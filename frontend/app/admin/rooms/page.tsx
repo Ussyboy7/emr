@@ -579,7 +579,7 @@ export default function RoomManagementPage() {
               <div className="py-4 space-y-4">
                 <div className="flex items-center gap-3">
                   <Badge variant="outline" className={getStatusBadge(selectedRoom.status)}>{selectedRoom.status}</Badge>
-                  <Badge variant="outline" className={getTypeBadge(selectedRoom.type)}>{selectedRoom.type}</Badge>
+                  {selectedRoom.type && <Badge variant="outline" className={getTypeBadge(selectedRoom.type)}>{selectedRoom.type}</Badge>}
                 </div>
                 <div className="grid grid-cols-2 gap-4 p-4 rounded-lg bg-muted/50">
                   <div><p className="text-xs text-muted-foreground">Room Name</p><p className="font-medium">{selectedRoom.name}</p></div>
