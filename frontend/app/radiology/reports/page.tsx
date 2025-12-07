@@ -53,7 +53,7 @@ const transformReport = (apiReport: ApiRadiologyReport): RadiologyReport => {
     study: String(studyObj?.procedure || ''),
     studyId: apiReport.order_id || '',
     category: String(studyObj?.modality || 'X-Ray'),
-    radiologist: studyObj?.reported_by || studyObj?.verified_by || 'Unknown',
+    radiologist: String(studyObj?.reported_by || studyObj?.verified_by || 'Unknown'),
     orderedBy: '',
     date: dateStr,
     findings: studyObj?.findings || '',

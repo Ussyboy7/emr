@@ -91,7 +91,7 @@ const transformReport = (apiReport: ApiRadiologyReport): RadiologyReport => {
       findings: studyObj?.findings,
       impression: studyObj?.impression,
       critical: apiReport.overall_status === 'critical',
-      reportedBy: studyObj?.reported_by,
+      reportedBy: studyObj?.reported_by ? String(studyObj.reported_by) : undefined,
       reportedAt: studyObj?.reported_at ? String(studyObj.reported_at) : undefined,
     },
     priority: transformPriority(apiReport.priority || 'routine') as 'Routine' | 'Urgent' | 'STAT',
