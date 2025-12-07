@@ -20,7 +20,7 @@ class VisitService {
    * Get all visits
    */
   async getVisits(params?: VisitFilters): Promise<{ results: Visit[]; count: number; next?: string; previous?: string }> {
-    const query = buildQueryString(params || {});
+    const query = buildQueryString((params || {}) as Record<string, string | number | boolean | undefined>);
     return apiFetch<{ results: Visit[]; count: number; next?: string; previous?: string }>(
       `/visits/${query}`
     );

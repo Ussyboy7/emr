@@ -114,7 +114,7 @@ export default function PrescriptionsPage() {
         clinicalNotes: rx.diagnosis || '',
         specialInstructions: rx.notes || '',
       }));
-      setPrescriptions(transformed);
+      setPrescriptions(transformed as Prescription[]);
     } catch (err: any) {
       setError(err.message || 'Failed to load prescriptions');
       console.error('Error loading prescriptions:', err);

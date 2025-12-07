@@ -39,7 +39,8 @@ interface RadiologyReport {
 // Transform backend report to frontend format
 const transformReport = (apiReport: ApiRadiologyReport): RadiologyReport => {
   const study = apiReport.study_details || apiReport.study;
-  const dateStr = study?.created_at ? new Date(study.created_at).toISOString().split('T')[0] : '';
+  const studyObj = typeof study === 'object' && study !== null ? study : null;
+  const dateStr = studyObj?.created_at ? new Date(studyObj.created_at).toISOString().split('T')[0] : '';
   
   return {
     id: apiReport.id.toString(),
@@ -49,14 +50,14 @@ const transformReport = (apiReport: ApiRadiologyReport): RadiologyReport => {
       age: 0, // Would need patient API
       gender: 'Unknown', // Would need patient API
     },
-    study: study?.procedure || '',
+    study: studyObj?.procedure || '',
     studyId: apiReport.order_id || '',
-    category: study?.modality || 'X-Ray',
-    radiologist: study?.reported_by || study?.verified_by || 'Unknown',
+    category: studyObj?.modality || 'X-Ray',
+    radiologist: studyObj?.reported_by || studyObj?.verified_by || 'Unknown',
     orderedBy: '',
     date: dateStr,
-    findings: study?.findings || '',
-    impression: study?.impression || '',
+    findings: studyObj?.findings || '',
+    impression: studyObj?.impression || '',
     status: 'Verified' as const,
     critical: apiReport.overall_status === 'critical',
   };

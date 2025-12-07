@@ -260,7 +260,7 @@ export default function NewVisitPage() {
                         >
                           <div className="flex items-center gap-3">
                             <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center text-muted-foreground font-medium">
-                              {patient.name.split(' ').map(n => n[0]).join('')}
+                              {patient.name.split(' ').map((n: string) => n[0]).join('')}
                             </div>
                             <div>
                               <p className="font-medium text-foreground">{patient.name}</p>
@@ -287,7 +287,7 @@ export default function NewVisitPage() {
                   <div className="flex items-center justify-between p-4 rounded-lg border border-primary/30 bg-primary/5">
                     <div className="flex items-center gap-4">
                       <div className="w-12 h-12 rounded-full bg-gradient-to-br from-teal-500 to-cyan-500 flex items-center justify-center text-lg font-bold text-white">
-                        {selectedPatient.name.split(' ').map(n => n[0]).join('')}
+                        {selectedPatient.name.split(' ').map((n: string) => n[0]).join('')}
                       </div>
                       <div>
                         <p className="font-medium text-foreground">{selectedPatient.name}</p>

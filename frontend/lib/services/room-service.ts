@@ -37,7 +37,7 @@ class RoomService {
    * Get all rooms with optional filters
    */
   async getRooms(filters: RoomFilters = {}): Promise<RoomListResponse> {
-    const query = buildQueryString(filters);
+    const query = buildQueryString(filters as Record<string, string | number | boolean | undefined>);
     return apiFetch<RoomListResponse>(`${this.basePath}/${query}`);
   }
 

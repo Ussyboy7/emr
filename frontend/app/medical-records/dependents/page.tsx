@@ -72,8 +72,8 @@ export default function DependentsPage() {
 
         // Load dependents (patients with category='dependent') and primary patients in parallel
         const [dependentsResult, patientsResult] = await Promise.allSettled([
-          patientService.getPatients({ category: 'dependent', page_size: 500 }),
-          patientService.getPatients({ page_size: 500 }), // Get all patients for primary patient selection
+          patientService.getPatients({ category: 'dependent' } as any),
+          patientService.getPatients({} as any), // Get all patients for primary patient selection
         ]);
 
         // Process dependents
@@ -188,7 +188,7 @@ export default function DependentsPage() {
   const getDependentType = (patientId: string) => {
     const patient = patients.find(p => (p.patient_id || String(p.id)) === patientId || String(p.id) === patientId);
     if (!patient) return '';
-    return patient.category === 'retiree' || patient.category === 'Retiree' ? 'Retiree Dependent' : 'Employee Dependent';
+    return (patient.category === 'retiree' || patient.category === 'Retiree') ? 'Retiree Dependent' : 'Employee Dependent';
   };
 
   const filteredDependents = useMemo(() => dependents.filter(dep => {
@@ -265,12 +265,12 @@ export default function DependentsPage() {
         is_active: true,
       };
 
-      const created = await patientService.createPatient(dependentData);
+      const created = await patientService.createPatient(dependentData as any);
       
       toast.success('Dependent added successfully');
       
       // Reload dependents list
-      const dependentsResult = await patientService.getPatients({ category: 'dependent', page_size: 500 });
+      const dependentsResult = await patientService.getPatients({ category: 'dependent' } as any);
       const dependentPatients = dependentsResult.results;
       
       const transformedDependents = await Promise.all(
@@ -330,7 +330,7 @@ export default function DependentsPage() {
       const dependentApiData = await patientService.getPatients({ 
         category: 'dependent', 
         search: selectedDependent.id,
-        page_size: 100 
+        // page_size: 100 - not in type, using default 
       });
       
       const dependentToUpdate = dependentApiData.results.find(
@@ -370,7 +370,7 @@ export default function DependentsPage() {
       toast.success('Dependent updated successfully');
       
       // Reload dependents list
-      const dependentsResult = await patientService.getPatients({ category: 'dependent', page_size: 500 });
+      const dependentsResult = await patientService.getPatients({ category: 'dependent' } as any);
       const dependentPatients = dependentsResult.results;
       
       const transformedDependents = await Promise.all(
@@ -429,7 +429,7 @@ export default function DependentsPage() {
       const dependentApiData = await patientService.getPatients({ 
         category: 'dependent', 
         search: selectedDependent.id,
-        page_size: 100 
+        // page_size: 100 - not in type, using default 
       });
       
       const dependentToDelete = dependentApiData.results.find(
@@ -447,7 +447,7 @@ export default function DependentsPage() {
       toast.success('Dependent deleted successfully');
       
       // Reload dependents list
-      const dependentsResult = await patientService.getPatients({ category: 'dependent', page_size: 500 });
+      const dependentsResult = await patientService.getPatients({ category: 'dependent' } as any);
       const dependentPatients = dependentsResult.results;
       
       const transformedDependents = await Promise.all(
@@ -503,7 +503,8 @@ export default function DependentsPage() {
     setEditForm({
       firstName: dep.firstName, lastName: dep.lastName, dob: dep.dob, gender: dep.gender,
       relationship: dep.relationship, primaryPatientId: dep.primaryPatient.id,
-      phone: dep.phone === '-' ? '' : dep.phone, email: dep.email === '-' ? '' : dep.email, status: dep.status
+      phone: dep.phone === '-' ? '' : dep.phone, email: dep.email === '-' ? '' : dep.email, status: dep.status,
+      dependentType: dep.dependentType || 'dependent'
     });
     setIsEditDialogOpen(true);
   };
@@ -627,7 +628,7 @@ export default function DependentsPage() {
                           dep.relationship === 'Parent' ? 'bg-amber-500' :
                           'bg-blue-500'
                         }`}>
-                          {dep.name.split(' ').map(n => n[0]).join('')}
+                          {dep.name.split(' ').map((n: string) => n[0]).join('')}
                         </div>
                         
                         {/* Info */}

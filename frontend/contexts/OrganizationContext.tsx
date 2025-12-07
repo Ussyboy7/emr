@@ -416,7 +416,7 @@ export const OrganizationProvider: React.FC<{ children: ReactNode }> = ({ childr
     (directorate: Directorate) => {
       setDirectorates((prev) => {
         const next = upsertById(prev, directorate, sortByName);
-        updateOrganizationCache({ directorates: next });
+        updateOrganizationCache();
         return next;
       });
     },
@@ -538,8 +538,7 @@ export const OrganizationProvider: React.FC<{ children: ReactNode }> = ({ childr
       setOffices(sortedOffices);
       setOfficeMemberships(apiOfficeMemberships);
       setRoles(sortedRoles);
-      updateOrganizationCache({
-        directorates: sortedDirectorates,
+      updateOrganizationCache();
         divisions: sortedDivisions,
         departments: sortedDepartments,
         offices: sortedOffices,
@@ -899,8 +898,7 @@ export const OrganizationProvider: React.FC<{ children: ReactNode }> = ({ childr
     setUsers([]);
     setRoles([]);
     setHasSynced(false);
-    updateOrganizationCache({
-      directorates: [],
+    updateOrganizationCache();
       divisions: [],
       departments: [],
       offices: [],

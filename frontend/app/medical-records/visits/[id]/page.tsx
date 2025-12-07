@@ -98,15 +98,15 @@ export default function VisitDetailPage({ params }: { params: Promise<{ id: stri
                  visitData.status === 'completed' ? 'Completed' :
                  visitData.status === 'cancelled' ? 'Cancelled' : visitData.status,
           chiefComplaint: visitData.chief_complaint || '',
-          presentingIllness: visitData.presenting_illness || visitData.clinical_notes || '',
+          presentingIllness: (visitData as any).presenting_illness || visitData.clinical_notes || '',
           vitals: {
-            bp: visitData.vitals?.blood_pressure || '',
-            pulse: visitData.vitals?.pulse_rate || '',
-            temp: visitData.vitals?.temperature || '',
-            respRate: visitData.vitals?.respiratory_rate || '',
-            spo2: visitData.vitals?.oxygen_saturation || '',
-            weight: visitData.vitals?.weight || '',
-            height: visitData.vitals?.height || '',
+            bp: (visitData as any).vitals?.blood_pressure || '',
+            pulse: (visitData as any).vitals?.pulse_rate || '',
+            temp: (visitData as any).vitals?.temperature || '',
+            respRate: (visitData as any).vitals?.respiratory_rate || '',
+            spo2: (visitData as any).vitals?.oxygen_saturation || '',
+            weight: (visitData as any).vitals?.weight || '',
+            height: (visitData as any).vitals?.height || '',
           },
         };
 

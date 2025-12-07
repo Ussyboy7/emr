@@ -335,7 +335,7 @@ export default function MedicalRecordsPage() {
                   >
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center text-muted-foreground font-medium">
-                        {patient.name.split(' ').map(n => n[0]).join('')}
+                        {patient.name.split(' ').map((n: string) => n[0]).join('')}
                       </div>
                       <div>
                         <p className="font-medium text-foreground">{patient.name}</p>

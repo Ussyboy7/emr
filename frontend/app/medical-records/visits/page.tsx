@@ -435,7 +435,7 @@ export default function VisitsPage() {
                       visit.type === 'routine' ? 'text-violet-600 dark:text-violet-400' :
                       'text-teal-600 dark:text-teal-400'
                     }`}>
-                      {visit.patient.split(' ').map(n => n[0]).join('')}
+                      {visit.patient.split(' ').map((n: string) => n[0]).join('')}
                     </span>
                   </div>
                   

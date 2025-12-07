@@ -110,14 +110,14 @@ export default function InventoryPage() {
         location: item.location || '',
         prescriptionRequired: false,
         isGeneric: false,
-        lastRestocked: item.created_at?.split('T')[0] || '',
+        lastRestocked: (item as any).created_at?.split('T')[0] || '',
         expiryDate: item.expiry_date,
         batches: [{
           id: item.id.toString(),
           batchNumber: item.batch_number,
           quantity: Number(item.quantity),
           expiryDate: item.expiry_date,
-          receivedDate: item.created_at?.split('T')[0] || '',
+          receivedDate: (item as any).created_at?.split('T')[0] || '',
           supplier: item.supplier || '',
           unitCost: 0,
         }] as MedicationBatch[],
@@ -306,7 +306,7 @@ export default function InventoryPage() {
       expiryDate: '-'
     };
     
-    setInventory(prev => [...prev, medication]);
+    setInventory(prev => [...prev, medication] as MedicationInventoryItem[]);
     toast.success(`${newMedication.name} added to inventory`);
     setShowAddModal(false);
     setNewMedication({

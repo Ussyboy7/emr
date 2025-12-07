@@ -62,10 +62,11 @@ interface RadiologyReport {
 const transformReport = (apiReport: ApiRadiologyReport): RadiologyReport => {
   const study = apiReport.study_details || apiReport.study;
   
+  const studyObj = typeof study === 'object' && study !== null ? study : null;
   return {
     id: apiReport.id.toString(),
     orderId: apiReport.order_id || '',
-    studyId: study?.id?.toString() || '',
+    studyId: studyObj?.id?.toString() || '',
     patient: {
       id: apiReport.patient?.toString() || '',
       name: apiReport.patient_name || 'Unknown',
@@ -78,20 +79,20 @@ const transformReport = (apiReport: ApiRadiologyReport): RadiologyReport => {
       specialty: '',
     },
     study: {
-      id: study?.id?.toString() || '',
-      procedure: study?.procedure || '',
-      category: study?.modality || 'X-Ray',
-      bodyPart: study?.body_part || '',
+      id: studyObj?.id?.toString() || '',
+      procedure: studyObj?.procedure || '',
+      category: studyObj?.modality || 'X-Ray',
+      bodyPart: studyObj?.body_part || '',
       contrastRequired: false,
-      status: study?.status ? (study.status === 'reported' ? 'Reported' : 'Verified') : 'Reported',
-      processingMethod: study?.processing_method ? (study.processing_method === 'in_house' ? 'In-house' : 'Outsourced') : undefined,
-      outsourcedFacility: study?.outsourced_facility,
-      imagesCount: study?.images_count,
-      findings: study?.findings,
-      impression: study?.impression,
+      status: studyObj?.status ? (studyObj.status === 'reported' ? 'Reported' : 'Verified') : 'Reported',
+      processingMethod: studyObj?.processing_method ? (studyObj.processing_method === 'in_house' ? 'In-house' : 'Outsourced') : undefined,
+      outsourcedFacility: studyObj?.outsourced_facility,
+      imagesCount: studyObj?.images_count,
+      findings: studyObj?.findings,
+      impression: studyObj?.impression,
       critical: apiReport.overall_status === 'critical',
-      reportedBy: study?.reported_by,
-      reportedAt: study?.reported_at,
+      reportedBy: studyObj?.reported_by,
+      reportedAt: studyObj?.reported_at,
     },
     priority: transformPriority(apiReport.priority || 'routine') as 'Routine' | 'Urgent' | 'STAT',
     clinic: '',
