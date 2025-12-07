@@ -3882,10 +3882,10 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                             </tr>
                           </thead>
                           <tbody className="divide-y">
-                            {selectedSession.radiologyOrders.map((img: { procedure: string; status: string }, index: number) => (
+                            {selectedSession.radiologyOrders.map((img: { procedure: string; priority?: string; status: string; finding?: string }, index: number) => (
                               <tr key={index}>
                                 <td className="px-3 py-2 font-medium">{img.procedure}</td>
-                                <td className="px-3 py-2">{img.priority}</td>
+                                <td className="px-3 py-2">{img.priority || '-'}</td>
                                 <td className="px-3 py-2">
                                   <Badge className="bg-emerald-100 text-emerald-800">{img.status}</Badge>
                                 </td>
