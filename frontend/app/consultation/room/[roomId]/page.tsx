@@ -833,7 +833,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       clinic: 'General', // This would come from context
       room: room?.name || 'Unknown',
       doctor: 'Dr. Current User', // This would come from auth context
-      doctorSpecialty: room?.specialty || 'General Practice',
+      doctorSpecialty: room?.specialtyFocus || 'General Practice',
       patient: {
         name: currentPatient.name,
         patientId: currentPatient.patientId,

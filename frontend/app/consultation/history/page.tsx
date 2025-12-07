@@ -112,7 +112,12 @@ export default function ConsultationHistoryPage() {
   const [showViewModal, setShowViewModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [editForm, setEditForm] = useState({ diagnosis: "", assessment: "", plan: "", status: "" });
+  const [editForm, setEditForm] = useState<{ diagnosis: string; assessment: string; plan: string; status: "Completed" | "In Progress" }>({ 
+    diagnosis: "", 
+    assessment: "", 
+    plan: "", 
+    status: "In Progress" 
+  });
 
   useEffect(() => {
     setLoading(true);
@@ -171,7 +176,11 @@ export default function ConsultationHistoryPage() {
     if (!selectedConsultation) return;
     setIsSubmitting(true);
     await new Promise(resolve => setTimeout(resolve, 1000));
-    setConsultations(prev => prev.map(c => c.id === selectedConsultation.id ? { ...c, ...editForm } : c));
+    setConsultations(prev => prev.map(c => 
+      c.id === selectedConsultation.id 
+        ? { ...c, diagnosis: editForm.diagnosis, assessment: editForm.assessment, plan: editForm.plan, status: editForm.status } 
+        : c
+    ));
     toast.success(`Consultation ${selectedConsultation.id} updated`);
     setIsSubmitting(false);
     setShowEditModal(false);
