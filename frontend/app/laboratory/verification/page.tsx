@@ -109,10 +109,10 @@ const transformResult = (apiResult: ApiLabResult): LabResult => {
     overallStatus,
     priority: transformPriority(apiResult.priority || 'routine') as 'Routine' | 'Urgent' | 'STAT',
     status: 'Results Ready',
-    submittedBy: test.processed_by_name || 'Lab Tech',
-    submittedAt: test.processed_at || test.created_at || new Date().toISOString(),
+    submittedBy: (test as any).processed_by_name || test.processed_by || 'Lab Tech',
+    submittedAt: test.processed_at || (test as any).created_at || new Date().toISOString(),
     clinic: '', // Would need to get from order
-    clinicalNotes: test.notes,
+    clinicalNotes: (test as any).notes || '',
   };
 };
 

@@ -92,7 +92,7 @@ export default function RoomQueuePage() {
         const queueItems = queueResult.results || [];
         
         // Transform queue items to patients
-        const transformedPatients: QueuedPatient[] = await Promise.all(queueItems.map(async (item: any) => {
+        const transformedPatients = await Promise.all(queueItems.map(async (item: any) => {
           try {
             // Get patient details (we'd need to fetch from patient service)
             // For now, use the patient_name from serializer
@@ -192,7 +192,7 @@ export default function RoomQueuePage() {
       const queueResult = await apiFetch<{ results: any[] }>('/consultation/queue/?is_active=true&page_size=1000');
       const queueItems = queueResult.results || [];
       
-      const transformedPatients: QueuedPatient[] = await Promise.all(queueItems.map(async (item: any) => {
+      const transformedPatients = await Promise.all(queueItems.map(async (item: any) => {
         try {
           const queuedAt = new Date(item.queued_at);
           const waitTime = Math.floor((Date.now() - queuedAt.getTime()) / (1000 * 60));

@@ -122,7 +122,7 @@ export default function ProceduresQueuePage() {
         const orders = ordersResult.results || [];
         
         // Transform orders to procedures format
-        const transformedProcedures: Procedure[] = await Promise.all(orders.map(async (order: any) => {
+        const transformedProcedures = await Promise.all(orders.map(async (order: any) => {
           try {
             // Get patient details
             const patient = await patientService.getPatient(order.patient);
@@ -234,7 +234,7 @@ export default function ProceduresQueuePage() {
       const ordersResult = await apiFetch<{ results: any[] }>('/nursing/orders/?status=pending&page_size=1000');
       const orders = ordersResult.results || [];
       
-      const transformedProcedures: Procedure[] = await Promise.all(orders.map(async (order: any) => {
+      const transformedProcedures = await Promise.all(orders.map(async (order: any) => {
         try {
           const patient = await patientService.getPatient(order.patient);
           

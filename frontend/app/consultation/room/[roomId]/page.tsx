@@ -4039,14 +4039,14 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                           </tr>
                         </thead>
                         <tbody className="divide-y">
-                          {selectedLabResult.parameters.map((param: { name: string; value: string; unit: string; status: string; referenceRange?: string }, index: number) => (
+                          {selectedLabResult.parameters.map((param: { name: string; value: string; unit: string; status: string; referenceRange?: string; normalRange?: string }, index: number) => (
                             <tr key={index} className={param.status !== 'Normal' ? 'bg-red-50/50 dark:bg-red-900/10' : ''}>
                               <td className="px-4 py-3 font-medium">{param.name}</td>
                               <td className={`px-4 py-3 text-center font-bold ${param.status === 'Abnormal' ? 'text-red-600' : param.status === 'Borderline' ? 'text-amber-600' : ''}`}>
                                 {param.value}
                               </td>
                               <td className="px-4 py-3 text-center text-muted-foreground">{param.unit}</td>
-                              <td className="px-4 py-3 text-center text-muted-foreground">{param.normalRange || '-'}</td>
+                              <td className="px-4 py-3 text-center text-muted-foreground">{param.normalRange || param.referenceRange || '-'}</td>
                               <td className="px-4 py-3 text-center">
                                 <Badge className={getParameterStatusColor(param.status)}>
                                   {param.status}
