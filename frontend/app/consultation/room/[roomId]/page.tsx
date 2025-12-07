@@ -59,7 +59,7 @@ interface ConsultationRoom {
 // Consultation room, patient, and medication data will be loaded from API
 
 // Medication inventory will be loaded from API
-const demoMedications: any[] = [];
+const demoMedications: any[] = [
   { id: 'MED-001', name: 'Metformin 500mg', genericName: 'Metformin', category: 'Diabetes', dosageForm: 'Tablet', strength: '500mg', stockLevel: 500 },
   { id: 'MED-002', name: 'Glibenclamide 5mg', genericName: 'Glibenclamide', category: 'Diabetes', dosageForm: 'Tablet', strength: '5mg', stockLevel: 200 },
   { id: 'MED-003', name: 'Methyldopa 250mg', genericName: 'Methyldopa', category: 'Cardiovascular', dosageForm: 'Tablet', strength: '250mg', stockLevel: 150 },

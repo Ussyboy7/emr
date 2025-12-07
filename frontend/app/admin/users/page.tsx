@@ -59,13 +59,6 @@ const departments = ['All Departments', 'Medical Services', 'Nursing', 'Laborato
 const clinics = ['All Clinics', 'General', 'Eye', 'Sickle Cell', 'Physiotherapy', 'Diamond'];
 const statuses = ['All Status', 'Active', 'Inactive', 'On Leave', 'Suspended'];
 
-const emptyStaff: Partial<StaffMember> = {
-  firstName: '', lastName: '', email: '', phone: '',
-  role: '', department: '', clinic: '', specialty: '',
-  licenseNumber: '', licenseExpiry: '', qualification: '',
-  status: 'Active', permissions: []
-};
-
 export default function UserManagementPage() {
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [loading, setLoading] = useState(true);
