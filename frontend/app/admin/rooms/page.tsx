@@ -120,7 +120,7 @@ export default function RoomManagementPage() {
   });
 
   const filteredRooms = useMemo(() => rooms.filter(room => {
-    const matchesSearch = room.name.toLowerCase().includes(searchQuery.toLowerCase()) || room.id.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesSearch = room.name.toLowerCase().includes(searchQuery.toLowerCase()) || String(room.id).toLowerCase().includes(searchQuery.toLowerCase());
     const matchesStatus = statusFilter === 'all' || room.status.toLowerCase() === statusFilter;
     const matchesType = typeFilter === 'all' || room.type.toLowerCase() === typeFilter;
     const matchesLocation = locationFilter === 'all' || room.location === locationFilter;
@@ -465,73 +465,97 @@ export default function RoomManagementPage() {
           </CardContent>
         </Card>
 
+        {/* Loading State */}
+        {loading && (
+          <Card>
+            <CardContent className="flex items-center justify-center py-12">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              <p className="ml-3 text-muted-foreground">Loading rooms...</p>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Error State */}
+        {error && !loading && (
+          <Card>
+            <CardContent className="flex flex-col items-center justify-center py-12">
+              <XCircle className="h-12 w-12 text-destructive mb-4" />
+              <h3 className="text-lg font-semibold mb-2">Error loading rooms</h3>
+              <p className="text-muted-foreground mb-4">{error}</p>
+              <Button onClick={() => window.location.reload()}>Retry</Button>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Rooms List */}
-        <div className="space-y-3">
-          {filteredRooms.length === 0 ? (
-            <Card><CardContent className="p-8 text-center text-muted-foreground">
-              <DoorOpen className="h-12 w-12 mx-auto mb-4 opacity-50" />
-              <p>No rooms found</p>
-            </CardContent></Card>
-          ) : (
-            paginatedRooms.map((room) => {
-              const borderColor = room.status === 'Active' ? 'border-l-emerald-500' : room.status === 'Maintenance' ? 'border-l-amber-500' : 'border-l-gray-500';
-              return (
-                <Card key={room.id} className={`border-l-4 hover:shadow-md transition-shadow ${borderColor} ${room.status === 'Inactive' ? 'opacity-60' : ''}`}>
-                  <CardContent className="py-3 px-4">
-                    <div className="flex items-center gap-3">
-                      <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${room.status === 'Active' ? 'bg-emerald-100 dark:bg-emerald-900/30' : room.status === 'Maintenance' ? 'bg-amber-100 dark:bg-amber-900/30' : 'bg-gray-100 dark:bg-gray-900/30'}`}>
-                        <DoorOpen className={`h-5 w-5 ${room.status === 'Active' ? 'text-emerald-600' : room.status === 'Maintenance' ? 'text-amber-600' : 'text-gray-600'}`} />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-2 flex-wrap min-w-0">
-                            <span className="font-semibold text-foreground truncate">{room.name}</span>
-                            <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${getStatusBadge(room.status)}`}>
-                              {room.status}
-                            </Badge>
-                            <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${getTypeBadge(room.type)}`}>
-                              {room.type}
-                            </Badge>
-                            <Badge variant="outline" className="text-[10px] px-1.5 py-0">{room.specialty}</Badge>
+        {!loading && !error && (
+          <div className="space-y-3">
+            {filteredRooms.length === 0 ? (
+              <Card><CardContent className="p-8 text-center text-muted-foreground">
+                <DoorOpen className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p>No rooms found</p>
+              </CardContent></Card>
+            ) : (
+              paginatedRooms.map((room) => {
+                const borderColor = room.status === 'Active' ? 'border-l-emerald-500' : room.status === 'Maintenance' ? 'border-l-amber-500' : 'border-l-gray-500';
+                return (
+                  <Card key={room.id} className={`border-l-4 hover:shadow-md transition-shadow ${borderColor} ${room.status === 'Inactive' ? 'opacity-60' : ''}`}>
+                    <CardContent className="py-3 px-4">
+                      <div className="flex items-center gap-3">
+                        <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${room.status === 'Active' ? 'bg-emerald-100 dark:bg-emerald-900/30' : room.status === 'Maintenance' ? 'bg-amber-100 dark:bg-amber-900/30' : 'bg-gray-100 dark:bg-gray-900/30'}`}>
+                          <DoorOpen className={`h-5 w-5 ${room.status === 'Active' ? 'text-emerald-600' : room.status === 'Maintenance' ? 'text-amber-600' : 'text-gray-600'}`} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 flex-wrap min-w-0">
+                              <span className="font-semibold text-foreground truncate">{room.name}</span>
+                              <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${getStatusBadge(room.status)}`}>
+                                {room.status}
+                              </Badge>
+                              <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${getTypeBadge(room.type || 'Consultation')}`}>
+                                {room.type || 'Consultation'}
+                              </Badge>
+                              <Badge variant="outline" className="text-[10px] px-1.5 py-0">{room.specialty}</Badge>
+                            </div>
+                            <div className="flex items-center gap-1 flex-shrink-0">
+                              <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openViewDialog(room)}>
+                                <Eye className="h-4 w-4 text-muted-foreground hover:text-primary" />
+                              </Button>
+                              <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openEditDialog(room)}>
+                                <Edit className="h-4 w-4 text-muted-foreground hover:text-blue-500" />
+                              </Button>
+                              <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-rose-600 hover:text-rose-700" onClick={() => openDeleteDialog(room)}>
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
                           </div>
-                          <div className="flex items-center gap-1 flex-shrink-0">
-                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openViewDialog(room)}>
-                              <Eye className="h-4 w-4 text-muted-foreground hover:text-primary" />
-                            </Button>
-                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openEditDialog(room)}>
-                              <Edit className="h-4 w-4 text-muted-foreground hover:text-blue-500" />
-                            </Button>
-                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-rose-600 hover:text-rose-700" onClick={() => openDeleteDialog(room)}>
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-wrap">
+                            <span>{room.room_number || room.id}</span>
+                            <span>•</span>
+                            <span className="flex items-center gap-1"><MapPin className="h-3 w-3" />{room.location}</span>
+                            <span>•</span>
+                            <span>{room.floor}</span>
+                            <span>•</span>
+                            <span className="flex items-center gap-1"><Users className="h-3 w-3" />Capacity: {room.capacity}</span>
+                            {room.assignedDoctor && (
+                              <>
+                                <span>•</span>
+                                <span className="flex items-center gap-1"><Stethoscope className="h-3 w-3" />{room.assignedDoctor}</span>
+                              </>
+                            )}
                           </div>
                         </div>
-                        <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-wrap">
-                          <span>{room.room_number || room.id}</span>
-                          <span>•</span>
-                          <span className="flex items-center gap-1"><MapPin className="h-3 w-3" />{room.location}</span>
-                          <span>•</span>
-                          <span>{room.floor}</span>
-                          <span>•</span>
-                          <span className="flex items-center gap-1"><Users className="h-3 w-3" />Capacity: {room.capacity}</span>
-                          {room.assignedDoctor && (
-                            <>
-                              <span>•</span>
-                              <span className="flex items-center gap-1"><Stethoscope className="h-3 w-3" />{room.assignedDoctor}</span>
-                            </>
-                          )}
-                        </div>
                       </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            })
-          )}
-        </div>
+                    </CardContent>
+                  </Card>
+                );
+              })
+            )}
+          </div>
+        )}
 
         {/* Pagination */}
-        {filteredRooms.length > 0 && (
+        {!loading && !error && filteredRooms.length > 0 && (
           <Card className="p-4 col-span-full">
             <StandardPagination
               currentPage={currentPage}
@@ -549,7 +573,7 @@ export default function RoomManagementPage() {
           <DialogContent className="sm:max-w-[600px]">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2"><DoorOpen className="h-5 w-5 text-blue-500" />Room Details</DialogTitle>
-              <DialogDescription>{selectedRoom?.id}</DialogDescription>
+              <DialogDescription>{selectedRoom?.room_number || selectedRoom?.id}</DialogDescription>
             </DialogHeader>
             {selectedRoom && (
               <div className="py-4 space-y-4">
