@@ -87,7 +87,7 @@ const transformReport = (apiReport: ApiRadiologyReport): RadiologyReport => {
       status: studyObj?.status ? (studyObj.status === 'reported' ? 'Reported' : 'Verified') : 'Reported',
       processingMethod: studyObj?.processing_method ? (studyObj.processing_method === 'in_house' ? 'In-house' : 'Outsourced') : undefined,
       outsourcedFacility: studyObj?.outsourced_facility,
-      imagesCount: studyObj?.images_count,
+      imagesCount: studyObj?.images_count ? Number(studyObj.images_count) : undefined,
       findings: studyObj?.findings,
       impression: studyObj?.impression,
       critical: apiReport.overall_status === 'critical',
