@@ -39,7 +39,7 @@ export default function DoctorDashboardPage() {
     );
   }
 
-  const totalClinicSessions = stats.clinicBreakdown.reduce((acc, c) => acc + c.count, 0);
+  const totalClinicSessions = stats.clinicBreakdown.reduce((acc: number, c) => acc + c.count, 0);
 
   return (
     <DashboardLayout>
