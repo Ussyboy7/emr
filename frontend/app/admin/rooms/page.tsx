@@ -122,7 +122,7 @@ export default function RoomManagementPage() {
   const filteredRooms = useMemo(() => rooms.filter(room => {
     const matchesSearch = room.name.toLowerCase().includes(searchQuery.toLowerCase()) || String(room.id).toLowerCase().includes(searchQuery.toLowerCase());
     const matchesStatus = statusFilter === 'all' || room.status.toLowerCase() === statusFilter;
-    const matchesType = typeFilter === 'all' || room.type.toLowerCase() === typeFilter;
+    const matchesType = typeFilter === 'all' || (room.type && room.type.toLowerCase() === typeFilter);
     const matchesLocation = locationFilter === 'all' || room.location === locationFilter;
     return matchesSearch && matchesStatus && matchesType && matchesLocation;
   }), [rooms, searchQuery, statusFilter, typeFilter, locationFilter]);
