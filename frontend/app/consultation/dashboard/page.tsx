@@ -15,6 +15,14 @@ import {
 
 // Doctor dashboard data will be loaded from API
 
+// Placeholder for current doctor - will be loaded from API/auth context
+const CURRENT_DOCTOR = {
+  name: "Dr. Loading...",
+  specialty: "General Practice",
+  location: "Main Clinic",
+  employeeId: "EMP001"
+};
+
 export default function DoctorDashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -39,7 +47,7 @@ export default function DoctorDashboardPage() {
     );
   }
 
-  const totalClinicSessions = stats.clinicBreakdown.reduce((acc: number, c) => acc + c.count, 0);
+  const totalClinicSessions = stats.clinicBreakdown.reduce((acc: number, c: { clinic: string; count: number }) => acc + c.count, 0);
 
   return (
     <DashboardLayout>
@@ -137,7 +145,7 @@ export default function DoctorDashboardPage() {
               </CardHeader>
               <CardContent>
                 <div className="space-y-3">
-                  {stats.week.byDay.map((day) => (
+                  {stats.week.byDay.map((day: { day: string; count: number }) => (
                     <div key={day.day} className="flex items-center gap-3">
                       <span className="w-10 text-sm text-muted-foreground">{day.day}</span>
                       <div className="flex-1 bg-muted rounded-full h-6 overflow-hidden">
@@ -194,7 +202,7 @@ export default function DoctorDashboardPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-3">
-                    {stats.clinicBreakdown.map((clinic) => (
+                    {stats.clinicBreakdown.map((clinic: { clinic: string; count: number }) => (
                       <div key={clinic.clinic}>
                         <div className="flex justify-between text-sm mb-1">
                           <span>{clinic.clinic}</span>
@@ -269,7 +277,7 @@ export default function DoctorDashboardPage() {
                 </div>
               </CardHeader>
               <CardContent className="space-y-3">
-                {stats.recentSessions.map((session) => (
+                {stats.recentSessions.map((session: { id: string; patient: string; diagnosis: string; duration: number; time: string }) => (
                   <div key={session.id} className="p-3 bg-muted/50 rounded-lg hover:bg-muted transition-colors cursor-pointer">
                     <div className="flex items-start justify-between">
                       <div>
@@ -295,7 +303,7 @@ export default function DoctorDashboardPage() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                {stats.upcomingFollowups.map((followup, idx) => (
+                {stats.upcomingFollowups.map((followup: { patient: string; reason: string; date: string }, idx: number) => (
                   <div key={idx} className="flex items-center gap-3 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-100 dark:border-blue-800">
                     <div className="w-10 h-10 bg-blue-100 dark:bg-blue-800 rounded-full flex items-center justify-center">
                       <User className="h-5 w-5 text-blue-600 dark:text-blue-400" />
