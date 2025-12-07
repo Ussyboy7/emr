@@ -1,0 +1,226 @@
+version: '3.8'
+
+# ================================
+# EMR STAGING ENVIRONMENT
+# ================================
+# Server: 172.16.0.46
+# Frontend Port: 4647 (direct access - no nginx for staging)
+# Backend Port: 8047 (direct access)
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: emr-postgres-stag
+    environment:
+      POSTGRES_DB: ${DB_NAME:-emr_db_stag}
+      POSTGRES_USER: ${DB_USER:-emradmin}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-emradmin}
+      POSTGRES_INITDB_ARGS: "-E UTF8 --locale=en_US.UTF-8"
+    volumes:
+      - postgres_data_stag:/var/lib/postgresql/data
+      - ./backups:/backups
+    ports:
+      - "5435:5432"  # Different from prod (5434) and npa-emr
+    networks:
+      - emr-network-stag
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-emradmin} -d ${DB_NAME:-emr_db_stag}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: emr-redis-stag
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-emr_redis_stag_pass}
+    volumes:
+      - redis_data_stag:/data
+    ports:
+      - "6382:6379"  # Different from prod (6381)
+    networks:
+      - emr-network-stag
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "--no-auth-warning", "-a", "${REDIS_PASSWORD:-emr_redis_stag_pass}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Backend (Django)
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    container_name: emr-backend-stag
+    command: >
+      sh -c "python manage.py migrate &&
+             python manage.py collectstatic --noinput &&
+             gunicorn --bind 0.0.0.0:8000 
+                      --workers 4 
+                      --threads 2 
+                      --timeout 120 
+                      --max-requests 500 
+                      --max-requests-jitter 25 
+                      --access-logfile /app/logs/gunicorn-access.log 
+                      --error-logfile /app/logs/gunicorn-error.log 
+                      --log-level info 
+                      emr_backend.wsgi:application"
+    env_file:
+      - ./backend/env/stag.env
+    volumes:
+      - static_files_stag:/app/staticfiles
+      - media_files_stag:/app/media
+      - ./logs/staging:/app/logs
+    ports:
+      - "8047:8000"  # Matches frontend nginx port pattern (4647)
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - emr-network-stag
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # Celery Worker
+  celery-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    container_name: emr-celery-worker-stag
+    env_file:
+      - ./backend/env/stag.env
+    command: celery -A emr_backend worker -l info --concurrency=2
+    volumes:
+      - media_files_stag:/app/media
+      - ./logs/staging:/app/logs
+    depends_on:
+      - backend
+      - redis
+    networks:
+      - emr-network-stag
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Celery Beat
+  celery-beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    container_name: emr-celery-beat-stag
+    env_file:
+      - ./backend/env/stag.env
+    command: celery -A emr_backend beat -l info
+    volumes:
+      - ./logs/staging:/app/logs
+    depends_on:
+      - backend
+      - redis
+    networks:
+      - emr-network-stag
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Frontend (Next.js) - Direct access for staging
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.stag
+    container_name: emr-frontend-stag
+    env_file:
+      - ./frontend/.env.stag
+    ports:
+      - "4647:3000"  # Direct access on 4647 (no nginx for staging)
+    depends_on:
+      - backend
+    networks:
+      - emr-network-stag
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Nginx Reverse Proxy - Disabled for staging (using direct frontend access)
+  # Uncomment if you need nginx features (SSL, advanced caching, etc.)
+  # nginx:
+  #   image: nginx:alpine
+  #   container_name: emr-nginx-stag
+  #   volumes:
+  #     - ./nginx/stag.conf:/etc/nginx/nginx.conf:ro
+  #     - static_files_stag:/usr/share/nginx/html/static:ro
+  #     - media_files_stag:/usr/share/nginx/html/media:ro
+  #   ports:
+  #     - "4648:80"  # Different port if nginx is needed
+  #   depends_on:
+  #     - backend
+  #     - frontend
+  #   networks:
+  #     - emr-network-stag
+  #   restart: unless-stopped
+  #   healthcheck:
+  #     test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/health"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+  #   logging:
+  #     driver: "json-file"
+  #     options:
+  #       max-size: "10m"
+  #       max-file: "3"
+
+volumes:
+  postgres_data_stag:
+    driver: local
+  redis_data_stag:
+    driver: local
+  static_files_stag:
+    driver: local
+  media_files_stag:
+    driver: local
+
+networks:
+  emr-network-stag:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.23.0.0/16

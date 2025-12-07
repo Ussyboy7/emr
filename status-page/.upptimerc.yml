@@ -1,0 +1,125 @@
+# NPA EMR Status Page Configuration
+# Powered by Upptime (https://upptime.js.org)
+
+# GitHub repository owner and name
+owner: Ussyboy7
+repo: npa-emr-status
+
+# Sites to monitor
+sites:
+  - name: NPA EMR Frontend
+    url: http://172.16.0.46:4647
+    icon: https://raw.githubusercontent.com/Ussyboy7/npa-emr-status/main/assets/npa-logo.png
+    expectedStatusCodes:
+      - 200
+      - 301
+      - 302
+
+  - name: NPA EMR API
+    url: http://172.16.0.46:4647/api/health/
+    icon: https://raw.githubusercontent.com/Ussyboy7/npa-emr-status/main/assets/api-icon.png
+    expectedStatusCodes:
+      - 200
+
+  - name: Authentication Service
+    url: http://172.16.0.46:4647/api/accounts/auth/me/
+    expectedStatusCodes:
+      - 200
+      - 401  # 401 is expected when not logged in - means service is up
+
+  - name: Patients API
+    url: http://172.16.0.46:4647/api/patients/patients/
+    expectedStatusCodes:
+      - 200
+      - 401
+
+  - name: Laboratory API
+    url: http://172.16.0.46:4647/api/laboratory/orders/
+    expectedStatusCodes:
+      - 200
+      - 401
+
+  - name: Pharmacy API
+    url: http://172.16.0.46:4647/api/pharmacy/prescriptions/
+    expectedStatusCodes:
+      - 200
+      - 401
+
+  - name: Radiology API
+    url: http://172.16.0.46:4647/api/radiology/orders/
+    expectedStatusCodes:
+      - 200
+      - 401
+
+# Status page configuration
+status-website:
+  # Custom domain (optional - uncomment and update when ready)
+  # cname: status.emr.npa.gov.ng
+  
+  # Logo and branding
+  logoUrl: https://raw.githubusercontent.com/Ussyboy7/npa-emr-status/main/assets/npa-logo.png
+  name: NPA EMR Status
+  
+  # Introduction text
+  introTitle: "**NPA EMR** Service Status"
+  introMessage: "Real-time status and uptime monitoring for the Nigerian Ports Authority Electronic Medical Records System. [Visit NPA EMR →](http://172.16.0.46:4647)"
+  
+  # Navbar links
+  navbar:
+    - title: Status
+      href: /
+    - title: NPA EMR
+      href: http://172.16.0.46:4647
+    - title: GitHub
+      href: https://github.com/$OWNER/$REPO
+
+  # Theme (light, dark, or auto)
+  theme: auto
+  
+  # Show powered by Upptime badge
+  showPoweredBy: true
+
+# Incidents configuration
+i18n:
+  activeIncidents: Active Incidents
+  allSystemsOperational: All Systems Operational
+  incidentReport: Incident Report for {0}
+  IncidentTime: Incident Time
+  overallUptime: Overall Uptime
+  overallUptimeTime: "{0} uptime over the past {1} days"
+  pastIncidents: Past Incidents
+  responseTime: Response Time
+  responseTimeMs: "{0} ms"
+  liveStatus: Live Status
+  up: Operational
+  degraded: Degraded
+  down: Major Outage
+
+# How often to check (in minutes)
+workflowSchedule:
+  graphs: "0 0 * * *"        # Update graphs daily
+  responseTime: "0 23 * * *"  # Response time daily
+  staticSite: "0 1 * * *"    # Rebuild site daily
+  summary: "0 0 * * *"       # Summary daily
+  updateTemplate: "0 0 * * *" # Template daily
+  updates: "*/5 * * * *"     # Check every 5 minutes
+  uptime: "*/5 * * * *"      # Uptime every 5 minutes
+
+# Notifications (optional - uncomment and configure as needed)
+# notifications:
+#   - type: slack
+#     channel: emr-alerts
+#     webhookUrl: $SLACK_WEBHOOK_URL
+#   - type: email
+#     address: admin@npa.gov.ng
+
+# Number of days to display in graphs
+commitMessages:
+  commitAuthorName: Upptime Bot
+  commitAuthorEmail: upptime@npa-emr.com
+  statusChange: "🚨 $SITE_NAME is $STATUS"
+  graphsUpdate: "📊 Update graphs"
+  summaryUpdate: "📊 Update summary"
+  responseTimeUpdate: "⏱ Update response time"
+  templateUpdate: "📄 Update template"
+

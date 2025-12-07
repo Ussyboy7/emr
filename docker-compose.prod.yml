@@ -1,0 +1,244 @@
+version: '3.8'
+
+# ================================
+# EMR PRODUCTION ENVIRONMENT
+# ================================
+# Server: 172.16.0.46
+# Frontend Port: 8082
+# Backend Port: 8002
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: emr-postgres-prod
+    environment:
+      POSTGRES_DB: ${DB_NAME:-emr_db_prod}
+      POSTGRES_USER: ${DB_USER:-emradmin}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-change_this_in_production}
+      POSTGRES_INITDB_ARGS: "-E UTF8 --locale=en_US.UTF-8"
+    volumes:
+      - postgres_data_prod:/var/lib/postgresql/data
+      - ./backups:/backups
+    ports:
+      - "5434:5432"  # Different from npa-emr (5433) and npa-ecm
+    networks:
+      - emr-network-prod
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-emradmin} -d ${DB_NAME:-emr_db_prod}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: emr-redis-prod
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-change_redis_password}
+    volumes:
+      - redis_data_prod:/data
+    ports:
+      - "6381:6379"  # Different from npa-emr (6380)
+    networks:
+      - emr-network-prod
+    restart: always
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Backend (Django)
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    container_name: emr-backend-prod
+    command: >
+      sh -c "python manage.py migrate &&
+             python manage.py collectstatic --noinput &&
+             gunicorn --bind 0.0.0.0:8000 
+                      --workers 8 
+                      --threads 4 
+                      --timeout 120 
+                      --max-requests 1000 
+                      --max-requests-jitter 50 
+                      --access-logfile /app/logs/gunicorn-access.log 
+                      --error-logfile /app/logs/gunicorn-error.log 
+                      --log-level warning 
+                      emr_backend.wsgi:application"
+    env_file:
+      - ./backend/env/prod.env
+    volumes:
+      - static_files_prod:/app/staticfiles
+      - media_files_prod:/app/media
+      - ./logs/production:/app/logs
+    ports:
+      - "8002:8000"  # Different from npa-emr (8001)
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - emr-network-prod
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # Celery Worker
+  celery-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    container_name: emr-celery-worker-prod
+    env_file:
+      - ./backend/env/prod.env
+    command: celery -A emr_backend worker -l info --concurrency=4
+    volumes:
+      - media_files_prod:/app/media
+      - ./logs/production:/app/logs
+    depends_on:
+      - backend
+      - redis
+    networks:
+      - emr-network-prod
+    restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Celery Beat
+  celery-beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    container_name: emr-celery-beat-prod
+    env_file:
+      - ./backend/env/prod.env
+    command: celery -A emr_backend beat -l info
+    volumes:
+      - ./logs/production:/app/logs
+    depends_on:
+      - backend
+      - redis
+    networks:
+      - emr-network-prod
+    restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Frontend (Next.js)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+    container_name: emr-frontend-prod
+    env_file:
+      - ./frontend/.env.prod
+    ports:
+      - "8082:3000"  # Different from npa-emr (8081)
+    depends_on:
+      - backend
+    networks:
+      - emr-network-prod
+    restart: always
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Nginx Reverse Proxy
+  nginx:
+    image: nginx:alpine
+    container_name: emr-nginx-prod
+    volumes:
+      - ./nginx/prod.conf:/etc/nginx/nginx.conf:ro
+      - static_files_prod:/usr/share/nginx/html/static:ro
+      - media_files_prod:/usr/share/nginx/html/media:ro
+      # - ./ssl:/etc/nginx/ssl:ro  # Uncomment when you have SSL certificates
+    ports:
+      - "8082:80"  # Different from npa-emr (8081)
+      # - "8443:443"  # Uncomment when you have SSL certificates
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - emr-network-prod
+    restart: always
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Backup Service (runs daily)
+  backup:
+    image: postgres:15-alpine
+    container_name: emr-backup-prod
+    environment:
+      PGPASSWORD: ${DB_PASSWORD:-change_this_in_production}
+    volumes:
+      - ./backups:/backups
+      - ./scripts/backup.sh:/backup.sh:ro
+    command: sh -c "while true; do /backup.sh; sleep 86400; done"
+    depends_on:
+      - postgres
+    networks:
+      - emr-network-prod
+    restart: unless-stopped
+
+volumes:
+  postgres_data_prod:
+    driver: local
+  redis_data_prod:
+    driver: local
+  static_files_prod:
+    driver: local
+  media_files_prod:
+    driver: local
+
+networks:
+  emr-network-prod:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.22.0.0/16
+
