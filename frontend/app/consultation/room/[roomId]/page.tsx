@@ -2450,7 +2450,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                   </tr>
                                 </thead>
                                 <tbody className="divide-y">
-                                  {paginatedLabs.map((lab: { id: string; date: string; test: string; criticalValue?: boolean; status: string; result?: string }) => (
+                                  {paginatedLabs.map((lab: { id: string; date: string; test: string; category?: string; criticalValue?: boolean; status: string; result?: string }) => (
                                     <tr key={lab.id} className={`hover:bg-muted/30 ${lab.criticalValue ? 'bg-red-50 dark:bg-red-900/10' : ''}`}>
                                       <td className="px-4 py-3 text-muted-foreground">{lab.date}</td>
                                       <td className="px-4 py-3 font-medium">
