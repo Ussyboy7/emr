@@ -504,7 +504,7 @@ const demoPatientHistory: any = {
 };
 
 // Past consultation sessions will be loaded from API
-const demoConsultationSessions: any[] = [];
+const demoConsultationSessions: any[] = [
   {
     id: 'CS-2024-001',
     date: '2024-11-15',
