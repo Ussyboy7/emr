@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -40,7 +40,7 @@ const visitTypes = [
   { value: 'routine', label: 'Routine Checkup', description: 'Routine health checkup' },
 ];
 
-export default function NewVisitPage() {
+function NewVisitPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const patientIdParam = searchParams.get('patient');
@@ -528,5 +528,19 @@ export default function NewVisitPage() {
         </div>
       </div>
     </DashboardLayout>
+  );
+}
+
+export default function NewVisitPage() {
+  return (
+    <Suspense fallback={
+      <DashboardLayout>
+        <div className="flex items-center justify-center h-[80vh]">
+          <Loader2 className="h-8 w-8 animate-spin text-emerald-500" />
+        </div>
+      </DashboardLayout>
+    }>
+      <NewVisitPageContent />
+    </Suspense>
   );
 }
