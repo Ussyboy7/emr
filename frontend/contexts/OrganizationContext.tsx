@@ -893,12 +893,6 @@ export const OrganizationProvider: React.FC<{ children: ReactNode }> = ({ childr
     setRoles([]);
     setHasSynced(false);
     updateOrganizationCache();
-      divisions: [],
-      departments: [],
-      offices: [],
-      officeMemberships: [],
-      users: [],
-    });
   }, []);
 
   return (
