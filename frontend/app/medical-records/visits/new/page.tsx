@@ -72,7 +72,7 @@ export default function NewVisitPage() {
         setLoading(true);
         setError(null);
 
-        const result = await patientService.getPatients({ page_size: 500 });
+        const result = await patientService.getPatients({} as any);
         setPatients(result.results.map(p => ({
           id: p.patient_id || String(p.id),
           numericId: p.id,

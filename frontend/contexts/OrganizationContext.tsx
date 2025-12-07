@@ -427,7 +427,7 @@ export const OrganizationProvider: React.FC<{ children: ReactNode }> = ({ childr
     (division: Division) => {
       setDivisions((prev) => {
         const next = upsertById(prev, division, sortByName);
-        updateOrganizationCache({ divisions: next });
+        updateOrganizationCache();
         return next;
       });
     },
@@ -438,7 +438,7 @@ export const OrganizationProvider: React.FC<{ children: ReactNode }> = ({ childr
     (department: Department) => {
       setDepartments((prev) => {
         const next = upsertById(prev, department, sortByName);
-        updateOrganizationCache({ departments: next });
+        updateOrganizationCache();
         return next;
       });
     },
@@ -449,7 +449,7 @@ export const OrganizationProvider: React.FC<{ children: ReactNode }> = ({ childr
     (userRecord: User) => {
       setUsers((prev) => {
         const next = upsertById(prev, userRecord, sortByName);
-        updateOrganizationCache({ users: next });
+        updateOrganizationCache();
         return next;
       });
     },

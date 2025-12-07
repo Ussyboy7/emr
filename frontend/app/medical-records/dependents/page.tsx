@@ -188,7 +188,7 @@ export default function DependentsPage() {
   const getDependentType = (patientId: string) => {
     const patient = patients.find(p => (p.patient_id || String(p.id)) === patientId || String(p.id) === patientId);
     if (!patient) return '';
-    return (patient.category === 'retiree' || patient.category === 'Retiree') ? 'Retiree Dependent' : 'Employee Dependent';
+    return (patient.category === 'retiree' || (patient.category as string) === 'Retiree') ? 'Retiree Dependent' : 'Employee Dependent';
   };
 
   const filteredDependents = useMemo(() => dependents.filter(dep => {
@@ -848,7 +848,7 @@ export default function DependentsPage() {
             {selectedDependent && (
               <div className="py-4">
                 <div className="flex items-center gap-4 mb-6">
-                  <div className="w-16 h-16 rounded-full bg-gradient-to-br from-violet-500 to-purple-500 flex items-center justify-center text-white font-bold text-xl">{selectedDependent.name.split(' ').map(n => n[0]).join('')}</div>
+                  <div className="w-16 h-16 rounded-full bg-gradient-to-br from-violet-500 to-purple-500 flex items-center justify-center text-white font-bold text-xl">{selectedDependent.name.split(' ').map((n: string) => n[0]).join('')}</div>
                   <div><h3 className="text-xl font-semibold">{selectedDependent.name}</h3><p className="text-muted-foreground">{selectedDependent.id}</p></div>
                 </div>
                 <div className="grid grid-cols-2 gap-4">

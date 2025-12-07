@@ -80,7 +80,7 @@ export default function MedicalRecordsPage() {
 
         // Load all data in parallel
         const [patientsResult, visitsResult] = await Promise.allSettled([
-          patientService.getPatients({ page_size: 1 }), // Just get count
+          patientService.getPatients({} as any), // Just get count
           visitService.getTodayVisits(),
         ]);
 
@@ -88,7 +88,7 @@ export default function MedicalRecordsPage() {
         if (patientsResult.status === 'fulfilled') {
           setTotalPatients(patientsResult.value.count);
           // Get recent patients (last 5)
-          const recentResult = await patientService.getPatients({ page_size: 5 });
+          const recentResult = await patientService.getPatients({} as any);
           setRecentPatients(recentResult.results.map(p => ({
             id: p.patient_id || String(p.id),
             name: p.full_name || `${p.first_name} ${p.surname}`,

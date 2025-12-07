@@ -40,7 +40,7 @@ interface RadiologyReport {
 const transformReport = (apiReport: ApiRadiologyReport): RadiologyReport => {
   const study = apiReport.study_details || apiReport.study;
   const studyObj = typeof study === 'object' && study !== null ? study : null;
-  const dateStr = studyObj?.created_at ? new Date(studyObj.created_at).toISOString().split('T')[0] : '';
+  const dateStr = (studyObj as any)?.created_at ? new Date((studyObj as any).created_at).toISOString().split('T')[0] : '';
   
   return {
     id: apiReport.id.toString(),
@@ -50,7 +50,7 @@ const transformReport = (apiReport: ApiRadiologyReport): RadiologyReport => {
       age: 0, // Would need patient API
       gender: 'Unknown', // Would need patient API
     },
-    study: studyObj?.procedure || '',
+    study: String(studyObj?.procedure || ''),
     studyId: apiReport.order_id || '',
     category: studyObj?.modality || 'X-Ray',
     radiologist: studyObj?.reported_by || studyObj?.verified_by || 'Unknown',
