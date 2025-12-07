@@ -449,7 +449,7 @@ export default function RoomManagementPage() {
                 <SelectTrigger className="w-[150px]"><SelectValue placeholder="Type" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Types</SelectItem>
-                  {roomTypes.map(t => <SelectItem key={t} value={t.toLowerCase()}>{t}</SelectItem>)}
+                  {roomTypes.filter((t): t is string => !!t).map(t => <SelectItem key={t} value={t.toLowerCase()}>{t}</SelectItem>)}
                 </SelectContent>
               </Select>
               <Select value={statusFilter} onValueChange={setStatusFilter}>
@@ -628,7 +628,7 @@ export default function RoomManagementPage() {
                   <Select value={formData.type} onValueChange={handleTypeChange}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      {roomTypes.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                      {roomTypes.filter((t): t is string => !!t).map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
@@ -706,7 +706,7 @@ export default function RoomManagementPage() {
                   <Select value={formData.type} onValueChange={handleTypeChange}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      {roomTypes.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                      {roomTypes.filter((t): t is string => !!t).map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
