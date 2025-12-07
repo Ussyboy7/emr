@@ -539,12 +539,6 @@ export const OrganizationProvider: React.FC<{ children: ReactNode }> = ({ childr
       setOfficeMemberships(apiOfficeMemberships);
       setRoles(sortedRoles);
       updateOrganizationCache();
-        divisions: sortedDivisions,
-        departments: sortedDepartments,
-        offices: sortedOffices,
-        officeMemberships: apiOfficeMemberships,
-        users: sortedUsers,
-      });
 
       setHasSynced(true);
       logInfo('Organization data loaded successfully:', { users: sortedUsers.length, directorates: sortedDirectorates.length, divisions: sortedDivisions.length, departments: sortedDepartments.length });
