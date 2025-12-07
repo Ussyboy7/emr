@@ -2569,11 +2569,11 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                   </tr>
                                 </thead>
                                 <tbody className="divide-y">
-                                  {paginatedImaging.map((img: { date: string; study: string; status: string; result?: string }, index: number) => (
+                                  {paginatedImaging.map((img: { date: string; study?: string; procedure: string; finding?: string; status: string; result?: string }, index: number) => (
                                     <tr key={index} className="hover:bg-muted/30">
                                       <td className="px-4 py-3 text-muted-foreground">{img.date}</td>
                                       <td className="px-4 py-3 font-medium">{img.procedure}</td>
-                                      <td className="px-4 py-3 text-muted-foreground truncate max-w-[200px]">{img.finding}</td>
+                                      <td className="px-4 py-3 text-muted-foreground truncate max-w-[200px]">{img.finding || ''}</td>
                                       <td className="px-4 py-3 text-center">
                                         <Badge className={img.status === 'Normal' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}>
                                           {img.status}
