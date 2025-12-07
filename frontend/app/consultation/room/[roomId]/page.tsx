@@ -2244,7 +2244,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                   <CardContent>
                     {demoPatientHistory.allergies.length > 0 ? (
                       <div className="flex flex-wrap gap-2">
-                        {demoPatientHistory.allergies.map((allergy, index) => (
+                        {demoPatientHistory.allergies.map((allergy: string, index: number) => (
                           <Badge key={index} className="bg-red-600 text-white">{allergy}</Badge>
                         ))}
                       </div>
@@ -2263,9 +2263,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    {demoPatientHistory.diagnoses.filter(d => d.status === 'Active').length > 0 ? (
+                    {demoPatientHistory.diagnoses.filter((d: { status: string }) => d.status === 'Active').length > 0 ? (
                       <div className="flex flex-wrap gap-2">
-                        {demoPatientHistory.diagnoses.filter(d => d.status === 'Active').map((diagnosis, index) => (
+                        {demoPatientHistory.diagnoses.filter((d: { status: string }) => d.status === 'Active').map((diagnosis: { name: string }, index: number) => (
                           <Badge key={index} variant="outline" className="bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400">
                             {diagnosis.name}
                           </Badge>
@@ -2409,7 +2409,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                     {/* Lab Results Tab */}
                     <TabsContent value="labs" className="mt-4">
                       {(() => {
-                        const filteredLabs = demoPatientHistory.labResults.filter(lab => labStatusFilter === 'all' || lab.status === labStatusFilter);
+                        const filteredLabs = demoPatientHistory.labResults.filter((lab: { status: string }) => labStatusFilter === 'all' || lab.status === labStatusFilter);
                         const totalLabs = filteredLabs.length;
                         const totalLabPages = Math.ceil(totalLabs / labResultsPerPage);
                         const paginatedLabs = filteredLabs.slice((labResultsPage - 1) * labResultsPerPage, labResultsPage * labResultsPerPage);
@@ -2450,7 +2450,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                   </tr>
                                 </thead>
                                 <tbody className="divide-y">
-                                  {paginatedLabs.map((lab) => (
+                                  {paginatedLabs.map((lab: { id: string; date: string; test: string; criticalValue?: boolean; status: string; result?: string }) => (
                                     <tr key={lab.id} className={`hover:bg-muted/30 ${lab.criticalValue ? 'bg-red-50 dark:bg-red-900/10' : ''}`}>
                                       <td className="px-4 py-3 text-muted-foreground">{lab.date}</td>
                                       <td className="px-4 py-3 font-medium">
@@ -2528,7 +2528,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                     {/* Imaging Tab */}
                     <TabsContent value="imaging" className="mt-4">
                       {(() => {
-                        const filteredImaging = demoPatientHistory.imagingResults.filter(img => imagingStatusFilter === 'all' || img.status === imagingStatusFilter);
+                        const filteredImaging = demoPatientHistory.imagingResults.filter((img: { status: string }) => imagingStatusFilter === 'all' || img.status === imagingStatusFilter);
                         const totalImaging = filteredImaging.length;
                         const totalImagingPages = Math.ceil(totalImaging / imagingPerPage);
                         const paginatedImaging = filteredImaging.slice((imagingPage - 1) * imagingPerPage, imagingPage * imagingPerPage);
@@ -2569,7 +2569,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                   </tr>
                                 </thead>
                                 <tbody className="divide-y">
-                                  {paginatedImaging.map((img, index) => (
+                                  {paginatedImaging.map((img: { date: string; study: string; status: string; result?: string }, index: number) => (
                                     <tr key={index} className="hover:bg-muted/30">
                                       <td className="px-4 py-3 text-muted-foreground">{img.date}</td>
                                       <td className="px-4 py-3 font-medium">{img.procedure}</td>
@@ -2655,7 +2655,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                           <CardContent>
                             {demoPatientHistory.surgicalHistory.length > 0 ? (
                               <ul className="space-y-2">
-                                {demoPatientHistory.surgicalHistory.map((surgery, index) => (
+                                {demoPatientHistory.surgicalHistory.map((surgery: { procedure: string; date: string }, index: number) => (
                                   <li key={index} className="text-sm flex justify-between">
                                     <span className="font-medium">{surgery.procedure}</span>
                                     <span className="text-muted-foreground">{surgery.date}</span>
@@ -2679,7 +2679,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                           <CardContent>
                             {demoPatientHistory.familyHistory.length > 0 ? (
                               <ul className="space-y-2">
-                                {demoPatientHistory.familyHistory.map((fh, index) => (
+                                {demoPatientHistory.familyHistory.map((fh: { relation: string; condition: string }, index: number) => (
                                   <li key={index} className="text-sm flex justify-between">
                                     <span className="font-medium">{fh.relation}</span>
                                     <span className="text-muted-foreground">{fh.condition}</span>
@@ -3750,10 +3750,10 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                   <div>
                     <h4 className="text-sm font-semibold text-blue-600 mb-2">VITAL SIGNS</h4>
                     <div className="grid grid-cols-3 md:grid-cols-6 gap-3">
-                      {Object.entries(selectedSession.vitals).map(([key, value]) => (
+                      {Object.entries(selectedSession.vitals).map(([key, value]: [string, unknown]) => (
                         <div key={key} className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-center border border-blue-200 dark:border-blue-800">
                           <div className="text-xs text-muted-foreground capitalize">{key.replace(/([A-Z])/g, ' $1')}</div>
-                          <div className="font-medium">{value}</div>
+                          <div className="font-medium">{String(value)}</div>
                         </div>
                       ))}
                     </div>
@@ -3815,7 +3815,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                             </tr>
                           </thead>
                           <tbody className="divide-y">
-                            {selectedSession.prescriptions.map((rx, index) => (
+                            {selectedSession.prescriptions.map((rx: { medication: string; dosage: string; frequency: string; duration: string; quantity: number }, index: number) => (
                               <tr key={index}>
                                 <td className="px-3 py-2 font-medium">{rx.medication}</td>
                                 <td className="px-3 py-2">{rx.dosage}</td>
@@ -3848,7 +3848,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                             </tr>
                           </thead>
                           <tbody className="divide-y">
-                            {selectedSession.labOrders.map((lab, index) => (
+                            {selectedSession.labOrders.map((lab: { test: string; status: string; priority?: string }, index: number) => (
                               <tr key={index}>
                                 <td className="px-3 py-2 font-medium">{lab.test}</td>
                                 <td className="px-3 py-2">{lab.priority}</td>
@@ -3882,7 +3882,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                             </tr>
                           </thead>
                           <tbody className="divide-y">
-                            {selectedSession.radiologyOrders.map((img, index) => (
+                            {selectedSession.radiologyOrders.map((img: { procedure: string; status: string }, index: number) => (
                               <tr key={index}>
                                 <td className="px-3 py-2 font-medium">{img.procedure}</td>
                                 <td className="px-3 py-2">{img.priority}</td>
@@ -3906,7 +3906,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                         NURSING ORDERS
                       </h4>
                       <div className="space-y-2">
-                        {selectedSession.nursingOrders.map((no, index) => (
+                        {selectedSession.nursingOrders.map((no: { type: string; instructions: string; status?: string }, index: number) => (
                           <div key={index} className="p-3 bg-cyan-50 dark:bg-cyan-900/20 rounded-lg border border-cyan-200 dark:border-cyan-800">
                             <div className="font-medium">{no.type}</div>
                             <div className="text-sm text-muted-foreground">{no.instructions}</div>
@@ -4039,7 +4039,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                           </tr>
                         </thead>
                         <tbody className="divide-y">
-                          {selectedLabResult.parameters.map((param, index) => (
+                          {selectedLabResult.parameters.map((param: { name: string; value: string; unit: string; status: string; referenceRange?: string }, index: number) => (
                             <tr key={index} className={param.status !== 'Normal' ? 'bg-red-50/50 dark:bg-red-900/10' : ''}>
                               <td className="px-4 py-3 font-medium">{param.name}</td>
                               <td className={`px-4 py-3 text-center font-bold ${param.status === 'Abnormal' ? 'text-red-600' : param.status === 'Borderline' ? 'text-amber-600' : ''}`}>

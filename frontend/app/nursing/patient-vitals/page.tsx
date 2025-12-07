@@ -11,6 +11,10 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
+import { apiFetch } from '@/lib/api-client';
+import { patientService } from '@/lib/services';
+import { useAuthRedirect } from '@/hooks/use-auth-redirect';
+import { isAuthenticationError } from '@/lib/auth-errors';
 import { 
   Activity, Search, RefreshCw, Eye, TrendingUp, TrendingDown, AlertTriangle, 
   CheckCircle2, Heart, Thermometer, Wind, Droplets, Scale, Calendar, 
@@ -55,9 +59,136 @@ export default function PatientVitalsPage() {
   const [patients, setPatients] = useState<PatientVitals[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [authError, setAuthError] = useState<unknown | null>(null);
+  useAuthRedirect(authError);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [isRefreshing, setIsRefreshing] = useState(false);
+  
+  // Load patients with vitals from API
+  useEffect(() => {
+    const loadPatients = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        
+        // Fetch all vitals
+        const vitalsResult = await apiFetch<{ results: any[] }>('/vitals/?ordering=-recorded_at&page_size=1000');
+        const allVitals = vitalsResult.results || [];
+        
+        // Group vitals by patient ID
+        const vitalsByPatient: Record<string, any[]> = {};
+        allVitals.forEach((vital: any) => {
+          const patientId = String(vital.patient);
+          if (!vitalsByPatient[patientId]) {
+            vitalsByPatient[patientId] = [];
+          }
+          vitalsByPatient[patientId].push(vital);
+        });
+        
+        // Get unique patient IDs
+        const patientIds = Object.keys(vitalsByPatient);
+        
+        if (patientIds.length === 0) {
+          setPatients([]);
+          return;
+        }
+        
+        // Fetch patient details for all patients with vitals
+        const patientPromises = patientIds.map(async (patientId) => {
+          try {
+            const patient = await patientService.getPatient(parseInt(patientId));
+            const patientVitals = vitalsByPatient[patientId];
+            const latestVitals = patientVitals[0]; // Already sorted by -recorded_at
+            
+            // Calculate status based on vitals
+            let status: 'normal' | 'warning' | 'critical' = 'normal';
+            const alerts: string[] = [];
+            
+            if (latestVitals.temperature) {
+              const temp = parseFloat(latestVitals.temperature);
+              if (temp >= 39) { status = 'critical'; alerts.push('High temperature'); }
+              else if (temp >= 38) { status = status === 'normal' ? 'warning' : status; alerts.push('Elevated temperature'); }
+              else if (temp < 36) { status = status === 'normal' ? 'warning' : status; alerts.push('Low temperature'); }
+            }
+            
+            if (latestVitals.heart_rate) {
+              const hr = parseInt(latestVitals.heart_rate);
+              if (hr >= 120 || hr < 60) { status = status !== 'critical' ? 'warning' : status; alerts.push('Abnormal heart rate'); }
+            }
+            
+            // Transform vitals
+            const transformedVitals: VitalsData = {
+              id: String(latestVitals.id),
+              temperature: latestVitals.temperature?.toString() || '',
+              pulse: latestVitals.heart_rate?.toString() || '',
+              bloodPressureSystolic: latestVitals.blood_pressure_systolic?.toString() || '',
+              bloodPressureDiastolic: latestVitals.blood_pressure_diastolic?.toString() || '',
+              respiratoryRate: latestVitals.respiratory_rate?.toString() || '',
+              oxygenSaturation: latestVitals.oxygen_saturation?.toString() || '',
+              weight: latestVitals.weight?.toString() || '',
+              height: latestVitals.height?.toString() || '',
+              painScale: '',
+              bloodSugar: '',
+              bmi: latestVitals.bmi?.toString() || '',
+              notes: latestVitals.notes || '',
+              recordedAt: latestVitals.recorded_at || new Date().toISOString(),
+              recordedBy: latestVitals.recorded_by_name || 'Unknown',
+            };
+            
+            // Transform vitals history
+            const vitalsHistory: VitalsData[] = patientVitals.map((v: any) => ({
+              id: String(v.id),
+              temperature: v.temperature?.toString() || '',
+              pulse: v.heart_rate?.toString() || '',
+              bloodPressureSystolic: v.blood_pressure_systolic?.toString() || '',
+              bloodPressureDiastolic: v.blood_pressure_diastolic?.toString() || '',
+              respiratoryRate: v.respiratory_rate?.toString() || '',
+              oxygenSaturation: v.oxygen_saturation?.toString() || '',
+              weight: v.weight?.toString() || '',
+              height: v.height?.toString() || '',
+              painScale: '',
+              bloodSugar: '',
+              bmi: v.bmi?.toString() || '',
+              notes: v.notes || '',
+              recordedAt: v.recorded_at || new Date().toISOString(),
+              recordedBy: v.recorded_by_name || 'Unknown',
+            }));
+            
+            return {
+              id: String(patient.id),
+              name: patient.full_name || `${patient.surname} ${patient.first_name}`,
+              patientId: patient.patient_id || String(patient.id),
+              personalNumber: patient.personal_number || '',
+              age: patient.age || 0,
+              gender: patient.gender || '',
+              latestVitals: transformedVitals,
+              vitalsHistory,
+              status,
+              alerts,
+            } as PatientVitals;
+          } catch (err) {
+            console.error(`Error loading patient ${patientId}:`, err);
+            return null;
+          }
+        });
+        
+        const loadedPatients = (await Promise.all(patientPromises)).filter((p): p is PatientVitals => p !== null);
+        setPatients(loadedPatients);
+      } catch (err) {
+        console.error('Error loading patients with vitals:', err);
+        if (isAuthenticationError(err)) {
+          setAuthError(err);
+        } else {
+          setError('Failed to load patient vitals. Please try again.');
+        }
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    loadPatients();
+  }, []);
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -100,9 +231,112 @@ export default function PatientVitalsPage() {
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    toast.success('Vitals data refreshed');
-    setIsRefreshing(false);
+    try {
+      // Reload patients with vitals (same logic as useEffect)
+      const vitalsResult = await apiFetch<{ results: any[] }>('/vitals/?ordering=-recorded_at&page_size=1000');
+      const allVitals = vitalsResult.results || [];
+      
+      const vitalsByPatient: Record<string, any[]> = {};
+      allVitals.forEach((vital: any) => {
+        const patientId = String(vital.patient);
+        if (!vitalsByPatient[patientId]) {
+          vitalsByPatient[patientId] = [];
+        }
+        vitalsByPatient[patientId].push(vital);
+      });
+      
+      const patientIds = Object.keys(vitalsByPatient);
+      
+      if (patientIds.length === 0) {
+        setPatients([]);
+        toast.success('Vitals data refreshed');
+        return;
+      }
+      
+      const patientPromises = patientIds.map(async (patientId) => {
+        try {
+          const patient = await patientService.getPatient(parseInt(patientId));
+          const patientVitals = vitalsByPatient[patientId];
+          const latestVitals = patientVitals[0];
+          
+          let status: 'normal' | 'warning' | 'critical' = 'normal';
+          const alerts: string[] = [];
+          
+          if (latestVitals.temperature) {
+            const temp = parseFloat(latestVitals.temperature);
+            if (temp >= 39) { status = 'critical'; alerts.push('High temperature'); }
+            else if (temp >= 38) { status = status === 'normal' ? 'warning' : status; alerts.push('Elevated temperature'); }
+            else if (temp < 36) { status = status === 'normal' ? 'warning' : status; alerts.push('Low temperature'); }
+          }
+          
+          if (latestVitals.heart_rate) {
+            const hr = parseInt(latestVitals.heart_rate);
+            if (hr >= 120 || hr < 60) { status = status !== 'critical' ? 'warning' : status; alerts.push('Abnormal heart rate'); }
+          }
+          
+          const transformedVitals: VitalsData = {
+            id: String(latestVitals.id),
+            temperature: latestVitals.temperature?.toString() || '',
+            pulse: latestVitals.heart_rate?.toString() || '',
+            bloodPressureSystolic: latestVitals.blood_pressure_systolic?.toString() || '',
+            bloodPressureDiastolic: latestVitals.blood_pressure_diastolic?.toString() || '',
+            respiratoryRate: latestVitals.respiratory_rate?.toString() || '',
+            oxygenSaturation: latestVitals.oxygen_saturation?.toString() || '',
+            weight: latestVitals.weight?.toString() || '',
+            height: latestVitals.height?.toString() || '',
+            painScale: '',
+            bloodSugar: '',
+            bmi: latestVitals.bmi?.toString() || '',
+            notes: latestVitals.notes || '',
+            recordedAt: latestVitals.recorded_at || new Date().toISOString(),
+            recordedBy: latestVitals.recorded_by_name || 'Unknown',
+          };
+          
+          const vitalsHistory: VitalsData[] = patientVitals.map((v: any) => ({
+            id: String(v.id),
+            temperature: v.temperature?.toString() || '',
+            pulse: v.heart_rate?.toString() || '',
+            bloodPressureSystolic: v.blood_pressure_systolic?.toString() || '',
+            bloodPressureDiastolic: v.blood_pressure_diastolic?.toString() || '',
+            respiratoryRate: v.respiratory_rate?.toString() || '',
+            oxygenSaturation: v.oxygen_saturation?.toString() || '',
+            weight: v.weight?.toString() || '',
+            height: v.height?.toString() || '',
+            painScale: '',
+            bloodSugar: '',
+            bmi: v.bmi?.toString() || '',
+            notes: v.notes || '',
+            recordedAt: v.recorded_at || new Date().toISOString(),
+            recordedBy: v.recorded_by_name || 'Unknown',
+          }));
+          
+          return {
+            id: String(patient.id),
+            name: patient.full_name || `${patient.surname} ${patient.first_name}`,
+            patientId: patient.patient_id || String(patient.id),
+            personalNumber: patient.personal_number || '',
+            age: patient.age || 0,
+            gender: patient.gender || '',
+            latestVitals: transformedVitals,
+            vitalsHistory,
+            status,
+            alerts,
+          } as PatientVitals;
+        } catch (err) {
+          console.error(`Error loading patient ${patientId}:`, err);
+          return null;
+        }
+      });
+      
+      const loadedPatients = (await Promise.all(patientPromises)).filter((p): p is PatientVitals => p !== null);
+      setPatients(loadedPatients);
+      toast.success('Vitals data refreshed');
+    } catch (err) {
+      console.error('Error refreshing vitals:', err);
+      toast.error('Failed to refresh vitals data');
+    } finally {
+      setIsRefreshing(false);
+    }
   };
 
   const openHistoryDialog = (patient: PatientVitals) => {

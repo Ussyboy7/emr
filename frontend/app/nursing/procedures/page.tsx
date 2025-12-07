@@ -13,6 +13,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import Link from 'next/link';
+import { apiFetch } from '@/lib/api-client';
+import { patientService } from '@/lib/services';
+import { useAuthRedirect } from '@/hooks/use-auth-redirect';
+import { isAuthenticationError } from '@/lib/auth-errors';
 import { 
   Syringe, Bandage, Pill, Search, RefreshCw, Users, Clock, CheckCircle2, AlertTriangle,
   Eye, Calendar, Loader2, Save, Activity, History, ArrowRight, User, Stethoscope
@@ -85,6 +89,8 @@ export default function ProceduresQueuePage() {
   const [procedures, setProcedures] = useState<Procedure[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [authError, setAuthError] = useState<unknown | null>(null);
+  useAuthRedirect(authError);
   const [searchQuery, setSearchQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
   const [priorityFilter, setPriorityFilter] = useState('all');
@@ -103,6 +109,83 @@ export default function ProceduresQueuePage() {
   const [injectionForm, setInjectionForm] = useState({ site: '', batchNumber: '', expiryDate: '', manufacturer: '', notes: '' });
   const [dressingForm, setDressingForm] = useState({ dressingType: '', woundCondition: '', woundSize: '', drainage: '', painLevel: '', skinCondition: '', observations: '' });
   const [medicationForm, setMedicationForm] = useState({ site: '', notes: '' });
+  
+  // Load nursing orders from API
+  useEffect(() => {
+    const loadOrders = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        
+        // Fetch pending nursing orders
+        const ordersResult = await apiFetch<{ results: any[] }>('/nursing/orders/?status=pending&page_size=1000');
+        const orders = ordersResult.results || [];
+        
+        // Transform orders to procedures format
+        const transformedProcedures: Procedure[] = await Promise.all(orders.map(async (order: any) => {
+          try {
+            // Get patient details
+            const patient = await patientService.getPatient(order.patient);
+            
+            // Map backend order_type to frontend type
+            const typeMap: Record<string, Procedure['type']> = {
+              'injection': 'injection',
+              'dressing': 'dressing',
+              'wound_care': 'dressing',
+              'medication': 'medication',
+            };
+            
+            const procedureType = typeMap[order.order_type?.toLowerCase()] || 'medication';
+            
+            // Map backend priority to frontend priority
+            const priorityMap: Record<string, Procedure['priority']> = {
+              'urgent': 'Emergency',
+              'high': 'High',
+              'medium': 'Medium',
+              'low': 'Low',
+            };
+            
+            const orderedAt = new Date(order.ordered_at);
+            
+            return {
+              id: String(order.id),
+              type: procedureType,
+              patientName: patient.full_name || `${patient.surname} ${patient.first_name}`,
+              patientId: patient.patient_id || String(patient.id),
+              personalNumber: patient.personal_number || '',
+              age: patient.age || 0,
+              gender: patient.gender || '',
+              ward: '',
+              orderedAt: order.ordered_at,
+              orderedBy: order.ordered_by_name || 'Unknown',
+              priority: priorityMap[order.priority] || 'Medium',
+              allergies: [],
+              details: {
+                // Extract details from description if needed
+              },
+            } as Procedure;
+          } catch (err) {
+            console.error(`Error loading order ${order.id}:`, err);
+            return null;
+          }
+        }));
+        
+        const validProcedures = transformedProcedures.filter((p): p is Procedure => p !== null);
+        setProcedures(validProcedures);
+      } catch (err) {
+        console.error('Error loading nursing orders:', err);
+        if (isAuthenticationError(err)) {
+          setAuthError(err);
+        } else {
+          setError('Failed to load procedures queue. Please try again.');
+        }
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    loadOrders();
+  }, []);
 
   // ==================== STATS ====================
   const stats = useMemo(() => ({
@@ -146,11 +229,70 @@ export default function ProceduresQueuePage() {
   }, [searchQuery, typeFilter, priorityFilter]);
 
   // ==================== HANDLERS ====================
+  const loadOrders = async () => {
+    try {
+      const ordersResult = await apiFetch<{ results: any[] }>('/nursing/orders/?status=pending&page_size=1000');
+      const orders = ordersResult.results || [];
+      
+      const transformedProcedures: Procedure[] = await Promise.all(orders.map(async (order: any) => {
+        try {
+          const patient = await patientService.getPatient(order.patient);
+          
+          const typeMap: Record<string, Procedure['type']> = {
+            'injection': 'injection',
+            'dressing': 'dressing',
+            'wound_care': 'dressing',
+            'medication': 'medication',
+          };
+          
+          const procedureType = typeMap[order.order_type?.toLowerCase()] || 'medication';
+          
+          const priorityMap: Record<string, Procedure['priority']> = {
+            'urgent': 'Emergency',
+            'high': 'High',
+            'medium': 'Medium',
+            'low': 'Low',
+          };
+          
+          return {
+            id: String(order.id),
+            type: procedureType,
+            patientName: patient.full_name || `${patient.surname} ${patient.first_name}`,
+            patientId: patient.patient_id || String(patient.id),
+            personalNumber: patient.personal_number || '',
+            age: patient.age || 0,
+            gender: patient.gender || '',
+            ward: '',
+            orderedAt: order.ordered_at,
+            orderedBy: order.ordered_by_name || 'Unknown',
+            priority: priorityMap[order.priority] || 'Medium',
+            allergies: [],
+            details: {},
+          } as Procedure;
+        } catch (err) {
+          return null;
+        }
+      }));
+      
+      const validProcedures = transformedProcedures.filter((p): p is Procedure => p !== null);
+      setProcedures(validProcedures);
+      return validProcedures;
+    } catch (err) {
+      console.error('Error loading orders:', err);
+      throw err;
+    }
+  };
+  
   const handleRefresh = async () => {
     setIsRefreshing(true);
-    await new Promise(r => setTimeout(r, 1000));
-    toast.success('Queue refreshed');
-    setIsRefreshing(false);
+    try {
+      await loadOrders();
+      toast.success('Queue refreshed');
+    } catch (err) {
+      toast.error('Failed to refresh queue');
+    } finally {
+      setIsRefreshing(false);
+    }
   };
 
   const openPerformDialog = (procedure: Procedure) => {
@@ -161,19 +303,63 @@ export default function ProceduresQueuePage() {
   const handleComplete = async () => {
     if (!selectedProcedure) return;
     setIsSubmitting(true);
-    await new Promise(r => setTimeout(r, 1500));
-
-    // Remove from queue (in real app, this would move to history)
-    setProcedures(prev => prev.filter(p => p.id !== selectedProcedure.id));
     
-    const typeLabel = getTypeConfig(selectedProcedure.type).label;
-    toast.success(`${typeLabel} completed for ${selectedProcedure.patientName}`, {
-      description: 'Procedure recorded successfully'
-    });
+    try {
+      const orderId = parseInt(selectedProcedure.id);
+      if (isNaN(orderId)) {
+        toast.error('Invalid order ID');
+        return;
+      }
+      
+      // Map frontend type to backend procedure_type
+      const typeMap: Record<string, string> = {
+        'injection': 'injection',
+        'dressing': 'dressing',
+        'medication': 'other',
+      };
+      
+      // Get patient ID from procedure
+      const patientId = parseInt(selectedProcedure.patientId) || parseInt(selectedProcedure.id);
+      
+      // Create procedure record
+      const procedureData: any = {
+        patient: patientId,
+        procedure_type: typeMap[selectedProcedure.type] || 'other',
+        description: selectedProcedure.type === 'injection' ? `Injection: ${injectionForm.notes}` :
+                     selectedProcedure.type === 'dressing' ? `Dressing: ${dressingForm.observations}` :
+                     `Medication: ${medicationForm.notes}`,
+        site: injectionForm.site || medicationForm.site || '',
+        notes: injectionForm.notes || dressingForm.observations || medicationForm.notes || '',
+      };
+      
+      // Create procedure
+      await apiFetch('/nursing/procedures/', {
+        method: 'POST',
+        body: JSON.stringify(procedureData),
+      });
+      
+      // Update order status to completed
+      await apiFetch(`/nursing/orders/${orderId}/`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status: 'completed' }),
+      });
+      
+      // Remove from local state
+      setProcedures(prev => prev.filter(p => p.id !== selectedProcedure.id));
+      
+      const typeLabel = getTypeConfig(selectedProcedure.type).label;
+      toast.success(`${typeLabel} completed for ${selectedProcedure.patientName}`, {
+        description: 'Procedure recorded successfully'
+      });
 
-    setIsSubmitting(false);
-    setIsPerformDialogOpen(false);
-    resetForms();
+      setIsPerformDialogOpen(false);
+      resetForms();
+    } catch (err) {
+      console.error('Error completing procedure:', err);
+      toast.error('Failed to complete procedure. Please try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const resetForms = () => {

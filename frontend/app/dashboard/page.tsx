@@ -229,7 +229,7 @@ export default function DashboardPage() {
                   <div key={patient.id} className="flex items-center justify-between p-3 bg-muted/50 rounded-lg hover:bg-muted transition-colors">
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center text-white font-medium text-sm">
-                        {patient.name.split(' ').map(n => n[0]).join('')}
+                        {patient.name.split(' ').map((n: string) => n[0]).join('')}
                       </div>
                       <div>
                         <p className="font-medium">{patient.name}</p>

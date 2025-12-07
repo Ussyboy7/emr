@@ -50,7 +50,7 @@ interface LabResult {
 
 // Transform backend LabResult to frontend format
 const transformResult = (apiResult: ApiLabResult): LabResult => {
-  const test = apiResult.test || apiResult.test_details;
+  const test = apiResult.test || (apiResult as any).test_details;
   const results: TestResult[] = [];
   
   // Transform results from JSON format to TestResult array
@@ -91,10 +91,10 @@ const transformResult = (apiResult: ApiLabResult): LabResult => {
 
   return {
     id: apiResult.id.toString(),
-    orderId: apiResult.order_id || '',
+    orderId: (apiResult as any).order_id || apiResult.order?.id?.toString() || '',
     patient: {
       id: apiResult.patient.id?.toString() || '',
-      name: apiResult.patient_name || 'Unknown',
+      name: (apiResult as any).patient_name || apiResult.patient?.name || 'Unknown',
       age: 0, // Would need to get from patient API
       gender: 'Unknown', // Would need to get from patient API
     },

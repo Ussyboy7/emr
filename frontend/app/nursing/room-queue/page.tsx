@@ -11,6 +11,10 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
+import { apiFetch } from '@/lib/api-client';
+import { roomService } from '@/lib/services';
+import { useAuthRedirect } from '@/hooks/use-auth-redirect';
+import { isAuthenticationError } from '@/lib/auth-errors';
 import { 
   DoorOpen, Search, RefreshCw, Users, Clock, CheckCircle2, AlertTriangle,
   ArrowRight, Stethoscope, Activity, Loader2, Eye, MoveUp, MoveDown,
@@ -56,10 +60,88 @@ export default function RoomQueuePage() {
   const [rooms, setRooms] = useState<ConsultationRoom[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [authError, setAuthError] = useState<unknown | null>(null);
+  useAuthRedirect(authError);
   const [searchQuery, setSearchQuery] = useState('');
   const [roomFilter, setRoomFilter] = useState('all');
   const [priorityFilter, setPriorityFilter] = useState('all');
   const [isRefreshing, setIsRefreshing] = useState(false);
+  
+  // Load rooms and queue from API
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        
+        // Load rooms
+        const roomsResult = await roomService.getRooms({ page_size: 1000 });
+        const transformedRooms: ConsultationRoom[] = roomsResult.results.map((room: any) => ({
+          id: String(room.id),
+          name: room.name,
+          status: 'available' as const, // Default status, could be enhanced
+          doctor: undefined,
+          specialty: room.specialty || '',
+          currentPatient: undefined,
+          consultationsToday: 0,
+        }));
+        setRooms(transformedRooms);
+        
+        // Load queue items
+        const queueResult = await apiFetch<{ results: any[] }>('/consultation/queue/?is_active=true&page_size=1000');
+        const queueItems = queueResult.results || [];
+        
+        // Transform queue items to patients
+        const transformedPatients: QueuedPatient[] = await Promise.all(queueItems.map(async (item: any) => {
+          try {
+            // Get patient details (we'd need to fetch from patient service)
+            // For now, use the patient_name from serializer
+            const queuedAt = new Date(item.queued_at);
+            const waitTime = Math.floor((Date.now() - queuedAt.getTime()) / (1000 * 60));
+            
+            // Map backend priority to frontend priority
+            const priorityMap: Record<string, QueuedPatient['priority']> = {
+              'urgent': 'Emergency',
+              'high': 'High',
+              'medium': 'Medium',
+              'low': 'Low',
+            };
+            
+            return {
+              id: String(item.id),
+              name: item.patient_name || `Patient ${item.patient}`,
+              patientId: String(item.patient), // Will need patient_id from patient fetch
+              personalNumber: '',
+              priority: priorityMap[item.priority] || 'Medium',
+              waitTime: waitTime > 0 ? waitTime : 0,
+              sentAt: item.queued_at,
+              sentBy: 'Nursing',
+              clinic: '',
+              visitType: 'Consultation',
+              roomId: String(item.room),
+            } as QueuedPatient;
+          } catch (err) {
+            console.error(`Error transforming queue item ${item.id}:`, err);
+            return null;
+          }
+        }));
+        
+        const validPatients = transformedPatients.filter((p): p is QueuedPatient => p !== null);
+        setPatients(validPatients);
+      } catch (err) {
+        console.error('Error loading room queue data:', err);
+        if (isAuthenticationError(err)) {
+          setAuthError(err);
+        } else {
+          setError('Failed to load room queue data. Please try again.');
+        }
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    loadData();
+  }, []);
   
   // Dialog states
   const [isReassignDialogOpen, setIsReassignDialogOpen] = useState(false);
@@ -105,9 +187,50 @@ export default function RoomQueuePage() {
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    toast.success('Queue data refreshed');
-    setIsRefreshing(false);
+    try {
+      // Reload queue data (same logic as useEffect)
+      const queueResult = await apiFetch<{ results: any[] }>('/consultation/queue/?is_active=true&page_size=1000');
+      const queueItems = queueResult.results || [];
+      
+      const transformedPatients: QueuedPatient[] = await Promise.all(queueItems.map(async (item: any) => {
+        try {
+          const queuedAt = new Date(item.queued_at);
+          const waitTime = Math.floor((Date.now() - queuedAt.getTime()) / (1000 * 60));
+          
+          const priorityMap: Record<string, QueuedPatient['priority']> = {
+            'urgent': 'Emergency',
+            'high': 'High',
+            'medium': 'Medium',
+            'low': 'Low',
+          };
+          
+          return {
+            id: String(item.id),
+            name: item.patient_name || `Patient ${item.patient}`,
+            patientId: String(item.patient),
+            personalNumber: '',
+            priority: priorityMap[item.priority] || 'Medium',
+            waitTime: waitTime > 0 ? waitTime : 0,
+            sentAt: item.queued_at,
+            sentBy: 'Nursing',
+            clinic: '',
+            visitType: 'Consultation',
+            roomId: String(item.room),
+          } as QueuedPatient;
+        } catch (err) {
+          return null;
+        }
+      }));
+      
+      const validPatients = transformedPatients.filter((p): p is QueuedPatient => p !== null);
+      setPatients(validPatients);
+      toast.success('Queue data refreshed');
+    } catch (err) {
+      console.error('Error refreshing queue:', err);
+      toast.error('Failed to refresh queue data');
+    } finally {
+      setIsRefreshing(false);
+    }
   };
 
   const openReassignDialog = (patient: QueuedPatient) => {
@@ -124,25 +247,62 @@ export default function RoomQueuePage() {
   const handleReassign = async () => {
     if (!selectedPatient || !selectedNewRoom) return;
     setIsSubmitting(true);
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    try {
+      const queueItemId = parseInt(selectedPatient.id);
+      if (isNaN(queueItemId)) {
+        toast.error('Invalid queue item ID');
+        return;
+      }
+      
+      // Update queue item to assign to new room
+      await apiFetch(`/consultation/queue/${queueItemId}/`, {
+        method: 'PATCH',
+        body: JSON.stringify({ room: parseInt(selectedNewRoom) }),
+      });
+      
+      const oldRoom = rooms.find(r => r.id === selectedPatient.roomId);
+      const newRoom = rooms.find(r => r.id === selectedNewRoom);
 
-    const oldRoom = rooms.find(r => r.id === selectedPatient.roomId);
-    const newRoom = rooms.find(r => r.id === selectedNewRoom);
+      setPatients(prev => prev.map(p => 
+        p.id === selectedPatient.id ? { ...p, roomId: selectedNewRoom } : p
+      ));
 
-    setPatients(prev => prev.map(p => 
-      p.id === selectedPatient.id ? { ...p, roomId: selectedNewRoom } : p
-    ));
-
-    toast.success(`Patient reassigned`, {
-      description: `${selectedPatient.name} moved from ${oldRoom?.name} to ${newRoom?.name}`
-    });
-    setIsSubmitting(false);
-    setIsReassignDialogOpen(false);
+      toast.success(`Patient reassigned`, {
+        description: `${selectedPatient.name} moved from ${oldRoom?.name} to ${newRoom?.name}`
+      });
+      setIsReassignDialogOpen(false);
+      
+      // Refresh queue data
+      await handleRefresh();
+    } catch (err) {
+      console.error('Error reassigning patient:', err);
+      toast.error('Failed to reassign patient. Please try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleRemoveFromQueue = async (patient: QueuedPatient) => {
-    setPatients(prev => prev.filter(p => p.id !== patient.id));
-    toast.success(`${patient.name} removed from queue`);
+    try {
+      const queueItemId = parseInt(patient.id);
+      if (isNaN(queueItemId)) {
+        toast.error('Invalid queue item ID');
+        return;
+      }
+      
+      // Deactivate queue item (soft delete by setting is_active=false)
+      await apiFetch(`/consultation/queue/${queueItemId}/`, {
+        method: 'PATCH',
+        body: JSON.stringify({ is_active: false }),
+      });
+      
+      setPatients(prev => prev.filter(p => p.id !== patient.id));
+      toast.success(`${patient.name} removed from queue`);
+    } catch (err) {
+      console.error('Error removing patient from queue:', err);
+      toast.error('Failed to remove patient from queue. Please try again.');
+    }
   };
 
   const movePatientInQueue = (patientId: string, direction: 'up' | 'down') => {

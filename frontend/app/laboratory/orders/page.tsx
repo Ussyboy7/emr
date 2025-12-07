@@ -503,7 +503,7 @@ export default function LabOrdersPage() {
         parseInt(selectedOrder.id),
         parseInt(selectedTest.id),
         resultEntryMode === 'values' ? resultValues : {},
-        resultEntryMode === 'upload' ? uploadedFile : undefined
+        resultEntryMode === 'upload' ? (uploadedFile || undefined) : undefined
       );
 
       toast.success(`Results submitted for ${selectedTest.name}. Awaiting verification.`);
