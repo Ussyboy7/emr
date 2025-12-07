@@ -1,0 +1,37 @@
+FROM node:20-alpine AS builder
+WORKDIR /app
+
+# Accept build arguments for Next.js public environment variables
+ARG NEXT_PUBLIC_API_URL
+ARG NEXT_PUBLIC_ENVIRONMENT
+
+# Set as environment variables for the build
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+ENV NEXT_PUBLIC_ENVIRONMENT=$NEXT_PUBLIC_ENVIRONMENT
+
+COPY package.json package-lock.json ./
+RUN npm ci
+
+COPY . .
+RUN npm run build
+
+FROM node:20-alpine AS runner
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV NEXT_PUBLIC_NODE_ENV=staging
+
+COPY --from=builder /app/package.json /app/package-lock.json ./
+RUN npm ci --omit=dev
+
+COPY --from=builder /app/.next ./.next
+COPY --from=builder /app/public ./public
+COPY --from=builder /app/next.config.js ./
+COPY --from=builder /app/tsconfig.json ./
+COPY --from=builder /app/tailwind.config.ts ./
+COPY --from=builder /app/postcss.config.js ./
+COPY --from=builder /app/eslint.config.js ./
+COPY --from=builder /app/components.json ./
+
+EXPOSE 3000
+CMD ["npm", "run", "start"]
