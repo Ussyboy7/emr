@@ -117,7 +117,7 @@ services:
     container_name: emr-celery-worker-prod
     env_file:
       - ./backend/env/prod.env
-    command: celery -A emr_backend worker -l info --concurrency=4
+    command: python -m celery -A emr_backend worker -l info --concurrency=4
     volumes:
       - media_files_prod:/app/media
       - ./logs/production:/app/logs
@@ -146,7 +146,7 @@ services:
     container_name: emr-celery-beat-prod
     env_file:
       - ./backend/env/prod.env
-    command: celery -A emr_backend beat -l info
+    command: python -m celery -A emr_backend beat -l info
     volumes:
       - ./logs/production:/app/logs
     depends_on:

@@ -122,7 +122,7 @@ services:
     container_name: emr-celery-worker-stag
     env_file:
       - ./backend/env/stag.env
-    command: celery -A emr_backend worker -l info --concurrency=2
+    command: python -m celery -A emr_backend worker -l info --concurrency=2
     volumes:
       - media_files_stag:/app/media
       - ./logs/staging:/app/logs
@@ -151,7 +151,7 @@ services:
     container_name: emr-celery-beat-stag
     env_file:
       - ./backend/env/stag.env
-    command: celery -A emr_backend beat -l info
+    command: python -m celery -A emr_backend beat -l info
     volumes:
       - ./logs/staging:/app/logs
     depends_on:
