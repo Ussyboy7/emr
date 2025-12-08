@@ -188,7 +188,9 @@ export default function RoomQueuePage() {
             if (item.visit) {
               try {
                 const visitId = typeof item.visit === 'number' ? item.visit : parseInt(String(item.visit));
-                const visit = await apiFetch(`/visits/${visitId}/`);
+                const visit = await apiFetch(`/visits/${visitId}/`) as {
+                  visit_type?: string;
+                };
                 visitType = visit.visit_type || 'Consultation';
                 
                 // Fetch vitals for this visit
@@ -346,7 +348,9 @@ export default function RoomQueuePage() {
           if (item.visit) {
             try {
               const visitId = typeof item.visit === 'number' ? item.visit : parseInt(String(item.visit));
-              const visit = await apiFetch(`/visits/${visitId}/`);
+              const visit = await apiFetch(`/visits/${visitId}/`) as {
+                visit_type?: string;
+              };
               visitType = visit.visit_type || 'Consultation';
               
               // Fetch vitals for this visit

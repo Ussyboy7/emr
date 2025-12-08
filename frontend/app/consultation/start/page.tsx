@@ -337,7 +337,11 @@ const StartConsultation = () => {
           if (queueItem.visit) {
             visitId = typeof queueItem.visit === 'number' ? queueItem.visit : parseInt(String(queueItem.visit));
             try {
-              const visit = await apiFetch(`/visits/${visitId}/`);
+              const visit = await apiFetch(`/visits/${visitId}/`) as {
+                date?: string;
+                time?: string;
+                chief_complaint?: string;
+              };
               visitDate = visit.date || visitDate;
               visitTime = visit.time || visitTime;
               chiefComplaint = visit.chief_complaint || chiefComplaint;

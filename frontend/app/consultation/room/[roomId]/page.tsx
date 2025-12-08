@@ -876,7 +876,11 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
             
             if (item.visit) {
               try {
-                const visit = await apiFetch(`/visits/${item.visit}/`);
+                const visit = await apiFetch(`/visits/${item.visit}/`) as {
+                  date?: string;
+                  time?: string;
+                  chief_complaint?: string;
+                };
                 visitDate = visit.date || visitDate;
                 visitTime = visit.time || visitTime;
                 chiefComplaint = visit.chief_complaint || chiefComplaint;
