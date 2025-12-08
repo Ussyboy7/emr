@@ -568,7 +568,7 @@ export default function RoomQueuePage() {
       const [currentItem, swapItem] = await Promise.all([
         apiFetch(`/consultation/queue/${queueItemId}/`),
         apiFetch(`/consultation/queue/${swapQueueItemId}/`),
-      ]);
+      ]) as [{ priority: number; queued_at: string; [key: string]: any }, { priority: number; queued_at: string; [key: string]: any }];
       
       console.log('Moving patient in queue:', {
         direction,
