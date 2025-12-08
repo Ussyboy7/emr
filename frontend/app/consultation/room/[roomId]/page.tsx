@@ -864,7 +864,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         });
         
         // Transform queue items to Patient objects
-        const transformedPatients: Patient[] = await Promise.all(sortedQueue.map(async (item: any, index: number) => {
+        const transformedPatients = await Promise.all(sortedQueue.map(async (item: any, index: number) => {
           try {
             // Get patient details
             const patient = await patientService.getPatient(item.patient);
