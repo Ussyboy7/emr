@@ -69,10 +69,14 @@ services:
       - 8.8.4.4
     container_name: emr-backend-stag
     command: >
-      sh -c "mkdir -p /app/logs &&
-             python manage.py migrate &&
-             python manage.py collectstatic --noinput &&
-             gunicorn --bind 0.0.0.0:8000 --workers 4 --threads 2 --timeout 120 --max-requests 500 --max-requests-jitter 25 --access-logfile /app/logs/gunicorn-access.log --error-logfile /app/logs/gunicorn-error.log --log-level info emr_backend.wsgi:application"
+      sh -c "set -e &&
+             mkdir -p /app/logs &&
+             echo 'Running migrations...' &&
+             python manage.py migrate --noinput || (echo 'Migration failed!' && exit 1) &&
+             echo 'Collecting static files...' &&
+             python manage.py collectstatic --noinput || (echo 'Collectstatic failed!' && exit 1) &&
+             echo 'Starting Gunicorn...' &&
+             exec gunicorn --bind 0.0.0.0:8000 --workers 4 --threads 2 --timeout 120 --max-requests 500 --max-requests-jitter 25 --access-logfile /app/logs/gunicorn-access.log --error-logfile /app/logs/gunicorn-error.log --log-level info emr_backend.wsgi:application"
     env_file:
       - ./backend/env/stag.env
     volumes:
