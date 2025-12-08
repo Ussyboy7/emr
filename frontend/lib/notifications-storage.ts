@@ -39,7 +39,6 @@ export interface NotificationPreferences {
   emailDigest: boolean;
   emailDigestTime?: string;
   moduleDms: boolean;
-  moduleCorrespondence: boolean;
   moduleWorkflow: boolean;
   moduleSystem: boolean;
   priorityLow: boolean;
@@ -49,7 +48,6 @@ export interface NotificationPreferences {
   priorityUrgent: boolean;
   typeWorkflow: boolean;
   typeDocument: boolean;
-  typeCorrespondence: boolean;
   typeSystem: boolean;
   typeAlert: boolean;
   typeReminder: boolean;

@@ -79,40 +79,97 @@ export default function PrescriptionsPage() {
         page: currentPage,
         search: searchQuery || undefined,
       });
-      // Transform API data - basic transformation for now
-      const transformed = response.results.map((rx: ApiPrescription) => ({
-        id: rx.prescription_id || rx.id.toString(),
-        patient: { 
-          name: rx.patient_name || 'Unknown', 
-          id: rx.patient.toString(), 
-          mrn: '', 
-          age: 0, 
-          gender: '', 
-          allergies: [], 
-          phone: '' 
-        },
-        medications: (rx.medications || []).map((med: any) => ({
-          id: med.id.toString(),
-          name: med.medication_name || '',
-          dosage: med.dosage || '',
-          frequency: med.frequency || '',
-          duration: med.duration || '',
-          quantity: Number(med.quantity),
-          route: 'Oral',
-          instructions: med.instructions || '',
-          status: med.is_dispensed ? 'Available' : 'Pending',
-          stockLevel: 0,
-        })),
-        doctor: rx.doctor_name || '',
-        clinic: '',
-        location: '',
-        date: rx.prescribed_at.split('T')[0],
-        time: new Date(rx.prescribed_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
-        status: rx.status === 'pending' ? 'Pending' : rx.status === 'dispensing' ? 'Processing' : rx.status === 'dispensed' ? 'Dispensed' : rx.status === 'partially_dispensed' ? 'Partially Dispensed' : 'On Hold',
-        priority: 'Medium' as Priority,
-        waitTime: 0,
-        clinicalNotes: rx.diagnosis || '',
-        specialInstructions: rx.notes || '',
+      // Transform API data - extract patient and visit details
+      const transformed = await Promise.all(response.results.map(async (rx: any) => {
+        // Extract patient details from prescription or visit
+        const patientDetails = rx.patient_details || {};
+        const visitDetails = rx.visit_details || {};
+        const patientId = rx.patient?.toString() || patientDetails.id || '';
+        const patientName = rx.patient_name || patientDetails.name || 'Unknown';
+        const patientMRN = patientDetails.mrn || patientDetails.patient_id || '';
+        const patientAge = patientDetails.age || 0;
+        const patientGender = patientDetails.gender || '';
+        const patientPhone = patientDetails.phone_number || patientDetails.phone || '';
+        const patientAllergies = patientDetails.allergies || [];
+        
+        // Extract visit/clinic details
+        const clinic = visitDetails.clinic || (visitDetails.consultation_room?.name) || '';
+        const location = patientDetails.location || visitDetails.location || '';
+        
+        // Extract doctor details
+        const doctorName = rx.doctor_name || '';
+        const doctorId = rx.doctor?.toString() || '';
+        
+        // Calculate wait time
+        const prescribedAt = new Date(rx.prescribed_at);
+        const now = new Date();
+        const waitTimeMs = now.getTime() - prescribedAt.getTime();
+        const waitTime = Math.floor(waitTimeMs / 60000); // minutes
+        
+        // Determine priority (could be enhanced with API field)
+        let priority: Priority = 'Medium';
+        if (rx.priority) {
+          const priorityMap: Record<string, Priority> = {
+            'emergency': 'Emergency',
+            'high': 'High',
+            'medium': 'Medium',
+            'low': 'Low',
+          };
+          priority = priorityMap[rx.priority.toLowerCase()] || 'Medium';
+        }
+        
+        // Transform medications
+        const medications = (rx.medications || []).map((med: any) => {
+          // Determine medication status
+          let status: 'Available' | 'Low Stock' | 'Out of Stock' | 'Pending' | 'Dispensed' = 'Pending';
+          if (med.is_dispensed) {
+            status = 'Dispensed';
+          } else if (med.medication_details?.current_stock !== undefined) {
+            const stock = med.medication_details.current_stock;
+            if (stock === 0) status = 'Out of Stock';
+            else if (stock < 50) status = 'Low Stock';
+            else status = 'Available';
+          } else {
+            status = 'Pending';
+          }
+          
+          return {
+            id: med.id.toString(),
+            name: med.medication_name || med.medication_details?.name || '',
+            dosage: med.dosage || '',
+            frequency: med.frequency || med.frequency_display || '',
+            duration: med.duration || '',
+            quantity: Number(med.quantity),
+            route: med.route || med.route_display || 'Oral',
+            instructions: med.instructions || '',
+            status,
+            stockLevel: med.medication_details?.current_stock || 0,
+          };
+        });
+        
+        return {
+          id: rx.prescription_id || rx.id.toString(),
+          patient: { 
+            name: patientName, 
+            id: patientId, 
+            mrn: patientMRN, 
+            age: patientAge, 
+            gender: patientGender, 
+            allergies: patientAllergies, 
+            phone: patientPhone 
+          },
+          medications,
+          doctor: doctorName,
+          clinic,
+          location,
+          date: rx.prescribed_at.split('T')[0],
+          time: new Date(rx.prescribed_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+          status: rx.status === 'pending' ? 'Pending' : rx.status === 'dispensing' ? 'Processing' : rx.status === 'dispensed' ? 'Dispensed' : rx.status === 'partially_dispensed' ? 'Partially Dispensed' : 'On Hold',
+          priority,
+          waitTime,
+          clinicalNotes: rx.diagnosis || '',
+          specialInstructions: rx.notes || '',
+        };
       }));
       setPrescriptions(transformed as Prescription[]);
     } catch (err: any) {

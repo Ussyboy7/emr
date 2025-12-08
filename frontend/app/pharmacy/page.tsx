@@ -1,44 +1,124 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useRouter } from 'next/navigation';
+import { pharmacyService } from '@/lib/services';
 import { 
   Pill, ClipboardList, Package, Database, AlertTriangle, Clock,
-  CheckCircle2, ArrowRight, History, User, TrendingUp
+  CheckCircle2, ArrowRight, History, User, TrendingUp, Loader2
 } from 'lucide-react';
-
-const stats = [
-  { label: 'Pending Rx', value: 5, icon: Clock, color: 'text-amber-500', bg: 'bg-amber-500/10' },
-  { label: 'Dispensed Today', value: 23, icon: CheckCircle2, color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
-  { label: 'Low Stock', value: 3, icon: AlertTriangle, color: 'text-rose-500', bg: 'bg-rose-500/10' },
-  { label: 'Total Inventory', value: 156, icon: Database, color: 'text-violet-500', bg: 'bg-violet-500/10' },
-];
-
-const pendingPrescriptions = [
-  { id: 'RX-001', patient: 'Adebayo Johnson', medications: ['Metformin 500mg', 'Glibenclamide 5mg'], doctor: 'Dr. Amaka', time: '10 min ago', priority: 'medium' },
-  { id: 'RX-002', patient: 'Fatima Mohammed', medications: ['Methyldopa 250mg'], doctor: 'Dr. Ngozi', time: '15 min ago', priority: 'high' },
-  { id: 'RX-003', patient: 'Chukwu Emeka', medications: ['Furosemide 40mg', 'Lisinopril 10mg', 'Clopidogrel 75mg'], doctor: 'Dr. Chidi', time: '20 min ago', priority: 'medium' },
-  { id: 'RX-004', patient: 'Ibrahim Suleiman', medications: ['Folic Acid 5mg', 'Hydroxyurea 500mg'], doctor: 'Dr. Fatima', time: '30 min ago', priority: 'emergency' },
-];
-
-const lowStockItems = [
-  { name: 'Lisinopril 10mg', stock: 45, reorderLevel: 80, status: 'Low Stock' },
-  { name: 'Clopidogrel 75mg', stock: 15, reorderLevel: 50, status: 'Critical' },
-  { name: 'Hydroxyurea 500mg', stock: 0, reorderLevel: 30, status: 'Out of Stock' },
-];
-
-const recentDispenses = [
-  { id: 'DISP-001', patient: 'Grace Okonkwo', items: 2, pharmacist: 'Pharm. Chioma', time: '5 min ago' },
-  { id: 'DISP-002', patient: 'Oluwaseun Adeleke', items: 3, pharmacist: 'Pharm. Ahmed', time: '12 min ago' },
-  { id: 'DISP-003', patient: 'Aisha Yusuf', items: 2, pharmacist: 'Pharm. Chioma', time: '25 min ago' },
-];
 
 export default function PharmacyDashboardPage() {
   const router = useRouter();
+  const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState([
+    { label: 'Pending Rx', value: 0, icon: Clock, color: 'text-amber-500', bg: 'bg-amber-500/10' },
+    { label: 'Dispensed Today', value: 0, icon: CheckCircle2, color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
+    { label: 'Low Stock', value: 0, icon: AlertTriangle, color: 'text-rose-500', bg: 'bg-rose-500/10' },
+    { label: 'Total Inventory', value: 0, icon: Database, color: 'text-violet-500', bg: 'bg-violet-500/10' },
+  ]);
+  const [pendingPrescriptions, setPendingPrescriptions] = useState<Array<{
+    id: string;
+    patient: string;
+    medications: string[];
+    doctor: string;
+    time: string;
+    priority: string;
+  }>>([]);
+  const [lowStockItems, setLowStockItems] = useState<Array<{
+    name: string;
+    stock: number;
+    reorderLevel: number;
+    status: string;
+  }>>([]);
+  const [recentDispenses, setRecentDispenses] = useState<Array<{
+    id: string;
+    patient: string;
+    items: number;
+    pharmacist: string;
+    time: string;
+  }>>([]);
+
+  useEffect(() => {
+    loadDashboardData();
+  }, []);
+
+  const loadDashboardData = async () => {
+    try {
+      setLoading(true);
+      
+      // Load stats
+      const statsData = await pharmacyService.getStats();
+      setStats([
+        { label: 'Pending Rx', value: statsData.pendingRx, icon: Clock, color: 'text-amber-500', bg: 'bg-amber-500/10' },
+        { label: 'Dispensed Today', value: statsData.dispensedToday, icon: CheckCircle2, color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
+        { label: 'Low Stock', value: statsData.lowStock, icon: AlertTriangle, color: 'text-rose-500', bg: 'bg-rose-500/10' },
+        { label: 'Total Inventory', value: statsData.totalInventory, icon: Database, color: 'text-violet-500', bg: 'bg-violet-500/10' },
+      ]);
+
+      // Load pending prescriptions (first 4)
+      const prescriptionsResponse = await pharmacyService.getPrescriptions({ status: 'pending', page: 1 });
+      const pending = prescriptionsResponse.results.slice(0, 4).map((rx: any) => {
+        const patientName = rx.patient_name || (rx.patient_details?.name) || 'Unknown';
+        const medications = (rx.medications || []).slice(0, 2).map((med: any) => 
+          med.medication_name || med.medication_details?.name || ''
+        );
+        const doctorName = rx.doctor_name || '';
+        const prescribedAt = new Date(rx.prescribed_at);
+        const now = new Date();
+        const diffMs = now.getTime() - prescribedAt.getTime();
+        const diffMins = Math.floor(diffMs / 60000);
+        const time = diffMins < 60 ? `${diffMins} min ago` : `${Math.floor(diffMins / 60)} hour${Math.floor(diffMins / 60) > 1 ? 's' : ''} ago`;
+        
+        return {
+          id: rx.prescription_id || rx.id.toString(),
+          patient: patientName,
+          medications,
+          doctor: doctorName,
+          time,
+          priority: rx.priority || 'medium',
+        };
+      });
+      setPendingPrescriptions(pending);
+
+      // Load low stock items
+      const alertsResponse = await pharmacyService.getInventoryAlerts({ type: 'low_stock', page: 1 });
+      const lowStock = alertsResponse.results.slice(0, 3).map((item: any) => ({
+        name: item.medication_name || 'Unknown',
+        stock: Number(item.quantity),
+        reorderLevel: Number(item.min_stock_level),
+        status: Number(item.quantity) === 0 ? 'Out of Stock' : Number(item.quantity) <= Number(item.min_stock_level) * 0.5 ? 'Critical' : 'Low Stock',
+      }));
+      setLowStockItems(lowStock);
+
+      // Load recent dispenses (last 3)
+      const historyResponse = await pharmacyService.getDispenseHistory({ page: 1 });
+      const recent = historyResponse.results.slice(0, 3).map((dispense: any) => {
+        const dispensedAt = new Date(dispense.dispensed_at);
+        const now = new Date();
+        const diffMs = now.getTime() - dispensedAt.getTime();
+        const diffMins = Math.floor(diffMs / 60000);
+        const time = diffMins < 60 ? `${diffMins} min ago` : `${Math.floor(diffMins / 60)} hour${Math.floor(diffMins / 60) > 1 ? 's' : ''} ago`;
+        
+        return {
+          id: dispense.dispense_id || dispense.id.toString(),
+          patient: dispense.patient_name || 'Unknown',
+          items: 1, // Could be enhanced to count items from prescription
+          pharmacist: dispense.dispensed_by_name || '',
+          time,
+        };
+      });
+      setRecentDispenses(recent);
+    } catch (err) {
+      console.error('Error loading dashboard data:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const getPriorityColor = (priority: string) => {
     switch (priority) {
@@ -72,19 +152,34 @@ export default function PharmacyDashboardPage() {
 
         {/* Stats */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {stats.map((stat, i) => (
-            <Card key={i}>
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-muted-foreground">{stat.label}</p>
-                    <p className={`text-3xl font-bold ${stat.color} mt-1`}>{stat.value}</p>
+          {loading ? (
+            Array.from({ length: 4 }).map((_, i) => (
+              <Card key={i}>
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-muted-foreground">Loading...</p>
+                      <p className="text-3xl font-bold mt-1"><Loader2 className="h-8 w-8 animate-spin" /></p>
+                    </div>
                   </div>
-                  <div className={`p-3 rounded-full ${stat.bg}`}><stat.icon className={`h-5 w-5 ${stat.color}`} /></div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+                </CardContent>
+              </Card>
+            ))
+          ) : (
+            stats.map((stat, i) => (
+              <Card key={i}>
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-muted-foreground">{stat.label}</p>
+                      <p className={`text-3xl font-bold ${stat.color} mt-1`}>{stat.value}</p>
+                    </div>
+                    <div className={`p-3 rounded-full ${stat.bg}`}><stat.icon className={`h-5 w-5 ${stat.color}`} /></div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))
+          )}
         </div>
 
         {/* Quick Actions */}
@@ -129,7 +224,18 @@ export default function PharmacyDashboardPage() {
                 </Button>
               </CardHeader>
               <CardContent className="space-y-3">
-                {pendingPrescriptions.map((rx) => (
+                {loading ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <Loader2 className="h-8 w-8 mx-auto mb-2 animate-spin" />
+                    <p>Loading prescriptions...</p>
+                  </div>
+                ) : pendingPrescriptions.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <ClipboardList className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                    <p>No pending prescriptions</p>
+                  </div>
+                ) : (
+                  pendingPrescriptions.map((rx) => (
                   <div key={rx.id} className="flex items-center justify-between p-3 rounded-lg border hover:bg-muted/50 transition-colors">
                     <div className="flex items-center gap-3">
                       <div className={`p-2 rounded-full ${rx.priority === 'emergency' ? 'bg-red-500/10' : 'bg-violet-500/10'}`}>
@@ -153,7 +259,8 @@ export default function PharmacyDashboardPage() {
                       <Button size="sm" className="bg-violet-500 hover:bg-violet-600 text-white">Dispense</Button>
                     </div>
                   </div>
-                ))}
+                  ))
+                )}
               </CardContent>
             </Card>
           </div>
@@ -169,7 +276,18 @@ export default function PharmacyDashboardPage() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                {lowStockItems.map((item, i) => (
+                {loading ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <Loader2 className="h-8 w-8 mx-auto mb-2 animate-spin" />
+                    <p>Loading alerts...</p>
+                  </div>
+                ) : lowStockItems.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <CheckCircle2 className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                    <p>No stock alerts</p>
+                  </div>
+                ) : (
+                  lowStockItems.map((item, i) => (
                   <div key={i} className="flex items-center justify-between p-2 rounded-lg bg-muted/50">
                     <div>
                       <p className="font-medium text-foreground text-sm">{item.name}</p>
@@ -179,7 +297,8 @@ export default function PharmacyDashboardPage() {
                       {item.stock === 0 ? 'Out' : item.stock}
                     </Badge>
                   </div>
-                ))}
+                  ))
+                )}
                 <Button 
                   variant="outline" 
                   className="w-full" 
@@ -199,7 +318,18 @@ export default function PharmacyDashboardPage() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                {recentDispenses.map((dispense) => (
+                {loading ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <Loader2 className="h-8 w-8 mx-auto mb-2 animate-spin" />
+                    <p>Loading history...</p>
+                  </div>
+                ) : recentDispenses.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <Package className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                    <p>No recent dispenses</p>
+                  </div>
+                ) : (
+                  recentDispenses.map((dispense) => (
                   <div key={dispense.id} className="flex items-center justify-between p-2 rounded-lg bg-muted/50">
                     <div>
                       <p className="font-medium text-foreground text-sm">{dispense.patient}</p>
@@ -207,7 +337,8 @@ export default function PharmacyDashboardPage() {
                     </div>
                     <span className="text-xs text-muted-foreground">{dispense.time}</span>
                   </div>
-                ))}
+                  ))
+                )}
                 <Button 
                   variant="outline" 
                   className="w-full" 

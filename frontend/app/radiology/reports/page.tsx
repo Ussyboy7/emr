@@ -37,29 +37,43 @@ interface RadiologyReport {
 }
 
 // Transform backend report to frontend format
-const transformReport = (apiReport: ApiRadiologyReport): RadiologyReport => {
+const transformReport = (apiReport: any): RadiologyReport => {
   const study = apiReport.study_details || apiReport.study;
-  const studyObj = typeof study === 'object' && study !== null ? study : null;
-  const dateStr = (studyObj as any)?.created_at ? new Date((studyObj as any).created_at).toISOString().split('T')[0] : '';
+  const studyObj = typeof study === 'object' && study !== null ? study : {};
+  
+  // Extract patient details
+  const patientId = apiReport.patient?.toString() || '';
+  const patientName = apiReport.patient_name || 'Unknown';
+  const patientAge = (apiReport as any).patient_details?.age || (apiReport as any).patient_age || 0;
+  const patientGender = (apiReport as any).patient_details?.gender || (apiReport as any).patient_gender || 'Unknown';
+  
+  // Extract doctor/radiologist details
+  const radiologist = studyObj.verified_by_name || studyObj.reported_by_name || String(studyObj.reported_by || studyObj.verified_by || 'Unknown');
+  const orderedBy = (apiReport as any).order_details?.doctor_name || (apiReport as any).doctor_name || '';
+  
+  // Extract date
+  const dateStr = studyObj.verified_at ? new Date(studyObj.verified_at).toISOString().split('T')[0] :
+                  studyObj.reported_at ? new Date(studyObj.reported_at).toISOString().split('T')[0] :
+                  apiReport.created_at ? new Date(apiReport.created_at).toISOString().split('T')[0] : '';
   
   return {
     id: apiReport.id.toString(),
     patient: {
-      id: apiReport.patient?.toString() || '',
-      name: apiReport.patient_name || 'Unknown',
-      age: 0, // Would need patient API
-      gender: 'Unknown', // Would need patient API
+      id: patientId,
+      name: patientName,
+      age: patientAge,
+      gender: patientGender,
     },
-    study: String(studyObj?.procedure || ''),
+    study: String(studyObj.procedure || ''),
     studyId: apiReport.order_id || '',
-    category: String(studyObj?.modality || 'X-Ray'),
-    radiologist: String(studyObj?.reported_by || studyObj?.verified_by || 'Unknown'),
-    orderedBy: '',
+    category: String(studyObj.modality || 'X-Ray'),
+    radiologist,
+    orderedBy,
     date: dateStr,
-    findings: studyObj?.findings || '',
-    impression: studyObj?.impression || '',
+    findings: studyObj.findings || '',
+    impression: studyObj.impression || '',
     status: 'Verified' as const,
-    critical: apiReport.overall_status === 'critical',
+    critical: apiReport.overall_status === 'critical' || studyObj.critical || false,
   };
 };
 

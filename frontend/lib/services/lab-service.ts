@@ -47,7 +47,13 @@ export interface LabTemplate {
   code: string;
   sample_type: string;
   description?: string;
-  normal_range?: Record<string, any>;
+  normal_range?: Record<string, any>; // JSON field storing parameter definitions
+  category?: string; // May not exist in backend, but used in frontend
+  turnaround_time?: string;
+  price?: number;
+  is_active?: boolean;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface LabResult {
@@ -182,6 +188,42 @@ class LabService {
   }
 
   /**
+   * Get a single lab template by ID
+   */
+  async getTemplate(templateId: number): Promise<LabTemplate> {
+    return apiFetch<LabTemplate>(`/laboratory/templates/${templateId}/`);
+  }
+
+  /**
+   * Create a new lab template
+   */
+  async createTemplate(data: Partial<LabTemplate>): Promise<LabTemplate> {
+    return apiFetch<LabTemplate>('/laboratory/templates/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  /**
+   * Update a lab template
+   */
+  async updateTemplate(templateId: number, data: Partial<LabTemplate>): Promise<LabTemplate> {
+    return apiFetch<LabTemplate>(`/laboratory/templates/${templateId}/`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  /**
+   * Delete a lab template
+   */
+  async deleteTemplate(templateId: number): Promise<void> {
+    return apiFetch<void>(`/laboratory/templates/${templateId}/`, {
+      method: 'DELETE',
+    });
+  }
+
+  /**
    * Get pending verifications
    */
   async getPendingVerifications(params?: {
@@ -231,6 +273,45 @@ class LabService {
     const queryParams = { ...params, status: 'verified' };
     const query = buildQueryString(queryParams);
     return apiFetch<{ results: LabTest[]; count: number }>(`/laboratory/tests/${query}`);
+  }
+
+  /**
+   * Reject a lab result and send it back to lab technician
+   */
+  async rejectResult(
+    testId: number,
+    rejectionReason: string
+  ): Promise<LabTest> {
+    return apiFetch<LabTest>(`/laboratory/tests/${testId}/`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        status: 'Needs Rework',
+        rejection_reason: rejectionReason,
+        rejected_by: 'Pathologist', // TODO: Get from auth context
+        rejected_date: new Date().toISOString(),
+      }),
+    });
+  }
+
+  /**
+   * Get lab statistics (pending, processing, results ready, critical)
+   */
+  async getStats(): Promise<{
+    pendingTests: number;
+    inProgress: number;
+    resultsReady: number;
+    critical: number;
+  }> {
+    // Get all orders and calculate stats
+    const orders = await this.getOrders({ page: 1 });
+    const allTests = orders.results.flatMap(order => order.tests || []);
+    
+    return {
+      pendingTests: allTests.filter(t => t.status === 'pending').length,
+      inProgress: allTests.filter(t => t.status === 'sample_collected' || t.status === 'processing').length,
+      resultsReady: allTests.filter(t => t.status === 'results_ready').length,
+      critical: orders.results.filter(o => o.priority === 'stat' && o.tests.some(t => t.status !== 'verified')).length,
+    };
   }
 }
 

@@ -15,11 +15,12 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { StandardPagination } from "@/components/StandardPagination";
+import { adminService, type User as ApiUser } from "@/lib/services";
 import {
   Users, Search, Plus, Edit, Trash2, MoreVertical, Eye, UserCog, Shield,
   Stethoscope, Syringe, FlaskConical, Pill, ScanLine, ClipboardList, Building2,
   Phone, Mail, Calendar, BadgeCheck, AlertTriangle, CheckCircle2, XCircle,
-  Download, Upload, RefreshCw, Filter, UserPlus, Key, Lock, Unlock
+  Download, Upload, RefreshCw, Filter, UserPlus, Key, Lock, Unlock, Loader2
 } from "lucide-react";
 
 // Types
@@ -44,15 +45,11 @@ interface StaffMember {
   profilePhoto?: string;
 }
 
-// Staff data will be loaded from API
-
 // Empty staff object for form initialization
 const emptyStaff: Partial<StaffMember> = {
   firstName: '', lastName: '', email: '', phone: '', role: '', department: '', clinic: '',
   dateJoined: new Date().toISOString().split('T')[0], status: 'Active', permissions: []
 };
-
-// Staff data will be loaded from API
 
 const roles = ['All Roles', 'Doctor', 'Nurse', 'Lab Scientist', 'Lab Technician', 'Pharmacist', 'Radiologist', 'Medical Records', 'System Admin'];
 const departments = ['All Departments', 'Medical Services', 'Nursing', 'Laboratory', 'Pharmacy', 'Radiology', 'Medical Records', 'IT'];
@@ -72,6 +69,48 @@ export default function UserManagementPage() {
   // Pagination
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
+
+  // Load staff from API
+  useEffect(() => {
+    loadStaff();
+  }, []);
+
+  const loadStaff = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const response = await adminService.getUsers({ page_size: 1000 });
+      
+      // Transform API users to frontend format
+      const transformedStaff: StaffMember[] = response.results.map((user: ApiUser) => ({
+        id: user.id.toString(),
+        staffId: user.employee_id || `NPA-${user.id}`,
+        firstName: user.first_name || '',
+        lastName: user.last_name || '',
+        email: user.email || '',
+        phone: user.phone || '',
+        role: user.system_role || 'Staff',
+        department: user.department || '',
+        clinic: user.clinic_name || '',
+        specialty: user.specialty,
+        licenseNumber: user.license_number,
+        licenseExpiry: user.license_expiry,
+        qualification: user.qualification,
+        dateJoined: user.date_joined?.split('T')[0] || '',
+        status: user.is_active ? 'Active' : 'Inactive' as StaffMember['status'],
+        lastLogin: user.last_login,
+        permissions: [],
+      }));
+      
+      setStaff(transformedStaff);
+    } catch (err: any) {
+      setError(err.message || 'Failed to load staff');
+      toast.error('Failed to load staff. Please try again.');
+      console.error('Error loading staff:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // Dialog states
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
@@ -191,64 +230,120 @@ export default function UserManagementPage() {
   };
 
   const handleCreate = async () => {
+    if (!formData.firstName || !formData.lastName || !formData.email) {
+      toast.error('Please fill in all required fields');
+      return;
+    }
     setIsSubmitting(true);
-    await new Promise(r => setTimeout(r, 1000));
     
-    const newStaff: StaffMember = {
-      ...formData as StaffMember,
-      id: String(staff.length + 1),
-      staffId: `NPA-${formData.role?.substring(0, 3).toUpperCase() || 'STF'}-${String(staff.length + 1).padStart(3, '0')}`,
-      dateJoined: new Date().toISOString().split('T')[0],
-      permissions: []
-    };
-    
-    setStaff(prev => [...prev, newStaff]);
-    toast.success(`${newStaff.firstName} ${newStaff.lastName} has been added`);
-    setIsCreateDialogOpen(false);
-    setFormData(emptyStaff);
-    setIsSubmitting(false);
+    try {
+      const newUser = await adminService.createUser({
+        first_name: formData.firstName,
+        last_name: formData.lastName,
+        email: formData.email,
+        phone: formData.phone,
+        system_role: formData.role,
+        department: formData.department,
+        is_active: formData.status === 'Active',
+        specialty: formData.specialty,
+        license_number: formData.licenseNumber,
+        license_expiry: formData.licenseExpiry,
+        qualification: formData.qualification,
+      });
+      
+      toast.success(`${formData.firstName} ${formData.lastName} has been added`);
+      setIsCreateDialogOpen(false);
+      setFormData(emptyStaff);
+      await loadStaff(); // Reload staff list
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to create staff member');
+      console.error('Error creating staff:', err);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleUpdate = async () => {
     if (!selectedStaff) return;
     setIsSubmitting(true);
-    await new Promise(r => setTimeout(r, 1000));
     
-    setStaff(prev => prev.map(s => s.id === selectedStaff.id ? { ...s, ...formData } : s));
-    toast.success(`${formData.firstName} ${formData.lastName}'s profile has been updated`);
-    setIsEditDialogOpen(false);
-    setSelectedStaff(null);
-    setFormData(emptyStaff);
-    setIsSubmitting(false);
+    try {
+      const userId = parseInt(selectedStaff.id);
+      await adminService.updateUser(userId, {
+        first_name: formData.firstName,
+        last_name: formData.lastName,
+        email: formData.email,
+        phone: formData.phone,
+        system_role: formData.role,
+        department: formData.department,
+        is_active: formData.status === 'Active',
+        specialty: formData.specialty,
+        license_number: formData.licenseNumber,
+        license_expiry: formData.licenseExpiry,
+        qualification: formData.qualification,
+      });
+      
+      toast.success(`${formData.firstName} ${formData.lastName}'s profile has been updated`);
+      setIsEditDialogOpen(false);
+      setSelectedStaff(null);
+      setFormData(emptyStaff);
+      await loadStaff(); // Reload staff list
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to update staff member');
+      console.error('Error updating staff:', err);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleDelete = async () => {
     if (!selectedStaff) return;
     setIsSubmitting(true);
-    await new Promise(r => setTimeout(r, 1000));
     
-    setStaff(prev => prev.filter(s => s.id !== selectedStaff.id));
-    toast.success(`${selectedStaff.firstName} ${selectedStaff.lastName} has been removed`);
-    setIsDeleteDialogOpen(false);
-    setSelectedStaff(null);
-    setIsSubmitting(false);
+    try {
+      const userId = parseInt(selectedStaff.id);
+      await adminService.deleteUser(userId);
+      toast.success(`${selectedStaff.firstName} ${selectedStaff.lastName} has been removed`);
+      setIsDeleteDialogOpen(false);
+      setSelectedStaff(null);
+      await loadStaff(); // Reload staff list
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to delete staff member');
+      console.error('Error deleting staff:', err);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleResetPassword = async () => {
     if (!selectedStaff) return;
     setIsSubmitting(true);
-    await new Promise(r => setTimeout(r, 1000));
     
-    toast.success(`Password reset link sent to ${selectedStaff.email}`);
-    setIsResetPasswordDialogOpen(false);
-    setSelectedStaff(null);
-    setIsSubmitting(false);
+    try {
+      // Password reset would require admin endpoint
+      // For now, show info message
+      toast.info(`Password reset functionality requires admin endpoint. User ${selectedStaff.email} can reset their password through the login page.`);
+      setIsResetPasswordDialogOpen(false);
+      setSelectedStaff(null);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to reset password');
+      console.error('Error resetting password:', err);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const toggleStatus = async (s: StaffMember) => {
-    const newStatus = s.status === 'Active' ? 'Inactive' : 'Active';
-    setStaff(prev => prev.map(staff => staff.id === s.id ? { ...staff, status: newStatus } : staff));
-    toast.success(`${s.firstName} ${s.lastName} is now ${newStatus}`);
+    try {
+      const userId = parseInt(s.id);
+      await adminService.toggleUserStatus(userId);
+      const newStatus = s.status === 'Active' ? 'Inactive' : 'Active';
+      toast.success(`${s.firstName} ${s.lastName} is now ${newStatus}`);
+      await loadStaff(); // Reload staff list
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to toggle status');
+      console.error('Error toggling status:', err);
+    }
   };
 
   const handleExport = () => {
@@ -383,22 +478,34 @@ export default function UserManagementPage() {
 
         {/* Staff Table */}
         <Card>
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b bg-muted/50">
-                  <th className="text-left p-4 text-sm font-medium text-muted-foreground">Staff</th>
-                  <th className="text-left p-4 text-sm font-medium text-muted-foreground">Role</th>
-                  <th className="text-left p-4 text-sm font-medium text-muted-foreground">Department</th>
-                  <th className="text-left p-4 text-sm font-medium text-muted-foreground">Status</th>
-                  <th className="text-left p-4 text-sm font-medium text-muted-foreground">Last Login</th>
-                  <th className="text-left p-4 text-sm font-medium text-muted-foreground">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {paginatedStaff.length === 0 ? (
-                  <tr><td colSpan={6} className="p-8 text-center text-muted-foreground">No staff members found</td></tr>
-                ) : (
+          {loading ? (
+            <CardContent className="p-8 text-center text-muted-foreground">
+              <Loader2 className="h-8 w-8 mx-auto mb-2 animate-spin" />
+              <p>Loading staff...</p>
+            </CardContent>
+          ) : error ? (
+            <CardContent className="p-8 text-center text-muted-foreground">
+              <AlertTriangle className="h-8 w-8 mx-auto mb-2 opacity-50" />
+              <p className="text-red-600 dark:text-red-400">{error}</p>
+              <Button variant="outline" className="mt-4" onClick={loadStaff}>Retry</Button>
+            </CardContent>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b bg-muted/50">
+                    <th className="text-left p-4 text-sm font-medium text-muted-foreground">Staff</th>
+                    <th className="text-left p-4 text-sm font-medium text-muted-foreground">Role</th>
+                    <th className="text-left p-4 text-sm font-medium text-muted-foreground">Department</th>
+                    <th className="text-left p-4 text-sm font-medium text-muted-foreground">Status</th>
+                    <th className="text-left p-4 text-sm font-medium text-muted-foreground">Last Login</th>
+                    <th className="text-left p-4 text-sm font-medium text-muted-foreground">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paginatedStaff.length === 0 ? (
+                    <tr><td colSpan={6} className="p-8 text-center text-muted-foreground">No staff members found</td></tr>
+                  ) : (
                   paginatedStaff.map((s) => {
                     const isLicenseExpiring = s.licenseExpiry && new Date(s.licenseExpiry) <= new Date(new Date().setMonth(new Date().getMonth() + 3));
                     return (
@@ -470,11 +577,13 @@ export default function UserManagementPage() {
                       </tr>
                     );
                   })
-                )}
-              </tbody>
-            </table>
-          </div>
-          <div className="p-4">
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {!loading && !error && (
+            <div className="p-4">
             <StandardPagination
               currentPage={currentPage}
               totalItems={filteredStaff.length}
@@ -483,7 +592,8 @@ export default function UserManagementPage() {
               onItemsPerPageChange={setItemsPerPage}
               itemName="staff"
             />
-          </div>
+            </div>
+          )}
         </Card>
 
         {/* Create/Edit Dialog */}

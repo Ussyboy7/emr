@@ -149,7 +149,12 @@ class PharmacyService {
     page?: number;
   }): Promise<{ results: MedicationInventory[]; count: number }> {
     const query = buildQueryString(params || {});
-    return apiFetch<{ results: MedicationInventory[]; count: number }>(`/pharmacy/inventory/${query}`);
+    // Try medication-inventory first, fallback to inventory
+    try {
+      return await apiFetch<{ results: MedicationInventory[]; count: number }>(`/pharmacy/medication-inventory/${query}`);
+    } catch {
+      return await apiFetch<{ results: MedicationInventory[]; count: number }>(`/pharmacy/inventory/${query}`);
+    }
   }
 
   /**
@@ -186,8 +191,134 @@ class PharmacyService {
     page?: number;
   }): Promise<{ results: Dispense[]; count: number }> {
     const query = buildQueryString(params || {});
-    return apiFetch<{ results: Dispense[]; count: number }>(`/pharmacy/history/${query}`);
+    // Try dispenses endpoint first, fallback to history
+    try {
+      return await apiFetch<{ results: Dispense[]; count: number }>(`/pharmacy/dispenses/${query}`);
+    } catch {
+      return await apiFetch<{ results: Dispense[]; count: number }>(`/pharmacy/history/${query}`);
+    }
   }
+
+  /**
+   * Get pharmacy statistics
+   */
+  async getStats(): Promise<{
+    pendingRx: number;
+    dispensedToday: number;
+    lowStock: number;
+    totalInventory: number;
+  }> {
+    // Get pending prescriptions
+    const pendingResponse = await this.getPrescriptions({ status: 'pending', page: 1 });
+    const pendingRx = pendingResponse.count || pendingResponse.results.length;
+    
+    // Get dispensed today
+    const today = new Date().toISOString().split('T')[0];
+    const dispensedResponse = await this.getPrescriptions({ status: 'dispensed', page: 1 });
+    const dispensedToday = dispensedResponse.results.filter((rx: Prescription) => {
+      if (rx.dispensed_at) {
+        return rx.dispensed_at.split('T')[0] === today;
+      }
+      return false;
+    }).length;
+    
+    // Get inventory alerts
+    const alertsResponse = await this.getInventoryAlertSummary();
+    const lowStock = alertsResponse.low_stock_count || 0;
+    
+    // Get total inventory items
+    const inventoryResponse = await this.getInventory({ page: 1 });
+    const totalInventory = inventoryResponse.count || inventoryResponse.results.length;
+    
+    return {
+      pendingRx,
+      dispensedToday,
+      lowStock,
+      totalInventory,
+    };
+  }
+
+  /**
+   * Get medication batches for a medication
+   */
+  async getMedicationBatches(medicationId: number): Promise<MedicationBatch[]> {
+    const inventory = await this.getInventory({ medication: medicationId.toString() });
+    return inventory.results.map((item: MedicationInventory) => ({
+      id: item.id.toString(),
+      batchNumber: item.batch_number,
+      quantity: Number(item.quantity),
+      expiryDate: item.expiry_date,
+      receivedDate: (item as any).created_at?.split('T')[0] || '',
+      supplier: item.supplier || '',
+      unitCost: Number((item as any).purchase_price) || 0,
+    }));
+  }
+
+  /**
+   * Get substitute medications for a medication
+   */
+  async getSubstitutes(medicationId: number): Promise<SubstituteOption[]> {
+    // Get the medication first
+    const medication = await apiFetch<Medication>(`/pharmacy/medications/${medicationId}/`);
+    
+    // Search for medications with same generic name or similar
+    const substitutes = await this.getMedications({ 
+      search: medication.generic_name || medication.name,
+      page: 1 
+    });
+    
+    // Filter out the same medication and transform
+    return substitutes.results
+      .filter(m => m.id !== medicationId)
+      .map(m => ({
+        id: m.id.toString(),
+        name: m.name,
+        type: m.generic_name ? 'generic' : 'brand',
+        stock: 0, // Would need to get from inventory
+        expiryDate: '',
+        unitPrice: 0,
+        isNearExpiry: false,
+        daysToExpiry: 0,
+      }));
+  }
+
+  /**
+   * Check drug interactions
+   */
+  async checkInteractions(medicationIds: number[]): Promise<DrugInteraction[]> {
+    // TODO: Implement API call for drug interaction checking
+    // For now, return empty array
+    return [];
+  }
+}
+
+interface MedicationBatch {
+  id: string;
+  batchNumber: string;
+  quantity: number;
+  expiryDate: string;
+  receivedDate: string;
+  supplier: string;
+  unitCost: number;
+}
+
+interface SubstituteOption {
+  id: string;
+  name: string;
+  type: 'generic' | 'brand' | 'alternative';
+  stock: number;
+  expiryDate: string;
+  unitPrice: number;
+  isNearExpiry: boolean;
+  daysToExpiry: number;
+}
+
+interface DrugInteraction {
+  drug1: string;
+  drug2: string;
+  severity: 'Major' | 'Moderate' | 'Minor';
+  description: string;
+  recommendation: string;
 }
 
 export const pharmacyService = new PharmacyService();

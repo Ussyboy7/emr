@@ -11,10 +11,11 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
+import { adminService, type AuditLog as ApiAuditLog } from "@/lib/services";
 import {
   ClipboardList, Search, Eye, Download, Filter, User, Calendar, Clock,
   Activity, FileText, Settings, Shield, Users, Database, LogIn, LogOut,
-  Edit, Trash2, Plus, CheckCircle, XCircle, AlertTriangle, RefreshCw
+  Edit, Trash2, Plus, CheckCircle, XCircle, AlertTriangle, RefreshCw, Loader2
 } from 'lucide-react';
 
 interface AuditLog {
@@ -34,8 +35,6 @@ interface AuditLog {
   changes?: { field: string; oldValue: string; newValue: string }[];
 }
 
-// Audit logs will be loaded from API
-
 const modules = ['All Modules', 'Authentication', 'Medical Records', 'Consultation', 'Nursing', 'Laboratory', 'Pharmacy', 'Radiology', 'Administration', 'Reports', 'System'];
 const actions = ['All Actions', 'CREATE', 'UPDATE', 'DELETE', 'VIEW', 'LOGIN', 'LOGOUT', 'EXPORT', 'IMPORT', 'APPROVE', 'REJECT'];
 
@@ -43,6 +42,49 @@ export default function AuditTrailPage() {
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Load audit logs from API
+  useEffect(() => {
+    loadLogs();
+  }, []);
+
+  const loadLogs = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const response = await adminService.getAuditLogs({ page_size: 1000 });
+      
+      // Transform API logs to frontend format
+      const transformedLogs: AuditLog[] = response.results.map((log: ApiAuditLog) => ({
+        id: log.id.toString(),
+        timestamp: log.created_at,
+        user: log.user_name || log.user_email || 'Unknown',
+        userId: log.user?.toString() || '',
+        role: '', // Would need to get from user
+        action: log.action.toUpperCase() as AuditLog['action'],
+        module: log.module || 'System',
+        resource: log.object_type || '',
+        resourceId: log.object_id?.toString() || log.object_repr || '',
+        details: log.description || '',
+        ipAddress: log.ip_address || '',
+        userAgent: log.user_agent || '',
+        status: log.result === 'success' ? 'Success' : log.result === 'failure' ? 'Failed' : 'Warning' as AuditLog['status'],
+        changes: log.old_values && log.new_values ? Object.keys(log.new_values).map(key => ({
+          field: key,
+          oldValue: String(log.old_values?.[key] || ''),
+          newValue: String(log.new_values?.[key] || ''),
+        })) : undefined,
+      }));
+      
+      setLogs(transformedLogs);
+    } catch (err: any) {
+      setError(err.message || 'Failed to load audit logs');
+      toast.error('Failed to load audit logs. Please try again.');
+      console.error('Error loading audit logs:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
   const [searchQuery, setSearchQuery] = useState('');
   const [moduleFilter, setModuleFilter] = useState('all');
   const [actionFilter, setActionFilter] = useState('all');
@@ -171,8 +213,9 @@ export default function AuditTrailPage() {
     toast.success('Audit log exported successfully');
   };
 
-  const handleRefresh = () => {
-    toast.info('Refreshing audit logs...');
+  const handleRefresh = async () => {
+    await loadLogs();
+    toast.success('Audit logs refreshed');
   };
 
   return (
@@ -272,23 +315,35 @@ export default function AuditTrailPage() {
 
         {/* Audit Log Table */}
         <Card className="overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b bg-muted/50">
-                  <th className="text-left p-4 text-sm font-medium text-muted-foreground">Timestamp</th>
-                  <th className="text-left p-4 text-sm font-medium text-muted-foreground">User</th>
-                  <th className="text-left p-4 text-sm font-medium text-muted-foreground">Action</th>
-                  <th className="text-left p-4 text-sm font-medium text-muted-foreground">Module</th>
-                  <th className="text-left p-4 text-sm font-medium text-muted-foreground">Details</th>
-                  <th className="text-left p-4 text-sm font-medium text-muted-foreground">Status</th>
-                  <th className="text-left p-4 text-sm font-medium text-muted-foreground">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredLogs.length === 0 ? (
-                  <tr><td colSpan={7} className="p-8 text-center text-muted-foreground">No audit logs found</td></tr>
-                ) : (
+          {loading ? (
+            <CardContent className="p-8 text-center text-muted-foreground">
+              <Loader2 className="h-8 w-8 mx-auto mb-2 animate-spin" />
+              <p>Loading audit logs...</p>
+            </CardContent>
+          ) : error ? (
+            <CardContent className="p-8 text-center text-muted-foreground">
+              <AlertTriangle className="h-8 w-8 mx-auto mb-2 opacity-50" />
+              <p className="text-red-600 dark:text-red-400">{error}</p>
+              <Button variant="outline" className="mt-4" onClick={loadLogs}>Retry</Button>
+            </CardContent>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b bg-muted/50">
+                    <th className="text-left p-4 text-sm font-medium text-muted-foreground">Timestamp</th>
+                    <th className="text-left p-4 text-sm font-medium text-muted-foreground">User</th>
+                    <th className="text-left p-4 text-sm font-medium text-muted-foreground">Action</th>
+                    <th className="text-left p-4 text-sm font-medium text-muted-foreground">Module</th>
+                    <th className="text-left p-4 text-sm font-medium text-muted-foreground">Details</th>
+                    <th className="text-left p-4 text-sm font-medium text-muted-foreground">Status</th>
+                    <th className="text-left p-4 text-sm font-medium text-muted-foreground">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredLogs.length === 0 ? (
+                    <tr><td colSpan={7} className="p-8 text-center text-muted-foreground">No audit logs found</td></tr>
+                  ) : (
                   paginatedLogs.map((log) => {
                     const ts = formatTimestamp(log.timestamp);
                     return (
@@ -339,11 +394,13 @@ export default function AuditTrailPage() {
                       </tr>
                     );
                   })
-                )}
-              </tbody>
-            </table>
-          </div>
-          <div className="p-4">
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {!loading && !error && (
+            <div className="p-4">
             <StandardPagination
               currentPage={currentPage}
               totalItems={filteredLogs.length}
@@ -352,7 +409,8 @@ export default function AuditTrailPage() {
               onItemsPerPageChange={setItemsPerPage}
               itemName="logs"
             />
-          </div>
+            </div>
+          )}
         </Card>
 
         {/* View Dialog */}

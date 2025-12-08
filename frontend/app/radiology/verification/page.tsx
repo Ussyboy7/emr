@@ -59,45 +59,62 @@ interface RadiologyReport {
 }
 
 // Transform backend radiology report to frontend format
-const transformReport = (apiReport: ApiRadiologyReport): RadiologyReport => {
+const transformReport = (apiReport: any): RadiologyReport => {
   const study = apiReport.study_details || apiReport.study;
+  const studyObj = typeof study === 'object' && study !== null ? study : {};
   
-  const studyObj = typeof study === 'object' && study !== null ? study : null;
+  // Extract patient details
+  const patientId = apiReport.patient?.toString() || '';
+  const patientName = apiReport.patient_name || 'Unknown';
+  const patientAge = (apiReport as any).patient_details?.age || (apiReport as any).patient_age || 0;
+  const patientGender = (apiReport as any).patient_details?.gender || (apiReport as any).patient_gender || 'Unknown';
+  
+  // Extract doctor details from order
+  const orderDetails = (apiReport as any).order_details || {};
+  const doctorId = orderDetails.doctor?.toString() || apiReport.doctor?.toString() || '';
+  const doctorName = orderDetails.doctor_name || apiReport.doctor_name || '';
+  const doctorSpecialty = orderDetails.doctor_specialty || (apiReport as any).doctor_specialty || '';
+  
+  // Extract clinic and clinical indication
+  const clinic = orderDetails.clinic || (apiReport as any).clinic || '';
+  const clinicalIndication = orderDetails.clinical_notes || apiReport.clinical_notes || '';
+  const specialInstructions = orderDetails.special_instructions || (apiReport as any).special_instructions || '';
+  
   return {
     id: apiReport.id.toString(),
     orderId: apiReport.order_id || '',
-    studyId: studyObj?.id?.toString() || '',
+    studyId: studyObj.id?.toString() || '',
     patient: {
-      id: apiReport.patient?.toString() || '',
-      name: apiReport.patient_name || 'Unknown',
-      age: 0, // Would need to get from patient API
-      gender: 'Unknown', // Would need to get from patient API
+      id: patientId,
+      name: patientName,
+      age: patientAge,
+      gender: patientGender,
     },
     doctor: {
-      id: '',
-      name: '',
-      specialty: '',
+      id: doctorId,
+      name: doctorName,
+      specialty: doctorSpecialty,
     },
     study: {
-      id: studyObj?.id?.toString() || '',
-      procedure: studyObj?.procedure || '',
-      category: studyObj?.modality || 'X-Ray',
-      bodyPart: studyObj?.body_part || '',
-      contrastRequired: false,
-      status: studyObj?.status ? (studyObj.status === 'reported' ? 'Reported' : 'Verified') : 'Reported',
-      processingMethod: studyObj?.processing_method ? (studyObj.processing_method === 'in_house' ? 'In-house' : 'Outsourced') : undefined,
-      outsourcedFacility: studyObj?.outsourced_facility,
-      imagesCount: studyObj?.images_count ? Number(studyObj.images_count) : undefined,
-      findings: studyObj?.findings,
-      impression: studyObj?.impression,
-      critical: apiReport.overall_status === 'critical',
-      reportedBy: studyObj?.reported_by ? String(studyObj.reported_by) : undefined,
-      reportedAt: studyObj?.reported_at ? String(studyObj.reported_at) : undefined,
+      id: studyObj.id?.toString() || '',
+      procedure: studyObj.procedure || '',
+      category: studyObj.modality || 'X-Ray',
+      bodyPart: studyObj.body_part || '',
+      contrastRequired: studyObj.procedure?.toLowerCase().includes('contrast') || false,
+      status: studyObj.status ? (studyObj.status === 'reported' ? 'Reported' : 'Verified') : 'Reported',
+      processingMethod: studyObj.processing_method ? (studyObj.processing_method === 'in_house' ? 'In-house' : 'Outsourced') : undefined,
+      outsourcedFacility: studyObj.outsourced_facility,
+      imagesCount: studyObj.images_count ? Number(studyObj.images_count) : undefined,
+      findings: studyObj.findings,
+      impression: studyObj.impression,
+      critical: apiReport.overall_status === 'critical' || studyObj.critical || false,
+      reportedBy: studyObj.reported_by_name || (studyObj.reported_by ? String(studyObj.reported_by) : undefined),
+      reportedAt: studyObj.reported_at ? String(studyObj.reported_at) : undefined,
     },
     priority: transformPriority(apiReport.priority || 'routine') as 'Routine' | 'Urgent' | 'STAT',
-    clinic: '',
-    clinicalIndication: '',
-    specialInstructions: '',
+    clinic,
+    clinicalIndication,
+    specialInstructions,
   };
 };
 
@@ -257,15 +274,39 @@ export default function RadiologyVerificationPage() {
       return;
     }
     setIsSubmitting(true);
-    await new Promise(r => setTimeout(r, 1000));
 
-    // In real app, this would send back to reporting radiologist
-    setReports(prev => prev.filter(r => r.id !== selectedReport.id));
-    toast.success(`Report rejected and sent back to ${selectedReport.study.reportedBy}`);
-    setIsSubmitting(false);
-    setIsRejectDialogOpen(false);
-    setRejectionReason('');
-    setSelectedReport(null);
+    try {
+      // Update study status to send back to reporting radiologist
+      // This would typically be done via an API endpoint
+      const { apiFetch } = await import('@/lib/api-client');
+      const studyId = parseInt(selectedReport.studyId);
+      if (!isNaN(studyId)) {
+        // Update study status back to 'acquired' or 'processing' to allow re-reporting
+        await apiFetch(`/radiology/studies/${studyId}/`, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            status: 'acquired',
+            verification_notes: `Rejected: ${rejectionReason}`,
+            verified_by: null,
+            verified_at: null,
+          }),
+        });
+      }
+      
+      toast.success(`Report rejected and sent back to ${selectedReport.study.reportedBy}`);
+      
+      // Reload reports
+      await loadReports();
+      
+      setIsRejectDialogOpen(false);
+      setRejectionReason('');
+      setSelectedReport(null);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to reject report');
+      console.error('Error rejecting report:', err);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleBatchVerify = async () => {

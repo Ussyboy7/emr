@@ -19,6 +19,10 @@ import {
   Users, TrendingUp, ArrowRight
 } from "lucide-react";
 import Link from "next/link";
+import { apiFetch } from '@/lib/api-client';
+import { patientService } from '@/lib/services';
+import { useAuthRedirect } from '@/hooks/use-auth-redirect';
+import { isAuthenticationError } from '@/lib/auth-errors';
 
 // Types
 interface ConsultationRecord {
@@ -119,12 +123,165 @@ export default function ConsultationHistoryPage() {
     status: "In Progress" 
   });
 
+  const [authError, setAuthError] = useState<unknown | null>(null);
+  useAuthRedirect(authError);
+
   useEffect(() => {
-    setLoading(true);
-    setTimeout(() => {
-      setConsultations(demoConsultations);
-      setLoading(false);
-    }, 500);
+    const loadConsultations = async () => {
+      try {
+        setLoading(true);
+        
+        // Fetch consultation sessions from API
+        const sessionsResult = await apiFetch<{ results: any[] }>('/consultation/sessions/?page_size=1000');
+        const sessions = sessionsResult.results || [];
+        
+        // Transform sessions to consultation records
+        const transformedConsultations = await Promise.all(sessions.map(async (session: any) => {
+          try {
+            // Get patient details
+            const patient = await patientService.getPatient(session.patient);
+            
+            // Get visit details if available
+            let visitDate = session.started_at ? new Date(session.started_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
+            let visitTime = session.started_at ? new Date(session.started_at).toTimeString().slice(0, 5) : '';
+            let chiefComplaint = '';
+            let diagnosis = '';
+            let assessment = '';
+            let plan = '';
+            
+            if (session.visit) {
+              try {
+                const visit = await apiFetch(`/visits/${session.visit}/`) as {
+                  date?: string;
+                  time?: string;
+                  chief_complaint?: string;
+                  clinical_notes?: string;
+                };
+                visitDate = visit.date || visitDate;
+                visitTime = visit.time || visitTime;
+                chiefComplaint = visit.chief_complaint || '';
+              } catch (visitErr) {
+                console.warn('Could not load visit details:', visitErr);
+              }
+            }
+            
+            // Get consultation notes if available
+            if (session.notes) {
+              try {
+                const notesResult = await apiFetch<{ results: any[] }>(`/consultation/notes/?session=${session.id}&page_size=1`);
+                const latestNote = notesResult.results?.[0];
+                if (latestNote) {
+                  diagnosis = latestNote.diagnosis || '';
+                  assessment = latestNote.assessment || '';
+                  plan = latestNote.plan || '';
+                }
+              } catch (notesErr) {
+                console.warn('Could not load consultation notes:', notesErr);
+              }
+            }
+            
+            // Calculate session duration
+            let sessionDuration = 0;
+            if (session.started_at && session.ended_at) {
+              sessionDuration = Math.floor((new Date(session.ended_at).getTime() - new Date(session.started_at).getTime()) / (1000 * 60));
+            }
+            
+            // Get prescriptions, lab orders, and nursing orders counts
+            let prescriptionsCount = 0;
+            let labOrdersCount = 0;
+            let nursingOrdersCount = 0;
+            
+            try {
+              const prescriptionsResult = await apiFetch<{ results: any[] }>(`/prescriptions/?visit=${session.visit || ''}&page_size=1`);
+              prescriptionsCount = prescriptionsResult.count || 0;
+            } catch (err) {
+              // Ignore
+            }
+            
+            try {
+              const labOrdersResult = await apiFetch<{ results: any[] }>(`/laboratory/orders/?visit=${session.visit || ''}&page_size=1`);
+              labOrdersCount = labOrdersResult.count || 0;
+            } catch (err) {
+              // Ignore
+            }
+            
+            try {
+              const nursingOrdersResult = await apiFetch<{ results: any[] }>(`/nursing/orders/?visit=${session.visit || ''}&page_size=1`);
+              nursingOrdersCount = nursingOrdersResult.count || 0;
+            } catch (err) {
+              // Ignore
+            }
+            
+            // Get vitals
+            let vitals: ConsultationRecord['vitals'] = [];
+            try {
+              const vitalsResult = await apiFetch<{ results: any[] }>(`/vitals/?visit=${session.visit || ''}&page_size=10`);
+              vitals = (vitalsResult.results || []).map((v: any) => ({
+                id: String(v.id),
+                systolic: v.blood_pressure_systolic || 0,
+                diastolic: v.blood_pressure_diastolic || 0,
+                heartRate: v.heart_rate || 0,
+                temperature: parseFloat(v.temperature) || 0,
+                respiratoryRate: v.respiratory_rate || 0,
+                weight: parseFloat(v.weight) || 0,
+                height: parseFloat(v.height) || 0,
+                oxygenSaturation: parseFloat(v.oxygen_saturation) || 0,
+                bloodSugar: 0, // Not in backend model
+                painScale: 0, // Not in backend model
+                comment: v.notes || '',
+                recordedBy: v.recorded_by_name || 'Unknown',
+                date: v.recorded_at || new Date().toISOString(),
+              }));
+            } catch (err) {
+              // Ignore
+            }
+            
+            return {
+              id: String(session.id),
+              patient: patient.full_name || `${patient.first_name} ${patient.surname}`,
+              patientId: patient.patient_id || String(patient.id),
+              doctor: session.doctor_name || 'Unknown',
+              doctorId: String(session.doctor || ''),
+              date: visitDate,
+              time: visitTime,
+              clinic: session.clinic || 'General',
+              room: session.room_name || 'Unknown',
+              diagnosis,
+              status: session.status === 'completed' ? 'Completed' as const : 'In Progress' as const,
+              priority: session.priority === 0 ? 'Emergency' : session.priority === 1 ? 'High' : session.priority === 2 ? 'Medium' : 'Low',
+              sessionDuration,
+              chiefComplaint,
+              historyOfPresentIllness: '',
+              physicalExamination: '',
+              assessment,
+              plan,
+              vitals,
+              prescriptions: [], // Will be loaded separately if needed
+              labOrders: [], // Will be loaded separately if needed
+              nursingOrders: [], // Will be loaded separately if needed
+              timeline: [],
+            } as ConsultationRecord;
+          } catch (err) {
+            console.error(`Error loading consultation ${session.id}:`, err);
+            return null;
+          }
+        }));
+        
+        const validConsultations = transformedConsultations.filter((c): c is ConsultationRecord => c !== null);
+        setConsultations(validConsultations);
+      } catch (err) {
+        console.error('Error loading consultations:', err);
+        if (isAuthenticationError(err)) {
+          setAuthError(err);
+        } else {
+          toast.error('Failed to load consultation history. Please try again.');
+        }
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    loadConsultations();
   }, []);
 
   const filteredConsultations = useMemo(() => {
@@ -175,15 +332,75 @@ export default function ConsultationHistoryPage() {
   const handleSaveEdit = async () => {
     if (!selectedConsultation) return;
     setIsSubmitting(true);
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    setConsultations(prev => prev.map(c => 
-      c.id === selectedConsultation.id 
-        ? { ...c, diagnosis: editForm.diagnosis, assessment: editForm.assessment, plan: editForm.plan, status: editForm.status } 
-        : c
-    ));
-    toast.success(`Consultation ${selectedConsultation.id} updated`);
-    setIsSubmitting(false);
-    setShowEditModal(false);
+    
+    try {
+      const sessionId = parseInt(selectedConsultation.id);
+      if (isNaN(sessionId)) {
+        toast.error('Invalid consultation ID');
+        setIsSubmitting(false);
+        return;
+      }
+      
+      // Update consultation notes if they exist
+      try {
+        const notesResult = await apiFetch<{ results: any[] }>(`/consultation/notes/?session=${sessionId}&page_size=1`);
+        const existingNote = notesResult.results?.[0];
+        
+        if (existingNote) {
+          // Update existing note
+          await apiFetch(`/consultation/notes/${existingNote.id}/`, {
+            method: 'PATCH',
+            body: JSON.stringify({
+              diagnosis: editForm.diagnosis,
+              assessment: editForm.assessment,
+              plan: editForm.plan,
+            }),
+          });
+        } else {
+          // Create new note
+          await apiFetch('/consultation/notes/', {
+            method: 'POST',
+            body: JSON.stringify({
+              session: sessionId,
+              diagnosis: editForm.diagnosis,
+              assessment: editForm.assessment,
+              plan: editForm.plan,
+            }),
+          });
+        }
+      } catch (notesErr) {
+        console.warn('Could not update consultation notes:', notesErr);
+      }
+      
+      // Update session status if changed
+      if (editForm.status !== selectedConsultation.status) {
+        try {
+          await apiFetch(`/consultation/sessions/${sessionId}/`, {
+            method: 'PATCH',
+            body: JSON.stringify({
+              status: editForm.status === 'Completed' ? 'completed' : 'in_progress',
+            }),
+          });
+        } catch (sessionErr) {
+          console.warn('Could not update session status:', sessionErr);
+        }
+      }
+      
+      // Update local state
+      setConsultations(prev => prev.map(c => 
+        c.id === selectedConsultation.id 
+          ? { ...c, diagnosis: editForm.diagnosis, assessment: editForm.assessment, plan: editForm.plan, status: editForm.status } 
+          : c
+      ));
+      
+      toast.success(`Consultation ${selectedConsultation.id} updated`);
+      setShowEditModal(false);
+    } catch (err: any) {
+      console.error('Error saving consultation:', err);
+      toast.error('Failed to update consultation. Please try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handlePrint = (consultation: ConsultationRecord) => {
@@ -192,11 +409,34 @@ export default function ConsultationHistoryPage() {
 
   const handleComplete = async (consultation: ConsultationRecord) => {
     setIsSubmitting(true);
-    await new Promise(resolve => setTimeout(resolve, 500));
-    setConsultations(prev => prev.map(c => c.id === consultation.id ? { ...c, status: "Completed" } : c));
-    toast.success("Consultation marked as complete");
-    setIsSubmitting(false);
-    setShowViewModal(false);
+    
+    try {
+      const sessionId = parseInt(consultation.id);
+      if (isNaN(sessionId)) {
+        toast.error('Invalid consultation ID');
+        setIsSubmitting(false);
+        return;
+      }
+      
+      // Update session status to completed
+      await apiFetch(`/consultation/sessions/${sessionId}/`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          status: 'completed',
+          ended_at: new Date().toISOString(),
+        }),
+      });
+      
+      // Update local state
+      setConsultations(prev => prev.map(c => c.id === consultation.id ? { ...c, status: "Completed" } : c));
+      toast.success("Consultation marked as complete");
+      setShowViewModal(false);
+    } catch (err: any) {
+      console.error('Error completing consultation:', err);
+      toast.error('Failed to complete consultation. Please try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   if (loading) {

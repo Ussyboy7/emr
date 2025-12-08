@@ -147,6 +147,37 @@ export default function ProceduresQueuePage() {
             
             const orderedAt = new Date(order.ordered_at);
             
+            // Parse order description to extract details
+            const details: Procedure['details'] = {};
+            const description = order.description || '';
+            const instructions = order.instructions || '';
+            
+            // Try to extract medication, dosage, route, frequency from description
+            if (procedureType === 'injection' || procedureType === 'medication') {
+              // Look for patterns like "Medication Name - Dosage" or "Medication (Route)"
+              const medMatch = description.match(/([^-•]+?)(?:\s*[-•]\s*([^•]+))?/);
+              if (medMatch) {
+                details.medication = medMatch[1].trim();
+                if (medMatch[2]) {
+                  const rest = medMatch[2].trim();
+                  // Try to extract dosage, route, frequency
+                  const parts = rest.split(/[•,]/).map(p => p.trim());
+                  details.dosage = parts[0] || '';
+                  details.route = parts.find(p => /oral|im|iv|sc|sublingual|topical/i.test(p)) || '';
+                  details.frequency = order.frequency || parts.find(p => /daily|bd|tds|qds|prn/i.test(p)) || '';
+                }
+              }
+              if (order.frequency) details.frequency = order.frequency;
+            } else if (procedureType === 'dressing') {
+              // Look for wound type and location in description
+              const woundMatch = description.match(/([^-•]+?)(?:\s*[-•]\s*([^•]+))?/);
+              if (woundMatch) {
+                details.woundType = woundMatch[1].trim();
+                details.woundLocation = woundMatch[2]?.trim() || '';
+              }
+              details.instructions = instructions || description;
+            }
+            
             return {
               id: String(order.id),
               type: procedureType,
@@ -160,9 +191,7 @@ export default function ProceduresQueuePage() {
               orderedBy: order.ordered_by_name || 'Unknown',
               priority: priorityMap[order.priority] || 'Medium',
               allergies: [],
-              details: {
-                // Extract details from description if needed
-              },
+              details,
             } as Procedure;
           } catch (err) {
             console.error(`Error loading order ${order.id}:`, err);
@@ -254,6 +283,37 @@ export default function ProceduresQueuePage() {
             'low': 'Low',
           };
           
+          // Parse order description to extract details
+          const details: Procedure['details'] = {};
+          const description = order.description || '';
+          const instructions = order.instructions || '';
+          
+          // Try to extract medication, dosage, route, frequency from description
+          if (procedureType === 'injection' || procedureType === 'medication') {
+            // Look for patterns like "Medication Name - Dosage" or "Medication (Route)"
+            const medMatch = description.match(/([^-•]+?)(?:\s*[-•]\s*([^•]+))?/);
+            if (medMatch) {
+              details.medication = medMatch[1].trim();
+              if (medMatch[2]) {
+                const rest = medMatch[2].trim();
+                // Try to extract dosage, route, frequency
+                const parts = rest.split(/[•,]/).map(p => p.trim());
+                details.dosage = parts[0] || '';
+                details.route = parts.find(p => /oral|im|iv|sc|sublingual|topical/i.test(p)) || '';
+                details.frequency = order.frequency || parts.find(p => /daily|bd|tds|qds|prn/i.test(p)) || '';
+              }
+            }
+            if (order.frequency) details.frequency = order.frequency;
+          } else if (procedureType === 'dressing') {
+            // Look for wound type and location in description
+            const woundMatch = description.match(/([^-•]+?)(?:\s*[-•]\s*([^•]+))?/);
+            if (woundMatch) {
+              details.woundType = woundMatch[1].trim();
+              details.woundLocation = woundMatch[2]?.trim() || '';
+            }
+            details.instructions = instructions || description;
+          }
+          
           return {
             id: String(order.id),
             type: procedureType,
@@ -267,7 +327,7 @@ export default function ProceduresQueuePage() {
             orderedBy: order.ordered_by_name || 'Unknown',
             priority: priorityMap[order.priority] || 'Medium',
             allergies: [],
-            details: {},
+            details,
           } as Procedure;
         } catch (err) {
           return null;
@@ -321,15 +381,77 @@ export default function ProceduresQueuePage() {
       // Get patient ID from procedure
       const patientId = parseInt(selectedProcedure.patientId) || parseInt(selectedProcedure.id);
       
-      // Create procedure record
+      // Create procedure record with all form data
+      let description = '';
+      let notes = '';
+      
+      if (selectedProcedure.type === 'injection') {
+        // Build comprehensive description for injection
+        const injectionDetails = [
+          selectedProcedure.details.medication || 'Injection',
+          selectedProcedure.details.dosage && `Dosage: ${selectedProcedure.details.dosage}`,
+          selectedProcedure.details.route && `Route: ${selectedProcedure.details.route}`,
+          selectedProcedure.details.frequency && `Frequency: ${selectedProcedure.details.frequency}`,
+        ].filter(Boolean).join(' • ');
+        
+        description = `Injection: ${injectionDetails}`;
+        
+        // Include all form fields in notes
+        const injectionNotes = [
+          injectionForm.site && `Site: ${injectionForm.site}`,
+          injectionForm.batchNumber && `Batch #: ${injectionForm.batchNumber}`,
+          injectionForm.expiryDate && `Expiry: ${injectionForm.expiryDate}`,
+          injectionForm.manufacturer && `Manufacturer: ${injectionForm.manufacturer}`,
+          injectionForm.notes && `Notes: ${injectionForm.notes}`,
+        ].filter(Boolean).join(' | ');
+        
+        notes = injectionNotes || injectionForm.notes || '';
+      } else if (selectedProcedure.type === 'dressing') {
+        // Build comprehensive description for dressing
+        const dressingDetails = [
+          selectedProcedure.details.woundType || 'Wound',
+          selectedProcedure.details.woundLocation && `Location: ${selectedProcedure.details.woundLocation}`,
+          selectedProcedure.details.instructions && `Instructions: ${selectedProcedure.details.instructions}`,
+        ].filter(Boolean).join(' • ');
+        
+        description = `Dressing: ${dressingDetails}`;
+        
+        // Include all form fields in notes
+        const dressingNotes = [
+          dressingForm.dressingType && `Type: ${dressingForm.dressingType}`,
+          dressingForm.woundCondition && `Condition: ${dressingForm.woundCondition}`,
+          dressingForm.woundSize && `Size: ${dressingForm.woundSize}`,
+          dressingForm.drainage && `Drainage: ${dressingForm.drainage}`,
+          dressingForm.painLevel && `Pain Level: ${dressingForm.painLevel}/10`,
+          dressingForm.skinCondition && `Skin: ${dressingForm.skinCondition}`,
+          dressingForm.observations && `Observations: ${dressingForm.observations}`,
+        ].filter(Boolean).join(' | ');
+        
+        notes = dressingNotes || dressingForm.observations || '';
+      } else {
+        // Medication
+        const medicationDetails = [
+          selectedProcedure.details.medication || 'Medication',
+          selectedProcedure.details.route && `Route: ${selectedProcedure.details.route}`,
+          selectedProcedure.details.scheduledTime && `Scheduled: ${selectedProcedure.details.scheduledTime}`,
+        ].filter(Boolean).join(' • ');
+        
+        description = `Medication: ${medicationDetails}`;
+        
+        const medicationNotes = [
+          medicationForm.site && `Site: ${medicationForm.site}`,
+          medicationForm.notes && `Notes: ${medicationForm.notes}`,
+        ].filter(Boolean).join(' | ');
+        
+        notes = medicationNotes || medicationForm.notes || '';
+      }
+      
       const procedureData: any = {
         patient: patientId,
         procedure_type: typeMap[selectedProcedure.type] || 'other',
-        description: selectedProcedure.type === 'injection' ? `Injection: ${injectionForm.notes}` :
-                     selectedProcedure.type === 'dressing' ? `Dressing: ${dressingForm.observations}` :
-                     `Medication: ${medicationForm.notes}`,
+        description,
         site: injectionForm.site || medicationForm.site || '',
-        notes: injectionForm.notes || dressingForm.observations || medicationForm.notes || '',
+        notes,
       };
       
       // Create procedure

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -12,11 +12,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { helpService } from '@/lib/services';
 import { toast } from 'sonner';
 import {
   HelpCircle, Search, Book, FileText, Video, MessageCircle, Phone, Mail,
   ExternalLink, ChevronRight, Stethoscope, TestTube, Pill, Users, Calendar,
-  Shield, Settings, Clock, CheckCircle2, AlertTriangle, Send, Headphones
+  Shield, Settings, Clock, CheckCircle2, AlertTriangle, Send, Headphones, Loader2
 } from 'lucide-react';
 
 // FAQ data
@@ -84,6 +85,44 @@ export default function HelpPage() {
   const [isTicketDialogOpen, setIsTicketDialogOpen] = useState(false);
   const [ticketForm, setTicketForm] = useState({ category: '', priority: 'medium', subject: '', description: '' });
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [systemStatus, setSystemStatus] = useState<{
+    status: string;
+    services: Record<string, string>;
+    lastUpdated: string;
+  }>({
+    status: 'healthy',
+    services: {},
+    lastUpdated: '',
+  });
+  const [loadingStatus, setLoadingStatus] = useState(true);
+
+  useEffect(() => {
+    loadSystemStatus();
+    // Refresh status every 5 minutes
+    const interval = setInterval(loadSystemStatus, 5 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const loadSystemStatus = async () => {
+    try {
+      setLoadingStatus(true);
+      const status = await helpService.getSystemStatus();
+      setSystemStatus({
+        status: status.status,
+        services: status.services,
+        lastUpdated: new Date().toLocaleTimeString(),
+      });
+    } catch (err) {
+      console.error('Error loading system status:', err);
+      setSystemStatus({
+        status: 'unhealthy',
+        services: { api: 'Connection failed' },
+        lastUpdated: new Date().toLocaleTimeString(),
+      });
+    } finally {
+      setLoadingStatus(false);
+    }
+  };
 
   const filteredFaqs = faqs.filter(cat => {
     if (selectedCategory !== 'all' && cat.category !== selectedCategory) return false;
@@ -105,12 +144,44 @@ export default function HelpPage() {
   }));
 
   const handleSubmitTicket = async () => {
+    if (!ticketForm.category || !ticketForm.subject || !ticketForm.description) {
+      toast.error('Please fill in all required fields');
+      return;
+    }
     setIsSubmitting(true);
-    await new Promise(r => setTimeout(r, 1500));
-    toast.success('Support ticket submitted successfully! Ticket #EMR-2024-' + Math.random().toString(36).substring(2, 8).toUpperCase());
-    setIsTicketDialogOpen(false);
-    setTicketForm({ category: '', priority: 'medium', subject: '', description: '' });
-    setIsSubmitting(false);
+    
+    try {
+      const ticket = await helpService.submitTicket({
+        category: ticketForm.category,
+        priority: ticketForm.priority as 'low' | 'medium' | 'high' | 'critical',
+        subject: ticketForm.subject,
+        description: ticketForm.description,
+      });
+      
+      const ticketId = ticket.id ? `#EMR-2024-${ticket.id}` : `#EMR-2024-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+      toast.success(`Support ticket submitted successfully! Ticket ${ticketId}`);
+      setIsTicketDialogOpen(false);
+      setTicketForm({ category: '', priority: 'medium', subject: '', description: '' });
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to submit ticket. Please try again.');
+      console.error('Error submitting ticket:', err);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const getServiceStatus = (serviceName: string): { status: string; badge: 'default' | 'secondary' | 'destructive' | 'outline' } => {
+    const service = systemStatus.services[serviceName.toLowerCase()];
+    if (!service) {
+      return { status: 'Unknown', badge: 'outline' };
+    }
+    if (service.includes('healthy')) {
+      return { status: 'Operational', badge: 'default' };
+    }
+    if (service.includes('unhealthy') || service.includes('failed')) {
+      return { status: 'Degraded', badge: 'destructive' };
+    }
+    return { status: 'Operational', badge: 'default' };
   };
 
   return (
@@ -230,26 +301,55 @@ export default function HelpPage() {
             {/* System Status */}
             <Card>
               <CardHeader>
-                <CardTitle className="flex items-center gap-2"><Settings className="h-5 w-5 text-blue-500" />System Status</CardTitle>
+                <div className="flex items-center justify-between">
+                  <CardTitle className="flex items-center gap-2"><Settings className="h-5 w-5 text-blue-500" />System Status</CardTitle>
+                  <Button variant="ghost" size="sm" onClick={loadSystemStatus} disabled={loadingStatus}>
+                    <Loader2 className={`h-4 w-4 ${loadingStatus ? 'animate-spin' : ''}`} />
+                  </Button>
+                </div>
               </CardHeader>
               <CardContent className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm">EMR Core Services</span>
-                  <Badge className="bg-emerald-500/10 text-emerald-600 border-emerald-500/30"><CheckCircle2 className="h-3 w-3 mr-1" />Operational</Badge>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm">Laboratory Module</span>
-                  <Badge className="bg-emerald-500/10 text-emerald-600 border-emerald-500/30"><CheckCircle2 className="h-3 w-3 mr-1" />Operational</Badge>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm">Pharmacy Module</span>
-                  <Badge className="bg-emerald-500/10 text-emerald-600 border-emerald-500/30"><CheckCircle2 className="h-3 w-3 mr-1" />Operational</Badge>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm">Backup Services</span>
-                  <Badge className="bg-amber-500/10 text-amber-600 border-amber-500/30"><AlertTriangle className="h-3 w-3 mr-1" />Degraded</Badge>
-                </div>
-                <div className="text-xs text-muted-foreground mt-2">Last updated: 5 minutes ago</div>
+                {loadingStatus ? (
+                  <div className="text-center py-4">
+                    <Loader2 className="h-6 w-6 mx-auto mb-2 animate-spin text-muted-foreground" />
+                    <p className="text-xs text-muted-foreground">Checking status...</p>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm">Database</span>
+                      {(() => {
+                        const dbStatus = getServiceStatus('database');
+                        return (
+                          <Badge className={dbStatus.status === 'Operational' ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/30' : 'bg-amber-500/10 text-amber-600 border-amber-500/30'}>
+                            {dbStatus.status === 'Operational' ? <CheckCircle2 className="h-3 w-3 mr-1" /> : <AlertTriangle className="h-3 w-3 mr-1" />}
+                            {dbStatus.status}
+                          </Badge>
+                        );
+                      })()}
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm">Cache</span>
+                      {(() => {
+                        const cacheStatus = getServiceStatus('cache');
+                        return (
+                          <Badge className={cacheStatus.status === 'Operational' ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/30' : 'bg-amber-500/10 text-amber-600 border-amber-500/30'}>
+                            {cacheStatus.status === 'Operational' ? <CheckCircle2 className="h-3 w-3 mr-1" /> : <AlertTriangle className="h-3 w-3 mr-1" />}
+                            {cacheStatus.status}
+                          </Badge>
+                        );
+                      })()}
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm">API Server</span>
+                      <Badge className={systemStatus.status === 'healthy' ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/30' : 'bg-rose-500/10 text-rose-600 border-rose-500/30'}>
+                        {systemStatus.status === 'healthy' ? <CheckCircle2 className="h-3 w-3 mr-1" /> : <AlertTriangle className="h-3 w-3 mr-1" />}
+                        {systemStatus.status === 'healthy' ? 'Operational' : 'Unhealthy'}
+                      </Badge>
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-2">Last updated: {systemStatus.lastUpdated || 'Never'}</div>
+                  </>
+                )}
               </CardContent>
             </Card>
 

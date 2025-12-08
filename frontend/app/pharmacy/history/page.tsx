@@ -58,18 +58,76 @@ export default function DispenseHistoryPage() {
         page: currentPage,
       });
       // Transform API data to frontend format
-      const transformed = response.results.map((dispense: ApiDispense) => ({
-        id: dispense.dispense_id || dispense.id.toString(),
-        prescriptionId: dispense.prescription?.toString() || '',
-        patient: { name: 'Patient', id: '', mrn: '', age: 0, gender: '' },
-        medications: [{ prescribed: dispense.medication_name || '', dispensed: dispense.medication_name || '', quantity: Number(dispense.quantity), isSubstituted: false }],
-        doctor: '',
-        pharmacist: dispense.dispensed_by_name || '',
-        date: dispense.dispensed_at.split('T')[0],
-        time: new Date(dispense.dispensed_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
-        status: 'Dispensed',
-        waitTime: '0 min',
-        substitutions: 0,
+      const transformed = await Promise.all(response.results.map(async (dispense: any) => {
+        // Extract patient details from prescription
+        const prescription = dispense.prescription_details || {};
+        const patientDetails = prescription.patient_details || {};
+        const patientName = dispense.patient_name || patientDetails.name || 'Unknown';
+        const patientId = patientDetails.id || '';
+        const patientMRN = patientDetails.mrn || patientDetails.patient_id || '';
+        const patientAge = patientDetails.age || 0;
+        const patientGender = patientDetails.gender || '';
+        
+        // Extract doctor details
+        const doctorName = prescription.prescribed_by_name || prescription.doctor_name || '';
+        
+        // Extract medications from prescription items
+        const prescriptionItems = prescription.items || [];
+        const medications = prescriptionItems.map((item: any) => {
+          const prescribed = item.medication_name || item.medication_details?.name || '';
+          const dispensed = item.substituted_with_details?.name || item.substituted_with_details?.medication_name || prescribed;
+          const isSubstituted = !!item.substituted_with || !!item.substituted_with_details;
+          
+          return {
+            prescribed,
+            dispensed,
+            quantity: Number(item.dispensed_quantity || item.quantity || dispense.quantity),
+            isSubstituted,
+          };
+        });
+        
+        // If no medications from prescription items, use dispense data
+        if (medications.length === 0) {
+          medications.push({
+            prescribed: dispense.medication_name || '',
+            dispensed: dispense.medication_name || '',
+            quantity: Number(dispense.quantity),
+            isSubstituted: false,
+          });
+        }
+        
+        // Count substitutions
+        const substitutions = medications.filter(m => m.isSubstituted).length;
+        
+        // Calculate wait time (if prescription has prescribed_at)
+        let waitTime = '0 min';
+        if (prescription.prescribed_at && dispense.dispensed_at) {
+          const prescribedAt = new Date(prescription.prescribed_at);
+          const dispensedAt = new Date(dispense.dispensed_at);
+          const waitTimeMs = dispensedAt.getTime() - prescribedAt.getTime();
+          const waitTimeMins = Math.floor(waitTimeMs / 60000);
+          waitTime = `${waitTimeMins} min`;
+        }
+        
+        return {
+          id: dispense.dispense_id || dispense.id.toString(),
+          prescriptionId: dispense.prescription?.toString() || prescription.prescription_id || '',
+          patient: { 
+            name: patientName, 
+            id: patientId, 
+            mrn: patientMRN, 
+            age: patientAge, 
+            gender: patientGender 
+          },
+          medications,
+          doctor: doctorName,
+          pharmacist: dispense.dispensed_by_name || '',
+          date: dispense.dispensed_at.split('T')[0],
+          time: new Date(dispense.dispensed_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+          status: 'Dispensed',
+          waitTime,
+          substitutions,
+        };
       }));
       setHistory(transformed);
     } catch (err: any) {

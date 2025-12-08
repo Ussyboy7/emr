@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
+import { labService, type LabTemplate as ApiLabTemplate } from '@/lib/services';
 import {
   FileText, Search, Eye, Plus, Edit, Trash2, Copy, CheckCircle2,
   Loader2, Settings, ListPlus, FlaskConical, Activity, Clock
@@ -46,8 +47,46 @@ interface TestTemplate {
   version: number;
 }
 
-// Test templates data will be loaded from API
-const demoTemplates: TestTemplate[] = [];
+// Transform API template to frontend format
+const transformTemplate = (apiTemplate: ApiLabTemplate): TestTemplate => {
+  // Parse fields from normal_range JSON or use fields array if available
+  let fields: TemplateField[] = [];
+  if (apiTemplate.fields && Array.isArray(apiTemplate.fields)) {
+    fields = apiTemplate.fields;
+  } else if (apiTemplate.normal_range && typeof apiTemplate.normal_range === 'object') {
+    // Convert normal_range JSON to fields array
+    fields = Object.entries(apiTemplate.normal_range).map(([name, value]: [string, any]) => {
+      const field: TemplateField = {
+        id: `f-${name}`,
+        name,
+        unit: value.unit || '',
+        normalRangeMin: value.min || value.normalRangeMin,
+        normalRangeMax: value.max || value.normalRangeMax,
+        normalRangeText: value.range || value.normalRangeText,
+        dataType: value.dataType || 'numeric',
+        options: value.options,
+        required: value.required !== false,
+      };
+      return field;
+    });
+  }
+  
+  return {
+    id: apiTemplate.id.toString(),
+    name: apiTemplate.name,
+    code: apiTemplate.code,
+    category: apiTemplate.category || 'Chemistry',
+    description: apiTemplate.description || '',
+    fields,
+    specimenType: apiTemplate.sample_type,
+    turnaroundTime: apiTemplate.turnaround_time || '',
+    price: apiTemplate.price || 0,
+    status: apiTemplate.is_active !== false ? 'Active' : 'Inactive',
+    createdAt: apiTemplate.created_at || new Date().toISOString().split('T')[0],
+    updatedAt: apiTemplate.updated_at || new Date().toISOString().split('T')[0],
+    version: apiTemplate.version || 1,
+  };
+};
 
 const categories = ['All', 'Hematology', 'Chemistry', 'Parasitology', 'Microbiology', 'Immunology'];
 
@@ -95,10 +134,31 @@ export default function TestTemplatesPage() {
     return filteredTemplates.slice(startIndex, startIndex + itemsPerPage);
   }, [filteredTemplates, currentPage, itemsPerPage]);
 
+  // Load templates from API
+  useEffect(() => {
+    loadTemplates();
+  }, []);
+
   // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
   }, [searchQuery, categoryFilter, statusFilter]);
+
+  const loadTemplates = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const apiTemplates = await labService.getTemplates();
+      const transformed = apiTemplates.map(transformTemplate);
+      setTemplates(transformed);
+    } catch (err: any) {
+      setError(err.message || 'Failed to load templates');
+      toast.error('Failed to load templates. Please try again.');
+      console.error('Error loading templates:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const stats = {
     total: templates.length,
@@ -146,69 +206,176 @@ export default function TestTemplatesPage() {
       return;
     }
     setIsSubmitting(true);
-    await new Promise(r => setTimeout(r, 1000));
 
-    const newTemplate: TestTemplate = {
-      id: `TPL-${Date.now()}`,
-      ...formData,
-      status: 'Active',
-      createdAt: new Date().toISOString().split('T')[0],
-      updatedAt: new Date().toISOString().split('T')[0],
-      version: 1
-    };
-    setTemplates(prev => [...prev, newTemplate]);
-    toast.success(`Template "${formData.name}" created`);
-    setIsSubmitting(false);
-    setIsCreateDialogOpen(false);
-    resetForm();
+    try {
+      // Convert fields array to normal_range JSON format
+      const normalRange: Record<string, any> = {};
+      formData.fields.forEach(field => {
+        normalRange[field.name] = {
+          unit: field.unit,
+          min: field.normalRangeMin,
+          max: field.normalRangeMax,
+          range: field.normalRangeText,
+          dataType: field.dataType,
+          options: field.options,
+          required: field.required,
+        };
+      });
+
+      const templateData = {
+        name: formData.name,
+        code: formData.code,
+        category: formData.category,
+        description: formData.description,
+        sample_type: formData.specimenType,
+        turnaround_time: formData.turnaroundTime,
+        price: formData.price,
+        normal_range: normalRange,
+        is_active: true,
+      };
+
+      const created = await labService.createTemplate(templateData);
+      const transformed = transformTemplate(created);
+      setTemplates(prev => [...prev, transformed]);
+      toast.success(`Template "${formData.name}" created`);
+      setIsCreateDialogOpen(false);
+      resetForm();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to create template');
+      console.error('Error creating template:', err);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleEdit = async () => {
     if (!selectedTemplate || !formData.name) return;
     setIsSubmitting(true);
-    await new Promise(r => setTimeout(r, 1000));
 
-    setTemplates(prev => prev.map(t => t.id === selectedTemplate.id ? {
-      ...t, ...formData,
-      updatedAt: new Date().toISOString().split('T')[0],
-      version: t.version + 1
-    } : t));
-    toast.success(`Template "${formData.name}" updated`);
-    setIsSubmitting(false);
-    setIsEditDialogOpen(false);
-    resetForm();
+    try {
+      const templateId = parseInt(selectedTemplate.id);
+      if (isNaN(templateId)) {
+        toast.error('Invalid template ID');
+        return;
+      }
+
+      // Convert fields array to normal_range JSON format
+      const normalRange: Record<string, any> = {};
+      formData.fields.forEach(field => {
+        normalRange[field.name] = {
+          unit: field.unit,
+          min: field.normalRangeMin,
+          max: field.normalRangeMax,
+          range: field.normalRangeText,
+          dataType: field.dataType,
+          options: field.options,
+          required: field.required,
+        };
+      });
+
+      const templateData = {
+        name: formData.name,
+        code: formData.code,
+        category: formData.category,
+        description: formData.description,
+        sample_type: formData.specimenType,
+        turnaround_time: formData.turnaroundTime,
+        price: formData.price,
+        normal_range: normalRange,
+        is_active: formData.status === 'Active',
+      };
+
+      const updated = await labService.updateTemplate(templateId, templateData);
+      const transformed = transformTemplate(updated);
+      setTemplates(prev => prev.map(t => t.id === selectedTemplate.id ? transformed : t));
+      toast.success(`Template "${formData.name}" updated`);
+      setIsEditDialogOpen(false);
+      resetForm();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to update template');
+      console.error('Error updating template:', err);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleDelete = async () => {
     if (!selectedTemplate) return;
     setIsSubmitting(true);
-    await new Promise(r => setTimeout(r, 1000));
 
-    setTemplates(prev => prev.filter(t => t.id !== selectedTemplate.id));
-    toast.success(`Template "${selectedTemplate.name}" deleted`);
-    setIsSubmitting(false);
-    setIsDeleteDialogOpen(false);
+    try {
+      const templateId = parseInt(selectedTemplate.id);
+      if (isNaN(templateId)) {
+        toast.error('Invalid template ID');
+        return;
+      }
+
+      await labService.deleteTemplate(templateId);
+      setTemplates(prev => prev.filter(t => t.id !== selectedTemplate.id));
+      toast.success(`Template "${selectedTemplate.name}" deleted`);
+      setIsDeleteDialogOpen(false);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to delete template');
+      console.error('Error deleting template:', err);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const handleDuplicate = (template: TestTemplate) => {
-    const duplicate: TestTemplate = {
-      ...template,
-      id: `TPL-${Date.now()}`,
-      name: `${template.name} (Copy)`,
-      code: `${template.code}_COPY`,
-      createdAt: new Date().toISOString().split('T')[0],
-      updatedAt: new Date().toISOString().split('T')[0],
-      version: 1
-    };
-    setTemplates(prev => [...prev, duplicate]);
-    toast.success(`Template duplicated`);
+  const handleDuplicate = async (template: TestTemplate) => {
+    try {
+      setIsSubmitting(true);
+      const templateId = parseInt(template.id);
+      if (isNaN(templateId)) {
+        toast.error('Invalid template ID');
+        return;
+      }
+
+      // Get the original template
+      const original = await labService.getTemplate(templateId);
+      
+      // Create a duplicate with modified name and code
+      const duplicateData = {
+        name: `${original.name} (Copy)`,
+        code: `${original.code}_COPY`,
+        category: original.category,
+        description: original.description,
+        sample_type: original.sample_type,
+        turnaround_time: original.turnaround_time,
+        price: original.price,
+        fields: original.fields,
+        is_active: false, // Start as inactive
+      };
+
+      const created = await labService.createTemplate(duplicateData);
+      const transformed = transformTemplate(created);
+      setTemplates(prev => [...prev, transformed]);
+      toast.success(`Template duplicated`);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to duplicate template');
+      console.error('Error duplicating template:', err);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const toggleStatus = (template: TestTemplate) => {
-    setTemplates(prev => prev.map(t => t.id === template.id ? {
-      ...t, status: t.status === 'Active' ? 'Inactive' : 'Active'
-    } : t));
-    toast.success(`Template ${template.status === 'Active' ? 'deactivated' : 'activated'}`);
+  const toggleStatus = async (template: TestTemplate) => {
+    try {
+      const templateId = parseInt(template.id);
+      if (isNaN(templateId)) {
+        toast.error('Invalid template ID');
+        return;
+      }
+
+      const newStatus = template.status === 'Active' ? false : true;
+      const updated = await labService.updateTemplate(templateId, { is_active: newStatus });
+      const transformed = transformTemplate(updated);
+      setTemplates(prev => prev.map(t => t.id === template.id ? transformed : t));
+      toast.success(`Template ${template.status === 'Active' ? 'deactivated' : 'activated'}`);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to update template status');
+      console.error('Error toggling template status:', err);
+    }
   };
 
   const resetForm = () => {
@@ -220,9 +387,14 @@ export default function TestTemplatesPage() {
   const openEditDialog = (template: TestTemplate) => {
     setSelectedTemplate(template);
     setFormData({
-      name: template.name, code: template.code, category: template.category,
-      description: template.description, specimenType: template.specimenType,
-      turnaroundTime: template.turnaroundTime, price: template.price, fields: template.fields
+      name: template.name, 
+      code: template.code, 
+      category: template.category,
+      description: template.description, 
+      specimenType: template.specimenType,
+      turnaroundTime: template.turnaroundTime, 
+      price: template.price, 
+      fields: template.fields.map(f => ({ ...f })) // Create a copy to avoid reference issues
     });
     setIsEditDialogOpen(true);
   };
@@ -320,7 +492,18 @@ export default function TestTemplatesPage() {
 
         {/* Templates List */}
         <div className="space-y-3">
-          {filteredTemplates.length === 0 ? (
+          {loading ? (
+            <Card><CardContent className="p-8 text-center text-muted-foreground">
+              <Loader2 className="h-12 w-12 mx-auto mb-4 animate-spin opacity-50" />
+              <p>Loading templates...</p>
+            </CardContent></Card>
+          ) : error ? (
+            <Card><CardContent className="p-8 text-center text-muted-foreground">
+              <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />
+              <p className="text-red-600 dark:text-red-400">{error}</p>
+              <Button variant="outline" className="mt-4" onClick={loadTemplates}>Retry</Button>
+            </CardContent></Card>
+          ) : filteredTemplates.length === 0 ? (
             <Card><CardContent className="p-8 text-center text-muted-foreground">
               <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />
               <p>No templates found</p>

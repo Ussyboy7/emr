@@ -59,7 +59,7 @@ export default function VisitsPage() {
   const [selectedVisit, setSelectedVisit] = useState<TransformedVisit | null>(null);
   
   // Edit form state
-  const [editForm, setEditForm] = useState({ type: '', clinic: '', location: '', notes: '' });
+  const [editForm, setEditForm] = useState({ type: '', clinic: '', location: '', notes: '', chiefComplaint: '' });
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -83,7 +83,7 @@ export default function VisitsPage() {
     department: visit.clinic || 'General',
     notes: visit.clinical_notes || '',
     chiefComplaint: visit.chief_complaint || '',
-    location: '', // Not in backend model currently
+    location: (visit as any).location || '', // Location may be available from backend
   });
 
   // Load visits from API
@@ -173,6 +173,7 @@ export default function VisitsPage() {
       clinic: visit.clinic,
       location: visit.location,
       notes: visit.notes,
+      chiefComplaint: visit.chiefComplaint || '',
     });
     setIsEditModalOpen(true);
   };
@@ -203,7 +204,9 @@ export default function VisitsPage() {
       const updateData: Partial<Visit> = {
         visit_type: editForm.type || undefined,
         clinic: editForm.clinic || undefined,
+        location: editForm.location || undefined,
         clinical_notes: editForm.notes || undefined,
+        chief_complaint: editForm.chiefComplaint || undefined,
       };
 
       await visitService.updateVisit(visitId, updateData);
@@ -552,10 +555,20 @@ export default function VisitsPage() {
                 </div>
               </div>
               <div className="space-y-2">
-                <Label>Notes / Reason for Visit</Label>
+                <Label>Chief Complaint</Label>
+                <Textarea 
+                  value={editForm.chiefComplaint} 
+                  onChange={(e) => setEditForm(prev => ({ ...prev, chiefComplaint: e.target.value }))}
+                  placeholder="Primary reason for visit"
+                  rows={2}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Clinical Notes</Label>
                 <Textarea 
                   value={editForm.notes} 
                   onChange={(e) => setEditForm(prev => ({ ...prev, notes: e.target.value }))}
+                  placeholder="Additional clinical notes or observations"
                   rows={3}
                 />
               </div>

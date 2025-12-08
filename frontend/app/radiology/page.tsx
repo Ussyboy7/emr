@@ -1,37 +1,120 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useRouter } from 'next/navigation';
+import { radiologyService } from '@/lib/services';
 import { 
   ScanLine, FileBarChart, Image as ImageIcon, Clock,
-  CheckCircle2, AlertTriangle, ArrowRight, Activity, ClipboardList
+  CheckCircle2, AlertTriangle, ArrowRight, Activity, ClipboardList, Loader2
 } from 'lucide-react';
-
-const stats = [
-  { label: 'Pending Orders', value: 3, icon: Clock, color: 'text-amber-500', bg: 'bg-amber-500/10' },
-  { label: 'In Progress', value: 2, icon: Activity, color: 'text-blue-500', bg: 'bg-blue-500/10' },
-  { label: 'Awaiting Report', value: 4, icon: FileBarChart, color: 'text-violet-500', bg: 'bg-violet-500/10' },
-  { label: 'Critical Findings', value: 1, icon: AlertTriangle, color: 'text-rose-500', bg: 'bg-rose-500/10' },
-];
-
-const pendingOrders = [
-  { id: 'RAD-2024-001', patient: 'Adebayo Johnson', procedure: 'Chest X-Ray PA/Lateral', priority: 'Urgent', time: '30m ago', orderedBy: 'Dr. Amaka Obi' },
-  { id: 'RAD-2024-002', patient: 'Fatima Mohammed', procedure: 'Abdominal Ultrasound', priority: 'Routine', time: '45m ago', orderedBy: 'Dr. Ngozi Eze' },
-  { id: 'RAD-2024-003', patient: 'Chukwu Emeka', procedure: 'CT Head without Contrast', priority: 'STAT', time: '5m ago', orderedBy: 'Dr. Chidi Okafor' },
-];
-
-const recentReports = [
-  { patient: 'Ngozi Eze', study: 'Mammography Bilateral', finding: 'BI-RADS 1: Negative', radiologist: 'Dr. Obi', time: '15m ago', status: 'Verified' },
-  { patient: 'Grace Okonkwo', study: 'Lumbar Spine X-Ray', finding: 'Degenerative disc disease L4-L5', radiologist: 'Dr. Obi', time: '30m ago', status: 'Verified' },
-  { patient: 'Ibrahim Suleiman', study: 'MRI Brain with Contrast', finding: 'Acute left MCA territory infarct', radiologist: 'Dr. Adeyemi', time: '1h ago', status: 'Critical', critical: true },
-];
 
 export default function RadiologyDashboardPage() {
   const router = useRouter();
+  const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState([
+    { label: 'Pending Orders', value: 0, icon: Clock, color: 'text-amber-500', bg: 'bg-amber-500/10' },
+    { label: 'In Progress', value: 0, icon: Activity, color: 'text-blue-500', bg: 'bg-blue-500/10' },
+    { label: 'Awaiting Report', value: 0, icon: FileBarChart, color: 'text-violet-500', bg: 'bg-violet-500/10' },
+    { label: 'Critical Findings', value: 0, icon: AlertTriangle, color: 'text-rose-500', bg: 'bg-rose-500/10' },
+  ]);
+  const [pendingOrders, setPendingOrders] = useState<Array<{
+    id: string;
+    patient: string;
+    procedure: string;
+    priority: string;
+    time: string;
+    orderedBy: string;
+  }>>([]);
+  const [recentReports, setRecentReports] = useState<Array<{
+    patient: string;
+    study: string;
+    finding: string;
+    radiologist: string;
+    time: string;
+    status: string;
+    critical?: boolean;
+  }>>([]);
+
+  useEffect(() => {
+    loadDashboardData();
+  }, []);
+
+  const loadDashboardData = async () => {
+    try {
+      setLoading(true);
+      
+      // Load stats from API
+      const statsData = await radiologyService.getStats();
+      setStats([
+        { label: 'Pending Orders', value: statsData.pendingOrders, icon: Clock, color: 'text-amber-500', bg: 'bg-amber-500/10' },
+        { label: 'In Progress', value: statsData.inProgress, icon: Activity, color: 'text-blue-500', bg: 'bg-blue-500/10' },
+        { label: 'Awaiting Report', value: statsData.awaitingReport, icon: FileBarChart, color: 'text-violet-500', bg: 'bg-violet-500/10' },
+        { label: 'Critical Findings', value: statsData.criticalFindings, icon: AlertTriangle, color: 'text-rose-500', bg: 'bg-rose-500/10' },
+      ]);
+      
+      // Load orders for pending list
+      const ordersResponse = await radiologyService.getOrders({ page: 1 });
+
+      // Load pending orders (first 3 with pending studies)
+      const pending = ordersResponse.results
+        .filter(order => order.studies.some(s => s.status === 'pending'))
+        .slice(0, 3)
+        .map(order => {
+          const pendingStudy = order.studies.find(s => s.status === 'pending');
+          const orderedAt = new Date(order.ordered_at);
+          const now = new Date();
+          const diffMs = now.getTime() - orderedAt.getTime();
+          const diffMins = Math.floor(diffMs / 60000);
+          const time = diffMins < 60 ? `${diffMins}m ago` : `${Math.floor(diffMins / 60)}h ago`;
+          
+          return {
+            id: order.order_id || `RAD-${order.id}`,
+            patient: order.patient_name || 'Unknown',
+            procedure: pendingStudy?.procedure || '',
+            priority: order.priority === 'stat' ? 'STAT' : order.priority === 'urgent' ? 'Urgent' : 'Routine',
+            time,
+            orderedBy: order.doctor_name || 'Unknown',
+          };
+        });
+      setPendingOrders(pending);
+
+      // Load recent reports (last 3 verified)
+      const reportsResponse = await radiologyService.getVerifiedReports({ page: 1 });
+      const recent = reportsResponse.results.slice(0, 3).map((report: any) => {
+        const study = report.study_details || report.study;
+        const studyObj = typeof study === 'object' && study !== null ? study : {};
+        const verifiedAt = studyObj.verified_at || studyObj.reported_at || report.created_at;
+        const verifiedDate = new Date(verifiedAt);
+        const now = new Date();
+        const diffMs = now.getTime() - verifiedDate.getTime();
+        const diffMins = Math.floor(diffMs / 60000);
+        const time = diffMins < 60 ? `${diffMins}m ago` : `${Math.floor(diffMins / 60)}h ago`;
+        
+        const impression = studyObj.impression || studyObj.findings || '';
+        const finding = impression.length > 50 ? impression.substring(0, 50) + '...' : impression;
+        const critical = report.overall_status === 'critical' || studyObj.critical;
+        
+        return {
+          patient: report.patient_name || 'Unknown',
+          study: studyObj.procedure || '',
+          finding,
+          radiologist: studyObj.verified_by_name || studyObj.reported_by_name || 'Unknown',
+          time,
+          status: critical ? 'Critical' : 'Verified',
+          critical,
+        };
+      });
+      setRecentReports(recent);
+    } catch (err) {
+      console.error('Error loading dashboard data:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <DashboardLayout>
@@ -47,19 +130,34 @@ export default function RadiologyDashboardPage() {
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {stats.map((stat, i) => (
-            <Card key={i}>
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-muted-foreground">{stat.label}</p>
-                    <p className={`text-3xl font-bold ${stat.color} mt-1`}>{stat.value}</p>
+          {loading ? (
+            Array.from({ length: 4 }).map((_, i) => (
+              <Card key={i}>
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-muted-foreground">Loading...</p>
+                      <p className="text-3xl font-bold mt-1"><Loader2 className="h-8 w-8 animate-spin" /></p>
+                    </div>
                   </div>
-                  <div className={`p-3 rounded-full ${stat.bg}`}><stat.icon className={`h-5 w-5 ${stat.color}`} /></div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+                </CardContent>
+              </Card>
+            ))
+          ) : (
+            stats.map((stat, i) => (
+              <Card key={i}>
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-muted-foreground">{stat.label}</p>
+                      <p className={`text-3xl font-bold ${stat.color} mt-1`}>{stat.value}</p>
+                    </div>
+                    <div className={`p-3 rounded-full ${stat.bg}`}><stat.icon className={`h-5 w-5 ${stat.color}`} /></div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))
+          )}
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -93,7 +191,18 @@ export default function RadiologyDashboardPage() {
                 </Button>
               </CardHeader>
               <CardContent className="space-y-3">
-                {pendingOrders.map((order) => (
+                {loading ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <Loader2 className="h-8 w-8 mx-auto mb-2 animate-spin" />
+                    <p>Loading orders...</p>
+                  </div>
+                ) : pendingOrders.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <CheckCircle2 className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                    <p>No pending orders</p>
+                  </div>
+                ) : (
+                  pendingOrders.map((order) => (
                   <div 
                     key={order.id} 
                     className={`flex items-center justify-between p-3 rounded-lg border hover:bg-muted/50 transition-colors ${
@@ -135,12 +244,7 @@ export default function RadiologyDashboardPage() {
                       <Button size="sm" className="bg-cyan-500 hover:bg-cyan-600 text-white">Process</Button>
                     </div>
                   </div>
-                ))}
-                {pendingOrders.length === 0 && (
-                  <div className="text-center py-8 text-muted-foreground">
-                    <CheckCircle2 className="h-12 w-12 mx-auto mb-2 opacity-50" />
-                    <p>No pending orders</p>
-                  </div>
+                  ))
                 )}
               </CardContent>
             </Card>
@@ -154,7 +258,18 @@ export default function RadiologyDashboardPage() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              {recentReports.map((report, i) => (
+              {loading ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <Loader2 className="h-8 w-8 mx-auto mb-2 animate-spin" />
+                  <p>Loading reports...</p>
+                </div>
+              ) : recentReports.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <FileBarChart className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                  <p>No recent reports</p>
+                </div>
+              ) : (
+                recentReports.map((report, i) => (
                 <div key={i} className={`flex items-start gap-3 ${report.critical ? 'p-2 rounded-lg bg-rose-50 dark:bg-rose-900/10 border border-rose-200 dark:border-rose-800' : ''}`}>
                   <div className={`p-2 rounded-full ${report.critical ? 'bg-rose-100 dark:bg-rose-900/30' : 'bg-emerald-100 dark:bg-emerald-900/30'}`}>
                     {report.critical ? (
@@ -176,7 +291,8 @@ export default function RadiologyDashboardPage() {
                     </div>
                   </div>
                 </div>
-              ))}
+                ))
+              )}
             </CardContent>
           </Card>
         </div>

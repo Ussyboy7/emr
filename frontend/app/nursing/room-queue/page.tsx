@@ -199,10 +199,10 @@ export default function RoomQueuePage() {
                   const latestVitals = vitalsResult.results?.[0];
                   if (latestVitals) {
                     vitals = {
-                      bp: latestVitals.blood_pressure || latestVitals.systolic_bp && latestVitals.diastolic_bp 
-                        ? `${latestVitals.systolic_bp}/${latestVitals.diastolic_bp}` 
+                      bp: latestVitals.blood_pressure_systolic && latestVitals.blood_pressure_diastolic
+                        ? `${latestVitals.blood_pressure_systolic}/${latestVitals.blood_pressure_diastolic}` 
                         : 'N/A',
-                      pulse: latestVitals.pulse_rate ? String(latestVitals.pulse_rate) : 'N/A',
+                      pulse: latestVitals.heart_rate ? String(latestVitals.heart_rate) : 'N/A',
                       temp: latestVitals.temperature ? `${latestVitals.temperature}°C` : 'N/A',
                     };
                   }
@@ -359,10 +359,10 @@ export default function RoomQueuePage() {
                 const latestVitals = vitalsResult.results?.[0];
                 if (latestVitals) {
                   vitals = {
-                    bp: latestVitals.blood_pressure || latestVitals.systolic_bp && latestVitals.diastolic_bp 
-                      ? `${latestVitals.systolic_bp}/${latestVitals.diastolic_bp}` 
+                    bp: latestVitals.blood_pressure_systolic && latestVitals.blood_pressure_diastolic
+                      ? `${latestVitals.blood_pressure_systolic}/${latestVitals.blood_pressure_diastolic}` 
                       : 'N/A',
-                    pulse: latestVitals.pulse_rate ? String(latestVitals.pulse_rate) : 'N/A',
+                    pulse: latestVitals.heart_rate ? String(latestVitals.heart_rate) : 'N/A',
                     temp: latestVitals.temperature ? `${latestVitals.temperature}°C` : 'N/A',
                   };
                 }

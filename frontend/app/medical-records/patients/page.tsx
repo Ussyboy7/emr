@@ -1307,6 +1307,34 @@ export default function PatientsListPage() {
                       </>
                     )}
 
+                    {/* Location field for non-Employee categories */}
+                    {(selectedPatient.category === 'Retiree' || selectedPatient.category === 'NonNPA' || selectedPatient.category === 'Dependent') && (
+                      <>
+                        <Separator />
+                        <div className="space-y-4">
+                          <h3 className="text-sm font-semibold text-foreground">
+                            {selectedPatient.category === 'Retiree' ? 'Retiree Details' :
+                             selectedPatient.category === 'Dependent' ? 'Dependent Details' :
+                             'Non-NPA Details'}
+                          </h3>
+                          <div className="grid grid-cols-1 gap-4">
+                            <div className="space-y-2">
+                              <Label>Location</Label>
+                              <Select value={editForm.location || undefined} onValueChange={(v) => setEditForm(prev => ({ ...prev, location: v === 'not-specified' ? '' : v }))}>
+                                <SelectTrigger><SelectValue placeholder="Select location" /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="not-specified">Not specified</SelectItem>
+                                  {locations.filter(l => l !== 'All Locations').map(l => (
+                                    <SelectItem key={l} value={l}>{l}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </div>
+                        </div>
+                      </>
+                    )}
+
                     <Separator />
 
                     {/* Next of Kin */}

@@ -204,6 +204,55 @@ class RadiologyService {
       }),
     });
   }
+
+  /**
+   * Get studies with images (for viewer)
+   */
+  async getStudiesWithImages(params?: {
+    patient?: string;
+    modality?: string;
+    page?: number;
+  }): Promise<{ results: RadiologyStudy[]; count: number }> {
+    const query = buildQueryString(params || {});
+    return apiFetch<{ results: RadiologyStudy[]; count: number }>(`/radiology/studies/${query}`);
+  }
+
+  /**
+   * Get radiology statistics
+   */
+  async getStats(): Promise<{
+    pendingOrders: number;
+    inProgress: number;
+    awaitingReport: number;
+    criticalFindings: number;
+  }> {
+    // Get all orders and calculate stats
+    const ordersResponse = await this.getOrders({ page: 1 });
+    const allStudies = ordersResponse.results.flatMap(order => order.studies || []);
+    
+    const pendingOrders = ordersResponse.results.filter(order => 
+      order.studies.some(s => s.status === 'pending')
+    ).length;
+    
+    const inProgress = ordersResponse.results.filter(order => 
+      order.studies.some(s => s.status === 'scheduled' || s.status === 'acquired' || s.status === 'processing')
+    ).length;
+    
+    const awaitingReport = ordersResponse.results.filter(order => 
+      order.studies.some(s => s.status === 'acquired' && !s.report)
+    ).length;
+    
+    const criticalFindings = ordersResponse.results.filter(order => 
+      order.studies.some(s => (s as any).critical || s.status === 'verified' && (s as any).overall_status === 'critical')
+    ).length;
+    
+    return {
+      pendingOrders,
+      inProgress,
+      awaitingReport,
+      criticalFindings,
+    };
+  }
 }
 
 export const radiologyService = new RadiologyService();

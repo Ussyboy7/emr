@@ -31,6 +31,7 @@ interface TestResult {
 
 interface LabResult {
   id: string;
+  testId: string; // Store test ID for API operations
   orderId: string;
   patient: { id: string; name: string; age: number; gender: string; };
   doctor: { id: string; name: string; specialty: string; };
@@ -91,6 +92,7 @@ const transformResult = (apiResult: ApiLabResult): LabResult => {
 
   return {
     id: apiResult.id.toString(),
+    testId: test.id?.toString() || apiResult.id.toString(), // Store test ID for API operations
     orderId: (apiResult as any).order_id || apiResult.order?.id?.toString() || '',
     patient: {
       id: apiResult.patient.id?.toString() || '',
@@ -275,14 +277,30 @@ export default function ResultsVerificationPage() {
       return;
     }
     setIsSubmitting(true);
-    await new Promise(r => setTimeout(r, 1000));
 
-    // In real app, this would send back to lab tech
-    setResults(prev => prev.filter(r => r.id !== selectedResult.id));
-    toast.success(`Result rejected and sent back to ${selectedResult.submittedBy}`);
-    setIsSubmitting(false);
-    setIsRejectDialogOpen(false);
-    setRejectionReason('');
+    try {
+      // Get the test ID from the result
+      const testId = parseInt(selectedResult.testId || selectedResult.id);
+      if (isNaN(testId)) {
+        toast.error('Invalid test ID');
+        return;
+      }
+
+      await labService.rejectResult(testId, rejectionReason);
+      
+      toast.success(`Result rejected and sent back to ${selectedResult.submittedBy}`);
+      
+      // Reload results to get updated data
+      await loadResults();
+      
+      setIsRejectDialogOpen(false);
+      setRejectionReason('');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to reject result');
+      console.error('Error rejecting result:', err);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleBatchVerify = async () => {

@@ -13,10 +13,11 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { StandardPagination } from "@/components/StandardPagination";
+import { adminService, type Role as ApiRole } from "@/lib/services";
 import {
   Shield, Search, Plus, Edit, Trash2, Eye, Users, Copy, Check,
   Stethoscope, Syringe, FlaskConical, Pill, ScanLine, ClipboardList, UserCog,
-  Building2, Settings, Lock, Key, AlertTriangle, CheckCircle2
+  Building2, Settings, Lock, Key, AlertTriangle, CheckCircle2, Loader2
 } from "lucide-react";
 
 interface Permission {
@@ -84,8 +85,6 @@ const allPermissions: Permission[] = [
   { id: 'admin_audit', name: 'View Audit Trail', description: 'View audit logs', module: 'Administration' },
 ];
 
-// Roles will be loaded from API
-
 const permissionModules = [...new Set(allPermissions.map(p => p.module))];
 const roleTypes = ['All Types', 'System', 'Clinical', 'Administrative', 'Custom'];
 
@@ -93,6 +92,40 @@ export default function RolesPermissionsPage() {
   const [roles, setRoles] = useState<Role[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Load roles from API
+  useEffect(() => {
+    loadRoles();
+  }, []);
+
+  const loadRoles = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const response = await adminService.getRoles({ page_size: 1000 });
+      
+      // Transform API roles to frontend format
+      const transformedRoles: Role[] = response.results.map((role: ApiRole) => ({
+        id: role.id.toString(),
+        name: role.name,
+        description: role.description || '',
+        type: role.type as Role['type'],
+        permissions: role.permissions || [],
+        userCount: role.user_count || 0,
+        isActive: role.is_active,
+        createdAt: role.created_at?.split('T')[0] || '',
+        updatedAt: role.updated_at?.split('T')[0] || '',
+      }));
+      
+      setRoles(transformedRoles);
+    } catch (err: any) {
+      setError(err.message || 'Failed to load roles');
+      toast.error('Failed to load roles. Please try again.');
+      console.error('Error loading roles:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
   const [searchQuery, setSearchQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -172,20 +205,77 @@ export default function RolesPermissionsPage() {
   const openDelete = (role: Role) => { setSelectedRole(role); setIsDeleteDialogOpen(true); };
 
   const handleCreate = async () => {
-    setIsSubmitting(true); await new Promise(r => setTimeout(r, 1000));
-    const newRole: Role = { id: String(roles.length + 1), name: formData.name, description: formData.description, type: formData.type, permissions: formData.permissions, userCount: 0, isActive: formData.isActive, createdAt: new Date().toISOString().split('T')[0], updatedAt: new Date().toISOString().split('T')[0] };
-    setRoles(prev => [...prev, newRole]); toast.success(`Role "${newRole.name}" created`); setIsCreateDialogOpen(false); resetForm(); setIsSubmitting(false);
+    if (!formData.name) {
+      toast.error('Please enter a role name');
+      return;
+    }
+    setIsSubmitting(true);
+    
+    try {
+      await adminService.createRole({
+        name: formData.name,
+        description: formData.description,
+        type: formData.type,
+        permissions: formData.permissions,
+        is_active: formData.isActive,
+      });
+      
+      toast.success(`Role "${formData.name}" created`);
+      setIsCreateDialogOpen(false);
+      resetForm();
+      await loadRoles(); // Reload roles
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to create role');
+      console.error('Error creating role:', err);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleUpdate = async () => {
-    if (!selectedRole) return; setIsSubmitting(true); await new Promise(r => setTimeout(r, 1000));
-    setRoles(prev => prev.map(r => r.id === selectedRole.id ? { ...r, name: formData.name, description: formData.description, type: formData.type, permissions: formData.permissions, isActive: formData.isActive, updatedAt: new Date().toISOString().split('T')[0] } : r));
-    toast.success(`Role "${formData.name}" updated`); setIsEditDialogOpen(false); setSelectedRole(null); resetForm(); setIsSubmitting(false);
+    if (!selectedRole) return;
+    setIsSubmitting(true);
+    
+    try {
+      const roleId = parseInt(selectedRole.id);
+      await adminService.updateRole(roleId, {
+        name: formData.name,
+        description: formData.description,
+        type: formData.type,
+        permissions: formData.permissions,
+        is_active: formData.isActive,
+      });
+      
+      toast.success(`Role "${formData.name}" updated`);
+      setIsEditDialogOpen(false);
+      setSelectedRole(null);
+      resetForm();
+      await loadRoles(); // Reload roles
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to update role');
+      console.error('Error updating role:', err);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleDelete = async () => {
-    if (!selectedRole) return; setIsSubmitting(true); await new Promise(r => setTimeout(r, 1000));
-    setRoles(prev => prev.filter(r => r.id !== selectedRole.id)); toast.success(`Role "${selectedRole.name}" deleted`); setIsDeleteDialogOpen(false); setSelectedRole(null); setIsSubmitting(false);
+    if (!selectedRole) return;
+    setIsSubmitting(true);
+    
+    try {
+      const roleId = parseInt(selectedRole.id);
+      await adminService.deleteRole(roleId);
+      toast.success(`Role "${selectedRole.name}" deleted`);
+      setIsDeleteDialogOpen(false);
+      setSelectedRole(null);
+      await loadRoles(); // Reload roles
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to delete role');
+      console.error('Error deleting role:', err);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -212,7 +302,23 @@ export default function RolesPermissionsPage() {
         </div></CardContent></Card>
 
         <div className="space-y-3">
-          {paginatedRoles.map(role => {
+          {loading ? (
+            <Card>
+              <CardContent className="p-8 text-center text-muted-foreground">
+                <Loader2 className="h-8 w-8 mx-auto mb-2 animate-spin" />
+                <p>Loading roles...</p>
+              </CardContent>
+            </Card>
+          ) : error ? (
+            <Card>
+              <CardContent className="p-8 text-center text-muted-foreground">
+                <AlertTriangle className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                <p className="text-red-600 dark:text-red-400">{error}</p>
+                <Button variant="outline" className="mt-4" onClick={loadRoles}>Retry</Button>
+              </CardContent>
+            </Card>
+          ) : (
+            paginatedRoles.map(role => {
             const permsByModule = getPermissionsByModule(role.permissions);
             const borderColor = role.type === 'Clinical' ? 'border-l-emerald-500' : role.type === 'Administrative' ? 'border-l-blue-500' : role.type === 'System' ? 'border-l-purple-500' : 'border-l-amber-500';
             return (
@@ -263,7 +369,8 @@ export default function RolesPermissionsPage() {
                 </CardContent>
               </Card>
             );
-          })}
+            })
+          )}
         </div>
 
         {filteredRoles.length === 0 && (

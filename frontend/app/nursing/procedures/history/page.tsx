@@ -12,8 +12,12 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import Link from 'next/link';
 import { 
   Syringe, Bandage, Pill, Search, ArrowLeft, CheckCircle2, Eye, Calendar,
-  Activity, User, Clock, Stethoscope, FileText
+  Activity, User, Clock, Stethoscope, FileText, Loader2, AlertTriangle
 } from 'lucide-react';
+import { apiFetch } from '@/lib/api-client';
+import { patientService } from '@/lib/services';
+import { useAuthRedirect } from '@/hooks/use-auth-redirect';
+import { isAuthenticationError } from '@/lib/auth-errors';
 
 // ==================== TYPES ====================
 interface CompletedProcedure {
@@ -67,6 +71,7 @@ export default function ProceduresHistoryPage() {
   const [history, setHistory] = useState<CompletedProcedure[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [authError, setAuthError] = useState<unknown | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('');
@@ -78,6 +83,105 @@ export default function ProceduresHistoryPage() {
   // Dialog states
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
   const [selectedProcedure, setSelectedProcedure] = useState<CompletedProcedure | null>(null);
+
+  useAuthRedirect(authError);
+
+  // Load procedures history from API
+  useEffect(() => {
+    const loadHistory = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        
+        // Fetch completed nursing procedures
+        const proceduresResult = await apiFetch<{ results: any[] }>('/nursing/procedures/?page_size=1000');
+        const procedures = proceduresResult.results || [];
+        
+        // Transform procedures to history format
+        const transformedHistory = await Promise.all(procedures.map(async (proc: any) => {
+          try {
+            // Get patient details
+            const patient = await patientService.getPatient(proc.patient);
+            
+            // Map backend procedure_type to frontend type
+            const typeMap: Record<string, CompletedProcedure['type']> = {
+              'injection': 'injection',
+              'dressing': 'dressing',
+              'wound_care': 'dressing',
+              'medication': 'medication',
+              'other': 'medication',
+            };
+            
+            const procedureType = typeMap[proc.procedure_type?.toLowerCase()] || 'medication';
+            
+            // Parse description for details
+            const details: CompletedProcedure['details'] = {};
+            const record: CompletedProcedure['record'] = {
+              site: proc.site || '',
+              notes: proc.notes || '',
+            };
+            
+            // Try to extract details from description
+            if (proc.description) {
+              if (procedureType === 'injection') {
+                const match = proc.description.match(/([^:]+):\s*(.+)/);
+                if (match) {
+                  details.medication = match[1].trim();
+                  const rest = match[2].trim();
+                  const parts = rest.split(' • ');
+                  details.dosage = parts[0] || '';
+                  details.route = parts[1] || '';
+                }
+              } else if (procedureType === 'dressing') {
+                const match = proc.description.match(/([^:]+):\s*(.+)/);
+                if (match) {
+                  details.woundType = match[1].trim();
+                  details.woundLocation = match[2].trim();
+                }
+              } else {
+                const match = proc.description.match(/([^:]+):\s*(.+)/);
+                if (match) {
+                  details.medication = match[1].trim();
+                }
+              }
+            }
+            
+            return {
+              id: String(proc.id),
+              type: procedureType,
+              patientName: patient.full_name || `${patient.surname} ${patient.first_name}`,
+              patientId: patient.patient_id || String(patient.id),
+              age: patient.age || 0,
+              gender: patient.gender || '',
+              ward: '',
+              orderedBy: proc.ordered_by_name || 'Unknown',
+              completedAt: proc.created_at || proc.recorded_at || new Date().toISOString(),
+              completedBy: proc.recorded_by_name || proc.performed_by_name || 'Unknown',
+              details,
+              record,
+            } as CompletedProcedure;
+          } catch (err) {
+            console.error(`Error loading procedure ${proc.id}:`, err);
+            return null;
+          }
+        }));
+        
+        const validHistory = transformedHistory.filter((p): p is CompletedProcedure => p !== null);
+        setHistory(validHistory);
+      } catch (err) {
+        console.error('Error loading procedures history:', err);
+        if (isAuthenticationError(err)) {
+          setAuthError(err);
+        } else {
+          setError('Failed to load procedures history. Please try again.');
+        }
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    loadHistory();
+  }, []);
 
   // Stats
   const stats = useMemo(() => ({
@@ -117,6 +221,38 @@ export default function ProceduresHistoryPage() {
     setSelectedProcedure(procedure);
     setIsViewDialogOpen(true);
   };
+
+  if (loading) {
+    return (
+      <DashboardLayout>
+        <div className="container mx-auto p-6">
+          <div className="flex items-center justify-center h-[60vh]">
+            <div className="text-center">
+              <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto mb-4" />
+              <p className="text-muted-foreground">Loading procedures history...</p>
+            </div>
+          </div>
+        </div>
+      </DashboardLayout>
+    );
+  }
+
+  if (error) {
+    return (
+      <DashboardLayout>
+        <div className="container mx-auto p-6">
+          <div className="flex items-center justify-center h-[60vh]">
+            <div className="text-center">
+              <AlertTriangle className="h-12 w-12 text-destructive mx-auto mb-4" />
+              <h3 className="text-lg font-semibold mb-2">Error loading history</h3>
+              <p className="text-muted-foreground mb-4">{error}</p>
+              <Button onClick={() => window.location.reload()}>Retry</Button>
+            </div>
+          </div>
+        </div>
+      </DashboardLayout>
+    );
+  }
 
   return (
     <DashboardLayout>

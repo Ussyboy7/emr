@@ -153,6 +153,7 @@ function NewVisitPageContent() {
         patient: selectedPatient.numericId || selectedPatient.id,
         visit_type: formData.visitType,
         clinic: formData.clinic,
+        location: formData.location || '',
         date: formData.visitDate,
         time: formData.visitTime,
         clinical_notes: formData.notes || '',

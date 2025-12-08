@@ -95,33 +95,61 @@ export default function InventoryPage() {
         page: currentPage,
       });
       // Transform API data to frontend format
-      const transformed = response.results.map((item: ApiMedicationInventory) => ({
-        id: item.id.toString(),
-        name: item.medication_name || 'Unknown',
-        genericName: '',
-        category: 'All Categories',
-        strength: '',
-        dosageForm: '',
-        packSize: 10,
-        manufacturer: '',
-        currentStock: Number(item.quantity),
-        minimumStock: Number(item.min_stock_level),
-        maximumStock: Number(item.min_stock_level) * 10,
-        location: item.location || '',
-        prescriptionRequired: false,
-        isGeneric: false,
-        lastRestocked: (item as any).created_at?.split('T')[0] || '',
-        expiryDate: item.expiry_date,
-        batches: [{
+      const transformed = response.results.map((item: any) => {
+        // Extract medication details from nested medication object
+        const medication = item.medication || {};
+        const medicationName = item.medication_name || medication.name || 'Unknown';
+        const genericName = medication.generic_name || '';
+        const strength = medication.strength || '';
+        const dosageForm = medication.form || medication.dosage_form || '';
+        const manufacturer = medication.manufacturer || '';
+        
+        // Determine category (could be enhanced with API field)
+        let category = 'All Categories';
+        if (medication.category) {
+          category = medication.category;
+        } else if (genericName) {
+          // Try to infer category from generic name (simplified)
+          const lowerGeneric = genericName.toLowerCase();
+          if (lowerGeneric.includes('antibiotic') || lowerGeneric.includes('penicillin') || lowerGeneric.includes('cephalosporin')) {
+            category = 'Antibiotics';
+          } else if (lowerGeneric.includes('analgesic') || lowerGeneric.includes('paracetamol') || lowerGeneric.includes('ibuprofen')) {
+            category = 'Analgesics';
+          } else if (lowerGeneric.includes('antihypertensive') || lowerGeneric.includes('lisinopril') || lowerGeneric.includes('amlodipine')) {
+            category = 'Cardiovascular';
+          } else if (lowerGeneric.includes('metformin') || lowerGeneric.includes('glibenclamide')) {
+            category = 'Diabetes';
+          }
+        }
+        
+        return {
           id: item.id.toString(),
-          batchNumber: item.batch_number,
-          quantity: Number(item.quantity),
+          name: medicationName,
+          genericName,
+          category,
+          strength,
+          dosageForm,
+          packSize: 10, // Could be enhanced with API field
+          manufacturer,
+          currentStock: Number(item.quantity),
+          minimumStock: Number(item.min_stock_level),
+          maximumStock: Number(item.min_stock_level) * 10, // Could be enhanced with API field
+          location: item.location || '',
+          prescriptionRequired: false, // Could be enhanced with API field
+          isGeneric: !!genericName && genericName.toLowerCase() === medicationName.toLowerCase(),
+          lastRestocked: (item as any).created_at?.split('T')[0] || (item as any).updated_at?.split('T')[0] || '',
           expiryDate: item.expiry_date,
-          receivedDate: (item as any).created_at?.split('T')[0] || '',
-          supplier: item.supplier || '',
-          unitCost: 0,
-        }] as MedicationBatch[],
-      }));
+          batches: [{
+            id: item.id.toString(),
+            batchNumber: item.batch_number,
+            quantity: Number(item.quantity),
+            expiryDate: item.expiry_date,
+            receivedDate: (item as any).created_at?.split('T')[0] || '',
+            supplier: item.supplier || '',
+            unitCost: Number(item.purchase_price) || 0,
+          }] as MedicationBatch[],
+        };
+      });
       setInventory(transformed);
     } catch (err: any) {
       setError(err.message || 'Failed to load inventory');

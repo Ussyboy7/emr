@@ -74,45 +74,62 @@ const transformStudyStatus = (status: string): string => {
 };
 
 // Transform backend order to frontend format
-const transformOrder = (apiOrder: ApiRadiologyOrder): RadiologyOrder => {
+const transformOrder = (apiOrder: any): RadiologyOrder => {
+  // Extract patient details from order or visit
+  const patientId = apiOrder.patient?.toString() || '';
+  const patientName = apiOrder.patient_name || 'Unknown';
+  const patientAge = (apiOrder as any).patient_details?.age || (apiOrder as any).patient_age || 0;
+  const patientGender = (apiOrder as any).patient_details?.gender || (apiOrder as any).patient_gender || 'Unknown';
+  
+  // Extract doctor details
+  const doctorId = apiOrder.doctor?.toString() || '';
+  const doctorName = apiOrder.doctor_name || 'Unknown';
+  const doctorSpecialty = (apiOrder as any).doctor_details?.specialty || (apiOrder as any).doctor_specialty || '';
+  
+  // Extract visit/clinic details
+  const clinic = (apiOrder as any).visit_details?.clinic || (apiOrder as any).clinic || '';
+  const clinicalIndication = apiOrder.clinical_notes || (apiOrder as any).clinical_indication || '';
+  const specialInstructions = (apiOrder as any).special_instructions || '';
+  
   return {
     id: apiOrder.id.toString(),
     orderId: apiOrder.order_id || `RAD-${apiOrder.id}`,
     patient: {
-      id: apiOrder.patient?.toString() || '',
-      name: apiOrder.patient_name || 'Unknown',
-      age: 0, // Would need to get from patient API
-      gender: 'Unknown', // Would need to get from patient API
+      id: patientId,
+      name: patientName,
+      age: patientAge,
+      gender: patientGender,
     },
     doctor: {
-      id: apiOrder.doctor?.toString() || '',
-      name: apiOrder.doctor_name || 'Unknown',
-      specialty: '',
+      id: doctorId,
+      name: doctorName,
+      specialty: doctorSpecialty,
     },
     studies: (apiOrder.studies || []).map((study: ApiRadiologyStudy) => ({
       id: study.id.toString(),
       procedure: study.procedure,
       category: study.modality || 'X-Ray',
       bodyPart: study.body_part || '',
-      contrastRequired: false, // Would need to determine from procedure
+      contrastRequired: study.procedure?.toLowerCase().includes('contrast') || false,
       status: transformStudyStatus(study.status) as ImagingStudy['status'],
       processingMethod: study.processing_method ? transformProcessingMethod(study.processing_method) as 'In-house' | 'Outsourced' : undefined,
       outsourcedFacility: study.outsourced_facility,
       scheduledDate: study.scheduled_date,
       scheduledTime: study.scheduled_time,
+      technologist: (study as any).acquired_by_name || (study as any).scheduled_by_name,
       acquiredAt: study.acquired_at,
       imagesCount: study.images_count,
       findings: study.findings,
       impression: study.impression,
-      critical: false, // Would need to determine from report
-      reportedBy: study.reported_by ? String(study.reported_by) : undefined,
+      critical: (study as any).critical || (study as any).overall_status === 'critical' || false,
+      reportedBy: (study as any).reported_by_name || (study.reported_by ? String(study.reported_by) : undefined),
       reportedAt: study.reported_at,
     })),
     priority: transformPriority(apiOrder.priority) as 'Routine' | 'Urgent' | 'STAT',
     orderedAt: apiOrder.ordered_at,
-    clinic: '', // Would need to get from visit
-    clinicalIndication: '', // Would need to get from order
-    specialInstructions: '', // Would need to get from order
+    clinic,
+    clinicalIndication,
+    specialInstructions,
   };
 };
 

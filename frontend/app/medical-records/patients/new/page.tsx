@@ -108,6 +108,7 @@ export default function NewPatientPage() {
   const [currentStep, setCurrentStep] = useState<FormStep>('personal');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [hasDraft, setHasDraft] = useState(false);
   const [showCategorySwitchDialog, setShowCategorySwitchDialog] = useState(false);
   const [pendingCategory, setPendingCategory] = useState<'employee' | 'retiree' | 'nonnpa' | 'dependent' | null>(null);
@@ -148,6 +149,12 @@ export default function NewPatientPage() {
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      // Validate file size (max 5MB)
+      if (file.size > 5 * 1024 * 1024) {
+        toast.error('Photo must be less than 5MB');
+        return;
+      }
+      setPhotoFile(file);
       const reader = new FileReader();
       reader.onloadend = () => setPhotoPreview(reader.result as string);
       reader.readAsDataURL(file);
@@ -311,8 +318,69 @@ export default function NewPatientPage() {
         if (formData.location) payload.location = formData.location.trim();
       }
 
-      // Call API to create patient
-      const createdPatient = await patientService.createPatient(payload);
+      // Handle photo upload if provided
+      let createdPatient: any;
+      if (photoFile) {
+        // Use FormData for file upload
+        const formData = new FormData();
+        Object.keys(payload).forEach(key => {
+          const value = payload[key];
+          if (value !== undefined && value !== null) {
+            formData.append(key, String(value));
+          }
+        });
+        formData.append('photo', photoFile);
+        
+        // Get access token
+        const { getStoredAccessToken } = await import('@/lib/api-client');
+        let token = getStoredAccessToken();
+        
+        if (!token) {
+          const refreshToken = localStorage.getItem('npa_ecm_refresh_token');
+          if (refreshToken) {
+            const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001/api';
+            const baseUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
+            const refreshResponse = await fetch(`${baseUrl}/accounts/auth/token/refresh/`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ refresh: refreshToken }),
+            });
+            
+            if (refreshResponse.ok) {
+              const data = await refreshResponse.json();
+              token = data.access;
+              localStorage.setItem('npa_ecm_access_token', data.access);
+              if (data.refresh) {
+                localStorage.setItem('npa_ecm_refresh_token', data.refresh);
+              }
+            }
+          }
+        }
+        
+        if (!token) {
+          throw new Error('Authentication required. Please log in again.');
+        }
+        
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001/api';
+        const baseUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
+        const response = await fetch(`${baseUrl}/patients/`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
+          body: formData,
+        });
+        
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.photo?.[0] || errorData.detail || 'Failed to create patient with photo');
+        }
+        
+        createdPatient = await response.json();
+      } else {
+        // No photo, use regular JSON API
+        createdPatient = await patientService.createPatient(payload);
+      }
       
       // Clear draft
       localStorage.removeItem('patient_register_draft');

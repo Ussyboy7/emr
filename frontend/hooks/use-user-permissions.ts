@@ -34,10 +34,6 @@ export const useUserPermissions = (user?: User | null): PermissionProfile => {
       enhancedProfile.canAccessApprovals = true;
     }
 
-    if (assignmentsForUser.some((assignment) => assignment.permissions.includes("draft"))) {
-      enhancedProfile.canRegisterCorrespondence = true;
-    }
-
     if (assignmentsForUser.some((assignment) => assignment.permissions.includes("view") || assignment.permissions.includes("coordinate"))) {
       enhancedProfile.canAccessDocumentManagement = true;
     }
@@ -46,14 +42,12 @@ export const useUserPermissions = (user?: User | null): PermissionProfile => {
     const isSuperAdmin = user.isSuperuser || user.systemRole === "Super Admin";
     if (isSuperAdmin) {
       // Superadmin should have all permissions
-      enhancedProfile.canRegisterCorrespondence = true;
       enhancedProfile.canAccessApprovals = true;
       enhancedProfile.canAccessAnalytics = true;
       enhancedProfile.canAccessExecutiveDashboard = true;
       enhancedProfile.canAccessAdministration = true;
       enhancedProfile.canAccessReports = true;
       enhancedProfile.canDistribute = true;
-      enhancedProfile.canViewCorrespondenceRegistry = true;
       enhancedProfile.canAccessDocumentManagement = true;
     }
 

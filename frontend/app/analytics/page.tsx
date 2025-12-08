@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -8,6 +8,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { analyticsService } from '@/lib/services';
+import { toast } from 'sonner';
 import {
   Bar, BarChart, CartesianGrid, Legend, Line, LineChart, PieChart, Pie, Cell,
   ResponsiveContainer, Tooltip, XAxis, YAxis, Area, AreaChart
@@ -15,10 +17,8 @@ import {
 import {
   TrendingUp, TrendingDown, Users, Stethoscope, TestTube, Pill, Calendar,
   Clock, Activity, Heart, FileText, Download, RefreshCw, Building2,
-  AlertTriangle, CheckCircle2, UserPlus, Bed
+  AlertTriangle, CheckCircle2, UserPlus, Bed, Loader2
 } from 'lucide-react';
-
-// Analytics data will be loaded from API
 
 export default function AnalyticsPage() {
   const [selectedPeriod, setSelectedPeriod] = useState('30');
@@ -26,36 +26,73 @@ export default function AnalyticsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   
-  // Analytics data will be loaded from API
-  const [patientVisitsData] = useState<any[]>([]);
-  const [clinicDistribution] = useState<any[]>([]);
-  const [departmentStats] = useState<any[]>([]);
-  const [dailyTrend] = useState<any[]>([]);
-  const [topDiagnoses] = useState<any[]>([]);
-  const [labTestDistribution] = useState<any[]>([]);
-  const [pharmacyMetrics] = useState<any[]>([]);
+  // Analytics data
+  const [stats, setStats] = useState({
+    totalPatients: 0,
+    patientsChange: 0,
+    totalVisits: 0,
+    visitsChange: 0,
+    avgWaitTime: 0,
+    waitTimeChange: 0,
+    satisfaction: 0,
+    satisfactionChange: 0,
+  });
+  const [patientVisitsData, setPatientVisitsData] = useState<any[]>([]);
+  const [clinicDistribution, setClinicDistribution] = useState<any[]>([]);
+  const [departmentStats, setDepartmentStats] = useState<any[]>([]);
+  const [dailyTrend, setDailyTrend] = useState<any[]>([]);
+  const [topDiagnoses, setTopDiagnoses] = useState<any[]>([]);
+  const [labTestDistribution, setLabTestDistribution] = useState<any[]>([]);
+  const [pharmacyMetrics, setPharmacyMetrics] = useState<any[]>([]);
+
+  useEffect(() => {
+    loadAnalyticsData();
+  }, [selectedPeriod]);
+
+  const loadAnalyticsData = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const period = parseInt(selectedPeriod);
+      
+      // Load all analytics data
+      const [summaryStats, visitsTrend, clinicDist, deptStats, daily, diagnoses, labDist, pharmMetrics] = await Promise.all([
+        analyticsService.getSummaryStats(period),
+        analyticsService.getPatientVisitsTrend(period),
+        analyticsService.getClinicDistribution(),
+        analyticsService.getDepartmentStats(),
+        analyticsService.getDailyTrend(7),
+        analyticsService.getTopDiagnoses(10),
+        analyticsService.getLabTestDistribution(),
+        analyticsService.getPharmacyMetrics(12),
+      ]);
+      
+      setStats(summaryStats);
+      setPatientVisitsData(visitsTrend);
+      setClinicDistribution(clinicDist);
+      setDepartmentStats(deptStats);
+      setDailyTrend(daily);
+      setTopDiagnoses(diagnoses);
+      setLabTestDistribution(labDist);
+      setPharmacyMetrics(pharmMetrics);
+    } catch (err: any) {
+      setError(err.message || 'Failed to load analytics data');
+      toast.error('Failed to load analytics. Please try again.');
+      console.error('Error loading analytics:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
-    await new Promise(r => setTimeout(r, 1500));
+    await loadAnalyticsData();
     setIsRefreshing(false);
   };
 
   const handleExport = () => {
-    // Simulated export
-    alert('Exporting analytics report...');
-  };
-
-  // Summary stats
-  const stats = {
-    totalPatients: 12450,
-    patientsChange: 8.5,
-    totalVisits: 18620,
-    visitsChange: 12.3,
-    avgWaitTime: 22,
-    waitTimeChange: -5.2,
-    satisfaction: 91,
-    satisfactionChange: 2.1,
+    // Export functionality
+    toast.info('Export functionality will be implemented');
   };
 
   return (
@@ -89,21 +126,36 @@ export default function AnalyticsPage() {
 
         {/* Summary Stats */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <Card className="border-l-4 border-l-blue-500">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Total Patients</p>
-                  <p className="text-3xl font-bold text-blue-600 dark:text-blue-400">{stats.totalPatients.toLocaleString()}</p>
-                  <p className={`text-sm flex items-center gap-1 ${stats.patientsChange >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
-                    {stats.patientsChange >= 0 ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
-                    {Math.abs(stats.patientsChange)}% vs last period
-                  </p>
-                </div>
-                <Users className="h-10 w-10 text-blue-500 opacity-50" />
-              </div>
-            </CardContent>
-          </Card>
+          {loading ? (
+            Array.from({ length: 4 }).map((_, i) => (
+              <Card key={i}>
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-muted-foreground">Loading...</p>
+                      <p className="text-3xl font-bold mt-1"><Loader2 className="h-8 w-8 animate-spin" /></p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))
+          ) : (
+            <>
+              <Card className="border-l-4 border-l-blue-500">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-muted-foreground">Total Patients</p>
+                      <p className="text-3xl font-bold text-blue-600 dark:text-blue-400">{stats.totalPatients.toLocaleString()}</p>
+                      <p className={`text-sm flex items-center gap-1 ${stats.patientsChange >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                        {stats.patientsChange >= 0 ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
+                        {Math.abs(stats.patientsChange)}% vs last period
+                      </p>
+                    </div>
+                    <Users className="h-10 w-10 text-blue-500 opacity-50" />
+                  </div>
+                </CardContent>
+              </Card>
           <Card className="border-l-4 border-l-emerald-500">
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
@@ -149,6 +201,8 @@ export default function AnalyticsPage() {
               </div>
             </CardContent>
           </Card>
+            </>
+          )}
         </div>
 
         <Tabs defaultValue="overview" className="space-y-4">
@@ -170,17 +224,27 @@ export default function AnalyticsPage() {
                   <CardDescription>Monthly visits over the past year</CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <ResponsiveContainer width="100%" height={300}>
-                    <AreaChart data={patientVisitsData}>
-                      <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
-                      <XAxis dataKey="month" />
-                      <YAxis />
-                      <Tooltip />
-                      <Legend />
-                      <Area type="monotone" dataKey="visits" stackId="1" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.6} name="Total Visits" />
-                      <Area type="monotone" dataKey="newPatients" stackId="2" stroke="#10b981" fill="#10b981" fillOpacity={0.6} name="New Patients" />
-                    </AreaChart>
-                  </ResponsiveContainer>
+                  {loading ? (
+                    <div className="h-[300px] flex items-center justify-center">
+                      <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                    </div>
+                  ) : patientVisitsData.length === 0 ? (
+                    <div className="h-[300px] flex items-center justify-center text-muted-foreground">
+                      <p>No data available</p>
+                    </div>
+                  ) : (
+                    <ResponsiveContainer width="100%" height={300}>
+                      <AreaChart data={patientVisitsData}>
+                        <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+                        <XAxis dataKey="month" />
+                        <YAxis />
+                        <Tooltip />
+                        <Legend />
+                        <Area type="monotone" dataKey="visits" stackId="1" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.6} name="Total Visits" />
+                        <Area type="monotone" dataKey="newPatients" stackId="2" stroke="#10b981" fill="#10b981" fillOpacity={0.6} name="New Patients" />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  )}
                 </CardContent>
               </Card>
 
@@ -191,24 +255,34 @@ export default function AnalyticsPage() {
                   <CardDescription>Distribution of patient visits across clinics</CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <ResponsiveContainer width="100%" height={300}>
-                    <PieChart>
-                      <Pie
-                        data={clinicDistribution}
-                        dataKey="value"
-                        nameKey="name"
-                        cx="50%"
-                        cy="50%"
-                        outerRadius={100}
-                        label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                      >
-                        {clinicDistribution.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={entry.color} />
-                        ))}
-                      </Pie>
-                      <Tooltip />
-                    </PieChart>
-                  </ResponsiveContainer>
+                  {loading ? (
+                    <div className="h-[300px] flex items-center justify-center">
+                      <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                    </div>
+                  ) : clinicDistribution.length === 0 ? (
+                    <div className="h-[300px] flex items-center justify-center text-muted-foreground">
+                      <p>No data available</p>
+                    </div>
+                  ) : (
+                    <ResponsiveContainer width="100%" height={300}>
+                      <PieChart>
+                        <Pie
+                          data={clinicDistribution}
+                          dataKey="value"
+                          nameKey="name"
+                          cx="50%"
+                          cy="50%"
+                          outerRadius={100}
+                          label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                        >
+                          {clinicDistribution.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={entry.color} />
+                          ))}
+                        </Pie>
+                        <Tooltip />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  )}
                 </CardContent>
               </Card>
             </div>
@@ -220,19 +294,29 @@ export default function AnalyticsPage() {
                 <CardDescription>Daily distribution of activities</CardDescription>
               </CardHeader>
               <CardContent>
-                <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={dailyTrend}>
-                    <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
-                    <XAxis dataKey="day" />
-                    <YAxis />
-                    <Tooltip />
-                    <Legend />
-                    <Bar dataKey="patients" fill="#3b82f6" name="Patients" />
-                    <Bar dataKey="consultations" fill="#10b981" name="Consultations" />
-                    <Bar dataKey="labs" fill="#f59e0b" name="Lab Tests" />
-                    <Bar dataKey="prescriptions" fill="#8b5cf6" name="Prescriptions" />
-                  </BarChart>
-                </ResponsiveContainer>
+                {loading ? (
+                  <div className="h-[300px] flex items-center justify-center">
+                    <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                  </div>
+                ) : dailyTrend.length === 0 ? (
+                  <div className="h-[300px] flex items-center justify-center text-muted-foreground">
+                    <p>No data available</p>
+                  </div>
+                ) : (
+                  <ResponsiveContainer width="100%" height={300}>
+                    <BarChart data={dailyTrend}>
+                      <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+                      <XAxis dataKey="day" />
+                      <YAxis />
+                      <Tooltip />
+                      <Legend />
+                      <Bar dataKey="patients" fill="#3b82f6" name="Patients" />
+                      <Bar dataKey="consultations" fill="#10b981" name="Consultations" />
+                      <Bar dataKey="labs" fill="#f59e0b" name="Lab Tests" />
+                      <Bar dataKey="prescriptions" fill="#8b5cf6" name="Prescriptions" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                )}
               </CardContent>
             </Card>
 
@@ -241,9 +325,18 @@ export default function AnalyticsPage() {
               <CardHeader>
                 <CardTitle className="flex items-center gap-2"><Building2 className="h-5 w-5 text-purple-500" />Department Performance</CardTitle>
               </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  {departmentStats.map(dept => (
+                <CardContent>
+                  {loading ? (
+                    <div className="h-[200px] flex items-center justify-center">
+                      <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                    </div>
+                  ) : departmentStats.length === 0 ? (
+                    <div className="h-[200px] flex items-center justify-center text-muted-foreground">
+                      <p>No data available</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {departmentStats.map(dept => (
                     <div key={dept.dept} className="flex items-center gap-4">
                       <div className="w-24 font-medium">{dept.dept}</div>
                       <div className="flex-1 space-y-1">
@@ -251,8 +344,9 @@ export default function AnalyticsPage() {
                         <Progress value={dept.satisfaction} className="h-2" />
                       </div>
                     </div>
-                  ))}
-                </div>
+                      ))}
+                    </div>
+                  )}
               </CardContent>
             </Card>
           </TabsContent>
@@ -315,8 +409,17 @@ export default function AnalyticsPage() {
                   <CardDescription>Most common diagnoses this period</CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <div className="space-y-3">
-                    {topDiagnoses.map((d, i) => (
+                  {loading ? (
+                    <div className="h-[200px] flex items-center justify-center">
+                      <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                    </div>
+                  ) : topDiagnoses.length === 0 ? (
+                    <div className="h-[200px] flex items-center justify-center text-muted-foreground">
+                      <p>No diagnosis data available</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {topDiagnoses.map((d, i) => (
                       <div key={d.diagnosis} className="flex items-center gap-3">
                         <span className="w-6 h-6 rounded-full bg-emerald-500/10 text-emerald-600 flex items-center justify-center text-sm font-medium">{i + 1}</span>
                         <div className="flex-1">
@@ -324,8 +427,9 @@ export default function AnalyticsPage() {
                           <Progress value={d.percentage} className="h-1.5 mt-1" />
                         </div>
                       </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
 
@@ -367,24 +471,34 @@ export default function AnalyticsPage() {
                   <CardTitle className="flex items-center gap-2"><TestTube className="h-5 w-5 text-amber-500" />Test Distribution</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <ResponsiveContainer width="100%" height={300}>
-                    <PieChart>
-                      <Pie
-                        data={labTestDistribution}
-                        dataKey="value"
-                        nameKey="name"
-                        cx="50%"
-                        cy="50%"
-                        outerRadius={100}
-                        label={({ name, value }) => `${name}: ${value}`}
-                      >
-                        {labTestDistribution.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={entry.color} />
-                        ))}
-                      </Pie>
-                      <Tooltip />
-                    </PieChart>
-                  </ResponsiveContainer>
+                  {loading ? (
+                    <div className="h-[300px] flex items-center justify-center">
+                      <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                    </div>
+                  ) : labTestDistribution.length === 0 ? (
+                    <div className="h-[300px] flex items-center justify-center text-muted-foreground">
+                      <p>No data available</p>
+                    </div>
+                  ) : (
+                    <ResponsiveContainer width="100%" height={300}>
+                      <PieChart>
+                        <Pie
+                          data={labTestDistribution}
+                          dataKey="value"
+                          nameKey="name"
+                          cx="50%"
+                          cy="50%"
+                          outerRadius={100}
+                          label={({ name, value }) => `${name}: ${value}`}
+                        >
+                          {labTestDistribution.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={entry.color} />
+                          ))}
+                        </Pie>
+                        <Tooltip />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  )}
                 </CardContent>
               </Card>
 
@@ -426,17 +540,27 @@ export default function AnalyticsPage() {
                   <CardTitle className="flex items-center gap-2"><Pill className="h-5 w-5 text-violet-500" />Dispensing Trend</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <ResponsiveContainer width="100%" height={300}>
-                    <BarChart data={pharmacyMetrics}>
-                      <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
-                      <XAxis dataKey="month" />
-                      <YAxis />
-                      <Tooltip />
-                      <Legend />
-                      <Bar dataKey="dispensed" fill="#8b5cf6" name="Dispensed" />
-                      <Bar dataKey="pending" fill="#f59e0b" name="Pending" />
-                    </BarChart>
-                  </ResponsiveContainer>
+                  {loading ? (
+                    <div className="h-[300px] flex items-center justify-center">
+                      <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                    </div>
+                  ) : pharmacyMetrics.length === 0 ? (
+                    <div className="h-[300px] flex items-center justify-center text-muted-foreground">
+                      <p>No data available</p>
+                    </div>
+                  ) : (
+                    <ResponsiveContainer width="100%" height={300}>
+                      <BarChart data={pharmacyMetrics}>
+                        <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+                        <XAxis dataKey="month" />
+                        <YAxis />
+                        <Tooltip />
+                        <Legend />
+                        <Bar dataKey="dispensed" fill="#8b5cf6" name="Dispensed" />
+                        <Bar dataKey="pending" fill="#f59e0b" name="Pending" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  )}
                 </CardContent>
               </Card>
 

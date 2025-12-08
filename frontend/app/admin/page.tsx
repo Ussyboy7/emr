@@ -1,11 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
+import { adminService } from "@/lib/services";
+import { toast } from "sonner";
 import {
   Users,
   Shield,
@@ -28,14 +30,15 @@ import {
   Stethoscope,
   ChevronRight,
   AlertCircle,
+  Loader2,
 } from "lucide-react";
 import Link from "next/link";
 
-// Admin dashboard data will be loaded from API
-
 export default function AdminDashboardPage() {
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [systemStats] = useState({
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [systemStats, setSystemStats] = useState({
     totalUsers: 0,
     activeUsers: 0,
     inactiveUsers: 0,
@@ -47,17 +50,53 @@ export default function AdminDashboardPage() {
     availableRooms: 0,
     occupiedRooms: 0,
   });
-  const [usersByRole] = useState<any[]>([]);
-  const [recentAuditEvents] = useState<any[]>([]);
-  const [systemHealth] = useState<any[]>([]);
-  const [expiringLicenses] = useState<any[]>([]);
-  const [clinicStatus] = useState<any[]>([]);
-  const [pendingApprovals] = useState<any[]>([]);
-  const [loading] = useState(true);
+  const [usersByRole, setUsersByRole] = useState<any[]>([]);
+  const [recentAuditEvents, setRecentAuditEvents] = useState<any[]>([]);
+  const [systemHealth, setSystemHealth] = useState<any[]>([]);
+  const [expiringLicenses, setExpiringLicenses] = useState<any[]>([]);
+  const [clinicStatus, setClinicStatus] = useState<any[]>([]);
+  const [pendingApprovals, setPendingApprovals] = useState<any[]>([]);
 
-  const handleRefresh = () => {
+  useEffect(() => {
+    loadDashboardData();
+  }, []);
+
+  const loadDashboardData = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const stats = await adminService.getDashboardStats();
+      setSystemStats({
+        totalUsers: stats.totalUsers,
+        activeUsers: stats.activeUsers,
+        inactiveUsers: stats.inactiveUsers,
+        onlineNow: stats.onlineNow,
+        totalRoles: stats.totalRoles,
+        totalClinics: stats.totalClinics,
+        activeClinics: stats.activeClinics,
+        totalRooms: stats.totalRooms,
+        availableRooms: stats.availableRooms,
+        occupiedRooms: stats.occupiedRooms,
+      });
+      setUsersByRole(stats.usersByRole);
+      setRecentAuditEvents(stats.recentAuditEvents);
+      setSystemHealth(stats.systemHealth);
+      setExpiringLicenses(stats.expiringLicenses);
+      setClinicStatus(stats.clinicStatus);
+      setPendingApprovals(stats.pendingApprovals);
+    } catch (err: any) {
+      setError(err.message || 'Failed to load dashboard data');
+      toast.error('Failed to load dashboard. Please try again.');
+      console.error('Error loading dashboard:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRefresh = async () => {
     setIsRefreshing(true);
-    setTimeout(() => setIsRefreshing(false), 1000);
+    await loadDashboardData();
+    setIsRefreshing(false);
   };
 
   const getStatusColor = (status: string) => {
@@ -102,20 +141,35 @@ export default function AdminDashboardPage() {
 
         {/* Key Stats */}
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-          <Card className="bg-gradient-to-br from-blue-500/10 to-blue-600/5 border-blue-500/20">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Total Users</p>
-                  <p className="text-2xl font-bold text-blue-500">{systemStats.totalUsers}</p>
-                </div>
-                <Users className="h-8 w-8 text-blue-500/50" />
-              </div>
-              <div className="mt-2 flex items-center gap-1 text-xs">
-                <span className="text-green-500">{systemStats.activeUsers} active</span>
-              </div>
-            </CardContent>
-          </Card>
+          {loading ? (
+            Array.from({ length: 6 }).map((_, i) => (
+              <Card key={i}>
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-muted-foreground">Loading...</p>
+                      <p className="text-2xl font-bold mt-1"><Loader2 className="h-6 w-6 animate-spin" /></p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))
+          ) : (
+            <>
+              <Card className="bg-gradient-to-br from-blue-500/10 to-blue-600/5 border-blue-500/20">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-muted-foreground">Total Users</p>
+                      <p className="text-2xl font-bold text-blue-500">{systemStats.totalUsers}</p>
+                    </div>
+                    <Users className="h-8 w-8 text-blue-500/50" />
+                  </div>
+                  <div className="mt-2 flex items-center gap-1 text-xs">
+                    <span className="text-green-500">{systemStats.activeUsers} active</span>
+                  </div>
+                </CardContent>
+              </Card>
 
           <Card className="bg-gradient-to-br from-green-500/10 to-green-600/5 border-green-500/20">
             <CardContent className="p-4">
@@ -188,6 +242,8 @@ export default function AdminDashboardPage() {
               </div>
             </CardContent>
           </Card>
+            </>
+          )}
         </div>
 
         {/* Main Content Grid */}
@@ -205,8 +261,19 @@ export default function AdminDashboardPage() {
                 </div>
               </CardHeader>
               <CardContent>
-                <div className="grid grid-cols-2 gap-4">
-                  {usersByRole.map((role) => (
+                {loading ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <Loader2 className="h-8 w-8 mx-auto mb-2 animate-spin" />
+                    <p>Loading...</p>
+                  </div>
+                ) : usersByRole.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <Users className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                    <p>No role data available</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-4">
+                    {usersByRole.map((role) => (
                     <div key={role.role} className="flex items-center gap-3">
                       <div className={`w-3 h-3 rounded-full ${role.color}`} />
                       <div className="flex-1 min-w-0">
@@ -217,8 +284,9 @@ export default function AdminDashboardPage() {
                         <Progress value={(role.count / totalUsers) * 100} className="h-1.5 mt-1" />
                       </div>
                     </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                )}
               </CardContent>
             </Card>
 
@@ -233,8 +301,19 @@ export default function AdminDashboardPage() {
                 </div>
               </CardHeader>
               <CardContent>
-                <div className="space-y-3">
-                  {recentAuditEvents.map((event) => (
+                {loading ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <Loader2 className="h-8 w-8 mx-auto mb-2 animate-spin" />
+                    <p>Loading...</p>
+                  </div>
+                ) : recentAuditEvents.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <ClipboardList className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                    <p>No recent activity</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {recentAuditEvents.map((event) => (
                     <div key={event.id} className="flex items-start gap-3 p-2 rounded-lg hover:bg-muted/50">
                       <div className={`mt-0.5 ${event.status === "success" ? "text-green-500" : "text-red-500"}`}>
                         {event.status === "success" ? <CheckCircle className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
@@ -249,8 +328,9 @@ export default function AdminDashboardPage() {
                       </div>
                       <span className="text-xs text-muted-foreground whitespace-nowrap">{event.time}</span>
                     </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                )}
               </CardContent>
             </Card>
 
@@ -265,8 +345,19 @@ export default function AdminDashboardPage() {
                 </div>
               </CardHeader>
               <CardContent>
-                <div className="space-y-2">
-                  {clinicStatus.map((clinic) => (
+                {loading ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <Loader2 className="h-8 w-8 mx-auto mb-2 animate-spin" />
+                    <p>Loading...</p>
+                  </div>
+                ) : clinicStatus.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <Building2 className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                    <p>No clinics found</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {clinicStatus.map((clinic) => (
                     <div key={clinic.name} className="flex items-center justify-between p-2 rounded-lg hover:bg-muted/50">
                       <div className="flex items-center gap-3">
                         <div className={`w-2 h-2 rounded-full ${clinic.status === "open" ? "bg-green-500" : "bg-red-500"}`} />
@@ -294,8 +385,14 @@ export default function AdminDashboardPage() {
                 <CardTitle className="text-lg">System Health</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="space-y-3">
-                  {systemHealth.map((system) => (
+                {loading ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <Loader2 className="h-8 w-8 mx-auto mb-2 animate-spin" />
+                    <p>Loading...</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {systemHealth.map((system) => (
                     <div key={system.name} className="flex items-center justify-between p-2 rounded-lg bg-muted/30">
                       <div className="flex items-center gap-3">
                         <system.icon className={`h-5 w-5 ${getStatusColor(system.status)}`} />
@@ -321,8 +418,19 @@ export default function AdminDashboardPage() {
                 <CardTitle className="text-lg">Pending Approvals</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="space-y-2">
-                  {pendingApprovals.map((approval) => (
+                {loading ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <Loader2 className="h-8 w-8 mx-auto mb-2 animate-spin" />
+                    <p>Loading...</p>
+                  </div>
+                ) : pendingApprovals.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <CheckCircle className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                    <p>No pending approvals</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {pendingApprovals.map((approval) => (
                     <div key={approval.type} className="flex items-center justify-between p-2 rounded-lg hover:bg-muted/50">
                       <div className="flex items-center gap-2">
                         <span className="text-sm">{approval.type}</span>
@@ -330,9 +438,12 @@ export default function AdminDashboardPage() {
                       </div>
                       <Badge variant="secondary">{approval.count}</Badge>
                     </div>
-                  ))}
-                </div>
-                <Button className="w-full mt-4" variant="outline" size="sm">Review All Pending</Button>
+                    ))}
+                  </div>
+                )}
+                {pendingApprovals.length > 0 && (
+                  <Button className="w-full mt-4" variant="outline" size="sm">Review All Pending</Button>
+                )}
               </CardContent>
             </Card>
 
@@ -345,8 +456,19 @@ export default function AdminDashboardPage() {
                 </div>
               </CardHeader>
               <CardContent>
-                <div className="space-y-3">
-                  {expiringLicenses.map((license) => (
+                {loading ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <Loader2 className="h-8 w-8 mx-auto mb-2 animate-spin" />
+                    <p>Loading...</p>
+                  </div>
+                ) : expiringLicenses.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <CheckCircle className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                    <p>No expiring licenses</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {expiringLicenses.map((license) => (
                     <div key={license.name} className="p-2 rounded-lg bg-background/50">
                       <div className="flex items-center justify-between">
                         <span className="text-sm font-medium">{license.name}</span>
@@ -356,8 +478,9 @@ export default function AdminDashboardPage() {
                       </div>
                       <p className="text-xs text-muted-foreground mt-1">{license.type} • Expires {license.expires}</p>
                     </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                )}
                 <Link href="/admin/users">
                   <Button className="w-full mt-4" variant="outline" size="sm">Manage Staff Licenses</Button>
                 </Link>

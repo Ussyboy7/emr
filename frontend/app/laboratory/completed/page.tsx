@@ -161,29 +161,81 @@ export default function CompletedTestsPage() {
         page: currentPage,
       });
       // Transform API data to frontend format
-      const transformed = response.results.map((test: ApiLabTest) => ({
-        id: test.id.toString(),
-        orderId: '',
-        patient: { id: '', name: 'Patient', age: 0, gender: '' },
-        doctor: { id: '', name: '', specialty: '' },
-        testName: test.name,
-        testCode: test.code,
-        results: Object.entries(test.results || {}).map(([key, value]) => ({
-          parameter: key,
-          value: String(value),
-          unit: '',
-          normalRange: '',
-          status: 'Normal' as const,
-        })),
-        overallStatus: 'Normal' as const,
-        priority: 'Routine' as const,
-        orderedAt: test.collected_at || new Date().toISOString(),
-        completedAt: test.processed_at || new Date().toISOString(),
-        verifiedBy: (test as any).verified_by || '',
-        verifiedAt: (test as any).verified_at || new Date().toISOString(),
-        submittedBy: test.processed_by || '',
-        clinic: '',
-        turnaroundTime: '2h',
+      const transformed = await Promise.all(response.results.map(async (test: any) => {
+        // Extract patient data from test
+        const patientName = test.patient_name || (test.lab_order?.patient_name) || 'Unknown Patient';
+        const patientId = test.patient_id || (test.lab_order?.visit?.patient?.id) || '';
+        const orderId = test.lab_order?.order_id || (test.order_id) || '';
+        
+        // Extract doctor data
+        const doctorName = test.ordered_by_name || (test.lab_order?.doctor_name) || (test.lab_order?.ordered_by_name) || '';
+        const doctorSpecialty = (test.lab_order?.doctor?.specialty) || '';
+        
+        // Extract clinic and other order data
+        const clinic = (test.lab_order?.visit?.clinic) || (test.clinic) || '';
+        const age = (test.lab_order?.visit?.patient?.age) || (test.age) || 0;
+        const gender = (test.lab_order?.visit?.patient?.gender) || (test.gender) || '';
+        
+        // Calculate turnaround time
+        const orderedAt = test.collected_at || (test.lab_order?.order_date) || new Date().toISOString();
+        const completedAt = test.processed_at || (test.verified_at) || new Date().toISOString();
+        const turnaroundMs = new Date(completedAt).getTime() - new Date(orderedAt).getTime();
+        const turnaroundHours = Math.floor(turnaroundMs / 3600000);
+        const turnaroundMins = Math.floor((turnaroundMs % 3600000) / 60000);
+        const turnaroundTime = turnaroundHours > 0 ? `${turnaroundHours}h ${turnaroundMins}m` : `${turnaroundMins}m`;
+        
+        // Determine overall status from results
+        let overallStatus: 'Normal' | 'Abnormal' | 'Critical' = 'Normal';
+        if (test.overall_status) {
+          const statusMap: Record<string, 'Normal' | 'Abnormal' | 'Critical'> = {
+            'normal': 'Normal',
+            'abnormal': 'Abnormal',
+            'critical': 'Critical',
+          };
+          overallStatus = statusMap[test.overall_status.toLowerCase()] || 'Normal';
+        }
+        
+        // Determine priority
+        const priorityMap: Record<string, 'Routine' | 'Urgent' | 'STAT'> = {
+          'routine': 'Routine',
+          'urgent': 'Urgent',
+          'stat': 'STAT',
+        };
+        const priority = priorityMap[(test.lab_order?.priority || test.priority || 'routine').toLowerCase()] || 'Routine';
+        
+        return {
+          id: test.id.toString(),
+          orderId,
+          patient: { 
+            id: patientId.toString(), 
+            name: patientName, 
+            age: age || 0, 
+            gender: gender || 'Unknown' 
+          },
+          doctor: { 
+            id: (test.lab_order?.doctor?.id)?.toString() || '', 
+            name: doctorName, 
+            specialty: doctorSpecialty 
+          },
+          testName: test.name,
+          testCode: test.code,
+          results: Object.entries(test.results || {}).map(([key, value]) => ({
+            parameter: key,
+            value: String(value),
+            unit: '', // Would need template data for units
+            normalRange: '', // Would need template data for normal ranges
+            status: 'Normal' as const, // Would need to calculate based on normal ranges
+          })),
+          overallStatus,
+          priority,
+          orderedAt,
+          completedAt,
+          verifiedBy: test.verified_by || (test.verified_by_name) || '',
+          verifiedAt: test.verified_at || new Date().toISOString(),
+          submittedBy: test.processed_by || (test.performed_by_name) || '',
+          clinic,
+          turnaroundTime,
+        };
       }));
       setTests(transformed);
     } catch (err: any) {

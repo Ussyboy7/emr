@@ -73,7 +73,6 @@ LOCAL_APPS = [
     "common",
     "accounts",
     "organization",
-    "correspondence",
     "patients",
     "laboratory",
     "pharmacy",

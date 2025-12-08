@@ -1,30 +1,80 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { radiologyService } from '@/lib/services';
 import { 
   Image as ImageIcon, Search, ZoomIn, ZoomOut, RotateCw, Contrast, 
-  Maximize, Grid, Ruler, Move, Download, Share2
+  Maximize, Grid, Ruler, Move, Download, Share2, Loader2, AlertTriangle
 } from 'lucide-react';
 
-const recentStudies = [
-  { id: 'RAD-001', patient: 'Adebayo Johnson', modality: 'X-Ray', bodyPart: 'Chest', date: '2024-11-27', images: 2 },
-  { id: 'RAD-002', patient: 'Fatima Mohammed', modality: 'Ultrasound', bodyPart: 'Abdomen', date: '2024-11-27', images: 12 },
-  { id: 'RAD-003', patient: 'Chukwu Emeka', modality: 'CT Scan', bodyPart: 'Head', date: '2024-11-27', images: 45 },
-  { id: 'RAD-004', patient: 'Grace Okonkwo', modality: 'X-Ray', bodyPart: 'Lumbar Spine', date: '2024-11-26', images: 3 },
-];
+interface StudyWithImages {
+  id: string;
+  patient: string;
+  modality: string;
+  bodyPart: string;
+  date: string;
+  images: number;
+}
 
 export default function ImageViewerPage() {
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedStudy, setSelectedStudy] = useState<typeof recentStudies[0] | null>(null);
+  const [selectedStudy, setSelectedStudy] = useState<StudyWithImages | null>(null);
+  const [studies, setStudies] = useState<StudyWithImages[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const filteredStudies = recentStudies.filter(study =>
-    study.patient.toLowerCase().includes(searchQuery.toLowerCase()) || study.id.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  useEffect(() => {
+    loadStudies();
+  }, []);
+
+  const loadStudies = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      // Get orders with acquired studies (studies that have images)
+      const ordersResponse = await radiologyService.getOrders({ page: 1 });
+      const studiesWithImages: StudyWithImages[] = [];
+      
+      ordersResponse.results.forEach(order => {
+        order.studies.forEach(study => {
+          // Only include studies that have been acquired (have images)
+          if (study.status === 'acquired' || study.status === 'processing' || study.status === 'reported' || study.status === 'verified') {
+            const acquiredDate = study.acquired_at ? new Date(study.acquired_at).toISOString().split('T')[0] : 
+                               new Date(order.ordered_at).toISOString().split('T')[0];
+            
+            studiesWithImages.push({
+              id: study.id.toString(),
+              patient: order.patient_name || 'Unknown',
+              modality: study.modality || 'X-Ray',
+              bodyPart: study.body_part || '',
+              date: acquiredDate,
+              images: study.images_count || 0,
+            });
+          }
+        });
+      });
+      
+      // Sort by date (most recent first) and take first 20
+      studiesWithImages.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      setStudies(studiesWithImages.slice(0, 20));
+    } catch (err: any) {
+      setError(err.message || 'Failed to load studies');
+      console.error('Error loading studies:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const filteredStudies = useMemo(() => studies.filter(study =>
+    study.patient.toLowerCase().includes(searchQuery.toLowerCase()) || 
+    study.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    study.modality.toLowerCase().includes(searchQuery.toLowerCase())
+  ), [studies, searchQuery]);
 
   return (
     <DashboardLayout>
@@ -47,7 +97,24 @@ export default function ImageViewerPage() {
                   <Input placeholder="Search..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-10" />
                 </div>
                 <div className="space-y-2 max-h-[400px] overflow-y-auto">
-                  {filteredStudies.map((study) => (
+                  {loading ? (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <Loader2 className="h-8 w-8 mx-auto mb-2 animate-spin" />
+                      <p className="text-sm">Loading studies...</p>
+                    </div>
+                  ) : error ? (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <AlertTriangle className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                      <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+                      <Button variant="outline" size="sm" className="mt-2" onClick={loadStudies}>Retry</Button>
+                    </div>
+                  ) : filteredStudies.length === 0 ? (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <ImageIcon className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                      <p className="text-sm">No studies found</p>
+                    </div>
+                  ) : (
+                    filteredStudies.map((study) => (
                     <div 
                       key={study.id} 
                       onClick={() => setSelectedStudy(study)}
@@ -60,7 +127,8 @@ export default function ImageViewerPage() {
                         <span className="text-xs text-muted-foreground">{study.images} images</span>
                       </div>
                     </div>
-                  ))}
+                    ))
+                  )}
                 </div>
               </CardContent>
             </Card>

@@ -13,7 +13,6 @@ api_v1_patterns = [
     path('health/', health_check, name='health_check'),
     path('accounts/', include('accounts.urls')),
     path('organization/', include('organization.urls')),
-    path('correspondence/', include('correspondence.urls')),
     path('', include('patients.urls')),
     path('', include('laboratory.urls')),
     path('', include('pharmacy.urls')),

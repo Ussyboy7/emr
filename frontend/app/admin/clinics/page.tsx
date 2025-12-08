@@ -14,10 +14,11 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { StandardPagination } from "@/components/StandardPagination";
+import { adminService, type Clinic as ApiClinic, type Department as ApiDepartment } from "@/lib/services";
 import {
   Building2, Search, Plus, Edit, Trash2, Eye, Users, Clock, MapPin, Phone,
   Mail, Stethoscope, Calendar, Settings, CheckCircle2, XCircle, AlertTriangle,
-  Activity, DoorOpen
+  Activity, DoorOpen, Loader2
 } from "lucide-react";
 
 interface Clinic {
@@ -50,14 +51,67 @@ interface Department {
 
 const daysOfWeek = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
-// Clinics and departments will be loaded from API
-
 export default function ClinicDepartmentPage() {
   const [activeTab, setActiveTab] = useState('clinics');
   const [clinics, setClinics] = useState<Clinic[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Load clinics and departments from API
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  const loadData = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const [clinicsResponse, deptsResponse] = await Promise.all([
+        adminService.getClinics({ page_size: 1000 }),
+        adminService.getDepartments({ page_size: 1000 }),
+      ]);
+      
+      // Transform clinics
+      const transformedClinics: Clinic[] = clinicsResponse.results.map((clinic: ApiClinic) => ({
+        id: clinic.id.toString(),
+        code: clinic.code,
+        name: clinic.name,
+        description: clinic.description || '',
+        location: clinic.location || '',
+        phone: clinic.phone || '',
+        email: clinic.email || '',
+        operatingHours: clinic.operating_hours || daysOfWeek.map(day => ({ day, open: '08:00', close: '17:00', isOpen: day !== 'Sunday' })),
+        services: clinic.services || [],
+        staffCount: clinic.staff_count || 0,
+        roomCount: clinic.room_count || 0,
+        isActive: clinic.is_active,
+        createdAt: clinic.created_at?.split('T')[0] || '',
+        head: clinic.head_name,
+      }));
+      
+      // Transform departments
+      const transformedDepts: Department[] = deptsResponse.results.map((dept: ApiDepartment) => ({
+        id: dept.id.toString(),
+        code: dept.code,
+        name: dept.name,
+        description: dept.description || '',
+        head: dept.head_name || '',
+        staffCount: dept.staff_count || 0,
+        clinics: dept.clinic_name ? [dept.clinic_name] : [],
+        isActive: dept.is_active,
+      }));
+      
+      setClinics(transformedClinics);
+      setDepartments(transformedDepts);
+    } catch (err: any) {
+      setError(err.message || 'Failed to load data');
+      toast.error('Failed to load clinics/departments. Please try again.');
+      console.error('Error loading data:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [currentPage, setCurrentPage] = useState(1);
@@ -141,37 +195,157 @@ export default function ClinicDepartmentPage() {
   };
 
   const handleCreateClinic = async () => {
-    setIsSubmitting(true); await new Promise(r => setTimeout(r, 1000));
-    const newClinic: Clinic = { ...clinicForm as Clinic, id: String(clinics.length + 1), staffCount: 0, roomCount: 0, createdAt: new Date().toISOString().split('T')[0] };
-    setClinics(prev => [...prev, newClinic]); toast.success(`Clinic "${newClinic.name}" created`); setIsCreateDialogOpen(false); resetClinicForm(); setIsSubmitting(false);
+    if (!clinicForm.name || !clinicForm.code) {
+      toast.error('Please fill in all required fields');
+      return;
+    }
+    setIsSubmitting(true);
+    
+    try {
+      await adminService.createClinic({
+        code: clinicForm.code,
+        name: clinicForm.name,
+        description: clinicForm.description,
+        location: clinicForm.location,
+        phone: clinicForm.phone,
+        email: clinicForm.email,
+        is_active: clinicForm.isActive,
+        operating_hours: clinicForm.operatingHours,
+        services: clinicForm.services,
+      });
+      
+      toast.success(`Clinic "${clinicForm.name}" created`);
+      setIsCreateDialogOpen(false);
+      resetClinicForm();
+      await loadData(); // Reload data
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to create clinic');
+      console.error('Error creating clinic:', err);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleUpdateClinic = async () => {
-    if (!selectedClinic) return; setIsSubmitting(true); await new Promise(r => setTimeout(r, 1000));
-    setClinics(prev => prev.map(c => c.id === selectedClinic.id ? { ...c, ...clinicForm } : c));
-    toast.success(`Clinic "${clinicForm.name}" updated`); setIsEditDialogOpen(false); setSelectedClinic(null); resetClinicForm(); setIsSubmitting(false);
+    if (!selectedClinic) return;
+    setIsSubmitting(true);
+    
+    try {
+      const clinicId = parseInt(selectedClinic.id);
+      await adminService.updateClinic(clinicId, {
+        code: clinicForm.code,
+        name: clinicForm.name,
+        description: clinicForm.description,
+        location: clinicForm.location,
+        phone: clinicForm.phone,
+        email: clinicForm.email,
+        is_active: clinicForm.isActive,
+        operating_hours: clinicForm.operatingHours,
+        services: clinicForm.services,
+      });
+      
+      toast.success(`Clinic "${clinicForm.name}" updated`);
+      setIsEditDialogOpen(false);
+      setSelectedClinic(null);
+      resetClinicForm();
+      await loadData(); // Reload data
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to update clinic');
+      console.error('Error updating clinic:', err);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleDeleteClinic = async () => {
-    if (!selectedClinic) return; setIsSubmitting(true); await new Promise(r => setTimeout(r, 1000));
-    setClinics(prev => prev.filter(c => c.id !== selectedClinic.id)); toast.success(`Clinic "${selectedClinic.name}" deleted`); setIsDeleteDialogOpen(false); setSelectedClinic(null); setIsSubmitting(false);
+    if (!selectedClinic) return;
+    setIsSubmitting(true);
+    
+    try {
+      const clinicId = parseInt(selectedClinic.id);
+      await adminService.deleteClinic(clinicId);
+      toast.success(`Clinic "${selectedClinic.name}" deleted`);
+      setIsDeleteDialogOpen(false);
+      setSelectedClinic(null);
+      await loadData(); // Reload data
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to delete clinic');
+      console.error('Error deleting clinic:', err);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleCreateDept = async () => {
-    setIsSubmitting(true); await new Promise(r => setTimeout(r, 1000));
-    const newDept: Department = { ...deptForm as Department, id: String(departments.length + 1), staffCount: 0 };
-    setDepartments(prev => [...prev, newDept]); toast.success(`Department "${newDept.name}" created`); setIsCreateDialogOpen(false); resetDeptForm(); setIsSubmitting(false);
+    if (!deptForm.name || !deptForm.code) {
+      toast.error('Please fill in all required fields');
+      return;
+    }
+    setIsSubmitting(true);
+    
+    try {
+      await adminService.createDepartment({
+        code: deptForm.code,
+        name: deptForm.name,
+        description: deptForm.description,
+        is_active: deptForm.isActive,
+      });
+      
+      toast.success(`Department "${deptForm.name}" created`);
+      setIsCreateDialogOpen(false);
+      resetDeptForm();
+      await loadData(); // Reload data
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to create department');
+      console.error('Error creating department:', err);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleUpdateDept = async () => {
-    if (!selectedDepartment) return; setIsSubmitting(true); await new Promise(r => setTimeout(r, 1000));
-    setDepartments(prev => prev.map(d => d.id === selectedDepartment.id ? { ...d, ...deptForm } : d));
-    toast.success(`Department "${deptForm.name}" updated`); setIsEditDialogOpen(false); setSelectedDepartment(null); resetDeptForm(); setIsSubmitting(false);
+    if (!selectedDepartment) return;
+    setIsSubmitting(true);
+    
+    try {
+      const deptId = parseInt(selectedDepartment.id);
+      await adminService.updateDepartment(deptId, {
+        code: deptForm.code,
+        name: deptForm.name,
+        description: deptForm.description,
+        is_active: deptForm.isActive,
+      });
+      
+      toast.success(`Department "${deptForm.name}" updated`);
+      setIsEditDialogOpen(false);
+      setSelectedDepartment(null);
+      resetDeptForm();
+      await loadData(); // Reload data
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to update department');
+      console.error('Error updating department:', err);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleDeleteDept = async () => {
-    if (!selectedDepartment) return; setIsSubmitting(true); await new Promise(r => setTimeout(r, 1000));
-    setDepartments(prev => prev.filter(d => d.id !== selectedDepartment.id)); toast.success(`Department "${selectedDepartment.name}" deleted`); setIsDeleteDialogOpen(false); setSelectedDepartment(null); setIsSubmitting(false);
+    if (!selectedDepartment) return;
+    setIsSubmitting(true);
+    
+    try {
+      const deptId = parseInt(selectedDepartment.id);
+      await adminService.deleteDepartment(deptId);
+      toast.success(`Department "${selectedDepartment.name}" deleted`);
+      setIsDeleteDialogOpen(false);
+      setSelectedDepartment(null);
+      await loadData(); // Reload data
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to delete department');
+      console.error('Error deleting department:', err);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const toggleClinicStatus = (c: Clinic) => {
@@ -208,8 +382,16 @@ export default function ClinicDepartmentPage() {
           </div></CardContent></Card>
 
           <TabsContent value="clinics">
-            <div className="space-y-3 mt-4">
-              {paginatedClinics.map(clinic => (
+            {loading ? (
+              <Card className="mt-4">
+                <CardContent className="p-8 text-center text-muted-foreground">
+                  <Loader2 className="h-8 w-8 mx-auto mb-2 animate-spin" />
+                  <p>Loading clinics...</p>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="space-y-3 mt-4">
+                {paginatedClinics.map(clinic => (
                 <Card key={clinic.id} className={`border-l-4 hover:shadow-md transition-shadow ${clinic.isActive ? 'border-l-teal-500' : 'border-l-gray-500'} ${!clinic.isActive ? 'opacity-60' : ''}`}>
                   <CardContent className="py-3 px-4">
                     <div className="flex items-center gap-3">
@@ -262,9 +444,10 @@ export default function ClinicDepartmentPage() {
                     </div>
                   </CardContent>
                 </Card>
-              ))}
-            </div>
-            {filteredClinics.length === 0 && (
+                ))}
+              </div>
+            )}
+            {!loading && filteredClinics.length === 0 && (
               <Card className="mt-4"><CardContent className="p-8 text-center text-muted-foreground">
                 <Building2 className="h-12 w-12 mx-auto mb-4 opacity-50" />
                 <p>No clinics found</p>
@@ -280,8 +463,16 @@ export default function ClinicDepartmentPage() {
           </TabsContent>
 
           <TabsContent value="departments">
-            <div className="space-y-3 mt-4">
-              {paginatedDepartments.map(dept => (
+            {loading ? (
+              <Card className="mt-4">
+                <CardContent className="p-8 text-center text-muted-foreground">
+                  <Loader2 className="h-8 w-8 mx-auto mb-2 animate-spin" />
+                  <p>Loading departments...</p>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="space-y-3 mt-4">
+                {paginatedDepartments.map(dept => (
                 <Card key={dept.id} className={`border-l-4 hover:shadow-md transition-shadow ${dept.isActive ? 'border-l-blue-500' : 'border-l-gray-500'} ${!dept.isActive ? 'opacity-60' : ''}`}>
                   <CardContent className="py-3 px-4">
                     <div className="flex items-center gap-3">
@@ -326,9 +517,10 @@ export default function ClinicDepartmentPage() {
                     </div>
                   </CardContent>
                 </Card>
-              ))}
-            </div>
-            {filteredDepartments.length === 0 && (
+                ))}
+              </div>
+            )}
+            {!loading && filteredDepartments.length === 0 && (
               <Card className="mt-4"><CardContent className="p-8 text-center text-muted-foreground">
                 <Activity className="h-12 w-12 mx-auto mb-4 opacity-50" />
                 <p>No departments found</p>

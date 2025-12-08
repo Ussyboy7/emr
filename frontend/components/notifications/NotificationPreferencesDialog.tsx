@@ -59,7 +59,6 @@ export const NotificationPreferencesDialog = ({
           emailDigest: false,
           emailDigestTime: '09:00',
           moduleDms: true,
-          moduleCorrespondence: true,
           moduleWorkflow: true,
           moduleSystem: true,
           priorityLow: true,
@@ -68,7 +67,6 @@ export const NotificationPreferencesDialog = ({
           priorityUrgent: true,
           typeWorkflow: true,
           typeDocument: true,
-          typeCorrespondence: true,
           typeSystem: true,
           typeAlert: true,
           typeReminder: true,
@@ -212,14 +210,6 @@ export const NotificationPreferencesDialog = ({
                   id="module-dms"
                   checked={preferences.moduleDms}
                   onCheckedChange={(checked) => updatePreference('moduleDms', checked)}
-                />
-              </div>
-              <div className="flex items-center justify-between">
-                <Label htmlFor="module-correspondence">Correspondence</Label>
-                <Switch
-                  id="module-correspondence"
-                  checked={preferences.moduleCorrespondence}
-                  onCheckedChange={(checked) => updatePreference('moduleCorrespondence', checked)}
                 />
               </div>
               <div className="flex items-center justify-between">

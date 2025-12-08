@@ -53,13 +53,14 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarRail,
   useSidebar,
 } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { NPA_LOGO_URL, NPA_EMR_TITLE } from "@/lib/branding";
 import { Badge } from "@/components/ui/badge";
-import { TooltipProvider } from "@/components/ui/tooltip";
+import { TooltipProvider, Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 // Types for menu structure
@@ -245,19 +246,47 @@ export function AppSidebar() {
   return (
     <TooltipProvider delayDuration={0}>
       <Sidebar collapsible="icon" className="border-r border-sidebar-border bg-sidebar">
-        <SidebarHeader className="border-b border-sidebar-border">
-          <div className="flex items-center justify-between w-full py-2">
-            <Link href="/dashboard" className="flex items-center gap-3">
-              <div className="relative h-10 w-10 overflow-hidden rounded-xl bg-white/10 ring-1 ring-white/20 flex-shrink-0">
-                <Image src={NPA_LOGO_URL} alt="NPA crest" fill className="object-contain p-1" sizes="40px" priority />
+        <SidebarRail />
+        <SidebarHeader className="border-b border-sidebar-border px-2 py-3">
+          <div className={`flex items-center w-full min-w-0 ${isCollapsed ? 'flex-col gap-2' : 'justify-between'}`}>
+            <Link 
+              href="/dashboard" 
+              className="flex items-center gap-2.5 min-w-0 group"
+            >
+              <div className="relative h-9 w-9 flex-shrink-0 overflow-hidden rounded-lg shadow-md ring-1 ring-sidebar-primary/20 bg-white transition-transform group-hover:scale-105">
+                <Image
+                  src={NPA_LOGO_URL}
+                  alt="NPA crest"
+                  fill
+                  className="object-contain p-0.5"
+                  sizes="36px"
+                  priority
+                />
               </div>
-              {!isCollapsed && <span className="text-lg font-bold text-sidebar-foreground">{NPA_EMR_TITLE}</span>}
+              {!isCollapsed && (
+                <div className="flex flex-col min-w-0">
+                  <span className="text-sm font-bold tracking-tight text-sidebar-foreground truncate">
+                    {NPA_EMR_TITLE}
+                  </span>
+                </div>
+              )}
             </Link>
-            {!isCollapsed && (
-              <Button variant="ghost" size="icon" onClick={toggleSidebar} className="h-8 w-8 text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent flex-shrink-0">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={toggleSidebar}
+              className={`text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground ${
+                isCollapsed ? 'h-6 w-6' : 'h-7 w-7'
+              }`}
+              title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            >
+              {isCollapsed ? (
+                <ChevronRight className="h-3.5 w-3.5" />
+              ) : (
                 <ChevronLeft className="h-4 w-4" />
-              </Button>
-            )}
+              )}
+              <span className="sr-only">Toggle Sidebar</span>
+            </Button>
           </div>
         </SidebarHeader>
 
@@ -354,20 +383,6 @@ export function AppSidebar() {
             </SidebarGroupContent>
           </SidebarGroup>
 
-          {/* Expand button at bottom when collapsed */}
-          {isCollapsed && (
-            <SidebarGroup className="mt-auto">
-              <SidebarGroupContent>
-                <SidebarMenu>
-                  <SidebarMenuItem>
-                    <SidebarMenuButton onClick={toggleSidebar} tooltip="Expand Sidebar" className="text-sidebar-foreground/80 hover:text-sidebar-foreground hover:bg-sidebar-accent">
-                      <ChevronRight className="h-4 w-4" />
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                </SidebarMenu>
-              </SidebarGroupContent>
-            </SidebarGroup>
-          )}
         </SidebarContent>
       </Sidebar>
     </TooltipProvider>

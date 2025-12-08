@@ -279,22 +279,6 @@ const mapApiDepartment = (item: any): Department => ({
   isActive: item.is_active ?? true,
 });
 
-const mapApiDelegation = (item: any): AssistantAssignment => {
-  const permissions: string[] = [];
-  if (item.can_minute) permissions.push('minute');
-  if (item.can_forward) permissions.push('forward');
-  if (item.can_approve) permissions.push('approve');
-
-  return {
-    id: String(item.id),
-    executiveId: item.principal_id ?? item.principal?.id ?? '',
-    assistantId: item.assistant_id ?? item.assistant?.id ?? '',
-    type: item.can_approve ? 'TA' : 'PA',
-    specialization: undefined,
-    permissions: permissions.length > 0 ? permissions : ['view'],
-  };
-};
-
 const mapApiRole = (item: any): Role => ({
   id: String(item.id),
   name: item.name ?? 'Role',
@@ -495,7 +479,6 @@ export const OrganizationProvider: React.FC<{ children: ReactNode }> = ({ childr
         directoratesRaw,
         divisionsRaw,
         departmentsRaw,
-        delegationsRaw,
         rolesRaw,
         officesRaw,
         officeMembershipsRaw,
@@ -504,7 +487,6 @@ export const OrganizationProvider: React.FC<{ children: ReactNode }> = ({ childr
         safeApiFetch('/organization/directorates/?ordering=name&page_size=500'),
         safeApiFetch('/organization/divisions/?ordering=name&page_size=500'),
         safeApiFetch('/organization/departments/?ordering=name&page_size=500'),
-        safeApiFetch('/correspondence/delegations/'),
         safeApiFetch('/organization/roles/?ordering=name'),
         safeApiFetch('/organization/offices/?ordering=name&page_size=500'),
         safeApiFetch('/organization/office-memberships/?ordering=office__name&page_size=500'),
@@ -520,7 +502,6 @@ export const OrganizationProvider: React.FC<{ children: ReactNode }> = ({ childr
       const apiDirectorates = unwrapResults<any>(directoratesRaw).map(mapApiDirectorate);
       const apiDivisions = unwrapResults<any>(divisionsRaw).map(mapApiDivision);
       const apiDepartments = unwrapResults<any>(departmentsRaw).map(mapApiDepartment);
-      const apiDelegations = unwrapResults<any>(delegationsRaw).map(mapApiDelegation);
       const apiRoles = unwrapResults<any>(rolesRaw).map(mapApiRole);
       const apiOffices = unwrapResults<any>(officesRaw).map(mapApiOffice);
       const apiOfficeMemberships = unwrapResults<any>(officeMembershipsRaw).map(mapApiOfficeMembership);
@@ -533,7 +514,8 @@ export const OrganizationProvider: React.FC<{ children: ReactNode }> = ({ childr
       setDirectorates(sortedDirectorates);
       setDivisions(sortedDivisions);
       setDepartments(sortedDepartments);
-      setAssistantAssignments(apiDelegations);
+      // Assistant assignments/delegations are not part of EMR - keeping empty for now
+      setAssistantAssignments([]);
       const sortedOffices = sortByName(apiOffices);
       setOffices(sortedOffices);
       setOfficeMemberships(apiOfficeMemberships);
@@ -784,60 +766,23 @@ export const OrganizationProvider: React.FC<{ children: ReactNode }> = ({ childr
     []
   );
 
-  const buildDelegationPayload = (assignment: Omit<AssistantAssignment, 'id'> | Partial<AssistantAssignment>) => {
-    const permissions = ('permissions' in assignment && assignment.permissions) ? assignment.permissions : [];
-    const type = 'type' in assignment ? assignment.type : undefined;
-    
-    // Determine can_approve from type or permissions
-    const canApprove = type === 'TA' || (Array.isArray(permissions) && permissions.includes('approve'));
-    const canMinute = Array.isArray(permissions) && (permissions.includes('minute') || permissions.includes('view'));
-    const canForward = Array.isArray(permissions) && (permissions.includes('forward') || permissions.includes('view'));
-
-    return cleanPayload({
-      principal_id: 'executiveId' in assignment ? assignment.executiveId : undefined,
-      assistant_id: 'assistantId' in assignment ? assignment.assistantId : undefined,
-      can_approve: canApprove,
-      can_minute: canMinute,
-      can_forward: canForward,
-      active: 'permissions' in assignment ? true : undefined, // Default to active for new assignments
-    });
-  };
 
   const addAssignment = async (assignment: Omit<AssistantAssignment, 'id'>) => {
-    const payload = buildDelegationPayload(assignment);
-    const response = await apiFetch('/correspondence/delegations/', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    });
-    const created = mapApiDelegation(response);
-    applyAssignmentUpdate(created);
-    return created;
+    // ECM feature - not implemented in EMR
+    logInfo('Assistant assignments are not available in EMR module');
+    throw new Error('Assistant assignments are not available in EMR module');
   };
 
   const updateAssignment = async (id: string, updates: Partial<AssistantAssignment>) => {
-    const existing = assistantAssignments.find((a) => a.id === id);
-    if (!existing) {
-      throw new Error('Assignment not found');
-    }
-
-    const merged = { ...existing, ...updates };
-    const payload = buildDelegationPayload(merged);
-    
-    const response = await apiFetch(`/correspondence/delegations/${id}/`, {
-      method: 'PATCH',
-      body: JSON.stringify(payload),
-    });
-    const updated = mapApiDelegation(response);
-    applyAssignmentUpdate(updated);
-    return updated;
+    // ECM feature - not implemented in EMR
+    logInfo('Assistant assignments are not available in EMR module');
+    throw new Error('Assistant assignments are not available in EMR module');
   };
 
   const deleteAssignment = async (id: string) => {
-    // Soft delete by setting active to false, or hard delete
-    await apiFetch(`/correspondence/delegations/${id}/`, {
-      method: 'DELETE',
-    });
-    setAssistantAssignments((prev) => prev.filter((assign) => assign.id !== id));
+    // ECM feature - not implemented in EMR
+    logInfo('Assistant assignments are not available in EMR module');
+    throw new Error('Assistant assignments are not available in EMR module');
   };
 
   const addRole = async (role: CreateRoleInput): Promise<Role> => {
