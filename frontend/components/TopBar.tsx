@@ -26,19 +26,25 @@ export const TopBar = () => {
   const router = useRouter();
   const { currentUser, hydrated } = useCurrentUser();
   const [authenticated, setAuthenticated] = useState(false);
-  const [currentTime, setCurrentTime] = useState(new Date());
+  const [currentTime, setCurrentTime] = useState<Date | null>(null);
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     setAuthenticated(hasTokens());
+    setMounted(true);
+    // Set initial time only on client
+    setCurrentTime(new Date());
   }, []);
 
   // Update time every minute
   useEffect(() => {
+    if (!mounted) return;
+    
     const timer = setInterval(() => {
       setCurrentTime(new Date());
     }, 60000);
     return () => clearInterval(timer);
-  }, []);
+  }, [mounted]);
 
   const handleLogout = async () => {
     await logout();
@@ -105,12 +111,16 @@ export const TopBar = () => {
         <div className="hidden md:flex items-center gap-3 text-xs text-sidebar-foreground/70">
           <div className="flex items-center gap-1.5">
             <Clock className="h-3.5 w-3.5" />
-            <span className="font-medium tabular-nums text-sidebar-foreground">{formatTime(currentTime)}</span>
+            <span className="font-medium tabular-nums text-sidebar-foreground" suppressHydrationWarning>
+              {currentTime ? formatTime(currentTime) : '--:-- --'}
+            </span>
           </div>
           <div className="h-4 w-px bg-sidebar-border" />
           <div className="flex items-center gap-1.5">
             <Calendar className="h-3.5 w-3.5" />
-            <span>{formatDate(currentTime)}</span>
+            <span suppressHydrationWarning>
+              {currentTime ? formatDate(currentTime) : '-- -- --'}
+            </span>
           </div>
         </div>
 

@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { apiFetch } from '@/lib/api-client';
-import { roomService } from '@/lib/services';
+import { roomService, patientService } from '@/lib/services';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { 
@@ -76,49 +76,163 @@ export default function RoomQueuePage() {
         
         // Load rooms
         const roomsResult = await roomService.getRooms({ page_size: 1000 });
-        const transformedRooms: ConsultationRoom[] = roomsResult.results.map((room: any) => ({
-          id: String(room.id),
-          name: room.name,
-          status: 'available' as const, // Default status, could be enhanced
-          doctor: undefined,
-          specialty: room.specialty || '',
-          currentPatient: undefined,
-          consultationsToday: 0,
-        }));
+        
+        // Load active consultation sessions to determine room status and current patients
+        let activeSessions: any[] = [];
+        try {
+          const sessionsResult = await apiFetch<{ results: any[] }>('/consultation/sessions/?status=active&page_size=1000');
+          activeSessions = sessionsResult.results || [];
+        } catch (sessionErr) {
+          console.warn('Could not load active sessions:', sessionErr);
+        }
+        
+        // Count consultations today per room
+        let todaySessions: any[] = [];
+        try {
+          const today = new Date().toISOString().split('T')[0];
+          const todaySessionsResult = await apiFetch<{ results: any[] }>(`/consultation/sessions/?started_at__date=${today}&page_size=1000`);
+          todaySessions = todaySessionsResult.results || [];
+        } catch (todayErr) {
+          console.warn('Could not load today sessions:', todayErr);
+        }
+        
+        // Group sessions by room
+        const sessionsByRoom: Record<string, any[]> = {};
+        activeSessions.forEach((session: any) => {
+          const roomId = String(session.room);
+          if (!sessionsByRoom[roomId]) {
+            sessionsByRoom[roomId] = [];
+          }
+          sessionsByRoom[roomId].push(session);
+        });
+        
+        // Count today's sessions per room
+        const todayCountByRoom: Record<string, number> = {};
+        todaySessions.forEach((session: any) => {
+          const roomId = String(session.room);
+          todayCountByRoom[roomId] = (todayCountByRoom[roomId] || 0) + 1;
+        });
+        
+        const transformedRooms: ConsultationRoom[] = roomsResult.results.map((room: any) => {
+          const roomId = String(room.id);
+          const activeSession = sessionsByRoom[roomId]?.[0];
+          const isOccupied = !!activeSession;
+          
+          return {
+            id: roomId,
+            name: room.name,
+            status: isOccupied ? 'occupied' as const : (room.status?.toLowerCase() === 'active' ? 'available' as const : 'paused' as const),
+            doctor: activeSession?.doctor_name || room.assigned_doctor || undefined,
+            specialty: room.specialty || '',
+            currentPatient: activeSession ? {
+              id: String(activeSession.patient),
+              name: activeSession.patient_name || '',
+              patientId: String(activeSession.patient),
+              personalNumber: '',
+              priority: 'Medium' as const,
+              waitTime: 0,
+              sentAt: activeSession.started_at,
+              sentBy: 'System',
+              clinic: room.specialty || '',
+              visitType: 'Consultation',
+              roomId: roomId,
+            } : undefined,
+            consultationsToday: todayCountByRoom[roomId] || 0,
+          };
+        });
         setRooms(transformedRooms);
         
         // Load queue items
         const queueResult = await apiFetch<{ results: any[] }>('/consultation/queue/?is_active=true&page_size=1000');
         const queueItems = queueResult.results || [];
         
+        // Create a map of rooms by ID for quick lookup
+        const roomsMap = new Map(roomsResult.results.map((room: any) => [String(room.id), room]));
+        
         // Transform queue items to patients
         const transformedPatients = await Promise.all(queueItems.map(async (item: any) => {
           try {
-            // Get patient details (we'd need to fetch from patient service)
-            // For now, use the patient_name from serializer
+            // Extract patient ID from queue item
+            const patientId = typeof item.patient === 'number' ? item.patient : parseInt(String(item.patient || ''));
+            
+            if (isNaN(patientId) || patientId <= 0) {
+              console.warn(`Invalid patient ID in queue item ${item.id}:`, item.patient);
+              return null;
+            }
+            
+            // Fetch patient details
+            let patient;
+            try {
+              patient = await patientService.getPatient(patientId);
+            } catch (patientErr) {
+              console.error(`Error fetching patient ${patientId} for queue item ${item.id}:`, patientErr);
+              // Continue with basic info from queue item
+              patient = null;
+            }
+            
             const queuedAt = new Date(item.queued_at);
             const waitTime = Math.floor((Date.now() - queuedAt.getTime()) / (1000 * 60));
             
-            // Map backend priority to frontend priority
-            const priorityMap: Record<string, QueuedPatient['priority']> = {
-              'urgent': 'Emergency',
-              'high': 'High',
-              'medium': 'Medium',
-              'low': 'Low',
+            // Map backend priority (integer) to frontend priority
+            // Backend uses: 0 = highest, 1 = high, 2 = medium, 3 = low
+            const getPriority = (priorityNum: number): QueuedPatient['priority'] => {
+              if (priorityNum === 0) return 'Emergency';
+              if (priorityNum === 1) return 'High';
+              if (priorityNum === 2) return 'Medium';
+              return 'Low';
             };
+            
+            // Get visit type and vitals if available
+            let visitType = 'Consultation';
+            let vitals: QueuedPatient['vitals'] = undefined;
+            if (item.visit) {
+              try {
+                const visitId = typeof item.visit === 'number' ? item.visit : parseInt(String(item.visit));
+                const visit = await apiFetch(`/visits/${visitId}/`);
+                visitType = visit.visit_type || 'Consultation';
+                
+                // Fetch vitals for this visit
+                try {
+                  const vitalsResult = await apiFetch<{ results: any[] }>(`/vitals/?visit=${visitId}&page_size=1`);
+                  const latestVitals = vitalsResult.results?.[0];
+                  if (latestVitals) {
+                    vitals = {
+                      bp: latestVitals.blood_pressure || latestVitals.systolic_bp && latestVitals.diastolic_bp 
+                        ? `${latestVitals.systolic_bp}/${latestVitals.diastolic_bp}` 
+                        : 'N/A',
+                      pulse: latestVitals.pulse_rate ? String(latestVitals.pulse_rate) : 'N/A',
+                      temp: latestVitals.temperature ? `${latestVitals.temperature}°C` : 'N/A',
+                    };
+                  }
+                } catch (vitalsErr) {
+                  console.warn(`Could not load vitals for visit ${visitId}:`, vitalsErr);
+                }
+              } catch (visitErr) {
+                console.warn(`Could not load visit ${item.visit} for queue item ${item.id}:`, visitErr);
+              }
+            }
+            
+            // Get room specialty for clinic
+            const room = roomsMap.get(String(item.room));
+            const clinic = room?.specialty || '';
             
             return {
               id: String(item.id),
-              name: item.patient_name || `Patient ${item.patient}`,
-              patientId: String(item.patient), // Will need patient_id from patient fetch
-              personalNumber: '',
-              priority: priorityMap[item.priority] || 'Medium',
+              name: patient 
+                ? (patient.full_name || `${patient.first_name} ${patient.surname}`)
+                : (item.patient_name || `Patient ${item.patient}`),
+              patientId: patient?.patient_id || String(patientId),
+              personalNumber: patient?.personal_number || '',
+              priority: getPriority(typeof item.priority === 'number' ? item.priority : parseInt(item.priority) || 2),
               waitTime: waitTime > 0 ? waitTime : 0,
               sentAt: item.queued_at,
               sentBy: 'Nursing',
-              clinic: '',
-              visitType: 'Consultation',
+              clinic,
+              visitType,
               roomId: String(item.room),
+              age: patient?.age,
+              gender: patient?.gender,
+              vitals,
             } as QueuedPatient;
           } catch (err) {
             console.error(`Error transforming queue item ${item.id}:`, err);
@@ -188,36 +302,98 @@ export default function RoomQueuePage() {
   const handleRefresh = async () => {
     setIsRefreshing(true);
     try {
-      // Reload queue data (same logic as useEffect)
+      // Reload rooms to get updated room data
+      const roomsResult = await roomService.getRooms({ page_size: 1000 });
+      const roomsMap = new Map(roomsResult.results.map((room: any) => [String(room.id), room]));
+      
+      // Reload queue data
       const queueResult = await apiFetch<{ results: any[] }>('/consultation/queue/?is_active=true&page_size=1000');
       const queueItems = queueResult.results || [];
       
       const transformedPatients = await Promise.all(queueItems.map(async (item: any) => {
         try {
+          // Extract patient ID from queue item
+          const patientId = typeof item.patient === 'number' ? item.patient : parseInt(String(item.patient || ''));
+          
+          if (isNaN(patientId) || patientId <= 0) {
+            console.warn(`Invalid patient ID in queue item ${item.id}:`, item.patient);
+            return null;
+          }
+          
+          // Fetch patient details
+          let patient;
+          try {
+            patient = await patientService.getPatient(patientId);
+          } catch (patientErr) {
+            console.error(`Error fetching patient ${patientId} for queue item ${item.id}:`, patientErr);
+            patient = null;
+          }
+          
           const queuedAt = new Date(item.queued_at);
           const waitTime = Math.floor((Date.now() - queuedAt.getTime()) / (1000 * 60));
           
-          const priorityMap: Record<string, QueuedPatient['priority']> = {
-            'urgent': 'Emergency',
-            'high': 'High',
-            'medium': 'Medium',
-            'low': 'Low',
+          // Map backend priority (integer) to frontend priority
+          const getPriority = (priorityNum: number): QueuedPatient['priority'] => {
+            if (priorityNum === 0) return 'Emergency';
+            if (priorityNum === 1) return 'High';
+            if (priorityNum === 2) return 'Medium';
+            return 'Low';
           };
+          
+          // Get visit type and vitals if available
+          let visitType = 'Consultation';
+          let vitals: QueuedPatient['vitals'] = undefined;
+          if (item.visit) {
+            try {
+              const visitId = typeof item.visit === 'number' ? item.visit : parseInt(String(item.visit));
+              const visit = await apiFetch(`/visits/${visitId}/`);
+              visitType = visit.visit_type || 'Consultation';
+              
+              // Fetch vitals for this visit
+              try {
+                const vitalsResult = await apiFetch<{ results: any[] }>(`/vitals/?visit=${visitId}&page_size=1`);
+                const latestVitals = vitalsResult.results?.[0];
+                if (latestVitals) {
+                  vitals = {
+                    bp: latestVitals.blood_pressure || latestVitals.systolic_bp && latestVitals.diastolic_bp 
+                      ? `${latestVitals.systolic_bp}/${latestVitals.diastolic_bp}` 
+                      : 'N/A',
+                    pulse: latestVitals.pulse_rate ? String(latestVitals.pulse_rate) : 'N/A',
+                    temp: latestVitals.temperature ? `${latestVitals.temperature}°C` : 'N/A',
+                  };
+                }
+              } catch (vitalsErr) {
+                // Ignore vitals fetch errors
+              }
+            } catch (visitErr) {
+              // Ignore visit fetch errors
+            }
+          }
+          
+          // Get room specialty for clinic
+          const room = roomsMap.get(String(item.room));
+          const clinic = room?.specialty || '';
           
           return {
             id: String(item.id),
-            name: item.patient_name || `Patient ${item.patient}`,
-            patientId: String(item.patient),
-            personalNumber: '',
-            priority: priorityMap[item.priority] || 'Medium',
+            name: patient 
+              ? (patient.full_name || `${patient.first_name} ${patient.surname}`)
+              : (item.patient_name || `Patient ${item.patient}`),
+            patientId: patient?.patient_id || String(patientId),
+            personalNumber: patient?.personal_number || '',
+            priority: getPriority(typeof item.priority === 'number' ? item.priority : parseInt(item.priority) || 2),
             waitTime: waitTime > 0 ? waitTime : 0,
             sentAt: item.queued_at,
             sentBy: 'Nursing',
-            clinic: '',
-            visitType: 'Consultation',
+            clinic,
+            visitType,
             roomId: String(item.room),
+            age: patient?.age,
+            gender: patient?.gender,
+            vitals,
           } as QueuedPatient;
         } catch (err) {
+          console.error(`Error transforming queue item ${item.id}:`, err);
           return null;
         }
       }));
@@ -252,14 +428,31 @@ export default function RoomQueuePage() {
       const queueItemId = parseInt(selectedPatient.id);
       if (isNaN(queueItemId)) {
         toast.error('Invalid queue item ID');
+        setIsSubmitting(false);
         return;
       }
       
-      // Update queue item to assign to new room
-      await apiFetch(`/consultation/queue/${queueItemId}/`, {
-        method: 'PATCH',
-        body: JSON.stringify({ room: parseInt(selectedNewRoom) }),
+      const newRoomId = parseInt(selectedNewRoom);
+      if (isNaN(newRoomId)) {
+        toast.error('Invalid room ID');
+        setIsSubmitting(false);
+        return;
+      }
+      
+      console.log('Reassigning patient:', {
+        queueItemId,
+        fromRoom: selectedPatient.roomId,
+        toRoom: selectedNewRoom,
+        newRoomId
       });
+      
+      // Update queue item to assign to new room
+      const response = await apiFetch(`/consultation/queue/${queueItemId}/`, {
+        method: 'PATCH',
+        body: JSON.stringify({ room: newRoomId }),
+      });
+      
+      console.log('Reassign response:', response);
       
       const oldRoom = rooms.find(r => r.id === selectedPatient.roomId);
       const newRoom = rooms.find(r => r.id === selectedNewRoom);
@@ -275,9 +468,32 @@ export default function RoomQueuePage() {
       
       // Refresh queue data
       await handleRefresh();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error reassigning patient:', err);
-      toast.error('Failed to reassign patient. Please try again.');
+      
+      // Extract error message
+      let errorMessage = 'Failed to reassign patient. Please try again.';
+      if (err?.message) {
+        errorMessage = err.message;
+      } else if (typeof err === 'string') {
+        errorMessage = err;
+      } else if (err?.response?.data) {
+        const errorData = err.response.data;
+        if (typeof errorData === 'string') {
+          errorMessage = errorData;
+        } else if (errorData.detail) {
+          errorMessage = errorData.detail;
+        } else if (errorData.non_field_errors) {
+          errorMessage = errorData.non_field_errors[0];
+        } else {
+          const fieldErrors = Object.entries(errorData)
+            .map(([field, errors]: [string, any]) => `${field}: ${Array.isArray(errors) ? errors.join(', ') : errors}`)
+            .join('; ');
+          errorMessage = fieldErrors || errorMessage;
+        }
+      }
+      
+      toast.error(errorMessage);
     } finally {
       setIsSubmitting(false);
     }
@@ -305,28 +521,117 @@ export default function RoomQueuePage() {
     }
   };
 
-  const movePatientInQueue = (patientId: string, direction: 'up' | 'down') => {
+  const movePatientInQueue = async (patientId: string, direction: 'up' | 'down') => {
     const patient = patients.find(p => p.id === patientId);
-    if (!patient) return;
+    if (!patient) {
+      toast.error('Patient not found');
+      return;
+    }
 
+    // Get all patients in the same room, sorted by current order (priority then waitTime)
     const roomPatients = patients.filter(p => p.roomId === patient.roomId)
-      .sort((a, b) => a.waitTime - b.waitTime);
+      .sort((a, b) => {
+        const priorityOrder = { 'Emergency': 0, 'High': 1, 'Medium': 2, 'Low': 3 };
+        const prioDiff = priorityOrder[a.priority] - priorityOrder[b.priority];
+        if (prioDiff !== 0) return prioDiff;
+        return a.waitTime - b.waitTime;
+      });
+    
     const index = roomPatients.findIndex(p => p.id === patientId);
     
-    if (direction === 'up' && index === 0) return;
-    if (direction === 'down' && index === roomPatients.length - 1) return;
+    if (direction === 'up' && index === 0) {
+      toast.info('Patient is already at the top of the queue');
+      return;
+    }
+    if (direction === 'down' && index === roomPatients.length - 1) {
+      toast.info('Patient is already at the bottom of the queue');
+      return;
+    }
 
-    // Swap wait times to change order
     const swapIndex = direction === 'up' ? index - 1 : index + 1;
-    const temp = roomPatients[index].waitTime;
+    const swapPatient = roomPatients[swapIndex];
     
-    setPatients(prev => prev.map(p => {
-      if (p.id === roomPatients[index].id) return { ...p, waitTime: roomPatients[swapIndex].waitTime };
-      if (p.id === roomPatients[swapIndex].id) return { ...p, waitTime: temp };
-      return p;
-    }));
-
-    toast.success('Queue order updated');
+    const queueItemId = parseInt(patient.id);
+    const swapQueueItemId = parseInt(swapPatient.id);
+    
+    if (isNaN(queueItemId) || isNaN(swapQueueItemId)) {
+      toast.error('Invalid queue item IDs');
+      return;
+    }
+    
+    try {
+      // Fetch current queue items to get their actual data
+      const [currentItem, swapItem] = await Promise.all([
+        apiFetch(`/consultation/queue/${queueItemId}/`),
+        apiFetch(`/consultation/queue/${swapQueueItemId}/`),
+      ]);
+      
+      console.log('Moving patient in queue:', {
+        direction,
+        currentPatient: patient.name,
+        swapPatient: swapPatient.name,
+        currentPriority: currentItem.priority,
+        swapPriority: swapItem.priority,
+        currentQueuedAt: currentItem.queued_at,
+        swapQueuedAt: swapItem.queued_at,
+      });
+      
+      const currentPriority = currentItem.priority;
+      const swapPriority = swapItem.priority;
+      const currentQueuedAt = new Date(currentItem.queued_at);
+      const swapQueuedAt = new Date(swapItem.queued_at);
+      
+      // Swap both priority and queued_at to ensure proper reordering
+      // If priorities are the same, swapping queued_at will change order
+      // If priorities are different, swapping priorities will change order
+      await Promise.all([
+        apiFetch(`/consultation/queue/${queueItemId}/`, {
+          method: 'PATCH',
+          body: JSON.stringify({ 
+            priority: swapPriority,
+            queued_at: swapQueuedAt.toISOString(),
+          }),
+        }),
+        apiFetch(`/consultation/queue/${swapQueueItemId}/`, {
+          method: 'PATCH',
+          body: JSON.stringify({ 
+            priority: currentPriority,
+            queued_at: currentQueuedAt.toISOString(),
+          }),
+        }),
+      ]);
+      
+      // Refresh queue data to show updated order
+      await handleRefresh();
+      
+      toast.success(`Patient ${direction === 'up' ? 'moved up' : 'moved down'} in queue`);
+    } catch (err: any) {
+      console.error('Error moving patient in queue:', err);
+      
+      // Extract error message
+      let errorMessage = 'Failed to update queue order. Please try again.';
+      if (err?.message) {
+        errorMessage = err.message;
+      } else if (typeof err === 'string') {
+        errorMessage = err;
+      } else if (err?.response?.data) {
+        const errorData = err.response.data;
+        if (typeof errorData === 'string') {
+          errorMessage = errorData;
+        } else if (errorData.detail) {
+          errorMessage = errorData.detail;
+        } else if (errorData.non_field_errors) {
+          errorMessage = errorData.non_field_errors[0];
+        } else {
+          const fieldErrors = Object.entries(errorData)
+            .map(([field, errors]: [string, any]) => `${field}: ${Array.isArray(errors) ? errors.join(', ') : errors}`)
+            .join('; ');
+          errorMessage = fieldErrors || errorMessage;
+        }
+      }
+      
+      toast.error(errorMessage);
+    }
   };
 
   const getPriorityColor = (priority: string) => {
@@ -347,6 +652,38 @@ export default function RoomQueuePage() {
       default: return 'text-gray-600 bg-gray-500/10';
     }
   };
+
+  if (loading) {
+    return (
+      <DashboardLayout>
+        <div className="container mx-auto p-6">
+          <div className="flex items-center justify-center h-[60vh]">
+            <div className="text-center">
+              <Loader2 className="h-8 w-8 animate-spin text-emerald-500 mx-auto mb-4" />
+              <p className="text-muted-foreground">Loading consultation room queue...</p>
+            </div>
+          </div>
+        </div>
+      </DashboardLayout>
+    );
+  }
+
+  if (error) {
+    return (
+      <DashboardLayout>
+        <div className="container mx-auto p-6">
+          <div className="flex items-center justify-center h-[60vh]">
+            <div className="text-center">
+              <AlertTriangle className="h-12 w-12 text-destructive mx-auto mb-4" />
+              <h3 className="text-lg font-semibold mb-2">Error loading queue</h3>
+              <p className="text-muted-foreground mb-4">{error}</p>
+              <Button onClick={() => window.location.reload()}>Retry</Button>
+            </div>
+          </div>
+        </div>
+      </DashboardLayout>
+    );
+  }
 
   return (
     <DashboardLayout>

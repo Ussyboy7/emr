@@ -28,6 +28,11 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
+import { roomService } from '@/lib/services';
+import { apiFetch } from '@/lib/api-client';
+import { patientService } from '@/lib/services';
+import { useAuthRedirect } from '@/hooks/use-auth-redirect';
+import { isAuthenticationError } from '@/lib/auth-errors';
 
 // Types
 interface Patient {
@@ -109,27 +114,299 @@ const StartConsultation = () => {
   const [consultationRooms, setConsultationRooms] = useState<ConsultationRoom[]>([]);
   const [loadingRooms, setLoadingRooms] = useState<boolean>(true);
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [authError, setAuthError] = useState<unknown | null>(null);
+  useAuthRedirect(authError);
 
-  // Load demo rooms
+  // Load rooms and queue from API
   useEffect(() => {
-    setLoadingRooms(true);
-    // TODO: Load consultation rooms from API
-    setConsultationRooms([]);
-    setLoadingRooms(false);
+    const loadRooms = async () => {
+      try {
+        setLoadingRooms(true);
+        setError(null);
+        
+        // Load rooms
+        const roomsResult = await roomService.getRooms({ page_size: 1000 });
+        
+        // Load queue items to get patient counts per room
+        const queueResult = await apiFetch<{ results: any[] }>('/consultation/queue/?is_active=true&page_size=1000');
+        const queueItems = queueResult.results || [];
+        
+        console.log('Loaded queue items:', queueItems.length);
+        console.log('Queue items sample:', queueItems.slice(0, 3));
+        
+        // Group queue items by room
+        const queueByRoom: Record<string, any[]> = {};
+        queueItems.forEach((item: any) => {
+          const roomId = String(item.room);
+          if (!queueByRoom[roomId]) {
+            queueByRoom[roomId] = [];
+          }
+          queueByRoom[roomId].push(item);
+          console.log(`Queue item ${item.id}: room=${roomId}, patient=${item.patient}, patient_name=${item.patient_name}`);
+        });
+        
+        console.log('Queue by room:', Object.keys(queueByRoom).map(roomId => ({
+          roomId,
+          count: queueByRoom[roomId].length,
+          patients: queueByRoom[roomId].map((item: any) => ({ id: item.patient, name: item.patient_name }))
+        })));
+        
+        // Transform rooms with queue data
+        const transformedRooms: ConsultationRoom[] = roomsResult.results.map((room: any) => {
+          const roomQueue = queueByRoom[String(room.id)] || [];
+          const sortedQueue = roomQueue.sort((a, b) => {
+            // Sort by priority (lower number = higher priority), then by queued_at
+            if (a.priority !== b.priority) {
+              return a.priority - b.priority;
+            }
+            return new Date(a.queued_at).getTime() - new Date(b.queued_at).getTime();
+          });
+          
+          return {
+            id: String(room.id),
+            name: room.name,
+            status: room.status?.toLowerCase() === 'active' ? 'available' as const : 'occupied' as const,
+            currentPatient: sortedQueue.length > 0 ? sortedQueue[0].patient_name : undefined,
+            startTime: undefined,
+            doctor: room.assigned_doctor || undefined,
+            specialtyFocus: room.specialty || undefined,
+            totalConsultationsToday: 0, // Could be calculated from visits
+            averageConsultationTime: 0,
+            queue: sortedQueue
+              .filter((item: any) => item.patient != null) // Filter out items without patient IDs
+              .map((item: any, index: number) => ({
+                patient_id: String(item.patient),
+                position: index + 1,
+              })),
+          };
+        });
+        
+        setConsultationRooms(transformedRooms);
+      } catch (err) {
+        console.error('Error loading consultation rooms:', err);
+        if (isAuthenticationError(err)) {
+          setAuthError(err);
+        } else {
+          setError('Failed to load consultation rooms. Please try again.');
+        }
+      } finally {
+        setLoadingRooms(false);
+      }
+    };
+    
+    loadRooms();
   }, []);
 
   // Load patient for selected room
   useEffect(() => {
-    if (selectedRoom) {
-      const room = consultationRooms.find((r) => r.id === selectedRoom);
-      if (room && room.queue.length > 0) {
-        const firstPatientId = room.queue[0].patient_id;
-        // TODO: Load patient data from API using firstPatientId
+    const loadPatient = async () => {
+      if (!selectedRoom) {
         setSelectedPatient(null);
-      } else {
+        return;
+      }
+      
+      const room = consultationRooms.find((r) => r.id === selectedRoom);
+      if (!room || room.queue.length === 0) {
+        setSelectedPatient(null);
+        return;
+      }
+      
+      try {
+        console.log('Loading patient for room:', selectedRoom);
+        console.log('Room data:', room);
+        console.log('Room queue:', room.queue);
+        
+        // Get the first patient ID from queue (already stored as string)
+        if (!room.queue || room.queue.length === 0) {
+          console.warn('Room queue is empty');
+          setSelectedPatient(null);
+          return;
+        }
+        
+        const firstPatientIdStr = room.queue[0].patient_id;
+        console.log('First patient ID from room queue:', firstPatientIdStr, typeof firstPatientIdStr);
+        
+        // Convert patient ID to number
+        let numericPatientId = typeof firstPatientIdStr === 'number' 
+          ? firstPatientIdStr 
+          : parseInt(String(firstPatientIdStr));
+        
+        if (isNaN(numericPatientId) || numericPatientId <= 0) {
+          console.error('Invalid patient ID from room queue:', {
+            firstPatientIdStr,
+            parsed: numericPatientId,
+            roomQueue: room.queue
+          });
+          toast.error('Invalid patient ID in queue. Please refresh and try again.');
+          setSelectedPatient(null);
+          return;
+        }
+        
+        console.log('Using patient ID:', numericPatientId);
+        
+        // Convert to number for API call
+        const numericRoomId = parseInt(selectedRoom);
+        if (isNaN(numericRoomId)) {
+          console.error('Invalid room ID:', selectedRoom);
+          toast.error('Invalid room selected. Please try again.');
+          setSelectedPatient(null);
+          return;
+        }
+        
+        // Load queue item from API to get visit info and other details
+        // Use numeric room ID for the filter
+        let queueItem: any = null;
+        try {
+          const queueResult = await apiFetch<{ results: any[] }>(`/consultation/queue/?room=${numericRoomId}&is_active=true&page_size=100`);
+          // Find the queue item that matches our patient ID
+          queueItem = queueResult.results?.find((item: any) => {
+            const itemPatientId = typeof item.patient === 'number' ? item.patient : parseInt(String(item.patient || ''));
+            return itemPatientId === numericPatientId;
+          });
+          
+          if (!queueItem && queueResult.results && queueResult.results.length > 0) {
+            // Fallback: use first item if patient ID doesn't match
+            console.warn('Patient ID mismatch, using first queue item:', {
+              expectedPatientId: numericPatientId,
+              firstItemPatientId: queueResult.results[0].patient
+            });
+            queueItem = queueResult.results[0];
+            // Update the patient ID from the queue item
+            const itemPatientId = typeof queueItem.patient === 'number' ? queueItem.patient : parseInt(String(queueItem.patient || ''));
+            if (!isNaN(itemPatientId) && itemPatientId > 0) {
+              numericPatientId = itemPatientId;
+            }
+          }
+        } catch (queueErr) {
+          console.warn('Could not load queue item from API, using patient ID from room queue:', queueErr);
+          // Continue with just the patient ID we have
+        }
+        
+        console.log('Queue item loaded:', queueItem);
+        if (queueItem) {
+          console.log('Queue item patient field:', queueItem.patient, typeof queueItem.patient);
+        }
+        
+        // Use the patient ID we have (either from room queue or from queue item)
+        const queuePatientId = numericPatientId;
+        
+        console.log(`Loading patient ${queuePatientId}`, { queueItem, queuePatientId });
+        
+        // Load patient data from API using the queue item's patient ID
+        let patient;
+        try {
+          patient = await patientService.getPatient(queuePatientId);
+        } catch (patientErr: any) {
+          console.error('Error fetching patient:', patientErr);
+          console.error('Patient fetch error details:', {
+            status: patientErr?.status,
+            message: patientErr?.message,
+            patientId: queuePatientId
+          });
+          // Check if it's a 404 or "not found" error
+          if (patientErr?.status === 404 || patientErr?.message?.includes('not found') || patientErr?.message?.includes('Not found')) {
+            toast.error(`Patient ID ${queuePatientId} not found. The patient may have been removed from the system.`);
+          } else {
+            toast.error('Failed to load patient information. Please try again.');
+          }
+          setSelectedPatient(null);
+          return;
+        }
+        
+        if (!patient) {
+          console.error('Patient not found:', queuePatientId);
+          toast.error(`Patient ID ${queuePatientId} not found. The patient may have been removed from the system.`);
+          setSelectedPatient(null);
+          return;
+        }
+        
+        console.log('Successfully loaded patient:', patient);
+        
+        // Get visit details if available
+        let visitDate = new Date().toISOString().split('T')[0];
+        let visitTime = '';
+        let chiefComplaint = queueItem?.notes || '';
+        let visitId: string | number | null = null;
+        let priority: "Emergency" | "High" | "Medium" | "Low" = 'Medium';
+        let waitTime = 0;
+        
+        if (queueItem) {
+          chiefComplaint = queueItem.notes || '';
+          
+          if (queueItem.visit) {
+            visitId = typeof queueItem.visit === 'number' ? queueItem.visit : parseInt(String(queueItem.visit));
+            try {
+              const visit = await apiFetch(`/visits/${visitId}/`);
+              visitDate = visit.date || visitDate;
+              visitTime = visit.time || visitTime;
+              chiefComplaint = visit.chief_complaint || chiefComplaint;
+            } catch (visitErr) {
+              console.warn('Could not load visit details:', visitErr);
+            }
+          }
+          
+          // Calculate wait time
+          if (queueItem.queued_at) {
+            waitTime = Math.floor((Date.now() - new Date(queueItem.queued_at).getTime()) / (1000 * 60));
+          }
+          
+          // Determine priority
+          if (queueItem.priority === 0) {
+            priority = 'Emergency';
+          } else if (queueItem.priority === 1) {
+            priority = 'High';
+          } else if (queueItem.priority === 2) {
+            priority = 'Medium';
+          } else {
+            priority = 'Low';
+          }
+        }
+        
+        setSelectedPatient({
+          id: String(patient.id),
+          visitId: visitId ? String(visitId) : '',
+          patientId: patient.patient_id || String(patient.id),
+          name: patient.full_name || `${patient.first_name} ${patient.surname}`,
+          age: patient.age || 0,
+          gender: patient.gender || '',
+          mrn: patient.patient_id || '',
+          allergies: [], // TODO: Load from patient allergies
+          chiefComplaint,
+          consultationRoom: selectedRoom,
+          waitTime,
+          vitalsCompleted: false, // TODO: Check if vitals exist
+          priority,
+          visitDate,
+          visitTime,
+        });
+      } catch (err: any) {
+        console.error('Error loading patient:', err);
+        console.error('Error details:', {
+          message: err?.message,
+          status: err?.status,
+          stack: err?.stack,
+          selectedRoom
+        });
+        
+        if (isAuthenticationError(err)) {
+          setAuthError(err);
+        } else {
+          // Check for specific error messages
+          const errorMessage = err?.message || String(err);
+          if (errorMessage.includes('not found') || errorMessage.includes('Not found') || err?.status === 404) {
+            toast.error(`Patient not found. The patient may have been removed from the system.`);
+          } else if (errorMessage.includes('Patient ID not found')) {
+            toast.error(`Patient ID not found. Queue item may be invalid.`);
+          } else {
+            toast.error(`Failed to load patient: ${errorMessage}`);
+          }
+        }
         setSelectedPatient(null);
       }
-    }
+    };
+    
+    loadPatient();
   }, [selectedRoom, consultationRooms]);
 
   const handleStartConsultation = () => {
@@ -173,6 +450,21 @@ const StartConsultation = () => {
           <div className="text-center">
             <Loader2 className="h-8 w-8 animate-spin text-emerald-500 mx-auto mb-4" />
             <p className="text-muted-foreground">Loading consultation rooms...</p>
+          </div>
+        </div>
+      </DashboardLayout>
+    );
+  }
+
+  if (error) {
+    return (
+      <DashboardLayout>
+        <div className="flex items-center justify-center h-[80vh]">
+          <div className="text-center">
+            <AlertTriangle className="h-12 w-12 text-destructive mx-auto mb-4" />
+            <h3 className="text-lg font-semibold mb-2">Error loading rooms</h3>
+            <p className="text-muted-foreground mb-4">{error}</p>
+            <Button onClick={() => window.location.reload()}>Retry</Button>
           </div>
         </div>
       </DashboardLayout>
@@ -385,7 +677,7 @@ const StartConsultation = () => {
         {/* Selected Room Info */}
         {selectedRoom && (
           <div className="mt-4 text-center">
-            <p className="text-sm text-gray-600 dark:text-gray-400">
+            <div className="text-sm text-gray-600 dark:text-gray-400">
               Selected:{" "}
               <span className="font-medium text-emerald-600 dark:text-emerald-400">
                 {selectedRoomData?.name}
@@ -410,7 +702,7 @@ const StartConsultation = () => {
                   </span>
                 </>
               )}
-            </p>
+            </div>
           </div>
         )}
 
@@ -421,36 +713,38 @@ const StartConsultation = () => {
               <AlertDialogTitle>
                 {selectedPatient ? "Start Consultation" : "Enter Room"}
               </AlertDialogTitle>
-              <AlertDialogDescription>
-                {selectedPatient ? (
-                  <>
-                    Are you sure you want to start a consultation in{" "}
-                    <strong>{selectedRoomData?.name}</strong> with{" "}
-                    <strong>{selectedPatient.name}</strong>?
-                    <div className="mt-4 p-4 bg-muted rounded-lg space-y-2">
-                      <p>
-                        <strong>Chief Complaint:</strong> {selectedPatient.chiefComplaint}
-                      </p>
-                      <p>
-                        <strong>Age/Gender:</strong> {selectedPatient.age} years,{" "}
-                        {selectedPatient.gender}
-                      </p>
-                      {selectedPatient.allergies.length > 0 && (
-                        <p className="text-red-600 dark:text-red-400">
-                          <strong>Allergies:</strong> {selectedPatient.allergies.join(", ")}
-                        </p>
-                      )}
-                      <p>
-                        <strong>Wait Time:</strong> {selectedPatient.waitTime} minutes
-                      </p>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    Are you sure you want to enter <strong>{selectedRoomData?.name}</strong>?
-                    There are currently no patients waiting in this room.
-                  </>
-                )}
+              <AlertDialogDescription asChild>
+                <div>
+                  {selectedPatient ? (
+                    <>
+                      Are you sure you want to start a consultation in{" "}
+                      <strong>{selectedRoomData?.name}</strong> with{" "}
+                      <strong>{selectedPatient.name}</strong>?
+                      <div className="mt-4 p-4 bg-muted rounded-lg space-y-2">
+                        <div>
+                          <strong>Chief Complaint:</strong> {selectedPatient.chiefComplaint}
+                        </div>
+                        <div>
+                          <strong>Age/Gender:</strong> {selectedPatient.age} years,{" "}
+                          {selectedPatient.gender}
+                        </div>
+                        {selectedPatient.allergies.length > 0 && (
+                          <div className="text-red-600 dark:text-red-400">
+                            <strong>Allergies:</strong> {selectedPatient.allergies.join(", ")}
+                          </div>
+                        )}
+                        <div>
+                          <strong>Wait Time:</strong> {selectedPatient.waitTime} minutes
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      Are you sure you want to enter <strong>{selectedRoomData?.name}</strong>?
+                      There are currently no patients waiting in this room.
+                    </>
+                  )}
+                </div>
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>

@@ -101,21 +101,32 @@ export const clearOriginalTokens = () => {
 };
 
 const refreshWithToken = async (refreshToken: string): Promise<LoginResponse | null> => {
-  const response = await fetch(`${getBaseUrl()}/accounts/auth/token/refresh/`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ refresh: refreshToken }),
-    credentials: "include",
-  });
+  try {
+    const response = await fetch(`${getBaseUrl()}/accounts/auth/token/refresh/`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ refresh: refreshToken }),
+      credentials: "include",
+    });
 
-  if (!response.ok) {
-    return null;
+    if (!response.ok) {
+      return null;
+    }
+
+    const data = (await response.json()) as LoginResponse;
+    return data;
+  } catch (error: any) {
+    // Handle network errors (Failed to fetch, CORS, etc.)
+    // This typically means the backend is not running or unreachable
+    if (error?.message === "Failed to fetch" || error?.name === "TypeError") {
+      logWarn("Unable to refresh token - backend may be unavailable", { error: error.message });
+      return null;
+    }
+    // Re-throw other errors
+    throw error;
   }
-
-  const data = (await response.json()) as LoginResponse;
-  return data;
 };
 
 const refreshAccessToken = async (): Promise<string | null> => {
@@ -130,8 +141,13 @@ const refreshAccessToken = async (): Promise<string | null> => {
     }
     storeTokens(data.access, data.refresh ?? refreshToken, data.expires_in);
     return data.access;
-  } catch (error) {
-    logError("Failed to refresh access token", error);
+  } catch (error: any) {
+    // Only log non-network errors (network errors are already handled in refreshWithToken)
+    if (error?.message !== "Failed to fetch" && error?.name !== "TypeError") {
+      logError("Failed to refresh access token", error);
+    }
+    // Clear tokens on any error to prevent retry loops
+    clearTokens();
   }
 
   return null;
@@ -171,8 +187,10 @@ export const apiFetch = async <T = unknown>(path: string, options: FetchOptions 
     // This typically means the backend is not running or unreachable
     const baseUrl = getBaseUrl();
     if (networkError?.message === "Failed to fetch" || networkError?.name === "TypeError") {
-      const error = new Error(`Unable to connect to the API server at ${baseUrl}. Please ensure the backend is running.`);
+      const error = new Error(`Unable to connect to the API server at ${baseUrl}. Please ensure the backend is running on the correct port.`);
       error.name = "NetworkError";
+      // Don't log network errors as they're expected when backend is down
+      // They'll be handled by the calling code
       throw error;
     }
     throw networkError;
@@ -278,24 +296,36 @@ export interface LoginResponse {
 }
 
 export const login = async (username: string, password: string): Promise<LoginResponse> => {
-  // Real API call
-  const response = await fetch(`${getBaseUrl()}/accounts/auth/token/`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ username, password }),
-    credentials: "include",
-  });
+  try {
+    // Real API call
+    const response = await fetch(`${getBaseUrl()}/accounts/auth/token/`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ username, password }),
+      credentials: "include",
+    });
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(errorText || "Invalid credentials");
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(errorText || "Invalid credentials");
+    }
+
+    const data = (await response.json()) as LoginResponse;
+    storeTokens(data.access, data.refresh, data.expires_in);
+    return data;
+  } catch (error: any) {
+    // Handle network errors (Failed to fetch, CORS, etc.)
+    if (error?.message === "Failed to fetch" || error?.name === "TypeError") {
+      const baseUrl = getBaseUrl();
+      const networkError = new Error(`Unable to connect to the API server at ${baseUrl}. Please ensure the backend is running on the correct port.`);
+      networkError.name = "NetworkError";
+      throw networkError;
+    }
+    // Re-throw other errors (like invalid credentials)
+    throw error;
   }
-
-  const data = (await response.json()) as LoginResponse;
-  storeTokens(data.access, data.refresh, data.expires_in);
-  return data;
 };
 
 export const logout = async () => {

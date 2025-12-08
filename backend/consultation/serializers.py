@@ -36,5 +36,5 @@ class ConsultationQueueSerializer(serializers.ModelSerializer):
     class Meta:
         model = ConsultationQueue
         fields = '__all__'
-        read_only_fields = ['queued_at']
+        # Note: queued_at is not in read_only_fields to allow manual reordering
 

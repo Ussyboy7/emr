@@ -27,6 +27,8 @@ interface Patient {
   id: string;
   name: string;
   patientId: string;
+  patientNumericId?: number; // Store the actual patient ID from backend
+  visitNumericId?: number; // Store the actual visit ID from backend
   personalNumber: string;
   clinic: string;
   visitDate: string;
@@ -173,6 +175,8 @@ export default function NursingPoolQueuePage() {
             nursingStatus,
             vitals,
             waitTime: waitTime > 0 ? waitTime : 0,
+            patientNumericId: visit.patient, // Store the actual patient ID from backend
+            visitNumericId: visit.id, // Store the actual visit ID from backend
           };
         });
         
@@ -199,6 +203,30 @@ export default function NursingPoolQueuePage() {
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
   const [vitalsForm, setVitalsForm] = useState<VitalsData>(emptyVitals);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  
+  // Reload rooms when room picker opens
+  useEffect(() => {
+    if (isRoomPickerOpen) {
+      const loadRooms = async () => {
+        try {
+          const roomsResult = await roomService.getRooms({ page_size: 1000 });
+          const transformedRooms: ConsultationRoom[] = roomsResult.results.map((room: any) => ({
+            id: String(room.id),
+            name: room.name,
+            status: room.status?.toLowerCase() === 'active' ? 'available' as const : 'occupied' as const,
+            doctor: room.assigned_doctor || undefined,
+            specialty: room.specialty || '',
+            queueCount: 0,
+            currentPatient: undefined,
+          }));
+          setRooms(transformedRooms);
+        } catch (err) {
+          console.error('Error loading rooms:', err);
+        }
+      };
+      loadRooms();
+    }
+  }, [isRoomPickerOpen]);
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -247,6 +275,19 @@ export default function NursingPoolQueuePage() {
   const handleRefresh = async () => {
     setIsRefreshing(true);
     try {
+      // Reload rooms
+      const roomsResult = await roomService.getRooms({ page_size: 1000 });
+      const transformedRooms: ConsultationRoom[] = roomsResult.results.map((room: any) => ({
+        id: String(room.id),
+        name: room.name,
+        status: room.status?.toLowerCase() === 'active' ? 'available' as const : 'occupied' as const,
+        doctor: room.assigned_doctor || undefined,
+        specialty: room.specialty || '',
+        queueCount: 0,
+        currentPatient: undefined,
+      }));
+      setRooms(transformedRooms);
+      
       // Reload visits from API
       const today = new Date().toISOString().split('T')[0];
       const result = await visitService.getVisits({ 
@@ -291,21 +332,23 @@ export default function NursingPoolQueuePage() {
           recordedBy: vitalsData.recorded_by_name || 'Unknown',
         } : undefined;
         
-        return {
-          id: String(visit.id),
-          name: visit.patient_name || `Patient ${visit.patient}`,
-          patientId: visit.visit_id || String(visit.id),
-          personalNumber: '',
-          clinic: visit.clinic || 'General',
-          visitDate: visit.date,
-          visitTime: visit.time,
-          visitType: visit.visit_type === 'emergency' ? 'Emergency' :
-                    visit.visit_type === 'consultation' ? 'Consultation' :
-                    visit.visit_type === 'follow_up' ? 'Follow-up' : 'Consultation',
-          nursingStatus,
-          vitals,
-          waitTime: waitTime > 0 ? waitTime : 0,
-        };
+          return {
+            id: String(visit.id),
+            name: visit.patient_name || `Patient ${visit.patient}`,
+            patientId: visit.visit_id || String(visit.id),
+            patientNumericId: visit.patient, // Store the actual patient ID from backend
+            visitNumericId: visit.id, // Store the actual visit ID from backend
+            personalNumber: '',
+            clinic: visit.clinic || 'General',
+            visitDate: visit.date,
+            visitTime: visit.time,
+            visitType: visit.visit_type === 'emergency' ? 'Emergency' :
+                      visit.visit_type === 'consultation' ? 'Consultation' :
+                      visit.visit_type === 'follow_up' ? 'Follow-up' : 'Consultation',
+            nursingStatus,
+            vitals,
+            waitTime: waitTime > 0 ? waitTime : 0,
+          };
       });
       
       setPatients(transformedPatients);
@@ -474,12 +517,95 @@ export default function NursingPoolQueuePage() {
         return;
       }
       
-      // Update visit status to "in_progress" to indicate patient has been sent to consultation room
-      await visitService.updateVisit(parseInt(selectedPatient.id), {
+      // Get the visit ID and patient ID from selectedPatient
+      const visitId = selectedPatient.visitNumericId || parseInt(selectedPatient.id);
+      const patientId = selectedPatient.patientNumericId;
+      
+      if (!patientId) {
+        toast.error('Patient ID not found');
+        setIsSubmitting(false);
+        return;
+      }
+      
+      // Determine priority based on visit type (0 = highest priority)
+      // Emergency = 0, High = 1, Medium = 2, Low = 3
+      let priority = 2; // Default to medium
+      if (selectedPatient.visitType === 'Emergency') {
+        priority = 0;
+      } else if (selectedPatient.visitType === 'Follow-up') {
+        priority = 1;
+      } else if (selectedPatient.visitType === 'Consultation') {
+        priority = 2;
+      } else {
+        priority = 3;
+      }
+      
+      // Update visit status to "in_progress"
+      await visitService.updateVisit(visitId, {
         status: 'in_progress',
-        // Note: If you have a consultation_room field in the backend, add it here
-        // consultation_room: roomId,
       });
+      
+      // Check if patient is already in queue for this room
+      try {
+        const existingQueue = await apiFetch<{ results: any[] }>(`/consultation/queue/?room=${parseInt(roomId)}&patient=${patientId}&is_active=true`);
+        if (existingQueue.results && existingQueue.results.length > 0) {
+          toast.error('Patient is already in the queue for this room');
+          setIsSubmitting(false);
+          return;
+        }
+      } catch (checkErr) {
+        // Ignore check errors, proceed with adding
+        console.warn('Could not check existing queue:', checkErr);
+      }
+      
+      // Add patient to consultation queue
+      try {
+        const queuePayload = {
+          patient: patientId, // Required: Patient ID (numeric)
+          visit: visitId, // Optional: Visit ID (numeric)
+          room: parseInt(roomId), // Required: Room ID (numeric)
+          priority: priority, // Required: Integer (0 = highest priority)
+          is_active: true,
+        };
+        
+        console.log('Sending patient to queue:', queuePayload);
+        
+        const queueResponse = await apiFetch('/consultation/queue/', {
+          method: 'POST',
+          body: JSON.stringify(queuePayload),
+        });
+        
+        console.log('Queue response:', queueResponse);
+      } catch (queueErr: any) {
+        console.error('Error adding to consultation queue:', queueErr);
+        
+        // Extract error message
+        let errorMessage = 'Failed to add patient to queue. Please try again.';
+        if (queueErr?.message) {
+          errorMessage = queueErr.message;
+        } else if (typeof queueErr === 'string') {
+          errorMessage = queueErr;
+        } else if (queueErr?.response?.data) {
+          const errorData = queueErr.response.data;
+          if (typeof errorData === 'string') {
+            errorMessage = errorData;
+          } else if (errorData.detail) {
+            errorMessage = errorData.detail;
+          } else if (errorData.non_field_errors) {
+            errorMessage = errorData.non_field_errors[0];
+          } else {
+            // Format field errors
+            const fieldErrors = Object.entries(errorData)
+              .map(([field, errors]: [string, any]) => `${field}: ${Array.isArray(errors) ? errors.join(', ') : errors}`)
+              .join('; ');
+            errorMessage = fieldErrors || errorMessage;
+          }
+        }
+        
+        toast.error(errorMessage);
+        setIsSubmitting(false);
+        return;
+      }
       
       // Update local state
       setPatients(prev => prev.map(p => 
@@ -955,34 +1081,46 @@ export default function NursingPoolQueuePage() {
                 Send {selectedPatient?.name} to a consultation room
               </DialogDescription>
             </DialogHeader>
-            <div className="py-4 space-y-3">
-              {rooms.map((room) => (
-                <div 
-                  key={room.id} 
-                  className={`p-4 rounded-lg border-2 transition-all cursor-pointer ${
-                    room.status === 'available' 
-                      ? 'border-emerald-500/50 bg-emerald-500/5 hover:bg-emerald-500/10' 
-                      : 'border-muted bg-muted/30 opacity-60'
-                  }`}
-                  onClick={() => room.status === 'available' && handleSendToRoom(room.id)}
-                >
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h4 className="font-semibold">{room.name}</h4>
-                      <p className="text-sm text-muted-foreground">{room.doctor} • {room.specialty}</p>
-                    </div>
-                    <div className="text-right">
-                      <Badge variant="outline" className={room.status === 'available' ? 'border-emerald-500 text-emerald-600' : 'border-rose-500 text-rose-600'}>
-                        {room.status === 'available' ? 'Available' : 'Occupied'}
-                      </Badge>
-                      <p className="text-xs text-muted-foreground mt-1">{room.queueCount} in queue</p>
-                    </div>
-                  </div>
-                  {room.currentPatient && (
-                    <p className="text-xs text-muted-foreground mt-2">Current: {room.currentPatient}</p>
-                  )}
+            <div className="py-4 space-y-3 max-h-[400px] overflow-y-auto">
+              {rooms.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <ArrowRight className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                  <p>No consultation rooms available</p>
+                  <p className="text-sm mt-2">Please create rooms in the admin section</p>
                 </div>
-              ))}
+              ) : (
+                rooms.map((room) => (
+                  <div 
+                    key={room.id} 
+                    className={`p-4 rounded-lg border-2 transition-all ${
+                      room.status === 'available' 
+                        ? 'border-emerald-500/50 bg-emerald-500/5 hover:bg-emerald-500/10 cursor-pointer' 
+                        : 'border-muted bg-muted/30 opacity-60 cursor-not-allowed'
+                    }`}
+                    onClick={() => room.status === 'available' && !isSubmitting && handleSendToRoom(room.id)}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h4 className="font-semibold">{room.name}</h4>
+                        <p className="text-sm text-muted-foreground">
+                          {room.doctor ? `${room.doctor} • ` : ''}{room.specialty || 'General'}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <Badge variant="outline" className={room.status === 'available' ? 'border-emerald-500 text-emerald-600' : 'border-rose-500 text-rose-600'}>
+                          {room.status === 'available' ? 'Available' : 'Occupied'}
+                        </Badge>
+                        {room.queueCount > 0 && (
+                          <p className="text-xs text-muted-foreground mt-1">{room.queueCount} in queue</p>
+                        )}
+                      </div>
+                    </div>
+                    {room.currentPatient && (
+                      <p className="text-xs text-muted-foreground mt-2">Current: {room.currentPatient}</p>
+                    )}
+                  </div>
+                ))
+              )}
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setIsRoomPickerOpen(false)}>Cancel</Button>

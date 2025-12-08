@@ -14,8 +14,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Separator } from "@/components/ui/separator";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { Activity, AlertTriangle, ArrowLeft, CheckCircle, Clock, FileText, History, Loader2, MapPin, Pill, Plus, Save, Stethoscope, Syringe, TestTube, User, Users, X, Send, ScanLine, TrendingUp, TrendingDown, Minus, Building2, UserPlus, Calendar, Phone, Mail, Heart, Download, Eye, Printer, FileDown, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, ClipboardList } from "lucide-react";
+import { Activity, AlertTriangle, ArrowLeft, CheckCircle, Clock, FileText, History, Loader2, MapPin, Pill, Plus, Save, Stethoscope, Syringe, TestTube, User, Users, X, Send, ScanLine, TrendingUp, TrendingDown, Minus, Building2, UserPlus, Calendar, Phone, Mail, Heart, Download, Eye, Printer, FileDown, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, ClipboardList, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
+import { roomService, patientService } from '@/lib/services';
+import { apiFetch } from '@/lib/api-client';
+import { useAuthRedirect } from '@/hooks/use-auth-redirect';
+import { isAuthenticationError } from '@/lib/auth-errors';
 
 // Types
 interface Patient {
@@ -649,6 +653,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   const [sessionStartTime, setSessionStartTime] = useState<Date | null>(null);
   const [sessionDuration, setSessionDuration] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [authError, setAuthError] = useState<unknown | null>(null);
+  useAuthRedirect(authError);
   const [activeTab, setActiveTab] = useState("notes");
   const [showEndDialog, setShowEndDialog] = useState(false);
   const [isEnding, setIsEnding] = useState(false);
@@ -793,13 +800,199 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   const [labResultsPerPage, setLabResultsPerPage] = useState(10);
   const [imagingPerPage, setImagingPerPage] = useState(10);
 
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  
+  const loadRoomData = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      // Convert roomId to integer (it might be a string from URL)
+      const numericRoomId = parseInt(roomId);
+      if (isNaN(numericRoomId)) {
+        setError('Invalid room ID');
+        setLoading(false);
+        return;
+      }
+      
+      // Load room details
+      const roomData = await roomService.getRoom(numericRoomId);
+      
+      // Load queue items for this room
+      // Try the room-specific queue endpoint first, then fallback to filtered query
+      let queueItems: any[] = [];
+      try {
+        // Try the room-specific queue endpoint: /consultation/rooms/{id}/queue/
+        console.log(`Attempting to load queue from /consultation/rooms/${numericRoomId}/queue/`);
+        const roomQueueResult = await apiFetch<any[]>(`/consultation/rooms/${numericRoomId}/queue/`);
+        queueItems = Array.isArray(roomQueueResult) ? roomQueueResult : [];
+        console.log(`Room-specific endpoint returned ${queueItems.length} items:`, roomQueueResult);
+      } catch (err) {
+        console.warn('Room-specific queue endpoint failed, trying filtered endpoint:', err);
+        // Fallback: Use filtered queue endpoint
+        try {
+          const queueResult = await apiFetch<{ results: any[] }>(`/consultation/queue/?room=${numericRoomId}&is_active=true&page_size=1000`);
+          queueItems = queueResult.results || [];
+          console.log(`Filtered endpoint returned ${queueItems.length} items:`, queueResult);
+        } catch (filterErr) {
+          console.warn('Filtered queue endpoint failed, loading all queue items:', filterErr);
+          // Last resort: Load all and filter client-side
+          const allQueueResult = await apiFetch<{ results: any[] }>(`/consultation/queue/?is_active=true&page_size=1000`);
+          const allItems = allQueueResult.results || [];
+          console.log(`Loaded ${allItems.length} total active queue items, filtering for room ${numericRoomId}`);
+          // Filter by room client-side
+          queueItems = allItems.filter((item: any) => {
+            const itemRoomId = typeof item.room === 'number' ? item.room : parseInt(item.room);
+            const matches = itemRoomId === numericRoomId;
+            if (!matches && allItems.length > 0) {
+              console.log(`Queue item ${item.id} has room ${itemRoomId} (expected ${numericRoomId})`);
+            }
+            return matches;
+          });
+          console.log(`After filtering, found ${queueItems.length} items for room ${numericRoomId}`);
+        }
+      }
+      
+      console.log(`Final: Loaded ${queueItems.length} queue items for room ${numericRoomId}`, queueItems);
+        
+        // Sort queue by priority (lower number = higher priority), then by queued_at
+        const sortedQueue = queueItems.sort((a, b) => {
+          if (a.priority !== b.priority) {
+            return a.priority - b.priority;
+          }
+          return new Date(a.queued_at).getTime() - new Date(b.queued_at).getTime();
+        });
+        
+        // Transform queue items to Patient objects
+        const transformedPatients: Patient[] = await Promise.all(sortedQueue.map(async (item: any, index: number) => {
+          try {
+            // Get patient details
+            const patient = await patientService.getPatient(item.patient);
+            
+            // Get visit details if available
+            let visitDate = new Date().toISOString().split('T')[0];
+            let visitTime = new Date().toTimeString().slice(0, 5);
+            let chiefComplaint = item.notes || '';
+            
+            if (item.visit) {
+              try {
+                const visit = await apiFetch(`/visits/${item.visit}/`);
+                visitDate = visit.date || visitDate;
+                visitTime = visit.time || visitTime;
+                chiefComplaint = visit.chief_complaint || chiefComplaint;
+              } catch (err) {
+                console.warn('Could not load visit details:', err);
+              }
+            }
+            
+            // Get vitals if available
+            let vitalsData = null;
+            if (item.visit) {
+              try {
+                const vitalsResult = await apiFetch<{ results: any[] }>(`/vitals/?visit=${item.visit}&ordering=-recorded_at`);
+                vitalsData = vitalsResult.results?.[0] || null;
+              } catch (err) {
+                console.warn('Could not load vitals:', err);
+              }
+            }
+            
+            // Calculate wait time
+            const queuedAt = new Date(item.queued_at);
+            const waitTime = Math.floor((Date.now() - queuedAt.getTime()) / (1000 * 60));
+            
+            // Map priority (integer) to string
+            const getPriority = (priorityNum: number): Patient['priority'] => {
+              if (priorityNum === 0) return 'Emergency';
+              if (priorityNum === 1) return 'High';
+              if (priorityNum === 2) return 'Medium';
+              return 'Low';
+            };
+            
+            return {
+              id: String(item.id),
+              visitId: item.visit ? String(item.visit) : '',
+              patientId: patient.patient_id || String(patient.id),
+              name: patient.full_name || `${patient.first_name} ${patient.surname}`,
+              age: patient.age || 0,
+              gender: patient.gender || '',
+              mrn: patient.patient_id || '',
+              personalNumber: patient.personal_number || '',
+              allergies: [], // TODO: Load from patient allergies
+              chiefComplaint,
+              waitTime: waitTime > 0 ? waitTime : 0,
+              vitalsCompleted: !!vitalsData,
+              priority: getPriority(typeof item.priority === 'number' ? item.priority : parseInt(item.priority) || 2),
+              visitDate,
+              visitTime,
+              queuePosition: index + 1,
+              bloodGroup: patient.blood_group || undefined,
+              genotype: patient.genotype || undefined,
+              vitals: vitalsData ? {
+                temperature: vitalsData.temperature?.toString() || '',
+                bloodPressure: `${vitalsData.blood_pressure_systolic || ''}/${vitalsData.blood_pressure_diastolic || ''}`,
+                heartRate: vitalsData.heart_rate?.toString() || '',
+                respiratoryRate: vitalsData.respiratory_rate?.toString() || '',
+                oxygenSaturation: vitalsData.oxygen_saturation?.toString() || '',
+                weight: vitalsData.weight?.toString() || '',
+                height: vitalsData.height?.toString() || '',
+                recordedAt: vitalsData.recorded_at || new Date().toISOString(),
+              } : undefined,
+            } as Patient;
+          } catch (err) {
+            console.error(`Error loading patient ${item.patient}:`, err);
+            return null;
+          }
+        }));
+        
+        const validPatients = transformedPatients.filter((p): p is Patient => p !== null);
+        
+        // Transform room data
+        const transformedRoom: ConsultationRoom = {
+          id: String(roomData.id),
+          name: roomData.name,
+          status: roomData.status?.toLowerCase() === 'active' ? 'available' as const : 'occupied' as const,
+          currentPatient: validPatients.length > 0 ? validPatients[0].name : undefined,
+          startTime: undefined,
+          doctor: roomData.assigned_doctor || undefined,
+          specialtyFocus: roomData.specialty || 'General Practice',
+          totalConsultationsToday: 0, // TODO: Calculate from visits
+          averageConsultationTime: 0, // TODO: Calculate from sessions
+          queue: sortedQueue.map((item: any, index: number) => ({
+            patient_id: String(item.patient),
+            position: index + 1,
+          })),
+        };
+        
+        setRoom(transformedRoom);
+        setPatients(validPatients);
+      } catch (err) {
+        console.error('Error loading room data:', err);
+        if (isAuthenticationError(err)) {
+          setAuthError(err);
+        } else {
+          setError('Failed to load consultation room. Please try again.');
+        }
+      } finally {
+        setLoading(false);
+      }
+    };
+  
   useEffect(() => {
-    setLoading(true);
-    // TODO: Load consultation room and queue data from API
-    setRoom(null);
-    setPatients([]);
-    setLoading(false);
+    loadRoomData();
   }, [roomId]);
+  
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      await loadRoomData();
+      toast.success('Queue refreshed');
+    } catch (err) {
+      console.error('Error refreshing:', err);
+      toast.error('Failed to refresh queue');
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
 
   useEffect(() => {
     if (!sessionActive || !sessionStartTime) return;
@@ -1195,8 +1388,51 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     return { icon: <TrendingDown className="h-3 w-3 text-blue-500" />, trend: 'down' };
   };
 
-  if (loading) { return (<DashboardLayout><div className="flex items-center justify-center h-[80vh]"><div className="text-center"><Loader2 className="h-8 w-8 animate-spin text-emerald-500 mx-auto mb-4" /><p className="text-muted-foreground">Loading consultation room...</p></div></div></DashboardLayout>); }
-  if (!room) { return (<DashboardLayout><div className="flex items-center justify-center h-[80vh]"><div className="text-center"><h2 className="text-2xl font-bold text-red-600 mb-4">Room Not Found</h2><p className="text-muted-foreground mb-4">The consultation room could not be found.</p><Button onClick={() => router.push("/consultation/start")}><ArrowLeft className="mr-2 h-4 w-4" />Back to Room Selection</Button></div></div></DashboardLayout>); }
+  if (loading) { 
+    return (
+      <DashboardLayout>
+        <div className="flex items-center justify-center h-[80vh]">
+          <div className="text-center">
+            <Loader2 className="h-8 w-8 animate-spin text-emerald-500 mx-auto mb-4" />
+            <p className="text-muted-foreground">Loading consultation room...</p>
+          </div>
+        </div>
+      </DashboardLayout>
+    ); 
+  }
+  
+  if (error) {
+    return (
+      <DashboardLayout>
+        <div className="flex items-center justify-center h-[80vh]">
+          <div className="text-center">
+            <AlertTriangle className="h-12 w-12 text-destructive mx-auto mb-4" />
+            <h2 className="text-2xl font-bold text-red-600 mb-2">Error Loading Room</h2>
+            <p className="text-muted-foreground mb-4">{error}</p>
+            <Button onClick={() => router.push("/consultation/start")}>
+              <ArrowLeft className="mr-2 h-4 w-4" />Back to Room Selection
+            </Button>
+          </div>
+        </div>
+      </DashboardLayout>
+    );
+  }
+  
+  if (!room) { 
+    return (
+      <DashboardLayout>
+        <div className="flex items-center justify-center h-[80vh]">
+          <div className="text-center">
+            <h2 className="text-2xl font-bold text-red-600 mb-4">Room Not Found</h2>
+            <p className="text-muted-foreground mb-4">The consultation room could not be found.</p>
+            <Button onClick={() => router.push("/consultation/start")}>
+              <ArrowLeft className="mr-2 h-4 w-4" />Back to Room Selection
+            </Button>
+          </div>
+        </div>
+      </DashboardLayout>
+    ); 
+  }
 
   if (!sessionActive || !currentPatient) {
     const emergencyPatients = patients.filter((p) => p.priority === "Emergency");
@@ -1212,9 +1448,17 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                 <div className="w-12 h-12 bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-lg flex items-center justify-center text-white text-xl font-bold shadow-lg">{room.name.charAt(0)}</div>
                 {room.name}
               </h1>
-              <p className="text-gray-600 dark:text-gray-400 mt-1">Consultation Room • {room.specialtyFocus || "General Practice"} • {room.doctor}</p>
+              <p className="text-gray-600 dark:text-gray-400 mt-1">Consultation Room • {room.specialtyFocus || "General Practice"} • {room.doctor || "No doctor assigned"}</p>
             </div>
-            <Button variant="outline" onClick={() => router.push("/consultation/start")}><ArrowLeft className="mr-2 h-4 w-4" />Exit Room</Button>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" onClick={handleRefresh} disabled={isRefreshing}>
+                <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
+                {isRefreshing ? 'Refreshing...' : 'Refresh'}
+              </Button>
+              <Button variant="outline" onClick={() => router.push("/consultation/start")}>
+                <ArrowLeft className="mr-2 h-4 w-4" />Exit Room
+              </Button>
+            </div>
           </div>
 
           <div className="grid gap-4 md:grid-cols-4">
