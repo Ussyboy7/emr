@@ -12,7 +12,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { visitService, type Visit } from '@/lib/services';
+import { visitService, roomService, type Visit } from '@/lib/services';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { apiFetch } from '@/lib/api-client';
@@ -85,12 +85,25 @@ export default function NursingPoolQueuePage() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // Load visits from API
+  // Load visits and rooms from API
   useEffect(() => {
-    const loadVisits = async () => {
+    const loadData = async () => {
       try {
         setLoading(true);
         setError(null);
+
+        // Load rooms first
+        const roomsResult = await roomService.getRooms({ page_size: 1000 });
+        const transformedRooms: ConsultationRoom[] = roomsResult.results.map((room: any) => ({
+          id: String(room.id),
+          name: room.name,
+          status: room.status?.toLowerCase() === 'active' ? 'available' as const : 'occupied' as const,
+          doctor: room.assigned_doctor || undefined,
+          specialty: room.specialty || '',
+          queueCount: 0, // Will be updated if we can get queue counts
+          currentPatient: undefined,
+        }));
+        setRooms(transformedRooms);
 
         // Fetch visits with status 'completed' (sent to nursing)
         // Also get today's visits to filter by date
@@ -165,7 +178,7 @@ export default function NursingPoolQueuePage() {
         
         setPatients(transformedPatients);
       } catch (err) {
-        console.error('Error loading nursing pool visits:', err);
+        console.error('Error loading nursing pool data:', err);
         if (isAuthenticationError(err)) {
           setAuthError(err);
         } else {
@@ -176,7 +189,7 @@ export default function NursingPoolQueuePage() {
       }
     };
 
-    loadVisits();
+    loadData();
   }, []);
   
   // Dialog states
