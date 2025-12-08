@@ -957,7 +957,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           status: roomData.status?.toLowerCase() === 'active' ? 'available' as const : 'occupied' as const,
           currentPatient: validPatients.length > 0 ? validPatients[0].name : undefined,
           startTime: undefined,
-          doctor: roomData.assigned_doctor || undefined,
+          doctor: (roomData as any).assigned_doctor || undefined,
           specialtyFocus: roomData.specialty || 'General Practice',
           totalConsultationsToday: 0, // TODO: Calculate from visits
           averageConsultationTime: 0, // TODO: Calculate from sessions
