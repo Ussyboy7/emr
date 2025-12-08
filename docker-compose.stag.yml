@@ -169,12 +169,16 @@ services:
       dockerfile: Dockerfile.stag
       # Add DNS for build process
       network: host
+      args:
+        NEXT_PUBLIC_API_URL: http://172.16.0.46:8047/api
+        NEXT_PUBLIC_ENVIRONMENT: staging
     dns:
       - 8.8.8.8
       - 8.8.4.4
     container_name: emr-frontend-stag
-    env_file:
-      - ./frontend/.env.stag
+    environment:
+      - NEXT_PUBLIC_API_URL=http://172.16.0.46:8047/api
+      - NEXT_PUBLIC_ENVIRONMENT=staging
     ports:
       - "4647:3000"  # Direct access on 4647 (no nginx for staging)
     depends_on:
