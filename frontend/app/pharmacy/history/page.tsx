@@ -97,7 +97,7 @@ export default function DispenseHistoryPage() {
         }
         
         // Count substitutions
-        const substitutions = medications.filter(m => m.isSubstituted).length;
+        const substitutions = medications.filter((m: any) => m.isSubstituted).length;
         
         // Calculate wait time (if prescription has prescribed_at)
         let waitTime = '0 min';

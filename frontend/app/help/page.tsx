@@ -107,9 +107,16 @@ export default function HelpPage() {
     try {
       setLoadingStatus(true);
       const status = await helpService.getSystemStatus();
+      // Filter out undefined values to match Record<string, string>
+      const services: Record<string, string> = {};
+      Object.entries(status.services || {}).forEach(([key, value]) => {
+        if (value !== undefined) {
+          services[key] = value;
+        }
+      });
       setSystemStatus({
         status: status.status,
-        services: status.services,
+        services,
         lastUpdated: new Date().toLocaleTimeString(),
       });
     } catch (err) {

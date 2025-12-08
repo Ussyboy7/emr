@@ -204,6 +204,7 @@ class AdminService {
     is_active?: boolean;
     search?: string;
     page?: number;
+    page_size?: number;
   }): Promise<{ results: Role[]; count: number }> {
     const query = buildQueryString(params || {});
     return apiFetch<{ results: Role[]; count: number }>(`/permissions/roles/${query}`);
@@ -260,6 +261,7 @@ class AdminService {
     is_active?: boolean;
     search?: string;
     page?: number;
+    page_size?: number;
   }): Promise<{ results: Clinic[]; count: number }> {
     const query = buildQueryString(params || {});
     return apiFetch<{ results: Clinic[]; count: number }>(`/organization/clinics/${query}`);
@@ -309,6 +311,7 @@ class AdminService {
     is_active?: boolean;
     search?: string;
     page?: number;
+    page_size?: number;
   }): Promise<{ results: Department[]; count: number }> {
     const query = buildQueryString(params || {});
     return apiFetch<{ results: Department[]; count: number }>(`/organization/departments/${query}`);

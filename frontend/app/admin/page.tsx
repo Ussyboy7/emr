@@ -273,18 +273,21 @@ export default function AdminDashboardPage() {
                   </div>
                 ) : (
                   <div className="grid grid-cols-2 gap-4">
-                    {usersByRole.map((role) => (
-                    <div key={role.role} className="flex items-center gap-3">
-                      <div className={`w-3 h-3 rounded-full ${role.color}`} />
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between">
-                          <span className="text-sm truncate">{role.role}</span>
-                          <span className="text-sm font-medium">{role.count}</span>
+                    {usersByRole.map((role) => {
+                      const percentage = totalUsers > 0 ? (role.count / totalUsers) * 100 : 0;
+                      return (
+                        <div key={role.role} className="flex items-center gap-3">
+                          <div className={`w-3 h-3 rounded-full ${role.color}`} />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between">
+                              <span className="text-sm truncate">{role.role}</span>
+                              <span className="text-sm font-medium">{role.count}</span>
+                            </div>
+                            <Progress value={percentage} className="h-1.5 mt-1" />
+                          </div>
                         </div>
-                        <Progress value={(role.count / totalUsers) * 100} className="h-1.5 mt-1" />
-                      </div>
-                    </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </CardContent>
@@ -345,34 +348,44 @@ export default function AdminDashboardPage() {
                 </div>
               </CardHeader>
               <CardContent>
-                {loading ? (
+                {loading && (
                   <div className="text-center py-8 text-muted-foreground">
                     <Loader2 className="h-8 w-8 mx-auto mb-2 animate-spin" />
                     <p>Loading...</p>
                   </div>
-                ) : clinicStatus.length === 0 ? (
+                )}
+                {!loading && clinicStatus.length === 0 && (
                   <div className="text-center py-8 text-muted-foreground">
                     <Building2 className="h-8 w-8 mx-auto mb-2 opacity-50" />
                     <p>No clinics found</p>
                   </div>
-                ) : (
+                )}
+                {!loading && clinicStatus.length > 0 && (
                   <div className="space-y-2">
-                    {clinicStatus.map((clinic) => (
-                    <div key={clinic.name} className="flex items-center justify-between p-2 rounded-lg hover:bg-muted/50">
-                      <div className="flex items-center gap-3">
-                        <div className={`w-2 h-2 rounded-full ${clinic.status === "open" ? "bg-green-500" : "bg-red-500"}`} />
-                        <span className="text-sm">{clinic.name}</span>
-                      </div>
-                      <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                        <span className="flex items-center gap-1"><Users className="h-3 w-3" /> {clinic.patients}</span>
-                        <span className="flex items-center gap-1"><Stethoscope className="h-3 w-3" /> {clinic.doctors}</span>
-                        <Badge className={clinic.status === "open" ? "bg-green-500/10 text-green-500" : "bg-red-500/10 text-red-500"}>
-                          {clinic.status}
-                        </Badge>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                    {clinicStatus.map((clinic) => {
+                      const statusBgClass = clinic.status === "open" ? "bg-green-500" : "bg-red-500";
+                      const badgeClass = clinic.status === "open" 
+                        ? "bg-green-500 bg-opacity-10 text-green-500" 
+                        : "bg-red-500 bg-opacity-10 text-red-500";
+                      const dotClass = "w-2 h-2 rounded-full " + statusBgClass;
+                      return (
+                        <div key={clinic.name} className="flex items-center justify-between p-2 rounded-lg hover:bg-muted/50">
+                          <div className="flex items-center gap-3">
+                            <div className={dotClass} />
+                            <span className="text-sm">{clinic.name}</span>
+                          </div>
+                          <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                            <span className="flex items-center gap-1"><Users className="h-3 w-3" /> {clinic.patients}</span>
+                            <span className="flex items-center gap-1"><Stethoscope className="h-3 w-3" /> {clinic.doctors}</span>
+                            <Badge className={badgeClass}>
+                              {clinic.status}
+                            </Badge>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>
@@ -385,30 +398,38 @@ export default function AdminDashboardPage() {
                 <CardTitle className="text-lg">System Health</CardTitle>
               </CardHeader>
               <CardContent>
-                {loading ? (
+                {loading && (
                   <div className="text-center py-8 text-muted-foreground">
                     <Loader2 className="h-8 w-8 mx-auto mb-2 animate-spin" />
                     <p>Loading...</p>
                   </div>
-                ) : (
+                )}
+                {!loading && (
                   <div className="space-y-3">
-                    {systemHealth.map((system) => (
-                    <div key={system.name} className="flex items-center justify-between p-2 rounded-lg bg-muted/30">
-                      <div className="flex items-center gap-3">
-                        <system.icon className={`h-5 w-5 ${getStatusColor(system.status)}`} />
-                        <span className="text-sm">{system.name}</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-muted-foreground">{system.uptime}</span>
-                        {system.status === "healthy" ? (
-                          <CheckCircle className="h-4 w-4 text-green-500" />
-                        ) : (
-                          <AlertTriangle className="h-4 w-4 text-yellow-500" />
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                    {systemHealth.map((system) => {
+                      const IconComponent = system.icon;
+                      const iconColorClass = getStatusColor(system.status);
+                      const iconClass = "h-5 w-5 " + iconColorClass;
+                      return (
+                        <div key={system.name} className="flex items-center justify-between p-2 rounded-lg bg-muted/30">
+                          <div className="flex items-center gap-3">
+                            <IconComponent className={iconClass} />
+                            <span className="text-sm">{system.name}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-muted-foreground">{system.uptime}</span>
+                            {system.status === "healthy" && (
+                              <CheckCircle className="h-4 w-4 text-green-500" />
+                            )}
+                            {system.status !== "healthy" && (
+                              <AlertTriangle className="h-4 w-4 text-yellow-500" />
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </CardContent>
             </Card>
 

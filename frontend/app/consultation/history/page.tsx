@@ -192,21 +192,21 @@ export default function ConsultationHistoryPage() {
             let nursingOrdersCount = 0;
             
             try {
-              const prescriptionsResult = await apiFetch<{ results: any[] }>(`/prescriptions/?visit=${session.visit || ''}&page_size=1`);
+              const prescriptionsResult = await apiFetch<{ results: any[]; count?: number }>(`/prescriptions/?visit=${session.visit || ''}&page_size=1`);
               prescriptionsCount = prescriptionsResult.count || 0;
             } catch (err) {
               // Ignore
             }
             
             try {
-              const labOrdersResult = await apiFetch<{ results: any[] }>(`/laboratory/orders/?visit=${session.visit || ''}&page_size=1`);
+              const labOrdersResult = await apiFetch<{ results: any[]; count?: number }>(`/laboratory/orders/?visit=${session.visit || ''}&page_size=1`);
               labOrdersCount = labOrdersResult.count || 0;
             } catch (err) {
               // Ignore
             }
             
             try {
-              const nursingOrdersResult = await apiFetch<{ results: any[] }>(`/nursing/orders/?visit=${session.visit || ''}&page_size=1`);
+              const nursingOrdersResult = await apiFetch<{ results: any[]; count?: number }>(`/nursing/orders/?visit=${session.visit || ''}&page_size=1`);
               nursingOrdersCount = nursingOrdersResult.count || 0;
             } catch (err) {
               // Ignore
@@ -215,7 +215,7 @@ export default function ConsultationHistoryPage() {
             // Get vitals
             let vitals: ConsultationRecord['vitals'] = [];
             try {
-              const vitalsResult = await apiFetch<{ results: any[] }>(`/vitals/?visit=${session.visit || ''}&page_size=10`);
+              const vitalsResult = await apiFetch<{ results: any[]; count?: number }>(`/vitals/?visit=${session.visit || ''}&page_size=10`);
               vitals = (vitalsResult.results || []).map((v: any) => ({
                 id: String(v.id),
                 systolic: v.blood_pressure_systolic || 0,

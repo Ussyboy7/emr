@@ -51,8 +51,8 @@ interface TestTemplate {
 const transformTemplate = (apiTemplate: ApiLabTemplate): TestTemplate => {
   // Parse fields from normal_range JSON or use fields array if available
   let fields: TemplateField[] = [];
-  if (apiTemplate.fields && Array.isArray(apiTemplate.fields)) {
-    fields = apiTemplate.fields;
+  if ((apiTemplate as any).fields && Array.isArray((apiTemplate as any).fields)) {
+    fields = (apiTemplate as any).fields;
   } else if (apiTemplate.normal_range && typeof apiTemplate.normal_range === 'object') {
     // Convert normal_range JSON to fields array
     fields = Object.entries(apiTemplate.normal_range).map(([name, value]: [string, any]) => {
@@ -84,7 +84,7 @@ const transformTemplate = (apiTemplate: ApiLabTemplate): TestTemplate => {
     status: apiTemplate.is_active !== false ? 'Active' : 'Inactive',
     createdAt: apiTemplate.created_at || new Date().toISOString().split('T')[0],
     updatedAt: apiTemplate.updated_at || new Date().toISOString().split('T')[0],
-    version: apiTemplate.version || 1,
+    version: (apiTemplate as any).version || 1,
   };
 };
 
@@ -282,7 +282,7 @@ export default function TestTemplatesPage() {
         turnaround_time: formData.turnaroundTime,
         price: formData.price,
         normal_range: normalRange,
-        is_active: formData.status === 'Active',
+        is_active: selectedTemplate?.status === 'Active' || true,
       };
 
       const updated = await labService.updateTemplate(templateId, templateData);
@@ -343,7 +343,7 @@ export default function TestTemplatesPage() {
         sample_type: original.sample_type,
         turnaround_time: original.turnaround_time,
         price: original.price,
-        fields: original.fields,
+        fields: (original as any).fields,
         is_active: false, // Start as inactive
       };
 

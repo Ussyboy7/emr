@@ -269,6 +269,7 @@ class LabService {
     patient?: string;
     status?: string;
     page?: number;
+    page_size?: number;
   }): Promise<{ results: LabTest[]; count: number }> {
     const queryParams = { ...params, status: 'verified' };
     const query = buildQueryString(queryParams);

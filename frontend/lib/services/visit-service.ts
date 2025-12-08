@@ -11,6 +11,8 @@ export interface VisitFilters {
   clinic?: string;
   search?: string;
   date?: string;
+  start_date?: string;
+  end_date?: string;
   page?: number;
   page_size?: number;
 }

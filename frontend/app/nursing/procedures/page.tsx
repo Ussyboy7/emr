@@ -161,10 +161,10 @@ export default function ProceduresQueuePage() {
                 if (medMatch[2]) {
                   const rest = medMatch[2].trim();
                   // Try to extract dosage, route, frequency
-                  const parts = rest.split(/[•,]/).map(p => p.trim());
+                  const parts = rest.split(/[•,]/).map((p: string) => p.trim());
                   details.dosage = parts[0] || '';
-                  details.route = parts.find(p => /oral|im|iv|sc|sublingual|topical/i.test(p)) || '';
-                  details.frequency = order.frequency || parts.find(p => /daily|bd|tds|qds|prn/i.test(p)) || '';
+                  details.route = parts.find((p: string) => /oral|im|iv|sc|sublingual|topical/i.test(p)) || '';
+                  details.frequency = order.frequency || parts.find((p: string) => /daily|bd|tds|qds|prn/i.test(p)) || '';
                 }
               }
               if (order.frequency) details.frequency = order.frequency;
@@ -297,10 +297,10 @@ export default function ProceduresQueuePage() {
               if (medMatch[2]) {
                 const rest = medMatch[2].trim();
                 // Try to extract dosage, route, frequency
-                const parts = rest.split(/[•,]/).map(p => p.trim());
+                const parts = rest.split(/[•,]/).map((p: string) => p.trim());
                 details.dosage = parts[0] || '';
-                details.route = parts.find(p => /oral|im|iv|sc|sublingual|topical/i.test(p)) || '';
-                details.frequency = order.frequency || parts.find(p => /daily|bd|tds|qds|prn/i.test(p)) || '';
+                details.route = parts.find((p: string) => /oral|im|iv|sc|sublingual|topical/i.test(p)) || '';
+                details.frequency = order.frequency || parts.find((p: string) => /daily|bd|tds|qds|prn/i.test(p)) || '';
               }
             }
             if (order.frequency) details.frequency = order.frequency;

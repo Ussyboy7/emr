@@ -201,7 +201,7 @@ export default function VisitsPage() {
         'Cancelled': 'cancelled',
       };
       
-      const updateData: Partial<Visit> = {
+      const updateData: any = {
         visit_type: editForm.type || undefined,
         clinic: editForm.clinic || undefined,
         location: editForm.location || undefined,

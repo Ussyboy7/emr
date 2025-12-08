@@ -226,24 +226,29 @@ export default function ExecutiveDashboardPage() {
               <CardTitle className="flex items-center gap-2"><Users className="h-5 w-5 text-teal-500" />Resource Utilization</CardTitle>
             </CardHeader>
             <CardContent>
-              {loading ? (
+              {loading && (
                 <div className="h-[200px] flex items-center justify-center">
                   <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
                 </div>
-              ) : (
+              )}
+              {!loading && (
                 <div className="space-y-4">
-                  {resourceUtilization.map(r => (
-                  <div key={r.resource}>
-                    <div className="flex justify-between text-sm mb-1">
-                      <span>{r.resource}</span>
-                      <span className="font-medium">{r.utilization}%</span>
-                    </div>
-                    <div className="w-full bg-muted rounded-full h-2">
-                      <div className="h-2 rounded-full" style={{ width: `${r.utilization}%`, backgroundColor: r.fill }} />
-                    </div>
-                  </div>
-                ))}
-              </div>
+                  {resourceUtilization.map(r => {
+                    const widthValue = `${r.utilization}%`;
+                    return (
+                      <div key={r.resource}>
+                        <div className="flex justify-between text-sm mb-1">
+                          <span>{r.resource}</span>
+                          <span className="font-medium">{r.utilization}%</span>
+                        </div>
+                        <div className="w-full bg-muted rounded-full h-2">
+                          <div className="h-2 rounded-full" style={{ width: widthValue, backgroundColor: r.fill }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>
@@ -285,30 +290,40 @@ export default function ExecutiveDashboardPage() {
               <CardTitle className="flex items-center gap-2"><Award className="h-5 w-5 text-amber-500" />Quality Indicators</CardTitle>
             </CardHeader>
             <CardContent>
-              {loading ? (
+              {loading && (
                 <div className="h-[200px] flex items-center justify-center">
                   <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
                 </div>
-              ) : (
+              )}
+              {!loading && (
                 <div className="space-y-3">
-                  {qualityIndicators.map(q => (
-                  <div key={q.indicator} className="flex items-center gap-3">
-                    <div className={`w-3 h-3 rounded-full ${q.status === 'above' ? 'bg-emerald-500' : 'bg-rose-500'}`} />
-                    <div className="flex-1">
-                      <div className="flex justify-between">
-                        <span className="text-sm font-medium">{q.indicator}</span>
-                        <span className={`text-sm font-bold ${q.status === 'above' ? 'text-emerald-600' : 'text-rose-600'}`}>{q.score}%</span>
+                  {qualityIndicators.map(q => {
+                    const dotClass = q.status === 'above' ? 'bg-emerald-500' : 'bg-rose-500';
+                    const scoreClass = q.status === 'above' ? 'text-emerald-600' : 'text-rose-600';
+                    const diffClass = q.status === 'above' ? 'text-emerald-500' : 'text-rose-500';
+                    const dotFullClass = 'w-3 h-3 rounded-full ' + dotClass;
+                    const scoreFullClass = 'text-sm font-bold ' + scoreClass;
+                    const diffSign = q.status === 'above' ? '+' : '';
+                    return (
+                      <div key={q.indicator} className="flex items-center gap-3">
+                        <div className={dotFullClass} />
+                        <div className="flex-1">
+                          <div className="flex justify-between">
+                            <span className="text-sm font-medium">{q.indicator}</span>
+                            <span className={scoreFullClass}>{q.score}%</span>
+                          </div>
+                          <div className="flex justify-between text-xs text-muted-foreground">
+                            <span>Target: {q.target}%</span>
+                            <span className={diffClass}>
+                              {diffSign}{q.score - q.target}%
+                            </span>
+                          </div>
+                        </div>
                       </div>
-                      <div className="flex justify-between text-xs text-muted-foreground">
-                        <span>Target: {q.target}%</span>
-                        <span className={q.status === 'above' ? 'text-emerald-500' : 'text-rose-500'}>
-                          {q.status === 'above' ? '+' : ''}{q.score - q.target}%
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
+                    );
+                  })}
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>
