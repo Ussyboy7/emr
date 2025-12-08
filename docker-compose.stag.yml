@@ -114,6 +114,11 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile.prod
+      # Add DNS for build process
+      network: host
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
     container_name: emr-celery-worker-stag
     env_file:
       - ./backend/env/stag.env
@@ -138,6 +143,11 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile.prod
+      # Add DNS for build process
+      network: host
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
     container_name: emr-celery-beat-stag
     env_file:
       - ./backend/env/stag.env
