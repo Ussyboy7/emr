@@ -20,16 +20,16 @@ const stats = [
 ];
 
 const patientQueue = [
-  { id: 1, patient: 'Adebayo Johnson', patientId: 'PAT-2024-001', visitType: 'Follow-up', waitTime: '15 min', clinic: 'General' },
-  { id: 2, patient: 'Fatima Mohammed', patientId: 'PAT-2024-002', visitType: 'Consultation', waitTime: '25 min', clinic: 'Eye' },
-  { id: 3, patient: 'Chukwu Emeka', patientId: 'PAT-2024-003', visitType: 'Emergency', waitTime: '5 min', clinic: 'General' },
-  { id: 4, patient: 'Grace Okonkwo', patientId: 'PAT-2024-004', visitType: 'Consultation', waitTime: '35 min', clinic: 'Physiotherapy' },
+  { id: 1, patient: 'Adebayo Johnson', patientId: 'PAT-2024-001', visitType: 'Follow-up', waitTime: '15 min', clinic: 'General', priority: 1, patient_name: 'Adebayo Johnson', room_name: 'Room 1', room: 1 },
+  { id: 2, patient: 'Fatima Mohammed', patientId: 'PAT-2024-002', visitType: 'Consultation', waitTime: '25 min', clinic: 'Eye', priority: 2, patient_name: 'Fatima Mohammed', room_name: 'Room 2', room: 2 },
+  { id: 3, patient: 'Chukwu Emeka', patientId: 'PAT-2024-003', visitType: 'Emergency', waitTime: '5 min', clinic: 'General', priority: 0, patient_name: 'Chukwu Emeka', room_name: 'Room 1', room: 1 },
+  { id: 4, patient: 'Grace Okonkwo', patientId: 'PAT-2024-004', visitType: 'Consultation', waitTime: '35 min', clinic: 'Physiotherapy', priority: 2, patient_name: 'Grace Okonkwo', room_name: 'Room 3', room: 3 },
 ];
 
 const recentConsultations = [
-  { patient: 'Ngozi Eze', diagnosis: 'Hypertension', doctor: 'Dr. Amaka', time: '10 min ago' },
-  { patient: 'Olumide Afolabi', diagnosis: 'Type 2 Diabetes', doctor: 'Dr. Chidi', time: '30 min ago' },
-  { patient: 'Amina Bello', diagnosis: 'Upper Respiratory Infection', doctor: 'Dr. Ibrahim', time: '1 hour ago' },
+  { id: 1, patient: 'Ngozi Eze', diagnosis: 'Hypertension', doctor: 'Dr. Amaka', time: '10 min ago', duration: 15 },
+  { id: 2, patient: 'Olumide Afolabi', diagnosis: 'Type 2 Diabetes', doctor: 'Dr. Chidi', time: '30 min ago', duration: 20 },
+  { id: 3, patient: 'Amina Bello', diagnosis: 'Upper Respiratory Infection', doctor: 'Dr. Ibrahim', time: '1 hour ago', duration: 12 },
 ];
 
 export default function ConsultationDashboardPage() {
@@ -49,7 +49,7 @@ export default function ConsultationDashboardPage() {
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {dashboardStats.map((stat, i) => (
+          {stats.map((stat, i) => (
             <Card key={i}>
               <CardContent className="p-4">
                 <div className="flex items-center justify-between">
@@ -91,8 +91,8 @@ export default function ConsultationDashboardPage() {
                 <Button variant="ghost" size="sm" onClick={() => router.push('/consultation/queue')}>View All<ArrowRight className="h-4 w-4 ml-1" /></Button>
               </CardHeader>
               <CardContent className="space-y-3">
-                {queueItems.length > 0 ? (
-                  queueItems.slice(0, 5).map((item) => {
+                {patientQueue.length > 0 ? (
+                  patientQueue.slice(0, 5).map((item) => {
                     const priorityLabels = ['Emergency', 'High', 'Medium', 'Low'];
                     const priorityLabel = priorityLabels[item.priority] || 'Medium';
                     const isEmergency = item.priority === 0;
@@ -137,8 +137,8 @@ export default function ConsultationDashboardPage() {
           <Card>
             <CardHeader className="pb-2"><CardTitle className="text-lg">Recent Consultations</CardTitle></CardHeader>
             <CardContent className="space-y-4">
-              {recentSessions.length > 0 ? (
-                recentSessions.map((session) => (
+              {recentConsultations.length > 0 ? (
+                recentConsultations.map((session) => (
                   <div key={session.id} className="flex items-start gap-3">
                     <div className="p-2 rounded-full bg-emerald-500/10"><CheckCircle2 className="h-4 w-4 text-emerald-500" /></div>
                     <div className="flex-1 min-w-0">

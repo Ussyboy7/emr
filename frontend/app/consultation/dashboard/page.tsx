@@ -32,7 +32,7 @@ export default function DoctorDashboardPage() {
       setLoading(true);
       setError(null);
       // Get current user's doctor ID if available
-      const doctorId = user?.id;
+      const doctorId = user?.id ? Number(user.id) : undefined;
       const statsData = await consultationService.getStats(doctorId);
       setStats(statsData);
     } catch (err: any) {
@@ -45,9 +45,9 @@ export default function DoctorDashboardPage() {
   };
 
   const CURRENT_DOCTOR = {
-    name: user?.name || (user?.first_name && user?.last_name ? `${user.first_name} ${user.last_name}` : "Dr. Loading..."),
+    name: user?.name || user?.username || "Dr. Loading...",
     specialty: user?.systemRole || "General Practice",
-    location: user?.clinic_name || "Main Clinic",
+    location: "Main Clinic", // clinic_name not available in User type
     employeeId: user?.employeeId || "EMP001"
   };
 

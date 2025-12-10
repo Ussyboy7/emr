@@ -1318,7 +1318,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
       // Update session with all medical data
       try {
-        await consultationService.updateSession(parseInt(sessionId), sessionUpdateData);
+        if (!sessionId) throw new Error('Session ID is required');
+        await consultationService.updateSession(sessionId, sessionUpdateData);
         console.log('Session data saved successfully');
       } catch (err) {
         console.error('Error saving session data:', err);
@@ -1332,7 +1333,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         try {
           const queueData = await consultationService.getQueue({
             room: parseInt(roomId),
-            patient: parseInt(currentPatient.id),
+            patient: typeof currentPatient.id === 'string' ? parseInt(currentPatient.id) : currentPatient.id,
             is_active: true,
           });
           
@@ -1352,7 +1353,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
       // Step 3: End the session using the dedicated endpoint
       try {
-        await consultationService.endSession(parseInt(sessionId));
+        if (!sessionId) throw new Error('Session ID is required');
+        await consultationService.endSession(sessionId);
         console.log('Session ended successfully');
       } catch (err: any) {
         console.error('Error ending session:', err);

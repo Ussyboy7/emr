@@ -98,6 +98,8 @@ class AdminService {
    */
   async getUsers(params?: {
     role?: string;
+    clinic?: number;
+    department?: number;
     is_active?: boolean;
     search?: string;
     page?: number;

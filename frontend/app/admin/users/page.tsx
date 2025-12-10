@@ -57,7 +57,7 @@ interface Department {
   id: number;
   name: string;
   code: string;
-  clinic: number;
+  clinic?: number;
 }
 
 // Empty staff object for form initialization

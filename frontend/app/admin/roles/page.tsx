@@ -114,8 +114,8 @@ export default function RolesPermissionsPage() {
   };
 
   // Map frontend role types to backend types
-  const mapToBackendType = (frontendType: Role['type']): string => {
-    const typeMap: Record<Role['type'], string> = {
+  const mapToBackendType = (frontendType: Role['type']): 'admin' | 'doctor' | 'nurse' | 'lab_tech' | 'pharmacist' | 'radiologist' | 'records' | 'custom' => {
+    const typeMap: Record<Role['type'], 'admin' | 'doctor' | 'nurse' | 'lab_tech' | 'pharmacist' | 'radiologist' | 'records' | 'custom'> = {
       'System': 'admin',
       'Clinical': 'doctor', // Default to doctor for clinical
       'Administrative': 'records',

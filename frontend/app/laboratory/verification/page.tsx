@@ -90,18 +90,18 @@ const transformResult = (apiResult: ApiLabResult): LabResult => {
     else if (results.some(r => r.status === 'Abnormal')) overallStatus = 'Abnormal';
   }
 
-  const order = (apiResult as any).order || test.order;
-  const patient = apiResult.patient || order?.patient;
+  const order = (apiResult as any).order || (test as any).order;
+  const patient = apiResult.patient || order?.patient || {};
   
   return {
     id: apiResult.id.toString(),
     testId: test.id?.toString() || apiResult.id.toString(), // Store test ID for API operations
     orderId: (apiResult as any).order_id || order?.order_id || '',
     patient: {
-      id: patient?.id?.toString() || '',
-      name: (apiResult as any).patient_name || patient?.name || 'Unknown',
-      age: patient?.age || 0,
-      gender: patient?.gender || 'Unknown',
+      id: (patient as any)?.id?.toString() || '',
+      name: (apiResult as any).patient_name || (patient as any)?.name || 'Unknown',
+      age: (patient as any)?.age || 0,
+      gender: (patient as any)?.gender || 'Unknown',
     },
     doctor: {
       id: order?.doctor?.id?.toString() || '',
