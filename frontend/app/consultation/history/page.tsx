@@ -20,9 +20,10 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { apiFetch } from '@/lib/api-client';
-import { patientService } from '@/lib/services';
+import { patientService, consultationService } from '@/lib/services';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
+import { useCurrentUser } from '@/hooks/use-current-user';
 
 // Types
 interface ConsultationRecord {
@@ -52,11 +53,6 @@ interface ConsultationRecord {
 }
 
 // Consultation history data will be loaded from API
-const demoConsultations: ConsultationRecord[] = [];
-
-// Current logged-in doctor (demo)
-const CURRENT_DOCTOR_ID = "doc-1";
-const CURRENT_DOCTOR_NAME = "Dr. Amaka Eze";
 
 const getPriorityColor = (priority: string) => {
   switch (priority?.toLowerCase()) {
@@ -97,7 +93,86 @@ const getEventIcon = (type: string) => {
   }
 };
 
+// Generate timeline from session events
+const generateTimeline = (
+  session: any,
+  vitals: ConsultationRecord['vitals'],
+  prescriptions: ConsultationRecord['prescriptions'],
+  labOrders: ConsultationRecord['labOrders'],
+  nursingOrders: ConsultationRecord['nursingOrders']
+): ConsultationRecord['timeline'] => {
+  const timeline: ConsultationRecord['timeline'] = [];
+  
+  // Session started
+  if (session.started_at) {
+    timeline.push({
+      time: new Date(session.started_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+      event: 'Consultation Started',
+      description: `Session ${session.session_id} began`,
+      type: 'consultation',
+    });
+  }
+  
+  // Vitals recorded
+  vitals.forEach((v) => {
+    timeline.push({
+      time: new Date(v.date).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+      event: 'Vitals Recorded',
+      description: `BP: ${v.systolic}/${v.diastolic}, Temp: ${v.temperature}°C, HR: ${v.heartRate} bpm`,
+      type: 'vitals',
+    });
+  });
+  
+  // Prescriptions added
+  prescriptions.forEach((p) => {
+    timeline.push({
+      time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+      event: 'Prescription Added',
+      description: `${p.medication} ${p.strength} - ${p.dosage} ${p.frequency}`,
+      type: 'prescription',
+    });
+  });
+  
+  // Lab orders added
+  labOrders.forEach((l) => {
+    timeline.push({
+      time: new Date(l.createdAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+      event: 'Lab Order Added',
+      description: `${l.test} - ${l.priority} priority`,
+      type: 'lab',
+    });
+  });
+  
+  // Nursing orders added
+  nursingOrders.forEach((n) => {
+    timeline.push({
+      time: new Date(n.createdAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+      event: 'Nursing Order Added',
+      description: `${n.type} - ${n.instructions}`,
+      type: 'nursing',
+    });
+  });
+  
+  // Session ended
+  if (session.ended_at) {
+    timeline.push({
+      time: new Date(session.ended_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+      event: 'Consultation Completed',
+      description: `Session ${session.session_id} ended`,
+      type: 'consultation',
+    });
+  }
+  
+  // Sort by time
+  return timeline.sort((a, b) => {
+    const timeA = a.time;
+    const timeB = b.time;
+    return timeA.localeCompare(timeB);
+  });
+};
+
 export default function ConsultationHistoryPage() {
+  const { currentUser } = useCurrentUser();
   const [consultations, setConsultations] = useState<ConsultationRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
@@ -165,20 +240,14 @@ export default function ConsultationHistoryPage() {
               }
             }
             
-            // Get consultation notes if available
-            if (session.notes) {
-              try {
-                const notesResult = await apiFetch<{ results: any[] }>(`/consultation/notes/?session=${session.id}&page_size=1`);
-                const latestNote = notesResult.results?.[0];
-                if (latestNote) {
-                  diagnosis = latestNote.diagnosis || '';
-                  assessment = latestNote.assessment || '';
-                  plan = latestNote.plan || '';
-                }
-              } catch (notesErr) {
-                console.warn('Could not load consultation notes:', notesErr);
-              }
-            }
+            // Get consultation notes directly from session
+            // Note: diagnosis is typically part of assessment, but we'll extract it if available
+            // For now, we'll use assessment as diagnosis since the model doesn't have a separate diagnosis field
+            diagnosis = session.assessment || '';
+            assessment = session.assessment || '';
+            plan = session.plan || '';
+            const historyOfPresentIllness = session.history_of_presenting_illness || '';
+            const physicalExamination = session.physical_examination || '';
             
             // Calculate session duration
             let sessionDuration = 0;
@@ -186,30 +255,57 @@ export default function ConsultationHistoryPage() {
               sessionDuration = Math.floor((new Date(session.ended_at).getTime() - new Date(session.started_at).getTime()) / (1000 * 60));
             }
             
-            // Get prescriptions, lab orders, and nursing orders counts
-            let prescriptionsCount = 0;
-            let labOrdersCount = 0;
-            let nursingOrdersCount = 0;
+            // Get prescriptions, lab orders, and nursing orders
+            let prescriptions: ConsultationRecord['prescriptions'] = [];
+            let labOrders: ConsultationRecord['labOrders'] = [];
+            let nursingOrders: ConsultationRecord['nursingOrders'] = [];
             
-            try {
-              const prescriptionsResult = await apiFetch<{ results: any[]; count?: number }>(`/prescriptions/?visit=${session.visit || ''}&page_size=1`);
-              prescriptionsCount = prescriptionsResult.count || 0;
-            } catch (err) {
-              // Ignore
-            }
-            
-            try {
-              const labOrdersResult = await apiFetch<{ results: any[]; count?: number }>(`/laboratory/orders/?visit=${session.visit || ''}&page_size=1`);
-              labOrdersCount = labOrdersResult.count || 0;
-            } catch (err) {
-              // Ignore
-            }
-            
-            try {
-              const nursingOrdersResult = await apiFetch<{ results: any[]; count?: number }>(`/nursing/orders/?visit=${session.visit || ''}&page_size=1`);
-              nursingOrdersCount = nursingOrdersResult.count || 0;
-            } catch (err) {
-              // Ignore
+            if (session.visit) {
+              try {
+                const prescriptionsResult = await apiFetch<{ results: any[] }>(`/prescriptions/?visit=${session.visit}&page_size=100`);
+                prescriptions = (prescriptionsResult.results || []).map((p: any) => ({
+                  id: String(p.id),
+                  medication: p.medication_name || p.medication || 'Unknown',
+                  strength: p.strength || '',
+                  form: p.form || '',
+                  dosage: p.dosage || '',
+                  frequency: p.frequency || '',
+                  duration: p.duration || '',
+                  instructions: p.instructions || '',
+                }));
+              } catch (err) {
+                console.warn('Could not load prescriptions:', err);
+              }
+              
+              try {
+                const labOrdersResult = await apiFetch<{ results: any[] }>(`/laboratory/orders/?visit=${session.visit}&page_size=100`);
+                labOrders = (labOrdersResult.results || []).map((l: any) => ({
+                  id: String(l.id),
+                  test: l.test_name || l.test || 'Unknown',
+                  priority: l.priority === 0 ? 'Emergency' : l.priority === 1 ? 'High' : l.priority === 2 ? 'Medium' : 'Low',
+                  instructions: l.instructions || '',
+                  status: l.status || 'pending',
+                  orderedBy: l.ordered_by_name || 'Unknown',
+                  createdAt: l.created_at || new Date().toISOString(),
+                }));
+              } catch (err) {
+                console.warn('Could not load lab orders:', err);
+              }
+              
+              try {
+                const nursingOrdersResult = await apiFetch<{ results: any[] }>(`/nursing/orders/?visit=${session.visit}&page_size=100`);
+                nursingOrders = (nursingOrdersResult.results || []).map((n: any) => ({
+                  id: String(n.id),
+                  type: n.order_type || n.type || 'General',
+                  instructions: n.instructions || '',
+                  status: n.status || 'pending',
+                  priority: n.priority === 0 ? 'Emergency' : n.priority === 1 ? 'High' : n.priority === 2 ? 'Medium' : 'Low',
+                  orderedBy: n.ordered_by_name || 'Unknown',
+                  createdAt: n.created_at || new Date().toISOString(),
+                }));
+              } catch (err) {
+                console.warn('Could not load nursing orders:', err);
+              }
             }
             
             // Get vitals
@@ -251,15 +347,15 @@ export default function ConsultationHistoryPage() {
               priority: session.priority === 0 ? 'Emergency' : session.priority === 1 ? 'High' : session.priority === 2 ? 'Medium' : 'Low',
               sessionDuration,
               chiefComplaint,
-              historyOfPresentIllness: '',
-              physicalExamination: '',
+              historyOfPresentIllness,
+              physicalExamination,
               assessment,
               plan,
               vitals,
-              prescriptions: [], // Will be loaded separately if needed
-              labOrders: [], // Will be loaded separately if needed
-              nursingOrders: [], // Will be loaded separately if needed
-              timeline: [],
+              prescriptions,
+              labOrders,
+              nursingOrders,
+              timeline: generateTimeline(session, vitals, prescriptions, labOrders, nursingOrders),
             } as ConsultationRecord;
           } catch (err) {
             console.error(`Error loading consultation ${session.id}:`, err);
@@ -285,15 +381,16 @@ export default function ConsultationHistoryPage() {
   }, []);
 
   const filteredConsultations = useMemo(() => {
+    const currentUserId = currentUser?.id ? String(currentUser.id) : '';
     return consultations.filter((c) => {
       const matchesSearch = !searchQuery || c.patient.toLowerCase().includes(searchQuery.toLowerCase()) || c.id.toLowerCase().includes(searchQuery.toLowerCase()) || c.patientId.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesScope = scopeFilter === "all" || (scopeFilter === "my" && c.doctorId === CURRENT_DOCTOR_ID);
+      const matchesScope = scopeFilter === "all" || (scopeFilter === "my" && c.doctorId === currentUserId);
       const matchesStatus = statusFilter === "all" || c.status.toLowerCase().replace(" ", "-") === statusFilter;
       const matchesDate = !dateFilter || c.date === dateFilter;
       const matchesClinic = clinicFilter === "all" || c.clinic === clinicFilter;
       return matchesSearch && matchesScope && matchesStatus && matchesDate && matchesClinic;
     });
-  }, [consultations, searchQuery, scopeFilter, statusFilter, dateFilter, clinicFilter]);
+  }, [consultations, searchQuery, scopeFilter, statusFilter, dateFilter, clinicFilter, currentUser]);
 
   // Paginated consultations
   const paginatedConsultations = useMemo(() => {
@@ -308,7 +405,8 @@ export default function ConsultationHistoryPage() {
 
   // Stats
   const stats = useMemo(() => {
-    const filtered = scopeFilter === "my" ? consultations.filter(c => c.doctorId === CURRENT_DOCTOR_ID) : consultations;
+    const currentUserId = currentUser?.id ? String(currentUser.id) : '';
+    const filtered = scopeFilter === "my" ? consultations.filter(c => c.doctorId === currentUserId) : consultations;
     const today = new Date().toISOString().split("T")[0];
     return {
       total: filtered.length,
@@ -316,7 +414,7 @@ export default function ConsultationHistoryPage() {
       completed: filtered.filter(c => c.status === "Completed").length,
       inProgress: filtered.filter(c => c.status === "In Progress").length,
     };
-  }, [consultations, scopeFilter]);
+  }, [consultations, scopeFilter, currentUser]);
 
   const openViewModal = (consultation: ConsultationRecord) => {
     setSelectedConsultation(consultation);
@@ -341,50 +439,22 @@ export default function ConsultationHistoryPage() {
         return;
       }
       
-      // Update consultation notes if they exist
-      try {
-        const notesResult = await apiFetch<{ results: any[] }>(`/consultation/notes/?session=${sessionId}&page_size=1`);
-        const existingNote = notesResult.results?.[0];
-        
-        if (existingNote) {
-          // Update existing note
-          await apiFetch(`/consultation/notes/${existingNote.id}/`, {
-            method: 'PATCH',
-            body: JSON.stringify({
-              diagnosis: editForm.diagnosis,
-              assessment: editForm.assessment,
-              plan: editForm.plan,
-            }),
-          });
-        } else {
-          // Create new note
-          await apiFetch('/consultation/notes/', {
-            method: 'POST',
-            body: JSON.stringify({
-              session: sessionId,
-              diagnosis: editForm.diagnosis,
-              assessment: editForm.assessment,
-              plan: editForm.plan,
-            }),
-          });
-        }
-      } catch (notesErr) {
-        console.warn('Could not update consultation notes:', notesErr);
-      }
+      // Update consultation session notes directly
+      // Note: diagnosis is stored in assessment field in the backend
+      const updateData: any = {
+        assessment: editForm.diagnosis || editForm.assessment,
+        plan: editForm.plan,
+      };
       
       // Update session status if changed
       if (editForm.status !== selectedConsultation.status) {
-        try {
-          await apiFetch(`/consultation/sessions/${sessionId}/`, {
-            method: 'PATCH',
-            body: JSON.stringify({
-              status: editForm.status === 'Completed' ? 'completed' : 'in_progress',
-            }),
-          });
-        } catch (sessionErr) {
-          console.warn('Could not update session status:', sessionErr);
+        updateData.status = editForm.status === 'Completed' ? 'completed' : 'in_progress';
+        if (editForm.status === 'Completed' && !selectedConsultation.status) {
+          updateData.ended_at = new Date().toISOString();
         }
       }
+      
+      await consultationService.updateSession(sessionId, updateData);
       
       // Update local state
       setConsultations(prev => prev.map(c => 
@@ -454,7 +524,7 @@ export default function ConsultationHistoryPage() {
 
   return (
     <DashboardLayout>
-      <div className="p-6 max-w-7xl mx-auto space-y-6">
+      <div className="container mx-auto p-6 space-y-6">
         {/* Header */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
@@ -555,31 +625,38 @@ export default function ConsultationHistoryPage() {
         {/* Filters */}
         <Card>
           <CardContent className="p-4">
-            <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
-              <div className="md:col-span-2 relative">
+            <div className="flex flex-col gap-4">
+              <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input placeholder="Search patient, ID..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-10" />
+                <Input 
+                  placeholder="Search patient, ID..." 
+                  value={searchQuery} 
+                  onChange={(e) => setSearchQuery(e.target.value)} 
+                  className="pl-10" 
+                />
               </div>
-              <Input type="date" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)} />
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger><SelectValue placeholder="Status" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Status</SelectItem>
-                  <SelectItem value="in-progress">In Progress</SelectItem>
-                  <SelectItem value="completed">Completed</SelectItem>
-                </SelectContent>
-              </Select>
-              <Select value={clinicFilter} onValueChange={setClinicFilter}>
-                <SelectTrigger><SelectValue placeholder="Clinic" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Clinics</SelectItem>
-                  <SelectItem value="General">General</SelectItem>
-                  <SelectItem value="Eye">Eye Clinic</SelectItem>
-                  <SelectItem value="Physiotherapy">Physiotherapy</SelectItem>
-                  <SelectItem value="Sickle Cell">Sickle Cell</SelectItem>
-                  <SelectItem value="Cardiology">Cardiology</SelectItem>
-                </SelectContent>
-              </Select>
+              <div className="flex flex-wrap gap-2">
+                <Input type="date" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)} className="w-[140px]" />
+                <Select value={statusFilter} onValueChange={setStatusFilter}>
+                  <SelectTrigger className="w-[160px]"><SelectValue placeholder="Status" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Status</SelectItem>
+                    <SelectItem value="in-progress">In Progress</SelectItem>
+                    <SelectItem value="completed">Completed</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={clinicFilter} onValueChange={setClinicFilter}>
+                  <SelectTrigger className="w-[140px]"><SelectValue placeholder="Clinic" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Clinics</SelectItem>
+                    <SelectItem value="General">General</SelectItem>
+                    <SelectItem value="Eye">Eye Clinic</SelectItem>
+                    <SelectItem value="Physiotherapy">Physiotherapy</SelectItem>
+                    <SelectItem value="Sickle Cell">Sickle Cell</SelectItem>
+                    <SelectItem value="Cardiology">Cardiology</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           </CardContent>
         </Card>

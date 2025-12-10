@@ -693,8 +693,8 @@ export default function LabOrdersPage() {
         {/* Filters & Tabs */}
         <Card>
           <CardContent className="p-4">
-            <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
-              <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full md:w-auto">
+            <div className="flex flex-col gap-4">
+              <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
                 <TabsList>
                   <TabsTrigger value="pending">Pending ({stats.pendingSamples})</TabsTrigger>
                   <TabsTrigger value="processing">Processing ({stats.processing})</TabsTrigger>
@@ -702,20 +702,27 @@ export default function LabOrdersPage() {
                   <TabsTrigger value="all">All</TabsTrigger>
                 </TabsList>
               </Tabs>
-              <div className="flex gap-2 w-full md:w-auto">
-                <div className="relative flex-1 md:w-64">
+              <div className="flex flex-col gap-4">
+                <div className="relative flex-1">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input placeholder="Search orders..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-10" />
+                  <Input 
+                    placeholder="Search orders..." 
+                    value={searchQuery} 
+                    onChange={(e) => setSearchQuery(e.target.value)} 
+                    className="pl-10" 
+                  />
                 </div>
-                <Select value={priorityFilter} onValueChange={setPriorityFilter}>
-                  <SelectTrigger className="w-[130px]"><SelectValue placeholder="Priority" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Priority</SelectItem>
-                    <SelectItem value="STAT">STAT</SelectItem>
-                    <SelectItem value="Urgent">Urgent</SelectItem>
-                    <SelectItem value="Routine">Routine</SelectItem>
-                  </SelectContent>
-                </Select>
+                <div className="flex flex-wrap gap-2">
+                  <Select value={priorityFilter} onValueChange={setPriorityFilter}>
+                    <SelectTrigger className="w-[130px]"><SelectValue placeholder="Priority" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Priority</SelectItem>
+                      <SelectItem value="STAT">STAT</SelectItem>
+                      <SelectItem value="Urgent">Urgent</SelectItem>
+                      <SelectItem value="Routine">Routine</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
             </div>
           </CardContent>
@@ -861,7 +868,21 @@ export default function LabOrdersPage() {
                             <FileText className="h-4 w-4 text-indigo-600" />
                             <span>{test.resultFile.name}</span>
                           </div>
-                          <Button variant="ghost" size="sm" className="h-6 px-2 text-indigo-600">
+                          <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            className="h-6 px-2 text-indigo-600"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (test.resultFile) {
+                                // Construct download URL
+                                const fileUrl = test.resultFile.name.startsWith('http') 
+                                  ? test.resultFile.name 
+                                  : `/api${test.resultFile.name}`;
+                                window.open(fileUrl, '_blank');
+                              }
+                            }}
+                          >
                             <Download className="h-3 w-3 mr-1" />Download
                           </Button>
                         </div>

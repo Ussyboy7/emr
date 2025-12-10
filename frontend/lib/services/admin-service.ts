@@ -18,7 +18,8 @@ export interface User {
   last_login?: string;
   clinic?: number;
   clinic_name?: string;
-  department?: string;
+  department?: number;  // Changed from string to number (ForeignKey)
+  department_name?: string;
   specialty?: string;
   license_number?: string;
   license_expiry?: string;
@@ -29,8 +30,8 @@ export interface Role {
   id: number;
   name: string;
   description?: string;
-  type: 'System' | 'Clinical' | 'Administrative' | 'Custom';
-  permissions?: string[];
+  type: 'admin' | 'doctor' | 'nurse' | 'lab_tech' | 'pharmacist' | 'radiologist' | 'records' | 'custom'; // Backend format
+  permissions?: any; // Backend stores as JSON object: {module: [pages]}
   is_active: boolean;
   user_count?: number;
   created_at: string;
@@ -103,14 +104,14 @@ class AdminService {
     page_size?: number;
   }): Promise<{ results: User[]; count: number }> {
     const query = buildQueryString(params || {});
-    return apiFetch<{ results: User[]; count: number }>(`/users/${query}`);
+    return apiFetch<{ results: User[]; count: number }>(`/accounts/users/${query}`);
   }
 
   /**
    * Get a single user
    */
   async getUser(userId: number): Promise<User> {
-    return apiFetch<User>(`/users/${userId}/`);
+    return apiFetch<User>(`/accounts/users/${userId}/`);
   }
 
   /**
@@ -129,14 +130,15 @@ class AdminService {
     
     if (data.phone) createData.phone = data.phone;
     if (data.system_role) createData.system_role = data.system_role;
-    if (data.department) createData.department = data.department;
+    if (data.clinic !== undefined) createData.clinic = data.clinic;
+    if (data.department !== undefined) createData.department = data.department;
     if (data.is_active !== undefined) createData.is_active = data.is_active;
     if ((data as any).specialty) createData.specialty = (data as any).specialty;
     if ((data as any).license_number) createData.license_number = (data as any).license_number;
     if ((data as any).license_expiry) createData.license_expiry = (data as any).license_expiry;
     if ((data as any).qualification) createData.qualification = (data as any).qualification;
     
-    return apiFetch<User>('/users/', {
+    return apiFetch<User>('/accounts/users/', {
       method: 'POST',
       body: JSON.stringify(createData),
     });
@@ -153,6 +155,7 @@ class AdminService {
     if (data.email !== undefined) updateData.email = data.email;
     if (data.phone !== undefined) updateData.phone = data.phone;
     if (data.system_role !== undefined) updateData.system_role = data.system_role;
+    if (data.clinic !== undefined) updateData.clinic = data.clinic;
     if (data.department !== undefined) updateData.department = data.department;
     // Note: is_active may not be in UserUpdateSerializer - would need backend update
     if (data.is_active !== undefined) updateData.is_active = data.is_active;
@@ -161,7 +164,7 @@ class AdminService {
     if ((data as any).license_expiry !== undefined) updateData.license_expiry = (data as any).license_expiry;
     if ((data as any).qualification !== undefined) updateData.qualification = (data as any).qualification;
     
-    return apiFetch<User>(`/users/${userId}/`, {
+    return apiFetch<User>(`/accounts/users/${userId}/`, {
       method: 'PATCH',
       body: JSON.stringify(updateData),
     });
@@ -171,21 +174,19 @@ class AdminService {
    * Delete a user
    */
   async deleteUser(userId: number): Promise<void> {
-    return apiFetch<void>(`/users/${userId}/`, {
+    return apiFetch<void>(`/accounts/users/${userId}/`, {
       method: 'DELETE',
     });
   }
 
   /**
    * Reset user password (admin action)
-   * Note: This would typically require a separate admin endpoint
-   * For now, we'll show a message that password reset should be done through the user's own change_password endpoint
    */
   async resetPassword(userId: number, newPassword: string): Promise<void> {
-    // In a real system, this would be an admin-only endpoint
-    // For now, we'll just return - the UI should handle this differently
-    // The user would need to use the change_password endpoint with old_password
-    throw new Error('Password reset requires admin endpoint. Please use user management system.');
+    return apiFetch<void>(`/accounts/users/${userId}/reset_password/`, {
+      method: 'POST',
+      body: JSON.stringify({ new_password: newPassword }),
+    });
   }
 
   /**
@@ -264,21 +265,21 @@ class AdminService {
     page_size?: number;
   }): Promise<{ results: Clinic[]; count: number }> {
     const query = buildQueryString(params || {});
-    return apiFetch<{ results: Clinic[]; count: number }>(`/organization/clinics/${query}`);
+    return apiFetch<{ results: Clinic[]; count: number }>(`/organization/organization/clinics/${query}`);
   }
 
   /**
    * Get a single clinic
    */
   async getClinic(clinicId: number): Promise<Clinic> {
-    return apiFetch<Clinic>(`/organization/clinics/${clinicId}/`);
+    return apiFetch<Clinic>(`/organization/organization/clinics/${clinicId}/`);
   }
 
   /**
    * Create a new clinic
    */
   async createClinic(data: Partial<Clinic>): Promise<Clinic> {
-    return apiFetch<Clinic>('/organization/clinics/', {
+    return apiFetch<Clinic>('/organization/organization/clinics/', {
       method: 'POST',
       body: JSON.stringify(data),
     });
@@ -288,7 +289,7 @@ class AdminService {
    * Update a clinic
    */
   async updateClinic(clinicId: number, data: Partial<Clinic>): Promise<Clinic> {
-    return apiFetch<Clinic>(`/organization/clinics/${clinicId}/`, {
+    return apiFetch<Clinic>(`/organization/organization/clinics/${clinicId}/`, {
       method: 'PATCH',
       body: JSON.stringify(data),
     });
@@ -298,7 +299,7 @@ class AdminService {
    * Delete a clinic
    */
   async deleteClinic(clinicId: number): Promise<void> {
-    return apiFetch<void>(`/organization/clinics/${clinicId}/`, {
+    return apiFetch<void>(`/organization/organization/clinics/${clinicId}/`, {
       method: 'DELETE',
     });
   }
@@ -314,21 +315,21 @@ class AdminService {
     page_size?: number;
   }): Promise<{ results: Department[]; count: number }> {
     const query = buildQueryString(params || {});
-    return apiFetch<{ results: Department[]; count: number }>(`/organization/departments/${query}`);
+    return apiFetch<{ results: Department[]; count: number }>(`/organization/organization/departments/${query}`);
   }
 
   /**
    * Get a single department
    */
   async getDepartment(deptId: number): Promise<Department> {
-    return apiFetch<Department>(`/organization/departments/${deptId}/`);
+    return apiFetch<Department>(`/organization/organization/departments/${deptId}/`);
   }
 
   /**
    * Create a new department
    */
   async createDepartment(data: Partial<Department>): Promise<Department> {
-    return apiFetch<Department>('/organization/departments/', {
+    return apiFetch<Department>('/organization/organization/departments/', {
       method: 'POST',
       body: JSON.stringify(data),
     });
@@ -338,17 +339,34 @@ class AdminService {
    * Update a department
    */
   async updateDepartment(deptId: number, data: Partial<Department>): Promise<Department> {
-    return apiFetch<Department>(`/organization/departments/${deptId}/`, {
+    return apiFetch<Department>(`/organization/organization/departments/${deptId}/`, {
       method: 'PATCH',
       body: JSON.stringify(data),
     });
   }
 
   /**
+   * Get all rooms
+   */
+  async getRooms(params?: {
+    clinic?: number;
+    department?: number;
+    room_type?: string;
+    status?: string;
+    is_active?: boolean;
+    search?: string;
+    page?: number;
+    page_size?: number;
+  }): Promise<{ results: any[]; count: number }> {
+    const query = buildQueryString(params || {});
+    return apiFetch<{ results: any[]; count: number }>(`/organization/organization/rooms/${query}`);
+  }
+
+  /**
    * Delete a department
    */
   async deleteDepartment(deptId: number): Promise<void> {
-    return apiFetch<void>(`/organization/departments/${deptId}/`, {
+    return apiFetch<void>(`/organization/organization/departments/${deptId}/`, {
       method: 'DELETE',
     });
   }
@@ -404,7 +422,7 @@ class AdminService {
       this.getUsers({ page_size: 1000 }),
       this.getRoles({ page_size: 1000 }),
       this.getClinics({ page_size: 1000 }),
-      apiFetch<{ results: any[]; count: number }>('/rooms/?page_size=1000'),
+      this.getRooms({ page_size: 1000 }), // Use the existing getRooms method
       this.getAuditLogs({ page_size: 10 }),
     ]);
 

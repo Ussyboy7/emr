@@ -38,6 +38,7 @@ export default function AdminDashboardPage() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<string>('');
   const [systemStats, setSystemStats] = useState({
     totalUsers: 0,
     activeUsers: 0,
@@ -59,6 +60,8 @@ export default function AdminDashboardPage() {
 
   useEffect(() => {
     loadDashboardData();
+    // Set initial time after mount to avoid hydration mismatch
+    setLastUpdated(new Date().toLocaleTimeString());
   }, []);
 
   const loadDashboardData = async () => {
@@ -96,6 +99,7 @@ export default function AdminDashboardPage() {
   const handleRefresh = async () => {
     setIsRefreshing(true);
     await loadDashboardData();
+    setLastUpdated(new Date().toLocaleTimeString());
     setIsRefreshing(false);
   };
 
@@ -133,9 +137,11 @@ export default function AdminDashboardPage() {
               <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? "animate-spin" : ""}`} />
               Refresh
             </Button>
-            <span className="text-sm text-muted-foreground">
-              Last updated: {new Date().toLocaleTimeString()}
-            </span>
+            {lastUpdated && (
+              <span className="text-sm text-muted-foreground">
+                Last updated: {lastUpdated}
+              </span>
+            )}
           </div>
         </div>
 

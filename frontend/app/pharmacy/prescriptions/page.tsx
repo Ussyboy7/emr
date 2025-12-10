@@ -41,16 +41,28 @@ const checkInteractions = async (medications: string[]): Promise<DrugInteraction
   return [];
 };
 
-// Get medication batches - TODO: Connect to API
-const getMedicationBatches = async (medicationId: string): Promise<MedicationBatch[]> => {
-  // TODO: Implement API call to get batches from inventory
-  return [];
-};
+// Get medication batches - uses pharmacyService
 
-// Get substitutes for medication - TODO: Connect to API
+// Get substitutes for medication - uses pharmacyService
 const getSubstitutesForMedication = async (medicationName: string): Promise<SubstituteOption[]> => {
-  // TODO: Implement API call to get medication substitutes
-  return [];
+  try {
+    // Search for medications with similar names (generic alternatives)
+    const response = await pharmacyService.getMedications({ search: medicationName, page: 1 });
+    return response.results.slice(0, 10).map((m: any) => ({
+      id: m.id.toString(),
+      name: m.name,
+      strength: m.strength || '',
+      type: m.generic_name ? 'generic' : 'brand',
+      stock: 0, // Would need to get from inventory
+      expiryDate: '',
+      daysToExpiry: 0,
+      unitPrice: 0,
+      isNearExpiry: false,
+    }));
+  } catch (err) {
+    console.error('Error loading substitutes:', err);
+    return [];
+  }
 };
 
 export default function PrescriptionsPage() {
@@ -148,7 +160,7 @@ export default function PrescriptionsPage() {
         });
         
         return {
-          id: rx.prescription_id || rx.id.toString(),
+          id: rx.id?.toString() || rx.prescription_id || '',
           patient: { 
             name: patientName, 
             id: patientId, 
@@ -188,6 +200,7 @@ export default function PrescriptionsPage() {
   const [dispenseQuantities, setDispenseQuantities] = useState<Record<string, number>>({});
   const [dispenseNotes, setDispenseNotes] = useState('');
   const [selectedBatches, setSelectedBatches] = useState<Record<string, string>>({});
+  const [medicationBatches, setMedicationBatches] = useState<Record<string, MedicationBatch[]>>({});
   const [counselingChecklist, setCounselingChecklist] = useState<Record<string, boolean>>({
     dosageExplained: false,
     sideEffectsDiscussed: false,
@@ -285,13 +298,35 @@ export default function PrescriptionsPage() {
     const initialQuantities: Record<string, number> = {};
     const initialSelection: string[] = [];
     const initialBatches: Record<string, string> = {};
+    const loadedBatches: Record<string, MedicationBatch[]> = {};
     
-    prescription.medications.forEach(med => {
+    // Load batches for each medication
+    const batchPromises = prescription.medications.map(async (med) => {
       if (med.status === 'Available' || med.status === 'Low Stock') {
         initialQuantities[med.id] = med.quantity;
         initialSelection.push(med.id);
+        
+        // Load batches for this medication
+        try {
+          // Get medication ID from the prescription item
+          const prescriptionId = parseInt(prescription.id) || prescription.id;
+          const rxDetail = await pharmacyService.getPrescription(typeof prescriptionId === 'number' ? prescriptionId : parseInt(prescriptionId));
+          const rxMed = rxDetail.medications.find((m: any) => m.id.toString() === med.id);
+          if (rxMed && rxMed.medication) {
+            const batches = await pharmacyService.getMedicationBatches(rxMed.medication);
+            loadedBatches[med.id] = batches;
+            if (batches.length > 0) {
+              initialBatches[med.id] = batches[0].id; // Default to first batch
+            }
+          }
+        } catch (err) {
+          console.error(`Error loading batches for ${med.name}:`, err);
+        }
       }
     });
+    
+    await Promise.all(batchPromises);
+    setMedicationBatches(loadedBatches);
     
     // Check for drug interactions
     const medNames = prescription.medications.map(m => m.name);
@@ -313,10 +348,32 @@ export default function PrescriptionsPage() {
     setShowDispenseModal(true);
   };
 
-  const handleMedicationSelection = (medId: string, checked: boolean, quantity: number) => {
+  const handleMedicationSelection = async (medId: string, checked: boolean, quantity: number) => {
     if (checked) {
       setSelectedMedications(prev => [...prev, medId]);
       setDispenseQuantities(prev => ({ ...prev, [medId]: quantity }));
+      
+      // Load batches for this medication when selected
+      if (selectedPrescription) {
+        try {
+          const med = selectedPrescription.medications.find(m => m.id === medId);
+          if (med) {
+            // Get prescription detail to find medication ID
+            const prescriptionId = parseInt(selectedPrescription.id) || selectedPrescription.id;
+            const rxDetail = await pharmacyService.getPrescription(typeof prescriptionId === 'number' ? prescriptionId : parseInt(prescriptionId));
+            const rxMed = rxDetail.medications.find((m: any) => m.id.toString() === medId);
+            if (rxMed && rxMed.medication) {
+              const batches = await pharmacyService.getMedicationBatches(rxMed.medication);
+              setMedicationBatches(prev => ({ ...prev, [medId]: batches }));
+              if (batches.length > 0) {
+                setSelectedBatches(prev => ({ ...prev, [medId]: batches[0].id }));
+              }
+            }
+          }
+        } catch (err) {
+          console.error(`Error loading batches for medication ${medId}:`, err);
+        }
+      }
     } else {
       setSelectedMedications(prev => prev.filter(id => id !== medId));
       setDispenseQuantities(prev => {
@@ -324,42 +381,62 @@ export default function PrescriptionsPage() {
         delete newQty[medId];
         return newQty;
       });
+      setSelectedBatches(prev => {
+        const newBatches = { ...prev };
+        delete newBatches[medId];
+        return newBatches;
+      });
     }
   };
 
-  const handleDispense = () => {
+  const handleDispense = async () => {
     if (!selectedPrescription || selectedMedications.length === 0) {
       toast.error('Please select medications to dispense');
       return;
     }
 
-    // Update prescription status
-    setPrescriptions(prev => prev.map(rx => {
-      if (rx.id === selectedPrescription.id) {
-        const allMedsDispensed = rx.medications.every(med => 
-          selectedMedications.includes(med.id) || med.status === 'Out of Stock' || med.status === 'Dispensed'
-        );
+    try {
+      // Get prescription ID (may be prescription_id string or numeric id)
+      const prescriptionId = parseInt(selectedPrescription.id) || selectedPrescription.id;
+      
+      // Dispense each selected medication
+      const dispensePromises = selectedMedications.map(async (medId) => {
+        const med = selectedPrescription.medications.find(m => m.id === medId);
+        if (!med) return;
         
-        const updatedMeds = rx.medications.map(med => ({
-          ...med,
-          status: selectedMedications.includes(med.id) ? 'Dispensed' : med.status
-        }));
+        const quantity = dispenseQuantities[medId] || med.quantity;
+        const inventoryId = selectedBatches[medId] ? parseInt(selectedBatches[medId]) : undefined;
+        
+        try {
+          await pharmacyService.dispense(
+            typeof prescriptionId === 'number' ? prescriptionId : parseInt(prescriptionId),
+            parseInt(medId),
+            quantity,
+            inventoryId,
+            dispenseNotes
+          );
+        } catch (err: any) {
+          console.error(`Error dispensing ${med.name}:`, err);
+          throw err;
+        }
+      });
 
-        return {
-          ...rx,
-          medications: updatedMeds,
-          status: allMedsDispensed ? 'Dispensed' : 'Partially Dispensed'
-        };
-      }
-      return rx;
-    }));
+      await Promise.all(dispensePromises);
 
-    toast.success(`${selectedMedications.length} medication(s) dispensed successfully for ${selectedPrescription.patient.name}`);
-    setShowDispenseModal(false);
-    setSelectedPrescription(null);
-    setSelectedMedications([]);
-    setDispenseQuantities({});
-    setDispenseNotes('');
+      toast.success(`${selectedMedications.length} medication(s) dispensed successfully for ${selectedPrescription.patient.name}`);
+      setShowDispenseModal(false);
+      setSelectedPrescription(null);
+      setSelectedMedications([]);
+      setDispenseQuantities({});
+      setDispenseNotes('');
+      setSelectedBatches({});
+      
+      // Reload prescriptions to get updated status
+      await loadPrescriptions();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to dispense medications');
+      console.error('Error dispensing medications:', err);
+    }
   };
 
   const handleQuickDispense = (prescription: Prescription) => {
@@ -490,7 +567,7 @@ export default function PrescriptionsPage() {
         {/* Filters */}
         <Card>
           <CardContent className="p-4">
-            <div className="flex flex-col md:flex-row gap-3">
+            <div className="flex flex-col gap-4">
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input 
@@ -500,27 +577,29 @@ export default function PrescriptionsPage() {
                   className="pl-10" 
                 />
               </div>
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="w-[150px]"><SelectValue placeholder="Status" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Status</SelectItem>
-                  <SelectItem value="pending">Pending</SelectItem>
-                  <SelectItem value="processing">Processing</SelectItem>
-                  <SelectItem value="ready">Ready</SelectItem>
-                  <SelectItem value="on hold">On Hold</SelectItem>
-                  <SelectItem value="partially dispensed">Partial</SelectItem>
-                </SelectContent>
-              </Select>
-              <Select value={priorityFilter} onValueChange={setPriorityFilter}>
-                <SelectTrigger className="w-[150px]"><SelectValue placeholder="Priority" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Priority</SelectItem>
-                  <SelectItem value="emergency">Emergency</SelectItem>
-                  <SelectItem value="high">High</SelectItem>
-                  <SelectItem value="medium">Medium</SelectItem>
-                  <SelectItem value="low">Low</SelectItem>
-                </SelectContent>
-              </Select>
+              <div className="flex flex-wrap gap-2">
+                <Select value={statusFilter} onValueChange={setStatusFilter}>
+                  <SelectTrigger className="w-[150px]"><SelectValue placeholder="Status" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Status</SelectItem>
+                    <SelectItem value="pending">Pending</SelectItem>
+                    <SelectItem value="processing">Processing</SelectItem>
+                    <SelectItem value="ready">Ready</SelectItem>
+                    <SelectItem value="on hold">On Hold</SelectItem>
+                    <SelectItem value="partially dispensed">Partial</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={priorityFilter} onValueChange={setPriorityFilter}>
+                  <SelectTrigger className="w-[150px]"><SelectValue placeholder="Priority" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Priority</SelectItem>
+                    <SelectItem value="emergency">Emergency</SelectItem>
+                    <SelectItem value="high">High</SelectItem>
+                    <SelectItem value="medium">Medium</SelectItem>
+                    <SelectItem value="low">Low</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -843,8 +922,7 @@ export default function PrescriptionsPage() {
                     {selectedPrescription.medications.map((med) => {
                       const isSelected = selectedMedications.includes(med.id);
                       const isAvailable = med.status === 'Available' || med.status === 'Low Stock';
-                      // Batches and substitutes will be loaded via API when needed
-                      const batches: MedicationBatch[] = [];
+                      const batches = medicationBatches[med.id] || [];
                       const hasSubstitute = false;
                       
                       return (

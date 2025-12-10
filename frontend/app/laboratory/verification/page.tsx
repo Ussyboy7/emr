@@ -90,31 +90,34 @@ const transformResult = (apiResult: ApiLabResult): LabResult => {
     else if (results.some(r => r.status === 'Abnormal')) overallStatus = 'Abnormal';
   }
 
+  const order = (apiResult as any).order || test.order;
+  const patient = apiResult.patient || order?.patient;
+  
   return {
     id: apiResult.id.toString(),
     testId: test.id?.toString() || apiResult.id.toString(), // Store test ID for API operations
-    orderId: (apiResult as any).order_id || apiResult.order?.id?.toString() || '',
+    orderId: (apiResult as any).order_id || order?.order_id || '',
     patient: {
-      id: apiResult.patient.id?.toString() || '',
-      name: (apiResult as any).patient_name || apiResult.patient?.name || 'Unknown',
-      age: 0, // Would need to get from patient API
-      gender: 'Unknown', // Would need to get from patient API
+      id: patient?.id?.toString() || '',
+      name: (apiResult as any).patient_name || patient?.name || 'Unknown',
+      age: patient?.age || 0,
+      gender: patient?.gender || 'Unknown',
     },
     doctor: {
-      id: '', // Would need to get from order
-      name: '', // Would need to get from order
-      specialty: '',
+      id: order?.doctor?.id?.toString() || '',
+      name: order?.doctor_name || order?.doctor?.name || '',
+      specialty: order?.doctor?.specialty || '',
     },
     testName: test.name || '',
     testCode: test.code || '',
     results,
     overallStatus,
-    priority: transformPriority(apiResult.priority || 'routine') as 'Routine' | 'Urgent' | 'STAT',
+    priority: transformPriority(apiResult.priority || order?.priority || 'routine') as 'Routine' | 'Urgent' | 'STAT',
     status: 'Results Ready',
     submittedBy: (test as any).processed_by_name || test.processed_by || 'Lab Tech',
     submittedAt: test.processed_at || (test as any).created_at || new Date().toISOString(),
-    clinic: '', // Would need to get from order
-    clinicalNotes: (test as any).notes || '',
+    clinic: order?.clinic || '',
+    clinicalNotes: order?.clinical_notes || (test as any).notes || '',
   };
 };
 
@@ -445,34 +448,41 @@ export default function ResultsVerificationPage() {
         {/* Filters */}
         <Card>
           <CardContent className="p-4">
-            <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
-              <div className="flex gap-2 flex-1">
-                <div className="relative flex-1 md:max-w-sm">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input placeholder="Search results..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-10" />
-                </div>
-                <Select value={statusFilter} onValueChange={setStatusFilter}>
-                  <SelectTrigger className="w-[140px]"><SelectValue placeholder="Status" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Status</SelectItem>
-                    <SelectItem value="critical">Critical</SelectItem>
-                    <SelectItem value="abnormal">Abnormal</SelectItem>
-                    <SelectItem value="normal">Normal</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Select value={priorityFilter} onValueChange={setPriorityFilter}>
-                  <SelectTrigger className="w-[130px]"><SelectValue placeholder="Priority" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Priority</SelectItem>
-                    <SelectItem value="STAT">STAT</SelectItem>
-                    <SelectItem value="Urgent">Urgent</SelectItem>
-                    <SelectItem value="Routine">Routine</SelectItem>
-                  </SelectContent>
-                </Select>
+            <div className="flex flex-col gap-4">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input 
+                  placeholder="Search results..." 
+                  value={searchQuery} 
+                  onChange={(e) => setSearchQuery(e.target.value)} 
+                  className="pl-10" 
+                />
               </div>
-              <Button variant="outline" onClick={selectAllNormal} disabled={stats.normal === 0}>
-                Select All Normal
-              </Button>
+              <div className="flex flex-wrap gap-2 items-center justify-between">
+                <div className="flex flex-wrap gap-2">
+                  <Select value={statusFilter} onValueChange={setStatusFilter}>
+                    <SelectTrigger className="w-[140px]"><SelectValue placeholder="Status" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Status</SelectItem>
+                      <SelectItem value="critical">Critical</SelectItem>
+                      <SelectItem value="abnormal">Abnormal</SelectItem>
+                      <SelectItem value="normal">Normal</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select value={priorityFilter} onValueChange={setPriorityFilter}>
+                    <SelectTrigger className="w-[130px]"><SelectValue placeholder="Priority" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Priority</SelectItem>
+                      <SelectItem value="STAT">STAT</SelectItem>
+                      <SelectItem value="Urgent">Urgent</SelectItem>
+                      <SelectItem value="Routine">Routine</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <Button variant="outline" onClick={selectAllNormal} disabled={stats.normal === 0}>
+                  Select All Normal
+                </Button>
+              </div>
             </div>
           </CardContent>
         </Card>

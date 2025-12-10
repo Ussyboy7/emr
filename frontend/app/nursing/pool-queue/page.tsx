@@ -16,6 +16,7 @@ import { visitService, roomService, type Visit } from '@/lib/services';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { apiFetch } from '@/lib/api-client';
+import { getPriorityFromVisitType } from '@/lib/utils/priority';
 import { 
   Users, Search, Stethoscope, UserCheck, ArrowRight, Clock, AlertTriangle, 
   RefreshCw, Eye, Edit, CheckCircle2, Calendar, Activity, Thermometer, 
@@ -527,18 +528,11 @@ export default function NursingPoolQueuePage() {
         return;
       }
       
-      // Determine priority based on visit type (0 = highest priority)
-      // Emergency = 0, High = 1, Medium = 2, Low = 3
-      let priority = 2; // Default to medium
-      if (selectedPatient.visitType === 'Emergency') {
-        priority = 0;
-      } else if (selectedPatient.visitType === 'Follow-up') {
-        priority = 1;
-      } else if (selectedPatient.visitType === 'Consultation') {
-        priority = 2;
-      } else {
-        priority = 3;
-      }
+      // Determine priority based on visit type using centralized utility
+      // NOTE: Priority is automatically derived from visit_type - no manual selection needed.
+      // The visit_type was selected when the visit was created, and we use it to determine
+      // queue priority automatically. Lower number = higher priority (0 = Emergency, 1 = High, 2 = Medium, 3 = Low)
+      const priority = getPriorityFromVisitType(selectedPatient.visitType);
       
       // Update visit status to "in_progress"
       await visitService.updateVisit(visitId, {
@@ -664,7 +658,7 @@ export default function NursingPoolQueuePage() {
   if (loading) {
     return (
       <DashboardLayout>
-        <div className="container mx-auto p-6">
+        <div className="container mx-auto p-6 space-y-6">
           <Card>
             <CardContent className="flex items-center justify-center py-12">
               <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -680,7 +674,7 @@ export default function NursingPoolQueuePage() {
   if (error) {
     return (
       <DashboardLayout>
-        <div className="container mx-auto p-6">
+        <div className="container mx-auto p-6 space-y-6">
           <Card>
             <CardContent className="flex flex-col items-center justify-center py-12">
               <AlertTriangle className="h-12 w-12 text-destructive mb-4" />
@@ -748,7 +742,12 @@ export default function NursingPoolQueuePage() {
             <div className="flex flex-col gap-4">
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input placeholder="Search by name, patient ID, personal number..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-10" />
+                <Input 
+                  placeholder="Search by name, patient ID, personal number..." 
+                  value={searchQuery} 
+                  onChange={(e) => setSearchQuery(e.target.value)} 
+                  className="pl-10" 
+                />
               </div>
               <div className="flex flex-wrap gap-2">
                 <Select value={statusFilter} onValueChange={setStatusFilter}>

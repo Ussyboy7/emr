@@ -360,7 +360,7 @@ export default function RadiologyOrdersPage() {
       await loadOrders();
       
       // Update selected order if dialog is still open
-      if (isViewDialogOpen) {
+      if (isViewDialogOpen && selectedOrder) {
         const updatedOrder = await radiologyService.getOrder(parseInt(selectedOrder.id));
         setSelectedOrder(transformOrder(updatedOrder));
       }
@@ -398,7 +398,7 @@ export default function RadiologyOrdersPage() {
       await loadOrders();
       
       // Update selected order if dialog is still open
-      if (isViewDialogOpen) {
+      if (isViewDialogOpen && selectedOrder) {
         const updatedOrder = await radiologyService.getOrder(parseInt(selectedOrder.id));
         setSelectedOrder(transformOrder(updatedOrder));
       }
@@ -426,14 +426,53 @@ export default function RadiologyOrdersPage() {
     setIsSubmitting(true);
 
     try {
-      await radiologyService.createReport(
-        parseInt(selectedOrder.id),
-        parseInt(selectedStudy.id),
-        reportEntryMode === 'manual' ? `${reportForm.findings}\n\nIMPRESSION:\n${reportForm.impression}` : '',
-        reportEntryMode === 'manual' ? reportForm.findings : undefined,
-        reportEntryMode === 'manual' ? reportForm.impression : undefined,
-        undefined // recommendations
-      );
+      // If file upload, convert to text or handle separately
+      let reportText = '';
+      if (reportEntryMode === 'manual') {
+        reportText = `${reportForm.findings}\n\nIMPRESSION:\n${reportForm.impression}`;
+      } else if (uploadedFile) {
+        // For file upload, read file content as text or store filename
+        // Note: Backend currently only accepts text, file storage would need to be added
+        reportText = `Report uploaded: ${uploadedFile.name} (${(uploadedFile.size / 1024).toFixed(1)} KB)\n\nFile upload functionality requires backend file storage integration.`;
+      }
+
+      // Prepare report data
+      const reportData: any = {
+        study_id: parseInt(selectedStudy.id),
+        report: reportText,
+      };
+      
+      if (reportEntryMode === 'manual') {
+        reportData.findings = reportForm.findings;
+        reportData.impression = reportForm.impression;
+      }
+      
+      if (reportForm.critical) {
+        reportData.critical = true;
+      }
+      
+      // Call API with FormData if file upload, otherwise JSON
+      if (reportEntryMode === 'upload' && uploadedFile) {
+        const formData = new FormData();
+        formData.append('study_id', selectedStudy.id);
+        formData.append('report', reportText);
+        formData.append('report_file', uploadedFile);
+        if (reportForm.critical) {
+          formData.append('critical', 'true');
+        }
+        
+        const { apiFetch } = await import('@/lib/api-client');
+        await apiFetch(`/radiology/orders/${parseInt(selectedOrder.id)}/report/`, {
+          method: 'POST',
+          body: formData,
+        });
+      } else {
+        const { apiFetch } = await import('@/lib/api-client');
+        await apiFetch(`/radiology/orders/${parseInt(selectedOrder.id)}/report/`, {
+          method: 'POST',
+          body: JSON.stringify(reportData),
+        });
+      }
 
       toast.success('Report submitted successfully. Awaiting verification.');
       
@@ -441,7 +480,7 @@ export default function RadiologyOrdersPage() {
       await loadOrders();
       
       // Update selected order if dialog is still open
-      if (isViewDialogOpen) {
+      if (isViewDialogOpen && selectedOrder) {
         const updatedOrder = await radiologyService.getOrder(parseInt(selectedOrder.id));
         setSelectedOrder(transformOrder(updatedOrder));
       }
@@ -574,39 +613,46 @@ export default function RadiologyOrdersPage() {
         {/* Filters & Tabs */}
         <Card>
           <CardContent className="p-4">
-            <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
-              <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full md:w-auto">
+            <div className="flex flex-col gap-4">
+              <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
                 <TabsList>
                   <TabsTrigger value="pending">Pending ({stats.pending})</TabsTrigger>
                   <TabsTrigger value="processing">Processing ({stats.processing})</TabsTrigger>
                   <TabsTrigger value="all">All</TabsTrigger>
                 </TabsList>
               </Tabs>
-              <div className="flex gap-2 w-full md:w-auto">
-                <div className="relative flex-1 md:w-64">
+              <div className="flex flex-col gap-4">
+                <div className="relative flex-1">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input placeholder="Search orders..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-10" />
+                  <Input 
+                    placeholder="Search orders..." 
+                    value={searchQuery} 
+                    onChange={(e) => setSearchQuery(e.target.value)} 
+                    className="pl-10" 
+                  />
                 </div>
-                <Select value={modalityFilter} onValueChange={setModalityFilter}>
-                  <SelectTrigger className="w-[130px]"><SelectValue placeholder="Modality" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Modalities</SelectItem>
-                    <SelectItem value="X-Ray">X-Ray</SelectItem>
-                    <SelectItem value="CT Scan">CT Scan</SelectItem>
-                    <SelectItem value="MRI">MRI</SelectItem>
-                    <SelectItem value="Ultrasound">Ultrasound</SelectItem>
-                    <SelectItem value="Mammography">Mammography</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Select value={priorityFilter} onValueChange={setPriorityFilter}>
-                  <SelectTrigger className="w-[120px]"><SelectValue placeholder="Priority" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Priority</SelectItem>
-                    <SelectItem value="STAT">STAT</SelectItem>
-                    <SelectItem value="Urgent">Urgent</SelectItem>
-                    <SelectItem value="Routine">Routine</SelectItem>
-                  </SelectContent>
-                </Select>
+                <div className="flex flex-wrap gap-2">
+                  <Select value={modalityFilter} onValueChange={setModalityFilter}>
+                    <SelectTrigger className="w-[130px]"><SelectValue placeholder="Modality" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Modalities</SelectItem>
+                      <SelectItem value="X-Ray">X-Ray</SelectItem>
+                      <SelectItem value="CT Scan">CT Scan</SelectItem>
+                      <SelectItem value="MRI">MRI</SelectItem>
+                      <SelectItem value="Ultrasound">Ultrasound</SelectItem>
+                      <SelectItem value="Mammography">Mammography</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select value={priorityFilter} onValueChange={setPriorityFilter}>
+                    <SelectTrigger className="w-[120px]"><SelectValue placeholder="Priority" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Priority</SelectItem>
+                      <SelectItem value="STAT">STAT</SelectItem>
+                      <SelectItem value="Urgent">Urgent</SelectItem>
+                      <SelectItem value="Routine">Routine</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
             </div>
           </CardContent>
@@ -759,7 +805,16 @@ export default function RadiologyOrdersPage() {
                             <FileText className="h-4 w-4 text-indigo-600" />
                             <span>{study.reportFile.name}</span>
                           </div>
-                          <Button variant="ghost" size="sm" className="h-6 px-2 text-indigo-600">
+                          <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            className="h-6 px-2 text-indigo-600"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              // Note: File download requires backend file storage and URL
+                              toast.info('File download requires file storage integration');
+                            }}
+                          >
                             <Download className="h-3 w-3 mr-1" />Download
                           </Button>
                         </div>
