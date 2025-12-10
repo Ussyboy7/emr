@@ -665,7 +665,7 @@ export default function DependentsPage() {
                             <span>•</span>
                             <span className="flex items-center gap-1"><Phone className="h-3 w-3" />{dep.phone}</span>
                             <span>•</span>
-                            <Link href={`/medical-records/patients/${dep.primaryPatient.id}`} className="flex items-center gap-1 text-primary hover:underline">
+                            <Link href="/medical-records/patients" className="flex items-center gap-1 text-primary hover:underline">
                               <Link2 className="h-3 w-3" />
                               <span className="truncate max-w-[100px]">{dep.primaryPatient.name}</span>
                             </Link>
@@ -861,7 +861,7 @@ export default function DependentsPage() {
                 </div>
                 <div className="mt-4 p-4 rounded-lg bg-muted/50">
                   <p className="text-sm text-muted-foreground mb-1">Principal (Staff/Retiree)</p>
-                  <Link href={`/medical-records/patients/${selectedDependent.primaryPatient.id}`} className="flex items-center gap-2 text-primary hover:underline font-medium"><Link2 className="h-4 w-4" />{selectedDependent.primaryPatient.name}</Link>
+                  <Link href="/medical-records/patients" className="flex items-center gap-2 text-primary hover:underline font-medium"><Link2 className="h-4 w-4" />{selectedDependent.primaryPatient.name}</Link>
                 </div>
               </div>
             )}

@@ -342,7 +342,7 @@ export default function VisitDetailPage({ params }: { params: Promise<{ id: stri
                   <div className="flex-1">
                     {patient ? (
                       <>
-                        <Link href={`/medical-records/patients/${patient.id}`} className="text-lg font-semibold text-foreground hover:text-primary">{patient.name}</Link>
+                        <Link href="/medical-records/patients" className="text-lg font-semibold text-foreground hover:text-primary">{patient.name}</Link>
                         <p className="text-sm text-muted-foreground">
                           {patient.id} • {patient.age > 0 ? `${patient.age}y` : ''} {patient.gender}
                           {patient.bloodGroup && ` • Blood: ${patient.bloodGroup}`}

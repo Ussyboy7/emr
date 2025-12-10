@@ -330,7 +330,7 @@ export default function MedicalRecordsPage() {
                 recentPatients.map((patient) => (
                   <Link 
                     key={patient.id} 
-                    href={`/medical-records/patients/${patient.id}`}
+                    href="/medical-records/patients"
                     className="flex items-center justify-between p-3 rounded-lg border border-border hover:border-primary/50 hover:bg-muted/50 transition-all"
                   >
                     <div className="flex items-center gap-3">

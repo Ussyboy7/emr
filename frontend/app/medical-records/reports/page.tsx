@@ -211,7 +211,7 @@ export default function ReportsPage() {
                     <td className="p-3 font-medium text-primary">{report.id}</td>
                     <td className="p-3 text-foreground">{report.type}</td>
                     <td className="p-3">
-                      <Link href={`/medical-records/patients/${report.patientId}`} className="text-foreground hover:text-primary">{report.patient}</Link>
+                      <Link href="/medical-records/patients" className="text-foreground hover:text-primary">{report.patient}</Link>
                     </td>
                     <td className="p-3 text-foreground">{report.date}</td>
                     <td className="p-3 text-foreground">{report.doctor}</td>

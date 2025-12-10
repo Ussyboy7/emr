@@ -390,8 +390,8 @@ export default function NewPatientPage() {
         description: `Patient ID: ${createdPatient.patient_id}`,
       });
       
-      // Redirect to patient detail page using the generated patient_id
-      router.push(`/medical-records/patients/${createdPatient.patient_id}`);
+      // Redirect to patients list page (patient detail page was replaced with modal)
+      router.push('/medical-records/patients');
     } catch (error: any) {
       console.error('Error registering patient:', error);
       toast.error('Failed to register patient', {
