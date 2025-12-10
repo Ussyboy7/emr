@@ -495,6 +495,8 @@ export default function NursingPoolQueuePage() {
           nursingStatus,
           vitals,
           waitTime: waitTime > 0 ? waitTime : 0,
+          patientNumericId: v.patient, // Store the actual patient ID from backend
+          visitNumericId: v.id, // Store the actual visit ID from backend
         };
       });
       

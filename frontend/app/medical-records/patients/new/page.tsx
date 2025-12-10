@@ -129,7 +129,7 @@ export default function NewPatientPage() {
     // Medical Details
     bloodGroup: '', genotype: '',
     // Next of Kin
-    nokFirstName: '', nokMiddleName: '', nokRelationship: '', nokAddress: '', nokPhone: '',
+    nokSurname: '', nokFirstName: '', nokMiddleName: '', nokRelationship: '', nokAddress: '', nokPhone: '',
   });
 
   // Clear work fields when switching to retiree
@@ -210,13 +210,75 @@ export default function NewPatientPage() {
     return Math.round((completed / total) * 100);
   }, [formData, showWorkInfo, photoPreview]);
 
+  // Validation functions
+  const validateEmail = (email: string): boolean => {
+    if (!email) return true; // Email is optional
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email);
+  };
+
+  const validatePhone = (phone: string): boolean => {
+    if (!phone) return true; // Phone is optional but should be validated if provided
+    // Nigerian phone format: 11 digits starting with 0, or 13 digits starting with +234
+    const phoneRegex = /^(\+234|0)[789][01]\d{8}$/;
+    const cleaned = phone.replace(/\s|-/g, '');
+    return phoneRegex.test(cleaned) || /^0\d{10}$/.test(cleaned);
+  };
+
+  const validateName = (name: string): boolean => {
+    if (!name) return false;
+    // Name should be at least 2 characters and contain only letters, spaces, hyphens, and apostrophes
+    const nameRegex = /^[a-zA-Z\s'-]{2,}$/;
+    return nameRegex.test(name.trim());
+  };
+
   const handleSubmit = async () => {
     setIsSubmitting(true);
     
     try {
       // Validate required fields
       if (!formData.surname || !formData.firstName || !formData.gender || !formData.dateOfBirth) {
-        toast.error('Please fill in all required fields');
+        toast.error('Please fill in all required fields (Surname, First Name, Gender, Date of Birth)');
+        setIsSubmitting(false);
+        return;
+      }
+
+      // Validate name fields
+      if (!validateName(formData.surname)) {
+        toast.error('Please enter a valid surname (at least 2 characters, letters only)');
+        setIsSubmitting(false);
+        return;
+      }
+
+      if (!validateName(formData.firstName)) {
+        toast.error('Please enter a valid first name (at least 2 characters, letters only)');
+        setIsSubmitting(false);
+        return;
+      }
+
+      if (formData.middleName && !validateName(formData.middleName)) {
+        toast.error('Please enter a valid middle name (at least 2 characters, letters only)');
+        setIsSubmitting(false);
+        return;
+      }
+
+      // Validate email if provided
+      if (formData.email && !validateEmail(formData.email)) {
+        toast.error('Please enter a valid email address');
+        setIsSubmitting(false);
+        return;
+      }
+
+      // Validate phone if provided
+      if (formData.phone && !validatePhone(formData.phone)) {
+        toast.error('Please enter a valid phone number (e.g., 08012345678 or +2348012345678)');
+        setIsSubmitting(false);
+        return;
+      }
+
+      // Validate Next of Kin phone if provided
+      if (formData.nokPhone && !validatePhone(formData.nokPhone)) {
+        toast.error('Please enter a valid Next of Kin phone number');
         setIsSubmitting(false);
         return;
       }
@@ -258,6 +320,7 @@ export default function NewPatientPage() {
         permanent_address: (formData.permanentAddress || '').trim(),
         blood_group: (formData.bloodGroup || '').trim(),
         genotype: (formData.genotype || '').trim(),
+        nok_surname: (formData.nokSurname || '').trim(),
         nok_first_name: (formData.nokFirstName || '').trim(),
         nok_middle_name: (formData.nokMiddleName || '').trim(),
         nok_relationship: (formData.nokRelationship || '').trim(), // Free text - capitalize first letter for consistency
@@ -363,20 +426,30 @@ export default function NewPatientPage() {
         
         const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001/api';
         const baseUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
+        
+        console.log('[Patient Registration] Uploading patient with photo...');
         const response = await fetch(`${baseUrl}/patients/`, {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${token}`,
+            // Don't set Content-Type header - browser will set it with boundary for FormData
           },
           body: formData,
         });
         
         if (!response.ok) {
           const errorData = await response.json().catch(() => ({}));
-          throw new Error(errorData.photo?.[0] || errorData.detail || 'Failed to create patient with photo');
+          console.error('[Patient Registration] Photo upload error:', errorData);
+          const errorMessage = errorData.photo?.[0] || errorData.detail || errorData.message || `Failed to create patient with photo (${response.status})`;
+          throw new Error(errorMessage);
         }
         
         createdPatient = await response.json();
+        console.log('[Patient Registration] Patient created successfully with photo:', createdPatient);
+        
+        if (!createdPatient || !createdPatient.patient_id) {
+          throw new Error('Patient created but patient_id not found in response');
+        }
       } else {
         // No photo, use regular JSON API
         createdPatient = await patientService.createPatient(payload);
@@ -420,7 +493,7 @@ export default function NewPatientPage() {
       email: '', phone: '', stateOfResidence: '', residentialAddress: '',
       stateOfOrigin: '', lga: '', permanentAddress: '',
       bloodGroup: '', genotype: '',
-      nokFirstName: '', nokMiddleName: '', nokRelationship: '', nokAddress: '', nokPhone: '',
+      nokSurname: '', nokFirstName: '', nokMiddleName: '', nokRelationship: '', nokAddress: '', nokPhone: '',
     });
     setPhotoPreview(null);
     toast.info('Draft cleared');
@@ -893,6 +966,10 @@ export default function NewPatientPage() {
                         Next of Kin
                       </h4>
                       <div className="space-y-4">
+                        <div className="space-y-2">
+                          <Label>Surname</Label>
+                          <Input value={formData.nokSurname} onChange={(e) => handleInputChange('nokSurname', e.target.value)} placeholder="Surname" />
+                        </div>
                         <div className="grid gap-4 sm:grid-cols-2">
                           <div className="space-y-2">
                             <Label>First Name</Label>

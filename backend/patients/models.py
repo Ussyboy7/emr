@@ -114,6 +114,7 @@ class Patient(models.Model):
     genotype = models.CharField(max_length=5, choices=GENOTYPE_CHOICES, blank=True)
     
     # Next of Kin
+    nok_surname = models.CharField(max_length=100, blank=True)
     nok_first_name = models.CharField(max_length=100, blank=True)
     nok_middle_name = models.CharField(max_length=100, blank=True)
     nok_relationship = models.CharField(max_length=50, blank=True)

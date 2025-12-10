@@ -21,7 +21,7 @@ class PatientSerializer(serializers.ModelSerializer):
             'email', 'phone', 'state_of_residence', 'residential_address',
             'state_of_origin', 'lga', 'permanent_address',
             'blood_group', 'genotype',
-            'nok_first_name', 'nok_middle_name', 'nok_relationship', 'nok_address', 'nok_phone',
+            'nok_surname', 'nok_first_name', 'nok_middle_name', 'nok_relationship', 'nok_address', 'nok_phone',
             'created_at', 'updated_at', 'is_active',
         ]
         read_only_fields = ['id', 'patient_id', 'created_at', 'updated_at', 'age']
