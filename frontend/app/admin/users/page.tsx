@@ -33,7 +33,9 @@ interface StaffMember {
   phone: string;
   role: string;
   department: string;
+  departmentId?: number;
   clinic: string;
+  clinicId?: number;
   specialty?: string;
   licenseNumber?: string;
   licenseExpiry?: string;
@@ -45,19 +47,32 @@ interface StaffMember {
   profilePhoto?: string;
 }
 
+interface Clinic {
+  id: number;
+  name: string;
+  code: string;
+}
+
+interface Department {
+  id: number;
+  name: string;
+  code: string;
+  clinic: number;
+}
+
 // Empty staff object for form initialization
 const emptyStaff: Partial<StaffMember> = {
   firstName: '', lastName: '', email: '', phone: '', role: '', department: '', clinic: '',
   dateJoined: new Date().toISOString().split('T')[0], status: 'Active', permissions: []
 };
 
-const roles = ['All Roles', 'Doctor', 'Nurse', 'Lab Scientist', 'Lab Technician', 'Pharmacist', 'Radiologist', 'Medical Records', 'System Admin'];
-const departments = ['All Departments', 'Medical Services', 'Nursing', 'Laboratory', 'Pharmacy', 'Radiology', 'Medical Records', 'IT'];
-const clinics = ['All Clinics', 'General', 'Eye', 'Sickle Cell', 'Physiotherapy', 'Diamond'];
+const roles = ['All Roles', 'Medical Doctor', 'Nursing Officer', 'Laboratory Scientist', 'Pharmacist', 'Radiologist', 'Medical Records Officer', 'System Administrator', 'Admin Staff'];
 const statuses = ['All Status', 'Active', 'Inactive', 'On Leave', 'Suspended'];
 
 export default function UserManagementPage() {
   const [staff, setStaff] = useState<StaffMember[]>([]);
+  const [clinics, setClinics] = useState<Clinic[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -70,10 +85,28 @@ export default function UserManagementPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
 
+  // Load clinics and departments from API
+  useEffect(() => {
+    loadClinicsAndDepartments();
+  }, []);
+
   // Load staff from API
   useEffect(() => {
     loadStaff();
   }, []);
+
+  const loadClinicsAndDepartments = async () => {
+    try {
+      const [clinicsResponse, departmentsResponse] = await Promise.all([
+        adminService.getClinics({ page_size: 1000 }),
+        adminService.getDepartments({ page_size: 1000 }),
+      ]);
+      setClinics(clinicsResponse.results);
+      setDepartments(departmentsResponse.results);
+    } catch (err: any) {
+      console.error('Error loading clinics/departments:', err);
+    }
+  };
 
   const loadStaff = async () => {
     try {
@@ -90,8 +123,10 @@ export default function UserManagementPage() {
         email: user.email || '',
         phone: user.phone || '',
         role: user.system_role || 'Staff',
-        department: user.department || '',
+        department: user.department_name || '',
+        departmentId: user.department,
         clinic: user.clinic_name || '',
+        clinicId: user.clinic,
         specialty: user.specialty,
         licenseNumber: user.license_number,
         licenseExpiry: user.license_expiry,
@@ -215,7 +250,11 @@ export default function UserManagementPage() {
 
   const openEdit = (s: StaffMember) => {
     setSelectedStaff(s);
-    setFormData(s);
+    setFormData({
+      ...s,
+      clinicId: s.clinicId,
+      departmentId: s.departmentId,
+    });
     setIsEditDialogOpen(true);
   };
 
@@ -234,6 +273,14 @@ export default function UserManagementPage() {
       toast.error('Please fill in all required fields');
       return;
     }
+    if (!formData.clinicId) {
+      toast.error('Please select a clinic');
+      return;
+    }
+    if (!formData.departmentId) {
+      toast.error('Please select a department');
+      return;
+    }
     setIsSubmitting(true);
     
     try {
@@ -243,7 +290,8 @@ export default function UserManagementPage() {
         email: formData.email,
         phone: formData.phone,
         system_role: formData.role,
-        department: formData.department,
+        clinic: formData.clinicId,
+        department: formData.departmentId,
         is_active: formData.status === 'Active',
         specialty: formData.specialty,
         license_number: formData.licenseNumber,
@@ -275,7 +323,8 @@ export default function UserManagementPage() {
         email: formData.email,
         phone: formData.phone,
         system_role: formData.role,
-        department: formData.department,
+        clinic: formData.clinicId,
+        department: formData.departmentId,
         is_active: formData.status === 'Active',
         specialty: formData.specialty,
         license_number: formData.licenseNumber,
@@ -315,15 +364,34 @@ export default function UserManagementPage() {
     }
   };
 
+  const [resetPasswordData, setResetPasswordData] = useState({ newPassword: '', confirmPassword: '' });
+
   const handleResetPassword = async () => {
     if (!selectedStaff) return;
+    
+    if (!resetPasswordData.newPassword) {
+      toast.error('Please enter a new password');
+      return;
+    }
+    
+    if (resetPasswordData.newPassword !== resetPasswordData.confirmPassword) {
+      toast.error('Passwords do not match');
+      return;
+    }
+    
+    if (resetPasswordData.newPassword.length < 8) {
+      toast.error('Password must be at least 8 characters long');
+      return;
+    }
+    
     setIsSubmitting(true);
     
     try {
-      // Password reset would require admin endpoint
-      // For now, show info message
-      toast.info(`Password reset functionality requires admin endpoint. User ${selectedStaff.email} can reset their password through the login page.`);
+      const userId = parseInt(selectedStaff.id);
+      await adminService.resetPassword(userId, resetPasswordData.newPassword);
+      toast.success(`Password reset successfully for ${selectedStaff.firstName} ${selectedStaff.lastName}`);
       setIsResetPasswordDialogOpen(false);
+      setResetPasswordData({ newPassword: '', confirmPassword: '' });
       setSelectedStaff(null);
     } catch (err: any) {
       toast.error(err.message || 'Failed to reset password');
@@ -456,13 +524,15 @@ export default function UserManagementPage() {
                 <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
                   <SelectTrigger className="w-[170px]"><SelectValue placeholder="Department" /></SelectTrigger>
                   <SelectContent>
-                    {departments.map(d => <SelectItem key={d} value={d === 'All Departments' ? 'all' : d}>{d}</SelectItem>)}
+                    <SelectItem value="all">All Departments</SelectItem>
+                    {departments.map(d => <SelectItem key={d.id} value={d.name}>{d.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
                 <Select value={clinicFilter} onValueChange={setClinicFilter}>
                   <SelectTrigger className="w-[140px]"><SelectValue placeholder="Clinic" /></SelectTrigger>
                   <SelectContent>
-                    {clinics.map(c => <SelectItem key={c} value={c === 'All Clinics' ? 'all' : c}>{c}</SelectItem>)}
+                    <SelectItem value="all">All Clinics</SelectItem>
+                    {clinics.map(c => <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
                 <Select value={statusFilter} onValueChange={setStatusFilter}>
@@ -686,20 +756,47 @@ export default function UserManagementPage() {
               <TabsContent value="assignment" className="space-y-4 mt-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label>Department *</Label>
-                    <Select value={formData.department || ''} onValueChange={(v) => setFormData(prev => ({ ...prev, department: v }))}>
-                      <SelectTrigger><SelectValue placeholder="Select department" /></SelectTrigger>
+                    <Label>Clinic *</Label>
+                    <Select 
+                      value={formData.clinicId?.toString() || ''} 
+                      onValueChange={(v) => {
+                        const clinicId = parseInt(v);
+                        const clinic = clinics.find(c => c.id === clinicId);
+                        setFormData(prev => ({ 
+                          ...prev, 
+                          clinicId: clinicId,
+                          clinic: clinic?.name || '',
+                          departmentId: undefined, // Reset department when clinic changes
+                          department: '',
+                        }));
+                      }}
+                    >
+                      <SelectTrigger><SelectValue placeholder="Select clinic" /></SelectTrigger>
                       <SelectContent>
-                        {departments.slice(1).map(d => <SelectItem key={d} value={d}>{d}</SelectItem>)}
+                        {clinics.map(c => <SelectItem key={c.id} value={c.id.toString()}>{c.name}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   </div>
                   <div className="space-y-2">
-                    <Label>Clinic *</Label>
-                    <Select value={formData.clinic || ''} onValueChange={(v) => setFormData(prev => ({ ...prev, clinic: v }))}>
-                      <SelectTrigger><SelectValue placeholder="Select clinic" /></SelectTrigger>
+                    <Label>Department *</Label>
+                    <Select 
+                      value={formData.departmentId?.toString() || ''} 
+                      onValueChange={(v) => {
+                        const departmentId = parseInt(v);
+                        const department = departments.find(d => d.id === departmentId);
+                        setFormData(prev => ({ 
+                          ...prev, 
+                          departmentId: departmentId,
+                          department: department?.name || '',
+                        }));
+                      }}
+                      disabled={!formData.clinicId}
+                    >
+                      <SelectTrigger><SelectValue placeholder="Select department" /></SelectTrigger>
                       <SelectContent>
-                        {clinics.slice(1).map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                        {departments
+                          .filter(d => !formData.clinicId || d.clinic === formData.clinicId)
+                          .map(d => <SelectItem key={d.id} value={d.id.toString()}>{d.name}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   </div>
@@ -833,8 +930,13 @@ export default function UserManagementPage() {
           </DialogContent>
         </Dialog>
 
-        {/* Reset Password Confirmation */}
-        <Dialog open={isResetPasswordDialogOpen} onOpenChange={setIsResetPasswordDialogOpen}>
+        {/* Reset Password Dialog */}
+        <Dialog open={isResetPasswordDialogOpen} onOpenChange={(open) => {
+          setIsResetPasswordDialogOpen(open);
+          if (!open) {
+            setResetPasswordData({ newPassword: '', confirmPassword: '' });
+          }
+        }}>
           <DialogContent>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
@@ -842,13 +944,36 @@ export default function UserManagementPage() {
                 Reset Password
               </DialogTitle>
               <DialogDescription>
-                Send a password reset link to <strong>{selectedStaff?.email}</strong>?
+                Set a new password for <strong>{selectedStaff?.firstName} {selectedStaff?.lastName}</strong> ({selectedStaff?.email})
               </DialogDescription>
             </DialogHeader>
+            <div className="space-y-4 mt-4">
+              <div className="space-y-2">
+                <Label>New Password *</Label>
+                <Input 
+                  type="password" 
+                  value={resetPasswordData.newPassword} 
+                  onChange={(e) => setResetPasswordData(prev => ({ ...prev, newPassword: e.target.value }))}
+                  placeholder="Enter new password (min 8 characters)"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Confirm Password *</Label>
+                <Input 
+                  type="password" 
+                  value={resetPasswordData.confirmPassword} 
+                  onChange={(e) => setResetPasswordData(prev => ({ ...prev, confirmPassword: e.target.value }))}
+                  placeholder="Confirm new password"
+                />
+              </div>
+            </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setIsResetPasswordDialogOpen(false)}>Cancel</Button>
-              <Button onClick={handleResetPassword} disabled={isSubmitting} className="bg-amber-600 hover:bg-amber-700">
-                {isSubmitting ? 'Sending...' : 'Send Reset Link'}
+              <Button variant="outline" onClick={() => {
+                setIsResetPasswordDialogOpen(false);
+                setResetPasswordData({ newPassword: '', confirmPassword: '' });
+              }}>Cancel</Button>
+              <Button onClick={handleResetPassword} disabled={isSubmitting || !resetPasswordData.newPassword || !resetPasswordData.confirmPassword} className="bg-amber-600 hover:bg-amber-700">
+                {isSubmitting ? 'Resetting...' : 'Reset Password'}
               </Button>
             </DialogFooter>
           </DialogContent>

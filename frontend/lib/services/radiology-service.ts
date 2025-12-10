@@ -207,14 +207,31 @@ class RadiologyService {
 
   /**
    * Get studies with images (for viewer)
+   * Note: Uses orders endpoint and filters for acquired/processed studies
    */
   async getStudiesWithImages(params?: {
     patient?: string;
     modality?: string;
     page?: number;
   }): Promise<{ results: RadiologyStudy[]; count: number }> {
-    const query = buildQueryString(params || {});
-    return apiFetch<{ results: RadiologyStudy[]; count: number }>(`/radiology/studies/${query}`);
+    // Use orders endpoint and filter for studies with images
+    const ordersResponse = await this.getOrders(params);
+    const allStudies: RadiologyStudy[] = [];
+    
+    ordersResponse.results.forEach(order => {
+      order.studies.forEach(study => {
+        // Only include studies that have been acquired (have images)
+        if (study.status === 'acquired' || study.status === 'processing' || 
+            study.status === 'reported' || study.status === 'verified') {
+          allStudies.push(study);
+        }
+      });
+    });
+    
+    return {
+      results: allStudies,
+      count: allStudies.length,
+    };
   }
 
   /**

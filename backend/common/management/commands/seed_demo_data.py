@@ -20,7 +20,7 @@ from radiology.models import RadiologyOrder, RadiologyStudy
 from consultation.models import ConsultationRoom, ConsultationSession, ConsultationQueue
 from nursing.models import NursingOrder
 from organization.models import Clinic, Department, Room
-from permissions.models import Role
+from permissions.models import Role, UserRole
 from notifications.models import Notification, NotificationPreferences
 
 User = get_user_model()
@@ -43,8 +43,9 @@ class Command(BaseCommand):
             if options.get("reset"):
                 self._reset_data()
 
-            users = self._create_users()
-            clinic = self._create_organization()
+            clinic, departments = self._create_organization()
+            roles = self._create_roles()
+            users = self._create_users(clinic, departments, roles)
             patients = self._create_patients(users)
             lab_templates = self._create_lab_templates()
             medications = self._create_medications()
@@ -72,6 +73,7 @@ class Command(BaseCommand):
         NursingOrder.objects.all().delete()
         ConsultationQueue.objects.all().delete()
         ConsultationSession.objects.all().delete()
+        ConsultationRoom.objects.all().delete()  # Delete consultation rooms
         RadiologyStudy.objects.all().delete()
         RadiologyOrder.objects.all().delete()
         PrescriptionItem.objects.all().delete()
@@ -85,12 +87,235 @@ class Command(BaseCommand):
         MedicalHistory.objects.all().delete()
         Visit.objects.all().delete()
         Patient.objects.all().delete()
+        Room.objects.all().delete()  # Delete organization rooms
+        Department.objects.all().delete()  # Delete departments
+        Clinic.objects.all().delete()  # Delete clinics (will cascade delete departments and rooms)
+        UserRole.objects.all().delete()  # Delete user-role relationships
+        Role.objects.all().delete()  # Delete roles
         self.stdout.write(self.style.WARNING("Existing demo data removed."))
 
-    def _create_users(self):
-        """Create demo users."""
+    def _create_roles(self):
+        """Create default roles with permissions."""
+        self.stdout.write("Creating roles and permissions...")
+        roles = {}
+        
+        # Define permissions mapping: frontend permission ID -> (module, action)
+        # Backend stores as: {"module": ["action1", "action2"]}
+        permission_map = {
+            # Medical Records
+            'patient_view': ('Medical Records', 'view'),
+            'patient_create': ('Medical Records', 'create'),
+            'patient_edit': ('Medical Records', 'edit'),
+            'patient_delete': ('Medical Records', 'delete'),
+            'visit_view': ('Medical Records', 'view'),
+            'visit_create': ('Medical Records', 'create'),
+            'visit_edit': ('Medical Records', 'edit'),
+            'reports_view': ('Medical Records', 'view'),
+            'reports_generate': ('Medical Records', 'generate'),
+            
+            # Consultation
+            'consultation_view': ('Consultation', 'view'),
+            'consultation_start': ('Consultation', 'start'),
+            'consultation_prescribe': ('Consultation', 'prescribe'),
+            'consultation_diagnosis': ('Consultation', 'diagnosis'),
+            'consultation_lab_order': ('Consultation', 'lab_order'),
+            'consultation_radiology_order': ('Consultation', 'radiology_order'),
+            'consultation_referral': ('Consultation', 'referral'),
+            'consultation_nursing_order': ('Consultation', 'nursing_order'),
+            
+            # Nursing
+            'nursing_vitals': ('Nursing', 'vitals'),
+            'nursing_triage': ('Nursing', 'triage'),
+            'nursing_administer': ('Nursing', 'administer'),
+            'nursing_procedures': ('Nursing', 'procedures'),
+            'nursing_notes': ('Nursing', 'notes'),
+            'nursing_queue': ('Nursing', 'queue'),
+            
+            # Laboratory
+            'lab_orders_view': ('Laboratory', 'view'),
+            'lab_collect': ('Laboratory', 'collect'),
+            'lab_process': ('Laboratory', 'process'),
+            'lab_results': ('Laboratory', 'results'),
+            'lab_verify': ('Laboratory', 'verify'),
+            'lab_templates': ('Laboratory', 'templates'),
+            
+            # Pharmacy
+            'pharmacy_view': ('Pharmacy', 'view'),
+            'pharmacy_dispense': ('Pharmacy', 'dispense'),
+            'pharmacy_inventory': ('Pharmacy', 'inventory'),
+            'pharmacy_substitute': ('Pharmacy', 'substitute'),
+            
+            # Radiology
+            'radiology_view': ('Radiology', 'view'),
+            'radiology_perform': ('Radiology', 'perform'),
+            'radiology_report': ('Radiology', 'report'),
+            'radiology_verify': ('Radiology', 'verify'),
+            
+            # Administration
+            'admin_users': ('Administration', 'users'),
+            'admin_roles': ('Administration', 'roles'),
+            'admin_rooms': ('Administration', 'rooms'),
+            'admin_clinics': ('Administration', 'clinics'),
+            'admin_settings': ('Administration', 'settings'),
+            'admin_audit': ('Administration', 'audit'),
+        }
+        
+        # Helper function to build permissions JSON from permission IDs
+        def build_permissions(perm_ids):
+            perms = {}
+            for perm_id in perm_ids:
+                if perm_id in permission_map:
+                    module, action = permission_map[perm_id]
+                    if module not in perms:
+                        perms[module] = []
+                    if action not in perms[module]:
+                        perms[module].append(action)
+            return perms
+        
+        # System Administrator - Full access
+        admin_role, _ = Role.objects.get_or_create(
+            name='System Administrator',
+            defaults={
+                'type': 'admin',
+                'description': 'Full system access with all permissions',
+                'permissions': build_permissions([
+                    'patient_view', 'patient_create', 'patient_edit', 'patient_delete',
+                    'visit_view', 'visit_create', 'visit_edit', 'reports_view', 'reports_generate',
+                    'consultation_view', 'consultation_start', 'consultation_prescribe', 'consultation_diagnosis',
+                    'consultation_lab_order', 'consultation_radiology_order', 'consultation_referral', 'consultation_nursing_order',
+                    'nursing_vitals', 'nursing_triage', 'nursing_administer', 'nursing_procedures', 'nursing_notes', 'nursing_queue',
+                    'lab_orders_view', 'lab_collect', 'lab_process', 'lab_results', 'lab_verify', 'lab_templates',
+                    'pharmacy_view', 'pharmacy_dispense', 'pharmacy_inventory', 'pharmacy_substitute',
+                    'radiology_view', 'radiology_perform', 'radiology_report', 'radiology_verify',
+                    'admin_users', 'admin_roles', 'admin_rooms', 'admin_clinics', 'admin_settings', 'admin_audit',
+                ]),
+                'is_active': True,
+            }
+        )
+        roles['System Administrator'] = admin_role
+        
+        # Medical Doctor - Clinical access
+        doctor_role, _ = Role.objects.get_or_create(
+            name='Medical Doctor',
+            defaults={
+                'type': 'doctor',
+                'description': 'Full clinical access for patient care and consultation',
+                'permissions': build_permissions([
+                    'patient_view', 'patient_create', 'patient_edit',
+                    'visit_view', 'visit_create', 'visit_edit', 'reports_view', 'reports_generate',
+                    'consultation_view', 'consultation_start', 'consultation_prescribe', 'consultation_diagnosis',
+                    'consultation_lab_order', 'consultation_radiology_order', 'consultation_referral', 'consultation_nursing_order',
+                    'nursing_vitals', 'nursing_queue',
+                    'lab_orders_view', 'lab_results',
+                    'pharmacy_view',
+                    'radiology_view', 'radiology_report',
+                ]),
+                'is_active': True,
+            }
+        )
+        roles['Medical Doctor'] = doctor_role
+        
+        # Nursing Officer - Nursing care
+        nurse_role, _ = Role.objects.get_or_create(
+            name='Nursing Officer',
+            defaults={
+                'type': 'nurse',
+                'description': 'Nursing care, vitals, and patient triage',
+                'permissions': build_permissions([
+                    'patient_view', 'patient_edit',
+                    'visit_view', 'visit_create', 'visit_edit',
+                    'consultation_view',
+                    'nursing_vitals', 'nursing_triage', 'nursing_administer', 'nursing_procedures', 'nursing_notes', 'nursing_queue',
+                    'lab_orders_view',
+                    'pharmacy_view',
+                ]),
+                'is_active': True,
+            }
+        )
+        roles['Nursing Officer'] = nurse_role
+        
+        # Laboratory Scientist - Lab operations
+        lab_role, _ = Role.objects.get_or_create(
+            name='Laboratory Scientist',
+            defaults={
+                'type': 'lab_tech',
+                'description': 'Laboratory testing and result management',
+                'permissions': build_permissions([
+                    'patient_view',
+                    'visit_view',
+                    'lab_orders_view', 'lab_collect', 'lab_process', 'lab_results', 'lab_verify', 'lab_templates',
+                ]),
+                'is_active': True,
+            }
+        )
+        roles['Laboratory Scientist'] = lab_role
+        
+        # Pharmacist - Pharmacy operations
+        pharmacist_role, _ = Role.objects.get_or_create(
+            name='Pharmacist',
+            defaults={
+                'type': 'pharmacist',
+                'description': 'Prescription dispensing and inventory management',
+                'permissions': build_permissions([
+                    'patient_view',
+                    'visit_view',
+                    'pharmacy_view', 'pharmacy_dispense', 'pharmacy_inventory', 'pharmacy_substitute',
+                ]),
+                'is_active': True,
+            }
+        )
+        roles['Pharmacist'] = pharmacist_role
+        
+        # Radiologist - Radiology operations
+        radiologist_role, _ = Role.objects.get_or_create(
+            name='Radiologist',
+            defaults={
+                'type': 'radiologist',
+                'description': 'Radiology studies and reporting',
+                'permissions': build_permissions([
+                    'patient_view',
+                    'visit_view',
+                    'radiology_view', 'radiology_perform', 'radiology_report', 'radiology_verify',
+                ]),
+                'is_active': True,
+            }
+        )
+        roles['Radiologist'] = radiologist_role
+        
+        # Medical Records Officer - Records management
+        records_role, _ = Role.objects.get_or_create(
+            name='Medical Records Officer',
+            defaults={
+                'type': 'records',
+                'description': 'Patient and visit record management',
+                'permissions': build_permissions([
+                    'patient_view', 'patient_create', 'patient_edit',
+                    'visit_view', 'visit_create', 'visit_edit',
+                    'reports_view', 'reports_generate',
+                ]),
+                'is_active': True,
+            }
+        )
+        roles['Medical Records Officer'] = records_role
+        
+        self.stdout.write(f"  ✓ Created {len(roles)} roles")
+        return roles
+
+    def _create_users(self, clinic, departments, roles):
+        """Create demo users and assign them to clinic, departments, and roles."""
         self.stdout.write("Creating users...")
         users = {}
+
+        # Map system roles to departments
+        role_to_department = {
+            'System Administrator': None,  # Admin doesn't need a department
+            'Medical Doctor': 'Consultation',
+            'Nursing Officer': 'Nursing',
+            'Laboratory Scientist': 'Laboratory',
+            'Pharmacist': 'Pharmacy',
+            'Radiologist': 'Radiology',
+            'Medical Records Officer': 'Medical Records',
+        }
 
         user_data = [
             {
@@ -155,51 +380,132 @@ class Command(BaseCommand):
 
         for data in user_data:
             username = data['username']
+            system_role = data['system_role']
+            
+            # Assign clinic and department based on role
+            data['clinic'] = clinic
+            dept_name = role_to_department.get(system_role)
+            if dept_name and dept_name in departments:
+                data['department'] = departments[dept_name]
+            
             user, created = User.objects.get_or_create(
                 username=username,
                 defaults=data
             )
             if created or not user.check_password('ChangeMe123!'):
                 user.set_password('ChangeMe123!')
+                # Update clinic and department if they weren't set during creation
+                if not user.clinic:
+                    user.clinic = clinic
+                if not user.department and dept_name and dept_name in departments:
+                    user.department = departments[dept_name]
                 user.save()
+            
             users[username] = user
 
-        self.stdout.write(f"  ✓ Created {len(users)} users")
+        # Assign roles to users after all users are created
+        for username, user in users.items():
+            system_role = None
+            for data in user_data:
+                if data['username'] == username:
+                    system_role = data['system_role']
+                    break
+            
+            if system_role and system_role in roles:
+                role = roles[system_role]
+                UserRole.objects.get_or_create(
+                    user=user,
+                    role=role,
+                    defaults={'assigned_by': users.get('admin')}  # Admin assigns roles
+                )
+
+        self.stdout.write(f"  ✓ Created {len(users)} users with roles assigned")
         return users
 
     def _create_organization(self):
         """Create organization structure."""
         self.stdout.write("Creating organization structure...")
 
+        # Create Bode Thomas Clinic
         clinic, _ = Clinic.objects.get_or_create(
-            code='HQ-CLINIC',
+            code='BODE-THOMAS',
             defaults={
-                'name': 'Headquarters Clinic',
-                'location': 'Headquarters',
+                'name': 'Bode Thomas Clinic',
+                'location': 'Bode Thomas, Lagos',
                 'phone': '+234-1-1234567',
-                'email': 'clinic@npa.gov.ng',
+                'email': 'bode.thomas@npa.gov.ng',
             }
         )
 
-        dept, _ = Department.objects.get_or_create(
-            clinic=clinic,
-            name='General Practice',
-            defaults={'code': 'GEN-PRAC'}
-        )
+        # Create all functional departments (modules)
+        departments = {}
+        department_data = [
+            {'name': 'Medical Records', 'code': 'MED-REC'},
+            {'name': 'Nursing', 'code': 'NURSING'},
+            {'name': 'Consultation', 'code': 'CONSULT'},
+            {'name': 'Laboratory', 'code': 'LAB'},
+            {'name': 'Pharmacy', 'code': 'PHARM'},
+            {'name': 'Radiology', 'code': 'RAD'},
+        ]
 
-        Room.objects.get_or_create(
-            room_number='R001',
-            defaults={
-                'name': 'Consultation Room 1',
-                'clinic': clinic,
-                'department': dept,
-                'room_type': 'consultation',
-                'status': 'active',
-            }
-        )
+        for dept_data in department_data:
+            dept, _ = Department.objects.get_or_create(
+                clinic=clinic,
+                name=dept_data['name'],
+                defaults={'code': dept_data['code']}
+            )
+            departments[dept_data['name']] = dept
 
+        # Note: We don't create consultation rooms in organization.Room anymore
+        # Consultation rooms are managed through consultation.ConsultationRoom model
+        # organization.Room is reserved for other room types (procedure, emergency, etc.) if needed in the future
+        org_rooms_created = 0
+
+        # Create consultation rooms (for consultation system)
+        consultation_rooms_created = 0
+        consultation_rooms_data = [
+            # Consulting rooms 1-4
+            {'room_number': 'CONSULT-001', 'name': 'Consulting Room 1'},
+            {'room_number': 'CONSULT-002', 'name': 'Consulting Room 2'},
+            {'room_number': 'CONSULT-003', 'name': 'Consulting Room 3'},
+            {'room_number': 'CONSULT-004', 'name': 'Consulting Room 4'},
+            # Management rooms
+            {'room_number': 'CMO', 'name': 'CMO', 'specialty': 'Chief Medical Officer'},
+            {'room_number': 'AGM', 'name': 'AGM', 'specialty': 'Assistant General Manager'},
+            {'room_number': 'GM', 'name': 'GM', 'specialty': 'General Manager'},
+            # Specialty rooms
+            {'room_number': 'EYE', 'name': 'Eye', 'specialty': 'Ophthalmology'},
+            {'room_number': 'PHYSIO', 'name': 'Physio', 'specialty': 'Physiotherapy'},
+            {'room_number': 'DIAMOND', 'name': 'Diamond', 'specialty': 'Diamond'},
+            {'room_number': 'SS', 'name': 'SS', 'specialty': 'SS'},
+        ]
+        
+        for room_data in consultation_rooms_data:
+            room, created = ConsultationRoom.objects.get_or_create(
+                room_number=room_data['room_number'],
+                defaults={
+                    'name': room_data['name'],
+                    'clinic': clinic,  # Link to clinic
+                    'specialty': room_data.get('specialty', ''),
+                    'status': 'active',
+                    'is_active': True,
+                    'location': clinic.location if clinic else '',
+                }
+            )
+            # Update existing rooms to link to clinic if they don't have one
+            if not created and not room.clinic:
+                room.clinic = clinic
+                room.save()
+            if created:
+                consultation_rooms_created += 1
+
+        self.stdout.write(f"  ✓ Created clinic: {clinic.name}")
+        self.stdout.write(f"  ✓ Created {len(departments)} departments")
+        self.stdout.write(f"  ✓ Created {consultation_rooms_created} consultation rooms (in ConsultationRoom model)")
+        if org_rooms_created > 0:
+            self.stdout.write(f"  ✓ Created {org_rooms_created} organization rooms (non-consultation)")
         self.stdout.write("  ✓ Organization structure created")
-        return clinic
+        return clinic, departments
 
     def _create_patients(self, users):
         """Create demo patients."""
@@ -460,22 +766,87 @@ class Command(BaseCommand):
         self.stdout.write("  ✓ Created radiology orders")
 
     def _create_consultation_data(self, patients, users, clinic):
-        """Create consultation rooms and sessions."""
+        """Create consultation sessions and queue items."""
         self.stdout.write("Creating consultation data...")
         
         if not patients:
             return
 
-        room, _ = ConsultationRoom.objects.get_or_create(
-            room_number='R001',
-            defaults={
-                'name': 'Consultation Room 1',
-                'location': 'First Floor',
-                'specialty': 'General Practice',
-                'status': 'active',
+        # Get a doctor user
+        doctor = users.get('doctor')
+        if not doctor:
+            doctor = users.get('admin')  # Fallback to admin if no doctor
+        
+        # Get consultation rooms
+        rooms = ConsultationRoom.objects.filter(is_active=True).order_by('room_number')[:4]  # Get first 4 rooms
+        
+        if not rooms.exists():
+            self.stdout.write("  ⚠ No consultation rooms found, skipping consultation data")
+            return
+        
+        # Create some visits for patients
+        from patients.models import Visit
+        visits_created = 0
+        for i, patient in enumerate(patients[:3]):  # Create visits for first 3 patients
+            visit, created = Visit.objects.get_or_create(
+                patient=patient,
+                visit_id=f'VIS-2024-{1000 + i}',
+                defaults={
+                    'visit_type': ['emergency', 'consultation', 'follow_up'][i % 3],
+                    'status': 'in_progress',
+                    'chief_complaint': [
+                        'Severe chest pain',
+                        'Routine check-up',
+                        'Follow-up for hypertension',
+                        'Headache and fever',
+                        'Abdominal pain',
+                        'Shortness of breath',
+                    ][i % 6],
+                    'date': timezone.now().date(),
+                    'time': timezone.now().time(),
+                    'doctor': doctor,
+                    'created_by': doctor,
+                }
+            )
+            if created:
+                visits_created += 1
+        
+        # Create queue items for patients with visits
+        queue_items_created = 0
+        
+        def get_priority_from_visit_type(visit_type):
+            """Map visit type to priority number (backend logic)."""
+            visit_type_map = {
+                'emergency': 0,
+                'follow_up': 1,
+                'follow-up': 1,
+                'consultation': 2,
+                'routine': 3,
             }
-        )
+            return visit_type_map.get(visit_type.lower() if visit_type else '', 2)
+        
+        for i, patient in enumerate(patients[:3]):
+            visit = Visit.objects.filter(patient=patient).first()
+            if visit:
+                # Assign to different rooms
+                room = rooms[i % len(rooms)]
+                priority = get_priority_from_visit_type(visit.visit_type)
+                
+                queue_item, created = ConsultationQueue.objects.get_or_create(
+                    room=room,
+                    patient=patient,
+                    visit=visit,
+                    is_active=True,
+                    defaults={
+                        'priority': priority,
+                        'notes': f'Queued for {room.name}',
+                    }
+                )
+                if created:
+                    queue_items_created += 1
 
+        self.stdout.write(f"  ✓ Created {visits_created} visits")
+        self.stdout.write(f"  ✓ Created {queue_items_created} queue items")
         self.stdout.write("  ✓ Created consultation data")
 
     def _create_nursing_orders(self, patients, users):

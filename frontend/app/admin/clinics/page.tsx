@@ -57,6 +57,10 @@ export default function ClinicDepartmentPage() {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [clinicRooms, setClinicRooms] = useState<any[]>([]);
+  const [clinicUsers, setClinicUsers] = useState<any[]>([]);
+  const [deptUsers, setDeptUsers] = useState<any[]>([]);
+  const [loadingDetails, setLoadingDetails] = useState(false);
 
   // Load clinics and departments from API
   useEffect(() => {
@@ -175,12 +179,53 @@ export default function ClinicDepartmentPage() {
   const resetDeptForm = () => { setDeptForm({ code: '', name: '', description: '', head: '', clinics: [], isActive: true }); };
 
   const openCreateClinic = () => { resetClinicForm(); setIsCreateDialogOpen(true); };
-  const openViewClinic = (c: Clinic) => { setSelectedClinic(c); setIsViewDialogOpen(true); };
+  const openViewClinic = async (c: Clinic) => { 
+    setSelectedClinic(c); 
+    setIsViewDialogOpen(true);
+    // Load rooms and users for this clinic
+    await loadClinicDetails(parseInt(c.id));
+  };
+  
+  const loadClinicDetails = async (clinicId: number) => {
+    setLoadingDetails(true);
+    try {
+      const [roomsResponse, usersResponse] = await Promise.all([
+        adminService.getRooms({ clinic: clinicId, page_size: 1000 }),
+        adminService.getUsers({ clinic: clinicId, page_size: 1000 }),
+      ]);
+      setClinicRooms(roomsResponse.results || []);
+      setClinicUsers(usersResponse.results || []);
+    } catch (err: any) {
+      console.error('Error loading clinic details:', err);
+      toast.error('Failed to load clinic details');
+    } finally {
+      setLoadingDetails(false);
+    }
+  };
+  
   const openEditClinic = (c: Clinic) => { setSelectedClinic(c); setClinicForm(c); setIsEditDialogOpen(true); };
   const openDeleteClinic = (c: Clinic) => { setSelectedClinic(c); setIsDeleteDialogOpen(true); };
 
   const openCreateDept = () => { resetDeptForm(); setIsCreateDialogOpen(true); };
-  const openViewDept = (d: Department) => { setSelectedDepartment(d); setIsViewDialogOpen(true); };
+  const openViewDept = async (d: Department) => { 
+    setSelectedDepartment(d); 
+    setIsViewDialogOpen(true);
+    // Load users for this department
+    await loadDepartmentDetails(parseInt(d.id));
+  };
+  
+  const loadDepartmentDetails = async (deptId: number) => {
+    setLoadingDetails(true);
+    try {
+      const usersResponse = await adminService.getUsers({ department: deptId, page_size: 1000 });
+      setDeptUsers(usersResponse.results || []);
+    } catch (err: any) {
+      console.error('Error loading department details:', err);
+      toast.error('Failed to load department details');
+    } finally {
+      setLoadingDetails(false);
+    }
+  };
   const openEditDept = (d: Department) => { setSelectedDepartment(d); setDeptForm(d); setIsEditDialogOpen(true); };
   const openDeleteDept = (d: Department) => { setSelectedDepartment(d); setIsDeleteDialogOpen(true); };
 
@@ -604,15 +649,38 @@ export default function ClinicDepartmentPage() {
 
         {/* View Department Dialog */}
         <Dialog open={isViewDialogOpen && activeTab === 'departments'} onOpenChange={(open) => { if (!open) setIsViewDialogOpen(false); }}>
-          <DialogContent className="sm:max-w-[500px]">
+          <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
             <DialogHeader><DialogTitle className="flex items-center gap-2"><Activity className="h-5 w-5 text-blue-500" />{selectedDepartment?.name}</DialogTitle><DialogDescription>{selectedDepartment?.code}</DialogDescription></DialogHeader>
             {selectedDepartment && (<div className="space-y-4 mt-4">
               <p className="text-muted-foreground">{selectedDepartment.description}</p>
               <div className="grid grid-cols-2 gap-4 text-sm">
-                <div><p className="text-muted-foreground">Head</p><p className="font-medium">{selectedDepartment.head}</p></div>
+                <div><p className="text-muted-foreground">Clinic</p><p className="font-medium">{selectedDepartment.clinics[0] || 'N/A'}</p></div>
+                <div><p className="text-muted-foreground">Head</p><p className="font-medium">{selectedDepartment.head || 'Not assigned'}</p></div>
                 <div><p className="text-muted-foreground">Staff Count</p><p className="font-medium">{selectedDepartment.staffCount}</p></div>
               </div>
-              {selectedDepartment.clinics.length > 0 && <div><p className="text-muted-foreground mb-2">Assigned Clinics</p><div className="flex flex-wrap gap-1">{selectedDepartment.clinics.map(c => <Badge key={c} variant="secondary">{c}</Badge>)}</div></div>}
+              
+              {/* Staff Section */}
+              <div>
+                <p className="text-muted-foreground mb-2 font-semibold flex items-center gap-2"><Users className="h-4 w-4" />Staff ({deptUsers.length})</p>
+                {loadingDetails ? (
+                  <div className="text-center py-4 text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin mx-auto mb-2" />Loading staff...</div>
+                ) : deptUsers.length > 0 ? (
+                  <div className="space-y-2 max-h-40 overflow-y-auto">
+                    {deptUsers.map((user: any) => (
+                      <div key={user.id} className="flex items-center justify-between p-2 bg-muted/50 rounded text-sm">
+                        <div>
+                          <span className="font-medium">{user.first_name} {user.last_name}</span>
+                          <span className="text-muted-foreground ml-2">({user.username})</span>
+                          {user.clinic_name && <span className="text-muted-foreground ml-2">• {user.clinic_name}</span>}
+                        </div>
+                        <Badge variant={user.is_active ? 'default' : 'secondary'} className="text-xs">{user.system_role || 'Staff'}</Badge>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">No staff assigned to this department</p>
+                )}
+              </div>
             </div>)}
             <DialogFooter><Button variant="outline" onClick={() => setIsViewDialogOpen(false)}>Close</Button><Button onClick={() => { setIsViewDialogOpen(false); if (selectedDepartment) openEditDept(selectedDepartment); }}><Edit className="h-4 w-4 mr-2" />Edit</Button></DialogFooter>
           </DialogContent>

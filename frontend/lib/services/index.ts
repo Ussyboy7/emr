@@ -19,5 +19,9 @@ export * from './admin-service';
 export { adminService } from './admin-service';
 export * from './help-service';
 export { helpService } from './help-service';
+export * from './referral-service';
+export { referralService } from './referral-service';
+export * from './consultation-service';
+export { consultationService } from './consultation-service';
 
 

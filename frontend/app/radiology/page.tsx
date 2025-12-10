@@ -241,7 +241,16 @@ export default function RadiologyDashboardPage() {
                         </Badge>
                         <p className="text-xs text-muted-foreground mt-1">{order.time}</p>
                       </div>
-                      <Button size="sm" className="bg-cyan-500 hover:bg-cyan-600 text-white">Process</Button>
+                      <Button 
+                        size="sm" 
+                        className="bg-cyan-500 hover:bg-cyan-600 text-white"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          router.push(`/radiology/studies?order=${order.id}`);
+                        }}
+                      >
+                        Process
+                      </Button>
                     </div>
                   </div>
                   ))

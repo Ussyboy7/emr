@@ -203,7 +203,16 @@ export default function LaboratoryDashboardPage() {
                         </Badge>
                         <p className="text-xs text-muted-foreground mt-1">{order.time}</p>
                       </div>
-                      <Button size="sm" className="bg-amber-500 hover:bg-amber-600 text-white">Process</Button>
+                      <Button 
+                        size="sm" 
+                        className="bg-amber-500 hover:bg-amber-600 text-white"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          router.push(`/laboratory/orders?order=${order.id}`);
+                        }}
+                      >
+                        Process
+                      </Button>
                     </div>
                   </div>
                   ))

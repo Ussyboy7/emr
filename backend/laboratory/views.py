@@ -55,11 +55,24 @@ class LabOrderViewSet(viewsets.ModelViewSet):
         """Mark sample as collected for a test."""
         order = self.get_object()
         test_id = request.data.get('test_id')
+        collection_method = request.data.get('collection_method', '')
+        notes = request.data.get('notes', '')
+        
         try:
             test = order.tests.get(id=test_id)
             test.status = 'sample_collected'
             test.collected_by = request.user
             test.collected_at = timezone.now()
+            
+            # Store collection method and notes
+            collection_info = []
+            if collection_method:
+                collection_info.append(f"Method: {collection_method}")
+            if notes:
+                collection_info.append(f"Notes: {notes}")
+            if collection_info:
+                test.notes = '\n'.join(collection_info)
+            
             test.save()
             return Response(LabTestSerializer(test).data)
         except LabTest.DoesNotExist:
@@ -92,11 +105,14 @@ class LabOrderViewSet(viewsets.ModelViewSet):
         test_id = request.data.get('test_id')
         results = request.data.get('results', {})
         notes = request.data.get('notes', '')
+        result_file = request.FILES.get('result_file')
         
         try:
             test = order.tests.get(id=test_id)
             test.results = results
             test.notes = notes
+            if result_file:
+                test.result_file = result_file
             test.status = 'results_ready'
             test.save()
             
@@ -149,7 +165,7 @@ class LabResultViewSet(viewsets.ReadOnlyModelViewSet):
         # Only show results that are ready for verification
         return LabResult.objects.filter(
             test__status='results_ready'
-        ).select_related('test', 'order', 'patient')
+        ).select_related('test', 'order', 'order__patient', 'order__doctor', 'patient')
     
     @action(detail=True, methods=['post'])
     def verify(self, request, pk=None):

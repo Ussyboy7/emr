@@ -49,7 +49,7 @@ export default function ConsultationDashboardPage() {
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {stats.map((stat, i) => (
+          {dashboardStats.map((stat, i) => (
             <Card key={i}>
               <CardContent className="p-4">
                 <div className="flex items-center justify-between">
@@ -91,26 +91,45 @@ export default function ConsultationDashboardPage() {
                 <Button variant="ghost" size="sm" onClick={() => router.push('/consultation/queue')}>View All<ArrowRight className="h-4 w-4 ml-1" /></Button>
               </CardHeader>
               <CardContent className="space-y-3">
-                {patientQueue.map((patient) => (
-                  <div key={patient.id} className="flex items-center justify-between p-3 rounded-lg border hover:bg-muted/50 transition-colors">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-full bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center text-white font-medium">
-                        {patient.patient.split(' ').map(n => n[0]).join('')}
+                {queueItems.length > 0 ? (
+                  queueItems.slice(0, 5).map((item) => {
+                    const priorityLabels = ['Emergency', 'High', 'Medium', 'Low'];
+                    const priorityLabel = priorityLabels[item.priority] || 'Medium';
+                    const isEmergency = item.priority === 0;
+                    return (
+                      <div key={item.id} className="flex items-center justify-between p-3 rounded-lg border hover:bg-muted/50 transition-colors">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center text-white font-medium">
+                            {item.patient_name?.split(' ').map((n: string) => n[0]).join('').substring(0, 2) || 'P'}
+                          </div>
+                          <div>
+                            <p className="font-medium text-foreground">{item.patient_name || 'Unknown Patient'}</p>
+                            <p className="text-xs text-muted-foreground">{item.room_name || 'Room'}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <div className="text-right">
+                            <Badge variant="outline" className={isEmergency ? 'border-rose-500/50 text-rose-600 dark:text-rose-400' : ''}>
+                              {priorityLabel}
+                            </Badge>
+                          </div>
+                          <Button 
+                            size="sm" 
+                            className="bg-emerald-500 hover:bg-emerald-600 text-white"
+                            onClick={() => router.push(`/consultation/start-consultation?room=${item.room}`)}
+                          >
+                            Start
+                          </Button>
+                        </div>
                       </div>
-                      <div>
-                        <p className="font-medium text-foreground">{patient.patient}</p>
-                        <p className="text-xs text-muted-foreground">{patient.patientId} • {patient.clinic}</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <div className="text-right">
-                        <Badge variant="outline" className={patient.visitType === 'Emergency' ? 'border-rose-500/50 text-rose-600 dark:text-rose-400' : ''}>{patient.visitType}</Badge>
-                        <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1"><Clock className="h-3 w-3" />{patient.waitTime}</p>
-                      </div>
-                      <Button size="sm" className="bg-emerald-500 hover:bg-emerald-600 text-white">Start</Button>
-                    </div>
+                    );
+                  })
+                ) : (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <UserCheck className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                    <p>No patients in queue</p>
                   </div>
-                ))}
+                )}
               </CardContent>
             </Card>
           </div>
@@ -118,16 +137,22 @@ export default function ConsultationDashboardPage() {
           <Card>
             <CardHeader className="pb-2"><CardTitle className="text-lg">Recent Consultations</CardTitle></CardHeader>
             <CardContent className="space-y-4">
-              {recentConsultations.map((consultation, i) => (
-                <div key={i} className="flex items-start gap-3">
-                  <div className="p-2 rounded-full bg-emerald-500/10"><CheckCircle2 className="h-4 w-4 text-emerald-500" /></div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-foreground text-sm">{consultation.patient}</p>
-                    <p className="text-xs text-muted-foreground">{consultation.diagnosis}</p>
-                    <p className="text-xs text-muted-foreground mt-1">{consultation.doctor} • {consultation.time}</p>
+              {recentSessions.length > 0 ? (
+                recentSessions.map((session) => (
+                  <div key={session.id} className="flex items-start gap-3">
+                    <div className="p-2 rounded-full bg-emerald-500/10"><CheckCircle2 className="h-4 w-4 text-emerald-500" /></div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-foreground text-sm">{session.patient}</p>
+                      <p className="text-xs text-muted-foreground">{session.diagnosis}</p>
+                      <p className="text-xs text-muted-foreground mt-1">{session.duration}m • {session.time}</p>
+                    </div>
                   </div>
+                ))
+              ) : (
+                <div className="text-center py-4 text-muted-foreground text-sm">
+                  No recent consultations
                 </div>
-              ))}
+              )}
             </CardContent>
           </Card>
         </div>

@@ -18,7 +18,7 @@ import { isAuthenticationError } from '@/lib/auth-errors';
 import { 
   Activity, Search, RefreshCw, Eye, TrendingUp, TrendingDown, AlertTriangle, 
   CheckCircle2, Heart, Thermometer, Wind, Droplets, Scale, Calendar, 
-  Clock, User
+  Clock, User, Loader2
 } from 'lucide-react';
 
 // Types
@@ -73,13 +73,40 @@ export default function PatientVitalsPage() {
         setError(null);
         
         // Fetch all vitals
+        console.log('[Patient Vitals] Fetching vitals from API...');
         const vitalsResult = await apiFetch<{ results: any[] }>('/vitals/?ordering=-recorded_at&page_size=1000');
-        const allVitals = vitalsResult.results || [];
+        console.log('[Patient Vitals] Full API response:', vitalsResult);
+        const allVitals = vitalsResult.results || vitalsResult || [];
+        console.log('[Patient Vitals] Fetched vitals:', allVitals.length, 'records');
+        console.log('[Patient Vitals] Sample vital record:', allVitals[0]);
+        
+        if (allVitals.length === 0) {
+          console.log('[Patient Vitals] No vitals found in database');
+          setPatients([]);
+          setLoading(false);
+          return;
+        }
         
         // Group vitals by patient ID
         const vitalsByPatient: Record<string, any[]> = {};
         allVitals.forEach((vital: any) => {
-          const patientId = String(vital.patient);
+          // Handle both numeric and object patient IDs
+          let patientId: string | null = null;
+          if (vital.patient) {
+            if (typeof vital.patient === 'object' && vital.patient.id) {
+              patientId = String(vital.patient.id);
+            } else if (typeof vital.patient === 'number') {
+              patientId = String(vital.patient);
+            } else if (typeof vital.patient === 'string') {
+              patientId = vital.patient;
+            }
+          }
+          
+          if (!patientId || patientId === 'null' || patientId === 'undefined') {
+            console.warn('[Patient Vitals] Vital record missing or invalid patient ID:', vital);
+            return;
+          }
+          
           if (!vitalsByPatient[patientId]) {
             vitalsByPatient[patientId] = [];
           }
@@ -88,18 +115,23 @@ export default function PatientVitalsPage() {
         
         // Get unique patient IDs
         const patientIds = Object.keys(vitalsByPatient);
+        console.log('[Patient Vitals] Found', patientIds.length, 'unique patients with vitals:', patientIds);
         
         if (patientIds.length === 0) {
+          console.log('[Patient Vitals] No patient IDs found in vitals - all vitals may be missing patient field');
           setPatients([]);
+          setLoading(false);
           return;
         }
         
         // Fetch patient details for all patients with vitals
         const patientPromises = patientIds.map(async (patientId) => {
           try {
+            console.log('[Patient Vitals] Fetching patient details for ID:', patientId);
             const patient = await patientService.getPatient(parseInt(patientId));
             const patientVitals = vitalsByPatient[patientId];
             const latestVitals = patientVitals[0]; // Already sorted by -recorded_at
+            console.log('[Patient Vitals] Loaded patient:', patient.full_name || patient.surname, 'with', patientVitals.length, 'vitals records');
             
             // Calculate status based on vitals
             let status: 'normal' | 'warning' | 'critical' = 'normal';
@@ -168,19 +200,26 @@ export default function PatientVitalsPage() {
               alerts,
             } as PatientVitals;
           } catch (err) {
-            console.error(`Error loading patient ${patientId}:`, err);
+            console.error(`[Patient Vitals] Error loading patient ${patientId}:`, err);
+            // Don't fail silently - show which patient failed
+            toast.error(`Failed to load patient ${patientId}: ${err instanceof Error ? err.message : 'Unknown error'}`);
             return null;
           }
         });
         
         const loadedPatients = (await Promise.all(patientPromises)).filter((p): p is PatientVitals => p !== null);
+        console.log('[Patient Vitals] Successfully loaded', loadedPatients.length, 'patients');
         setPatients(loadedPatients);
       } catch (err) {
-        console.error('Error loading patients with vitals:', err);
+        console.error('[Patient Vitals] Error loading patients with vitals:', err);
+        const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+        console.error('[Patient Vitals] Full error details:', err);
+        
         if (isAuthenticationError(err)) {
           setAuthError(err);
         } else {
-          setError('Failed to load patient vitals. Please try again.');
+          setError(`Failed to load patient vitals: ${errorMessage}`);
+          toast.error(`Failed to load patient vitals: ${errorMessage}`);
         }
       } finally {
         setLoading(false);
@@ -419,7 +458,30 @@ export default function PatientVitalsPage() {
           </Button>
         </div>
 
+        {/* Loading State */}
+        {loading && (
+          <Card>
+            <CardContent className="flex items-center justify-center py-12">
+              <Loader2 className="h-8 w-8 animate-spin text-primary mr-3" />
+              <p className="text-muted-foreground">Loading patient vitals...</p>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Error State */}
+        {error && !loading && (
+          <Card className="border-red-500/20 bg-red-500/5">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-3">
+                <AlertTriangle className="h-5 w-5 text-red-500" />
+                <p className="text-red-600 dark:text-red-400">{error}</p>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Stats Cards */}
+        {!loading && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[
             { label: 'Total Patients', value: stats.total, icon: User, color: 'text-blue-500', bg: 'bg-blue-500/10' },
@@ -442,14 +504,21 @@ export default function PatientVitalsPage() {
             </Card>
           ))}
         </div>
+        )}
 
         {/* Filters */}
+        {!loading && (
         <Card>
           <CardContent className="p-4">
             <div className="flex flex-col gap-4">
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input placeholder="Search by name, patient ID, or personal number..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-10" />
+                <Input 
+                  placeholder="Search by name, patient ID, or personal number..." 
+                  value={searchQuery} 
+                  onChange={(e) => setSearchQuery(e.target.value)} 
+                  className="pl-10" 
+                />
               </div>
               <div className="flex flex-wrap gap-2">
                 <Select value={statusFilter} onValueChange={setStatusFilter}>
@@ -465,21 +534,39 @@ export default function PatientVitalsPage() {
             </div>
           </CardContent>
         </Card>
+        )}
 
         {/* Results Count */}
+        {!loading && (
         <p className="text-sm text-muted-foreground px-1">
           Showing <span className="font-medium text-foreground">{paginatedPatients.length}</span> of {filteredPatients.length} patients
         </p>
+        )}
 
         {/* Patient Vitals List */}
+        {!loading && (
         <div className="space-y-3">
-          {filteredPatients.length === 0 ? (
+          {patients.length === 0 ? (
+            <Card>
+              <CardContent className="flex flex-col items-center justify-center py-12">
+                <Activity className="h-12 w-12 text-muted-foreground mb-4" />
+                <h3 className="text-lg font-semibold text-muted-foreground mb-2">No patient vitals recorded</h3>
+                <p className="text-sm text-muted-foreground text-center">
+                  Patient vitals will appear here once they are recorded in the Nursing Pool Queue
+                </p>
+              </CardContent>
+            </Card>
+          ) : filteredPatients.length === 0 ? (
             <Card>
               <CardContent className="flex flex-col items-center justify-center py-12">
                 <Search className="h-12 w-12 text-muted-foreground mb-4" />
-                <h3 className="text-lg font-semibold text-muted-foreground mb-2">No patients found</h3>
-                <p className="text-sm text-muted-foreground text-center">
-                  Try adjusting your search or filter criteria
+                <h3 className="text-lg font-semibold text-muted-foreground mb-2">
+                  {searchQuery || statusFilter !== 'all' ? 'No patients found' : 'No patient vitals recorded'}
+                </h3>
+                <p className="text-sm text-muted-foreground text-center max-w-md">
+                  {searchQuery || statusFilter !== 'all'
+                    ? 'Try adjusting your search or filter criteria'
+                    : 'No patient vitals have been recorded yet. To record vitals, go to the Nursing Pool Queue page and record vitals for patients during their visit.'}
                 </p>
               </CardContent>
             </Card>
@@ -547,6 +634,7 @@ export default function PatientVitalsPage() {
             ))
           )}
         </div>
+        )}
 
         {/* Pagination */}
         {filteredPatients.length > 0 && (

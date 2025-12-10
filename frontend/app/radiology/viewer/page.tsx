@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { toast } from 'sonner';
 import { radiologyService } from '@/lib/services';
 import { 
   Image as ImageIcon, Search, ZoomIn, ZoomOut, RotateCw, Contrast, 
@@ -36,32 +37,31 @@ export default function ImageViewerPage() {
     try {
       setLoading(true);
       setError(null);
-      // Get orders with acquired studies (studies that have images)
-      const ordersResponse = await radiologyService.getOrders({ page: 1 });
-      const studiesWithImages: StudyWithImages[] = [];
+      // Use the service method to get studies with images
+      const response = await radiologyService.getStudiesWithImages({ page: 1 });
       
-      ordersResponse.results.forEach(order => {
-        order.studies.forEach(study => {
-          // Only include studies that have been acquired (have images)
-          if (study.status === 'acquired' || study.status === 'processing' || study.status === 'reported' || study.status === 'verified') {
-            const acquiredDate = study.acquired_at ? new Date(study.acquired_at).toISOString().split('T')[0] : 
-                               new Date(order.ordered_at).toISOString().split('T')[0];
-            
-            studiesWithImages.push({
-              id: study.id.toString(),
-              patient: order.patient_name || 'Unknown',
-              modality: study.modality || 'X-Ray',
-              bodyPart: study.body_part || '',
-              date: acquiredDate,
-              images: study.images_count || 0,
-            });
-          }
-        });
+      const studiesWithImages: StudyWithImages[] = response.results.map(study => {
+        // Get order info from the study if available, or use defaults
+        const order = (study as any).order_details || {};
+        const acquiredDate = study.acquired_at 
+          ? new Date(study.acquired_at).toISOString().split('T')[0] 
+          : (study as any).created_at 
+          ? new Date((study as any).created_at).toISOString().split('T')[0]
+          : new Date().toISOString().split('T')[0];
+        
+        return {
+          id: study.id.toString(),
+          patient: order.patient_name || (study as any).patient_name || 'Unknown',
+          modality: study.modality || 'X-Ray',
+          bodyPart: study.body_part || '',
+          date: acquiredDate,
+          images: study.images_count || 0,
+        };
       });
       
-      // Sort by date (most recent first) and take first 20
+      // Sort by date (most recent first)
       studiesWithImages.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-      setStudies(studiesWithImages.slice(0, 20));
+      setStudies(studiesWithImages);
     } catch (err: any) {
       setError(err.message || 'Failed to load studies');
       console.error('Error loading studies:', err);
@@ -151,9 +151,30 @@ export default function ImageViewerPage() {
                     <Button variant="ghost" size="sm"><Grid className="h-4 w-4" /></Button>
                   </div>
                   <div className="flex items-center gap-1">
-                    <Button variant="ghost" size="sm"><Download className="h-4 w-4" /></Button>
-                    <Button variant="ghost" size="sm"><Share2 className="h-4 w-4" /></Button>
-                    <Button variant="ghost" size="sm"><Maximize className="h-4 w-4" /></Button>
+                    <Button 
+                      variant="ghost" 
+                      size="sm"
+                      onClick={() => toast.info('Download requires DICOM/PACS integration')}
+                      title="Download Images"
+                    >
+                      <Download className="h-4 w-4" />
+                    </Button>
+                    <Button 
+                      variant="ghost" 
+                      size="sm"
+                      onClick={() => toast.info('Share requires integration setup')}
+                      title="Share"
+                    >
+                      <Share2 className="h-4 w-4" />
+                    </Button>
+                    <Button 
+                      variant="ghost" 
+                      size="sm"
+                      onClick={() => toast.info('Full screen viewer requires DICOM viewer integration')}
+                      title="Full Screen"
+                    >
+                      <Maximize className="h-4 w-4" />
+                    </Button>
                   </div>
                 </div>
               </CardContent>

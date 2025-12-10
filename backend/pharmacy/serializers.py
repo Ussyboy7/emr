@@ -57,6 +57,7 @@ class DispenseSerializer(serializers.ModelSerializer):
     medication_name = serializers.CharField(source='medication.name', read_only=True)
     patient_name = serializers.CharField(source='prescription.patient.get_full_name', read_only=True)
     dispensed_by_name = serializers.CharField(source='dispensed_by.get_full_name', read_only=True, allow_null=True)
+    prescription_details = PrescriptionSerializer(source='prescription', read_only=True)
     
     class Meta:
         model = Dispense

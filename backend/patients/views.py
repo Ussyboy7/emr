@@ -17,6 +17,7 @@ from .serializers import (
     VitalReadingSerializer,
     MedicalHistorySerializer,
 )
+from audit.services import AuditService
 
 
 class PatientViewSet(viewsets.ModelViewSet):
@@ -53,8 +54,61 @@ class PatientViewSet(viewsets.ModelViewSet):
         return PatientSerializer
     
     def perform_create(self, serializer):
-        """Set created_by when creating a patient."""
-        serializer.save(created_by=self.request.user)
+        """Set created_by when creating a patient and log audit."""
+        patient = serializer.save(created_by=self.request.user)
+        AuditService.log_patient_action(
+            user=self.request.user,
+            action='create',
+            patient=patient,
+            module='medical_records',
+            description=f'Registered new patient: {patient.get_full_name()} ({patient.patient_id})',
+            new_values={'patient_id': patient.patient_id, 'name': patient.get_full_name(), 'category': patient.category},
+            request=self.request,
+        )
+    
+    def perform_update(self, serializer):
+        """Update patient and log audit."""
+        old_instance = self.get_object()
+        old_values = {
+            'surname': old_instance.surname,
+            'first_name': old_instance.first_name,
+            'category': old_instance.category,
+            'is_active': old_instance.is_active,
+        }
+        patient = serializer.save()
+        new_values = {
+            'surname': patient.surname,
+            'first_name': patient.first_name,
+            'category': patient.category,
+            'is_active': patient.is_active,
+        }
+        AuditService.log_patient_action(
+            user=self.request.user,
+            action='update',
+            patient=patient,
+            module='medical_records',
+            description=f'Updated patient: {patient.get_full_name()} ({patient.patient_id})',
+            old_values=old_values,
+            new_values=new_values,
+            request=self.request,
+        )
+    
+    def perform_destroy(self, instance):
+        """Soft delete patient and log audit."""
+        patient_id = instance.id
+        patient_repr = instance.get_full_name()
+        instance.is_active = False
+        instance.save()
+        AuditService.log_patient_action(
+            user=self.request.user,
+            action='delete',
+            patient=instance,
+            module='medical_records',
+            description=f'Deactivated patient: {patient_repr} ({instance.patient_id})',
+            old_values={'is_active': True},
+            new_values={'is_active': False},
+            request=self.request,
+        )
     
     @action(detail=True, methods=['get'])
     def visits(self, request, pk=None):
@@ -109,8 +163,19 @@ class VisitViewSet(viewsets.ModelViewSet):
         return Visit.objects.all().select_related('patient', 'doctor', 'created_by')
     
     def perform_create(self, serializer):
-        """Set created_by when creating a visit."""
-        serializer.save(created_by=self.request.user)
+        """Set created_by when creating a visit and log audit."""
+        visit = serializer.save(created_by=self.request.user)
+        AuditService.log_activity(
+            user=self.request.user,
+            action='create',
+            object_type='visit',
+            object_id=str(visit.id),
+            module='medical_records',
+            object_repr=f'Visit {visit.visit_id}',
+            description=f'Created visit {visit.visit_id} for patient {visit.patient.get_full_name()}',
+            new_values={'visit_id': visit.visit_id, 'visit_type': visit.visit_type, 'status': visit.status},
+            request=self.request,
+        )
 
 
 class VitalReadingViewSet(viewsets.ModelViewSet):

@@ -256,7 +256,16 @@ export default function PharmacyDashboardPage() {
                         <p className="text-xs text-muted-foreground">{rx.doctor}</p>
                         <p className="text-xs text-muted-foreground">{rx.time}</p>
                       </div>
-                      <Button size="sm" className="bg-violet-500 hover:bg-violet-600 text-white">Dispense</Button>
+                      <Button 
+                        size="sm" 
+                        className="bg-violet-500 hover:bg-violet-600 text-white"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          router.push(`/pharmacy/prescriptions?rx=${rx.id}`);
+                        }}
+                      >
+                        Dispense
+                      </Button>
                     </div>
                   </div>
                   ))

@@ -65,7 +65,9 @@ class RadiologyOrderViewSet(viewsets.ModelViewSet):
         
         try:
             study = order.studies.get(id=study_id)
-            study.status = 'reported'  # Goes directly to reported after acquisition
+            # Status should be 'acquired' after image acquisition
+            # It only becomes 'reported' after a radiologist creates the report
+            study.status = 'acquired'
             study.processing_method = processing_method
             study.outsourced_facility = outsourced_facility if processing_method == 'outsourced' else ''
             study.images_count = images_count
@@ -73,15 +75,6 @@ class RadiologyOrderViewSet(viewsets.ModelViewSet):
             study.acquired_by = request.user
             study.acquired_at = timezone.now()
             study.save()
-            
-            # Create report record for verification
-            RadiologyReport.objects.get_or_create(
-                study=study,
-                defaults={
-                    'order': order,
-                    'patient': order.patient,
-                }
-            )
             
             return Response(RadiologyStudySerializer(study).data)
         except RadiologyStudy.DoesNotExist:
@@ -96,6 +89,8 @@ class RadiologyOrderViewSet(viewsets.ModelViewSet):
         findings = request.data.get('findings', '')
         impression = request.data.get('impression', '')
         recommendations = request.data.get('recommendations', '')
+        critical = request.data.get('critical', False) or request.data.get('critical') == 'true'
+        report_file = request.FILES.get('report_file')
         
         try:
             study = order.studies.get(id=study_id)
@@ -106,16 +101,29 @@ class RadiologyOrderViewSet(viewsets.ModelViewSet):
             study.status = 'reported'
             study.reported_by = request.user
             study.reported_at = timezone.now()
+            # Store critical flag if model supports it (could be added as a field)
+            # For now, we'll note it in the report text if critical
+            if critical:
+                study.report = f"[CRITICAL FINDING]\n\n{study.report}"
+            # File upload handling - could store file path if FileField added to model
+            if report_file:
+                # Note: FileField would need to be added to model for actual file storage
+                study.technical_notes = f"{study.technical_notes}\n\nReport file uploaded: {report_file.name}".strip()
             study.save()
             
             # Create or update report record
-            RadiologyReport.objects.get_or_create(
+            report_record, created = RadiologyReport.objects.get_or_create(
                 study=study,
                 defaults={
                     'order': order,
                     'patient': order.patient,
+                    'overall_status': 'critical' if critical else 'normal',
                 }
             )
+            if not created:
+                if critical:
+                    report_record.overall_status = 'critical'
+                report_record.save()
             
             return Response(RadiologyStudySerializer(study).data)
         except RadiologyStudy.DoesNotExist:
@@ -133,7 +141,9 @@ class RadiologyReportViewSet(viewsets.ReadOnlyModelViewSet):
     ordering = ['-created_at']
     
     def get_queryset(self):
-        queryset = RadiologyReport.objects.all().select_related('study', 'order', 'patient')
+        queryset = RadiologyReport.objects.all().select_related(
+            'study', 'order', 'patient', 'order__doctor', 'study__reported_by'
+        )
         
         # Filter by study status if provided
         study_status = self.request.query_params.get('study_status', None)
@@ -162,4 +172,33 @@ class RadiologyReportViewSet(viewsets.ReadOnlyModelViewSet):
         report.save()
         
         return Response(RadiologyReportSerializer(report).data)
+    
+    @action(detail=True, methods=['post'])
+    def reject(self, request, pk=None):
+        """Reject a radiology report and send back for revision."""
+        report = self.get_object()
+        study = report.study
+        rejection_reason = request.data.get('reason', '')
+        
+        # Set study status back to 'acquired' so it can be re-reported
+        study.status = 'acquired'
+        study.verification_notes = f"Rejected: {rejection_reason}"
+        study.verified_by = None
+        study.verified_at = None
+        # Clear previous report data to allow re-reporting
+        study.report = ''
+        study.findings = ''
+        study.impression = ''
+        study.recommendations = ''
+        study.reported_by = None
+        study.reported_at = None
+        study.save()
+        
+        # Delete the report record so it's no longer in verification queue
+        report.delete()
+        
+        return Response({
+            'message': 'Report rejected and sent back for revision',
+            'study': RadiologyStudySerializer(study).data
+        })
 

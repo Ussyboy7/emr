@@ -276,22 +276,14 @@ export default function RadiologyVerificationPage() {
     setIsSubmitting(true);
 
     try {
-      // Update study status to send back to reporting radiologist
-      // This would typically be done via an API endpoint
+      // Use the reject endpoint on the report
       const { apiFetch } = await import('@/lib/api-client');
-      const studyId = parseInt(selectedReport.studyId);
-      if (!isNaN(studyId)) {
-        // Update study status back to 'acquired' or 'processing' to allow re-reporting
-        await apiFetch(`/radiology/studies/${studyId}/`, {
-          method: 'PATCH',
-          body: JSON.stringify({
-            status: 'acquired',
-            verification_notes: `Rejected: ${rejectionReason}`,
-            verified_by: null,
-            verified_at: null,
-          }),
-        });
-      }
+      await apiFetch(`/radiology/verification/${selectedReport.id}/reject/`, {
+        method: 'POST',
+        body: JSON.stringify({
+          reason: rejectionReason,
+        }),
+      });
       
       toast.success(`Report rejected and sent back to ${selectedReport.study.reportedBy}`);
       
@@ -645,7 +637,15 @@ export default function RadiologyVerificationPage() {
                       <FileText className="h-5 w-5 text-indigo-600" />
                       <span className="text-sm">{selectedReport.study.reportFile.name}</span>
                     </div>
-                    <Button variant="ghost" size="sm" className="text-indigo-600">
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      className="text-indigo-600"
+                      onClick={() => {
+                        // Note: File view/download requires backend file storage and URL
+                        toast.info('File view requires file storage integration');
+                      }}
+                    >
                       <Download className="h-4 w-4 mr-1" />View
                     </Button>
                   </div>

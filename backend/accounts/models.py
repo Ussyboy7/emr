@@ -28,10 +28,27 @@ class User(AbstractUser):
     grade_level = models.CharField(max_length=50, blank=True)
     system_role = models.CharField(max_length=50, choices=SYSTEM_ROLE_CHOICES, blank=True)
     
-    # Organizational structure (will be linked to organization app)
+    # Organizational structure - linked to organization app
+    clinic = models.ForeignKey(
+        'organization.Clinic',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='staff',
+        help_text="Clinic where the user works (e.g., Bode Thomas, HQ)"
+    )
+    department = models.ForeignKey(
+        'organization.Department',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='staff',
+        help_text="Department/Module the user belongs to (e.g., Medical Records, Nursing, Consultation)"
+    )
+    
+    # Legacy fields (kept for backward compatibility, can be removed later)
     directorate = models.CharField(max_length=100, blank=True)
     division = models.CharField(max_length=100, blank=True)
-    department = models.CharField(max_length=100, blank=True)
     
     # Additional metadata
     phone = models.CharField(max_length=20, blank=True)
@@ -49,6 +66,7 @@ class User(AbstractUser):
             models.Index(fields=['employee_id']),
             models.Index(fields=['system_role']),
             models.Index(fields=['email']),
+            models.Index(fields=['clinic', 'department']),
         ]
     
     def __str__(self):

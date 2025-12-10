@@ -17,11 +17,12 @@ import { patientService, type Patient as ApiPatient } from '@/lib/services';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { 
-  Search, Filter, Users, Phone, Mail, Eye, 
-  UserPlus, Calendar, FileText, Edit, X, MapPin, Loader2,
-  Activity, UserCheck, AlertTriangle, Droplets, User, Briefcase, Camera, Upload, Trash2
+  Search, Filter, Users, Phone, Eye, 
+  UserPlus, Calendar, FileText, Edit, X, Loader2,
+  Activity, UserCheck, AlertTriangle, Camera, Upload, Trash2
 } from 'lucide-react';
 import { StandardPagination } from '@/components/StandardPagination';
+import { PatientOverviewModal } from '@/components/PatientOverviewModal';
 
 // Constants for form fields
 const titles = ['Mr', 'Mrs', 'Ms', 'Dr', 'Chief', 'Engr', 'Prof', 'Alhaji', 'Hajia'];
@@ -169,7 +170,7 @@ export default function PatientsListPage() {
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
   
   // Modal states
-  const [isViewModalOpen, setIsViewModalOpen] = useState(false);
+  const [isOverviewModalOpen, setIsOverviewModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   
@@ -314,50 +315,9 @@ export default function PatientsListPage() {
     { label: 'Dependents', value: patients.filter(p => p.category === 'Dependent').length, icon: Users, color: 'text-violet-500', bg: 'bg-violet-500/10' },
   ], [patients]);
 
-  const openViewModal = async (patient: Patient) => {
+  const openOverviewModal = (patient: Patient) => {
     setSelectedPatient(patient);
-    setIsViewModalOpen(true);
-    
-    // Fetch visit data when opening the modal (lazy loading)
-    if (patient.totalVisits === 0) {
-      try {
-        // Look up patient by patient_id to get numeric ID for API calls
-        let numericId: number;
-        const patientIdStr = patient.id.trim();
-        
-        // Check if it's a numeric ID
-        const parsedId = parseInt(patientIdStr, 10);
-        if (!isNaN(parsedId) && parsedId > 0) {
-          numericId = parsedId;
-        } else {
-          // It's a string patient_id (like "E-A2962") - search for it
-          const searchResult = await patientService.getPatients({ search: patientIdStr });
-          const matchedPatient = searchResult.results.find(
-            p => p.patient_id === patientIdStr || p.patient_id.toUpperCase() === patientIdStr.toUpperCase()
-          );
-          if (!matchedPatient) {
-            return; // Could not find patient, skip fetching visits
-          }
-          numericId = matchedPatient.id;
-        }
-        
-        // Fetch visits for this patient
-        const visits = await patientService.getPatientVisits(numericId);
-        const updatedPatient = { ...patient };
-        updatedPatient.totalVisits = visits.length;
-        if (visits.length > 0) {
-          const sortedVisits = [...visits].sort((a, b) => 
-            new Date(b.date).getTime() - new Date(a.date).getTime()
-          );
-          updatedPatient.lastVisit = sortedVisits[0].date;
-        }
-        setSelectedPatient(updatedPatient);
-        // Also update in the main list
-        setPatients(prev => prev.map(p => p.id === patient.id ? updatedPatient : p));
-      } catch (err) {
-        console.debug('Could not fetch visit data for patient', patient.id, err);
-      }
-    }
+    setIsOverviewModalOpen(true);
   };
 
   const openEditModal = async (patient: Patient) => {
@@ -771,15 +731,18 @@ export default function PatientsListPage() {
                           {/* Row 1: Name + Category + Actions */}
                           <div className="flex items-center justify-between gap-2">
                             <div className="flex items-center gap-2 flex-wrap min-w-0">
-                              <Link href={`/medical-records/patients/${patient.id}`} className="font-semibold text-foreground hover:text-primary transition-colors truncate">
+                              <button
+                                onClick={() => openOverviewModal(patient)}
+                                className="font-semibold text-foreground hover:text-primary transition-colors truncate text-left"
+                              >
                                 {patient.name}
-                              </Link>
+                              </button>
                               <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${getCategoryBadge(patient.category)}`}>
                                 {patient.category}
                               </Badge>
                             </div>
                             <div className="flex items-center gap-1 flex-shrink-0">
-                              <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openViewModal(patient)} title="View Patient">
+                              <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openOverviewModal(patient)} title="View Patient">
                                 <Eye className="h-4 w-4 text-muted-foreground hover:text-primary" />
                               </Button>
                               <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openEditModal(patient)} title="Edit Patient">
@@ -919,150 +882,15 @@ export default function PatientsListPage() {
         </Dialog>
 
         {/* Patient Overview Modal */}
-        <Dialog open={isViewModalOpen} onOpenChange={setIsViewModalOpen}>
-          <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                <User className="h-5 w-5 text-teal-500" />
-                Patient Overview
-              </DialogTitle>
-              <DialogDescription>Patient registration details and information</DialogDescription>
-            </DialogHeader>
-            {selectedPatient && (
-              <div className="space-y-6 py-4">
-                {/* Patient Header */}
-                <div className="flex items-center gap-4 p-4 rounded-lg bg-gradient-to-r from-teal-500/10 to-cyan-500/10">
-                  <PatientAvatar patient={selectedPatient} size="lg" />
-                  <div>
-                    <h3 className="text-xl font-bold text-foreground">{selectedPatient.name}</h3>
-                    <div className="flex items-center gap-2 mt-1">
-                      <Badge variant="outline" className={getCategoryBadge(selectedPatient.category)}>{selectedPatient.category}</Badge>
-                      <span className="text-sm text-muted-foreground">{selectedPatient.id}</span>
-                    </div>
-                    {selectedPatient.personalNumber && (
-                      <p className="text-sm text-muted-foreground mt-1">Personal #: {selectedPatient.personalNumber}</p>
-                    )}
-                  </div>
-                </div>
-
-                {/* Basic Info */}
-                <div>
-                  <h4 className="text-sm font-semibold text-muted-foreground mb-3">BASIC INFORMATION</h4>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1">
-                      <p className="text-xs text-muted-foreground">Date of Birth</p>
-                      <p className="text-sm font-medium">{selectedPatient.dob}</p>
-                    </div>
-                    <div className="space-y-1">
-                      <p className="text-xs text-muted-foreground">Age / Gender</p>
-                      <p className="text-sm font-medium">{selectedPatient.age} years • {selectedPatient.gender}</p>
-                    </div>
-                    <div className="space-y-1">
-                      <p className="text-xs text-muted-foreground">Blood Group</p>
-                      <p className="text-sm font-medium flex items-center gap-1"><Droplets className="h-3 w-3 text-rose-500" />{selectedPatient.bloodGroup}</p>
-                    </div>
-                    <div className="space-y-1">
-                      <p className="text-xs text-muted-foreground">Registered</p>
-                      <p className="text-sm font-medium">{selectedPatient.registeredAt}</p>
-                    </div>
-                  </div>
-                </div>
-
-                <Separator />
-
-                {/* Contact Info */}
-                <div>
-                  <h4 className="text-sm font-semibold text-muted-foreground mb-3">CONTACT INFORMATION</h4>
-                  <div className="space-y-3">
-                    <div className="flex items-center gap-3">
-                      <Phone className="h-4 w-4 text-muted-foreground" />
-                      <span className="text-sm">{selectedPatient.phone}</span>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <Mail className="h-4 w-4 text-muted-foreground" />
-                      <span className="text-sm">{selectedPatient.email}</span>
-                    </div>
-                    <div className="flex items-start gap-3">
-                      <MapPin className="h-4 w-4 text-muted-foreground mt-0.5" />
-                      <span className="text-sm">{selectedPatient.address}</span>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <AlertTriangle className="h-4 w-4 text-amber-500" />
-                      <span className="text-sm"><strong>Emergency:</strong> {selectedPatient.emergencyContact}</span>
-                    </div>
-                  </div>
-                </div>
-
-                <Separator />
-
-                {/* Category Specific Info */}
-                <div>
-                  <h4 className="text-sm font-semibold text-muted-foreground mb-3">
-                    {selectedPatient.category === 'Employee' ? 'EMPLOYMENT DETAILS' : 
-                     selectedPatient.category === 'Dependent' ? 'DEPENDENT DETAILS' :
-                     selectedPatient.category === 'Retiree' ? 'RETIREE DETAILS' : 'NON-NPA DETAILS'}
-                  </h4>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1">
-                      <p className="text-xs text-muted-foreground">Location</p>
-                      <p className="text-sm font-medium flex items-center gap-1"><MapPin className="h-3 w-3" />{selectedPatient.location}</p>
-                    </div>
-                    {selectedPatient.category === 'Employee' && (
-                      <>
-                        <div className="space-y-1">
-                          <p className="text-xs text-muted-foreground">Employee Type</p>
-                          <p className="text-sm font-medium">{selectedPatient.employeeType}</p>
-                        </div>
-                        <div className="space-y-1">
-                          <p className="text-xs text-muted-foreground">Division</p>
-                          <p className="text-sm font-medium flex items-center gap-1"><Briefcase className="h-3 w-3" />{selectedPatient.division}</p>
-                        </div>
-                      </>
-                    )}
-                    {selectedPatient.category === 'Dependent' && (
-                      <>
-                        <div className="space-y-1">
-                          <p className="text-xs text-muted-foreground">Primary Patient</p>
-                          <p className="text-sm font-medium">{selectedPatient.primaryPatient}</p>
-                        </div>
-                        <div className="space-y-1">
-                          <p className="text-xs text-muted-foreground">Relationship</p>
-                          <p className="text-sm font-medium">{selectedPatient.relationship}</p>
-                        </div>
-                      </>
-                    )}
-                    {selectedPatient.category === 'NonNPA' && (
-                      <div className="space-y-1">
-                        <p className="text-xs text-muted-foreground">Non-NPA Type</p>
-                        <p className="text-sm font-medium">{selectedPatient.nonNpaType}</p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <Separator />
-
-                {/* Visit Stats */}
-                <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
-                  <div>
-                    <p className="text-xs text-muted-foreground">Total Visits</p>
-                    <p className="text-lg font-bold text-teal-600">{selectedPatient.totalVisits}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground">Last Visit</p>
-                    <p className="text-sm font-medium">{selectedPatient.lastVisit}</p>
-                  </div>
-                </div>
-              </div>
-            )}
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setIsViewModalOpen(false)}>Close</Button>
-              <Button onClick={() => { setIsViewModalOpen(false); if (selectedPatient) openEditModal(selectedPatient); }}>
-                <Edit className="h-4 w-4 mr-2" />Edit Patient
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+        <PatientOverviewModal
+          patient={selectedPatient}
+          isOpen={isOverviewModalOpen}
+          onClose={() => setIsOverviewModalOpen(false)}
+          onEdit={(patient) => {
+            setIsOverviewModalOpen(false);
+            openEditModal(patient);
+          }}
+        />
 
         {/* Edit Patient Modal */}
         <Dialog open={isEditModalOpen} onOpenChange={setIsEditModalOpen}>

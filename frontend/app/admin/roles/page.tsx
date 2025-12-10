@@ -98,6 +98,114 @@ export default function RolesPermissionsPage() {
     loadRoles();
   }, []);
 
+  // Map backend role types to frontend types
+  const mapRoleType = (backendType: string): Role['type'] => {
+    const typeMap: Record<string, Role['type']> = {
+      'admin': 'System',
+      'doctor': 'Clinical',
+      'nurse': 'Clinical',
+      'lab_tech': 'Clinical',
+      'pharmacist': 'Clinical',
+      'radiologist': 'Clinical',
+      'records': 'Administrative',
+      'custom': 'Custom',
+    };
+    return typeMap[backendType] || 'Custom';
+  };
+
+  // Map frontend role types to backend types
+  const mapToBackendType = (frontendType: Role['type']): string => {
+    const typeMap: Record<Role['type'], string> = {
+      'System': 'admin',
+      'Clinical': 'doctor', // Default to doctor for clinical
+      'Administrative': 'records',
+      'Custom': 'custom',
+    };
+    return typeMap[frontendType] || 'custom';
+  };
+
+  // Convert permissions from backend JSON format to frontend array format
+  const convertPermissionsFromBackend = (backendPerms: any): string[] => {
+    if (Array.isArray(backendPerms)) {
+      return backendPerms;
+    }
+    if (typeof backendPerms === 'object' && backendPerms !== null) {
+      // Backend stores as {module: [pages]}, convert to flat array of permission IDs
+      const permIds: string[] = [];
+      Object.keys(backendPerms).forEach(module => {
+        const pages = backendPerms[module];
+        if (Array.isArray(pages)) {
+          pages.forEach(page => {
+            // Try to find matching permission by constructing ID
+            // Backend format: {"Medical Records": ["view", "create"]}
+            // Frontend format: ["patient_view", "patient_create"]
+            const moduleName = module.toLowerCase().replace(/\s+/g, '_');
+            const pageName = page.toLowerCase().replace(/\s+/g, '_');
+            
+            // Try exact match first
+            const exactMatch = allPermissions.find(p => 
+              p.id === `${moduleName}_${pageName}` || 
+              p.id === pageName ||
+              (p.module.toLowerCase() === module.toLowerCase() && p.id.includes(pageName))
+            );
+            
+            if (exactMatch) {
+              if (!permIds.includes(exactMatch.id)) {
+                permIds.push(exactMatch.id);
+              }
+            } else {
+              // Fallback: try to match by module and page name pattern
+              const modulePerms = allPermissions.filter(p => 
+                p.module.toLowerCase() === module.toLowerCase()
+              );
+              const matched = modulePerms.find(p => {
+                const permIdParts = p.id.split('_');
+                return permIdParts.includes(pageName) || permIdParts[permIdParts.length - 1] === pageName;
+              });
+              if (matched && !permIds.includes(matched.id)) {
+                permIds.push(matched.id);
+              }
+            }
+          });
+        }
+      });
+      return permIds;
+    }
+    return [];
+  };
+
+  // Convert permissions from frontend array format to backend JSON format
+  const convertPermissionsToBackend = (frontendPerms: string[]): Record<string, string[]> => {
+    const backendPerms: Record<string, string[]> = {};
+    frontendPerms.forEach(permId => {
+      const perm = allPermissions.find(p => p.id === permId);
+      if (perm) {
+        if (!backendPerms[perm.module]) {
+          backendPerms[perm.module] = [];
+        }
+        // Extract action/page name from permission ID
+        // e.g., 'patient_view' -> 'view', 'consultation_start' -> 'start'
+        const parts = permId.split('_');
+        // Remove module name part and keep the action
+        const moduleName = perm.module.toLowerCase().replace(/\s+/g, '_');
+        let actionName = parts[parts.length - 1]; // Default to last part
+        
+        // If permission ID starts with module name, remove it
+        if (permId.startsWith(moduleName + '_')) {
+          actionName = permId.substring(moduleName.length + 1);
+        } else if (parts.length > 1) {
+          // Try to find the action part (usually the last part)
+          actionName = parts[parts.length - 1];
+        }
+        
+        if (!backendPerms[perm.module].includes(actionName)) {
+          backendPerms[perm.module].push(actionName);
+        }
+      }
+    });
+    return backendPerms;
+  };
+
   const loadRoles = async () => {
     try {
       setLoading(true);
@@ -109,8 +217,8 @@ export default function RolesPermissionsPage() {
         id: role.id.toString(),
         name: role.name,
         description: role.description || '',
-        type: role.type as Role['type'],
-        permissions: role.permissions || [],
+        type: mapRoleType(role.type),
+        permissions: convertPermissionsFromBackend(role.permissions),
         userCount: role.user_count || 0,
         isActive: role.is_active,
         createdAt: role.created_at?.split('T')[0] || '',
@@ -215,8 +323,8 @@ export default function RolesPermissionsPage() {
       await adminService.createRole({
         name: formData.name,
         description: formData.description,
-        type: formData.type,
-        permissions: formData.permissions,
+        type: mapToBackendType(formData.type),
+        permissions: convertPermissionsToBackend(formData.permissions),
         is_active: formData.isActive,
       });
       
@@ -241,8 +349,8 @@ export default function RolesPermissionsPage() {
       await adminService.updateRole(roleId, {
         name: formData.name,
         description: formData.description,
-        type: formData.type,
-        permissions: formData.permissions,
+        type: mapToBackendType(formData.type),
+        permissions: convertPermissionsToBackend(formData.permissions),
         is_active: formData.isActive,
       });
       

@@ -477,8 +477,7 @@ const StartConsultation = () => {
 
   return (
     <DashboardLayout>
-      <div className="p-6">
-        <div className="max-w-7xl mx-auto">
+      <div className="container mx-auto p-6 space-y-6">
         {/* Header */}
         <div className="mb-6">
           <h1 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mb-2">
@@ -773,7 +772,6 @@ const StartConsultation = () => {
           </AlertDialogContent>
         </AlertDialog>
       </div>
-    </div>
     </DashboardLayout>
   );
 };

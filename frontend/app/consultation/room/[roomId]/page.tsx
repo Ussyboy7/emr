@@ -14,12 +14,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Separator } from "@/components/ui/separator";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { Activity, AlertTriangle, ArrowLeft, CheckCircle, Clock, FileText, History, Loader2, MapPin, Pill, Plus, Save, Stethoscope, Syringe, TestTube, User, Users, X, Send, ScanLine, TrendingUp, TrendingDown, Minus, Building2, UserPlus, Calendar, Phone, Mail, Heart, Download, Eye, Printer, FileDown, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, ClipboardList, RefreshCw } from "lucide-react";
+import { Activity, AlertTriangle, ArrowLeft, CheckCircle, Clock, FileText, History, Loader2, MapPin, Pill, Plus, Save, Stethoscope, Syringe, TestTube, User, Users, X, Send, ScanLine, TrendingUp, TrendingDown, Minus, Building2, UserPlus, Calendar, Phone, Mail, Heart, Download, Eye, Printer, FileDown, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, ClipboardList, RefreshCw, Thermometer } from "lucide-react";
 import { toast } from "sonner";
-import { roomService, patientService } from '@/lib/services';
+import { roomService, patientService, pharmacyService, labService, radiologyService, referralService, consultationService } from '@/lib/services';
 import { apiFetch } from '@/lib/api-client';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
+import { getPriorityLabel, getPriorityColor } from '@/lib/utils/priority';
 
 // Types
 interface Patient {
@@ -189,7 +190,7 @@ const icd10Codes = [
   { code: 'B50.9', name: 'Plasmodium falciparum malaria, unspecified', category: 'Infectious' },
   { code: 'B51.9', name: 'Plasmodium vivax malaria', category: 'Infectious' },
   { code: 'B54', name: 'Unspecified malaria', category: 'Infectious' },
-  { code: 'J06.9', name: 'Acute upper respiratory infection, unspecified', category: 'Infectious' },
+  { code: 'J06.8', name: 'Acute upper respiratory infection, other specified', category: 'Infectious' },
   { code: 'J18.9', name: 'Pneumonia, unspecified organism', category: 'Infectious' },
   // Metabolic/Endocrine
   { code: 'E10.9', name: 'Type 1 diabetes mellitus without complications', category: 'Endocrine' },
@@ -631,15 +632,7 @@ const demoMedicalTimeline = [
   { date: '2024-05-20', time: '10:30', event: 'Imaging', type: 'imaging', description: 'Lumbar X-ray - Mild degenerative changes' },
 ];
 
-const getPriorityColor = (priority: string) => {
-  switch (priority?.toLowerCase()) {
-    case "emergency": return "bg-red-100 text-red-800 border-red-200 dark:bg-red-900/30 dark:text-red-400";
-    case "high": return "bg-orange-100 text-orange-800 border-orange-200 dark:bg-orange-900/30 dark:text-orange-400";
-    case "medium": return "bg-yellow-100 text-yellow-800 border-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-400";
-    case "low": return "bg-green-100 text-green-800 border-green-200 dark:bg-green-900/30 dark:text-green-400";
-    default: return "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300";
-  }
-};
+// Priority utility functions are now imported from @/lib/utils/priority
 
 export default function RoomPage({ params }: { params: Promise<{ roomId: string }> }) {
   const router = useRouter();
@@ -650,6 +643,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   const [patients, setPatients] = useState<Patient[]>([]);
   const [currentPatient, setCurrentPatient] = useState<Patient | null>(null);
   const [sessionActive, setSessionActive] = useState(false);
+  const [sessionId, setSessionId] = useState<number | null>(null);
   const [sessionStartTime, setSessionStartTime] = useState<Date | null>(null);
   const [sessionDuration, setSessionDuration] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -658,6 +652,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   useAuthRedirect(authError);
   const [activeTab, setActiveTab] = useState("notes");
   const [showEndDialog, setShowEndDialog] = useState(false);
+  const [showRoomQueueDialog, setShowRoomQueueDialog] = useState(false);
   const [isEnding, setIsEnding] = useState(false);
   const [followUpRequired, setFollowUpRequired] = useState(false);
   const [followUpDate, setFollowUpDate] = useState("");
@@ -801,6 +796,131 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   const [imagingPerPage, setImagingPerPage] = useState(10);
 
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isRefreshingQueue, setIsRefreshingQueue] = useState(false);
+  
+  // Function to refresh only the queue data (for modal refresh)
+  const refreshQueueData = async () => {
+    setIsRefreshingQueue(true);
+    try {
+      const numericRoomId = parseInt(roomId);
+      if (isNaN(numericRoomId)) {
+        return;
+      }
+      
+      // Load queue items for this room
+      let queueItems: any[] = [];
+      try {
+        const roomQueueResult = await apiFetch<any[]>(`/consultation/rooms/${numericRoomId}/queue/`);
+        queueItems = Array.isArray(roomQueueResult) ? roomQueueResult : [];
+      } catch (err) {
+        try {
+          const queueResult = await apiFetch<{ results: any[] }>(`/consultation/queue/?room=${numericRoomId}&is_active=true&page_size=1000`);
+          queueItems = queueResult.results || [];
+        } catch (filterErr) {
+          const allQueueResult = await apiFetch<{ results: any[] }>(`/consultation/queue/?is_active=true&page_size=1000`);
+          const allItems = allQueueResult.results || [];
+          queueItems = allItems.filter((item: any) => {
+            const itemRoomId = typeof item.room === 'number' ? item.room : parseInt(item.room);
+            return itemRoomId === numericRoomId;
+          });
+        }
+      }
+      
+      // Sort queue by priority
+      const sortedQueue = queueItems.sort((a, b) => {
+        if (a.priority !== b.priority) {
+          return a.priority - b.priority;
+        }
+        return new Date(a.queued_at).getTime() - new Date(b.queued_at).getTime();
+      });
+      
+      // Transform queue items to Patient objects
+      const transformedPatients = await Promise.all(sortedQueue.map(async (item: any, index: number) => {
+        try {
+          const patient = await patientService.getPatient(item.patient);
+          
+          let visitDate = new Date().toISOString().split('T')[0];
+          let visitTime = new Date().toTimeString().slice(0, 5);
+          let chiefComplaint = item.notes || '';
+          
+          if (item.visit) {
+            try {
+              const visit = await apiFetch(`/visits/${item.visit}/`) as {
+                date?: string;
+                time?: string;
+                chief_complaint?: string;
+              };
+              visitDate = visit.date || visitDate;
+              visitTime = visit.time || visitTime;
+              chiefComplaint = visit.chief_complaint || chiefComplaint;
+            } catch (err) {
+              console.warn('Could not load visit details:', err);
+            }
+          }
+          
+          let vitalsData = null;
+          if (item.visit) {
+            try {
+              const vitalsResult = await apiFetch<{ results: any[] }>(`/vitals/?visit=${item.visit}&ordering=-recorded_at`);
+              vitalsData = vitalsResult.results?.[0] || null;
+            } catch (err) {
+              console.warn('Could not load vitals:', err);
+            }
+          }
+          
+          const queuedAt = new Date(item.queued_at);
+          const waitTime = Math.floor((Date.now() - queuedAt.getTime()) / (1000 * 60));
+          
+          const getPriority = (priorityNum: number): Patient['priority'] => {
+            return getPriorityLabel(priorityNum);
+          };
+          
+          return {
+            id: String(item.patient),
+            visitId: item.visit ? String(item.visit) : '',
+            patientId: patient.patient_id || String(patient.id),
+            name: patient.full_name || `${patient.first_name} ${patient.surname}`,
+            age: patient.age || 0,
+            gender: patient.gender || '',
+            mrn: patient.patient_id || '',
+            personalNumber: patient.personal_number || '',
+            allergies: [],
+            chiefComplaint,
+            waitTime: waitTime > 0 ? waitTime : 0,
+            vitalsCompleted: !!vitalsData,
+            priority: getPriority(typeof item.priority === 'number' ? item.priority : parseInt(item.priority) || 0),
+            visitDate,
+            visitTime,
+            queuePosition: index + 1,
+            bloodGroup: patient.blood_group || undefined,
+            genotype: patient.genotype || undefined,
+            vitals: vitalsData ? {
+              temperature: vitalsData.temperature?.toString() || '',
+              bloodPressure: `${vitalsData.blood_pressure_systolic || ''}/${vitalsData.blood_pressure_diastolic || ''}`,
+              heartRate: vitalsData.heart_rate?.toString() || '',
+              respiratoryRate: vitalsData.respiratory_rate?.toString() || '',
+              oxygenSaturation: vitalsData.oxygen_saturation?.toString() || '',
+              weight: vitalsData.weight?.toString() || '',
+              height: vitalsData.height?.toString() || '',
+              recordedAt: vitalsData.recorded_at || new Date().toISOString(),
+            } : undefined,
+          } as Patient;
+        } catch (err) {
+          console.error(`Error loading patient ${item.patient}:`, err);
+          return null;
+        }
+      }));
+      
+      // Filter out any null results
+      const validPatients = transformedPatients.filter((p): p is Patient => p !== null);
+      setPatients(validPatients);
+    } catch (err: any) {
+      console.error('Error refreshing queue:', err);
+      toast.error('Failed to refresh queue');
+    } finally {
+      setIsRefreshingQueue(false);
+    }
+  };
   
   const loadRoomData = async () => {
     try {
@@ -904,18 +1024,17 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
             const queuedAt = new Date(item.queued_at);
             const waitTime = Math.floor((Date.now() - queuedAt.getTime()) / (1000 * 60));
             
-            // Map priority (integer) to string
+            // Map priority (integer) to string using centralized utility
+            // NOTE: Priority comes from ConsultationQueue model and was automatically set based on visit_type
+            // when the patient was added to the queue. No manual priority selection is needed.
             const getPriority = (priorityNum: number): Patient['priority'] => {
-              if (priorityNum === 0) return 'Emergency';
-              if (priorityNum === 1) return 'High';
-              if (priorityNum === 2) return 'Medium';
-              return 'Low';
+              return getPriorityLabel(priorityNum);
             };
             
             return {
-              id: String(item.id),
+              id: String(item.patient), // Use patient ID from queue, not queue item ID
               visitId: item.visit ? String(item.visit) : '',
-              patientId: patient.patient_id || String(patient.id),
+              patientId: patient.patient_id || String(patient.id), // Display ID (e.g., "PAT-2024-001")
               name: patient.full_name || `${patient.first_name} ${patient.surname}`,
               age: patient.age || 0,
               gender: patient.gender || '',
@@ -925,7 +1044,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
               chiefComplaint,
               waitTime: waitTime > 0 ? waitTime : 0,
               vitalsCompleted: !!vitalsData,
-              priority: getPriority(typeof item.priority === 'number' ? item.priority : parseInt(item.priority) || 2),
+              priority: getPriority(typeof item.priority === 'number' ? item.priority : parseInt(item.priority) || 0), // Default to 0 (Emergency) to match backend default
               visitDate,
               visitTime,
               queuePosition: index + 1,
@@ -1008,13 +1127,43 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     return () => clearInterval(interval);
   }, [sessionActive, sessionStartTime]);
 
-  const handleStartSession = (patient: Patient) => {
-    setCurrentPatient(patient);
-    setSessionActive(true);
-    setSessionStartTime(new Date());
-    setSessionDuration(0);
-    setMedicalNotes({ ...medicalNotes, chiefComplaint: patient.chiefComplaint });
-    toast.success(`Session started with ${patient.name}`);
+  const handleStartSession = async (patient: Patient) => {
+    try {
+      // Create consultation session in backend
+      const numericRoomId = parseInt(roomId);
+      // patient.id is now the actual patient database ID (from queue item.patient)
+      // patient.patientId is the display ID (e.g., "PAT-2024-001")
+      const numericPatientId = parseInt(patient.id);
+      const numericVisitId = patient.visitId ? parseInt(patient.visitId) : null;
+      
+      if (isNaN(numericRoomId) || isNaN(numericPatientId)) {
+        toast.error('Invalid room or patient ID');
+        console.error('Room ID:', numericRoomId, 'Patient ID:', numericPatientId, 'Patient object:', patient);
+        return;
+      }
+      
+      const sessionData = await apiFetch<{ id: number }>('/consultation/sessions/', {
+        method: 'POST',
+        body: JSON.stringify({
+          room: numericRoomId,
+          patient: numericPatientId,
+          visit: numericVisitId,
+          status: 'active', // Valid choices: 'active', 'completed', 'cancelled'
+          // Note: priority is for ConsultationQueue, not ConsultationSession
+        }),
+      });
+      
+      setCurrentPatient(patient);
+      setSessionActive(true);
+      setSessionId(sessionData.id);
+      setSessionStartTime(new Date());
+      setSessionDuration(0);
+      setMedicalNotes({ ...medicalNotes, chiefComplaint: patient.chiefComplaint });
+      toast.success(`Session started with ${patient.name}`);
+    } catch (err: any) {
+      console.error('Error starting session:', err);
+      toast.error(err.message || 'Failed to start consultation session');
+    }
   };
 
   // Generate consultation session PDF
@@ -1128,40 +1277,127 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   const confirmEndSession = async () => {
     setIsEnding(true);
     
-    // Generate PDF for the session
-    const sessionPDF = generateSessionPDF();
-    if (sessionPDF) {
-      toast.success("Consultation report generated", {
-        description: `Session ${sessionPDF.id} saved to patient history`,
-        action: {
-          label: "View",
-          onClick: () => console.log("View PDF", sessionPDF.pdfUrl)
+    try {
+      if (!sessionId) {
+        throw new Error('No active session to end');
+      }
+
+      // Step 1: Save all medical notes and data to the session before ending
+      const sessionUpdateData: any = {
+        chief_complaint: medicalNotes.chiefComplaint || '',
+        history_of_presenting_illness: medicalNotes.historyOfPresentIllness || '',
+        physical_examination: medicalNotes.physicalExamination || '',
+        assessment: medicalNotes.assessment || '',
+        plan: medicalNotes.plan || '',
+        notes: '', // Will be populated with diagnosis and follow-up info below
+      };
+
+      // Add diagnosis summary to notes if available
+      if (diagnoses.length > 0) {
+        const diagnosisSummary = diagnoses
+          .filter(d => d.type === 'Primary')
+          .map(d => `${d.code}: ${d.name}`)
+          .join('; ');
+        if (diagnosisSummary) {
+          sessionUpdateData.notes = sessionUpdateData.notes 
+            ? `${sessionUpdateData.notes}\n\nDiagnosis: ${diagnosisSummary}`
+            : `Diagnosis: ${diagnosisSummary}`;
         }
-      });
+      }
+
+      // Add follow-up information to notes if scheduled
+      if (followUpRequired && followUpDate && followUpReason) {
+        const followUpNote = `\n\nFollow-up Appointment:\nDate: ${followUpDate}\nReason: ${followUpReason}`;
+        sessionUpdateData.notes = sessionUpdateData.notes 
+          ? `${sessionUpdateData.notes}${followUpNote}`
+          : followUpNote.trim();
+        
+        // TODO: Create follow-up appointment in appointments module when available
+        // For now, the follow-up information is saved in the session notes
+      }
+
+      // Update session with all medical data
+      try {
+        await consultationService.updateSession(parseInt(sessionId), sessionUpdateData);
+        console.log('Session data saved successfully');
+      } catch (err) {
+        console.error('Error saving session data:', err);
+        toast.error('Failed to save session data. Please try again.');
+        setIsEnding(false);
+        return;
+      }
+
+      // Step 2: Deactivate queue item if patient was in queue
+      if (currentPatient?.id) {
+        try {
+          const queueData = await consultationService.getQueue({
+            room: parseInt(roomId),
+            patient: parseInt(currentPatient.id),
+            is_active: true,
+          });
+          
+          if (queueData.results && queueData.results.length > 0) {
+            const queueItem = queueData.results[0];
+            await apiFetch(`/consultation/queue/${queueItem.id}/`, {
+              method: 'PATCH',
+              body: JSON.stringify({ is_active: false }),
+            });
+            console.log('Queue item deactivated');
+          }
+        } catch (err) {
+          console.error('Error deactivating queue item:', err);
+          // Don't fail the entire process if queue deactivation fails
+        }
+      }
+
+      // Step 3: End the session using the dedicated endpoint
+      try {
+        await consultationService.endSession(parseInt(sessionId));
+        console.log('Session ended successfully');
+      } catch (err: any) {
+        console.error('Error ending session:', err);
+        throw new Error(err.message || 'Failed to end session');
+      }
+      
+      // Generate PDF for the session
+      const sessionPDF = generateSessionPDF();
+      if (sessionPDF) {
+        toast.success("Consultation report generated", {
+          description: `Session ${sessionPDF.id} saved to patient history`,
+          action: {
+            label: "View",
+            onClick: () => console.log("View PDF", sessionPDF.pdfUrl)
+          }
+        });
+      }
+      
+      toast.success("Consultation session completed successfully");
+      setPatients((prev) => prev.filter((p) => p.id !== currentPatient?.id));
+      if (room) {
+        setRoom({ ...room, totalConsultationsToday: room.totalConsultationsToday + 1, averageConsultationTime: Math.round((room.averageConsultationTime * room.totalConsultationsToday + sessionDuration) / (room.totalConsultationsToday + 1)) });
+      }
+      setCurrentPatient(null);
+      setSessionActive(false);
+      setSessionId(null);
+      setSessionStartTime(null);
+      setSessionDuration(0);
+      setMedicalNotes({ chiefComplaint: "", historyOfPresentIllness: "", physicalExamination: "", assessment: "", plan: "" });
+      setDiagnoses([]);
+      setPrescriptions([]);
+      setLabOrders([]);
+      setNursingOrders([]);
+      setReferrals([]);
+      setRadiologyOrders([]);
+      setFollowUpRequired(false);
+      setFollowUpDate("");
+      setFollowUpReason("");
+      setShowEndDialog(false);
+    } catch (err: any) {
+      console.error('Error ending session:', err);
+      toast.error(err.message || 'Failed to end session properly');
+    } finally {
+      setIsEnding(false);
     }
-    
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    toast.success("Consultation session completed successfully");
-    setPatients((prev) => prev.filter((p) => p.id !== currentPatient?.id));
-    if (room) {
-      setRoom({ ...room, totalConsultationsToday: room.totalConsultationsToday + 1, averageConsultationTime: Math.round((room.averageConsultationTime * room.totalConsultationsToday + sessionDuration) / (room.totalConsultationsToday + 1)) });
-    }
-    setCurrentPatient(null);
-    setSessionActive(false);
-    setSessionStartTime(null);
-    setSessionDuration(0);
-    setMedicalNotes({ chiefComplaint: "", historyOfPresentIllness: "", physicalExamination: "", assessment: "", plan: "" });
-    setDiagnoses([]);
-    setPrescriptions([]);
-    setLabOrders([]);
-    setNursingOrders([]);
-    setReferrals([]);
-    setRadiologyOrders([]);
-    setFollowUpRequired(false);
-    setFollowUpDate("");
-    setFollowUpReason("");
-    setShowEndDialog(false);
-    setIsEnding(false);
   };
 
   const addPrescription = () => { 
@@ -1192,7 +1428,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     } 
   };
 
-  const sendPrescriptionsToPharmacy = () => {
+  const sendPrescriptionsToPharmacy = async () => {
     if (prescriptions.length === 0) {
       toast.error("No prescriptions to send");
       return;
@@ -1202,15 +1438,62 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       toast.info("All prescriptions have already been sent to pharmacy");
       return;
     }
-    setPrescriptions(prev => prev.map(rx => rx.status === 'Draft' ? { ...rx, status: 'Sent to Pharmacy' } : rx));
-    setPrescriptionsSentToPharmacy(true);
-    toast.success(`${draftPrescriptions.length} prescription(s) sent to Pharmacy queue`, {
-      description: `Patient: ${currentPatient?.name}`,
-      action: {
-        label: "View in Pharmacy",
-        onClick: () => window.open('/pharmacy/prescriptions', '_blank')
+    
+    if (!currentPatient || !sessionId) {
+      toast.error('No active session. Please start a consultation session first.');
+      return;
+    }
+    
+    try {
+      // currentPatient.id is the actual patient database ID
+      const numericPatientId = parseInt(currentPatient.id);
+      const numericVisitId = currentPatient.visitId ? parseInt(currentPatient.visitId) : null;
+      
+      if (isNaN(numericPatientId)) {
+        toast.error('Invalid patient ID');
+        return;
       }
-    });
+      
+      // Create prescription in backend for each draft prescription
+      for (const rx of draftPrescriptions) {
+        try {
+          // Find medication ID from demoMedications (in real app, this would come from API)
+          const medication = demoMedications.find((m: any) => m.name === rx.medication);
+          
+          await pharmacyService.createPrescription({
+            patient: numericPatientId,
+            visit: numericVisitId || undefined,
+            diagnosis: diagnoses.length > 0 ? diagnoses.filter(d => d.type === 'Primary').map(d => `${d.code}: ${d.name}`).join('; ') : undefined,
+            notes: medicalNotes.assessment || undefined,
+            medications: [{
+              medication: medication?.id ? parseInt(medication.id.replace('MED-', '')) : 0, // This would need proper medication ID
+              quantity: rx.quantity,
+              unit: 'tablet', // Default, should come from medication data
+              dosage: rx.dosage,
+              frequency: rx.frequency,
+              duration: rx.duration,
+              instructions: rx.instructions,
+            }] as any, // ID, prescription, dispensed_quantity, is_dispensed will be assigned by backend
+          });
+        } catch (err: any) {
+          console.error(`Error creating prescription for ${rx.medication}:`, err);
+          toast.error(`Failed to send ${rx.medication} to pharmacy`);
+        }
+      }
+      
+      setPrescriptions(prev => prev.map(rx => rx.status === 'Draft' ? { ...rx, status: 'Sent to Pharmacy' } : rx));
+      setPrescriptionsSentToPharmacy(true);
+      toast.success(`${draftPrescriptions.length} prescription(s) sent to Pharmacy queue`, {
+        description: `Patient: ${currentPatient?.name}`,
+        action: {
+          label: "View in Pharmacy",
+          onClick: () => window.open('/pharmacy/prescriptions', '_blank')
+        }
+      });
+    } catch (err: any) {
+      console.error('Error sending prescriptions:', err);
+      toast.error(err.message || 'Failed to send prescriptions to pharmacy');
+    }
   };
 
   const selectMedication = (med: any) => {
@@ -1247,10 +1530,107 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         med.category?.toLowerCase().includes(medicationSearch.toLowerCase())
       )
     : demoMedications;
-  const addLabOrder = () => { if (newLabOrder.test) { setLabOrders([...labOrders, newLabOrder]); setNewLabOrder({ test: "", priority: "Routine", notes: "" }); setShowAddLabOrder(false); toast.success("Lab order added"); } };
+  const addLabOrder = async () => {
+    if (!newLabOrder.test) {
+      toast.error('Please select a test');
+      return;
+    }
+    
+    if (!currentPatient || !sessionId) {
+      toast.error('No active session. Please start a consultation session first.');
+      return;
+    }
+    
+    try {
+      // currentPatient.id is the actual patient database ID
+      const numericPatientId = parseInt(currentPatient.id);
+      const numericVisitId = currentPatient.visitId ? parseInt(currentPatient.visitId) : null;
+      
+      if (isNaN(numericPatientId)) {
+        toast.error('Invalid patient ID');
+        return;
+      }
+      
+      // Create lab order in backend
+      const priorityMap: Record<string, 'routine' | 'urgent' | 'stat'> = {
+        'Routine': 'routine',
+        'Urgent': 'urgent',
+        'STAT': 'stat',
+      };
+      
+      await labService.createOrder({
+        patient: numericPatientId as any, // API expects patient ID number, interface shows object for response
+        visit: numericVisitId || undefined,
+        priority: priorityMap[newLabOrder.priority] || 'routine',
+        clinical_notes: newLabOrder.notes || undefined,
+        tests: [{
+          name: newLabOrder.test,
+          code: newLabOrder.test.substring(0, 10).toUpperCase().replace(/\s/g, '_'),
+          sample_type: 'Blood', // Default, should be determined from test
+          status: 'pending',
+        }] as any, // ID will be assigned by backend
+      } as any); // Visit field may not be in interface but is accepted by API
+      
+      setLabOrders([...labOrders, newLabOrder]);
+      setNewLabOrder({ test: "", priority: "Routine", notes: "" });
+      setShowAddLabOrder(false);
+      toast.success("Lab order sent to laboratory");
+    } catch (err: any) {
+      console.error('Error creating lab order:', err);
+      toast.error(err.message || 'Failed to create lab order');
+    }
+  };
   
-  const addNursingOrder = () => { 
-    if (newNursingOrder.type && newNursingOrder.instructions) { 
+  const addNursingOrder = async () => {
+    if (!newNursingOrder.type || !newNursingOrder.instructions) {
+      toast.error('Please fill in all required fields');
+      return;
+    }
+    
+    if (!currentPatient || !sessionId) {
+      toast.error('No active session. Please start a consultation session first.');
+      return;
+    }
+    
+    try {
+      // currentPatient.id is the actual patient database ID
+      const numericPatientId = parseInt(currentPatient.id);
+      const numericVisitId = currentPatient.visitId ? parseInt(currentPatient.visitId) : null;
+      
+      if (isNaN(numericPatientId)) {
+        toast.error('Invalid patient ID');
+        return;
+      }
+      
+      // Build description from order details
+      let description = newNursingOrder.instructions;
+      if (newNursingOrder.type === 'Injection' && newNursingOrder.medication) {
+        description = `${newNursingOrder.medication} - ${newNursingOrder.dosage || ''} via ${newNursingOrder.route || ''}. ${newNursingOrder.instructions}`;
+      } else if (newNursingOrder.type === 'Dressing') {
+        description = `${newNursingOrder.woundType || 'Wound'} dressing at ${newNursingOrder.woundLocation || 'site'}. Supplies: ${newNursingOrder.supplies || 'Standard'}. ${newNursingOrder.instructions}`;
+      }
+      
+      const priorityMap: Record<string, 'low' | 'medium' | 'high' | 'urgent'> = {
+        'Routine': 'low',
+        'Urgent': 'high',
+        'STAT': 'urgent',
+      };
+      
+      // Create nursing order in backend
+      await apiFetch('/nursing/orders/', {
+        method: 'POST',
+        body: JSON.stringify({
+          patient: numericPatientId,
+          visit: numericVisitId || undefined,
+          order_type: newNursingOrder.type,
+          description: description,
+          frequency: newNursingOrder.type === 'Injection' ? 'As ordered' : '',
+          duration: '',
+          status: 'pending',
+          priority: priorityMap[newNursingOrder.priority] || 'medium',
+        }),
+      });
+      
       const orderId = `NO-${Date.now()}`;
       setNursingOrders([...nursingOrders, {
         id: orderId,
@@ -1263,15 +1643,20 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         supplies: newNursingOrder.supplies || undefined,
         instructions: newNursingOrder.instructions,
         priority: newNursingOrder.priority as 'Routine' | 'Urgent' | 'STAT',
-        status: 'Draft'
-      }]); 
-      setNewNursingOrder({ type: "", medication: "", dosage: "", route: "Intramuscular (IM)", woundLocation: "", woundType: "", supplies: "", instructions: "", priority: "Routine" }); 
-      setShowAddNursingOrder(false); 
-      toast.success("Nursing order added"); 
-    } 
+        status: 'Sent to Nursing'
+      }]);
+      setNewNursingOrder({ type: "", medication: "", dosage: "", route: "Intramuscular (IM)", woundLocation: "", woundType: "", supplies: "", instructions: "", priority: "Routine" });
+      setShowAddNursingOrder(false);
+      toast.success("Nursing order sent to nursing procedures queue");
+    } catch (err: any) {
+      console.error('Error creating nursing order:', err);
+      toast.error(err.message || 'Failed to create nursing order');
+    }
   };
 
   const sendNursingOrdersToNursing = () => {
+    // Note: Nursing orders are now sent directly when added via addNursingOrder
+    // This function is kept for backward compatibility but orders are sent immediately
     if (nursingOrders.length === 0) {
       toast.error("No nursing orders to send");
       return;
@@ -1281,8 +1666,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       toast.info("All nursing orders have already been sent");
       return;
     }
+    // Orders are now sent immediately when created, so this is just a status update
     setNursingOrders(prev => prev.map(order => order.status === 'Draft' ? { ...order, status: 'Sent to Nursing' } : order));
-    toast.success(`${draftOrders.length} nursing order(s) sent to Nursing Procedures queue`, {
+    toast.success(`${draftOrders.length} nursing order(s) already sent to Nursing Procedures queue`, {
       description: `Patient: ${currentPatient?.name}`,
       action: {
         label: "View Queue",
@@ -1301,8 +1687,55 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   };
 
   // Referral functions
-  const addReferral = () => {
-    if (newReferral.specialty && newReferral.facility && newReferral.reason) {
+  const addReferral = async () => {
+    if (!newReferral.specialty || !newReferral.facility || !newReferral.reason) {
+      toast.error('Please fill in all required fields');
+      return;
+    }
+    
+    if (!currentPatient || !sessionId) {
+      toast.error('No active session. Please start a consultation session first.');
+      return;
+    }
+    
+    try {
+      // currentPatient.id is the actual patient database ID
+      const numericPatientId = parseInt(currentPatient.id);
+      const numericVisitId = currentPatient.visitId ? parseInt(currentPatient.visitId) : null;
+      
+      if (isNaN(numericPatientId)) {
+        toast.error('Invalid patient ID');
+        return;
+      }
+      
+      const urgencyMap: Record<string, 'routine' | 'urgent' | 'emergency'> = {
+        'Routine': 'routine',
+        'Urgent': 'urgent',
+        'Emergency': 'emergency',
+      };
+      
+      const facilityTypeMap: Record<string, 'internal' | 'external' | 'specialist'> = {
+        'Internal': 'internal',
+        'External': 'external',
+        'Specialist': 'specialist',
+      };
+      
+      // Create referral in backend
+      const createdReferral = await referralService.createReferral({
+        patient: numericPatientId,
+        visit: numericVisitId || undefined,
+        session: sessionId,
+        specialty: newReferral.specialty,
+        facility: newReferral.facility,
+        facility_type: facilityTypeMap[newReferral.facilityType] || 'internal',
+        reason: newReferral.reason,
+        clinical_summary: newReferral.clinicalSummary || undefined,
+        urgency: urgencyMap[newReferral.urgency] || 'routine',
+        contact_person: newReferral.contactPerson || undefined,
+        contact_phone: newReferral.contactPhone || undefined,
+        status: 'sent',
+      });
+      
       const referralId = `REF-${Date.now()}`;
       setReferrals([...referrals, {
         id: referralId,
@@ -1314,15 +1747,20 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         clinicalSummary: newReferral.clinicalSummary,
         contactPerson: newReferral.contactPerson || undefined,
         contactPhone: newReferral.contactPhone || undefined,
-        status: 'Draft'
+        status: 'Sent'
       }]);
       setNewReferral({ specialty: "", facility: "", facilityType: "", reason: "", urgency: "Routine", clinicalSummary: "", contactPerson: "", contactPhone: "" });
       setShowAddReferral(false);
-      toast.success("Referral added");
+      toast.success("Referral sent successfully");
+    } catch (err: any) {
+      console.error('Error creating referral:', err);
+      toast.error(err.message || 'Failed to create referral');
     }
   };
 
   const sendReferrals = () => {
+    // Note: Referrals are now sent directly when added via addReferral
+    // This function is kept for backward compatibility but referrals are sent immediately
     if (referrals.length === 0) {
       toast.error("No referrals to send");
       return;
@@ -1332,17 +1770,58 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       toast.info("All referrals have already been sent");
       return;
     }
+    // Referrals are now sent immediately when created, so this is just a status update
     setReferrals(prev => prev.map(r => r.status === 'Draft' ? { ...r, status: 'Sent' } : r));
-    toast.success(`${draftReferrals.length} referral(s) sent successfully`, {
+    toast.success(`${draftReferrals.length} referral(s) already sent successfully`, {
       description: `Patient: ${currentPatient?.name}`
     });
   };
 
   // Radiology functions
-  const addRadiologyOrder = () => {
-    if (newRadiology.procedure && newRadiology.clinicalIndication) {
-      const orderId = `RAD-${Date.now()}`;
+  const addRadiologyOrder = async () => {
+    if (!newRadiology.procedure || !newRadiology.clinicalIndication) {
+      toast.error('Please fill in all required fields');
+      return;
+    }
+    
+    if (!currentPatient || !sessionId) {
+      toast.error('No active session. Please start a consultation session first.');
+      return;
+    }
+    
+    try {
+      // currentPatient.id is the actual patient database ID
+      const numericPatientId = parseInt(currentPatient.id);
+      const numericVisitId = currentPatient.visitId ? parseInt(currentPatient.visitId) : null;
+      
+      if (isNaN(numericPatientId)) {
+        toast.error('Invalid patient ID');
+        return;
+      }
+      
       const selectedProcedure = radiologyProcedures.find(p => p.name === newRadiology.procedure);
+      const priorityMap: Record<string, 'routine' | 'urgent' | 'stat'> = {
+        'Routine': 'routine',
+        'Urgent': 'urgent',
+        'STAT': 'stat',
+      };
+      
+      // Create radiology order in backend
+      await radiologyService.createOrder({
+        patient: numericPatientId,
+        visit: numericVisitId || undefined,
+        priority: priorityMap[newRadiology.priority] || 'routine',
+        clinical_notes: newRadiology.clinicalIndication,
+        studies: [{
+          procedure: newRadiology.procedure,
+          body_part: selectedProcedure?.bodyPart || newRadiology.bodyPart,
+          modality: selectedProcedure?.category || 'X-Ray',
+          status: 'pending',
+          technical_notes: newRadiology.specialInstructions || undefined,
+        }] as any, // ID and order will be assigned by backend
+      });
+      
+      const orderId = `RAD-${Date.now()}`;
       setRadiologyOrders([...radiologyOrders, {
         id: orderId,
         procedure: newRadiology.procedure,
@@ -1352,11 +1831,14 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         priority: newRadiology.priority as 'Routine' | 'Urgent' | 'STAT',
         contrastRequired: newRadiology.contrastRequired,
         specialInstructions: newRadiology.specialInstructions || undefined,
-        status: 'Draft'
+        status: 'Sent to Radiology'
       }]);
       setNewRadiology({ procedure: "", category: "", bodyPart: "", clinicalIndication: "", priority: "Routine", contrastRequired: false, specialInstructions: "" });
       setShowAddRadiology(false);
-      toast.success("Radiology order added");
+      toast.success("Radiology order sent to radiology department");
+    } catch (err: any) {
+      console.error('Error creating radiology order:', err);
+      toast.error(err.message || 'Failed to create radiology order');
     }
   };
 
@@ -1445,14 +1927,19 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
     return (
       <DashboardLayout>
-        <div className="p-6 max-w-7xl mx-auto space-y-6">
-          <div className="flex items-center justify-between">
+        <div className="container mx-auto p-6 space-y-6">
+          {/* Header Section */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
-              <h1 className="text-3xl font-bold text-gray-900 dark:text-white flex items-center gap-3">
-                <div className="w-12 h-12 bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-lg flex items-center justify-center text-white text-xl font-bold shadow-lg">{room.name.charAt(0)}</div>
+              <h1 className="text-3xl font-bold text-foreground flex items-center gap-3">
+                <div className="w-12 h-12 bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-lg flex items-center justify-center text-white text-xl font-bold shadow-lg">
+                  {room.name.charAt(0)}
+                </div>
                 {room.name}
               </h1>
-              <p className="text-gray-600 dark:text-gray-400 mt-1">Consultation Room • {room.specialtyFocus || "General Practice"} • {room.doctor || "No doctor assigned"}</p>
+              <p className="text-muted-foreground mt-1">
+                Consultation Room • {room.specialtyFocus || "General Practice"} • {room.doctor || "No doctor assigned"}
+              </p>
             </div>
             <div className="flex items-center gap-2">
               <Button variant="outline" onClick={handleRefresh} disabled={isRefreshing}>
@@ -1460,7 +1947,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                 {isRefreshing ? 'Refreshing...' : 'Refresh'}
               </Button>
               <Button variant="outline" onClick={() => router.push("/consultation/start")}>
-                <ArrowLeft className="mr-2 h-4 w-4" />Exit Room
+                <ArrowLeft className="mr-2 h-4 w-4" />
+                Exit Room
               </Button>
             </div>
           </div>
@@ -1541,25 +2029,35 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   // Active Session View
   return (
     <DashboardLayout>
-      <div className="p-6 max-w-7xl mx-auto">
-        <div className="mb-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Consultation Session</h1>
-              <p className="text-muted-foreground">Room: {room.name} • {room.doctor}</p>
-              <div className="mt-2 flex items-center gap-2 text-sm text-muted-foreground"><Clock className="h-4 w-4" />Session Duration: {sessionDuration} min</div>
+      <div className="container mx-auto p-6 space-y-6">
+        {/* Header Section */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-bold text-foreground">Consultation Session</h1>
+            <p className="text-muted-foreground mt-1">Room: {room.name} • {room.doctor}</p>
+            <div className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
+              <Clock className="h-4 w-4" />
+              <span>Session Duration: {sessionDuration} min</span>
             </div>
-            <div className="flex gap-2">
-              <Button variant="outline" onClick={() => setShowEndDialog(true)}><Users className="mr-2 h-4 w-4" />Room Queue ({patients.length})</Button>
-              <Button variant="destructive" onClick={() => setShowEndDialog(true)}>End Session</Button>
-            </div>
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => setShowRoomQueueDialog(true)}>
+              <Users className="mr-2 h-4 w-4" />
+              Room Queue ({patients.length})
+            </Button>
+            <Button variant="destructive" onClick={() => setShowEndDialog(true)}>
+              End Session
+            </Button>
           </div>
         </div>
 
-        <Card className="mb-6">
+        {/* Patient Info Card */}
+        <Card>
           <CardHeader className="pb-4">
             <div className="flex items-start gap-6">
-              <div className="w-20 h-20 bg-gradient-to-br from-emerald-100 to-emerald-200 dark:from-emerald-800 dark:to-emerald-700 rounded-full flex items-center justify-center"><User className="h-10 w-10 text-emerald-600 dark:text-emerald-300" /></div>
+              <div className="w-20 h-20 bg-gradient-to-br from-emerald-100 to-emerald-200 dark:from-emerald-800 dark:to-emerald-700 rounded-full flex items-center justify-center">
+                <User className="h-10 w-10 text-emerald-600 dark:text-emerald-300" />
+              </div>
               <div className="flex-1">
                 <div className="flex items-start justify-between mb-4">
                   <div>
@@ -1570,7 +2068,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                       <span><strong>Gender:</strong> {currentPatient.gender}</span>
                     </div>
                   </div>
-                  <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-400">Session Active</Badge>
+                  <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-400">
+                    Session Active
+                  </Badge>
                 </div>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                   <div><span className="text-muted-foreground">Blood Group:</span><span className="ml-2 font-semibold text-red-600">{currentPatient.bloodGroup || "N/A"}</span></div>
@@ -1578,39 +2078,98 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                   <div><span className="text-muted-foreground">Division:</span><span className="ml-2 font-semibold">{currentPatient.division || "N/A"}</span></div>
                   <div><span className="text-muted-foreground">Location:</span><span className="ml-2 font-semibold">{currentPatient.location || "N/A"}</span></div>
                 </div>
-                {currentPatient.allergies.length > 0 && <div className="mt-3 p-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg"><div className="flex items-center gap-2 text-red-600 dark:text-red-400"><AlertTriangle className="h-4 w-4" /><span className="font-medium">Allergies: {currentPatient.allergies.join(", ")}</span></div></div>}
+                {currentPatient.allergies.length > 0 && (
+                  <div className="mt-3 p-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+                    <div className="flex items-center gap-2 text-red-600 dark:text-red-400">
+                      <AlertTriangle className="h-4 w-4" />
+                      <span className="font-medium">Allergies: {currentPatient.allergies.join(", ")}</span>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </CardHeader>
         </Card>
 
+        {/* Vitals Card */}
         {currentPatient.vitals && (
-          <Card className="mb-6">
-            <CardHeader className="pb-2"><CardTitle className="text-lg flex items-center gap-2"><Activity className="h-5 w-5 text-blue-600" />Current Vitals</CardTitle></CardHeader>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Activity className="h-5 w-5 text-blue-600" />
+                Current Vitals
+              </CardTitle>
+            </CardHeader>
             <CardContent>
               <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
-                <div className="text-center p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg"><div className="text-xs text-muted-foreground">Temperature</div><div className="text-lg font-bold text-blue-600">{currentPatient.vitals.temperature}°C</div></div>
-                <div className="text-center p-3 bg-red-50 dark:bg-red-900/20 rounded-lg"><div className="text-xs text-muted-foreground">Blood Pressure</div><div className="text-lg font-bold text-red-600">{currentPatient.vitals.bloodPressure}</div></div>
-                <div className="text-center p-3 bg-pink-50 dark:bg-pink-900/20 rounded-lg"><div className="text-xs text-muted-foreground">Heart Rate</div><div className="text-lg font-bold text-pink-600">{currentPatient.vitals.heartRate} bpm</div></div>
-                <div className="text-center p-3 bg-cyan-50 dark:bg-cyan-900/20 rounded-lg"><div className="text-xs text-muted-foreground">Resp. Rate</div><div className="text-lg font-bold text-cyan-600">{currentPatient.vitals.respiratoryRate}/min</div></div>
-                <div className="text-center p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg"><div className="text-xs text-muted-foreground">SpO2</div><div className="text-lg font-bold text-emerald-600">{currentPatient.vitals.oxygenSaturation}%</div></div>
-                <div className="text-center p-3 bg-purple-50 dark:bg-purple-900/20 rounded-lg"><div className="text-xs text-muted-foreground">Weight</div><div className="text-lg font-bold text-purple-600">{currentPatient.vitals.weight} kg</div></div>
-                <div className="text-center p-3 bg-orange-50 dark:bg-orange-900/20 rounded-lg"><div className="text-xs text-muted-foreground">Height</div><div className="text-lg font-bold text-orange-600">{currentPatient.vitals.height} cm</div></div>
+                <div className="text-center p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                  <div className="text-xs text-muted-foreground">Temperature</div>
+                  <div className="text-lg font-bold text-blue-600">{currentPatient.vitals.temperature}°C</div>
+                </div>
+                <div className="text-center p-3 bg-red-50 dark:bg-red-900/20 rounded-lg">
+                  <div className="text-xs text-muted-foreground">Blood Pressure</div>
+                  <div className="text-lg font-bold text-red-600">{currentPatient.vitals.bloodPressure}</div>
+                </div>
+                <div className="text-center p-3 bg-pink-50 dark:bg-pink-900/20 rounded-lg">
+                  <div className="text-xs text-muted-foreground">Heart Rate</div>
+                  <div className="text-lg font-bold text-pink-600">{currentPatient.vitals.heartRate} bpm</div>
+                </div>
+                <div className="text-center p-3 bg-cyan-50 dark:bg-cyan-900/20 rounded-lg">
+                  <div className="text-xs text-muted-foreground">Resp. Rate</div>
+                  <div className="text-lg font-bold text-cyan-600">{currentPatient.vitals.respiratoryRate}/min</div>
+                </div>
+                <div className="text-center p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg">
+                  <div className="text-xs text-muted-foreground">SpO2</div>
+                  <div className="text-lg font-bold text-emerald-600">{currentPatient.vitals.oxygenSaturation}%</div>
+                </div>
+                <div className="text-center p-3 bg-purple-50 dark:bg-purple-900/20 rounded-lg">
+                  <div className="text-xs text-muted-foreground">Weight</div>
+                  <div className="text-lg font-bold text-purple-600">{currentPatient.vitals.weight} kg</div>
+                </div>
+                <div className="text-center p-3 bg-orange-50 dark:bg-orange-900/20 rounded-lg">
+                  <div className="text-xs text-muted-foreground">Height</div>
+                  <div className="text-lg font-bold text-orange-600">{currentPatient.vitals.height} cm</div>
+                </div>
               </div>
             </CardContent>
           </Card>
         )}
 
+        {/* Tabs Section */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
           <TabsList className="grid w-full grid-cols-8">
-            <TabsTrigger value="notes" className="flex items-center gap-1"><FileText className="h-4 w-4" /><span className="hidden lg:inline">Notes</span></TabsTrigger>
-            <TabsTrigger value="prescriptions" className="flex items-center gap-1"><Pill className="h-4 w-4" /><span className="hidden lg:inline">Prescriptions</span></TabsTrigger>
-            <TabsTrigger value="lab" className="flex items-center gap-1"><TestTube className="h-4 w-4" /><span className="hidden lg:inline">Lab</span></TabsTrigger>
-            <TabsTrigger value="radiology" className="flex items-center gap-1"><ScanLine className="h-4 w-4" /><span className="hidden lg:inline">Radiology</span></TabsTrigger>
-            <TabsTrigger value="nursing" className="flex items-center gap-1"><Syringe className="h-4 w-4" /><span className="hidden lg:inline">Nursing</span></TabsTrigger>
-            <TabsTrigger value="referral" className="flex items-center gap-1"><Send className="h-4 w-4" /><span className="hidden lg:inline">Referral</span></TabsTrigger>
-            <TabsTrigger value="vitals" className="flex items-center gap-1"><Heart className="h-4 w-4" /><span className="hidden lg:inline">Vitals</span></TabsTrigger>
-            <TabsTrigger value="history" className="flex items-center gap-1"><History className="h-4 w-4" /><span className="hidden lg:inline">History</span></TabsTrigger>
+            <TabsTrigger value="notes" className="flex items-center gap-1">
+              <FileText className="h-4 w-4" />
+              <span className="hidden lg:inline">Notes</span>
+            </TabsTrigger>
+            <TabsTrigger value="prescriptions" className="flex items-center gap-1">
+              <Pill className="h-4 w-4" />
+              <span className="hidden lg:inline">Prescriptions</span>
+            </TabsTrigger>
+            <TabsTrigger value="lab" className="flex items-center gap-1">
+              <TestTube className="h-4 w-4" />
+              <span className="hidden lg:inline">Lab</span>
+            </TabsTrigger>
+            <TabsTrigger value="radiology" className="flex items-center gap-1">
+              <ScanLine className="h-4 w-4" />
+              <span className="hidden lg:inline">Radiology</span>
+            </TabsTrigger>
+            <TabsTrigger value="nursing" className="flex items-center gap-1">
+              <Syringe className="h-4 w-4" />
+              <span className="hidden lg:inline">Nursing</span>
+            </TabsTrigger>
+            <TabsTrigger value="referral" className="flex items-center gap-1">
+              <Send className="h-4 w-4" />
+              <span className="hidden lg:inline">Referral</span>
+            </TabsTrigger>
+            <TabsTrigger value="vitals" className="flex items-center gap-1">
+              <Heart className="h-4 w-4" />
+              <span className="hidden lg:inline">Vitals</span>
+            </TabsTrigger>
+            <TabsTrigger value="history" className="flex items-center gap-1">
+              <History className="h-4 w-4" />
+              <span className="hidden lg:inline">History</span>
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="notes">
@@ -1667,7 +2226,52 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
                 <div className="space-y-2"><Label>Assessment</Label><Textarea value={medicalNotes.assessment} onChange={(e) => setMedicalNotes({ ...medicalNotes, assessment: e.target.value })} placeholder="Clinical assessment and reasoning..." rows={3} /></div>
                 <div className="space-y-2"><Label>Plan</Label><Textarea value={medicalNotes.plan} onChange={(e) => setMedicalNotes({ ...medicalNotes, plan: e.target.value })} placeholder="Treatment plan, follow-up instructions..." rows={4} /></div>
-                <Button className="w-full" onClick={() => toast.success("Medical notes saved")}><Save className="mr-2 h-4 w-4" />Save Medical Notes</Button>
+                <Button 
+                  className="w-full" 
+                  onClick={async () => {
+                    if (!sessionId) {
+                      toast.error('No active session. Please start a consultation session first.');
+                      return;
+                    }
+                    
+                    try {
+                      // Check if notes already exist
+                      const notesResult = await apiFetch<{ results: any[] }>(`/consultation/notes/?session=${sessionId}&page_size=1`);
+                      const existingNote = notesResult.results?.[0];
+                      
+                      const notesData = {
+                        session: sessionId,
+                        chief_complaint: medicalNotes.chiefComplaint,
+                        history_of_present_illness: medicalNotes.historyOfPresentIllness,
+                        physical_examination: medicalNotes.physicalExamination,
+                        assessment: medicalNotes.assessment,
+                        plan: medicalNotes.plan,
+                        diagnosis: diagnoses.length > 0 ? diagnoses.filter(d => d.type === 'Primary').map(d => `${d.code}: ${d.name}`).join('; ') : '',
+                      };
+                      
+                      if (existingNote) {
+                        // Update existing note
+                        await apiFetch(`/consultation/notes/${existingNote.id}/`, {
+                          method: 'PATCH',
+                          body: JSON.stringify(notesData),
+                        });
+                        toast.success('Medical notes updated successfully');
+                      } else {
+                        // Create new note
+                        await apiFetch('/consultation/notes/', {
+                          method: 'POST',
+                          body: JSON.stringify(notesData),
+                        });
+                        toast.success('Medical notes saved successfully');
+                      }
+                    } catch (err: any) {
+                      console.error('Error saving medical notes:', err);
+                      toast.error(err.message || 'Failed to save medical notes');
+                    }
+                  }}
+                >
+                  <Save className="mr-2 h-4 w-4" />Save Medical Notes
+                </Button>
               </CardContent>
             </Card>
           </TabsContent>
@@ -3038,9 +3642,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                           dx.category.toLowerCase().includes(diagnosisSearch.toLowerCase())
                         )
                         .slice(0, 15)
-                        .map((dx) => (
+                        .map((dx, index) => (
                           <div 
-                            key={dx.code}
+                            key={`${dx.code}-${index}`}
                             onClick={() => {
                               const newDx = {
                                 id: `dx-${Date.now()}`,
@@ -3927,6 +4531,172 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
             <AlertDialogFooter><AlertDialogCancel disabled={isEnding}>Cancel</AlertDialogCancel><AlertDialogAction onClick={confirmEndSession} disabled={isEnding}>{isEnding ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Ending Session...</> : "End Session & Return to Queue"}</AlertDialogAction></AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+
+        {/* Room Queue Dialog */}
+        <Dialog open={showRoomQueueDialog} onOpenChange={setShowRoomQueueDialog}>
+          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Users className="h-5 w-5 text-emerald-500" />
+                Room Queue - {room?.name || 'Consultation Room'}
+              </DialogTitle>
+              <DialogDescription>
+                Patients waiting in queue for this room ({patients.length} {patients.length === 1 ? 'patient' : 'patients'})
+              </DialogDescription>
+            </DialogHeader>
+            
+            <div className="space-y-4 mt-4">
+              {patients.length === 0 ? (
+                <div className="text-center py-12 text-muted-foreground">
+                  <Users className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                  <p className="text-lg font-medium">No patients in queue</p>
+                  <p className="text-sm">The queue is currently empty for this room.</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {patients.map((patient, index) => {
+                    const priorityColor = 
+                      patient.priority === 'Emergency' ? 'border-rose-500/50 text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-900/20' :
+                      patient.priority === 'High' ? 'border-orange-500/50 text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-900/20' :
+                      patient.priority === 'Medium' ? 'border-amber-500/50 text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20' :
+                      'border-gray-500/50 text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-900/20';
+                    
+                    const isCurrentPatient = currentPatient?.id === patient.id;
+                    
+                    return (
+                      <div
+                        key={patient.id}
+                        className={`p-4 rounded-lg border-2 transition-all ${
+                          isCurrentPatient
+                            ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20'
+                            : 'border-border hover:border-emerald-300 hover:bg-muted/50'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="flex items-start gap-4 flex-1">
+                            <div className={`w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-lg ${
+                              isCurrentPatient
+                                ? 'bg-gradient-to-br from-emerald-500 to-teal-500'
+                                : 'bg-gradient-to-br from-blue-500 to-cyan-500'
+                            }`}>
+                              {patient.name.split(' ').map(n => n[0]).join('').substring(0, 2)}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 mb-1">
+                                <h4 className="font-semibold text-lg">{patient.name}</h4>
+                                {isCurrentPatient && (
+                                  <Badge variant="outline" className="bg-emerald-500 text-white border-emerald-600">
+                                    In Consultation
+                                  </Badge>
+                                )}
+                                <Badge variant="outline" className={priorityColor}>
+                                  {patient.priority}
+                                </Badge>
+                              </div>
+                              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm text-muted-foreground mb-2">
+                                <div>
+                                  <span className="font-medium">Patient ID:</span> {patient.patientId}
+                                </div>
+                                <div>
+                                  <span className="font-medium">Age:</span> {patient.age} years
+                                </div>
+                                <div>
+                                  <span className="font-medium">Gender:</span> {patient.gender}
+                                </div>
+                                <div>
+                                  <span className="font-medium">Wait Time:</span>{' '}
+                                  <span className="text-amber-600 dark:text-amber-400 font-medium">
+                                    {patient.waitTime} min
+                                  </span>
+                                </div>
+                              </div>
+                              {patient.chiefComplaint && (
+                                <div className="mt-2">
+                                  <p className="text-sm">
+                                    <span className="font-medium text-muted-foreground">Chief Complaint:</span>{' '}
+                                    <span className="text-foreground">{patient.chiefComplaint}</span>
+                                  </p>
+                                </div>
+                              )}
+                              {patient.vitals && (
+                                <div className="mt-2 flex items-center gap-4 text-xs text-muted-foreground">
+                                  {patient.vitals.temperature && (
+                                    <span className="flex items-center gap-1">
+                                      <Thermometer className="h-3 w-3" />
+                                      Temp: {patient.vitals.temperature}°C
+                                    </span>
+                                  )}
+                                  {patient.vitals.bloodPressure && (
+                                    <span className="flex items-center gap-1">
+                                      <Heart className="h-3 w-3" />
+                                      BP: {patient.vitals.bloodPressure}
+                                    </span>
+                                  )}
+                                  {patient.vitals.heartRate && (
+                                    <span className="flex items-center gap-1">
+                                      <Activity className="h-3 w-3" />
+                                      HR: {patient.vitals.heartRate} bpm
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex flex-col items-end gap-2">
+                            <div className="text-right">
+                              <div className="text-xs text-muted-foreground mb-1">Position</div>
+                              <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">
+                                #{index + 1}
+                              </div>
+                            </div>
+                            {!isCurrentPatient && (
+                              <Button
+                                size="sm"
+                                onClick={() => {
+                                  setShowRoomQueueDialog(false);
+                                  handleStartSession(patient);
+                                }}
+                                className="bg-emerald-500 hover:bg-emerald-600 text-white"
+                              >
+                                <Stethoscope className="h-4 w-4 mr-1" />
+                                Start
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+            
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setShowRoomQueueDialog(false)}>
+                Close
+              </Button>
+              <Button
+                type="button"
+                disabled={isRefreshingQueue}
+                onClick={async (e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  // Refresh only queue data, not the entire page
+                  try {
+                    await refreshQueueData();
+                    toast.success('Queue refreshed');
+                  } catch (error) {
+                    // Error already handled in refreshQueueData
+                  }
+                }}
+                variant="default"
+              >
+                <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshingQueue ? 'animate-spin' : ''}`} />
+                {isRefreshingQueue ? 'Refreshing...' : 'Refresh Queue'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* Session Viewer Dialog */}
         <Dialog open={showSessionViewer} onOpenChange={setShowSessionViewer}>

@@ -421,10 +421,12 @@ export default function NursingPoolQueuePage() {
       };
       
       // Save vitals to API
-      await apiFetch('/vitals/', {
+      console.log('[Pool Queue] Saving vitals:', payload);
+      const response = await apiFetch('/vitals/', {
         method: 'POST',
         body: JSON.stringify(payload),
       });
+      console.log('[Pool Queue] Vitals save response:', response);
       
       // Update visit status (optional - you might want to add a field to track vitals recorded)
       // For now, we'll just reload the data
@@ -498,9 +500,18 @@ export default function NursingPoolQueuePage() {
       
       setPatients(transformedPatients);
       
-    } catch (err) {
-      console.error('Error saving vitals:', err);
-      toast.error('Failed to save vitals. Please try again.');
+    } catch (err: any) {
+      console.error('[Pool Queue] Error saving vitals:', err);
+      console.error('[Pool Queue] Error details:', {
+        message: err?.message,
+        status: err?.status,
+        response: err?.response,
+        stack: err?.stack
+      });
+      const errorMessage = err?.message || err?.response?.data?.detail || 'Failed to save vitals. Please try again.';
+      toast.error('Failed to save vitals', {
+        description: errorMessage
+      });
     } finally {
       setIsSubmitting(false);
     }

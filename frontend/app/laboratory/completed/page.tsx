@@ -43,94 +43,6 @@ interface CompletedTest {
   turnaroundTime: string;
 }
 
-// Demo data - completed/verified tests
-const demoCompletedTests: CompletedTest[] = [
-  {
-    id: 'COMP-001', orderId: 'LAB-2024-010',
-    patient: { id: 'PAT-010', name: 'Olumide Afolabi', age: 48, gender: 'Male' },
-    doctor: { id: 'DOC-001', name: 'Dr. Amaka Eze', specialty: 'General Practice' },
-    testName: 'Complete Blood Count', testCode: 'CBC',
-    results: [
-      { parameter: 'WBC', value: '8.2', unit: '×10³/μL', normalRange: '4.0-11.0', status: 'Normal' },
-      { parameter: 'RBC', value: '4.9', unit: '×10⁶/μL', normalRange: '4.2-5.4', status: 'Normal' },
-      { parameter: 'Hemoglobin', value: '14.5', unit: 'g/dL', normalRange: '13.5-17.5', status: 'Normal' },
-      { parameter: 'Hematocrit', value: '43', unit: '%', normalRange: '40-50', status: 'Normal' },
-      { parameter: 'Platelets', value: '275', unit: '×10³/μL', normalRange: '150-400', status: 'Normal' },
-    ],
-    overallStatus: 'Normal', priority: 'Routine',
-    orderedAt: new Date(Date.now() - 4 * 3600000).toISOString(),
-    completedAt: new Date(Date.now() - 2 * 3600000).toISOString(),
-    verifiedBy: 'Dr. Pathologist', verifiedAt: new Date(Date.now() - 1 * 3600000).toISOString(),
-    submittedBy: 'Lab Tech Ada', clinic: 'General Clinic', turnaroundTime: '2h 15m'
-  },
-  {
-    id: 'COMP-002', orderId: 'LAB-2024-011',
-    patient: { id: 'PAT-011', name: 'Amina Bello', age: 35, gender: 'Female' },
-    doctor: { id: 'DOC-002', name: 'Dr. Chidi Okafor', specialty: 'Internal Medicine' },
-    testName: 'Liver Function Test', testCode: 'LFT',
-    results: [
-      { parameter: 'ALT', value: '45', unit: 'U/L', normalRange: '7-56', status: 'Normal' },
-      { parameter: 'AST', value: '38', unit: 'U/L', normalRange: '10-40', status: 'Normal' },
-      { parameter: 'ALP', value: '85', unit: 'U/L', normalRange: '44-147', status: 'Normal' },
-      { parameter: 'Bilirubin', value: '0.9', unit: 'mg/dL', normalRange: '0.1-1.2', status: 'Normal' },
-    ],
-    overallStatus: 'Normal', priority: 'Routine',
-    orderedAt: new Date(Date.now() - 5 * 3600000).toISOString(),
-    completedAt: new Date(Date.now() - 3 * 3600000).toISOString(),
-    verifiedBy: 'Dr. Pathologist', verifiedAt: new Date(Date.now() - 2.5 * 3600000).toISOString(),
-    submittedBy: 'Lab Tech Bola', clinic: 'General Clinic', turnaroundTime: '2h 30m'
-  },
-  {
-    id: 'COMP-003', orderId: 'LAB-2024-012',
-    patient: { id: 'PAT-012', name: 'Chidinma Obi', age: 52, gender: 'Female' },
-    doctor: { id: 'DOC-001', name: 'Dr. Amaka Eze', specialty: 'General Practice' },
-    testName: 'Lipid Profile', testCode: 'LIP',
-    results: [
-      { parameter: 'Total Cholesterol', value: '245', unit: 'mg/dL', normalRange: '<200', status: 'Abnormal' },
-      { parameter: 'LDL', value: '165', unit: 'mg/dL', normalRange: '<100', status: 'Abnormal' },
-      { parameter: 'HDL', value: '38', unit: 'mg/dL', normalRange: '>40', status: 'Abnormal' },
-      { parameter: 'Triglycerides', value: '180', unit: 'mg/dL', normalRange: '<150', status: 'Abnormal' },
-    ],
-    overallStatus: 'Abnormal', priority: 'Routine',
-    orderedAt: new Date(Date.now() - 6 * 3600000).toISOString(),
-    completedAt: new Date(Date.now() - 4 * 3600000).toISOString(),
-    verifiedBy: 'Dr. Pathologist', verifiedAt: new Date(Date.now() - 3.5 * 3600000).toISOString(),
-    submittedBy: 'Lab Tech Ada', clinic: 'Cardiology', turnaroundTime: '2h 45m'
-  },
-  {
-    id: 'COMP-004', orderId: 'LAB-2024-013',
-    patient: { id: 'PAT-013', name: 'Emeka Nwosu', age: 62, gender: 'Male' },
-    doctor: { id: 'DOC-003', name: 'Dr. Ibrahim Hassan', specialty: 'Emergency Medicine' },
-    testName: 'Serum Electrolytes', testCode: 'ELEC',
-    results: [
-      { parameter: 'Sodium', value: '142', unit: 'mmol/L', normalRange: '135-145', status: 'Normal' },
-      { parameter: 'Potassium', value: '4.2', unit: 'mmol/L', normalRange: '3.5-5.0', status: 'Normal' },
-      { parameter: 'Chloride', value: '102', unit: 'mmol/L', normalRange: '98-107', status: 'Normal' },
-      { parameter: 'Bicarbonate', value: '24', unit: 'mmol/L', normalRange: '22-29', status: 'Normal' },
-    ],
-    overallStatus: 'Normal', priority: 'STAT',
-    orderedAt: new Date(Date.now() - 3 * 3600000).toISOString(),
-    completedAt: new Date(Date.now() - 2 * 3600000).toISOString(),
-    verifiedBy: 'Dr. Pathologist', verifiedAt: new Date(Date.now() - 1.5 * 3600000).toISOString(),
-    submittedBy: 'Lab Tech Chidi', clinic: 'Emergency', turnaroundTime: '45m'
-  },
-  {
-    id: 'COMP-005', orderId: 'LAB-2024-014',
-    patient: { id: 'PAT-014', name: 'Fatimah Yusuf', age: 28, gender: 'Female' },
-    doctor: { id: 'DOC-004', name: 'Dr. Ngozi Adamu', specialty: 'Pediatrics' },
-    testName: 'Malaria Parasite', testCode: 'MP',
-    results: [
-      { parameter: 'Malaria Parasite', value: 'Positive', unit: '', normalRange: 'Negative', status: 'Abnormal' },
-      { parameter: 'Parasite Density', value: '++', unit: '', normalRange: 'Negative', status: 'Abnormal' },
-    ],
-    overallStatus: 'Abnormal', priority: 'Urgent',
-    orderedAt: new Date(Date.now() - 2 * 3600000).toISOString(),
-    completedAt: new Date(Date.now() - 1 * 3600000).toISOString(),
-    verifiedBy: 'Dr. Pathologist', verifiedAt: new Date(Date.now() - 0.5 * 3600000).toISOString(),
-    submittedBy: 'Lab Tech Ada', clinic: 'Pediatrics', turnaroundTime: '1h 15m'
-  },
-];
-
 export default function CompletedTestsPage() {
   const [tests, setTests] = useState<CompletedTest[]>([]);
   const [loading, setLoading] = useState(true);
@@ -162,19 +74,22 @@ export default function CompletedTestsPage() {
       });
       // Transform API data to frontend format
       const transformed = await Promise.all(response.results.map(async (test: any) => {
-        // Extract patient data from test
-        const patientName = test.patient_name || (test.lab_order?.patient_name) || 'Unknown Patient';
-        const patientId = test.patient_id || (test.lab_order?.visit?.patient?.id) || '';
-        const orderId = test.lab_order?.order_id || (test.order_id) || '';
+        // Extract patient data from test - LabTest has order, order has patient
+        const order = test.order || test.lab_order;
+        const patient = order?.patient || test.patient;
+        const patientName = patient?.name || test.patient_name || order?.patient_name || 'Unknown Patient';
+        const patientId = patient?.id?.toString() || test.patient_id || order?.patient?.id?.toString() || '';
+        const orderId = order?.order_id || test.order_id || '';
         
         // Extract doctor data
-        const doctorName = test.ordered_by_name || (test.lab_order?.doctor_name) || (test.lab_order?.ordered_by_name) || '';
-        const doctorSpecialty = (test.lab_order?.doctor?.specialty) || '';
+        const doctor = order?.doctor;
+        const doctorName = doctor?.name || order?.doctor_name || test.ordered_by_name || '';
+        const doctorSpecialty = doctor?.specialty || order?.doctor?.specialty || '';
         
         // Extract clinic and other order data
-        const clinic = (test.lab_order?.visit?.clinic) || (test.clinic) || '';
-        const age = (test.lab_order?.visit?.patient?.age) || (test.age) || 0;
-        const gender = (test.lab_order?.visit?.patient?.gender) || (test.gender) || '';
+        const clinic = order?.clinic || test.clinic || '';
+        const age = patient?.age || test.age || 0;
+        const gender = patient?.gender || test.gender || '';
         
         // Calculate turnaround time
         const orderedAt = test.collected_at || (test.lab_order?.order_date) || new Date().toISOString();

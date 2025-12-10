@@ -52,7 +52,7 @@ class RoomService {
    * Create a new room
    */
   async createRoom(data: Partial<Room>): Promise<Room> {
-    return apiFetch<Room>(this.basePath, {
+    return apiFetch<Room>(`${this.basePath}/`, {
       method: 'POST',
       body: JSON.stringify(data),
     });

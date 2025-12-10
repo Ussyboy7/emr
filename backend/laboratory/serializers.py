@@ -47,6 +47,19 @@ class LabResultSerializer(serializers.ModelSerializer):
     test_details = LabTestSerializer(source='test', read_only=True)
     patient_name = serializers.CharField(source='patient.get_full_name', read_only=True)
     order_id = serializers.CharField(source='order.order_id', read_only=True)
+    order = LabOrderSerializer(read_only=True)
+    patient = serializers.SerializerMethodField()
+    
+    def get_patient(self, obj):
+        """Get patient details."""
+        if obj.patient:
+            return {
+                'id': obj.patient.id,
+                'name': obj.patient.get_full_name(),
+                'age': getattr(obj.patient, 'age', None),
+                'gender': getattr(obj.patient, 'gender', None),
+            }
+        return None
     
     class Meta:
         model = LabResult

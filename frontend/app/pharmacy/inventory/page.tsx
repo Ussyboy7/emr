@@ -812,32 +812,62 @@ export default function InventoryPage() {
               }}>Cancel</Button>
               <Button 
                 className="bg-emerald-600 hover:bg-emerald-700"
-                onClick={() => {
+                onClick={async () => {
                   if (!newBatch.batchNumber || !newBatch.quantity || !newBatch.expiryDate) {
                     toast.error('Please fill in all required fields');
                     return;
                   }
-                  setInventory(prev => prev.map(med => 
-                    med.id === selectedMedication?.id 
-                      ? { 
-                          ...med, 
-                          currentStock: med.currentStock + newBatch.quantity, 
-                          lastRestocked: new Date().toISOString().split('T')[0],
-                          batches: [...(med.batches || []), {
-                            id: `B${Date.now()}`,
-                            batchNumber: newBatch.batchNumber,
-                            quantity: newBatch.quantity,
-                            expiryDate: newBatch.expiryDate,
-                            receivedDate: new Date().toISOString().split('T')[0],
-                            supplier: newBatch.supplier,
-                            unitCost: newBatch.unitCost,
-                          }]
-                        }
-                      : med
-                  ));
-                  toast.success(`Added ${newBatch.quantity} units of ${selectedMedication?.name} (Batch: ${newBatch.batchNumber})`);
-                  setShowAddStockModal(false);
-                  setNewBatch({ batchNumber: '', quantity: 0, expiryDate: '', supplier: '', unitCost: 0 });
+                  
+                  try {
+                    // Get current inventory item to find medication ID
+                    const currentItem = inventory.find(m => m.id === selectedMedication?.id);
+                    if (!currentItem) {
+                      toast.error('Medication not found');
+                      return;
+                    }
+                    
+                    // Get medication ID from the inventory API response
+                    // Fetch the specific inventory item by ID to get the medication reference
+                    const inventoryItems = await pharmacyService.getInventory({ search: currentItem.name });
+                    const matchingItem = inventoryItems.results.find((item: any) => {
+                      // Match by name or by ID if available
+                      return item.medication_name === currentItem.name || 
+                             item.id?.toString() === selectedMedication?.id;
+                    });
+                    
+                    if (!matchingItem) {
+                      toast.error('Could not find medication in inventory. Please try adding the medication first.');
+                      return;
+                    }
+                    
+                    // Get medication ID - it should be in the medication field
+                    const medicationId = matchingItem.medication;
+                    if (!medicationId) {
+                      toast.error('Could not find medication ID. Please try adding the medication first.');
+                      return;
+                    }
+                    
+                    // Create new inventory batch entry via API
+                    await pharmacyService.createInventoryItem({
+                      medication: typeof medicationId === 'number' ? medicationId : parseInt(medicationId),
+                      batch_number: newBatch.batchNumber,
+                      expiry_date: newBatch.expiryDate,
+                      quantity: newBatch.quantity,
+                      unit: currentItem.dosageForm || 'unit',
+                      min_stock_level: currentItem.minimumStock,
+                      location: currentItem.location || newBatch.supplier || '',
+                      supplier: newBatch.supplier,
+                      purchase_price: newBatch.unitCost,
+                    });
+                    
+                    toast.success(`Added ${newBatch.quantity} units of ${selectedMedication?.name} (Batch: ${newBatch.batchNumber})`);
+                    setShowAddStockModal(false);
+                    setNewBatch({ batchNumber: '', quantity: 0, expiryDate: '', supplier: '', unitCost: 0 });
+                    await loadInventory(); // Reload inventory
+                  } catch (err: any) {
+                    toast.error(err.message || 'Failed to add stock');
+                    console.error('Error adding stock:', err);
+                  }
                 }}
                 disabled={!newBatch.batchNumber || !newBatch.quantity || !newBatch.expiryDate}
               >
@@ -945,11 +975,12 @@ export default function InventoryPage() {
               }}>Cancel</Button>
               <Button 
                 className={adjustmentForm.type === 'increase' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-600 hover:bg-red-700'}
-                onClick={() => {
+                onClick={async () => {
                   if (!adjustmentForm.quantity || !adjustmentForm.reason) {
                     toast.error('Please fill in all required fields');
                     return;
                   }
+                  
                   const newStock = adjustmentForm.type === 'increase' 
                     ? selectedMedication!.currentStock + adjustmentForm.quantity
                     : selectedMedication!.currentStock - adjustmentForm.quantity;
@@ -959,13 +990,26 @@ export default function InventoryPage() {
                     return;
                   }
 
-                  setInventory(prev => prev.map(med => 
-                    med.id === selectedMedication?.id ? { ...med, currentStock: newStock } : med
-                  ));
-                  
-                  toast.success(`Stock ${adjustmentForm.type === 'increase' ? 'increased' : 'decreased'} by ${adjustmentForm.quantity} units`);
-                  setShowAdjustStockModal(false);
-                  setAdjustmentForm({ type: 'decrease', quantity: 0, reason: '', notes: '' });
+                  try {
+                    // Update inventory item via API
+                    const inventoryId = parseInt(selectedMedication?.id || '');
+                    if (!inventoryId) {
+                      toast.error('Invalid inventory item ID');
+                      return;
+                    }
+                    
+                    await pharmacyService.updateInventoryItem(inventoryId, {
+                      quantity: newStock,
+                    });
+                    
+                    toast.success(`Stock ${adjustmentForm.type === 'increase' ? 'increased' : 'decreased'} by ${adjustmentForm.quantity} units`);
+                    setShowAdjustStockModal(false);
+                    setAdjustmentForm({ type: 'decrease', quantity: 0, reason: '', notes: '' });
+                    await loadInventory(); // Reload inventory
+                  } catch (err: any) {
+                    toast.error(err.message || 'Failed to adjust stock');
+                    console.error('Error adjusting stock:', err);
+                  }
                 }}
                 disabled={!adjustmentForm.quantity || !adjustmentForm.reason}
               >

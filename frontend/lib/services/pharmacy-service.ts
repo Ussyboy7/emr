@@ -158,6 +158,36 @@ class PharmacyService {
   }
 
   /**
+   * Create/add inventory item
+   */
+  async createInventoryItem(data: {
+    medication: number;
+    batch_number: string;
+    expiry_date: string;
+    quantity: number;
+    unit: string;
+    min_stock_level?: number;
+    location?: string;
+    supplier?: string;
+    purchase_price?: number;
+  }): Promise<MedicationInventory> {
+    return apiFetch<MedicationInventory>('/pharmacy/inventory/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  /**
+   * Update inventory item
+   */
+  async updateInventoryItem(id: number, data: Partial<MedicationInventory>): Promise<MedicationInventory> {
+    return apiFetch<MedicationInventory>(`/pharmacy/inventory/${id}/`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  /**
    * Get inventory alerts
    */
   async getInventoryAlerts(params?: {

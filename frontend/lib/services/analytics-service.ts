@@ -78,7 +78,12 @@ class AnalyticsService {
    * Get patient demographics report
    */
   async getPatientDemographics(): Promise<any> {
-    return apiFetch<any>('/reports/patient-demographics/');
+    try {
+      return await apiFetch<any>('/reports/patient-demographics/');
+    } catch (err) {
+      console.warn('Patient demographics endpoint not available, using fallback');
+      return null;
+    }
   }
 
   /**
@@ -146,24 +151,50 @@ class AnalyticsService {
    */
   async getPatientVisitsTrend(period: number = 365): Promise<PatientVisitsData[]> {
     // Get visits grouped by month
-    const visits = await visitService.getVisits({ page: 1 });
+    // Fetch more pages to get comprehensive data
+    let allVisits: any[] = [];
+    let page = 1;
+    let hasMore = true;
     
-    // Group by month (simplified - would need proper aggregation)
-    const monthlyData: Record<string, { visits: number; newPatients: number }> = {};
-    visits.results.forEach((visit: any) => {
+    while (hasMore && page <= 10) { // Limit to 10 pages for performance
+      const response = await visitService.getVisits({ page });
+      allVisits = [...allVisits, ...response.results];
+      hasMore = response.results.length > 0 && allVisits.length < response.count;
+      page++;
+    }
+    
+    // Track patient first visits to calculate new patients
+    const patientFirstVisits: Record<number, string> = {};
+    
+    // Group by month
+    const monthlyData: Record<string, { visits: number; newPatients: Set<number> }> = {};
+    allVisits.forEach((visit: any) => {
       const date = new Date(visit.visit_date || visit.created_at);
       const monthKey = date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
       if (!monthlyData[monthKey]) {
-        monthlyData[monthKey] = { visits: 0, newPatients: 0 };
+        monthlyData[monthKey] = { visits: 0, newPatients: new Set() };
       }
       monthlyData[monthKey].visits++;
+      
+      // Track if this is patient's first visit
+      const patientId = visit.patient?.id || visit.patient;
+      if (patientId) {
+        if (!patientFirstVisits[patientId]) {
+          patientFirstVisits[patientId] = monthKey;
+          monthlyData[monthKey].newPatients.add(patientId);
+        } else if (patientFirstVisits[patientId] === monthKey) {
+          monthlyData[monthKey].newPatients.add(patientId);
+        }
+      }
     });
     
-    return Object.entries(monthlyData).map(([month, data]) => ({
-      month,
-      visits: data.visits,
-      newPatients: data.newPatients,
-    }));
+    return Object.entries(monthlyData)
+      .sort((a, b) => new Date(a[0]).getTime() - new Date(b[0]).getTime())
+      .map(([month, data]) => ({
+        month,
+        visits: data.visits,
+        newPatients: data.newPatients.size,
+      }));
   }
 
   /**
@@ -250,12 +281,16 @@ class AnalyticsService {
   }
 
   /**
-   * Get top diagnoses
+   * Get top diagnoses from consultation sessions.
    */
   async getTopDiagnoses(limit: number = 10): Promise<TopDiagnosis[]> {
-    // Would need to aggregate from consultation sessions
-    // For now, return empty array - would need diagnosis field in consultations
-    return [];
+    try {
+      const response = await apiFetch<any[]>(`/reports/top-diagnoses/?limit=${limit}`);
+      return response || [];
+    } catch (err) {
+      console.warn('Top diagnoses endpoint not available:', err);
+      return [];
+    }
   }
 
   /**
@@ -267,7 +302,8 @@ class AnalyticsService {
     
     orders.results.forEach((order: any) => {
       order.tests.forEach((test: any) => {
-        const testName = test.name || test.code || 'Unknown';
+        // Use template_name if available, otherwise name, then code
+        const testName = test.template_name || test.name || test.code || 'Unknown';
         testCounts[testName] = (testCounts[testName] || 0) + 1;
       });
     });
@@ -356,8 +392,15 @@ class AnalyticsService {
    * Get department comparison
    */
   async getDepartmentComparison(): Promise<any[]> {
-    // Would need to aggregate from consultations by department/clinic
-    return await this.getDepartmentStats();
+    // Transform department stats to match chart requirements
+    const stats = await this.getDepartmentStats();
+    return stats.map(dept => ({
+      name: dept.dept,
+      consultations: dept.consultations,
+      satisfaction: dept.satisfaction,
+      efficiency: Math.max(0, 100 - (dept.avgWait * 2)), // Calculate efficiency (lower wait = higher efficiency, scale appropriately)
+      avgWait: dept.avgWait,
+    }));
   }
 
   /**

@@ -122,7 +122,7 @@ class LabService {
       method: 'POST',
       body: JSON.stringify({ 
         test_id: testId,
-        collection_method: collectionMethod,
+        collection_method: collectionMethod || '',
         notes: notes || '',
       }),
     });

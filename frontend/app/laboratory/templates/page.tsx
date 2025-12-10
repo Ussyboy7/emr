@@ -343,7 +343,7 @@ export default function TestTemplatesPage() {
         sample_type: original.sample_type,
         turnaround_time: original.turnaround_time,
         price: original.price,
-        fields: (original as any).fields,
+        normal_range: original.normal_range, // Use normal_range instead of fields
         is_active: false, // Start as inactive
       };
 

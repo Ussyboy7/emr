@@ -10,17 +10,20 @@ class UserSerializer(serializers.ModelSerializer):
     """Serializer for User model."""
     
     full_name = serializers.SerializerMethodField()
+    clinic_name = serializers.CharField(source='clinic.name', read_only=True)
+    department_name = serializers.CharField(source='department.name', read_only=True)
     
     class Meta:
         model = User
         fields = [
             'id', 'username', 'email', 'first_name', 'last_name', 'full_name',
             'employee_id', 'grade_level', 'system_role',
-            'directorate', 'division', 'department',
+            'clinic', 'clinic_name', 'department', 'department_name',
+            'directorate', 'division',  # Legacy fields
             'phone', 'bio', 'is_management', 'is_active', 'is_staff',
             'avatar', 'last_activity', 'date_joined',
         ]
-        read_only_fields = ['id', 'date_joined', 'last_activity']
+        read_only_fields = ['id', 'date_joined', 'last_activity', 'clinic_name', 'department_name']
         extra_kwargs = {
             'password': {'write_only': True, 'required': False},
         }
@@ -40,7 +43,8 @@ class UserCreateSerializer(serializers.ModelSerializer):
         fields = [
             'username', 'email', 'first_name', 'last_name', 'password', 'password_confirm',
             'employee_id', 'grade_level', 'system_role',
-            'directorate', 'division', 'department',
+            'clinic', 'department',  # New ForeignKey fields
+            'directorate', 'division',  # Legacy fields
             'phone', 'bio', 'is_management', 'is_active', 'is_staff',
         ]
     
@@ -66,7 +70,8 @@ class UserUpdateSerializer(serializers.ModelSerializer):
         fields = [
             'first_name', 'last_name', 'email', 'phone', 'bio',
             'grade_level', 'system_role',
-            'directorate', 'division', 'department',
+            'clinic', 'department',  # New ForeignKey fields
+            'directorate', 'division',  # Legacy fields
             'avatar',
         ]
 
