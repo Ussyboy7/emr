@@ -184,7 +184,8 @@ class LabService {
    * Get lab templates
    */
   async getTemplates(): Promise<LabTemplate[]> {
-    return apiFetch<LabTemplate[]>('/laboratory/templates/');
+    const response = await apiFetch<{ results: LabTemplate[]; count: number }>('/laboratory/templates/?page_size=1000');
+    return response.results || [];
   }
 
   /**

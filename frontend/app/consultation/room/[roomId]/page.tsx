@@ -2237,35 +2237,18 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                     }
                     
                     try {
-                      // Check if notes already exist
-                      const notesResult = await apiFetch<{ results: any[] }>(`/consultation/notes/?session=${sessionId}&page_size=1`);
-                      const existingNote = notesResult.results?.[0];
-                      
-                      const notesData = {
-                        session: sessionId,
-                        chief_complaint: medicalNotes.chiefComplaint,
-                        history_of_present_illness: medicalNotes.historyOfPresentIllness,
-                        physical_examination: medicalNotes.physicalExamination,
-                        assessment: medicalNotes.assessment,
-                        plan: medicalNotes.plan,
-                        diagnosis: diagnoses.length > 0 ? diagnoses.filter(d => d.type === 'Primary').map(d => `${d.code}: ${d.name}`).join('; ') : '',
+                      // Update the consultation session with medical notes
+                      const sessionData = {
+                        chief_complaint: medicalNotes.chiefComplaint || '',
+                        history_of_presenting_illness: medicalNotes.historyOfPresentIllness || '',
+                        physical_examination: medicalNotes.physicalExamination || '',
+                        assessment: medicalNotes.assessment || '',
+                        plan: medicalNotes.plan || '',
+                        notes: diagnoses.length > 0 ? diagnoses.filter(d => d.type === 'Primary').map(d => `${d.code}: ${d.name}`).join('; ') : '',
                       };
                       
-                      if (existingNote) {
-                        // Update existing note
-                        await apiFetch(`/consultation/notes/${existingNote.id}/`, {
-                          method: 'PATCH',
-                          body: JSON.stringify(notesData),
-                        });
-                        toast.success('Medical notes updated successfully');
-                      } else {
-                        // Create new note
-                        await apiFetch('/consultation/notes/', {
-                          method: 'POST',
-                          body: JSON.stringify(notesData),
-                        });
-                        toast.success('Medical notes saved successfully');
-                      }
+                      await consultationService.updateSession(sessionId.toString(), sessionData);
+                      toast.success('Medical notes saved successfully');
                     } catch (err: any) {
                       console.error('Error saving medical notes:', err);
                       toast.error(err.message || 'Failed to save medical notes');

@@ -194,6 +194,7 @@ export default function PatientsListPage() {
     location: '',
     division: '',
     employeeType: '',
+    nokSurname: '',
     nokFirstName: '',
     nokMiddleName: '',
     nokRelationship: '',
@@ -387,6 +388,7 @@ export default function PatientsListPage() {
         location: apiPatient.location || '',
         division: apiPatient.division || '',
         employeeType: normalizedEmployeeType,
+        nokSurname: apiPatient.nok_surname || '',
         nokFirstName: apiPatient.nok_first_name || '',
         nokMiddleName: apiPatient.nok_middle_name || '',
         nokRelationship: normalizedNokRelationship,
@@ -481,6 +483,7 @@ export default function PatientsListPage() {
         employee_type: editForm.employeeType && editForm.employeeType.trim() !== '' 
           ? editForm.employeeType.charAt(0).toUpperCase() + editForm.employeeType.slice(1).toLowerCase()
           : undefined,
+        nok_surname: editForm.nokSurname.trim() || undefined,
         nok_first_name: editForm.nokFirstName.trim() || undefined,
         nok_middle_name: editForm.nokMiddleName.trim() || undefined,
         nok_relationship: editForm.nokRelationship && editForm.nokRelationship.trim() !== '' 
@@ -1168,7 +1171,11 @@ export default function PatientsListPage() {
                     {/* Next of Kin */}
                     <div className="space-y-4">
                       <h3 className="text-sm font-semibold text-foreground">Next of Kin</h3>
-                      <div className="grid grid-cols-2 gap-4">
+                      <div className="grid grid-cols-3 gap-4">
+                        <div className="space-y-2">
+                          <Label>Surname</Label>
+                          <Input value={editForm.nokSurname} onChange={(e) => setEditForm(prev => ({ ...prev, nokSurname: e.target.value }))} />
+                        </div>
                         <div className="space-y-2">
                           <Label>First Name</Label>
                           <Input value={editForm.nokFirstName} onChange={(e) => setEditForm(prev => ({ ...prev, nokFirstName: e.target.value }))} />

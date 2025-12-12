@@ -18,9 +18,21 @@ class LabTestSerializer(serializers.ModelSerializer):
     """Serializer for LabTest model."""
     
     template_name = serializers.CharField(source='template.name', read_only=True, allow_null=True)
-    collected_by_name = serializers.CharField(source='collected_by.get_full_name', read_only=True, allow_null=True)
-    processed_by_name = serializers.CharField(source='processed_by.get_full_name', read_only=True, allow_null=True)
-    verified_by_name = serializers.CharField(source='verified_by.get_full_name', read_only=True, allow_null=True)
+    collected_by_name = serializers.SerializerMethodField()
+    processed_by_name = serializers.SerializerMethodField()
+    verified_by_name = serializers.SerializerMethodField()
+    
+    def get_collected_by_name(self, obj):
+        """Get collected by user full name."""
+        return obj.collected_by.get_full_name() if obj.collected_by else None
+    
+    def get_processed_by_name(self, obj):
+        """Get processed by user full name."""
+        return obj.processed_by.get_full_name() if obj.processed_by else None
+    
+    def get_verified_by_name(self, obj):
+        """Get verified by user full name."""
+        return obj.verified_by.get_full_name() if obj.verified_by else None
     
     class Meta:
         model = LabTest
@@ -31,9 +43,17 @@ class LabTestSerializer(serializers.ModelSerializer):
 class LabOrderSerializer(serializers.ModelSerializer):
     """Serializer for LabOrder model."""
     
-    patient_name = serializers.CharField(source='patient.get_full_name', read_only=True)
-    doctor_name = serializers.CharField(source='doctor.get_full_name', read_only=True, allow_null=True)
+    patient_name = serializers.SerializerMethodField()
+    doctor_name = serializers.SerializerMethodField()
     tests = LabTestSerializer(many=True, read_only=True)
+    
+    def get_patient_name(self, obj):
+        """Get patient full name."""
+        return obj.patient.get_full_name() if obj.patient else None
+    
+    def get_doctor_name(self, obj):
+        """Get doctor full name."""
+        return obj.doctor.get_full_name() if obj.doctor else None
     
     class Meta:
         model = LabOrder
@@ -45,10 +65,14 @@ class LabResultSerializer(serializers.ModelSerializer):
     """Serializer for LabResult model."""
     
     test_details = LabTestSerializer(source='test', read_only=True)
-    patient_name = serializers.CharField(source='patient.get_full_name', read_only=True)
+    patient_name = serializers.SerializerMethodField()
     order_id = serializers.CharField(source='order.order_id', read_only=True)
     order = LabOrderSerializer(read_only=True)
     patient = serializers.SerializerMethodField()
+    
+    def get_patient_name(self, obj):
+        """Get patient full name."""
+        return obj.patient.get_full_name() if obj.patient else None
     
     def get_patient(self, obj):
         """Get patient details."""
