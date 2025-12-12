@@ -70,6 +70,8 @@ class PrescriptionSerializer(serializers.ModelSerializer):
     patient_name = serializers.SerializerMethodField()
     doctor_name = serializers.SerializerMethodField()
     medications = PrescriptionItemSerializer(many=True, read_only=True)
+    # Allow medications to be written during creation
+    items = PrescriptionItemSerializer(many=True, write_only=True, required=False)
     
     def get_patient_name(self, obj):
         """Get patient full name."""
@@ -78,6 +80,17 @@ class PrescriptionSerializer(serializers.ModelSerializer):
     def get_doctor_name(self, obj):
         """Get doctor full name."""
         return obj.doctor.get_full_name() if obj.doctor else None
+    
+    def create(self, validated_data):
+        """Create prescription with nested items."""
+        items_data = validated_data.pop('items', [])
+        prescription = Prescription.objects.create(**validated_data)
+        
+        # Create prescription items
+        for item_data in items_data:
+            PrescriptionItem.objects.create(prescription=prescription, **item_data)
+        
+        return prescription
     
     class Meta:
         model = Prescription

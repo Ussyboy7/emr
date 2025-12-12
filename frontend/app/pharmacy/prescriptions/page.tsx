@@ -727,6 +727,11 @@ export default function PrescriptionsPage() {
                   <div className="text-sm text-muted-foreground">RX: {selectedPrescription?.id}</div>
                 </div>
               </DialogTitle>
+              <DialogDescription>
+                View prescription details and patient information
+              </DialogDescription>
+            </DialogHeader>
+              </DialogTitle>
             </DialogHeader>
             
             {selectedPrescription && (

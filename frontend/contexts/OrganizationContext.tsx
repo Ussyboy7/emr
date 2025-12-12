@@ -474,22 +474,13 @@ export const OrganizationProvider: React.FC<{ children: ReactNode }> = ({ childr
         }
       };
 
+      // EMR backend only has clinics, departments, and rooms (not directorates, divisions, roles, offices)
       const [
         usersDataRaw,
-        directoratesRaw,
-        divisionsRaw,
         departmentsRaw,
-        rolesRaw,
-        officesRaw,
-        officeMembershipsRaw,
       ] = await Promise.all([
         safeApiFetch('/accounts/users/'),
-        safeApiFetch('/organization/directorates/?ordering=name&page_size=500'),
-        safeApiFetch('/organization/divisions/?ordering=name&page_size=500'),
         safeApiFetch('/organization/departments/?ordering=name&page_size=500'),
-        safeApiFetch('/organization/roles/?ordering=name'),
-        safeApiFetch('/organization/offices/?ordering=name&page_size=500'),
-        safeApiFetch('/organization/office-memberships/?ordering=office__name&page_size=500'),
       ]);
 
       const unwrappedUsers = unwrapResults<any>(usersDataRaw);
@@ -499,31 +490,22 @@ export const OrganizationProvider: React.FC<{ children: ReactNode }> = ({ childr
       logInfo('Mapped users:', { count: sortedUsers.length, sample: sortedUsers[0] });
       setUsers(sortedUsers);
 
-      const apiDirectorates = unwrapResults<any>(directoratesRaw).map(mapApiDirectorate);
-      const apiDivisions = unwrapResults<any>(divisionsRaw).map(mapApiDivision);
       const apiDepartments = unwrapResults<any>(departmentsRaw).map(mapApiDepartment);
-      const apiRoles = unwrapResults<any>(rolesRaw).map(mapApiRole);
-      const apiOffices = unwrapResults<any>(officesRaw).map(mapApiOffice);
-      const apiOfficeMemberships = unwrapResults<any>(officeMembershipsRaw).map(mapApiOfficeMembership);
-
-      const sortedDirectorates = sortByName(apiDirectorates);
-      const sortedDivisions = sortByName(apiDivisions);
       const sortedDepartments = sortByName(apiDepartments);
-      const sortedRoles = sortByName(apiRoles);
 
-      setDirectorates(sortedDirectorates);
-      setDivisions(sortedDivisions);
+      // EMR doesn't have directorates, divisions, roles, offices - set to empty arrays
+      setDirectorates([]);
+      setDivisions([]);
       setDepartments(sortedDepartments);
       // Assistant assignments/delegations are not part of EMR - keeping empty for now
       setAssistantAssignments([]);
-      const sortedOffices = sortByName(apiOffices);
-      setOffices(sortedOffices);
-      setOfficeMemberships(apiOfficeMemberships);
-      setRoles(sortedRoles);
+      setOffices([]);
+      setOfficeMemberships([]);
+      setRoles([]);
       updateOrganizationCache();
 
       setHasSynced(true);
-      logInfo('Organization data loaded successfully:', { users: sortedUsers.length, directorates: sortedDirectorates.length, divisions: sortedDivisions.length, departments: sortedDepartments.length });
+      logInfo('Organization data loaded successfully:', { users: sortedUsers.length, departments: sortedDepartments.length });
     } catch (error) {
       logError('Failed to load organization data from API', error);
       if (error instanceof Error) {
@@ -621,73 +603,39 @@ export const OrganizationProvider: React.FC<{ children: ReactNode }> = ({ childr
     });
 
   const addDirectorate = async (directorate: CreateDirectorateInput) => {
-    const payload = buildDirectoratePayload(directorate);
-    const response = await apiFetch('/organization/directorates/', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    });
-    const created = mapApiDirectorate(response);
-    applyDirectorateUpdate(created);
-    return created;
+    // ECM feature - not available in EMR
+    logInfo('Directorates are not available in EMR module');
+    throw new Error('Directorates are not available in EMR module');
   };
 
   const updateDirectorate = async (id: string, updates: UpdateDirectorateInput) => {
-    const payload = buildDirectoratePayload(updates);
-    if (Object.keys(payload).length === 0) {
-      return directorates.find((dir) => dir.id === id) ?? null;
-    }
-    const response = await apiFetch(`/organization/directorates/${id}/`, {
-      method: 'PATCH',
-      body: JSON.stringify(payload),
-    });
-    const updated = mapApiDirectorate(response);
-    applyDirectorateUpdate(updated);
-    return updated;
+    // ECM feature - not available in EMR
+    logInfo('Directorates are not available in EMR module');
+    throw new Error('Directorates are not available in EMR module');
   };
 
   const deleteDirectorate = async (id: string) => {
-    const response = await apiFetch(`/organization/directorates/${id}/`, {
-      method: 'PATCH',
-      body: JSON.stringify({ is_active: false }),
-    });
-    const updated = mapApiDirectorate(response);
-    applyDirectorateUpdate(updated);
-    return updated;
+    // ECM feature - not available in EMR
+    logInfo('Directorates are not available in EMR module');
+    throw new Error('Directorates are not available in EMR module');
   };
 
   const addDivision = async (division: CreateDivisionInput) => {
-    const payload = buildDivisionPayload(division);
-    const response = await apiFetch('/organization/divisions/', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    });
-    const created = mapApiDivision(response);
-    applyDivisionUpdate(created);
-    return created;
+    // ECM feature - not available in EMR
+    logInfo('Divisions are not available in EMR module');
+    throw new Error('Divisions are not available in EMR module');
   };
 
   const updateDivision = async (id: string, updates: UpdateDivisionInput) => {
-    const payload = buildDivisionPayload(updates);
-    if (Object.keys(payload).length === 0) {
-      return divisions.find((div) => div.id === id) ?? null;
-    }
-    const response = await apiFetch(`/organization/divisions/${id}/`, {
-      method: 'PATCH',
-      body: JSON.stringify(payload),
-    });
-    const updated = mapApiDivision(response);
-    applyDivisionUpdate(updated);
-    return updated;
+    // ECM feature - not available in EMR
+    logInfo('Divisions are not available in EMR module');
+    throw new Error('Divisions are not available in EMR module');
   };
 
   const deleteDivision = async (id: string) => {
-    const response = await apiFetch(`/organization/divisions/${id}/`, {
-      method: 'PATCH',
-      body: JSON.stringify({ is_active: false }),
-    });
-    const updated = mapApiDivision(response);
-    applyDivisionUpdate(updated);
-    return updated;
+    // ECM feature - not available in EMR
+    logInfo('Divisions are not available in EMR module');
+    throw new Error('Divisions are not available in EMR module');
   };
 
   const addDepartment = async (department: CreateDepartmentInput) => {
@@ -786,7 +734,8 @@ export const OrganizationProvider: React.FC<{ children: ReactNode }> = ({ childr
   };
 
   const addRole = async (role: CreateRoleInput): Promise<Role> => {
-    const response = await apiFetch('/organization/roles/', {
+    // Roles are managed via /permissions/roles/ endpoint, not /organization/roles/
+    const response = await apiFetch('/permissions/roles/', {
       method: 'POST',
       body: JSON.stringify({
         name: role.name,
@@ -802,7 +751,8 @@ export const OrganizationProvider: React.FC<{ children: ReactNode }> = ({ childr
 
   const updateRole = async (id: string, updates: UpdateRoleInput): Promise<Role | null> => {
     try {
-      const response = await apiFetch(`/organization/roles/${id}/`, {
+      // Roles are managed via /permissions/roles/ endpoint, not /organization/roles/
+      const response = await apiFetch(`/permissions/roles/${id}/`, {
         method: 'PATCH',
         body: JSON.stringify({
           name: updates.name,
@@ -821,7 +771,8 @@ export const OrganizationProvider: React.FC<{ children: ReactNode }> = ({ childr
   };
 
   const deleteRole = async (id: string): Promise<void> => {
-    await apiFetch(`/organization/roles/${id}/`, {
+    // Roles are managed via /permissions/roles/ endpoint, not /organization/roles/
+    await apiFetch(`/permissions/roles/${id}/`, {
       method: 'DELETE',
     });
     setRoles((prev) => prev.filter((role) => role.id !== id));

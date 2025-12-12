@@ -104,6 +104,18 @@ class Prescription(models.Model):
             models.Index(fields=['status']),
         ]
     
+    def save(self, *args, **kwargs):
+        """Auto-generate prescription_id if not provided."""
+        if not self.prescription_id:
+            # Generate prescription ID: RX-YYYYMMDD-HHMMSS-XXXX
+            from datetime import datetime
+            timestamp = datetime.now().strftime('%Y%m%d-%H%M%S')
+            # Add random suffix to ensure uniqueness
+            import random
+            suffix = f"{random.randint(1000, 9999)}"
+            self.prescription_id = f"RX-{timestamp}-{suffix}"
+        super().save(*args, **kwargs)
+    
     def __str__(self):
         return f"{self.prescription_id} - {self.patient.get_full_name()}"
 

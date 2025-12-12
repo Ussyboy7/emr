@@ -39,7 +39,7 @@ class LabOrderViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     serializer_class = LabOrderSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['patient', 'doctor', 'priority', 'status']
+    filterset_fields = ['patient', 'doctor', 'priority']
     search_fields = ['order_id', 'clinical_notes']
     ordering_fields = ['ordered_at']
     ordering = ['-ordered_at']

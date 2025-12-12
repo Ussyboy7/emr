@@ -1465,9 +1465,10 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           await pharmacyService.createPrescription({
             patient: numericPatientId,
             visit: numericVisitId || undefined,
+            doctor: sessionId ? undefined : undefined, // Will be set from request user in backend
             diagnosis: diagnoses.length > 0 ? diagnoses.filter(d => d.type === 'Primary').map(d => `${d.code}: ${d.name}`).join('; ') : undefined,
             notes: medicalNotes.assessment || undefined,
-            medications: [{
+            items: [{
               medication: medication?.id ? parseInt(medication.id.replace('MED-', '')) : 0, // This would need proper medication ID
               quantity: rx.quantity,
               unit: 'tablet', // Default, should come from medication data
@@ -1475,7 +1476,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
               frequency: rx.frequency,
               duration: rx.duration,
               instructions: rx.instructions,
-            }] as any, // ID, prescription, dispensed_quantity, is_dispensed will be assigned by backend
+            }] as any, // Use 'items' instead of 'medications' for write operations
           });
         } catch (err: any) {
           console.error(`Error creating prescription for ${rx.medication}:`, err);

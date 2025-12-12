@@ -66,7 +66,11 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
         return Prescription.objects.all().select_related('patient', 'doctor', 'visit', 'created_by').prefetch_related('medications')
     
     def perform_create(self, serializer):
-        serializer.save(created_by=self.request.user)
+        # Set doctor from request user if not provided
+        if not serializer.validated_data.get('doctor') and self.request.user.is_authenticated:
+            serializer.save(created_by=self.request.user, doctor=self.request.user)
+        else:
+            serializer.save(created_by=self.request.user)
     
     @action(detail=True, methods=['post'])
     def dispense(self, request, pk=None):
