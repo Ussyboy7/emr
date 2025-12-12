@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { StandardPagination } from '@/components/StandardPagination';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -51,23 +51,70 @@ interface LabResult {
 
 // Transform backend LabResult to frontend format
 const transformResult = (apiResult: ApiLabResult): LabResult => {
-  const test = apiResult.test || (apiResult as any).test_details;
+  // Prioritize test_details over test (test might just be an ID)
+  const test = (apiResult as any).test_details || apiResult.test;
   const results: TestResult[] = [];
   
+  // Debug: Log the structure to help identify issues
+  if (process.env.NODE_ENV === 'development') {
+    console.log('LabResult API response:', {
+      hasTest: !!apiResult.test,
+      hasTestDetails: !!(apiResult as any).test_details,
+      testObject: test,
+      testType: typeof test,
+      testIsObject: test && typeof test === 'object' && !Array.isArray(test),
+      testResults: test?.results,
+      testResultsType: typeof test?.results,
+      testResultsKeys: test?.results ? Object.keys(test.results) : [],
+      fullApiResult: apiResult,
+    });
+  }
+  
   // Transform results from JSON format to TestResult array
-  if (test.results && typeof test.results === 'object') {
-    Object.entries(test.results).forEach(([key, value]) => {
+  // Try multiple ways to access results
+  let resultsObj: Record<string, any> | null = null;
+  
+  // If test is an object (not just an ID), try to access results
+  if (test && typeof test === 'object' && !Array.isArray(test)) {
+    // Try direct access to test.results
+    if (test.results && typeof test.results === 'object' && !Array.isArray(test.results)) {
+      resultsObj = test.results;
+    }
+  }
+  
+  // Also try accessing from test_details.results if test_details exists
+  if (!resultsObj && (apiResult as any).test_details) {
+    const testDetails = (apiResult as any).test_details;
+    if (testDetails.results && typeof testDetails.results === 'object' && !Array.isArray(testDetails.results)) {
+      resultsObj = testDetails.results;
+    }
+  }
+  
+  // Also try accessing from the root API result
+  if (!resultsObj && (apiResult as any).results && typeof (apiResult as any).results === 'object') {
+    resultsObj = (apiResult as any).results;
+  }
+  
+  // Process results if we found them
+  if (resultsObj && Object.keys(resultsObj).length > 0) {
+    Object.entries(resultsObj).forEach(([key, value]) => {
+      // Skip if value is null, undefined, or empty string
+      if (value === null || value === undefined || value === '') {
+        return;
+      }
+      
       // Try to determine status based on value (simplified)
       let status: 'Normal' | 'Abnormal' | 'Critical' = 'Normal';
-      if (typeof value === 'string') {
-        // Simple heuristic - in real app, this would be more sophisticated
-        if (value.includes('Critical') || value.includes('critical')) status = 'Critical';
-        else if (value.includes('Abnormal') || value.includes('abnormal')) status = 'Abnormal';
+      const valueStr = String(value);
+      if (valueStr.includes('Critical') || valueStr.includes('critical')) {
+        status = 'Critical';
+      } else if (valueStr.includes('Abnormal') || valueStr.includes('abnormal')) {
+        status = 'Abnormal';
       }
       
       results.push({
         parameter: key,
-        value: String(value),
+        value: valueStr,
         unit: '', // Would need to come from template
         normalRange: '', // Would need to come from template
         status,
@@ -93,9 +140,15 @@ const transformResult = (apiResult: ApiLabResult): LabResult => {
   const order = (apiResult as any).order || (test as any).order;
   const patient = apiResult.patient || order?.patient || {};
   
+  // Get test details - handle case where test might be just an ID
+  const testDetails = (apiResult as any).test_details || (test && typeof test === 'object' ? test : null);
+  const testId = typeof test === 'number' ? test.toString() : (testDetails?.id?.toString() || test?.id?.toString() || apiResult.id.toString());
+  const testName = testDetails?.name || test?.name || '';
+  const testCode = testDetails?.code || test?.code || '';
+  
   return {
     id: apiResult.id.toString(),
-    testId: test.id?.toString() || apiResult.id.toString(), // Store test ID for API operations
+    testId: testId, // Store test ID for API operations
     orderId: (apiResult as any).order_id || order?.order_id || '',
     patient: {
       id: (patient as any)?.id?.toString() || '',
@@ -108,16 +161,16 @@ const transformResult = (apiResult: ApiLabResult): LabResult => {
       name: order?.doctor_name || order?.doctor?.name || '',
       specialty: order?.doctor?.specialty || '',
     },
-    testName: test.name || '',
-    testCode: test.code || '',
+    testName: testName,
+    testCode: testCode,
     results,
     overallStatus,
     priority: transformPriority(apiResult.priority || order?.priority || 'routine') as 'Routine' | 'Urgent' | 'STAT',
     status: 'Results Ready',
-    submittedBy: (test as any).processed_by_name || test.processed_by || 'Lab Tech',
-    submittedAt: test.processed_at || (test as any).created_at || new Date().toISOString(),
+    submittedBy: testDetails?.processed_by_name || testDetails?.processed_by || test?.processed_by_name || test?.processed_by || 'Lab Tech',
+    submittedAt: testDetails?.processed_at || testDetails?.created_at || test?.processed_at || test?.created_at || new Date().toISOString(),
     clinic: order?.clinic || '',
-    clinicalNotes: order?.clinical_notes || (test as any).notes || '',
+    clinicalNotes: order?.clinical_notes || testDetails?.notes || test?.notes || '',
   };
 };
 
@@ -159,23 +212,17 @@ export default function ResultsVerificationPage() {
     return matchesSearch && matchesStatus && matchesPriority;
   }), [pendingResults, searchQuery, statusFilter, priorityFilter]);
 
-  // Paginated results
-  const paginatedResults = useMemo(() => {
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    return filteredResults.slice(startIndex, startIndex + itemsPerPage);
-  }, [filteredResults, currentPage, itemsPerPage]);
-
-  // Load results from API
-  useEffect(() => {
-    loadResults();
-  }, []);
+  // Note: Since we're using server-side pagination, we display all filtered results
+  // The API handles pagination, but we still filter client-side for search
+  const paginatedResults = filteredResults;
 
   // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
   }, [searchQuery, statusFilter, priorityFilter]);
 
-  const loadResults = async () => {
+  // Load results function - memoized to prevent infinite loops
+  const loadResults = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
@@ -199,7 +246,12 @@ export default function ResultsVerificationPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [currentPage, statusFilter, priorityFilter]);
+
+  // Load results from API when page or filters change
+  useEffect(() => {
+    loadResults();
+  }, [loadResults]);
 
   const stats = {
     pending: pendingResults.length,
@@ -614,26 +666,35 @@ export default function ResultsVerificationPage() {
                 </div>
                 <div>
                   <p className="text-sm text-muted-foreground mb-2">Test Results</p>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead><tr className="border-b bg-muted/50">
-                        <th className="text-left p-2">Parameter</th>
-                        <th className="text-left p-2">Value</th>
-                        <th className="text-left p-2">Normal Range</th>
-                        <th className="text-left p-2">Status</th>
-                      </tr></thead>
-                      <tbody>
-                        {selectedResult.results.map(r => (
-                          <tr key={r.parameter} className="border-b">
-                            <td className="p-2 font-medium">{r.parameter}</td>
-                            <td className={`p-2 ${getResultStatusColor(r.status)}`}>{r.value} {r.unit}</td>
-                            <td className="p-2 text-muted-foreground">{r.normalRange}</td>
-                            <td className="p-2"><Badge variant="outline" className={getOverallStatusBadge(r.status)}>{r.status}</Badge></td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                  {selectedResult.results.length > 0 ? (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead><tr className="border-b bg-muted/50">
+                          <th className="text-left p-2">Parameter</th>
+                          <th className="text-left p-2">Value</th>
+                          <th className="text-left p-2">Normal Range</th>
+                          <th className="text-left p-2">Status</th>
+                        </tr></thead>
+                        <tbody>
+                          {selectedResult.results.map(r => (
+                            <tr key={r.parameter} className="border-b">
+                              <td className="p-2 font-medium">{r.parameter}</td>
+                              <td className={`p-2 ${getResultStatusColor(r.status)}`}>{r.value} {r.unit}</td>
+                              <td className="p-2 text-muted-foreground">{r.normalRange}</td>
+                              <td className="p-2"><Badge variant="outline" className={getOverallStatusBadge(r.status)}>{r.status}</Badge></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="p-4 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
+                      <p className="text-sm text-amber-700 dark:text-amber-300 flex items-center gap-2">
+                        <AlertTriangle className="h-4 w-4" />
+                        No test results available. Results may not have been entered yet.
+                      </p>
+                    </div>
+                  )}
                 </div>
                 {selectedResult.clinicalNotes && (
                   <div>

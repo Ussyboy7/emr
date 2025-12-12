@@ -1,24 +1,28 @@
 "use client";
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
+import { Loader2 } from 'lucide-react';
+import { toast } from 'sonner';
 import {
   Users, Stethoscope, TestTube, Pill, Calendar, Clock, Activity,
   TrendingUp, TrendingDown, AlertTriangle, CheckCircle2, UserPlus,
   Play, ClipboardList, Bell, ArrowRight, Heart, Building2, Bed,
   FileText, Syringe, ScanLine
 } from 'lucide-react';
-
-// Dashboard data will be loaded from API
+import { consultationService } from '@/lib/services/consultation-service';
+import { labService } from '@/lib/services/lab-service';
+import { pharmacyService } from '@/lib/services/pharmacy-service';
+import { patientService } from '@/lib/services/patient-service';
+import { visitService } from '@/lib/services/visit-service';
 
 export default function DashboardPage() {
-  // Dashboard data will be loaded from API
-  const [todayStats] = useState({
+  const [todayStats, setTodayStats] = useState({
     patientsToday: 0,
     patientsChange: 0,
     consultations: 0,
@@ -28,17 +32,154 @@ export default function DashboardPage() {
     prescriptions: 0,
     prescriptionsChange: 0,
   });
-  const [queueStatus] = useState({
+  const [queueStatus, setQueueStatus] = useState({
     nursingPool: 0,
     consultationWaiting: 0,
     labPending: 0,
     pharmacyQueue: 0,
   });
-  const [recentPatients] = useState<any[]>([]);
-  const [criticalAlerts] = useState<any[]>([]);
-  const [clinicPerformance] = useState<any[]>([]);
-  const [upcomingAppointments] = useState<any[]>([]);
-  const [loading] = useState(true);
+  const [recentPatients, setRecentPatients] = useState<any[]>([]);
+  const [criticalAlerts, setCriticalAlerts] = useState<any[]>([]);
+  const [clinicPerformance, setClinicPerformance] = useState<any[]>([]);
+  const [upcomingAppointments, setUpcomingAppointments] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Load dashboard data
+  const loadDashboardData = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      // Load all stats in parallel
+      const [consultationStats, labStats, pharmacyStats, todayVisits, consultationQueue, labOrders, pharmacyPrescriptions] = await Promise.all([
+        consultationService.getStats().catch(() => ({ total: 0, today: 0, completed: 0, in_progress: 0 })),
+        labService.getStats().catch(() => ({ pendingTests: 0, inProgress: 0, resultsReady: 0, critical: 0 })),
+        pharmacyService.getStats().catch(() => ({ pendingRx: 0, dispensedToday: 0, lowStock: 0, totalInventory: 0 })),
+        visitService.getVisits({ page: 1, page_size: 100 }).catch(() => ({ results: [], count: 0 })),
+        consultationService.getQueue({ is_active: true, page: 1 }).catch(() => ({ results: [], count: 0 })),
+        labService.getOrders({ page: 1 }).catch(() => ({ results: [], count: 0 })),
+        pharmacyService.getPrescriptions({ status: 'pending', page: 1 }).catch(() => ({ results: [], count: 0 })),
+      ]);
+
+      // Calculate today's patients (visits created today)
+      const today = new Date().toISOString().split('T')[0];
+      const patientsToday = todayVisits.results.filter((v: any) => {
+        const visitDate = v.created_at?.split('T')[0] || v.visit_date;
+        return visitDate === today;
+      }).length;
+
+      // Get yesterday's count for comparison (simplified - would need actual API)
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      const yesterdayDate = yesterday.toISOString().split('T')[0];
+      const patientsYesterday = todayVisits.results.filter((v: any) => {
+        const visitDate = v.created_at?.split('T')[0] || v.visit_date;
+        return visitDate === yesterdayDate;
+      }).length;
+      const patientsChange = patientsYesterday > 0 
+        ? Math.round(((patientsToday - patientsYesterday) / patientsYesterday) * 100)
+        : 0;
+
+      // Update stats
+      setTodayStats({
+        patientsToday,
+        patientsChange,
+        consultations: typeof consultationStats.today === 'object' ? (consultationStats.today?.sessions || 0) : (consultationStats.today || 0),
+        consultationsChange: 0, // Would need yesterday's data
+        labTests: labStats.pendingTests + labStats.inProgress + labStats.resultsReady,
+        labTestsChange: 0, // Would need yesterday's data
+        prescriptions: pharmacyStats.dispensedToday || 0,
+        prescriptionsChange: 0, // Would need yesterday's data
+      });
+
+      // Update queue status
+      setQueueStatus({
+        nursingPool: 0, // Would need nursing queue API
+        consultationWaiting: consultationQueue.count || consultationQueue.results.length,
+        labPending: labStats.pendingTests || 0,
+        pharmacyQueue: pharmacyStats.pendingRx || pharmacyPrescriptions.count || 0,
+      });
+
+      // Get recent patients (from today's visits)
+      const recent = todayVisits.results
+        .slice(0, 5)
+        .map((visit: any) => ({
+          id: visit.patient?.patient_id || visit.patient_id || '',
+          name: visit.patient?.full_name || visit.patient_name || 'Unknown',
+          clinic: visit.clinic || 'General',
+          time: new Date(visit.created_at || visit.visit_date).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+          status: visit.status === 'completed' ? 'Completed' : visit.status === 'in_progress' ? 'In Consultation' : 'Pending',
+        }));
+      setRecentPatients(recent);
+
+      // Critical alerts (lab critical results, low stock, etc.)
+      const alerts: any[] = [];
+      if (labStats.critical > 0) {
+        alerts.push({
+          type: 'lab',
+          message: `${labStats.critical} critical lab result${labStats.critical > 1 ? 's' : ''} require attention`,
+          time: 'Just now',
+        });
+      }
+      if (pharmacyStats.lowStock > 0) {
+        alerts.push({
+          type: 'stock',
+          message: `${pharmacyStats.lowStock} medication${pharmacyStats.lowStock > 1 ? 's' : ''} running low on stock`,
+          time: 'Just now',
+        });
+      }
+      setCriticalAlerts(alerts);
+
+      // Clinic performance (simplified - would need actual clinic data)
+      setClinicPerformance([]);
+
+      // Upcoming appointments (simplified - would need appointments API)
+      setUpcomingAppointments([]);
+
+    } catch (err: any) {
+      setError(err.message || 'Failed to load dashboard data');
+      toast.error('Failed to load dashboard. Please try again.');
+      console.error('Error loading dashboard:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadDashboardData();
+  }, [loadDashboardData]);
+
+  if (loading) {
+    return (
+      <DashboardLayout>
+        <div className="container mx-auto p-6">
+          <div className="flex items-center justify-center min-h-[400px]">
+            <div className="text-center">
+              <Loader2 className="h-12 w-12 mx-auto mb-4 animate-spin text-muted-foreground" />
+              <p className="text-muted-foreground">Loading dashboard...</p>
+            </div>
+          </div>
+        </div>
+      </DashboardLayout>
+    );
+  }
+
+  if (error) {
+    return (
+      <DashboardLayout>
+        <div className="container mx-auto p-6">
+          <Card className="border-red-500/50">
+            <CardContent className="p-8 text-center">
+              <AlertTriangle className="h-12 w-12 mx-auto mb-4 text-red-500" />
+              <p className="text-red-600 dark:text-red-400 mb-4">{error}</p>
+              <Button onClick={loadDashboardData}>Retry</Button>
+            </CardContent>
+          </Card>
+        </div>
+      </DashboardLayout>
+    );
+  }
 
   return (
     <DashboardLayout>
@@ -57,6 +198,10 @@ export default function DashboardPage() {
             </Button>
             <Button asChild className="bg-emerald-600 hover:bg-emerald-700">
               <Link href="/consultation/start"><Play className="h-4 w-4 mr-2" />Start Consultation</Link>
+            </Button>
+            <Button variant="outline" onClick={loadDashboardData} disabled={loading}>
+              <Loader2 className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+              Refresh
             </Button>
           </div>
         </div>
@@ -224,26 +369,33 @@ export default function DashboardPage() {
               </Button>
             </CardHeader>
             <CardContent>
-              <div className="space-y-3">
-                {recentPatients.map(patient => (
-                  <div key={patient.id} className="flex items-center justify-between p-3 bg-muted/50 rounded-lg hover:bg-muted transition-colors">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center text-white font-medium text-sm">
-                        {patient.name.split(' ').map((n: string) => n[0]).join('')}
+              {recentPatients.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <Users className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                  <p>No patients seen today</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {recentPatients.map((patient, index) => (
+                    <div key={patient.id || index} className="flex items-center justify-between p-3 bg-muted/50 rounded-lg hover:bg-muted transition-colors">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center text-white font-medium text-sm">
+                          {patient.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2)}
+                        </div>
+                        <div>
+                          <p className="font-medium">{patient.name}</p>
+                          <p className="text-xs text-muted-foreground">{patient.id} • {patient.clinic} Clinic • {patient.time}</p>
+                        </div>
                       </div>
-                      <div>
-                        <p className="font-medium">{patient.name}</p>
-                        <p className="text-xs text-muted-foreground">{patient.id} • {patient.clinic} Clinic • {patient.time}</p>
-                      </div>
+                      <Badge variant={
+                        patient.status === 'Completed' ? 'default' :
+                        patient.status === 'In Consultation' ? 'secondary' :
+                        'outline'
+                      }>{patient.status}</Badge>
                     </div>
-                    <Badge variant={
-                      patient.status === 'Completed' ? 'default' :
-                      patient.status === 'In Consultation' ? 'secondary' :
-                      'outline'
-                    }>{patient.status}</Badge>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
 
@@ -254,22 +406,29 @@ export default function DashboardPage() {
               <CardDescription>Next appointments</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="space-y-3">
-                {upcomingAppointments.map((apt, i) => (
-                  <div key={i} className="p-3 border rounded-lg">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="font-medium text-sm">{apt.patient}</span>
-                      <Badge variant="outline" className="text-xs">{apt.type}</Badge>
+              {upcomingAppointments.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <Calendar className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                  <p>No upcoming appointments</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {upcomingAppointments.map((apt, i) => (
+                    <div key={i} className="p-3 border rounded-lg">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="font-medium text-sm">{apt.patient}</span>
+                        <Badge variant="outline" className="text-xs">{apt.type}</Badge>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <Clock className="h-3 w-3" />
+                        <span>{apt.time}</span>
+                        <span>•</span>
+                        <span>{apt.clinic}</span>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <Clock className="h-3 w-3" />
-                      <span>{apt.time}</span>
-                      <span>•</span>
-                      <span>{apt.clinic}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>
@@ -281,21 +440,28 @@ export default function DashboardPage() {
             <CardDescription>Patient volume and wait times by clinic</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-              {clinicPerformance.map(clinic => (
-                <div key={clinic.name} className="p-4 bg-muted/50 rounded-lg">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="font-medium">{clinic.name}</span>
-                    <span className="text-lg font-bold text-foreground">{clinic.patients}</span>
+            {clinicPerformance.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <Building2 className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                <p>No clinic performance data available</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+                {clinicPerformance.map(clinic => (
+                  <div key={clinic.name} className="p-4 bg-muted/50 rounded-lg">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="font-medium">{clinic.name}</span>
+                      <span className="text-lg font-bold text-foreground">{clinic.patients}</span>
+                    </div>
+                    <Progress value={(clinic.patients / clinic.target) * 100} className="h-2 mb-2" />
+                    <div className="flex items-center justify-between text-xs text-muted-foreground">
+                      <span>Target: {clinic.target}</span>
+                      <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{clinic.avgWait} min wait</span>
+                    </div>
                   </div>
-                  <Progress value={(clinic.patients / clinic.target) * 100} className="h-2 mb-2" />
-                  <div className="flex items-center justify-between text-xs text-muted-foreground">
-                    <span>Target: {clinic.target}</span>
-                    <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{clinic.avgWait} min wait</span>
-                  </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
 

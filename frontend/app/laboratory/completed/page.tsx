@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { StandardPagination } from '@/components/StandardPagination';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -60,12 +60,8 @@ export default function CompletedTestsPage() {
   const [selectedTest, setSelectedTest] = useState<CompletedTest | null>(null);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
 
-  // Load completed tests from API
-  useEffect(() => {
-    loadTests();
-  }, [currentPage]);
-
-  const loadTests = async () => {
+  // Load completed tests function - memoized to prevent infinite loops
+  const loadTests = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
@@ -145,9 +141,9 @@ export default function CompletedTestsPage() {
           priority,
           orderedAt,
           completedAt,
-          verifiedBy: test.verified_by || (test.verified_by_name) || '',
+          verifiedBy: test.verified_by_name || test.verified_by || '',
           verifiedAt: test.verified_at || new Date().toISOString(),
-          submittedBy: test.processed_by || (test.performed_by_name) || '',
+          submittedBy: test.processed_by_name || test.processed_by || '',
           clinic,
           turnaroundTime,
         };
@@ -159,18 +155,51 @@ export default function CompletedTestsPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [currentPage]);
 
-  const clinics = [...new Set(tests.map(t => t.clinic))];
+  // Load completed tests from API when page changes
+  useEffect(() => {
+    loadTests();
+  }, [loadTests]);
 
-  const filteredTests = useMemo(() => tests.filter(test => {
-    const matchesSearch = test.patient.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      test.orderId.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      test.testName.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesStatus = statusFilter === 'all' || test.overallStatus.toLowerCase() === statusFilter;
-    const matchesClinic = clinicFilter === 'all' || test.clinic === clinicFilter;
-    return matchesSearch && matchesStatus && matchesClinic;
-  }), [tests, searchQuery, statusFilter, clinicFilter]);
+  const clinics = [...new Set(tests.map(t => t.clinic).filter(c => c && c.trim() !== ''))];
+
+  const filteredTests = useMemo(() => {
+    let filtered = tests.filter(test => {
+      const matchesSearch = test.patient.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        test.orderId.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        test.testName.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesStatus = statusFilter === 'all' || test.overallStatus.toLowerCase() === statusFilter;
+      const matchesClinic = clinicFilter === 'all' || test.clinic === clinicFilter;
+      return matchesSearch && matchesStatus && matchesClinic;
+    });
+
+    // Apply date filter
+    if (dateFilter !== 'all') {
+      const now = new Date();
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const weekAgo = new Date(today);
+      weekAgo.setDate(weekAgo.getDate() - 7);
+      const monthAgo = new Date(today);
+      monthAgo.setMonth(monthAgo.getMonth() - 1);
+
+      filtered = filtered.filter(test => {
+        const completedDate = new Date(test.completedAt);
+        switch (dateFilter) {
+          case 'today':
+            return completedDate >= today;
+          case 'week':
+            return completedDate >= weekAgo;
+          case 'month':
+            return completedDate >= monthAgo;
+          default:
+            return true;
+        }
+      });
+    }
+
+    return filtered;
+  }, [tests, searchQuery, statusFilter, clinicFilter, dateFilter]);
 
   // Paginated tests
   const paginatedTests = useMemo(() => {
@@ -181,7 +210,7 @@ export default function CompletedTestsPage() {
   // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, statusFilter, clinicFilter]);
+  }, [searchQuery, statusFilter, clinicFilter, dateFilter]);
 
   const stats = {
     total: tests.length,

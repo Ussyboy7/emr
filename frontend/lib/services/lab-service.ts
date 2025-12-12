@@ -58,12 +58,15 @@ export interface LabTemplate {
 
 export interface LabResult {
   id: number;
-  test: LabTest;
+  test?: LabTest;
+  test_details?: LabTest; // API returns this as test_details
   order: LabOrder;
   patient: {
     id: number;
     name: string;
   };
+  patient_name?: string; // API also returns this
+  order_id?: string; // API also returns this
   overall_status?: 'normal' | 'abnormal' | 'critical';
   priority?: 'low' | 'medium' | 'high';
   created_at: string;
@@ -264,6 +267,16 @@ class LabService {
   }
 
   /**
+   * Update a test (for rework/resubmit)
+   */
+  async updateTest(testId: number, data: Partial<LabTest>): Promise<LabTest> {
+    return apiFetch<LabTest>(`/laboratory/tests/${testId}/`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  /**
    * Get completed/verified lab tests
    */
   async getCompletedTests(params?: {
@@ -287,10 +300,9 @@ class LabService {
     return apiFetch<LabTest>(`/laboratory/tests/${testId}/`, {
       method: 'PATCH',
       body: JSON.stringify({
-        status: 'Needs Rework',
-        rejection_reason: rejectionReason,
-        rejected_by: 'Pathologist', // TODO: Get from auth context
-        rejected_date: new Date().toISOString(),
+        status: 'rejected', // Set status to rejected
+        verification_notes: rejectionReason, // Store rejection reason in verification_notes
+        // rejected_by and rejected_at will be set by the backend
       }),
     });
   }

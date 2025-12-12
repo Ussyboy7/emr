@@ -59,6 +59,18 @@ class LabOrder(models.Model):
             models.Index(fields=['priority']),
         ]
     
+    def save(self, *args, **kwargs):
+        """Auto-generate order_id if not provided."""
+        if not self.order_id:
+            # Generate lab order ID: LAB-YYYYMMDD-HHMMSS-XXXX
+            from datetime import datetime
+            timestamp = datetime.now().strftime('%Y%m%d-%H%M%S')
+            # Add random suffix to ensure uniqueness
+            import random
+            suffix = f"{random.randint(1000, 9999)}"
+            self.order_id = f"LAB-{timestamp}-{suffix}"
+        super().save(*args, **kwargs)
+    
     def __str__(self):
         return f"{self.order_id} - {self.patient.get_full_name()}"
 
@@ -73,6 +85,7 @@ class LabTest(models.Model):
         ('sample_collected', 'Sample Collected'),
         ('processing', 'Processing'),
         ('results_ready', 'Results Ready'),
+        ('rejected', 'Rejected'),
         ('verified', 'Verified'),
     ]
     
@@ -110,6 +123,10 @@ class LabTest(models.Model):
     verified_by = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, blank=True, related_name='verified_lab_tests')
     verified_at = models.DateTimeField(null=True, blank=True)
     verification_notes = models.TextField(blank=True)
+    
+    # Rejection tracking
+    rejected_by = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, blank=True, related_name='rejected_lab_tests')
+    rejected_at = models.DateTimeField(null=True, blank=True)
     
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

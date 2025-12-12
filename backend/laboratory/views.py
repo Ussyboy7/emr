@@ -141,7 +141,7 @@ class LabTestViewSet(viewsets.ModelViewSet):
     ordering = ['-created_at']
     
     def get_queryset(self):
-        queryset = LabTest.objects.all().select_related('order', 'template', 'collected_by', 'processed_by', 'verified_by')
+        queryset = LabTest.objects.all().select_related('order', 'template', 'collected_by', 'processed_by', 'verified_by', 'rejected_by')
         
         # Filter by status if provided
         status_filter = self.request.query_params.get('status', None)
@@ -149,6 +149,27 @@ class LabTestViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(status=status_filter)
         
         return queryset
+    
+    def perform_update(self, serializer):
+        """Handle status changes, especially rejection."""
+        instance = serializer.instance
+        
+        # Check if status is being changed to 'rejected'
+        if 'status' in serializer.validated_data:
+            new_status = serializer.validated_data['status']
+            
+            if new_status == 'rejected' and instance.status != 'rejected':
+                # Set rejection tracking fields
+                serializer.save(
+                    rejected_by=self.request.user,
+                    rejected_at=timezone.now()
+                )
+            else:
+                # For other status changes, save normally
+                serializer.save()
+        else:
+            # No status change, save normally
+            serializer.save()
 
 
 class LabResultViewSet(viewsets.ReadOnlyModelViewSet):
@@ -162,7 +183,7 @@ class LabResultViewSet(viewsets.ReadOnlyModelViewSet):
     ordering = ['-created_at']
     
     def get_queryset(self):
-        # Only show results that are ready for verification
+        # Only show results that are ready for verification (exclude rejected)
         return LabResult.objects.filter(
             test__status='results_ready'
         ).select_related('test', 'order', 'order__patient', 'order__doctor', 'patient')

@@ -21,6 +21,7 @@ class LabTestSerializer(serializers.ModelSerializer):
     collected_by_name = serializers.SerializerMethodField()
     processed_by_name = serializers.SerializerMethodField()
     verified_by_name = serializers.SerializerMethodField()
+    rejected_by_name = serializers.SerializerMethodField()
     
     def get_collected_by_name(self, obj):
         """Get collected by user full name."""
@@ -49,10 +50,28 @@ class LabTestSerializer(serializers.ModelSerializer):
         except (AttributeError, TypeError):
             return str(obj.verified_by) if obj.verified_by else None
     
+    def get_rejected_by_name(self, obj):
+        """Get rejected by user full name."""
+        if not obj.rejected_by:
+            return None
+        try:
+            return obj.rejected_by.get_full_name()
+        except (AttributeError, TypeError):
+            return str(obj.rejected_by) if obj.rejected_by else None
+    
     class Meta:
         model = LabTest
         fields = '__all__'
         read_only_fields = ['created_at', 'updated_at']
+
+
+class LabTestCreateSerializer(serializers.ModelSerializer):
+    """Serializer for creating LabTest as part of LabOrder (nested)."""
+    
+    class Meta:
+        model = LabTest
+        fields = ['name', 'code', 'sample_type', 'status', 'template', 'notes']
+        # Exclude 'order' as it will be set when creating the order
 
 
 class LabOrderSerializer(serializers.ModelSerializer):
@@ -60,7 +79,11 @@ class LabOrderSerializer(serializers.ModelSerializer):
     
     patient_name = serializers.SerializerMethodField()
     doctor_name = serializers.SerializerMethodField()
+    patient_details = serializers.SerializerMethodField()
+    doctor_details = serializers.SerializerMethodField()
     tests = LabTestSerializer(many=True, read_only=True)
+    # Allow tests to be written during creation (using nested serializer without order field)
+    tests_data = LabTestCreateSerializer(many=True, write_only=True, required=False)
     
     def get_patient_name(self, obj):
         """Get patient full name."""
@@ -79,6 +102,61 @@ class LabOrderSerializer(serializers.ModelSerializer):
             return obj.doctor.get_full_name()
         except (AttributeError, TypeError):
             return str(obj.doctor) if obj.doctor else None
+    
+    def get_doctor_details(self, obj):
+        """Get doctor details."""
+        if not obj.doctor:
+            return None
+        try:
+            return {
+                'id': obj.doctor.id,
+                'name': obj.doctor.get_full_name() if hasattr(obj.doctor, 'get_full_name') else str(obj.doctor),
+                'specialty': getattr(obj.doctor, 'specialty', None) or '',
+            }
+        except (AttributeError, TypeError):
+            return {
+                'id': obj.doctor.id if obj.doctor else None,
+                'name': str(obj.doctor) if obj.doctor else None,
+                'specialty': '',
+            }
+    
+    def get_patient_details(self, obj):
+        """Get patient details."""
+        if not obj.patient:
+            return None
+        try:
+            return {
+                'id': obj.patient.id,
+                'name': obj.patient.get_full_name() if hasattr(obj.patient, 'get_full_name') else str(obj.patient),
+                'age': obj.patient.age,
+                'gender': obj.patient.gender,
+            }
+        except (AttributeError, TypeError):
+            return {
+                'id': obj.patient.id if obj.patient else None,
+                'name': str(obj.patient) if obj.patient else None,
+                'age': None,
+                'gender': None,
+            }
+    
+    def to_representation(self, instance):
+        """Customize output to include patient and doctor as objects."""
+        representation = super().to_representation(instance)
+        # Add patient and doctor as full objects in response
+        representation['patient'] = self.get_patient_details(instance)
+        representation['doctor'] = self.get_doctor_details(instance)
+        return representation
+    
+    def create(self, validated_data):
+        """Create lab order with nested tests."""
+        tests_data = validated_data.pop('tests_data', [])
+        order = LabOrder.objects.create(**validated_data)
+        
+        # Create lab tests
+        for test_data in tests_data:
+            LabTest.objects.create(order=order, **test_data)
+        
+        return order
     
     class Meta:
         model = LabOrder

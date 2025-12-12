@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { StandardPagination } from '@/components/StandardPagination';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -19,7 +19,7 @@ import { transformLabTestStatus, transformPriority, transformProcessingMethod, t
 import {
   TestTube, Search, Eye, Clock, CheckCircle2, Activity, FlaskConical, Loader2,
   Beaker, AlertTriangle, User, Calendar, FileText, Play, Stethoscope,
-  ClipboardList, RefreshCw, Upload, Download, Building2, Truck, X, Droplets, Pipette
+  ClipboardList, RefreshCw, Upload, Download, Building2, Truck, X, Droplets, Pipette, RotateCcw, XCircle
 } from 'lucide-react';
 
 // Enhanced Test interface - each test is independent
@@ -28,7 +28,7 @@ interface LabTest {
   name: string;
   code: string;
   sampleType: 'Blood' | 'Urine' | 'Stool' | 'Sputum' | 'Swab' | 'CSF' | 'Other';
-  status: 'Pending' | 'Sample Collected' | 'Processing' | 'Results Ready' | 'Verified';
+  status: 'Pending' | 'Sample Collected' | 'Processing' | 'Results Ready' | 'Rejected' | 'Verified';
   processingMethod?: 'In-house' | 'Outsourced';
   outsourcedLab?: string;
   collectedBy?: string;
@@ -281,29 +281,24 @@ export default function LabOrdersPage() {
       if (activeTab === 'pending') return matchesSearch && matchesPriority && order.tests.some(t => t.status === 'Pending');
       if (activeTab === 'processing') return matchesSearch && matchesPriority && order.tests.some(t => t.status === 'Sample Collected' || t.status === 'Processing');
       if (activeTab === 'results') return matchesSearch && matchesPriority && order.tests.some(t => t.status === 'Results Ready');
+      if (activeTab === 'rejected') return matchesSearch && matchesPriority && order.tests.some(t => t.status === 'Rejected');
       return matchesSearch && matchesPriority;
     });
   };
 
   const filteredOrders = getFilteredOrders();
   
-  // Paginated orders
-  const paginatedOrders = useMemo(() => {
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    return filteredOrders.slice(startIndex, startIndex + itemsPerPage);
-  }, [filteredOrders, currentPage, itemsPerPage]);
-
-  // Load orders from API
-  useEffect(() => {
-    loadOrders();
-  }, []);
+  // Note: Since we're using server-side pagination, we display all filtered orders
+  // The API handles pagination, but we still filter client-side for tabs
+  const paginatedOrders = filteredOrders;
 
   // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
   }, [searchQuery, priorityFilter, activeTab]);
 
-  const loadOrders = async () => {
+  // Load orders function - memoized to prevent infinite loops
+  const loadOrders = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
@@ -327,7 +322,12 @@ export default function LabOrdersPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [currentPage, priorityFilter, searchQuery]);
+
+  // Load orders from API when page or filters change
+  useEffect(() => {
+    loadOrders();
+  }, [loadOrders]);
 
   const stats = useMemo(() => {
     const allTests = orders.flatMap(o => o.tests);
@@ -335,6 +335,7 @@ export default function LabOrdersPage() {
       pendingSamples: allTests.filter(t => t.status === 'Pending').length,
       processing: allTests.filter(t => t.status === 'Sample Collected' || t.status === 'Processing').length,
       resultsReady: allTests.filter(t => t.status === 'Results Ready').length,
+      rejected: allTests.filter(t => t.status === 'Rejected').length,
       stat: orders.filter(o => o.priority === 'STAT' && o.tests.some(t => t.status !== 'Verified')).length,
     };
   }, [orders]);
@@ -353,6 +354,7 @@ export default function LabOrdersPage() {
       case 'Sample Collected': return 'bg-violet-500/10 text-violet-600 dark:text-violet-400 border-violet-500/50';
       case 'Processing': return 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/50';
       case 'Results Ready': return 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/50';
+      case 'Rejected': return 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/50';
       case 'Verified': return 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/50';
       default: return 'bg-gray-500/10 text-gray-600 dark:text-gray-400 border-gray-500/50';
     }
@@ -677,6 +679,17 @@ export default function LabOrdersPage() {
               </div>
             </CardContent>
           </Card>
+          <Card className="border-l-4 border-l-rose-500 cursor-pointer hover:shadow-md" onClick={() => setActiveTab('rejected')}>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Rejected</p>
+                  <p className="text-3xl font-bold text-rose-600 dark:text-rose-400">{stats.rejected}</p>
+                </div>
+                <XCircle className="h-8 w-8 text-rose-400" />
+              </div>
+            </CardContent>
+          </Card>
           <Card className="border-l-4 border-l-rose-500">
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
@@ -699,6 +712,7 @@ export default function LabOrdersPage() {
                   <TabsTrigger value="pending">Pending ({stats.pendingSamples})</TabsTrigger>
                   <TabsTrigger value="processing">Processing ({stats.processing})</TabsTrigger>
                   <TabsTrigger value="results">Results ({stats.resultsReady})</TabsTrigger>
+                  <TabsTrigger value="rejected">Rejected ({stats.rejected})</TabsTrigger>
                   <TabsTrigger value="all">All</TabsTrigger>
                 </TabsList>
               </Tabs>
@@ -767,6 +781,9 @@ export default function LabOrdersPage() {
               onItemsPerPageChange={setItemsPerPage}
               itemName="orders"
             />
+            <p className="text-xs text-muted-foreground mt-2 text-center">
+              Showing {filteredOrders.length} order{filteredOrders.length !== 1 ? 's' : ''} (filtered from all orders)
+            </p>
           </Card>
         )}
 
@@ -846,6 +863,29 @@ export default function LabOrdersPage() {
                           {test.status === 'Results Ready' && (
                             <Button variant="outline" size="sm" className="h-7 px-3 text-xs text-emerald-600">
                               <CheckCircle2 className="h-3 w-3 mr-1" />Complete
+                            </Button>
+                          )}
+                          {test.status === 'Rejected' && (
+                            <Button 
+                              size="sm" 
+                              onClick={async () => {
+                                try {
+                                  await labService.updateTest(parseInt(test.id), { 
+                                    status: 'results_ready' as any 
+                                  });
+                                  toast.success(`${test.name} sent back for re-verification`);
+                                  await loadOrders();
+                                  if (isViewDialogOpen && selectedOrder) {
+                                    const updatedOrder = await labService.getOrder(parseInt(selectedOrder.id));
+                                    setSelectedOrder(transformOrder(updatedOrder));
+                                  }
+                                } catch (err: any) {
+                                  toast.error(err.message || 'Failed to resubmit test');
+                                }
+                              }} 
+                              className="h-7 px-3 bg-amber-500 hover:bg-amber-600 text-white text-xs"
+                            >
+                              <RotateCcw className="h-3 w-3 mr-1" />Rework & Resubmit
                             </Button>
                           )}
                         </div>

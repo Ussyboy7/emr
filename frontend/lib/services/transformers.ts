@@ -11,6 +11,7 @@ export const transformLabTestStatus = (status: string): string => {
     'sample_collected': 'Sample Collected',
     'processing': 'Processing',
     'results_ready': 'Results Ready',
+    'rejected': 'Rejected',
     'verified': 'Verified',
   };
   return statusMap[status] || status;
@@ -25,6 +26,7 @@ export const transformToBackendStatus = (status: string): string => {
     'Sample Collected': 'sample_collected',
     'Processing': 'processing',
     'Results Ready': 'results_ready',
+    'Rejected': 'rejected',
     'Verified': 'verified',
   };
   return statusMap[status] || status.toLowerCase().replace(/\s+/g, '_');
