@@ -2247,7 +2247,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                         notes: diagnoses.length > 0 ? diagnoses.filter(d => d.type === 'Primary').map(d => `${d.code}: ${d.name}`).join('; ') : '',
                       };
                       
-                      await consultationService.updateSession(sessionId.toString(), sessionData);
+                      await consultationService.updateSession(sessionId, sessionData);
                       toast.success('Medical notes saved successfully');
                     } catch (err: any) {
                       console.error('Error saving medical notes:', err);

@@ -33,6 +33,7 @@ export interface Patient {
   permanent_address?: string;
   blood_group?: string;
   genotype?: string;
+  nok_surname?: string;
   nok_first_name?: string;
   nok_middle_name?: string;
   nok_relationship?: string;
