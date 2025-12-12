@@ -731,8 +731,6 @@ export default function PrescriptionsPage() {
                 View prescription details and patient information
               </DialogDescription>
             </DialogHeader>
-              </DialogTitle>
-            </DialogHeader>
             
             {selectedPrescription && (
               <div className="overflow-y-auto max-h-[65vh] space-y-4">

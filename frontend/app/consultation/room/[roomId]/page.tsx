@@ -1476,8 +1476,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
               frequency: rx.frequency,
               duration: rx.duration,
               instructions: rx.instructions,
-            }] as any, // Use 'items' instead of 'medications' for write operations
-          });
+            }],
+          } as any); // Use 'items' instead of 'medications' for write operations - backend expects 'items' for creation
         } catch (err: any) {
           console.error(`Error creating prescription for ${rx.medication}:`, err);
           toast.error(`Failed to send ${rx.medication} to pharmacy`);
