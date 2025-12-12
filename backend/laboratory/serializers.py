@@ -24,15 +24,30 @@ class LabTestSerializer(serializers.ModelSerializer):
     
     def get_collected_by_name(self, obj):
         """Get collected by user full name."""
-        return obj.collected_by.get_full_name() if obj.collected_by else None
+        if not obj.collected_by:
+            return None
+        try:
+            return obj.collected_by.get_full_name()
+        except (AttributeError, TypeError):
+            return str(obj.collected_by) if obj.collected_by else None
     
     def get_processed_by_name(self, obj):
         """Get processed by user full name."""
-        return obj.processed_by.get_full_name() if obj.processed_by else None
+        if not obj.processed_by:
+            return None
+        try:
+            return obj.processed_by.get_full_name()
+        except (AttributeError, TypeError):
+            return str(obj.processed_by) if obj.processed_by else None
     
     def get_verified_by_name(self, obj):
         """Get verified by user full name."""
-        return obj.verified_by.get_full_name() if obj.verified_by else None
+        if not obj.verified_by:
+            return None
+        try:
+            return obj.verified_by.get_full_name()
+        except (AttributeError, TypeError):
+            return str(obj.verified_by) if obj.verified_by else None
     
     class Meta:
         model = LabTest
@@ -49,11 +64,21 @@ class LabOrderSerializer(serializers.ModelSerializer):
     
     def get_patient_name(self, obj):
         """Get patient full name."""
-        return obj.patient.get_full_name() if obj.patient else None
+        if not obj.patient:
+            return None
+        try:
+            return obj.patient.get_full_name()
+        except (AttributeError, TypeError):
+            return str(obj.patient) if obj.patient else None
     
     def get_doctor_name(self, obj):
         """Get doctor full name."""
-        return obj.doctor.get_full_name() if obj.doctor else None
+        if not obj.doctor:
+            return None
+        try:
+            return obj.doctor.get_full_name()
+        except (AttributeError, TypeError):
+            return str(obj.doctor) if obj.doctor else None
     
     class Meta:
         model = LabOrder
@@ -72,18 +97,31 @@ class LabResultSerializer(serializers.ModelSerializer):
     
     def get_patient_name(self, obj):
         """Get patient full name."""
-        return obj.patient.get_full_name() if obj.patient else None
+        if not obj.patient:
+            return None
+        try:
+            return obj.patient.get_full_name()
+        except (AttributeError, TypeError):
+            return str(obj.patient) if obj.patient else None
     
     def get_patient(self, obj):
         """Get patient details."""
-        if obj.patient:
+        if not obj.patient:
+            return None
+        try:
             return {
                 'id': obj.patient.id,
-                'name': obj.patient.get_full_name(),
+                'name': obj.patient.get_full_name() if hasattr(obj.patient, 'get_full_name') else str(obj.patient),
                 'age': getattr(obj.patient, 'age', None),
                 'gender': getattr(obj.patient, 'gender', None),
             }
-        return None
+        except (AttributeError, TypeError):
+            return {
+                'id': obj.patient.id if obj.patient else None,
+                'name': str(obj.patient) if obj.patient else None,
+                'age': None,
+                'gender': None,
+            }
     
     class Meta:
         model = LabResult
