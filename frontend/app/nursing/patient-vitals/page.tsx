@@ -63,6 +63,8 @@ export default function PatientVitalsPage() {
   useAuthRedirect(authError);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [dateFilter, setDateFilter] = useState('all');
+  const [genderFilter, setGenderFilter] = useState('all');
   const [isRefreshing, setIsRefreshing] = useState(false);
   
   // Load patients with vitals from API
@@ -245,9 +247,30 @@ export default function PatientVitalsPage() {
                            p.patientId.toLowerCase().includes(searchQuery.toLowerCase()) ||
                            p.personalNumber.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesStatus = statusFilter === 'all' || p.status === statusFilter;
-      return matchesSearch && matchesStatus;
+      const matchesGender = genderFilter === 'all' || p.gender.toLowerCase() === genderFilter.toLowerCase();
+      
+      // Date filter (filter by latest vitals recorded date)
+      if (dateFilter !== 'all' && p.latestVitals?.recordedAt) {
+        const recordedDate = new Date(p.latestVitals.recordedAt);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        
+        if (dateFilter === 'today' && recordedDate.toDateString() !== today.toDateString()) return false;
+        if (dateFilter === 'week') {
+          const weekAgo = new Date(today);
+          weekAgo.setDate(weekAgo.getDate() - 7);
+          if (recordedDate < weekAgo) return false;
+        }
+        if (dateFilter === 'month') {
+          const monthAgo = new Date(today);
+          monthAgo.setMonth(monthAgo.getMonth() - 1);
+          if (recordedDate < monthAgo) return false;
+        }
+      }
+      
+      return matchesSearch && matchesStatus && matchesGender;
     });
-  }, [patients, searchQuery, statusFilter]);
+  }, [patients, searchQuery, statusFilter, dateFilter, genderFilter]);
 
   // Paginated patients
   const paginatedPatients = useMemo(() => {
@@ -258,7 +281,7 @@ export default function PatientVitalsPage() {
   // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, statusFilter]);
+  }, [searchQuery, statusFilter, dateFilter, genderFilter]);
 
   // Stats
   const stats = useMemo(() => ({
@@ -521,6 +544,15 @@ export default function PatientVitalsPage() {
                 />
               </div>
               <div className="flex flex-wrap gap-2">
+                <Select value={dateFilter} onValueChange={setDateFilter}>
+                  <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Time</SelectItem>
+                    <SelectItem value="today">Today</SelectItem>
+                    <SelectItem value="week">This Week</SelectItem>
+                    <SelectItem value="month">This Month</SelectItem>
+                  </SelectContent>
+                </Select>
                 <Select value={statusFilter} onValueChange={setStatusFilter}>
                   <SelectTrigger className="w-[140px]"><SelectValue placeholder="Status" /></SelectTrigger>
                   <SelectContent>
@@ -528,6 +560,14 @@ export default function PatientVitalsPage() {
                     <SelectItem value="normal">Normal</SelectItem>
                     <SelectItem value="warning">Warning</SelectItem>
                     <SelectItem value="critical">Critical</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={genderFilter} onValueChange={setGenderFilter}>
+                  <SelectTrigger className="w-[120px]"><SelectValue placeholder="Gender" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Gender</SelectItem>
+                    <SelectItem value="male">Male</SelectItem>
+                    <SelectItem value="female">Female</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

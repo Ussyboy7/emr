@@ -16,6 +16,9 @@ export interface Patient {
   date_of_birth: string;
   age?: number;
   marital_status?: string;
+  religion?: string;
+  tribe?: string;
+  occupation?: string;
   photo?: string;
   personal_number?: string;
   employee_type?: string;

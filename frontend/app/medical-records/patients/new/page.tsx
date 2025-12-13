@@ -50,6 +50,12 @@ const dependentTypes = ["Employee Dependent", "Retiree Dependent"];
 // Titles
 const titles = ['Mr', 'Mrs', 'Ms', 'Dr', 'Chief', 'Engr', 'Prof', 'Alhaji', 'Hajia'];
 
+// Religions
+const religions = ['Christianity', 'Islam', 'Traditional', 'Other', 'None'];
+
+// Tribes (Major Nigerian tribes)
+const tribes = ['Hausa', 'Yoruba', 'Igbo', 'Fulani', 'Ibibio', 'Tiv', 'Kanuri', 'Ijaw', 'Nupe', 'Efik', 'Urhobo', 'Edo', 'Itsekiri', 'Jjaw', 'Edo', 'Other'];
+
 // Nigeria States and LGAs
 type StateWithLGAs = { name: string; lgas: string[] };
 
@@ -116,7 +122,7 @@ export default function NewPatientPage() {
   const [formData, setFormData] = useState({
     // Personal Details
     personalNumber: '', title: '', surname: '', firstName: '', middleName: '', 
-    gender: '', dateOfBirth: '', maritalStatus: '',
+    gender: '', dateOfBirth: '', maritalStatus: '', religion: '', tribe: '', occupation: '',
     // Work Information (Employee/Retiree)
     employeeType: '', division: '', location: '',
     // NonNPA Information
@@ -311,6 +317,8 @@ export default function NewPatientPage() {
         gender: formData.gender.toLowerCase(), // Backend expects lowercase: 'male', 'female'
         date_of_birth: formData.dateOfBirth,
         marital_status: (formData.maritalStatus || '').toLowerCase(), // Backend expects lowercase: 'single', 'married', etc.
+        religion: (formData.religion || '').trim(),
+        tribe: (formData.tribe || '').trim(),
         email: (formData.email || '').trim(),
         phone: (formData.phone || '').trim(),
         state_of_residence: (formData.stateOfResidence || '').trim(),
@@ -327,6 +335,11 @@ export default function NewPatientPage() {
         nok_address: (formData.nokAddress || '').trim(),
         nok_phone: (formData.nokPhone || '').trim(),
       };
+
+      // Add occupation for Dependent and Retiree only
+      if ((patientCategory === 'dependent' || patientCategory === 'retiree') && formData.occupation) {
+        payload.occupation = formData.occupation.trim();
+      }
 
       // Add optional title field
       if (formData.title) {
@@ -378,7 +391,7 @@ export default function NewPatientPage() {
         if (formData.dependentType) {
           payload.dependent_type = formData.dependentType.trim(); // Exact match: 'Employee Dependent', 'Retiree Dependent'
         }
-        if (formData.location) payload.location = formData.location.trim();
+        // Location removed for dependents - not needed
       }
 
       // Handle photo upload if provided
@@ -486,7 +499,7 @@ export default function NewPatientPage() {
     setHasDraft(false);
     setFormData({
       personalNumber: '', title: '', surname: '', firstName: '', middleName: '',
-      gender: '', dateOfBirth: '', maritalStatus: '',
+      gender: '', dateOfBirth: '', maritalStatus: '', religion: '', tribe: '', occupation: '',
       employeeType: '', division: '', location: '',
       nonNPAType: '',
       dependentType: '', principalStaffId: '',
@@ -549,6 +562,11 @@ export default function NewPatientPage() {
         // Clear personalNumber if switching away from employee/retiree
         if (pendingCategory !== 'employee' && pendingCategory !== 'retiree') {
           updated.personalNumber = '';
+        }
+        
+        // Clear occupation if switching away from dependent/retiree
+        if (pendingCategory !== 'dependent' && pendingCategory !== 'retiree') {
+          updated.occupation = '';
         }
         
         return updated;
@@ -729,6 +747,37 @@ export default function NewPatientPage() {
                       </div>
                     </div>
 
+                    <div className="grid gap-4 sm:grid-cols-3">
+                      <div className="space-y-2">
+                        <Label>Religion</Label>
+                        <Select value={formData.religion} onValueChange={(v) => handleInputChange('religion', v)}>
+                          <SelectTrigger><SelectValue placeholder="Select religion" /></SelectTrigger>
+                          <SelectContent>
+                            {religions.map(religion => <SelectItem key={religion} value={religion}>{religion}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Tribe</Label>
+                        <Select value={formData.tribe} onValueChange={(v) => handleInputChange('tribe', v)}>
+                          <SelectTrigger><SelectValue placeholder="Select tribe" /></SelectTrigger>
+                          <SelectContent>
+                            {tribes.map(tribe => <SelectItem key={tribe} value={tribe}>{tribe}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      {(patientCategory === 'dependent' || patientCategory === 'retiree') && (
+                        <div className="space-y-2">
+                          <Label>Occupation</Label>
+                          <Input 
+                            value={formData.occupation} 
+                            onChange={(e) => handleInputChange('occupation', e.target.value)} 
+                            placeholder="Enter occupation" 
+                          />
+                        </div>
+                      )}
+                    </div>
+
                     <div className="flex justify-end pt-4">
                       <Button type="button" onClick={goToNextStep}>
                         Next: Work Info
@@ -822,15 +871,6 @@ export default function NewPatientPage() {
                             placeholder="Enter principal staff/retiree ID" 
                           />
                           <p className="text-xs text-muted-foreground">The NPA staff or retiree this dependent is linked to</p>
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Location</Label>
-                          <Select value={formData.location} onValueChange={(v) => handleInputChange('location', v)}>
-                            <SelectTrigger><SelectValue placeholder="Select location" /></SelectTrigger>
-                            <SelectContent>
-                              {locations.map(loc => <SelectItem key={loc} value={loc}>{loc}</SelectItem>)}
-                            </SelectContent>
-                          </Select>
                         </div>
                       </>
                     )}

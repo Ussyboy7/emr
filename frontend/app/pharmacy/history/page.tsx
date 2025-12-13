@@ -39,7 +39,8 @@ export default function DispenseHistoryPage() {
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [dateFilter, setDateFilter] = useState('');
+  const [dateFilter, setDateFilter] = useState('all');
+  const [genderFilter, setGenderFilter] = useState('all');
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [selectedRecord, setSelectedRecord] = useState<DispenseHistoryRecord | null>(null);
@@ -147,8 +148,28 @@ export default function DispenseHistoryPage() {
         record.prescriptionId.toLowerCase().includes(searchQuery.toLowerCase()) ||
         record.id.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesStatus = statusFilter === 'all' || record.status.toLowerCase().replace(' ', '-') === statusFilter;
-      const matchesDate = !dateFilter || record.date === dateFilter;
-      return matchesSearch && matchesStatus && matchesDate;
+      const matchesGender = genderFilter === 'all' || record.patient.gender.toLowerCase() === genderFilter.toLowerCase();
+      
+      // Date filter
+      if (dateFilter !== 'all') {
+        const dispensedDate = new Date(record.date);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        
+        if (dateFilter === 'today' && dispensedDate.toDateString() !== today.toDateString()) return false;
+        if (dateFilter === 'week') {
+          const weekAgo = new Date(today);
+          weekAgo.setDate(weekAgo.getDate() - 7);
+          if (dispensedDate < weekAgo) return false;
+        }
+        if (dateFilter === 'month') {
+          const monthAgo = new Date(today);
+          monthAgo.setMonth(monthAgo.getMonth() - 1);
+          if (dispensedDate < monthAgo) return false;
+        }
+      }
+      
+      return matchesSearch && matchesStatus && matchesGender;
     });
   }, [history, searchQuery, statusFilter, dateFilter]);
 
@@ -161,7 +182,7 @@ export default function DispenseHistoryPage() {
   // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, statusFilter, dateFilter]);
+  }, [searchQuery, statusFilter, dateFilter, genderFilter]);
 
   // Stats
   const stats = useMemo(() => ({
@@ -275,23 +296,28 @@ export default function DispenseHistoryPage() {
         {/* Filters */}
         <Card>
           <CardContent className="p-4">
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <div className="md:col-span-2">
-                <Label>Search</Label>
-                <div className="relative mt-1">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    placeholder="Patient name, ID, or prescription..."
-                    value={searchQuery}
-                    onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }}
-                    className="pl-10"
-                  />
-                </div>
+            <div className="flex flex-col gap-4">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Patient name, ID, or prescription..."
+                  value={searchQuery}
+                  onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }}
+                  className="pl-10"
+                />
               </div>
-              <div>
-                <Label>Status</Label>
+              <div className="flex flex-wrap gap-2">
+                <Select value={dateFilter} onValueChange={(v) => { setDateFilter(v); setCurrentPage(1); }}>
+                  <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Time</SelectItem>
+                    <SelectItem value="today">Today</SelectItem>
+                    <SelectItem value="week">This Week</SelectItem>
+                    <SelectItem value="month">This Month</SelectItem>
+                  </SelectContent>
+                </Select>
                 <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v); setCurrentPage(1); }}>
-                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="w-[150px]"><SelectValue placeholder="Status" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Status</SelectItem>
                     <SelectItem value="dispensed">Dispensed</SelectItem>
@@ -299,15 +325,14 @@ export default function DispenseHistoryPage() {
                     <SelectItem value="cancelled">Cancelled</SelectItem>
                   </SelectContent>
                 </Select>
-              </div>
-              <div>
-                <Label>Date</Label>
-                <Input
-                  type="date"
-                  value={dateFilter}
-                  onChange={(e) => { setDateFilter(e.target.value); setCurrentPage(1); }}
-                  className="mt-1"
-                />
+                <Select value={genderFilter} onValueChange={(v) => { setGenderFilter(v); setCurrentPage(1); }}>
+                  <SelectTrigger className="w-[120px]"><SelectValue placeholder="Gender" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Gender</SelectItem>
+                    <SelectItem value="male">Male</SelectItem>
+                    <SelectItem value="female">Female</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
           </CardContent>

@@ -20,8 +20,9 @@ import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { 
   Calendar, User, Send, Stethoscope, ClipboardList, Search, AlertTriangle,
-  MapPin, FileText, Users, CheckCircle2, Clock, Loader2
+  MapPin, FileText, Users, CheckCircle2, Clock, Loader2, CheckCircle
 } from 'lucide-react';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 // NPA Clinics
 const clinics = ["General", "Physiotherapy", "Eye", "Sickle Cell", "Diamond"];
@@ -54,6 +55,8 @@ function NewVisitPageContent() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectedPatient, setSelectedPatient] = useState<any | null>(null);
   const [patientSearch, setPatientSearch] = useState('');
+  const [isSuccessDialogOpen, setIsSuccessDialogOpen] = useState(false);
+  const [createdVisitData, setCreatedVisitData] = useState<{ visitId: string; patientName: string; date: string; time: string; location: string; clinic: string } | null>(null);
   
   const [formData, setFormData] = useState({
     patientId: patientIdParam || '', 
@@ -163,13 +166,29 @@ function NewVisitPageContent() {
 
       const createdVisit = await visitService.createVisit(visitData);
       
-      toast.success('Visit created successfully', {
-        description: `${selectedPatient.name} - ${formData.visitType.charAt(0).toUpperCase() + formData.visitType.slice(1)}`,
+      // Get visit ID
+      const visitId = createdVisit.visit_id || String(createdVisit.id);
+      
+      // Format date for display
+      const formattedDate = new Date(formData.visitDate).toLocaleDateString("en-US", {
+        year: "numeric",
+        month: "short",
+        day: "2-digit",
       });
       
-      // Redirect to visit detail page
-      const visitId = createdVisit.visit_id || String(createdVisit.id);
-      router.push(`/medical-records/visits/${visitId}`);
+      // Store created visit data for success dialog
+      setCreatedVisitData({
+        visitId,
+        patientName: selectedPatient.name,
+        date: formattedDate,
+        time: formData.visitTime,
+        location: formData.location,
+        clinic: formData.clinic,
+      });
+      
+      // Show success dialog
+      setIsSuccessDialogOpen(true);
+      setIsSubmitting(false);
       
     } catch (err: any) {
       console.error('Error creating visit:', err);
@@ -527,6 +546,84 @@ function NewVisitPageContent() {
             </Card>
           </div>
         </div>
+
+        {/* Success Dialog */}
+        <Dialog open={isSuccessDialogOpen} onOpenChange={setIsSuccessDialogOpen}>
+          <DialogContent className="sm:max-w-[500px]">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <CheckCircle className="h-5 w-5 text-green-500" />
+                Visit Created Successfully!
+              </DialogTitle>
+            </DialogHeader>
+            {createdVisitData && (
+              <div className="space-y-4">
+                <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800">
+                  <div className="space-y-2">
+                    <p className="font-medium text-green-800 dark:text-green-200">
+                      Visit ID: {createdVisitData.visitId}
+                    </p>
+                    <p className="text-sm text-green-700 dark:text-green-300">
+                      Visit scheduled for <strong>{createdVisitData.patientName}</strong>
+                    </p>
+                    <p className="text-sm text-green-700 dark:text-green-300">
+                      Date: {createdVisitData.date} at {createdVisitData.time}
+                    </p>
+                    <p className="text-sm text-green-700 dark:text-green-300">
+                      Location: {createdVisitData.location} - {createdVisitData.clinic}
+                    </p>
+                  </div>
+                </div>
+                <div className="text-sm text-muted-foreground">
+                  <p>
+                    The visit has been created and is ready to be sent to nursing staff.
+                  </p>
+                </div>
+              </div>
+            )}
+            <DialogFooter className="flex-col gap-2 sm:flex-row">
+              <Button
+                variant="outline"
+                onClick={() => router.push('/medical-records/visits')}
+                className="w-full sm:w-auto"
+              >
+                View in Manage Visits
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setIsSuccessDialogOpen(false);
+                  setCreatedVisitData(null);
+                  // Reset form
+                  setSelectedPatient(null);
+                  setFormData({
+                    patientId: '',
+                    visitType: '',
+                    clinic: '',
+                    location: '',
+                    visitDate: new Date().toISOString().split('T')[0],
+                    visitTime: new Date().toTimeString().slice(0, 5),
+                    notes: '',
+                  });
+                }}
+                className="w-full sm:w-auto"
+              >
+                Create Another Visit
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  setIsSuccessDialogOpen(false);
+                  setCreatedVisitData(null);
+                  router.push('/medical-records/visits');
+                }}
+                className="w-full sm:w-auto"
+              >
+                Close
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </DashboardLayout>
   );

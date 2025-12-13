@@ -29,16 +29,22 @@ export interface LabTest {
   name: string;
   code: string;
   sample_type: string;
-  status: 'pending' | 'sample_collected' | 'processing' | 'results_ready' | 'verified';
+  status: 'pending' | 'sample_collected' | 'processing' | 'results_ready' | 'verified' | 'rejected';
   processing_method?: 'in_house' | 'outsourced';
   outsourced_lab?: string;
-  collected_by?: string;
+  collected_by?: string | number;
+  collected_by_name?: string;
   collected_at?: string;
-  processed_by?: string;
+  processed_by?: string | number;
+  processed_by_name?: string;
   processed_at?: string;
   results?: Record<string, string>;
   result_file?: { name: string; type: string; uploaded_at: string };
   template?: string;
+  rejected_by?: string | number;
+  rejected_by_name?: string;
+  rejected_at?: string;
+  verification_notes?: string;
 }
 
 export interface LabTemplate {

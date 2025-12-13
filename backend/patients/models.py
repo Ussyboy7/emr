@@ -74,6 +74,9 @@ class Patient(models.Model):
     gender = models.CharField(max_length=10, choices=GENDER_CHOICES)
     date_of_birth = models.DateField()
     marital_status = models.CharField(max_length=20, choices=MARITAL_STATUS_CHOICES, blank=True)
+    religion = models.CharField(max_length=50, blank=True)
+    tribe = models.CharField(max_length=50, blank=True)
+    occupation = models.CharField(max_length=100, blank=True, null=True)  # For Dependent and Retiree only
     photo = models.ImageField(upload_to='patients/photos/', blank=True, null=True)
     
     # Employee/Retiree Specific

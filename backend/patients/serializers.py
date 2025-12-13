@@ -15,7 +15,7 @@ class PatientSerializer(serializers.ModelSerializer):
         model = Patient
         fields = [
             'id', 'patient_id', 'category', 'title', 'surname', 'first_name', 'middle_name',
-            'full_name', 'gender', 'date_of_birth', 'age', 'marital_status', 'photo',
+            'full_name', 'gender', 'date_of_birth', 'age', 'marital_status', 'religion', 'tribe', 'occupation', 'photo',
             'personal_number', 'employee_type', 'division', 'location',
             'nonnpa_type', 'dependent_type', 'principal_staff',
             'email', 'phone', 'state_of_residence', 'residential_address',
@@ -53,16 +53,35 @@ class VisitSerializer(serializers.ModelSerializer):
     
     patient_name = serializers.CharField(source='patient.get_full_name', read_only=True)
     doctor_name = serializers.CharField(source='doctor.get_full_name', read_only=True, allow_null=True)
+    vitals = serializers.SerializerMethodField()
+    
+    def get_vitals(self, obj):
+        """Get the most recent vital reading for this visit."""
+        vital = obj.vital_readings.first()
+        if vital:
+            return {
+                'bp': f"{vital.blood_pressure_systolic or ''}/{vital.blood_pressure_diastolic or ''}".strip('/'),
+                'pulse': str(vital.heart_rate) if vital.heart_rate else '',
+                'temp': str(vital.temperature) if vital.temperature else '',
+                'respRate': str(vital.respiratory_rate) if vital.respiratory_rate else '',
+                'spo2': str(vital.oxygen_saturation) if vital.oxygen_saturation else '',
+                'weight': str(vital.weight) if vital.weight else '',
+                'height': str(vital.height) if vital.height else '',
+                'bmi': str(vital.bmi) if vital.bmi else '',
+            }
+        return {
+            'bp': '', 'pulse': '', 'temp': '', 'respRate': '', 'spo2': '', 'weight': '', 'height': '', 'bmi': ''
+        }
     
     class Meta:
         model = Visit
         fields = [
             'id', 'visit_id', 'patient', 'patient_name', 'visit_type', 'status',
             'date', 'time', 'clinic', 'doctor', 'doctor_name',
-            'chief_complaint', 'clinical_notes',
+            'chief_complaint', 'clinical_notes', 'vitals',
             'created_at', 'updated_at',
         ]
-        read_only_fields = ['id', 'visit_id', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'visit_id', 'created_at', 'updated_at', 'vitals']
 
 
 class VitalReadingSerializer(serializers.ModelSerializer):

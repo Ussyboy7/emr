@@ -125,6 +125,8 @@ export default function RadiologyVerificationPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [priorityFilter, setPriorityFilter] = useState('all');
+  const [dateFilter, setDateFilter] = useState('all');
+  const [genderFilter, setGenderFilter] = useState('all');
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -153,7 +155,28 @@ export default function RadiologyVerificationPage() {
       report.study.procedure.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesCategory = categoryFilter === 'all' || report.study.category === categoryFilter;
     const matchesPriority = priorityFilter === 'all' || report.priority === priorityFilter;
-    return matchesSearch && matchesCategory && matchesPriority;
+    const matchesGender = genderFilter === 'all' || report.patient.gender.toLowerCase() === genderFilter.toLowerCase();
+    
+    // Date filter (filter by reported date)
+    if (dateFilter !== 'all' && report.study.reportedAt) {
+      const reportedDate = new Date(report.study.reportedAt);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      if (dateFilter === 'today' && reportedDate.toDateString() !== today.toDateString()) return false;
+      if (dateFilter === 'week') {
+        const weekAgo = new Date(today);
+        weekAgo.setDate(weekAgo.getDate() - 7);
+        if (reportedDate < weekAgo) return false;
+      }
+      if (dateFilter === 'month') {
+        const monthAgo = new Date(today);
+        monthAgo.setMonth(monthAgo.getMonth() - 1);
+        if (reportedDate < monthAgo) return false;
+      }
+    }
+    
+    return matchesSearch && matchesCategory && matchesPriority && matchesGender;
   }), [pendingReports, searchQuery, categoryFilter, priorityFilter]);
 
   // Paginated reports
@@ -170,7 +193,7 @@ export default function RadiologyVerificationPage() {
   // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, categoryFilter, priorityFilter]);
+  }, [searchQuery, categoryFilter, priorityFilter, dateFilter, genderFilter]);
 
   const loadReports = async () => {
     try {
@@ -438,32 +461,51 @@ export default function RadiologyVerificationPage() {
         {/* Filters */}
         <Card>
           <CardContent className="p-4">
-            <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
-              <div className="flex gap-2 flex-1">
-                <div className="relative flex-1 md:max-w-sm">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input placeholder="Search reports..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-10" />
+            <div className="flex flex-col gap-4">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input placeholder="Search reports..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-10" />
+              </div>
+              <div className="flex flex-wrap gap-2 items-center justify-between">
+                <div className="flex flex-wrap gap-2">
+                  <Select value={dateFilter} onValueChange={setDateFilter}>
+                    <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Time</SelectItem>
+                      <SelectItem value="today">Today</SelectItem>
+                      <SelectItem value="week">This Week</SelectItem>
+                      <SelectItem value="month">This Month</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                    <SelectTrigger className="w-[140px]"><SelectValue placeholder="Category" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Categories</SelectItem>
+                      <SelectItem value="X-Ray">X-Ray</SelectItem>
+                      <SelectItem value="CT Scan">CT Scan</SelectItem>
+                      <SelectItem value="MRI">MRI</SelectItem>
+                      <SelectItem value="Ultrasound">Ultrasound</SelectItem>
+                      <SelectItem value="Mammography">Mammography</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select value={priorityFilter} onValueChange={setPriorityFilter}>
+                    <SelectTrigger className="w-[130px]"><SelectValue placeholder="Priority" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Priority</SelectItem>
+                      <SelectItem value="STAT">STAT</SelectItem>
+                      <SelectItem value="Urgent">Urgent</SelectItem>
+                      <SelectItem value="Routine">Routine</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select value={genderFilter} onValueChange={setGenderFilter}>
+                    <SelectTrigger className="w-[120px]"><SelectValue placeholder="Gender" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Gender</SelectItem>
+                      <SelectItem value="male">Male</SelectItem>
+                      <SelectItem value="female">Female</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
-                <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-                  <SelectTrigger className="w-[140px]"><SelectValue placeholder="Category" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Categories</SelectItem>
-                    <SelectItem value="X-Ray">X-Ray</SelectItem>
-                    <SelectItem value="CT Scan">CT Scan</SelectItem>
-                    <SelectItem value="MRI">MRI</SelectItem>
-                    <SelectItem value="Ultrasound">Ultrasound</SelectItem>
-                    <SelectItem value="Mammography">Mammography</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Select value={priorityFilter} onValueChange={setPriorityFilter}>
-                  <SelectTrigger className="w-[130px]"><SelectValue placeholder="Priority" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Priority</SelectItem>
-                    <SelectItem value="STAT">STAT</SelectItem>
-                    <SelectItem value="Urgent">Urgent</SelectItem>
-                    <SelectItem value="Routine">Routine</SelectItem>
-                  </SelectContent>
-                </Select>
               </div>
               <Button variant="outline" onClick={selectAllRoutine} disabled={stats.routine === 0}>
                 Select All Routine

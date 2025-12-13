@@ -1566,7 +1566,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         visit: numericVisitId || undefined,
         priority: priorityMap[newLabOrder.priority] || 'routine',
         clinical_notes: newLabOrder.notes || undefined,
-        tests: [{
+        tests_data: [{
           name: newLabOrder.test,
           code: newLabOrder.test.substring(0, 10).toUpperCase().replace(/\s/g, '_'),
           sample_type: 'Blood', // Default, should be determined from test

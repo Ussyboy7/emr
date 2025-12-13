@@ -109,15 +109,28 @@ class LabOrderViewSet(viewsets.ModelViewSet):
         
         try:
             test = order.tests.get(id=test_id)
+            
+            # Check if this was a rejected test being resubmitted
+            was_rejected = test.status == 'rejected' or test.rejected_by is not None
+            
             test.results = results
             test.notes = notes
             if result_file:
                 test.result_file = result_file
             test.status = 'results_ready'
+            
+            # If this was a rejected test being resubmitted, clear rejection fields
+            if was_rejected:
+                test.rejected_by = None
+                test.rejected_at = None
+                # Clear verification_notes if it contains rejection reason (starts with "REJECTED:")
+                if test.verification_notes and test.verification_notes.startswith('REJECTED:'):
+                    test.verification_notes = ''
+            
             test.save()
             
-            # Create result record for verification
-            LabResult.objects.get_or_create(
+            # Create or update result record for verification
+            LabResult.objects.update_or_create(
                 test=test,
                 defaults={
                     'order': order,

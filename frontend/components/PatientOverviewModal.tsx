@@ -8,12 +8,14 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { toast } from "sonner";
-import { patientService, labService, pharmacyService, type Patient as ApiPatient } from '@/lib/services';
+import { patientService, labService, pharmacyService, consultationService, radiologyService, type Patient as ApiPatient } from '@/lib/services';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import Link from 'next/link';
+import { VisitDetailModal } from '@/components/VisitDetailModal';
 import { 
   User, Phone, Calendar, Heart, AlertCircle, FileText, Activity, Pill, TestTube, Plus, 
   ChevronRight, AlertTriangle, Eye, Trash2, Stethoscope, Loader2, Mail, MapPin, Droplets,
-  Briefcase, X, RefreshCw, ClipboardList
+  Briefcase, X, RefreshCw, ClipboardList, History, ScanLine, ChevronLeft, Download
 } from 'lucide-react';
 
 interface Patient {
@@ -51,6 +53,9 @@ interface PatientDetail {
   age: number;
   gender: string;
   maritalStatus: string;
+  religion?: string;
+  tribe?: string;
+  occupation?: string;
   bloodGroup: string;
   genotype: string;
   phone: string;
@@ -87,12 +92,18 @@ interface PatientDetail {
 
 interface Visit {
   id: string;
+  numericId?: number;
+  visitId?: string;
+  patientId: string;
+  patient?: string;
   date: string;
+  time: string;
   type: string;
   department: string;
   doctor: string;
-  chiefComplaint: string;
-  diagnosis: string;
+  chiefComplaint?: string;
+  diagnosis?: string;
+  notes?: string;
   status: string;
   clinic: string;
 }
@@ -147,8 +158,33 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
   const [labResults, setLabResults] = useState<any[]>([]);
   const [vitalSigns, setVitalSigns] = useState<any[]>([]);
   const [prescriptions, setPrescriptions] = useState<any[]>([]);
+  const [consultationSessions, setConsultationSessions] = useState<any[]>([]);
+  const [imagingResults, setImagingResults] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('overview');
+  const [historySubTab, setHistorySubTab] = useState('consultations');
+  
+  // History tab filters and pagination
+  const [sessionDateFilter, setSessionDateFilter] = useState<string>('all');
+  const [labDateFilter, setLabDateFilter] = useState<string>('all');
+  const [labStatusFilter, setLabStatusFilter] = useState<string>('all');
+  const [imagingDateFilter, setImagingDateFilter] = useState<string>('all');
+  const [imagingStatusFilter, setImagingStatusFilter] = useState<string>('all');
+  const [consultationsPage, setConsultationsPage] = useState(1);
+  const [labResultsPage, setLabResultsPage] = useState(1);
+  const [imagingPage, setImagingPage] = useState(1);
+  const [consultationsPerPage, setConsultationsPerPage] = useState(10);
+  const [labResultsPerPage, setLabResultsPerPage] = useState(10);
+  const [imagingPerPage, setImagingPerPage] = useState(10);
+  
+  // Visit detail modal state
+  const [isVisitDetailModalOpen, setIsVisitDetailModalOpen] = useState(false);
+  const [selectedVisit, setSelectedVisit] = useState<Visit | null>(null);
+  
+  const handleViewVisit = (visit: Visit) => {
+    setSelectedVisit(visit);
+    setIsVisitDetailModalOpen(true);
+  };
 
   const loadPatientData = useCallback(async () => {
     if (!patient) return;
@@ -178,19 +214,25 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
       }
       
       // Load all patient data in parallel
-      const [visitsData, vitalsData, labData, historyData, prescriptionsData] = await Promise.allSettled([
+      const [visitsData, vitalsData, labData, historyData, prescriptionsData, consultationsData, imagingData] = await Promise.allSettled([
         patientService.getPatientVisits(numericId),
         patientService.getPatientVitals(numericId),
         labService.getOrders({ patient: numericId.toString() }),
         patientService.getPatientHistory(numericId),
         pharmacyService.getPrescriptions({ patient: numericId.toString() }),
+        consultationService.getSessions({ patient: numericId }).catch(() => ({ results: [] })),
+        radiologyService.getOrders({ patient: numericId.toString() }).catch(() => ({ results: [] })),
       ]);
 
       // Process visits
       if (visitsData.status === 'fulfilled') {
         const transformedVisits = visitsData.value.map((visit: any) => ({
           id: visit.id.toString(),
+          numericId: visit.id,
+          visitId: visit.visit_id || visit.id.toString(),
+          patientId: visit.patient?.toString() || numericId.toString(),
           date: visit.date || visit.created_at?.split('T')[0] || '',
+          time: visit.created_at ? new Date(visit.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '',
           type: visit.visit_type || 'OPD',
           department: visit.department || '',
           doctor: visit.doctor?.name || visit.assigned_doctor || 'Unknown',
@@ -252,6 +294,45 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
         setLabResults(transformedLabResults);
       }
 
+      // Process consultation sessions
+      if (consultationsData.status === 'fulfilled' && consultationsData.value?.results) {
+        const transformedSessions = consultationsData.value.results.map((session: any) => ({
+          id: session.id?.toString() || String(session.id),
+          date: session.created_at ? new Date(session.created_at).toLocaleDateString() : session.date || '',
+          chiefComplaint: session.chief_complaint || '',
+          doctor: session.doctor?.name || session.doctor_name || 'Unknown',
+          clinic: session.clinic || session.room?.name || 'General',
+          room: session.room?.name || '',
+          status: session.status || 'completed',
+          notes: session.notes || '',
+          diagnoses: session.diagnoses || [],
+        }));
+        setConsultationSessions(transformedSessions);
+      }
+
+      // Process imaging results - extract studies from orders
+      if (imagingData.status === 'fulfilled' && imagingData.value?.results) {
+        const allStudies: any[] = [];
+        imagingData.value.results.forEach((order: any) => {
+          if (order.studies && Array.isArray(order.studies)) {
+            order.studies.forEach((study: any) => {
+              allStudies.push({
+                id: study.id?.toString() || String(study.id),
+                studyId: order.order_id ? `${order.order_id}-${study.id}` : `IMG-${study.id}`,
+                type: study.modality || study.procedure || 'Unknown',
+                description: study.body_part || study.procedure || '',
+                date: order.ordered_at ? new Date(order.ordered_at).toLocaleDateString() : study.created_at ? new Date(study.created_at).toLocaleDateString() : '',
+                status: study.status || 'pending',
+                orderedBy: order.doctor_name || order.doctor?.name || 'Unknown',
+                result: study.findings || study.report || 'Pending',
+                report: study.report || '',
+              });
+            });
+          }
+        });
+        setImagingResults(allStudies);
+      }
+
       // Process prescriptions
       if (prescriptionsData.status === 'fulfilled' && prescriptionsData.value?.results) {
         const transformedPrescriptions = prescriptionsData.value.results.map((rx: any) => ({
@@ -306,6 +387,9 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
         age: apiPatient.age || 0,
         gender: apiPatient.gender === 'male' ? 'Male' : 'Female',
         maritalStatus: apiPatient.marital_status || '',
+        religion: (apiPatient as any).religion || '',
+        tribe: (apiPatient as any).tribe || '',
+        occupation: (apiPatient as any).occupation || '',
         bloodGroup: apiPatient.blood_group || '',
         genotype: apiPatient.genotype || '',
         phone: apiPatient.phone || '',
@@ -346,6 +430,7 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
     if (isOpen && patient) {
       loadPatientData();
       setActiveTab('overview');
+      setHistorySubTab('consultations');
     }
   }, [isOpen, patient, loadPatientData]);
 
@@ -423,6 +508,9 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
                   <TabsTrigger value="prescriptions" className="data-[state=active]:bg-primary/20 data-[state=active]:text-primary">
                     <ClipboardList className="h-4 w-4 mr-2" />Prescriptions
                   </TabsTrigger>
+                  <TabsTrigger value="history" className="data-[state=active]:bg-primary/20 data-[state=active]:text-primary">
+                    <History className="h-4 w-4 mr-2" />History
+                  </TabsTrigger>
                 </TabsList>
               </div>
 
@@ -461,7 +549,11 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
                             </CardHeader>
                             <CardContent className="space-y-3">
                               {visits.slice(0, 3).map((visit) => (
-                                <Link key={visit.id} href={`/medical-records/visits/${visit.id}`} className="flex items-center justify-between p-3 rounded-lg border hover:bg-muted/50 transition-all cursor-pointer">
+                                <div 
+                                  key={visit.id} 
+                                  onClick={() => handleViewVisit(visit)}
+                                  className="flex items-center justify-between p-3 rounded-lg border hover:bg-muted/50 transition-all cursor-pointer"
+                                >
                                   <div className="flex items-center gap-3">
                                     <div className={`w-2 h-2 rounded-full ${
                                       visit.type === 'Emergency' ? 'bg-rose-500' : 
@@ -474,7 +566,7 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
                                     </div>
                                   </div>
                                   <Badge variant="outline">{visit.type}</Badge>
-                                </Link>
+                                </div>
                               ))}
                               {visits.length === 0 && (
                                 <p className="text-sm text-muted-foreground text-center py-4">No visits recorded</p>
@@ -544,6 +636,30 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
                                 <span className="text-muted-foreground">Gender</span>
                                 <span>{patientDetail.gender}</span>
                               </div>
+                              {patientDetail.maritalStatus && (
+                                <div className="flex justify-between">
+                                  <span className="text-muted-foreground">Marital Status</span>
+                                  <span className="capitalize">{patientDetail.maritalStatus}</span>
+                                </div>
+                              )}
+                              {patientDetail.religion && (
+                                <div className="flex justify-between">
+                                  <span className="text-muted-foreground">Religion</span>
+                                  <span>{patientDetail.religion}</span>
+                                </div>
+                              )}
+                              {patientDetail.tribe && (
+                                <div className="flex justify-between">
+                                  <span className="text-muted-foreground">Tribe</span>
+                                  <span>{patientDetail.tribe}</span>
+                                </div>
+                              )}
+                              {patientDetail.occupation && (
+                                <div className="flex justify-between">
+                                  <span className="text-muted-foreground">Occupation</span>
+                                  <span>{patientDetail.occupation}</span>
+                                </div>
+                              )}
                               <div className="flex justify-between">
                                 <span className="text-muted-foreground">Blood Group</span>
                                 <span className="flex items-center gap-1">
@@ -627,7 +743,11 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
                     <CardContent>
                       <div className="space-y-3">
                         {visits.map((v) => (
-                          <Link key={v.id} href={`/medical-records/visits/${v.id}`} className="flex items-center justify-between p-4 rounded-lg border hover:bg-muted/30 transition-colors cursor-pointer">
+                          <div 
+                            key={v.id} 
+                            onClick={() => handleViewVisit(v)}
+                            className="flex items-center justify-between p-4 rounded-lg border hover:bg-muted/30 transition-colors cursor-pointer"
+                          >
                             <div className="flex items-center gap-4">
                               <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
                                 v.type === 'Emergency' ? 'bg-rose-100 dark:bg-rose-900/30' :
@@ -653,7 +773,7 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
                                 'border-blue-500/50 text-blue-600'
                               }>{v.type}</Badge>
                             </div>
-                          </Link>
+                          </div>
                         ))}
                         {visits.length === 0 && (
                           <p className="text-sm text-muted-foreground text-center py-8">No visits recorded</p>
@@ -840,11 +960,414 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
                     </CardContent>
                   </Card>
                 </TabsContent>
+
+                {/* HISTORY TAB */}
+                <TabsContent value="history" className="mt-0">
+                  <div className="space-y-4">
+                    {/* Allergies and Chronic Conditions Cards */}
+                    {patientDetail && (
+                      <div className="grid gap-4 lg:grid-cols-2">
+                        {/* Allergies Card */}
+                        <Card className={patientDetail.allergies.length > 0 ? 'border-red-300 dark:border-red-800 bg-red-50/50 dark:bg-red-900/10' : ''}>
+                          <CardHeader className="pb-2">
+                            <CardTitle className="text-sm flex items-center gap-2">
+                              <AlertTriangle className={`h-4 w-4 ${patientDetail.allergies.length > 0 ? 'text-red-500' : 'text-muted-foreground'}`} />
+                              Allergies
+                            </CardTitle>
+                          </CardHeader>
+                          <CardContent>
+                            {patientDetail.allergies.length > 0 ? (
+                              <div className="flex flex-wrap gap-2">
+                                {patientDetail.allergies.map((allergy: string, index: number) => (
+                                  <Badge key={index} className="bg-red-600 text-white">{allergy}</Badge>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="text-sm text-muted-foreground">No known allergies</p>
+                            )}
+                          </CardContent>
+                        </Card>
+
+                        {/* Chronic Conditions Card */}
+                        <Card>
+                          <CardHeader className="pb-2">
+                            <CardTitle className="text-sm flex items-center gap-2">
+                              <Stethoscope className="h-4 w-4 text-amber-500" />
+                              Chronic Conditions
+                            </CardTitle>
+                          </CardHeader>
+                          <CardContent>
+                            {patientDetail.chronicConditions.length > 0 ? (
+                              <div className="flex flex-wrap gap-2">
+                                {patientDetail.chronicConditions.map((condition: string, index: number) => (
+                                  <Badge key={index} variant="outline" className="bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400">
+                                    {condition}
+                                  </Badge>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="text-sm text-muted-foreground">No chronic conditions</p>
+                            )}
+                          </CardContent>
+                        </Card>
+                      </div>
+                    )}
+
+                    {/* History Tables in Tabs */}
+                    <Card>
+                      <CardHeader>
+                        <CardTitle>Patient History</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <Tabs value={historySubTab} onValueChange={setHistorySubTab} className="w-full">
+                          <TabsList className="grid w-full grid-cols-3">
+                            <TabsTrigger value="consultations" className="text-xs">
+                              <ClipboardList className="h-3 w-3 mr-1" />
+                              Consultations ({consultationSessions.length})
+                            </TabsTrigger>
+                            <TabsTrigger value="labs" className="text-xs">
+                              <TestTube className="h-3 w-3 mr-1" />
+                              Lab Results ({labResults.length})
+                            </TabsTrigger>
+                            <TabsTrigger value="imaging" className="text-xs">
+                              <ScanLine className="h-3 w-3 mr-1" />
+                              Imaging ({imagingResults.length})
+                            </TabsTrigger>
+                          </TabsList>
+
+                          {/* Consultations Sub-Tab */}
+                          <TabsContent value="consultations" className="mt-4">
+                            <div className="flex items-center justify-between mb-3">
+                              <Select value={sessionDateFilter} onValueChange={(v) => { setSessionDateFilter(v); setConsultationsPage(1); }}>
+                                <SelectTrigger className="w-[150px]">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="all">All Time</SelectItem>
+                                  <SelectItem value="30">Last 30 Days</SelectItem>
+                                  <SelectItem value="90">Last 3 Months</SelectItem>
+                                  <SelectItem value="365">Last Year</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="border rounded-lg overflow-hidden">
+                              <table className="w-full text-sm">
+                                <thead className="bg-muted/50">
+                                  <tr>
+                                    <th className="px-4 py-2 text-left font-medium">Date</th>
+                                    <th className="px-4 py-2 text-left font-medium">Chief Complaint</th>
+                                    <th className="px-4 py-2 text-left font-medium">Doctor</th>
+                                    <th className="px-4 py-2 text-left font-medium">Clinic</th>
+                                    <th className="px-4 py-2 text-center font-medium">Action</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y">
+                                  {consultationSessions
+                                    .filter((s: any) => {
+                                      if (sessionDateFilter === 'all') return true;
+                                      const sessionDate = new Date(s.date);
+                                      const daysAgo = Math.floor((Date.now() - sessionDate.getTime()) / (1000 * 60 * 60 * 24));
+                                      return daysAgo <= parseInt(sessionDateFilter);
+                                    })
+                                    .slice((consultationsPage - 1) * consultationsPerPage, consultationsPage * consultationsPerPage)
+                                    .map((session: any) => (
+                                    <tr key={session.id} className="hover:bg-muted/30">
+                                      <td className="px-4 py-3 text-muted-foreground">{session.date}</td>
+                                      <td className="px-4 py-3 font-medium">{session.chiefComplaint || 'N/A'}</td>
+                                      <td className="px-4 py-3">{session.doctor}</td>
+                                      <td className="px-4 py-3">
+                                        <Badge variant="outline">{session.clinic}</Badge>
+                                      </td>
+                                      <td className="px-4 py-3 text-center">
+                                        <Button variant="ghost" size="sm">
+                                          <Eye className="h-4 w-4 mr-1" /> View
+                                        </Button>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                  {consultationSessions.length === 0 && (
+                                    <tr>
+                                      <td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">
+                                        No consultation sessions found
+                                      </td>
+                                    </tr>
+                                  )}
+                                </tbody>
+                              </table>
+                            </div>
+                            {consultationSessions.length > 0 && (
+                              <div className="flex flex-col gap-3 border-t border-border/60 pt-3 mt-3 md:flex-row md:items-center md:justify-between">
+                                <div className="flex items-center gap-4">
+                                  <p className="text-sm text-muted-foreground">
+                                    Showing {consultationSessions.length === 0 ? 0 : `${(consultationsPage - 1) * consultationsPerPage + 1}-${Math.min(consultationSessions.length, consultationsPage * consultationsPerPage)}`} of {consultationSessions.length}
+                                  </p>
+                                  <Select value={String(consultationsPerPage)} onValueChange={(v) => { setConsultationsPerPage(Number(v)); setConsultationsPage(1); }}>
+                                    <SelectTrigger className="w-16 h-8">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="5">5</SelectItem>
+                                      <SelectItem value="10">10</SelectItem>
+                                      <SelectItem value="25">25</SelectItem>
+                                      <SelectItem value="50">50</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <Button variant="outline" size="sm" disabled={consultationsPage === 1} onClick={() => setConsultationsPage(p => p - 1)}>
+                                    <ChevronLeft className="h-4 w-4" />
+                                    Previous
+                                  </Button>
+                                  <Button variant="outline" size="sm" disabled={consultationsPage >= Math.ceil(consultationSessions.length / consultationsPerPage)} onClick={() => setConsultationsPage(p => p + 1)}>
+                                    Next
+                                    <ChevronRight className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                              </div>
+                            )}
+                          </TabsContent>
+
+                          {/* Lab Results Sub-Tab */}
+                          <TabsContent value="labs" className="mt-4">
+                            <div className="flex items-center justify-between mb-3">
+                              <div className="flex items-center gap-3">
+                                <Select value={labDateFilter} onValueChange={(v) => { setLabDateFilter(v); setLabResultsPage(1); }}>
+                                  <SelectTrigger className="w-[150px]">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="all">All Time</SelectItem>
+                                    <SelectItem value="30">Last 30 Days</SelectItem>
+                                    <SelectItem value="90">Last 3 Months</SelectItem>
+                                    <SelectItem value="365">Last Year</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                                <Select value={labStatusFilter} onValueChange={(v) => { setLabStatusFilter(v); setLabResultsPage(1); }}>
+                                  <SelectTrigger className="w-[130px]">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="all">All Status</SelectItem>
+                                    <SelectItem value="pending">Pending</SelectItem>
+                                    <SelectItem value="results_ready">Results Ready</SelectItem>
+                                    <SelectItem value="verified">Verified</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            </div>
+                            <div className="border rounded-lg overflow-hidden">
+                              <table className="w-full text-sm">
+                                <thead className="bg-muted/50">
+                                  <tr>
+                                    <th className="px-4 py-2 text-left font-medium">Date</th>
+                                    <th className="px-4 py-2 text-left font-medium">Test</th>
+                                    <th className="px-4 py-2 text-left font-medium">Result</th>
+                                    <th className="px-4 py-2 text-center font-medium">Status</th>
+                                    <th className="px-4 py-2 text-center font-medium">Action</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y">
+                                  {labResults
+                                    .filter((lab: any) => {
+                                      if (labStatusFilter !== 'all' && lab.status.toLowerCase() !== labStatusFilter.toLowerCase()) return false;
+                                      if (labDateFilter === 'all') return true;
+                                      const labDate = new Date(lab.date);
+                                      const daysAgo = Math.floor((Date.now() - labDate.getTime()) / (1000 * 60 * 60 * 24));
+                                      return daysAgo <= parseInt(labDateFilter);
+                                    })
+                                    .slice((labResultsPage - 1) * labResultsPerPage, labResultsPage * labResultsPerPage)
+                                    .map((lab: any) => (
+                                    <tr key={lab.id} className="hover:bg-muted/30">
+                                      <td className="px-4 py-3 text-muted-foreground">{lab.date}</td>
+                                      <td className="px-4 py-3 font-medium">{lab.test}</td>
+                                      <td className="px-4 py-3">{lab.result || 'Pending'}</td>
+                                      <td className="px-4 py-3 text-center">
+                                        <Badge variant={lab.status === 'Normal' || lab.status === 'verified' ? 'default' : 'secondary'}>
+                                          {lab.status}
+                                        </Badge>
+                                      </td>
+                                      <td className="px-4 py-3 text-center">
+                                        <Button variant="ghost" size="sm">
+                                          <Eye className="h-4 w-4 mr-1" /> View
+                                        </Button>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                  {labResults.length === 0 && (
+                                    <tr>
+                                      <td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">
+                                        No lab results found
+                                      </td>
+                                    </tr>
+                                  )}
+                                </tbody>
+                              </table>
+                            </div>
+                            {labResults.length > 0 && (
+                              <div className="flex flex-col gap-3 border-t border-border/60 pt-3 mt-3 md:flex-row md:items-center md:justify-between">
+                                <div className="flex items-center gap-4">
+                                  <p className="text-sm text-muted-foreground">
+                                    Showing {labResults.length === 0 ? 0 : `${(labResultsPage - 1) * labResultsPerPage + 1}-${Math.min(labResults.length, labResultsPage * labResultsPerPage)}`} of {labResults.length}
+                                  </p>
+                                  <Select value={String(labResultsPerPage)} onValueChange={(v) => { setLabResultsPerPage(Number(v)); setLabResultsPage(1); }}>
+                                    <SelectTrigger className="w-16 h-8">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="5">5</SelectItem>
+                                      <SelectItem value="10">10</SelectItem>
+                                      <SelectItem value="25">25</SelectItem>
+                                      <SelectItem value="50">50</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <Button variant="outline" size="sm" disabled={labResultsPage === 1} onClick={() => setLabResultsPage(p => p - 1)}>
+                                    <ChevronLeft className="h-4 w-4" />
+                                    Previous
+                                  </Button>
+                                  <Button variant="outline" size="sm" disabled={labResultsPage >= Math.ceil(labResults.length / labResultsPerPage)} onClick={() => setLabResultsPage(p => p + 1)}>
+                                    Next
+                                    <ChevronRight className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                              </div>
+                            )}
+                          </TabsContent>
+
+                          {/* Imaging Sub-Tab */}
+                          <TabsContent value="imaging" className="mt-4">
+                            <div className="flex items-center justify-between mb-3">
+                              <div className="flex items-center gap-3">
+                                <Select value={imagingDateFilter} onValueChange={(v) => { setImagingDateFilter(v); setImagingPage(1); }}>
+                                  <SelectTrigger className="w-[150px]">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="all">All Time</SelectItem>
+                                    <SelectItem value="30">Last 30 Days</SelectItem>
+                                    <SelectItem value="90">Last 3 Months</SelectItem>
+                                    <SelectItem value="365">Last Year</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                                <Select value={imagingStatusFilter} onValueChange={(v) => { setImagingStatusFilter(v); setImagingPage(1); }}>
+                                  <SelectTrigger className="w-[130px]">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="all">All Status</SelectItem>
+                                    <SelectItem value="pending">Pending</SelectItem>
+                                    <SelectItem value="completed">Completed</SelectItem>
+                                    <SelectItem value="reported">Reported</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            </div>
+                            <div className="border rounded-lg overflow-hidden">
+                              <table className="w-full text-sm">
+                                <thead className="bg-muted/50">
+                                  <tr>
+                                    <th className="px-4 py-2 text-left font-medium">Date</th>
+                                    <th className="px-4 py-2 text-left font-medium">Study ID</th>
+                                    <th className="px-4 py-2 text-left font-medium">Type</th>
+                                    <th className="px-4 py-2 text-left font-medium">Description</th>
+                                    <th className="px-4 py-2 text-center font-medium">Status</th>
+                                    <th className="px-4 py-2 text-center font-medium">Action</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y">
+                                  {imagingResults
+                                    .filter((img: any) => {
+                                      if (imagingStatusFilter !== 'all' && img.status.toLowerCase() !== imagingStatusFilter.toLowerCase()) return false;
+                                      if (imagingDateFilter === 'all') return true;
+                                      const imgDate = new Date(img.date);
+                                      const daysAgo = Math.floor((Date.now() - imgDate.getTime()) / (1000 * 60 * 60 * 24));
+                                      return daysAgo <= parseInt(imagingDateFilter);
+                                    })
+                                    .slice((imagingPage - 1) * imagingPerPage, imagingPage * imagingPerPage)
+                                    .map((img: any) => (
+                                    <tr key={img.id} className="hover:bg-muted/30">
+                                      <td className="px-4 py-3 text-muted-foreground">{img.date}</td>
+                                      <td className="px-4 py-3 font-medium">{img.studyId}</td>
+                                      <td className="px-4 py-3">{img.type}</td>
+                                      <td className="px-4 py-3">{img.description || 'N/A'}</td>
+                                      <td className="px-4 py-3 text-center">
+                                        <Badge variant={img.status === 'completed' || img.status === 'reported' ? 'default' : 'secondary'}>
+                                          {img.status}
+                                        </Badge>
+                                      </td>
+                                      <td className="px-4 py-3 text-center">
+                                        <Button variant="ghost" size="sm">
+                                          <Eye className="h-4 w-4 mr-1" /> View
+                                        </Button>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                  {imagingResults.length === 0 && (
+                                    <tr>
+                                      <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">
+                                        No imaging studies found
+                                      </td>
+                                    </tr>
+                                  )}
+                                </tbody>
+                              </table>
+                            </div>
+                            {imagingResults.length > 0 && (
+                              <div className="flex flex-col gap-3 border-t border-border/60 pt-3 mt-3 md:flex-row md:items-center md:justify-between">
+                                <div className="flex items-center gap-4">
+                                  <p className="text-sm text-muted-foreground">
+                                    Showing {imagingResults.length === 0 ? 0 : `${(imagingPage - 1) * imagingPerPage + 1}-${Math.min(imagingResults.length, imagingPage * imagingPerPage)}`} of {imagingResults.length}
+                                  </p>
+                                  <Select value={String(imagingPerPage)} onValueChange={(v) => { setImagingPerPage(Number(v)); setImagingPage(1); }}>
+                                    <SelectTrigger className="w-16 h-8">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="5">5</SelectItem>
+                                      <SelectItem value="10">10</SelectItem>
+                                      <SelectItem value="25">25</SelectItem>
+                                      <SelectItem value="50">50</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <Button variant="outline" size="sm" disabled={imagingPage === 1} onClick={() => setImagingPage(p => p - 1)}>
+                                    <ChevronLeft className="h-4 w-4" />
+                                    Previous
+                                  </Button>
+                                  <Button variant="outline" size="sm" disabled={imagingPage >= Math.ceil(imagingResults.length / imagingPerPage)} onClick={() => setImagingPage(p => p + 1)}>
+                                    Next
+                                    <ChevronRight className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                              </div>
+                            )}
+                          </TabsContent>
+                        </Tabs>
+                      </CardContent>
+                    </Card>
+                  </div>
+                </TabsContent>
               </div>
             </Tabs>
           )}
         </div>
       </DialogContent>
+      
+      {/* Visit Detail Modal */}
+      <VisitDetailModal
+        visit={selectedVisit}
+        visitId={selectedVisit?.id}
+        isOpen={isVisitDetailModalOpen}
+        onClose={() => setIsVisitDetailModalOpen(false)}
+        onVisitUpdated={() => {
+          // Reload visits when visit is updated
+          if (patient) {
+            loadPatientData();
+          }
+        }}
+      />
     </Dialog>
   );
 }

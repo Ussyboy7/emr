@@ -72,6 +72,8 @@ export default function PrescriptionsPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [priorityFilter, setPriorityFilter] = useState('all');
+  const [dateFilter, setDateFilter] = useState('all');
+  const [genderFilter, setGenderFilter] = useState('all');
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -231,9 +233,30 @@ export default function PrescriptionsPage() {
         rx.patient.mrn.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesStatus = statusFilter === 'all' || rx.status.toLowerCase() === statusFilter.toLowerCase();
       const matchesPriority = priorityFilter === 'all' || rx.priority.toLowerCase() === priorityFilter.toLowerCase();
-      return matchesSearch && matchesStatus && matchesPriority;
+      const matchesGender = genderFilter === 'all' || rx.patient.gender.toLowerCase() === genderFilter.toLowerCase();
+      
+      // Date filter (filter by prescribed date)
+      if (dateFilter !== 'all') {
+        const prescribedDate = new Date(rx.date);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        
+        if (dateFilter === 'today' && prescribedDate.toDateString() !== today.toDateString()) return false;
+        if (dateFilter === 'week') {
+          const weekAgo = new Date(today);
+          weekAgo.setDate(weekAgo.getDate() - 7);
+          if (prescribedDate < weekAgo) return false;
+        }
+        if (dateFilter === 'month') {
+          const monthAgo = new Date(today);
+          monthAgo.setMonth(monthAgo.getMonth() - 1);
+          if (prescribedDate < monthAgo) return false;
+        }
+      }
+      
+      return matchesSearch && matchesStatus && matchesPriority && matchesGender;
     });
-  }, [prescriptions, searchQuery, statusFilter, priorityFilter]);
+  }, [prescriptions, searchQuery, statusFilter, priorityFilter, dateFilter, genderFilter]);
 
   // Paginated prescriptions
   const paginatedPrescriptions = useMemo(() => {
@@ -244,7 +267,7 @@ export default function PrescriptionsPage() {
   // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, statusFilter, priorityFilter]);
+  }, [searchQuery, statusFilter, priorityFilter, dateFilter, genderFilter]);
 
   // Calculate stats
   const stats = useMemo(() => ({
@@ -578,6 +601,15 @@ export default function PrescriptionsPage() {
                 />
               </div>
               <div className="flex flex-wrap gap-2">
+                <Select value={dateFilter} onValueChange={setDateFilter}>
+                  <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Time</SelectItem>
+                    <SelectItem value="today">Today</SelectItem>
+                    <SelectItem value="week">This Week</SelectItem>
+                    <SelectItem value="month">This Month</SelectItem>
+                  </SelectContent>
+                </Select>
                 <Select value={statusFilter} onValueChange={setStatusFilter}>
                   <SelectTrigger className="w-[150px]"><SelectValue placeholder="Status" /></SelectTrigger>
                   <SelectContent>
@@ -597,6 +629,14 @@ export default function PrescriptionsPage() {
                     <SelectItem value="high">High</SelectItem>
                     <SelectItem value="medium">Medium</SelectItem>
                     <SelectItem value="low">Low</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={genderFilter} onValueChange={setGenderFilter}>
+                  <SelectTrigger className="w-[120px]"><SelectValue placeholder="Gender" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Gender</SelectItem>
+                    <SelectItem value="male">Male</SelectItem>
+                    <SelectItem value="female">Female</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

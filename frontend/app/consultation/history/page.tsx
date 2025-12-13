@@ -30,6 +30,7 @@ interface ConsultationRecord {
   id: string;
   patient: string;
   patientId: string;
+  patientGender?: string; // Add gender for filtering
   doctor: string;
   doctorId: string;
   date: string;
@@ -178,8 +179,9 @@ export default function ConsultationHistoryPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [scopeFilter, setScopeFilter] = useState<"all" | "my">("all");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [dateFilter, setDateFilter] = useState("");
+  const [dateFilter, setDateFilter] = useState("all");
   const [clinicFilter, setClinicFilter] = useState("all");
+  const [genderFilter, setGenderFilter] = useState("all");
   const [viewMode, setViewMode] = useState<"table" | "cards">("table");
   
   // Pagination state
@@ -336,6 +338,7 @@ export default function ConsultationHistoryPage() {
               id: String(session.id),
               patient: patient.full_name || `${patient.first_name} ${patient.surname}`,
               patientId: patient.patient_id || String(patient.id),
+              patientGender: patient.gender || undefined, // Store gender for filtering
               doctor: session.doctor_name || 'Unknown',
               doctorId: String(session.doctor || ''),
               date: visitDate,
@@ -386,11 +389,30 @@ export default function ConsultationHistoryPage() {
       const matchesSearch = !searchQuery || c.patient.toLowerCase().includes(searchQuery.toLowerCase()) || c.id.toLowerCase().includes(searchQuery.toLowerCase()) || c.patientId.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesScope = scopeFilter === "all" || (scopeFilter === "my" && c.doctorId === currentUserId);
       const matchesStatus = statusFilter === "all" || c.status.toLowerCase().replace(" ", "-") === statusFilter;
-      const matchesDate = !dateFilter || c.date === dateFilter;
+      // Date filter
+      if (dateFilter !== 'all') {
+        const consultationDate = new Date(c.date);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        
+        if (dateFilter === 'today' && consultationDate.toDateString() !== today.toDateString()) return false;
+        if (dateFilter === 'week') {
+          const weekAgo = new Date(today);
+          weekAgo.setDate(weekAgo.getDate() - 7);
+          if (consultationDate < weekAgo) return false;
+        }
+        if (dateFilter === 'month') {
+          const monthAgo = new Date(today);
+          monthAgo.setMonth(monthAgo.getMonth() - 1);
+          if (consultationDate < monthAgo) return false;
+        }
+      }
+      
       const matchesClinic = clinicFilter === "all" || c.clinic === clinicFilter;
-      return matchesSearch && matchesScope && matchesStatus && matchesDate && matchesClinic;
+      const matchesGender = genderFilter === 'all' || !c.patientGender || c.patientGender.toLowerCase() === genderFilter.toLowerCase();
+      return matchesSearch && matchesScope && matchesStatus && matchesClinic && matchesGender;
     });
-  }, [consultations, searchQuery, scopeFilter, statusFilter, dateFilter, clinicFilter, currentUser]);
+  }, [consultations, searchQuery, scopeFilter, statusFilter, dateFilter, clinicFilter, genderFilter, currentUser]);
 
   // Paginated consultations
   const paginatedConsultations = useMemo(() => {
@@ -401,7 +423,7 @@ export default function ConsultationHistoryPage() {
   // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, scopeFilter, statusFilter, dateFilter, clinicFilter]);
+  }, [searchQuery, scopeFilter, statusFilter, dateFilter, clinicFilter, genderFilter]);
 
   // Stats
   const stats = useMemo(() => {
@@ -636,7 +658,15 @@ export default function ConsultationHistoryPage() {
                 />
               </div>
               <div className="flex flex-wrap gap-2">
-                <Input type="date" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)} className="w-[140px]" />
+                <Select value={dateFilter} onValueChange={setDateFilter}>
+                  <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Time</SelectItem>
+                    <SelectItem value="today">Today</SelectItem>
+                    <SelectItem value="week">This Week</SelectItem>
+                    <SelectItem value="month">This Month</SelectItem>
+                  </SelectContent>
+                </Select>
                 <Select value={statusFilter} onValueChange={setStatusFilter}>
                   <SelectTrigger className="w-[160px]"><SelectValue placeholder="Status" /></SelectTrigger>
                   <SelectContent>
@@ -654,6 +684,14 @@ export default function ConsultationHistoryPage() {
                     <SelectItem value="Physiotherapy">Physiotherapy</SelectItem>
                     <SelectItem value="Sickle Cell">Sickle Cell</SelectItem>
                     <SelectItem value="Cardiology">Cardiology</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={genderFilter} onValueChange={setGenderFilter}>
+                  <SelectTrigger className="w-[120px]"><SelectValue placeholder="Gender" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Gender</SelectItem>
+                    <SelectItem value="male">Male</SelectItem>
+                    <SelectItem value="female">Female</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

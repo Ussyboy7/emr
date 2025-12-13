@@ -27,6 +27,8 @@ import { PatientOverviewModal } from '@/components/PatientOverviewModal';
 // Constants for form fields
 const titles = ['Mr', 'Mrs', 'Ms', 'Dr', 'Chief', 'Engr', 'Prof', 'Alhaji', 'Hajia'];
 const maritalStatuses = ['Single', 'Married', 'Divorced', 'Widowed'];
+const religions = ['Christianity', 'Islam', 'Traditional', 'Other', 'None'];
+const tribes = ['Hausa', 'Yoruba', 'Igbo', 'Fulani', 'Ibibio', 'Tiv', 'Kanuri', 'Ijaw', 'Nupe', 'Efik', 'Urhobo', 'Edo', 'Itsekiri', 'Jjaw', 'Edo', 'Other'];
 const NOK_RELATIONSHIPS = ['Spouse', 'Parent', 'Child', 'Sibling', 'Relative', 'Friend', 'Other'];
 
 // NPA Divisions
@@ -182,6 +184,9 @@ export default function PatientsListPage() {
     middleName: '',
     dateOfBirth: '',
     maritalStatus: '',
+    religion: '',
+    tribe: '',
+    occupation: '',
     phone: '',
     email: '',
     residentialAddress: '',
@@ -376,6 +381,9 @@ export default function PatientsListPage() {
         middleName: apiPatient.middle_name || '',
         dateOfBirth: dobFormatted,
         maritalStatus: normalizedMaritalStatus,
+        religion: (apiPatient as any).religion || '',
+        tribe: (apiPatient as any).tribe || '',
+        occupation: (apiPatient as any).occupation || '',
         phone: apiPatient.phone || '',
         email: apiPatient.email || '',
         residentialAddress: apiPatient.residential_address || '',
@@ -469,6 +477,8 @@ export default function PatientsListPage() {
         marital_status: editForm.maritalStatus && editForm.maritalStatus.trim() !== '' 
           ? editForm.maritalStatus.toLowerCase() 
           : undefined,
+        religion: editForm.religion.trim() || undefined,
+        tribe: editForm.tribe.trim() || undefined,
         phone: editForm.phone.trim() || undefined,
         email: editForm.email.trim() || undefined,
         residential_address: editForm.residentialAddress.trim() || undefined,
@@ -492,6 +502,11 @@ export default function PatientsListPage() {
         nok_address: editForm.nokAddress.trim() || undefined,
         nok_phone: editForm.nokPhone.trim() || undefined,
       };
+
+      // Add occupation for Dependent and Retiree only
+      if ((selectedPatient.category === 'Dependent' || selectedPatient.category === 'Retiree') && editForm.occupation) {
+        (updateData as any).occupation = editForm.occupation.trim();
+      }
 
       // Remove undefined values to avoid sending them
       Object.keys(updateData).forEach(key => {
@@ -1011,6 +1026,38 @@ export default function PatientsListPage() {
                           </Select>
                         </div>
                       </div>
+                      <div className="grid grid-cols-3 gap-4">
+                        <div className="space-y-2">
+                          <Label>Religion</Label>
+                          <Select value={editForm.religion || undefined} onValueChange={(v) => setEditForm(prev => ({ ...prev, religion: v === 'not-specified' ? '' : v }))}>
+                            <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="not-specified">Not specified</SelectItem>
+                              {religions.map(religion => <SelectItem key={religion} value={religion}>{religion}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Tribe</Label>
+                          <Select value={editForm.tribe || undefined} onValueChange={(v) => setEditForm(prev => ({ ...prev, tribe: v === 'not-specified' ? '' : v }))}>
+                            <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="not-specified">Not specified</SelectItem>
+                              {tribes.map(tribe => <SelectItem key={tribe} value={tribe}>{tribe}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        {(selectedPatient.category === 'Dependent' || selectedPatient.category === 'Retiree') && (
+                          <div className="space-y-2">
+                            <Label>Occupation</Label>
+                            <Input 
+                              value={editForm.occupation} 
+                              onChange={(e) => setEditForm(prev => ({ ...prev, occupation: e.target.value }))} 
+                              placeholder="Enter occupation" 
+                            />
+                          </div>
+                        )}
+                      </div>
                     </div>
 
                     <Separator />
@@ -1138,15 +1185,13 @@ export default function PatientsListPage() {
                       </>
                     )}
 
-                    {/* Location field for non-Employee categories */}
-                    {(selectedPatient.category === 'Retiree' || selectedPatient.category === 'NonNPA' || selectedPatient.category === 'Dependent') && (
+                    {/* Location field for non-Employee categories (except Dependent) */}
+                    {(selectedPatient.category === 'Retiree' || selectedPatient.category === 'NonNPA') && (
                       <>
                         <Separator />
                         <div className="space-y-4">
                           <h3 className="text-sm font-semibold text-foreground">
-                            {selectedPatient.category === 'Retiree' ? 'Retiree Details' :
-                             selectedPatient.category === 'Dependent' ? 'Dependent Details' :
-                             'Non-NPA Details'}
+                            {selectedPatient.category === 'Retiree' ? 'Retiree Details' : 'Non-NPA Details'}
                           </h3>
                           <div className="grid grid-cols-1 gap-4">
                             <div className="space-y-2">

@@ -38,6 +38,9 @@ interface LabTest {
   results?: Record<string, string>;
   resultFile?: { name: string; type: string; uploadedAt: string };
   template?: string;
+  rejectedBy?: string;
+  rejectedAt?: string;
+  verificationNotes?: string;
 }
 
 interface LabOrder {
@@ -86,9 +89,9 @@ const transformTest = (apiTest: ApiLabTest): LabTest => {
     status: transformLabTestStatus(apiTest.status) as LabTest['status'],
     processingMethod: apiTest.processing_method ? transformProcessingMethod(apiTest.processing_method) as 'In-house' | 'Outsourced' : undefined,
     outsourcedLab: apiTest.outsourced_lab,
-    collectedBy: apiTest.collected_by,
+    collectedBy: apiTest.collected_by_name || apiTest.collected_by?.toString(),
     collectedAt: apiTest.collected_at,
-    processedBy: apiTest.processed_by,
+    processedBy: apiTest.processed_by_name || apiTest.processed_by?.toString(),
     processedAt: apiTest.processed_at,
     results: apiTest.results as Record<string, string>,
     resultFile: apiTest.result_file ? {
@@ -97,6 +100,9 @@ const transformTest = (apiTest: ApiLabTest): LabTest => {
       uploadedAt: typeof apiTest.result_file === 'string' ? '' : apiTest.result_file.uploaded_at || '',
     } : undefined,
     template: apiTest.template?.toString(),
+    rejectedBy: apiTest.rejected_by_name || apiTest.rejected_by?.toString(),
+    rejectedAt: apiTest.rejected_at,
+    verificationNotes: apiTest.verification_notes,
   };
 };
 
@@ -224,6 +230,8 @@ export default function LabOrdersPage() {
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [priorityFilter, setPriorityFilter] = useState('all');
+  const [dateFilter, setDateFilter] = useState('all');
+  const [genderFilter, setGenderFilter] = useState('all');
   const [activeTab, setActiveTab] = useState('pending');
   
   // Pagination state
@@ -276,13 +284,33 @@ export default function LabOrdersPage() {
         order.orderId.toLowerCase().includes(searchQuery.toLowerCase()) ||
         order.doctor.name.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesPriority = priorityFilter === 'all' || order.priority === priorityFilter;
+      const matchesGender = genderFilter === 'all' || order.patient.gender.toLowerCase() === genderFilter.toLowerCase();
+      
+      // Date filter
+      if (dateFilter !== 'all') {
+        const orderedDate = new Date(order.orderedAt);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        
+        if (dateFilter === 'today' && orderedDate.toDateString() !== today.toDateString()) return false;
+        if (dateFilter === 'week') {
+          const weekAgo = new Date(today);
+          weekAgo.setDate(weekAgo.getDate() - 7);
+          if (orderedDate < weekAgo) return false;
+        }
+        if (dateFilter === 'month') {
+          const monthAgo = new Date(today);
+          monthAgo.setMonth(monthAgo.getMonth() - 1);
+          if (orderedDate < monthAgo) return false;
+        }
+      }
       
       // Tab filtering
-      if (activeTab === 'pending') return matchesSearch && matchesPriority && order.tests.some(t => t.status === 'Pending');
-      if (activeTab === 'processing') return matchesSearch && matchesPriority && order.tests.some(t => t.status === 'Sample Collected' || t.status === 'Processing');
-      if (activeTab === 'results') return matchesSearch && matchesPriority && order.tests.some(t => t.status === 'Results Ready');
-      if (activeTab === 'rejected') return matchesSearch && matchesPriority && order.tests.some(t => t.status === 'Rejected');
-      return matchesSearch && matchesPriority;
+      if (activeTab === 'pending') return matchesSearch && matchesPriority && matchesGender && order.tests.some(t => t.status === 'Pending');
+      if (activeTab === 'processing') return matchesSearch && matchesPriority && matchesGender && order.tests.some(t => t.status === 'Sample Collected' || t.status === 'Processing');
+      if (activeTab === 'results') return matchesSearch && matchesPriority && matchesGender && order.tests.some(t => t.status === 'Results Ready');
+      if (activeTab === 'rejected') return matchesSearch && matchesPriority && matchesGender && order.tests.some(t => t.status === 'Rejected');
+      return matchesSearch && matchesPriority && matchesGender;
     });
   };
 
@@ -295,7 +323,7 @@ export default function LabOrdersPage() {
   // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, priorityFilter, activeTab]);
+  }, [searchQuery, priorityFilter, dateFilter, genderFilter, activeTab]);
 
   // Load orders function - memoized to prevent infinite loops
   const loadOrders = useCallback(async () => {
@@ -549,14 +577,23 @@ export default function LabOrdersPage() {
     setIsProcessDialogOpen(true); 
   };
   
-  const openResultsDialog = (test: LabTest) => {
+  const openResultsDialog = (test: LabTest, isRework = false) => {
     setSelectedTest(test);
-    // Initialize result values from template
+    
+    // Initialize result values - pre-fill existing results if reworking a rejected test
     const initial: Record<string, string> = {};
     const template = testTemplates[test.code];
-    if (template) {
+    
+    if (isRework && test.results) {
+      // Pre-fill with existing results for rework
+      Object.entries(test.results).forEach(([key, value]) => {
+        initial[key] = String(value);
+      });
+    } else if (template) {
+      // Start fresh with template fields
       template.fields.forEach(field => { initial[field.name] = ''; });
     }
+    
     setResultValues(initial);
     setResultEntryMode(test.processingMethod === 'Outsourced' ? 'upload' : 'values');
     setUploadedFile(null);
@@ -727,6 +764,15 @@ export default function LabOrdersPage() {
                   />
                 </div>
                 <div className="flex flex-wrap gap-2">
+                  <Select value={dateFilter} onValueChange={setDateFilter}>
+                    <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Time</SelectItem>
+                      <SelectItem value="today">Today</SelectItem>
+                      <SelectItem value="week">This Week</SelectItem>
+                      <SelectItem value="month">This Month</SelectItem>
+                    </SelectContent>
+                  </Select>
                   <Select value={priorityFilter} onValueChange={setPriorityFilter}>
                     <SelectTrigger className="w-[130px]"><SelectValue placeholder="Priority" /></SelectTrigger>
                     <SelectContent>
@@ -734,6 +780,14 @@ export default function LabOrdersPage() {
                       <SelectItem value="STAT">STAT</SelectItem>
                       <SelectItem value="Urgent">Urgent</SelectItem>
                       <SelectItem value="Routine">Routine</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select value={genderFilter} onValueChange={setGenderFilter}>
+                    <SelectTrigger className="w-[120px]"><SelectValue placeholder="Gender" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Gender</SelectItem>
+                      <SelectItem value="male">Male</SelectItem>
+                      <SelectItem value="female">Female</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -841,6 +895,9 @@ export default function LabOrdersPage() {
                         <div className="text-xs text-muted-foreground">
                           {test.collectedBy && <span>Collected by {test.collectedBy} {test.collectedAt && `at ${formatTime(test.collectedAt)}`}</span>}
                           {test.outsourcedLab && <span className="ml-2">• {test.outsourcedLab}</span>}
+                          {test.status === 'Rejected' && test.rejectedBy && (
+                            <span className="ml-2">• Rejected by {test.rejectedBy} {test.rejectedAt && `at ${formatTime(test.rejectedAt)}`}</span>
+                          )}
                         </div>
                         
                         {/* Action Buttons */}
@@ -868,21 +925,7 @@ export default function LabOrdersPage() {
                           {test.status === 'Rejected' && (
                             <Button 
                               size="sm" 
-                              onClick={async () => {
-                                try {
-                                  await labService.updateTest(parseInt(test.id), { 
-                                    status: 'results_ready' as any 
-                                  });
-                                  toast.success(`${test.name} sent back for re-verification`);
-                                  await loadOrders();
-                                  if (isViewDialogOpen && selectedOrder) {
-                                    const updatedOrder = await labService.getOrder(parseInt(selectedOrder.id));
-                                    setSelectedOrder(transformOrder(updatedOrder));
-                                  }
-                                } catch (err: any) {
-                                  toast.error(err.message || 'Failed to resubmit test');
-                                }
-                              }} 
+                              onClick={() => openResultsDialog(test, true)} 
                               className="h-7 px-3 bg-amber-500 hover:bg-amber-600 text-white text-xs"
                             >
                               <RotateCcw className="h-3 w-3 mr-1" />Rework & Resubmit
@@ -890,6 +933,24 @@ export default function LabOrdersPage() {
                           )}
                         </div>
                       </div>
+                      
+                      {/* Show Rejection Reason if rejected */}
+                      {test.status === 'Rejected' && test.verificationNotes && (
+                        <div className="mt-2 p-2 rounded bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 text-xs">
+                          <p className="font-medium text-rose-700 dark:text-rose-400 mb-1 flex items-center gap-1">
+                            <XCircle className="h-3 w-3" />
+                            Rejection Reason:
+                          </p>
+                          <p className="text-rose-600 dark:text-rose-300">
+                            {test.verificationNotes.replace('REJECTED: ', '')}
+                          </p>
+                          {test.rejectedBy && test.rejectedAt && (
+                            <p className="text-rose-500 dark:text-rose-400 mt-1 text-[10px]">
+                              Rejected by {test.rejectedBy} on {new Date(test.rejectedAt).toLocaleDateString()} at {formatTime(test.rejectedAt)}
+                            </p>
+                          )}
+                        </div>
+                      )}
                       
                       {/* Show Results if available */}
                       {test.results && (
@@ -1144,11 +1205,31 @@ export default function LabOrdersPage() {
         <Dialog open={isResultsDialogOpen} onOpenChange={setIsResultsDialogOpen}>
           <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle className="flex items-center gap-2"><FileText className="h-5 w-5 text-amber-500" />Enter Results</DialogTitle>
-              <DialogDescription>Enter results for {selectedTest?.name}</DialogDescription>
+              <DialogTitle className="flex items-center gap-2">
+                <FileText className="h-5 w-5 text-amber-500" />
+                {selectedTest?.status === 'Rejected' ? 'Rework & Resubmit Results' : 'Enter Results'}
+              </DialogTitle>
+              <DialogDescription>
+                {selectedTest?.status === 'Rejected' 
+                  ? `Edit and resubmit corrected results for ${selectedTest?.name}` 
+                  : `Enter results for ${selectedTest?.name}`}
+              </DialogDescription>
             </DialogHeader>
             {selectedOrder && selectedTest && (
               <div className="space-y-4 py-4">
+                {selectedTest.status === 'Rejected' && (
+                  <div className="p-3 rounded-lg bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800">
+                    <p className="text-sm text-rose-700 dark:text-rose-300 flex items-center gap-2">
+                      <XCircle className="h-4 w-4" />
+                      This test was rejected. Please correct the results below and resubmit.
+                      {selectedTest.verificationNotes && (
+                        <span className="block mt-1 text-xs text-rose-600 dark:text-rose-400">
+                          Reason: {selectedTest.verificationNotes.replace('REJECTED: ', '')}
+                        </span>
+                      )}
+                    </p>
+                  </div>
+                )}
                 <div className="p-4 rounded-lg bg-muted/50 space-y-2">
                   <div className="flex justify-between"><span className="text-muted-foreground">Patient:</span><span className="font-medium">{selectedOrder.patient.name}</span></div>
                   <div className="flex justify-between"><span className="text-muted-foreground">Test:</span><span className="font-medium">{selectedTest.name} ({selectedTest.code})</span></div>
@@ -1269,7 +1350,7 @@ export default function LabOrdersPage() {
               <Button variant="outline" onClick={() => setIsResultsDialogOpen(false)}>Cancel</Button>
               <Button onClick={handleSubmitResults} disabled={isSubmitting} className="bg-amber-500 hover:bg-amber-600">
                 {isSubmitting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <CheckCircle2 className="h-4 w-4 mr-2" />}
-                Submit Results
+                {selectedTest?.status === 'Rejected' ? 'Resubmit Corrected Results' : 'Submit Results'}
               </Button>
             </DialogFooter>
           </DialogContent>

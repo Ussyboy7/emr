@@ -23,6 +23,9 @@ import {
   Heart, Wind, Droplets, Scale, Loader2, Save, X
 } from 'lucide-react';
 
+// Constants
+const clinics = ["All Clinics", "General", "Physiotherapy", "Eye", "Sickle Cell", "Diamond"];
+
 // Types
 interface Patient {
   id: string;
@@ -86,6 +89,9 @@ export default function NursingPoolQueuePage() {
   useAuthRedirect(authError);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [dateFilter, setDateFilter] = useState('all');
+  const [typeFilter, setTypeFilter] = useState('all');
+  const [clinicFilter, setClinicFilter] = useState('all');
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Load visits and rooms from API
@@ -241,9 +247,31 @@ export default function NursingPoolQueuePage() {
                          p.patientId.toLowerCase().includes(searchLower) ||
                          (p.personalNumber && p.personalNumber.toLowerCase().includes(searchLower));
     const matchesStatus = statusFilter === 'all' || p.nursingStatus.toLowerCase().replace(' ', '-') === statusFilter;
+    const matchesType = typeFilter === 'all' || p.visitType.toLowerCase() === typeFilter.toLowerCase();
+    const matchesClinic = clinicFilter === 'all' || p.clinic.toLowerCase() === clinicFilter.toLowerCase();
+    
+    // Date filter
+    if (dateFilter !== 'all') {
+      const visitDate = new Date(p.visitDate);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      if (dateFilter === 'today' && visitDate.toDateString() !== today.toDateString()) return false;
+      if (dateFilter === 'week') {
+        const weekAgo = new Date(today);
+        weekAgo.setDate(weekAgo.getDate() - 7);
+        if (visitDate < weekAgo) return false;
+      }
+      if (dateFilter === 'month') {
+        const monthAgo = new Date(today);
+        monthAgo.setMonth(monthAgo.getMonth() - 1);
+        if (visitDate < monthAgo) return false;
+      }
+    }
+    
     // Don't show patients already sent to rooms
     const notSentToRoom = p.nursingStatus !== 'Sent to Room';
-    return matchesSearch && matchesStatus && notSentToRoom;
+    return matchesSearch && matchesStatus && matchesType && matchesClinic && notSentToRoom;
   });
 
   // Sort by visit type (Emergency first) then by wait time
@@ -263,7 +291,7 @@ export default function NursingPoolQueuePage() {
   // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, statusFilter]);
+  }, [searchQuery, statusFilter, dateFilter, typeFilter, clinicFilter]);
 
   // Stats
   const stats = {
@@ -763,6 +791,15 @@ export default function NursingPoolQueuePage() {
                 />
               </div>
               <div className="flex flex-wrap gap-2">
+                <Select value={dateFilter} onValueChange={setDateFilter}>
+                  <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Time</SelectItem>
+                    <SelectItem value="today">Today</SelectItem>
+                    <SelectItem value="week">This Week</SelectItem>
+                    <SelectItem value="month">This Month</SelectItem>
+                  </SelectContent>
+                </Select>
                 <Select value={statusFilter} onValueChange={setStatusFilter}>
                   <SelectTrigger className="w-[160px]"><SelectValue placeholder="Status" /></SelectTrigger>
                   <SelectContent>
@@ -770,6 +807,21 @@ export default function NursingPoolQueuePage() {
                     <SelectItem value="pending">Pending Vitals</SelectItem>
                     <SelectItem value="vitals-recorded">Vitals Recorded</SelectItem>
                     <SelectItem value="ready-for-consultation">Ready for Consultation</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={typeFilter} onValueChange={setTypeFilter}>
+                  <SelectTrigger className="w-[140px]"><SelectValue placeholder="Visit Type" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Types</SelectItem>
+                    <SelectItem value="emergency">Emergency</SelectItem>
+                    <SelectItem value="consultation">Consultation</SelectItem>
+                    <SelectItem value="follow-up">Follow-up</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={clinicFilter} onValueChange={setClinicFilter}>
+                  <SelectTrigger className="w-[140px]"><SelectValue placeholder="Clinic" /></SelectTrigger>
+                  <SelectContent>
+                    {clinics.map(c => <SelectItem key={c} value={c === 'All Clinics' ? 'all' : c.toLowerCase()}>{c}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>

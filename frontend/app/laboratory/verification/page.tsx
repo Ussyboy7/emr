@@ -181,6 +181,8 @@ export default function ResultsVerificationPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [priorityFilter, setPriorityFilter] = useState('all');
+  const [dateFilter, setDateFilter] = useState('all');
+  const [genderFilter, setGenderFilter] = useState('all');
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -209,8 +211,29 @@ export default function ResultsVerificationPage() {
       result.testName.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesStatus = statusFilter === 'all' || result.overallStatus.toLowerCase() === statusFilter;
     const matchesPriority = priorityFilter === 'all' || result.priority === priorityFilter;
-    return matchesSearch && matchesStatus && matchesPriority;
-  }), [pendingResults, searchQuery, statusFilter, priorityFilter]);
+    const matchesGender = genderFilter === 'all' || result.patient.gender.toLowerCase() === genderFilter.toLowerCase();
+    
+    // Date filter (filter by test submitted date)
+    if (dateFilter !== 'all' && result.submittedAt) {
+      const submittedDate = new Date(result.submittedAt);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      if (dateFilter === 'today' && submittedDate.toDateString() !== today.toDateString()) return false;
+      if (dateFilter === 'week') {
+        const weekAgo = new Date(today);
+        weekAgo.setDate(weekAgo.getDate() - 7);
+        if (submittedDate < weekAgo) return false;
+      }
+      if (dateFilter === 'month') {
+        const monthAgo = new Date(today);
+        monthAgo.setMonth(monthAgo.getMonth() - 1);
+        if (submittedDate < monthAgo) return false;
+      }
+    }
+    
+    return matchesSearch && matchesStatus && matchesPriority && matchesGender;
+  }), [pendingResults, searchQuery, statusFilter, priorityFilter, dateFilter, genderFilter]);
 
   // Note: Since we're using server-side pagination, we display all filtered results
   // The API handles pagination, but we still filter client-side for search
@@ -219,7 +242,7 @@ export default function ResultsVerificationPage() {
   // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, statusFilter, priorityFilter]);
+  }, [searchQuery, statusFilter, priorityFilter, dateFilter, genderFilter]);
 
   // Load results function - memoized to prevent infinite loops
   const loadResults = useCallback(async () => {
@@ -512,6 +535,15 @@ export default function ResultsVerificationPage() {
               </div>
               <div className="flex flex-wrap gap-2 items-center justify-between">
                 <div className="flex flex-wrap gap-2">
+                  <Select value={dateFilter} onValueChange={setDateFilter}>
+                    <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Time</SelectItem>
+                      <SelectItem value="today">Today</SelectItem>
+                      <SelectItem value="week">This Week</SelectItem>
+                      <SelectItem value="month">This Month</SelectItem>
+                    </SelectContent>
+                  </Select>
                   <Select value={statusFilter} onValueChange={setStatusFilter}>
                     <SelectTrigger className="w-[140px]"><SelectValue placeholder="Status" /></SelectTrigger>
                     <SelectContent>
@@ -528,6 +560,14 @@ export default function ResultsVerificationPage() {
                       <SelectItem value="STAT">STAT</SelectItem>
                       <SelectItem value="Urgent">Urgent</SelectItem>
                       <SelectItem value="Routine">Routine</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select value={genderFilter} onValueChange={setGenderFilter}>
+                    <SelectTrigger className="w-[120px]"><SelectValue placeholder="Gender" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Gender</SelectItem>
+                      <SelectItem value="male">Male</SelectItem>
+                      <SelectItem value="female">Female</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

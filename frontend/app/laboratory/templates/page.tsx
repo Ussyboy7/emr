@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { StandardPagination } from '@/components/StandardPagination';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -134,17 +134,8 @@ export default function TestTemplatesPage() {
     return filteredTemplates.slice(startIndex, startIndex + itemsPerPage);
   }, [filteredTemplates, currentPage, itemsPerPage]);
 
-  // Load templates from API
-  useEffect(() => {
-    loadTemplates();
-  }, []);
-
-  // Reset to page 1 when filters change
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchQuery, categoryFilter, statusFilter]);
-
-  const loadTemplates = async () => {
+  // Load templates function - memoized
+  const loadTemplates = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
@@ -158,7 +149,17 @@ export default function TestTemplatesPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  // Load templates from API on mount
+  useEffect(() => {
+    loadTemplates();
+  }, [loadTemplates]);
+
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, categoryFilter, statusFilter]);
 
   const stats = {
     total: templates.length,

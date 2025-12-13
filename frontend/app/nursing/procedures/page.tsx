@@ -94,6 +94,8 @@ export default function ProceduresQueuePage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
   const [priorityFilter, setPriorityFilter] = useState('all');
+  const [dateFilter, setDateFilter] = useState('all');
+  const [genderFilter, setGenderFilter] = useState('all');
   const [isRefreshing, setIsRefreshing] = useState(false);
   
   // Pagination state
@@ -233,7 +235,28 @@ export default function ProceduresQueuePage() {
                              p.patientId.toLowerCase().includes(searchQuery.toLowerCase());
         const matchesType = typeFilter === 'all' || p.type === typeFilter;
         const matchesPriority = priorityFilter === 'all' || p.priority === priorityFilter;
-        return matchesSearch && matchesType && matchesPriority;
+        const matchesGender = genderFilter === 'all' || p.gender.toLowerCase() === genderFilter.toLowerCase();
+        
+        // Date filter (filter by ordered date)
+        if (dateFilter !== 'all') {
+          const orderedDate = new Date(p.orderedAt);
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          
+          if (dateFilter === 'today' && orderedDate.toDateString() !== today.toDateString()) return false;
+          if (dateFilter === 'week') {
+            const weekAgo = new Date(today);
+            weekAgo.setDate(weekAgo.getDate() - 7);
+            if (orderedDate < weekAgo) return false;
+          }
+          if (dateFilter === 'month') {
+            const monthAgo = new Date(today);
+            monthAgo.setMonth(monthAgo.getMonth() - 1);
+            if (orderedDate < monthAgo) return false;
+          }
+        }
+        
+        return matchesSearch && matchesType && matchesPriority && matchesGender;
       })
       .sort((a, b) => {
         // Sort by priority first
@@ -244,7 +267,7 @@ export default function ProceduresQueuePage() {
         // Then by time (oldest first)
         return new Date(a.orderedAt).getTime() - new Date(b.orderedAt).getTime();
       });
-  }, [procedures, searchQuery, typeFilter, priorityFilter]);
+  }, [procedures, searchQuery, typeFilter, priorityFilter, dateFilter, genderFilter]);
 
   // Paginated procedures
   const paginatedProcedures = useMemo(() => {
@@ -255,7 +278,7 @@ export default function ProceduresQueuePage() {
   // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, typeFilter, priorityFilter]);
+  }, [searchQuery, typeFilter, priorityFilter, dateFilter, genderFilter]);
 
   // ==================== HANDLERS ====================
   const loadOrders = async () => {
@@ -568,30 +591,49 @@ export default function ProceduresQueuePage() {
         {/* Filters */}
         <Card>
           <CardContent className="p-4">
-            <div className="flex flex-col md:flex-row gap-3">
+            <div className="flex flex-col gap-4">
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input placeholder="Search patients..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-10" />
               </div>
-              <Select value={typeFilter} onValueChange={setTypeFilter}>
-                <SelectTrigger className="w-[160px]"><SelectValue placeholder="Procedure Type" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Types</SelectItem>
-                  <SelectItem value="injection">💉 Injections</SelectItem>
-                  <SelectItem value="dressing">🩹 Dressings</SelectItem>
-                  <SelectItem value="medication">💊 Medications</SelectItem>
-                </SelectContent>
-              </Select>
-              <Select value={priorityFilter} onValueChange={setPriorityFilter}>
-                <SelectTrigger className="w-[140px]"><SelectValue placeholder="Priority" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Priority</SelectItem>
-                  <SelectItem value="Emergency">🔴 Emergency</SelectItem>
-                  <SelectItem value="High">🟠 High</SelectItem>
-                  <SelectItem value="Medium">🔵 Medium</SelectItem>
-                  <SelectItem value="Low">🟢 Low</SelectItem>
-                </SelectContent>
-              </Select>
+              <div className="flex flex-wrap gap-2">
+                <Select value={dateFilter} onValueChange={setDateFilter}>
+                  <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Time</SelectItem>
+                    <SelectItem value="today">Today</SelectItem>
+                    <SelectItem value="week">This Week</SelectItem>
+                    <SelectItem value="month">This Month</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={typeFilter} onValueChange={setTypeFilter}>
+                  <SelectTrigger className="w-[160px]"><SelectValue placeholder="Procedure Type" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Types</SelectItem>
+                    <SelectItem value="injection">💉 Injections</SelectItem>
+                    <SelectItem value="dressing">🩹 Dressings</SelectItem>
+                    <SelectItem value="medication">💊 Medications</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={priorityFilter} onValueChange={setPriorityFilter}>
+                  <SelectTrigger className="w-[140px]"><SelectValue placeholder="Priority" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Priority</SelectItem>
+                    <SelectItem value="Emergency">🔴 Emergency</SelectItem>
+                    <SelectItem value="High">🟠 High</SelectItem>
+                    <SelectItem value="Medium">🔵 Medium</SelectItem>
+                    <SelectItem value="Low">🟢 Low</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={genderFilter} onValueChange={setGenderFilter}>
+                  <SelectTrigger className="w-[120px]"><SelectValue placeholder="Gender" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Gender</SelectItem>
+                    <SelectItem value="male">Male</SelectItem>
+                    <SelectItem value="female">Female</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           </CardContent>
         </Card>

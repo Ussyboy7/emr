@@ -160,7 +160,7 @@ class VisitViewSet(viewsets.ModelViewSet):
     ordering = ['-date', '-time']
     
     def get_queryset(self):
-        return Visit.objects.all().select_related('patient', 'doctor', 'created_by')
+        return Visit.objects.all().select_related('patient', 'doctor', 'created_by').prefetch_related('vital_readings')
     
     def perform_create(self, serializer):
         """Set created_by when creating a visit and log audit."""

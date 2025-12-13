@@ -158,6 +158,8 @@ export default function RadiologyOrdersPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [priorityFilter, setPriorityFilter] = useState('all');
   const [modalityFilter, setModalityFilter] = useState('all');
+  const [dateFilter, setDateFilter] = useState('all');
+  const [genderFilter, setGenderFilter] = useState('all');
   const [activeTab, setActiveTab] = useState('pending');
 
   // Pagination state
@@ -206,11 +208,31 @@ export default function RadiologyOrdersPage() {
         order.doctor.name.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesPriority = priorityFilter === 'all' || order.priority === priorityFilter;
       const matchesModality = modalityFilter === 'all' || order.studies.some(s => s.category === modalityFilter);
+      const matchesGender = genderFilter === 'all' || order.patient.gender.toLowerCase() === genderFilter.toLowerCase();
+      
+      // Date filter
+      if (dateFilter !== 'all') {
+        const orderedDate = new Date(order.orderedAt);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        
+        if (dateFilter === 'today' && orderedDate.toDateString() !== today.toDateString()) return false;
+        if (dateFilter === 'week') {
+          const weekAgo = new Date(today);
+          weekAgo.setDate(weekAgo.getDate() - 7);
+          if (orderedDate < weekAgo) return false;
+        }
+        if (dateFilter === 'month') {
+          const monthAgo = new Date(today);
+          monthAgo.setMonth(monthAgo.getMonth() - 1);
+          if (orderedDate < monthAgo) return false;
+        }
+      }
 
       // Tab filtering
-      if (activeTab === 'pending') return matchesSearch && matchesPriority && matchesModality && order.studies.some(s => s.status === 'Pending' || s.status === 'Scheduled');
-      if (activeTab === 'processing') return matchesSearch && matchesPriority && matchesModality && order.studies.some(s => s.status === 'Acquired' || s.status === 'Processing');
-      return matchesSearch && matchesPriority && matchesModality;
+      if (activeTab === 'pending') return matchesSearch && matchesPriority && matchesModality && matchesGender && order.studies.some(s => s.status === 'Pending' || s.status === 'Scheduled');
+      if (activeTab === 'processing') return matchesSearch && matchesPriority && matchesModality && matchesGender && order.studies.some(s => s.status === 'Acquired' || s.status === 'Processing');
+      return matchesSearch && matchesPriority && matchesModality && matchesGender;
     });
   };
 
@@ -228,7 +250,7 @@ export default function RadiologyOrdersPage() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, priorityFilter, modalityFilter, activeTab]);
+  }, [searchQuery, priorityFilter, modalityFilter, dateFilter, genderFilter, activeTab]);
 
   const loadOrders = async () => {
     try {
@@ -632,6 +654,15 @@ export default function RadiologyOrdersPage() {
                   />
                 </div>
                 <div className="flex flex-wrap gap-2">
+                  <Select value={dateFilter} onValueChange={setDateFilter}>
+                    <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Time</SelectItem>
+                      <SelectItem value="today">Today</SelectItem>
+                      <SelectItem value="week">This Week</SelectItem>
+                      <SelectItem value="month">This Month</SelectItem>
+                    </SelectContent>
+                  </Select>
                   <Select value={modalityFilter} onValueChange={setModalityFilter}>
                     <SelectTrigger className="w-[130px]"><SelectValue placeholder="Modality" /></SelectTrigger>
                     <SelectContent>
@@ -650,6 +681,14 @@ export default function RadiologyOrdersPage() {
                       <SelectItem value="STAT">STAT</SelectItem>
                       <SelectItem value="Urgent">Urgent</SelectItem>
                       <SelectItem value="Routine">Routine</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select value={genderFilter} onValueChange={setGenderFilter}>
+                    <SelectTrigger className="w-[120px]"><SelectValue placeholder="Gender" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Gender</SelectItem>
+                      <SelectItem value="male">Male</SelectItem>
+                      <SelectItem value="female">Female</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

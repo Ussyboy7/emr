@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { FileText, Download, Printer, Calendar, FileCheck, FileClock, ArrowRight, Plus, Eye, Trash2, CheckCircle, Search } from 'lucide-react';
 
 const patients = [
@@ -23,6 +24,17 @@ const patients = [
 ];
 
 const reportTypes = [
+  { id: 'attendance-summary', title: 'Attendance Summary', description: 'Patient attendance by category (Officers, Staff, Dependents, Retirees, etc.)', icon: FileText, href: '/medical-records/reports/attendance-summary', color: 'text-blue-500', bgColor: 'bg-blue-500/10' },
+  { id: 'clinic-attendance', title: 'Clinic Attendance', description: 'Specialized clinic attendance (Diamond Club, Sickle Cell, Healthron, Eye, Physiotherapy)', icon: FileText, href: '/medical-records/reports/clinic-attendance', color: 'text-green-500', bgColor: 'bg-green-500/10' },
+  { id: 'services-activities', title: 'Services & Activities', description: 'Injections, Dressing, Sick Leave, Referrals, Observations', icon: FileText, href: '/medical-records/reports/services-activities', color: 'text-orange-500', bgColor: 'bg-orange-500/10' },
+  { id: 'dispensed-prescriptions', title: 'Dispensed Prescriptions', description: 'Monthly prescription dispensing statistics', icon: FileText, href: '/medical-records/reports/dispensed-prescriptions', color: 'text-purple-500', bgColor: 'bg-purple-500/10' },
+  { id: 'laboratory-attendance', title: 'Laboratory Attendance', description: 'Lab services by patient category and month', icon: FileText, href: '/medical-records/reports/laboratory-attendance', color: 'text-pink-500', bgColor: 'bg-pink-500/10' },
+  { id: 'radiological-services', title: 'Radiological Services', description: 'X-Ray, ECG, Ultrasound, CT Scan, MRI statistics', icon: FileText, href: '/medical-records/reports/radiological-services', color: 'text-indigo-500', bgColor: 'bg-indigo-500/10' },
+  { id: 'referral-tracking', title: 'Referral Tracking', description: 'New referrals and follow-ups to retainership hospitals', icon: FileText, href: '/medical-records/reports/referral-tracking', color: 'text-blue-500', bgColor: 'bg-blue-500/10' },
+  { id: 'disease-pattern', title: 'Disease Pattern', description: 'Top diagnoses and disease trends', icon: FileText, href: '/medical-records/reports/disease-pattern', color: 'text-red-500', bgColor: 'bg-red-500/10' },
+  { id: 'gop-attendance', title: 'G.O.P Attendance', description: 'General Outpatient attendance statistics', icon: FileText, href: '/medical-records/reports/gop-attendance', color: 'text-blue-500', bgColor: 'bg-blue-500/10' },
+  { id: 'weekend-duty', title: 'Weekend Call Duty', description: 'Weekend and after-hours attendance', icon: FileText, href: '/medical-records/reports/weekend-duty', color: 'text-purple-500', bgColor: 'bg-purple-500/10' },
+  { id: 'comprehensive', title: 'Comprehensive Report', description: 'All reports combined in one comprehensive view', icon: FileText, href: '/medical-records/reports/comprehensive', color: 'text-gray-500', bgColor: 'bg-gray-500/10' },
   { id: 'medical-cert', title: 'Medical Certificate', description: 'Generate fitness or illness certificates', icon: FileCheck, count: 45, color: 'text-blue-500', bgColor: 'bg-blue-500/10' },
   { id: 'discharge', title: 'Discharge Summary', description: 'Patient discharge documentation', icon: FileText, count: 28, color: 'text-emerald-500', bgColor: 'bg-emerald-500/10' },
   { id: 'referral', title: 'Referral Letter', description: 'Specialist referral letters', icon: FileText, count: 15, color: 'text-violet-500', bgColor: 'bg-violet-500/10' },
@@ -33,6 +45,7 @@ const reportTypes = [
 const initialReports: any[] = [];
 
 export default function ReportsPage() {
+  const router = useRouter();
   const [reports, setReports] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -130,7 +143,17 @@ export default function ReportsPage() {
         {/* Report Types */}
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           {reportTypes.map((report) => (
-            <Card key={report.id} className="border-border bg-card hover:border-primary/50 hover:shadow-md transition-all cursor-pointer group" onClick={() => openNewReportModal(report.title)}>
+            <Card 
+              key={report.id} 
+              className="border-border bg-card hover:border-primary/50 hover:shadow-md transition-all cursor-pointer group"
+              onClick={() => {
+                if ((report as any).href) {
+                  router.push((report as any).href);
+                } else {
+                  openNewReportModal(report.title);
+                }
+              }}
+            >
               <CardContent className="p-6">
                 <div className={`w-12 h-12 rounded-xl ${report.bgColor} flex items-center justify-center mb-4`}>
                   <report.icon className={`h-6 w-6 ${report.color}`} />
@@ -138,7 +161,11 @@ export default function ReportsPage() {
                 <h3 className="font-semibold text-foreground group-hover:text-primary transition-colors">{report.title}</h3>
                 <p className="text-sm text-muted-foreground mt-1">{report.description}</p>
                 <div className="flex items-center justify-between mt-4">
-                  <Badge variant="outline">{report.count} reports</Badge>
+                  {(report as any).count ? (
+                    <Badge variant="outline">{(report as any).count} reports</Badge>
+                  ) : (
+                    <Badge variant="outline">Available</Badge>
+                  )}
                   <ArrowRight className="h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors" />
                 </div>
               </CardContent>

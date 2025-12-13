@@ -74,7 +74,8 @@ export default function ProceduresHistoryPage() {
   const [authError, setAuthError] = useState<unknown | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
-  const [dateFilter, setDateFilter] = useState('');
+  const [dateFilter, setDateFilter] = useState('all');
+  const [genderFilter, setGenderFilter] = useState('all');
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -200,11 +201,31 @@ export default function ProceduresHistoryPage() {
                              p.patientId.toLowerCase().includes(searchQuery.toLowerCase()) ||
                              p.completedBy.toLowerCase().includes(searchQuery.toLowerCase());
         const matchesType = typeFilter === 'all' || p.type === typeFilter;
-        const matchesDate = !dateFilter || new Date(p.completedAt).toISOString().split('T')[0] === dateFilter;
-        return matchesSearch && matchesType && matchesDate;
+        const matchesGender = genderFilter === 'all' || p.gender.toLowerCase() === genderFilter.toLowerCase();
+        
+        // Date filter
+        if (dateFilter !== 'all') {
+          const completedDate = new Date(p.completedAt);
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          
+          if (dateFilter === 'today' && completedDate.toDateString() !== today.toDateString()) return false;
+          if (dateFilter === 'week') {
+            const weekAgo = new Date(today);
+            weekAgo.setDate(weekAgo.getDate() - 7);
+            if (completedDate < weekAgo) return false;
+          }
+          if (dateFilter === 'month') {
+            const monthAgo = new Date(today);
+            monthAgo.setMonth(monthAgo.getMonth() - 1);
+            if (completedDate < monthAgo) return false;
+          }
+        }
+        
+        return matchesSearch && matchesType && matchesGender;
       })
       .sort((a, b) => new Date(b.completedAt).getTime() - new Date(a.completedAt).getTime());
-  }, [history, searchQuery, typeFilter, dateFilter]);
+  }, [history, searchQuery, typeFilter, dateFilter, genderFilter]);
 
   // Paginated history
   const paginatedHistory = useMemo(() => {
@@ -215,7 +236,7 @@ export default function ProceduresHistoryPage() {
   // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, typeFilter, dateFilter]);
+  }, [searchQuery, typeFilter, dateFilter, genderFilter]);
 
   const openViewDialog = (procedure: CompletedProcedure) => {
     setSelectedProcedure(procedure);
@@ -327,27 +348,39 @@ export default function ProceduresHistoryPage() {
         {/* Filters */}
         <Card>
           <CardContent className="p-4">
-            <div className="flex flex-col md:flex-row gap-3">
+            <div className="flex flex-col gap-4">
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input placeholder="Search patient, ID, or nurse..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-10" />
               </div>
-              <Select value={typeFilter} onValueChange={setTypeFilter}>
-                <SelectTrigger className="w-[160px]"><SelectValue placeholder="Type" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Types</SelectItem>
-                  <SelectItem value="injection">💉 Injections</SelectItem>
-                  <SelectItem value="dressing">🩹 Dressings</SelectItem>
-                  <SelectItem value="medication">💊 Medications</SelectItem>
-                </SelectContent>
-              </Select>
-              <div className="relative">
-                <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-                <Input type="date" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)} className="pl-10 w-[180px]" />
+              <div className="flex flex-wrap gap-2">
+                <Select value={dateFilter} onValueChange={setDateFilter}>
+                  <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Time</SelectItem>
+                    <SelectItem value="today">Today</SelectItem>
+                    <SelectItem value="week">This Week</SelectItem>
+                    <SelectItem value="month">This Month</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={typeFilter} onValueChange={setTypeFilter}>
+                  <SelectTrigger className="w-[160px]"><SelectValue placeholder="Type" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Types</SelectItem>
+                    <SelectItem value="injection">💉 Injections</SelectItem>
+                    <SelectItem value="dressing">🩹 Dressings</SelectItem>
+                    <SelectItem value="medication">💊 Medications</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={genderFilter} onValueChange={setGenderFilter}>
+                  <SelectTrigger className="w-[120px]"><SelectValue placeholder="Gender" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Gender</SelectItem>
+                    <SelectItem value="male">Male</SelectItem>
+                    <SelectItem value="female">Female</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
-              {dateFilter && (
-                <Button variant="ghost" size="sm" onClick={() => setDateFilter('')}>Clear Date</Button>
-              )}
             </div>
           </CardContent>
         </Card>

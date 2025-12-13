@@ -19,7 +19,7 @@ import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { 
   Search, Plus, Calendar, Clock, CheckCircle2, MapPin,
-  Edit, Send, AlertTriangle, Loader2
+  Edit, Send, AlertTriangle, Loader2, Eye
 } from 'lucide-react';
 import { StandardPagination } from '@/components/StandardPagination';
 
@@ -461,7 +461,7 @@ export default function VisitsPage() {
                   <div className="flex items-center gap-1 flex-shrink-0">
                     {visit.status === 'Scheduled' && (
                       <>
-                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleEditVisit(visit)}>
+                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleEditVisit(visit)} title="Edit Visit">
                           <Edit className="h-3.5 w-3.5" />
                         </Button>
                         <Button 
@@ -579,6 +579,8 @@ export default function VisitsPage() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        {/* Visit Detail Modal */}
 
         {/* Send to Nursing Confirmation Modal */}
         <Dialog open={isForwardModalOpen} onOpenChange={setIsForwardModalOpen}>

@@ -49,8 +49,9 @@ export default function CompletedTestsPage() {
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [dateFilter, setDateFilter] = useState('today');
+  const [dateFilter, setDateFilter] = useState('all');
   const [clinicFilter, setClinicFilter] = useState('all');
+  const [genderFilter, setGenderFilter] = useState('all');
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -171,7 +172,8 @@ export default function CompletedTestsPage() {
         test.testName.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesStatus = statusFilter === 'all' || test.overallStatus.toLowerCase() === statusFilter;
       const matchesClinic = clinicFilter === 'all' || test.clinic === clinicFilter;
-      return matchesSearch && matchesStatus && matchesClinic;
+      const matchesGender = genderFilter === 'all' || test.patient.gender.toLowerCase() === genderFilter.toLowerCase();
+      return matchesSearch && matchesStatus && matchesClinic && matchesGender;
     });
 
     // Apply date filter
@@ -199,7 +201,7 @@ export default function CompletedTestsPage() {
     }
 
     return filtered;
-  }, [tests, searchQuery, statusFilter, clinicFilter, dateFilter]);
+  }, [tests, searchQuery, statusFilter, clinicFilter, dateFilter, genderFilter]);
 
   // Paginated tests
   const paginatedTests = useMemo(() => {
@@ -210,7 +212,7 @@ export default function CompletedTestsPage() {
   // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, statusFilter, clinicFilter, dateFilter]);
+  }, [searchQuery, statusFilter, clinicFilter, dateFilter, genderFilter]);
 
   const stats = {
     total: tests.length,
@@ -334,12 +336,12 @@ export default function CompletedTestsPage() {
                 <Input placeholder="Search by patient, order ID, or test..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-10" />
               </div>
               <Select value={dateFilter} onValueChange={setDateFilter}>
-                <SelectTrigger className="w-[140px]"><SelectValue placeholder="Date" /></SelectTrigger>
+                <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="all">All Time</SelectItem>
                   <SelectItem value="today">Today</SelectItem>
                   <SelectItem value="week">This Week</SelectItem>
                   <SelectItem value="month">This Month</SelectItem>
-                  <SelectItem value="all">All Time</SelectItem>
                 </SelectContent>
               </Select>
               <Select value={statusFilter} onValueChange={setStatusFilter}>
@@ -356,6 +358,14 @@ export default function CompletedTestsPage() {
                 <SelectContent>
                   <SelectItem value="all">All Clinics</SelectItem>
                   {clinics.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Select value={genderFilter} onValueChange={setGenderFilter}>
+                <SelectTrigger className="w-[120px]"><SelectValue placeholder="Gender" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Gender</SelectItem>
+                  <SelectItem value="male">Male</SelectItem>
+                  <SelectItem value="female">Female</SelectItem>
                 </SelectContent>
               </Select>
             </div>

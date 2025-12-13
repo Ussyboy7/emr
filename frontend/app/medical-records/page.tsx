@@ -114,6 +114,7 @@ export default function MedicalRecordsPage() {
           const active = todayVisits.filter(v => v.status === 'in_progress').slice(0, 3);
           setActiveVisits(active.map(v => ({
             id: v.visit_id || String(v.id),
+            numericId: v.id, // Keep numeric ID for API calls
             patient: v.patient_name || `Patient ${v.patient}`,
             type: v.visit_type || 'Consultation',
             department: v.clinic || 'General',
@@ -268,10 +269,9 @@ export default function MedicalRecordsPage() {
                 </div>
               ) : activeVisits.length > 0 ? (
                 activeVisits.map((visit) => (
-                  <Link 
+                  <div 
                     key={visit.id} 
-                    href={`/medical-records/visits/${visit.id}`}
-                    className="flex items-center justify-between p-3 rounded-lg border border-border hover:border-primary/50 hover:bg-muted/50 transition-all"
+                    className="flex items-center justify-between p-3 rounded-lg border border-border"
                   >
                     <div className="flex items-center gap-3">
                       <div className={`w-2 h-2 rounded-full ${
@@ -296,7 +296,7 @@ export default function MedicalRecordsPage() {
                         <p className="text-xs text-muted-foreground mt-1">{visit.time}</p>
                       )}
                     </div>
-                  </Link>
+                  </div>
                 ))
               ) : (
                 <p className="text-sm text-muted-foreground text-center p-4">No active visits today</p>
