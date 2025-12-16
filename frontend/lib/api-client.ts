@@ -226,6 +226,8 @@ export const apiFetch = async <T = unknown>(path: string, options: FetchOptions 
       if (contentType && contentType.includes('application/json')) {
         const errorData = await response.json();
         errorDetails = (errorData as Record<string, unknown> | undefined)?.details;
+        
+        // Handle different error formats
         if (errorData.detail) {
           errorMessage = errorData.detail;
         } else if (errorData.message) {
@@ -237,7 +239,28 @@ export const apiFetch = async <T = unknown>(path: string, options: FetchOptions 
             ? errorData.non_field_errors.join(', ') 
             : String(errorData.non_field_errors);
         } else {
-          errorMessage = JSON.stringify(errorData);
+          // Handle field-level validation errors (e.g., {height: ["Height must be between..."], weight: [...]})
+          const fieldErrors = Object.entries(errorData)
+            .filter(([key]) => key !== 'details') // Exclude 'details' as it's handled separately
+            .map(([field, errors]: [string, any]) => {
+              const fieldName = field.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+              let errorText: string;
+              if (Array.isArray(errors)) {
+                errorText = errors.map(e => typeof e === 'object' ? JSON.stringify(e) : String(e)).join(', ');
+              } else if (typeof errors === 'object' && errors !== null) {
+                errorText = JSON.stringify(errors);
+              } else {
+                errorText = String(errors);
+              }
+              return `${fieldName}: ${errorText}`;
+            });
+          
+          if (fieldErrors.length > 0) {
+            errorMessage = fieldErrors.join('; ');
+          } else {
+            // Fallback to JSON stringify if no recognized format
+            errorMessage = JSON.stringify(errorData);
+          }
         }
       } else {
         const body = await response.text();
@@ -412,4 +435,29 @@ export const impersonateUser = async (username: string) => {
   }
   storeTokens(data.access, data.refresh, data.expires_in);
   return data;
+};
+
+/**
+ * Get the media base URL from the API URL configuration
+ */
+const getMediaBaseUrl = () => {
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8001/api";
+  // Remove '/api' from the end to get the base URL for media
+  return apiUrl.endsWith("/api") ? apiUrl.slice(0, -4) : apiUrl;
+};
+
+/**
+ * Construct a full photo URL from a relative path
+ * @param relativePath - Relative path from backend (e.g., "/media/patients/photos/image.jpg")
+ * @returns Full URL or null if path is invalid
+ */
+export const getPhotoUrl = (relativePath: string | null | undefined): string | null => {
+  if (!relativePath) return null;
+  if (relativePath.startsWith('http://') || relativePath.startsWith('https://')) {
+    return relativePath; // Already a full URL
+  }
+  if (relativePath.startsWith('/media/')) {
+    return `${getMediaBaseUrl()}${relativePath}`;
+  }
+  return null; // Unknown format
 };
