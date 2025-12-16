@@ -14,13 +14,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Separator } from "@/components/ui/separator";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { Activity, AlertTriangle, ArrowLeft, CheckCircle, Clock, FileText, History, Loader2, MapPin, Pill, Plus, Save, Stethoscope, Syringe, TestTube, User, Users, X, Send, ScanLine, TrendingUp, TrendingDown, Minus, Building2, UserPlus, Calendar, Phone, Mail, Heart, Download, Eye, Printer, FileDown, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, ClipboardList, RefreshCw, Thermometer } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Activity, AlertTriangle, ArrowLeft, CheckCircle, Clock, FileText, History, Loader2, MapPin, Pill, Plus, Save, Stethoscope, Syringe, TestTube, User, Users, X, Send, ScanLine, TrendingUp, TrendingDown, Minus, Building2, UserPlus, Calendar, Phone, Mail, Heart, Download, Eye, Printer, FileDown, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, ClipboardList, RefreshCw, Thermometer, CheckSquare, Square, Edit } from "lucide-react";
 import { toast } from "sonner";
 import { roomService, patientService, pharmacyService, labService, radiologyService, referralService, consultationService } from '@/lib/services';
 import { apiFetch } from '@/lib/api-client';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { getPriorityLabel, getPriorityColor } from '@/lib/utils/priority';
+import { PatientAvatar } from '@/components/PatientAvatar';
 
 // Types
 interface Patient {
@@ -33,7 +35,6 @@ interface Patient {
   mrn: string;
   personalNumber?: string;
   allergies: string[];
-  chiefComplaint: string;
   waitTime: number;
   vitalsCompleted: boolean;
   priority: "Emergency" | "High" | "Medium" | "Low";
@@ -45,6 +46,12 @@ interface Patient {
   employeeType?: string;
   division?: string;
   location?: string;
+  phone?: string;
+  email?: string;
+  occupation?: string;
+  religion?: string;
+  tribe?: string;
+  photo?: string | null;
   vitals?: { temperature: string; bloodPressure: string; heartRate: string; respiratoryRate: string; oxygenSaturation: string; weight: string; height: string; recordedAt: string };
 }
 
@@ -63,34 +70,7 @@ interface ConsultationRoom {
 
 // Consultation room, patient, and medication data will be loaded from API
 
-// Medication inventory will be loaded from API
-const demoMedications: any[] = [
-  { id: 'MED-001', name: 'Metformin 500mg', genericName: 'Metformin', category: 'Diabetes', dosageForm: 'Tablet', strength: '500mg', stockLevel: 500 },
-  { id: 'MED-002', name: 'Glibenclamide 5mg', genericName: 'Glibenclamide', category: 'Diabetes', dosageForm: 'Tablet', strength: '5mg', stockLevel: 200 },
-  { id: 'MED-003', name: 'Methyldopa 250mg', genericName: 'Methyldopa', category: 'Cardiovascular', dosageForm: 'Tablet', strength: '250mg', stockLevel: 150 },
-  { id: 'MED-004', name: 'Furosemide 40mg', genericName: 'Furosemide', category: 'Cardiovascular', dosageForm: 'Tablet', strength: '40mg', stockLevel: 300 },
-  { id: 'MED-005', name: 'Lisinopril 10mg', genericName: 'Lisinopril', category: 'Cardiovascular', dosageForm: 'Tablet', strength: '10mg', stockLevel: 45 },
-  { id: 'MED-006', name: 'Amlodipine 5mg', genericName: 'Amlodipine', category: 'Cardiovascular', dosageForm: 'Tablet', strength: '5mg', stockLevel: 250 },
-  { id: 'MED-007', name: 'Atorvastatin 20mg', genericName: 'Atorvastatin', category: 'Cardiovascular', dosageForm: 'Tablet', strength: '20mg', stockLevel: 180 },
-  { id: 'MED-008', name: 'Clopidogrel 75mg', genericName: 'Clopidogrel', category: 'Cardiovascular', dosageForm: 'Tablet', strength: '75mg', stockLevel: 15 },
-  { id: 'MED-009', name: 'Paracetamol 500mg', genericName: 'Acetaminophen', category: 'Analgesics', dosageForm: 'Tablet', strength: '500mg', stockLevel: 1200 },
-  { id: 'MED-010', name: 'Ibuprofen 400mg', genericName: 'Ibuprofen', category: 'Analgesics', dosageForm: 'Tablet', strength: '400mg', stockLevel: 800 },
-  { id: 'MED-011', name: 'Diclofenac 50mg', genericName: 'Diclofenac', category: 'Analgesics', dosageForm: 'Tablet', strength: '50mg', stockLevel: 350 },
-  { id: 'MED-012', name: 'Omeprazole 20mg', genericName: 'Omeprazole', category: 'Gastrointestinal', dosageForm: 'Capsule', strength: '20mg', stockLevel: 400 },
-  { id: 'MED-013', name: 'Pantoprazole 40mg', genericName: 'Pantoprazole', category: 'Gastrointestinal', dosageForm: 'Tablet', strength: '40mg', stockLevel: 280 },
-  { id: 'MED-014', name: 'Amoxicillin 500mg', genericName: 'Amoxicillin', category: 'Antibiotics', dosageForm: 'Capsule', strength: '500mg', stockLevel: 350 },
-  { id: 'MED-015', name: 'Azithromycin 500mg', genericName: 'Azithromycin', category: 'Antibiotics', dosageForm: 'Tablet', strength: '500mg', stockLevel: 120 },
-  { id: 'MED-016', name: 'Ciprofloxacin 500mg', genericName: 'Ciprofloxacin', category: 'Antibiotics', dosageForm: 'Tablet', strength: '500mg', stockLevel: 200 },
-  { id: 'MED-017', name: 'Metronidazole 400mg', genericName: 'Metronidazole', category: 'Antibiotics', dosageForm: 'Tablet', strength: '400mg', stockLevel: 280 },
-  { id: 'MED-018', name: 'Cetirizine 10mg', genericName: 'Cetirizine', category: 'Antihistamines', dosageForm: 'Tablet', strength: '10mg', stockLevel: 500 },
-  { id: 'MED-019', name: 'Loratadine 10mg', genericName: 'Loratadine', category: 'Antihistamines', dosageForm: 'Tablet', strength: '10mg', stockLevel: 400 },
-  { id: 'MED-020', name: 'Folic Acid 5mg', genericName: 'Folic Acid', category: 'Vitamins', dosageForm: 'Tablet', strength: '5mg', stockLevel: 600 },
-  { id: 'MED-021', name: 'Ferrous Sulfate 200mg', genericName: 'Iron Supplement', category: 'Vitamins', dosageForm: 'Tablet', strength: '200mg', stockLevel: 450 },
-  { id: 'MED-022', name: 'Vitamin B Complex', genericName: 'B Vitamins', category: 'Vitamins', dosageForm: 'Tablet', strength: 'Standard', stockLevel: 380 },
-  { id: 'MED-023', name: 'Hydroxyurea 500mg', genericName: 'Hydroxyurea', category: 'Oncology', dosageForm: 'Capsule', strength: '500mg', stockLevel: 0 },
-  { id: 'MED-024', name: 'Salbutamol Inhaler', genericName: 'Salbutamol', category: 'Respiratory', dosageForm: 'Inhaler', strength: '100mcg', stockLevel: 50 },
-  { id: 'MED-025', name: 'Prednisolone 5mg', genericName: 'Prednisolone', category: 'Corticosteroids', dosageForm: 'Tablet', strength: '5mg', stockLevel: 180 },
-];
+// Medications are loaded from the API - no demo medications needed
 
 const frequencyToDailyDoses: Record<string, number> = {
   'Once daily (OD)': 1,
@@ -321,12 +301,12 @@ const demoVitalsHistory = [
 // Patient medical history will be loaded from API
 const demoPatientHistory: any = {
   previousVisits: [
-    { id: 'V-001', date: '2024-11-15', type: 'Follow-up', clinic: 'General', doctor: 'Dr. Adebayo', chiefComplaint: 'Hypertension follow-up', diagnosis: 'Essential Hypertension (Controlled)', outcome: 'Medications refilled, follow-up in 1 month' },
-    { id: 'V-002', date: '2024-10-22', type: 'Consultation', clinic: 'General', doctor: 'Dr. Okonkwo', chiefComplaint: 'Chest discomfort', diagnosis: 'Costochondritis', outcome: 'Prescribed NSAIDs, symptoms resolved' },
-    { id: 'V-003', date: '2024-09-18', type: 'Emergency', clinic: 'General', doctor: 'Dr. Eze', chiefComplaint: 'Fever, body aches, headache', diagnosis: 'Malaria (Plasmodium falciparum)', outcome: 'Treated with Artemether-Lumefantrine, recovered' },
-    { id: 'V-004', date: '2024-08-05', type: 'Consultation', clinic: 'Eye', doctor: 'Dr. Adamu', chiefComplaint: 'Blurred vision, eye strain', diagnosis: 'Presbyopia', outcome: 'Prescribed reading glasses' },
-    { id: 'V-005', date: '2024-07-12', type: 'Follow-up', clinic: 'General', doctor: 'Dr. Adebayo', chiefComplaint: 'Annual checkup', diagnosis: 'Mild hypertension', outcome: 'Started on Amlodipine 5mg' },
-    { id: 'V-006', date: '2024-05-20', type: 'Consultation', clinic: 'Physiotherapy', doctor: 'Dr. Bello', chiefComplaint: 'Lower back pain', diagnosis: 'Lumbar strain', outcome: 'Physiotherapy sessions, improved' },
+    { id: 'V-001', date: '2024-11-15', type: 'Follow-up', clinic: 'General', doctor: 'Dr. Adebayo', diagnosis: 'Essential Hypertension (Controlled)', outcome: 'Medications refilled, follow-up in 1 month' },
+    { id: 'V-002', date: '2024-10-22', type: 'Consultation', clinic: 'General', doctor: 'Dr. Okonkwo', diagnosis: 'Costochondritis', outcome: 'Prescribed NSAIDs, symptoms resolved' },
+    { id: 'V-003', date: '2024-09-18', type: 'Emergency', clinic: 'General', doctor: 'Dr. Eze', diagnosis: 'Malaria (Plasmodium falciparum)', outcome: 'Treated with Artemether-Lumefantrine, recovered' },
+    { id: 'V-004', date: '2024-08-05', type: 'Consultation', clinic: 'Eye', doctor: 'Dr. Adamu', diagnosis: 'Presbyopia', outcome: 'Prescribed reading glasses' },
+    { id: 'V-005', date: '2024-07-12', type: 'Follow-up', clinic: 'General', doctor: 'Dr. Adebayo', diagnosis: 'Mild hypertension', outcome: 'Started on Amlodipine 5mg' },
+    { id: 'V-006', date: '2024-05-20', type: 'Consultation', clinic: 'Physiotherapy', doctor: 'Dr. Bello', diagnosis: 'Lumbar strain', outcome: 'Physiotherapy sessions, improved' },
   ],
   diagnoses: [
     { code: 'I10', name: 'Essential Hypertension', status: 'Active', diagnosedDate: '2024-07-12', treatingDoctor: 'Dr. Adebayo' },
@@ -340,6 +320,14 @@ const demoPatientHistory: any = {
     { name: 'Artemether-Lumefantrine', dosage: '4 tablets', frequency: 'Twice daily x 3 days', startDate: '2024-09-18', endDate: '2024-09-21', status: 'Completed', prescribedBy: 'Dr. Eze' },
     { name: 'Ibuprofen 400mg', dosage: '1 tablet', frequency: 'Three times daily', startDate: '2024-10-22', endDate: '2024-10-29', status: 'Completed', prescribedBy: 'Dr. Okonkwo' },
     { name: 'Diclofenac Gel', dosage: 'Apply to affected area', frequency: 'Twice daily', startDate: '2024-05-20', endDate: '2024-06-20', status: 'Completed', prescribedBy: 'Dr. Bello' },
+  ],
+  prescriptions: [
+    { id: 'RX-2024-001', date: '2024-11-15', prescriptionId: 'RX-001', doctor: 'Dr. Adebayo', status: 'dispensed', diagnosis: 'Essential Hypertension', medications: ['Amlodipine 5mg', 'Lisinopril 10mg'], notes: 'Continue current medications' },
+    { id: 'RX-2024-002', date: '2024-10-22', prescriptionId: 'RX-002', doctor: 'Dr. Okonkwo', status: 'dispensed', diagnosis: 'Costochondritis', medications: ['Ibuprofen 400mg'], notes: 'Take with food' },
+    { id: 'RX-2024-003', date: '2024-09-18', prescriptionId: 'RX-003', doctor: 'Dr. Eze', status: 'dispensed', diagnosis: 'Malaria', medications: ['Artemether-Lumefantrine', 'Paracetamol 1g'], notes: 'Complete full course' },
+    { id: 'RX-2024-004', date: '2024-08-05', prescriptionId: 'RX-004', doctor: 'Dr. Adamu', status: 'dispensed', diagnosis: 'Presbyopia', medications: ['Reading Glasses'], notes: 'Use for reading only' },
+    { id: 'RX-2024-005', date: '2024-07-12', prescriptionId: 'RX-005', doctor: 'Dr. Adebayo', status: 'dispensed', diagnosis: 'Mild Hypertension', medications: ['Amlodipine 5mg'], notes: 'Start medication' },
+    { id: 'RX-2024-006', date: '2024-05-20', prescriptionId: 'RX-006', doctor: 'Dr. Bello', status: 'dispensed', diagnosis: 'Lumbar Strain', medications: ['Diclofenac Gel'], notes: 'Apply to affected area' },
   ],
   labResults: [
     { 
@@ -520,7 +508,6 @@ const demoConsultationSessions: any[] = [
     doctor: 'Dr. Adebayo Ogundimu',
     doctorSpecialty: 'Internal Medicine',
     patient: { name: 'Oluwaseun Adeyemi', patientId: 'NPA-2024-001', age: 45, gender: 'Male' },
-    chiefComplaint: 'Hypertension follow-up',
     vitals: { temperature: '37.2°C', bloodPressure: '135/88', heartRate: '82 bpm', respiratoryRate: '18/min', oxygenSaturation: '97%', weight: '82.5 kg' },
     medicalNotes: {
       historyOfPresentIllness: 'Patient returns for routine hypertension follow-up. Reports occasional mild headaches in the morning. No chest pain, shortness of breath, or palpitations. Compliant with medications.',
@@ -555,7 +542,6 @@ const demoConsultationSessions: any[] = [
     doctor: 'Dr. Chukwuma Okonkwo',
     doctorSpecialty: 'General Practice',
     patient: { name: 'Oluwaseun Adeyemi', patientId: 'NPA-2024-001', age: 45, gender: 'Male' },
-    chiefComplaint: 'Chest discomfort for 2 days',
     vitals: { temperature: '36.5°C', bloodPressure: '128/82', heartRate: '75 bpm', respiratoryRate: '16/min', oxygenSaturation: '99%', weight: '83 kg' },
     medicalNotes: {
       historyOfPresentIllness: 'Patient presents with left-sided chest discomfort for 2 days. Pain is sharp, localized, worsens with movement and deep breathing. No radiation. No SOB, palpitations, or diaphoresis. Started after moving heavy boxes at home.',
@@ -588,7 +574,6 @@ const demoConsultationSessions: any[] = [
     doctor: 'Dr. Emeka Eze',
     doctorSpecialty: 'Emergency Medicine',
     patient: { name: 'Oluwaseun Adeyemi', patientId: 'NPA-2024-001', age: 45, gender: 'Male' },
-    chiefComplaint: 'High fever, body aches, severe headache',
     vitals: { temperature: '38.1°C', bloodPressure: '140/92', heartRate: '92 bpm', respiratoryRate: '20/min', oxygenSaturation: '96%', weight: '81 kg' },
     medicalNotes: {
       historyOfPresentIllness: 'Patient presents to ER with high-grade fever (38.5°C at home), severe headache, generalized body aches, and chills for 1 day. Reports recent travel to malaria-endemic area. No cough, vomiting, or diarrhea.',
@@ -657,8 +642,22 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   const [followUpRequired, setFollowUpRequired] = useState(false);
   const [followUpDate, setFollowUpDate] = useState("");
   const [followUpReason, setFollowUpReason] = useState("");
-  const [medicalNotes, setMedicalNotes] = useState({ chiefComplaint: "", historyOfPresentIllness: "", physicalExamination: "", assessment: "", plan: "" });
+  const [medicalNotes, setMedicalNotes] = useState({ historyOfPresentIllness: "", physicalExamination: "", assessment: "", plan: "" });
   const [diagnoses, setDiagnoses] = useState<{ id: string; code: string; name: string; type: 'Primary' | 'Secondary' | 'Differential'; notes: string }[]>([]);
+  const [medicalHistory, setMedicalHistory] = useState({
+    allergies: [] as string[],
+    diagnoses: [] as Array<{ code?: string; name: string; status: string; diagnosedDate?: string; treatingDoctor?: string }>,
+    surgicalHistory: [] as Array<{ procedure: string; date: string; hospital: string }>,
+    familyHistory: [] as Array<{ relation: string; condition: string }>,
+    socialHistory: {
+      smoking: '',
+      alcohol: '',
+      exercise: '',
+      occupation: '',
+    },
+  });
+  const [showEditMedicalHistory, setShowEditMedicalHistory] = useState(false);
+  const [loadingMedicalHistory, setLoadingMedicalHistory] = useState(false);
   const [showAddDiagnosis, setShowAddDiagnosis] = useState(false);
   const [diagnosisSearch, setDiagnosisSearch] = useState('');
   const [showDiagnosisDropdown, setShowDiagnosisDropdown] = useState(false);
@@ -667,6 +666,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   const [prescriptions, setPrescriptions] = useState<{ 
     id: string;
     medication: string; 
+    medicationId?: number; // Store the actual medication ID from database
     genericName: string;
     dosage: string; 
     frequency: string; 
@@ -680,6 +680,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   const [showAddPrescription, setShowAddPrescription] = useState(false);
   const [newPrescription, setNewPrescription] = useState({ 
     medication: "", 
+    medicationId: undefined as number | undefined, // Store medication ID
     genericName: "",
     dosage: "", 
     frequency: "", 
@@ -692,13 +693,40 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   });
   const [medicationSearch, setMedicationSearch] = useState("");
   const [showMedicationDropdown, setShowMedicationDropdown] = useState(false);
+  const [selectedMedications, setSelectedMedications] = useState<Set<number>>(new Set()); // Track selected medication IDs for multi-select
+  const [medicationConfigs, setMedicationConfigs] = useState<Map<number, {
+    dosage: string;
+    frequency: string;
+    duration: string;
+    durationDays: number;
+    quantity: number;
+    route: string;
+    instructions: string;
+    priority: string;
+  }>>(new Map()); // Store individual configuration for each selected medication
   const [prescriptionsSentToPharmacy, setPrescriptionsSentToPharmacy] = useState(false);
-  const [labOrders, setLabOrders] = useState<{ test: string; priority: string; notes: string }[]>([]);
+  const [medications, setMedications] = useState<any[]>([]); // Store real medications from API
+  const [loadingMedications, setLoadingMedications] = useState(false);
+  const [labOrders, setLabOrders] = useState<{ 
+    id: string;
+    test: string; 
+    testId?: number; // Template ID
+    code?: string;
+    sampleType?: string;
+    priority: string; 
+    notes: string;
+    status: 'Draft' | 'Sent to Lab';
+  }[]>([]);
   const [showAddLabOrder, setShowAddLabOrder] = useState(false);
   const [newLabOrder, setNewLabOrder] = useState({ test: "", priority: "Routine", notes: "" });
+  const [labTemplates, setLabTemplates] = useState<any[]>([]);
+  const [loadingLabTemplates, setLoadingLabTemplates] = useState(false);
+  const [labTemplateSearch, setLabTemplateSearch] = useState("");
+  const [showLabTemplateDropdown, setShowLabTemplateDropdown] = useState(false);
+  const [selectedLabTemplates, setSelectedLabTemplates] = useState<Set<number>>(new Set());
   const [nursingOrders, setNursingOrders] = useState<{
     id: string;
-    type: 'Injection' | 'Dressing' | 'IV Infusion' | 'Nebulization' | 'Catheterization' | 'Vital Signs' | 'Other';
+    type: 'Injection' | 'Dressing';
     medication?: string;
     dosage?: string;
     route?: string;
@@ -780,20 +808,30 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   const [showLabResultViewer, setShowLabResultViewer] = useState(false);
   const [expandedLabResults, setExpandedLabResults] = useState<string[]>([]);
 
+  const [selectedPrescription, setSelectedPrescription] = useState<any | null>(null);
+  const [showPrescriptionViewer, setShowPrescriptionViewer] = useState(false);
+
   // History tab filters
   const [sessionDateFilter, setSessionDateFilter] = useState<string>('all');
   const [labDateFilter, setLabDateFilter] = useState<string>('all');
   const [labStatusFilter, setLabStatusFilter] = useState<string>('all');
   const [imagingDateFilter, setImagingDateFilter] = useState<string>('all');
   const [imagingStatusFilter, setImagingStatusFilter] = useState<string>('all');
+  const [vitalsDateFilter, setVitalsDateFilter] = useState<string>('all');
+  const [prescriptionsDateFilter, setPrescriptionsDateFilter] = useState<string>('all');
+  const [prescriptionsStatusFilter, setPrescriptionsStatusFilter] = useState<string>('all');
   
   // Pagination state
   const [consultationsPage, setConsultationsPage] = useState(1);
   const [labResultsPage, setLabResultsPage] = useState(1);
   const [imagingPage, setImagingPage] = useState(1);
+  const [vitalsPage, setVitalsPage] = useState(1);
+  const [prescriptionsPage, setPrescriptionsPage] = useState(1);
   const [consultationsPerPage, setConsultationsPerPage] = useState(10);
   const [labResultsPerPage, setLabResultsPerPage] = useState(10);
   const [imagingPerPage, setImagingPerPage] = useState(10);
+  const [vitalsPerPage, setVitalsPerPage] = useState(10);
+  const [prescriptionsPerPage, setPrescriptionsPerPage] = useState(10);
 
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isRefreshingQueue, setIsRefreshingQueue] = useState(false);
@@ -841,51 +879,46 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           
           let visitDate = new Date().toISOString().split('T')[0];
           let visitTime = new Date().toTimeString().slice(0, 5);
-          let chiefComplaint = item.notes || '';
-          
-          if (item.visit) {
-            try {
-              const visit = await apiFetch(`/visits/${item.visit}/`) as {
-                date?: string;
-                time?: string;
-                chief_complaint?: string;
-              };
-              visitDate = visit.date || visitDate;
-              visitTime = visit.time || visitTime;
-              chiefComplaint = visit.chief_complaint || chiefComplaint;
-            } catch (err) {
-              console.warn('Could not load visit details:', err);
+            if (item.visit) {
+              try {
+                const visit = await apiFetch(`/visits/${item.visit}/`) as {
+                  date?: string;
+                  time?: string;
+                };
+                visitDate = visit.date || visitDate;
+                visitTime = visit.time || visitTime;
+              } catch (err) {
+                console.warn('Could not load visit details:', err);
+              }
             }
-          }
-          
-          let vitalsData = null;
-          if (item.visit) {
-            try {
-              const vitalsResult = await apiFetch<{ results: any[] }>(`/vitals/?visit=${item.visit}&ordering=-recorded_at`);
-              vitalsData = vitalsResult.results?.[0] || null;
-            } catch (err) {
-              console.warn('Could not load vitals:', err);
+            
+            let vitalsData = null;
+            if (item.visit) {
+              try {
+                const vitalsResult = await apiFetch<{ results: any[] }>(`/vitals/?visit=${item.visit}&ordering=-recorded_at`);
+                vitalsData = vitalsResult.results?.[0] || null;
+              } catch (err) {
+                console.warn('Could not load vitals:', err);
+              }
             }
-          }
-          
-          const queuedAt = new Date(item.queued_at);
-          const waitTime = Math.floor((Date.now() - queuedAt.getTime()) / (1000 * 60));
-          
-          const getPriority = (priorityNum: number): Patient['priority'] => {
-            return getPriorityLabel(priorityNum);
-          };
-          
-          return {
-            id: String(item.patient),
-            visitId: item.visit ? String(item.visit) : '',
-            patientId: patient.patient_id || String(patient.id),
-            name: patient.full_name || `${patient.first_name} ${patient.surname}`,
-            age: patient.age || 0,
-            gender: patient.gender || '',
-            mrn: patient.patient_id || '',
-            personalNumber: patient.personal_number || '',
-            allergies: [],
-            chiefComplaint,
+            
+            const queuedAt = new Date(item.queued_at);
+            const waitTime = Math.floor((Date.now() - queuedAt.getTime()) / (1000 * 60));
+            
+            const getPriority = (priorityNum: number): Patient['priority'] => {
+              return getPriorityLabel(priorityNum);
+            };
+            
+            return {
+              id: String(item.patient),
+              visitId: item.visit ? String(item.visit) : '',
+              patientId: patient.patient_id || String(patient.id),
+              name: patient.full_name || `${patient.first_name} ${patient.surname}`,
+              age: patient.age || 0,
+              gender: patient.gender || '',
+              mrn: patient.patient_id || '',
+              personalNumber: patient.personal_number || '',
+              allergies: [],
             waitTime: waitTime > 0 ? waitTime : 0,
             vitalsCompleted: !!vitalsData,
             priority: getPriority(typeof item.priority === 'number' ? item.priority : parseInt(item.priority) || 0),
@@ -894,6 +927,15 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
             queuePosition: index + 1,
             bloodGroup: patient.blood_group || undefined,
             genotype: patient.genotype || undefined,
+            employeeType: (patient as any).employee_type || undefined,
+            division: (patient as any).division || undefined,
+            location: (patient as any).location || undefined,
+            phone: (patient as any).phone || undefined,
+            email: (patient as any).email || undefined,
+            occupation: (patient as any).occupation || undefined,
+            religion: (patient as any).religion || undefined,
+            tribe: (patient as any).tribe || undefined,
+            photo: (patient as any).photo || null,
             vitals: vitalsData ? {
               temperature: vitalsData.temperature?.toString() || '',
               bloodPressure: `${vitalsData.blood_pressure_systolic || ''}/${vitalsData.blood_pressure_diastolic || ''}`,
@@ -992,18 +1034,15 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
             // Get visit details if available
             let visitDate = new Date().toISOString().split('T')[0];
             let visitTime = new Date().toTimeString().slice(0, 5);
-            let chiefComplaint = item.notes || '';
             
             if (item.visit) {
               try {
                 const visit = await apiFetch(`/visits/${item.visit}/`) as {
                   date?: string;
                   time?: string;
-                  chief_complaint?: string;
                 };
                 visitDate = visit.date || visitDate;
                 visitTime = visit.time || visitTime;
-                chiefComplaint = visit.chief_complaint || chiefComplaint;
               } catch (err) {
                 console.warn('Could not load visit details:', err);
               }
@@ -1041,7 +1080,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
               mrn: patient.patient_id || '',
               personalNumber: patient.personal_number || '',
               allergies: [], // TODO: Load from patient allergies
-              chiefComplaint,
               waitTime: waitTime > 0 ? waitTime : 0,
               vitalsCompleted: !!vitalsData,
               priority: getPriority(typeof item.priority === 'number' ? item.priority : parseInt(item.priority) || 0), // Default to 0 (Emergency) to match backend default
@@ -1050,6 +1088,14 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
               queuePosition: index + 1,
               bloodGroup: patient.blood_group || undefined,
               genotype: patient.genotype || undefined,
+              employeeType: (patient as any).employee_type || undefined,
+              division: (patient as any).division || undefined,
+              location: (patient as any).location || undefined,
+              phone: (patient as any).phone || undefined,
+              email: (patient as any).email || undefined,
+              occupation: (patient as any).occupation || undefined,
+              religion: (patient as any).religion || undefined,
+              tribe: (patient as any).tribe || undefined,
               vitals: vitalsData ? {
                 temperature: vitalsData.temperature?.toString() || '',
                 bloodPressure: `${vitalsData.blood_pressure_systolic || ''}/${vitalsData.blood_pressure_diastolic || ''}`,
@@ -1088,6 +1134,13 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         
         setRoom(transformedRoom);
         setPatients(validPatients);
+        
+        // Check for active session and restore it
+        const activeSession = (roomData as any).active_session;
+        if (activeSession && activeSession.id) {
+          console.log('Found active session, restoring...', activeSession);
+          await restoreActiveSession(activeSession.id);
+        }
       } catch (err) {
         console.error('Error loading room data:', err);
         if (isAuthenticationError(err)) {
@@ -1100,9 +1153,286 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       }
     };
   
+  // Function to restore active session
+  const restoreActiveSession = async (sessionId: number) => {
+    try {
+      console.log('Restoring active session:', sessionId);
+      
+      // Load full session data
+      const session = await consultationService.getSession(sessionId);
+      console.log('Loaded session data:', session);
+      
+      // Load patient data
+      const patient = await patientService.getPatient(session.patient);
+      console.log('Loaded patient data:', patient);
+      
+      // Load visit data if available
+      let visitData: any = null;
+      let visitId: string | number | null = null;
+      if (session.visit) {
+        visitId = session.visit;
+        try {
+          visitData = await apiFetch(`/visits/${visitId}/`);
+          console.log('Loaded visit data:', visitData);
+        } catch (visitErr) {
+          console.warn('Could not load visit data:', visitErr);
+        }
+      }
+      
+      // Restore patient state
+      const restoredPatient: Patient = {
+        id: String(patient.id),
+        visitId: visitId ? String(visitId) : '',
+        patientId: patient.patient_id || String(patient.id),
+        name: patient.full_name || `${patient.first_name} ${patient.surname}`,
+        age: patient.age || 0,
+        gender: patient.gender || '',
+        mrn: patient.patient_id || '',
+        personalNumber: (patient as any).personal_number,
+        allergies: (patient as any).allergies || [],
+        waitTime: 0,
+        vitalsCompleted: false,
+        priority: 'Medium' as const,
+        visitDate: visitData?.date || new Date().toISOString().split('T')[0],
+        visitTime: visitData?.time || '',
+        bloodGroup: (patient as any).blood_group,
+        genotype: (patient as any).genotype,
+        employeeType: (patient as any).employee_type,
+        division: (patient as any).division,
+        location: (patient as any).location,
+        phone: (patient as any).phone,
+        email: (patient as any).email,
+        occupation: (patient as any).occupation,
+        religion: (patient as any).religion,
+        tribe: (patient as any).tribe,
+        photo: (patient as any).photo || null,
+      };
+      
+      // Load vitals if available
+      if (visitId) {
+        try {
+          const vitalsResult = await apiFetch<{ results: any[] }>(`/vitals/?visit=${visitId}&page_size=100`);
+          const latestVitals = vitalsResult.results?.[0];
+          if (latestVitals) {
+            restoredPatient.vitals = {
+              temperature: latestVitals.temperature || '',
+              bloodPressure: latestVitals.systolic_bp && latestVitals.diastolic_bp 
+                ? `${latestVitals.systolic_bp}/${latestVitals.diastolic_bp}` 
+                : '',
+              heartRate: latestVitals.heart_rate || '',
+              respiratoryRate: latestVitals.respiratory_rate || '',
+              oxygenSaturation: latestVitals.oxygen_saturation || '',
+              weight: latestVitals.weight || '',
+              height: latestVitals.height || '',
+              recordedAt: latestVitals.recorded_at || '',
+            };
+            restoredPatient.vitalsCompleted = true;
+          }
+        } catch (vitalsErr) {
+          console.warn('Could not load vitals:', vitalsErr);
+        }
+      }
+      
+      // Restore session state
+      setCurrentPatient(restoredPatient);
+      setSessionActive(true);
+      setSessionId(session.id);
+      setSessionStartTime(new Date(session.started_at));
+      
+      // Calculate session duration
+      const now = new Date();
+      const startTime = new Date(session.started_at);
+      const minutes = Math.floor((now.getTime() - startTime.getTime()) / (1000 * 60));
+      setSessionDuration(minutes);
+      
+      // Restore medical notes
+      setMedicalNotes({
+        historyOfPresentIllness: session.history_of_presenting_illness || '',
+        physicalExamination: session.physical_examination || '',
+        assessment: session.assessment || '',
+        plan: session.plan || '',
+      });
+      
+      // Load medical history
+      try {
+        const numericPatientId = typeof patient.id === 'number' ? patient.id : parseInt(patient.id, 10);
+        const history = await patientService.getPatientHistory(numericPatientId);
+        setMedicalHistory({
+          allergies: Array.isArray(history.allergies) ? history.allergies : [],
+          diagnoses: Array.isArray(history.diagnoses) ? history.diagnoses : [],
+          surgicalHistory: Array.isArray(history.surgical_history) ? history.surgical_history : [],
+          familyHistory: Array.isArray(history.family_history) ? history.family_history : [],
+          socialHistory: {
+            smoking: history.social_history?.smoking || '',
+            alcohol: history.social_history?.alcohol || '',
+            exercise: history.social_history?.exercise || '',
+            occupation: history.social_history?.occupation || '',
+          },
+        });
+      } catch (historyErr) {
+        console.warn('Could not load medical history:', historyErr);
+        setMedicalHistory({
+          allergies: [],
+          diagnoses: [],
+          surgicalHistory: [],
+          familyHistory: [],
+          socialHistory: { smoking: '', alcohol: '', exercise: '', occupation: '' },
+        });
+      }
+      
+      // Load prescriptions if visit exists
+      if (visitId) {
+        try {
+          const prescriptionsResult = await apiFetch<{ results: any[] }>(`/pharmacy/prescriptions/?visit=${visitId}&page_size=100`);
+          // Transform prescriptions for the UI
+          const transformedPrescriptions = prescriptionsResult.results?.flatMap((rx: any) => 
+            (rx.medications || []).map((item: any) => ({
+              id: `RX-${rx.id}-${item.id}`,
+              medication: item.medication?.name || 'Unknown',
+              medicationId: item.medication?.id,
+              genericName: item.medication?.generic_name || '',
+              dosage: item.dosage || '',
+              frequency: item.frequency || '',
+              duration: item.duration || '',
+              quantity: item.quantity || 0,
+              route: item.route || 'Oral',
+              instructions: item.instructions || '',
+              priority: item.priority || 'Routine',
+              status: rx.status === 'dispensed' ? 'Dispensed' : rx.status === 'partially_dispensed' ? 'Partially Dispensed' : 'Draft',
+            })) || []
+          ) || [];
+          setPrescriptions(transformedPrescriptions);
+        } catch (prescriptionErr) {
+          console.warn('Could not load prescriptions:', prescriptionErr);
+        }
+      }
+      
+      // Load lab orders if visit exists
+      if (visitId) {
+        try {
+          const labOrdersResult = await apiFetch<{ results: any[] }>(`/laboratory/orders/?visit=${visitId}&page_size=100`);
+          // Transform lab orders - each order has multiple tests
+          const transformedLabOrders: typeof labOrders = [];
+          labOrdersResult.results?.forEach((order: any) => {
+            // Each order can have multiple tests
+            (order.tests || []).forEach((test: any) => {
+              transformedLabOrders.push({
+                id: `LAB-${order.id}-${test.id}`,
+                test: test.name || 'Unknown Test',
+                testId: test.template,
+                code: test.code,
+                sampleType: test.sample_type,
+                priority: order.priority === 'routine' ? 'Routine' : order.priority === 'urgent' ? 'Urgent' : 'STAT',
+                notes: test.notes || order.clinical_notes || '',
+                status: 'Sent to Lab' as const, // Already sent if loaded from API
+              });
+            });
+          });
+          setLabOrders(transformedLabOrders);
+        } catch (labErr) {
+          console.warn('Could not load lab orders:', labErr);
+        }
+      }
+      
+      // Load radiology orders if visit exists
+      if (visitId) {
+        try {
+          const radiologyOrdersResult = await apiFetch<{ results: any[] }>(`/radiology/orders/?visit=${visitId}&page_size=100`);
+          // Transform radiology orders - each order has multiple studies
+          const transformedRadiologyOrders: typeof radiologyOrders = [];
+          radiologyOrdersResult.results?.forEach((order: any) => {
+            // Each order can have multiple studies
+            (order.studies || []).forEach((study: any) => {
+              transformedRadiologyOrders.push({
+                id: `RAD-${order.id}-${study.id}`,
+                procedure: study.procedure || 'Unknown Procedure',
+                category: study.modality || 'X-Ray',
+                bodyPart: study.body_part || '',
+                clinicalIndication: order.clinical_notes || '',
+                priority: order.priority === 'routine' ? 'Routine' : order.priority === 'urgent' ? 'Urgent' : 'STAT',
+                contrastRequired: false, // Not stored in backend model
+                specialInstructions: study.technical_notes || undefined,
+                status: 'Sent to Radiology' as const, // Already sent if loaded from API
+              });
+            });
+          });
+          setRadiologyOrders(transformedRadiologyOrders);
+        } catch (radiologyErr) {
+          console.warn('Could not load radiology orders:', radiologyErr);
+        }
+      }
+      
+      toast.success(`Restored active session with ${restoredPatient.name}`);
+      console.log('Session restored successfully');
+    } catch (err: any) {
+      console.error('Error restoring active session:', err);
+      toast.error('Failed to restore active session. You may need to start a new session.');
+      // Don't throw - allow the page to load normally
+    }
+  };
+  
   useEffect(() => {
     loadRoomData();
   }, [roomId]);
+
+  // Load medications from API when component mounts
+  useEffect(() => {
+    const loadMedications = async () => {
+      try {
+        setLoadingMedications(true);
+        const response = await pharmacyService.getMedications({ page_size: 1000 });
+        const loadedMeds = response.results || [];
+        setMedications(loadedMeds);
+        console.log(`[Consultation] Loaded ${loadedMeds.length} medications from API`);
+        // Debug: Check if paracetamol is in the list
+        const paracetamolMeds = loadedMeds.filter((m: any) => m.name?.toLowerCase().includes('paracetamol'));
+        if (paracetamolMeds.length > 0) {
+          console.log(`[Consultation] Found ${paracetamolMeds.length} paracetamol medications:`, paracetamolMeds.map((m: any) => m.name));
+        }
+      } catch (err) {
+        console.error('Failed to load medications:', err);
+        toast.error('Failed to load medications. Using fallback list.');
+        // Keep medications as empty array if loading fails
+      } finally {
+        setLoadingMedications(false);
+      }
+    };
+    loadMedications();
+  }, []);
+
+  // Load lab templates from API when component mounts
+  useEffect(() => {
+    const loadLabTemplates = async () => {
+      try {
+        setLoadingLabTemplates(true);
+        const templates = await labService.getTemplates();
+        setLabTemplates(templates);
+        console.log(`[Consultation] Loaded ${templates.length} lab templates from API`);
+      } catch (err) {
+        console.error('Failed to load lab templates:', err);
+        toast.error('Failed to load lab templates. Some tests may not be available.');
+      } finally {
+        setLoadingLabTemplates(false);
+      }
+    };
+    
+    loadLabTemplates();
+  }, []);
+
+  // Close lab template dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      if (showLabTemplateDropdown && !target.closest('[data-lab-template-dropdown]')) {
+        setShowLabTemplateDropdown(false);
+      }
+    };
+    
+    if (showLabTemplateDropdown) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [showLabTemplateDropdown]);
   
   const handleRefresh = async () => {
     setIsRefreshing(true);
@@ -1127,8 +1457,56 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     return () => clearInterval(interval);
   }, [sessionActive, sessionStartTime]);
 
+  // Auto-save medical notes every 30 seconds
+  useEffect(() => {
+    if (!sessionActive || !sessionId) return;
+    
+    const autoSave = async () => {
+      try {
+        await consultationService.updateSession(sessionId, {
+          history_of_presenting_illness: medicalNotes.historyOfPresentIllness || '',
+          physical_examination: medicalNotes.physicalExamination || '',
+          assessment: medicalNotes.assessment || '',
+          plan: medicalNotes.plan || '',
+        });
+        console.log('Auto-saved medical notes');
+      } catch (err) {
+        console.error('Auto-save failed:', err);
+        // Don't show error to user - silent fail for auto-save
+      }
+    };
+    
+    // Save immediately on mount if there's data
+    if (medicalNotes.historyOfPresentIllness || medicalNotes.physicalExamination || 
+        medicalNotes.assessment || medicalNotes.plan) {
+      autoSave();
+    }
+    
+    // Then save every 30 seconds
+    const interval = setInterval(autoSave, 30000);
+    return () => clearInterval(interval);
+  }, [sessionActive, sessionId, medicalNotes]);
+
   const handleStartSession = async (patient: Patient) => {
     try {
+      // Check if there's already an active session
+      if (sessionActive && sessionId) {
+        const confirmed = window.confirm(
+          `There is already an active session with ${currentPatient?.name || 'a patient'}. ` +
+          `Do you want to end that session and start a new one with ${patient.name}?`
+        );
+        if (!confirmed) {
+          return;
+        }
+        // End the current session first
+        try {
+          await consultationService.endSession(sessionId);
+        } catch (endErr) {
+          console.warn('Error ending previous session:', endErr);
+          // Continue anyway - backend will handle conflicts
+        }
+      }
+      
       // Create consultation session in backend
       const numericRoomId = parseInt(roomId);
       // patient.id is now the actual patient database ID (from queue item.patient)
@@ -1158,7 +1536,45 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       setSessionId(sessionData.id);
       setSessionStartTime(new Date());
       setSessionDuration(0);
-      setMedicalNotes({ ...medicalNotes, chiefComplaint: patient.chiefComplaint });
+      
+      // Reset form states for new session
+      setMedicalNotes({ historyOfPresentIllness: "", physicalExamination: "", assessment: "", plan: "" });
+      setDiagnoses([]);
+      setPrescriptions([]);
+      setLabOrders([]); // Reset lab orders when starting new session
+      setNursingOrders([]);
+      setReferrals([]);
+      setRadiologyOrders([]);
+      setFollowUpRequired(false);
+      setFollowUpDate("");
+      setFollowUpReason("");
+      
+      // Load medical history for the patient
+      try {
+        const history = await patientService.getPatientHistory(numericPatientId);
+        setMedicalHistory({
+          allergies: Array.isArray(history.allergies) ? history.allergies : [],
+          diagnoses: Array.isArray(history.diagnoses) ? history.diagnoses : [],
+          surgicalHistory: Array.isArray(history.surgical_history) ? history.surgical_history : [],
+          familyHistory: Array.isArray(history.family_history) ? history.family_history : [],
+          socialHistory: {
+            smoking: history.social_history?.smoking || '',
+            alcohol: history.social_history?.alcohol || '',
+            exercise: history.social_history?.exercise || '',
+            occupation: history.social_history?.occupation || '',
+          },
+        });
+      } catch (historyErr) {
+        console.warn('Could not load medical history:', historyErr);
+        setMedicalHistory({
+          allergies: [],
+          diagnoses: [],
+          surgicalHistory: [],
+          familyHistory: [],
+          socialHistory: { smoking: '', alcohol: '', exercise: '', occupation: '' },
+        });
+      }
+      
       toast.success(`Session started with ${patient.name}`);
     } catch (err: any) {
       console.error('Error starting session:', err);
@@ -1186,7 +1602,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         age: currentPatient.age,
         gender: currentPatient.gender
       },
-      chiefComplaint: medicalNotes.chiefComplaint,
       vitals: currentPatient.vitals,
       medicalNotes: medicalNotes,
       prescriptions: prescriptions,
@@ -1241,6 +1656,12 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     setShowLabResultViewer(true);
   };
 
+  // View prescription details
+  const viewPrescriptionDetails = (prescription: any) => {
+    setSelectedPrescription(prescription);
+    setShowPrescriptionViewer(true);
+  };
+
   // Toggle lab result expansion in history
   const toggleLabResultExpansion = (labId: string) => {
     setExpandedLabResults(prev => 
@@ -1284,7 +1705,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
       // Step 1: Save all medical notes and data to the session before ending
       const sessionUpdateData: any = {
-        chief_complaint: medicalNotes.chiefComplaint || '',
         history_of_presenting_illness: medicalNotes.historyOfPresentIllness || '',
         physical_examination: medicalNotes.physicalExamination || '',
         assessment: medicalNotes.assessment || '',
@@ -1383,10 +1803,10 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       setSessionId(null);
       setSessionStartTime(null);
       setSessionDuration(0);
-      setMedicalNotes({ chiefComplaint: "", historyOfPresentIllness: "", physicalExamination: "", assessment: "", plan: "" });
+      setMedicalNotes({ historyOfPresentIllness: "", physicalExamination: "", assessment: "", plan: "" });
       setDiagnoses([]);
       setPrescriptions([]);
-      setLabOrders([]);
+      setLabOrders([]); // Reset lab orders when starting new session
       setNursingOrders([]);
       setReferrals([]);
       setRadiologyOrders([]);
@@ -1403,31 +1823,42 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   };
 
   const addPrescription = () => { 
-    if (newPrescription.medication && newPrescription.dosage && newPrescription.frequency) { 
-      const rxId = `RX-${Date.now()}`;
-      const dailyDoses = frequencyToDailyDoses[newPrescription.frequency] || 1;
-      const calculatedQty = newPrescription.frequency === 'STAT (Single dose)' 
-        ? 1 
-        : Math.ceil(dailyDoses * newPrescription.durationDays);
-      
-      setPrescriptions([...prescriptions, {
-        id: rxId,
-        medication: newPrescription.medication,
-        genericName: newPrescription.genericName,
-        dosage: newPrescription.dosage,
-        frequency: newPrescription.frequency,
-        duration: newPrescription.duration,
-        quantity: calculatedQty || newPrescription.quantity,
-        route: newPrescription.route,
-        instructions: newPrescription.instructions,
-        priority: newPrescription.priority,
-        status: 'Draft'
-      }]); 
-      setNewPrescription({ medication: "", genericName: "", dosage: "", frequency: "", duration: "", durationDays: 0, quantity: 0, route: "Oral", instructions: "", priority: "Routine" }); 
-      setMedicationSearch("");
-      setShowAddPrescription(false); 
-      toast.success("Prescription added to order"); 
-    } 
+    // Validate required fields
+    if (!newPrescription.medication || !newPrescription.dosage || !newPrescription.frequency) {
+      toast.error("Please fill in all required fields (medication, dosage, frequency)");
+      return;
+    }
+
+    // CRITICAL: Ensure medicationId is present and is a valid number
+    if (!newPrescription.medicationId || isNaN(Number(newPrescription.medicationId))) {
+      toast.error("Please select a valid medication from the list. Medication ID is missing or invalid.");
+      return;
+    }
+
+    const rxId = `RX-${Date.now()}`;
+    const dailyDoses = frequencyToDailyDoses[newPrescription.frequency] || 1;
+    const calculatedQty = newPrescription.frequency === 'STAT (Single dose)' 
+      ? 1 
+      : Math.ceil(dailyDoses * newPrescription.durationDays);
+    
+    setPrescriptions([...prescriptions, {
+      id: rxId,
+      medication: newPrescription.medication,
+      medicationId: Number(newPrescription.medicationId), // Ensure it's a number
+      genericName: newPrescription.genericName,
+      dosage: newPrescription.dosage,
+      frequency: newPrescription.frequency,
+      duration: newPrescription.duration,
+      quantity: calculatedQty || newPrescription.quantity,
+      route: newPrescription.route,
+      instructions: newPrescription.instructions,
+      priority: newPrescription.priority,
+      status: 'Draft'
+    }]); 
+    setNewPrescription({ medication: "", medicationId: undefined, genericName: "", dosage: "", frequency: "", duration: "", durationDays: 0, quantity: 0, route: "Oral", instructions: "", priority: "Routine" }); 
+    setMedicationSearch("");
+    setShowAddPrescription(false); 
+    toast.success("Prescription added to order"); 
   };
 
   const sendPrescriptionsToPharmacy = async () => {
@@ -1456,68 +1887,286 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         return;
       }
       
-      // Create prescription in backend for each draft prescription
+      // Build items array for ONE prescription with ALL medications
+      const prescriptionItems: any[] = [];
+      const skippedMedications: string[] = [];
+      
       for (const rx of draftPrescriptions) {
-        try {
-          // Find medication ID from demoMedications (in real app, this would come from API)
-          const medication = demoMedications.find((m: any) => m.name === rx.medication);
-          
-          await pharmacyService.createPrescription({
-            patient: numericPatientId,
-            visit: numericVisitId || undefined,
-            doctor: sessionId ? undefined : undefined, // Will be set from request user in backend
-            diagnosis: diagnoses.length > 0 ? diagnoses.filter(d => d.type === 'Primary').map(d => `${d.code}: ${d.name}`).join('; ') : undefined,
-            notes: medicalNotes.assessment || undefined,
-            items: [{
-              medication: medication?.id ? parseInt(medication.id.replace('MED-', '')) : 0, // This would need proper medication ID
-              quantity: rx.quantity,
-              unit: 'tablet', // Default, should come from medication data
-              dosage: rx.dosage,
-              frequency: rx.frequency,
-              duration: rx.duration,
-              instructions: rx.instructions,
-            }],
-          } as any); // Use 'items' instead of 'medications' for write operations - backend expects 'items' for creation
-        } catch (err: any) {
-          console.error(`Error creating prescription for ${rx.medication}:`, err);
-          toast.error(`Failed to send ${rx.medication} to pharmacy`);
+        // Use the stored medication ID, or try to find it from medications list
+        let medicationId: number | undefined = rx.medicationId;
+        
+        if (!medicationId) {
+          // Fallback: try to find medication by name
+          const medication = medications.find((m: any) => m.name === rx.medication);
+          if (medication) {
+            medicationId = typeof medication.id === 'string' ? parseInt(medication.id, 10) : medication.id;
+          } else {
+            skippedMedications.push(rx.medication);
+            continue; // Skip this medication
+          }
         }
+        
+        // Ensure medicationId is a number
+        const numericMedicationId = typeof medicationId === 'string' ? parseInt(medicationId, 10) : medicationId;
+        
+        if (!numericMedicationId || isNaN(numericMedicationId) || numericMedicationId === 0) {
+          skippedMedications.push(rx.medication);
+          continue; // Skip this medication
+        }
+        
+        // Find medication details for unit
+        const medication = medications.find((m: any) => {
+          const mId = typeof m.id === 'string' ? parseInt(m.id, 10) : m.id;
+          return mId === numericMedicationId;
+        });
+        const unit = medication?.unit || 'tablet'; // Default to 'tablet' if not found
+        
+        // Add to items array
+        prescriptionItems.push({
+          medication: numericMedicationId,
+          quantity: rx.quantity,
+          unit: unit,
+          dosage: rx.dosage,
+          frequency: rx.frequency,
+          duration: rx.duration,
+          instructions: rx.instructions,
+        });
+      }
+      
+      // Show warning if some medications were skipped
+      if (skippedMedications.length > 0) {
+        toast.warning(`Skipped ${skippedMedications.length} invalid medication(s): ${skippedMedications.join(', ')}`);
+      }
+      
+      // Create ONE prescription with ALL items
+      if (prescriptionItems.length === 0) {
+        toast.error('No valid medications to send. Please check your prescription items.');
+        return;
+      }
+      
+      try {
+        await pharmacyService.createPrescription({
+          patient: numericPatientId,
+          visit: numericVisitId || undefined,
+          doctor: sessionId ? undefined : undefined, // Will be set from request user in backend
+          diagnosis: diagnoses.length > 0 ? diagnoses.filter(d => d.type === 'Primary').map(d => `${d.code}: ${d.name}`).join('; ') : undefined,
+          notes: medicalNotes.assessment || undefined,
+          items: prescriptionItems, // Send ALL items in ONE prescription
+        } as any);
+        
+        toast.success(`Prescription with ${prescriptionItems.length} medication(s) sent to Pharmacy queue`, {
+          description: `Patient: ${currentPatient?.name}`,
+          action: {
+            label: "View in Pharmacy",
+            onClick: () => window.open('/pharmacy/prescriptions', '_blank')
+          }
+        });
+      } catch (err: any) {
+        console.error('Error creating prescription:', err);
+        toast.error(`Failed to send prescription to pharmacy: ${err.message || 'Unknown error'}`);
+        return; // Don't update status if creation failed
       }
       
       setPrescriptions(prev => prev.map(rx => rx.status === 'Draft' ? { ...rx, status: 'Sent to Pharmacy' } : rx));
       setPrescriptionsSentToPharmacy(true);
-      toast.success(`${draftPrescriptions.length} prescription(s) sent to Pharmacy queue`, {
-        description: `Patient: ${currentPatient?.name}`,
-        action: {
-          label: "View in Pharmacy",
-          onClick: () => window.open('/pharmacy/prescriptions', '_blank')
-        }
-      });
     } catch (err: any) {
       console.error('Error sending prescriptions:', err);
       toast.error(err.message || 'Failed to send prescriptions to pharmacy');
     }
   };
 
-  const selectMedication = (med: any) => {
-    // Check for allergies
-    const isAllergyRisk = currentPatient?.allergies.some(allergy => 
-      med.name.toLowerCase().includes(allergy.toLowerCase()) || 
-      med.genericName.toLowerCase().includes(allergy.toLowerCase())
-    );
-    
-    if (isAllergyRisk) {
-      toast.error(`⚠️ Allergy Alert: Patient is allergic to ${currentPatient?.allergies.join(', ')}. This medication may be contraindicated.`);
+  const toggleMedicationSelection = (med: any) => {
+    // CRITICAL: Ensure medication ID is a valid number
+    let medicationId: number | undefined;
+    if (typeof med.id === 'number') {
+      medicationId = med.id;
+    } else if (typeof med.id === 'string') {
+      const parsed = parseInt(med.id, 10);
+      if (!isNaN(parsed) && parsed > 0) {
+        medicationId = parsed;
+      } else {
+        toast.error("Please select a medication from the database. Demo medications cannot be used.");
+        return;
+      }
+    } else {
+      toast.error("Invalid medication ID. Please select a valid medication.");
+      return;
     }
     
-    setNewPrescription({
-      ...newPrescription,
-      medication: med.name,
-      genericName: med.genericName,
-      dosage: `1 ${med.dosageForm.toLowerCase()}`
+    // Check for allergies when selecting
+    const isAllergyRisk = currentPatient?.allergies.some(allergy => 
+      med.name.toLowerCase().includes(allergy.toLowerCase()) || 
+      (med.generic_name || med.genericName || '').toLowerCase().includes(allergy.toLowerCase())
+    );
+    
+    if (isAllergyRisk && medicationId !== undefined && !selectedMedications.has(medicationId)) {
+      const confirmed = window.confirm(`⚠️ Allergy Alert: Patient is allergic to ${currentPatient?.allergies.join(', ')}. This medication may be contraindicated. Do you want to proceed?`);
+      if (!confirmed) {
+        return;
+      }
+    }
+    
+    // Toggle selection
+    setSelectedMedications(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(medicationId!)) {
+        // Remove medication and its config
+        newSet.delete(medicationId!);
+        setMedicationConfigs(prevConfigs => {
+          const newConfigs = new Map(prevConfigs);
+          newConfigs.delete(medicationId!);
+          return newConfigs;
+        });
+      } else {
+        // Add medication with sensible defaults based on form
+        newSet.add(medicationId!);
+        setMedicationConfigs(prevConfigs => {
+          const newConfigs = new Map(prevConfigs);
+          const form = med.form || med.dosageForm || 'tablet';
+          // Set sensible defaults based on medication form
+          const defaultDosage = form.toLowerCase().includes('tablet') || form.toLowerCase().includes('capsule') 
+            ? `1 ${form.toLowerCase()}`
+            : form.toLowerCase().includes('syrup') || form.toLowerCase().includes('suspension')
+            ? '5ml'
+            : form.toLowerCase().includes('injection') || form.toLowerCase().includes('vial')
+            ? '1 vial'
+            : `1 ${form.toLowerCase()}`;
+          
+          const defaultRoute = form.toLowerCase().includes('injection') || form.toLowerCase().includes('vial')
+            ? 'IV'
+            : 'Oral';
+          
+          newConfigs.set(medicationId!, {
+            dosage: defaultDosage,
+            frequency: 'Once daily (OD)',
+            duration: '',
+            durationDays: 0,
+            quantity: 0,
+            route: defaultRoute,
+            instructions: '',
+            priority: 'Routine',
+          });
+          return newConfigs;
+        });
+      }
+      return newSet;
     });
-    setMedicationSearch(med.name);
-    setShowMedicationDropdown(false);
+  };
+
+  const selectMedication = (med: any) => {
+    // For single select (backward compatibility) - toggle selection instead
+    toggleMedicationSelection(med);
+  };
+
+  const updateMedicationConfig = (medicationId: number, field: string, value: any) => {
+    setMedicationConfigs(prev => {
+      const newConfigs = new Map(prev);
+      const currentConfig = newConfigs.get(medicationId) || {
+        dosage: '',
+        frequency: 'Once daily (OD)',
+        duration: '',
+        durationDays: 0,
+        quantity: 0,
+        route: 'Oral',
+        instructions: '',
+        priority: 'Routine',
+      };
+      
+      const updatedConfig = { ...currentConfig, [field]: value };
+      
+      // Auto-calculate quantity when frequency or durationDays changes
+      if (field === 'frequency' || field === 'durationDays') {
+        const dailyDoses = frequencyToDailyDoses[updatedConfig.frequency] || 1;
+        updatedConfig.quantity = updatedConfig.frequency === 'STAT (Single dose)' 
+          ? 1 
+          : Math.ceil(dailyDoses * updatedConfig.durationDays);
+      }
+      
+      // Auto-update duration string when durationDays changes
+      if (field === 'durationDays') {
+        updatedConfig.duration = value > 0 ? `${value} days` : '';
+      }
+      
+      newConfigs.set(medicationId, updatedConfig);
+      return newConfigs;
+    });
+  };
+
+  const addSelectedMedicationsToPrescription = () => {
+    if (selectedMedications.size === 0) {
+      toast.error("Please select at least one medication");
+      return;
+    }
+    
+    // Validate all selected medications have required fields
+    const invalidMeds: string[] = [];
+    Array.from(selectedMedications).forEach(medId => {
+      const config = medicationConfigs.get(medId);
+      const med = medications.find((m: any) => {
+        const mId = typeof m.id === 'number' ? m.id : parseInt(m.id, 10);
+        return mId === medId;
+      });
+      
+      if (!config || !config.dosage || !config.frequency || (!config.durationDays && config.frequency !== 'STAT (Single dose)')) {
+        if (med) invalidMeds.push(med.name);
+      }
+    });
+    
+    if (invalidMeds.length > 0) {
+      toast.error(`Please fill in all required fields (dosage, frequency, duration) for: ${invalidMeds.join(', ')}`);
+      return;
+    }
+    
+    const selectedMeds = medications.filter((m: any) => {
+      const mId = typeof m.id === 'number' ? m.id : parseInt(m.id, 10);
+      return selectedMedications.has(mId);
+    });
+    
+    // Add all selected medications to prescriptions list with their individual configs
+    const newPrescriptions: {
+      id: string;
+      medication: string;
+      medicationId?: number;
+      genericName: string;
+      dosage: string;
+      frequency: string;
+      duration: string;
+      quantity: number;
+      route: string;
+      instructions: string;
+      priority: string;
+      status: 'Draft' | 'Sent to Pharmacy' | 'Processing' | 'Dispensed';
+    }[] = selectedMeds.map((med: any) => {
+      const medicationId = typeof med.id === 'number' ? med.id : parseInt(med.id, 10);
+      const config = medicationConfigs.get(medicationId)!;
+      const rxId = `RX-${Date.now()}-${medicationId}`;
+      
+      return {
+        id: rxId,
+        medication: med.name,
+        medicationId: medicationId,
+        genericName: med.generic_name || med.genericName || '',
+        dosage: config.dosage,
+        frequency: config.frequency,
+        duration: config.duration,
+        quantity: config.quantity,
+        route: config.route,
+        instructions: config.instructions,
+        priority: config.priority,
+        status: 'Draft' as const
+      };
+    });
+    
+    setPrescriptions([...prescriptions, ...newPrescriptions]);
+    
+    // Reset form and selections
+    setSelectedMedications(new Set());
+    setMedicationConfigs(new Map());
+    setNewPrescription({ medication: "", medicationId: undefined, genericName: "", dosage: "", frequency: "", duration: "", durationDays: 0, quantity: 0, route: "Oral", instructions: "", priority: "Routine" });
+    setMedicationSearch("");
+    setShowAddPrescription(false);
+    
+    toast.success(`${selectedMeds.length} medication(s) added to prescription order`);
   };
 
   const calculateQuantity = (frequency: string, durationDays: number) => {
@@ -1526,16 +2175,77 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     return Math.ceil(dailyDoses * durationDays);
   };
 
+  // CRITICAL: Only use real medications from API - do NOT use demo medications
+  // Demo medications have string IDs which cannot be used for prescriptions
+  const availableMedications = medications.length > 0 ? medications : [];
   const filteredMedications = medicationSearch 
-    ? demoMedications.filter((med: any) => 
-        med.name?.toLowerCase().includes(medicationSearch.toLowerCase()) ||
-        med.genericName?.toLowerCase().includes(medicationSearch.toLowerCase()) ||
-        med.category?.toLowerCase().includes(medicationSearch.toLowerCase())
-      )
-    : demoMedications;
-  const addLabOrder = async () => {
-    if (!newLabOrder.test) {
-      toast.error('Please select a test');
+    ? availableMedications.filter((med: any) => {
+        const searchTerm = medicationSearch.toLowerCase().trim();
+        if (!searchTerm) return true; // Show all if search is empty
+        
+        const name = (med.name || '').toLowerCase();
+        const genericName = ((med.generic_name || med.genericName || '')).toLowerCase();
+        const category = ((med.category || '')).toLowerCase();
+        const form = ((med.form || med.dosageForm || '')).toLowerCase();
+        const code = ((med.code || '')).toLowerCase();
+        
+        return name.includes(searchTerm) ||
+               genericName.includes(searchTerm) ||
+               category.includes(searchTerm) ||
+               form.includes(searchTerm) ||
+               code.includes(searchTerm);
+      })
+    : availableMedications;
+  // Toggle lab template selection
+  const toggleLabTemplateSelection = (template: any) => {
+    const templateId = template.id;
+    setSelectedLabTemplates(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(templateId)) {
+        newSet.delete(templateId);
+      } else {
+        newSet.add(templateId);
+      }
+      return newSet;
+    });
+  };
+
+  // Add selected lab templates to draft order (like prescriptions)
+  const addLabOrder = () => {
+    if (selectedLabTemplates.size === 0) {
+      toast.error('Please select at least one test');
+      return;
+    }
+    
+    // Get selected templates
+    const selectedTemplates = labTemplates.filter(t => selectedLabTemplates.has(t.id));
+    
+    // Add to draft lab orders (not sent yet)
+    const newOrders = selectedTemplates.map(template => ({
+      id: `LAB-${Date.now()}-${template.id}`,
+      test: template.name,
+      testId: template.id,
+      code: template.code,
+      sampleType: template.sample_type || 'Blood',
+      priority: newLabOrder.priority,
+      notes: newLabOrder.notes,
+      status: 'Draft' as const,
+    }));
+    
+    setLabOrders([...labOrders, ...newOrders]);
+    setSelectedLabTemplates(new Set());
+    setLabTemplateSearch("");
+    setNewLabOrder({ test: "", priority: "Routine", notes: "" });
+    setShowAddLabOrder(false);
+    toast.success(`${selectedTemplates.length} test(s) added to order`);
+  };
+
+  // Send all draft lab orders to lab (like sendPrescriptionsToPharmacy)
+  const sendLabOrdersToLab = async () => {
+    const draftOrders = labOrders.filter(order => order.status === 'Draft');
+    
+    if (draftOrders.length === 0) {
+      toast.info("No draft lab orders to send");
       return;
     }
     
@@ -1554,39 +2264,112 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         return;
       }
       
-      // Create lab order in backend
+      // Group tests by priority (use the most urgent priority for the order)
+      const priorityOrder: Record<string, number> = { 'STAT': 0, 'Urgent': 1, 'Routine': 2 };
+      const orderPriority = draftOrders.reduce((highest, order) => {
+        const currentPriority = priorityOrder[order.priority] ?? 2;
+        const highestPriority = priorityOrder[highest] ?? 2;
+        return currentPriority < highestPriority ? order.priority : highest;
+      }, 'Routine');
+      
+      // Combine all notes (or use the first one)
+      const combinedNotes = draftOrders.map(o => o.notes).filter(n => n).join('; ') || undefined;
+      
+      // Create lab order in backend with all selected tests
       const priorityMap: Record<string, 'routine' | 'urgent' | 'stat'> = {
         'Routine': 'routine',
         'Urgent': 'urgent',
         'STAT': 'stat',
       };
       
-      await labService.createOrder({
-        patient: numericPatientId as any, // API expects patient ID number, interface shows object for response
-        visit: numericVisitId || undefined,
-        priority: priorityMap[newLabOrder.priority] || 'routine',
-        clinical_notes: newLabOrder.notes || undefined,
-        tests_data: [{
-          name: newLabOrder.test,
-          code: newLabOrder.test.substring(0, 10).toUpperCase().replace(/\s/g, '_'),
-          sample_type: 'Blood', // Default, should be determined from test
-          status: 'pending',
-        }] as any, // ID will be assigned by backend
-      } as any); // Visit field may not be in interface but is accepted by API
+      const testsData = draftOrders.map(order => ({
+        name: order.test,
+        code: order.code || order.test.substring(0, 10).toUpperCase().replace(/\s/g, '_'),
+        sample_type: order.sampleType || 'Blood',
+        template: order.testId, // Link to template
+        status: 'pending',
+        notes: order.notes || '',
+      }));
       
-      setLabOrders([...labOrders, newLabOrder]);
-      setNewLabOrder({ test: "", priority: "Routine", notes: "" });
-      setShowAddLabOrder(false);
-      toast.success("Lab order sent to laboratory");
+      await labService.createOrder({
+        patient: numericPatientId as any,
+        visit: numericVisitId || undefined,
+        priority: priorityMap[orderPriority] || 'routine',
+        clinical_notes: combinedNotes,
+        tests_data: testsData as any,
+      } as any);
+      
+      // Update status of sent orders
+      setLabOrders(prev => prev.map(order => 
+        draftOrders.some(draft => draft.id === order.id)
+          ? { ...order, status: 'Sent to Lab' as const }
+          : order
+      ));
+      
+      toast.success(`${draftOrders.length} test(s) sent to laboratory`);
     } catch (err: any) {
       console.error('Error creating lab order:', err);
-      toast.error(err.message || 'Failed to create lab order');
+      toast.error(err.message || 'Failed to send lab order');
     }
   };
+
+  // Filter lab templates based on search
+  const filteredLabTemplates = labTemplates.filter(template => {
+    if (!labTemplateSearch.trim()) return true;
+    const search = labTemplateSearch.toLowerCase();
+    return (
+      template.name?.toLowerCase().includes(search) ||
+      template.code?.toLowerCase().includes(search) ||
+      template.sample_type?.toLowerCase().includes(search) ||
+      (template.description && template.description.toLowerCase().includes(search))
+    );
+  }).slice(0, 20); // Limit to 20 results for performance
   
-  const addNursingOrder = async () => {
+  // Add nursing order to draft (like prescriptions, lab orders, and radiology orders)
+  const addNursingOrder = () => {
     if (!newNursingOrder.type || !newNursingOrder.instructions) {
       toast.error('Please fill in all required fields');
+      return;
+    }
+    
+    // Validate type-specific required fields
+    if (newNursingOrder.type === 'Injection' && !newNursingOrder.medication) {
+      toast.error('Please select a medication for injection');
+      return;
+    }
+    if (newNursingOrder.type === 'Dressing' && !newNursingOrder.woundLocation) {
+      toast.error('Please specify wound location for dressing');
+      return;
+    }
+    
+    const orderId = `NO-${Date.now()}`;
+    
+    // Add to draft nursing orders (not sent yet)
+    setNursingOrders([...nursingOrders, {
+      id: orderId,
+      type: newNursingOrder.type as 'Injection' | 'Dressing',
+      medication: newNursingOrder.medication || undefined,
+      dosage: newNursingOrder.dosage || undefined,
+      route: newNursingOrder.route || undefined,
+      woundLocation: newNursingOrder.woundLocation || undefined,
+      woundType: newNursingOrder.woundType || undefined,
+      supplies: newNursingOrder.supplies || undefined,
+      instructions: newNursingOrder.instructions,
+      priority: newNursingOrder.priority as 'Routine' | 'Urgent' | 'STAT',
+      status: 'Draft'
+    }]);
+    
+    setNewNursingOrder({ type: "", medication: "", dosage: "", route: "Intramuscular (IM)", woundLocation: "", woundType: "", supplies: "", instructions: "", priority: "Routine" });
+    setShowAddNursingOrder(false);
+    toast.success("Nursing order added to draft");
+  };
+
+  // Send all draft nursing orders to nursing (like sendPrescriptionsToPharmacy, sendLabOrdersToLab, sendRadiologyOrders)
+  const sendNursingOrdersToNursing = async () => {
+    const draftOrders = nursingOrders.filter(order => order.status === 'Draft');
+    
+    if (draftOrders.length === 0) {
+      toast.info("No draft nursing orders to send");
       return;
     }
     
@@ -1603,14 +2386,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       if (isNaN(numericPatientId)) {
         toast.error('Invalid patient ID');
         return;
-      }
-      
-      // Build description from order details
-      let description = newNursingOrder.instructions;
-      if (newNursingOrder.type === 'Injection' && newNursingOrder.medication) {
-        description = `${newNursingOrder.medication} - ${newNursingOrder.dosage || ''} via ${newNursingOrder.route || ''}. ${newNursingOrder.instructions}`;
-      } else if (newNursingOrder.type === 'Dressing') {
-        description = `${newNursingOrder.woundType || 'Wound'} dressing at ${newNursingOrder.woundLocation || 'site'}. Supplies: ${newNursingOrder.supplies || 'Standard'}. ${newNursingOrder.instructions}`;
       }
       
       const priorityMap: Record<string, 'low' | 'medium' | 'high' | 'urgent'> = {
@@ -1619,72 +2394,51 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         'STAT': 'urgent',
       };
       
-      // Create nursing order in backend
-      await apiFetch('/nursing/orders/', {
-        method: 'POST',
-        body: JSON.stringify({
-          patient: numericPatientId,
-          visit: numericVisitId || undefined,
-          order_type: newNursingOrder.type,
-          description: description,
-          frequency: newNursingOrder.type === 'Injection' ? 'As ordered' : '',
-          duration: '',
-          status: 'pending',
-          priority: priorityMap[newNursingOrder.priority] || 'medium',
-        }),
+      // Send each draft order to backend
+      const sendPromises = draftOrders.map(async (order) => {
+        // Build description from order details
+        let description = order.instructions;
+        if (order.type === 'Injection' && order.medication) {
+          description = `${order.medication} - ${order.dosage || ''} via ${order.route || ''}. ${order.instructions}`;
+        } else if (order.type === 'Dressing') {
+          description = `${order.woundType || 'Wound'} dressing at ${order.woundLocation || 'site'}. Supplies: ${order.supplies || 'Standard'}. ${order.instructions}`;
+        }
+        
+        return apiFetch('/nursing/orders/', {
+          method: 'POST',
+          body: JSON.stringify({
+            patient: numericPatientId,
+            visit: numericVisitId || undefined,
+            order_type: order.type,
+            description: description,
+            frequency: order.type === 'Injection' ? 'As ordered' : '',
+            duration: '',
+            status: 'pending',
+            priority: priorityMap[order.priority] || 'medium',
+          }),
+        });
       });
       
-      const orderId = `NO-${Date.now()}`;
-      setNursingOrders([...nursingOrders, {
-        id: orderId,
-        type: newNursingOrder.type as 'Injection' | 'Dressing' | 'IV Infusion' | 'Nebulization' | 'Catheterization' | 'Vital Signs' | 'Other',
-        medication: newNursingOrder.medication || undefined,
-        dosage: newNursingOrder.dosage || undefined,
-        route: newNursingOrder.route || undefined,
-        woundLocation: newNursingOrder.woundLocation || undefined,
-        woundType: newNursingOrder.woundType || undefined,
-        supplies: newNursingOrder.supplies || undefined,
-        instructions: newNursingOrder.instructions,
-        priority: newNursingOrder.priority as 'Routine' | 'Urgent' | 'STAT',
-        status: 'Sent to Nursing'
-      }]);
-      setNewNursingOrder({ type: "", medication: "", dosage: "", route: "Intramuscular (IM)", woundLocation: "", woundType: "", supplies: "", instructions: "", priority: "Routine" });
-      setShowAddNursingOrder(false);
-      toast.success("Nursing order sent to nursing procedures queue");
+      await Promise.all(sendPromises);
+      
+      // Update status of sent orders
+      setNursingOrders(prev => prev.map(order => 
+        draftOrders.some(draft => draft.id === order.id)
+          ? { ...order, status: 'Sent to Nursing' as const }
+          : order
+      ));
+      
+      toast.success(`${draftOrders.length} nursing order(s) sent to Nursing Procedures queue`);
     } catch (err: any) {
-      console.error('Error creating nursing order:', err);
-      toast.error(err.message || 'Failed to create nursing order');
+      console.error('Error creating nursing orders:', err);
+      toast.error(err.message || 'Failed to send nursing orders');
     }
-  };
-
-  const sendNursingOrdersToNursing = () => {
-    // Note: Nursing orders are now sent directly when added via addNursingOrder
-    // This function is kept for backward compatibility but orders are sent immediately
-    if (nursingOrders.length === 0) {
-      toast.error("No nursing orders to send");
-      return;
-    }
-    const draftOrders = nursingOrders.filter(order => order.status === 'Draft');
-    if (draftOrders.length === 0) {
-      toast.info("All nursing orders have already been sent");
-      return;
-    }
-    // Orders are now sent immediately when created, so this is just a status update
-    setNursingOrders(prev => prev.map(order => order.status === 'Draft' ? { ...order, status: 'Sent to Nursing' } : order));
-    toast.success(`${draftOrders.length} nursing order(s) already sent to Nursing Procedures queue`, {
-      description: `Patient: ${currentPatient?.name}`,
-      action: {
-        label: "View Queue",
-        onClick: () => window.open('/nursing/procedures', '_blank')
-      }
-    });
   };
 
   const getNursingOrderIcon = (type: string) => {
     switch (type) {
       case 'Injection': return <Syringe className="h-4 w-4 text-rose-600" />;
       case 'Dressing': return <Activity className="h-4 w-4 text-amber-600" />;
-      case 'IV Infusion': return <Activity className="h-4 w-4 text-blue-600" />;
       default: return <Syringe className="h-4 w-4 text-cyan-600" />;
     }
   };
@@ -1781,9 +2535,40 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   };
 
   // Radiology functions
-  const addRadiologyOrder = async () => {
+  // Add radiology order to draft (like prescriptions and lab orders)
+  const addRadiologyOrder = () => {
     if (!newRadiology.procedure || !newRadiology.clinicalIndication) {
       toast.error('Please fill in all required fields');
+      return;
+    }
+    
+    const selectedProcedure = radiologyProcedures.find(p => p.name === newRadiology.procedure);
+    const orderId = `RAD-${Date.now()}`;
+    
+    // Add to draft radiology orders (not sent yet)
+    setRadiologyOrders([...radiologyOrders, {
+      id: orderId,
+      procedure: newRadiology.procedure,
+      category: selectedProcedure?.category || newRadiology.category,
+      bodyPart: selectedProcedure?.bodyPart || newRadiology.bodyPart,
+      clinicalIndication: newRadiology.clinicalIndication,
+      priority: newRadiology.priority as 'Routine' | 'Urgent' | 'STAT',
+      contrastRequired: newRadiology.contrastRequired,
+      specialInstructions: newRadiology.specialInstructions || undefined,
+      status: 'Draft'
+    }]);
+    
+    setNewRadiology({ procedure: "", category: "", bodyPart: "", clinicalIndication: "", priority: "Routine", contrastRequired: false, specialInstructions: "" });
+    setShowAddRadiology(false);
+    toast.success("Radiology order added to draft");
+  };
+
+  // Send all draft radiology orders to radiology (like sendPrescriptionsToPharmacy and sendLabOrdersToLab)
+  const sendRadiologyOrders = async () => {
+    const draftOrders = radiologyOrders.filter(r => r.status === 'Draft');
+    
+    if (draftOrders.length === 0) {
+      toast.info("No draft radiology orders to send");
       return;
     }
     
@@ -1802,67 +2587,57 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         return;
       }
       
-      const selectedProcedure = radiologyProcedures.find(p => p.name === newRadiology.procedure);
+      // Group studies by priority (use the most urgent priority for the order)
+      const priorityOrder: Record<string, number> = { 'STAT': 0, 'Urgent': 1, 'Routine': 2 };
+      const orderPriority = draftOrders.reduce((highest, order) => {
+        const currentPriority = priorityOrder[order.priority] ?? 2;
+        const highestPriority = priorityOrder[highest] ?? 2;
+        return currentPriority < highestPriority ? order.priority : highest;
+      }, 'Routine');
+      
+      // Combine all clinical indications (or use the first one)
+      const combinedClinicalNotes = draftOrders.map(o => o.clinicalIndication).filter(n => n).join('; ') || undefined;
+      const combinedSpecialInstructions = draftOrders.map(o => o.specialInstructions).filter(n => n).join('; ') || undefined;
+      
       const priorityMap: Record<string, 'routine' | 'urgent' | 'stat'> = {
         'Routine': 'routine',
         'Urgent': 'urgent',
         'STAT': 'stat',
       };
       
-      // Create radiology order in backend
+      // Create all studies for the order
+      const studiesData = draftOrders.map(order => {
+        const selectedProcedure = radiologyProcedures.find(p => p.name === order.procedure);
+        return {
+          procedure: order.procedure,
+          body_part: selectedProcedure?.bodyPart || order.bodyPart || '',
+          modality: selectedProcedure?.category || order.category || 'X-Ray',
+          status: 'pending',
+          technical_notes: order.specialInstructions || undefined,
+        };
+      });
+      
+      // Create radiology order in backend with all selected studies
       await radiologyService.createOrder({
         patient: numericPatientId,
         visit: numericVisitId || undefined,
-        priority: priorityMap[newRadiology.priority] || 'routine',
-        clinical_notes: newRadiology.clinicalIndication,
-        studies: [{
-          procedure: newRadiology.procedure,
-          body_part: selectedProcedure?.bodyPart || newRadiology.bodyPart,
-          modality: selectedProcedure?.category || 'X-Ray',
-          status: 'pending',
-          technical_notes: newRadiology.specialInstructions || undefined,
-        }] as any, // ID and order will be assigned by backend
+        priority: priorityMap[orderPriority] || 'routine',
+        clinical_notes: combinedClinicalNotes,
+        studies: studiesData as any,
       });
       
-      const orderId = `RAD-${Date.now()}`;
-      setRadiologyOrders([...radiologyOrders, {
-        id: orderId,
-        procedure: newRadiology.procedure,
-        category: selectedProcedure?.category || newRadiology.category,
-        bodyPart: selectedProcedure?.bodyPart || newRadiology.bodyPart,
-        clinicalIndication: newRadiology.clinicalIndication,
-        priority: newRadiology.priority as 'Routine' | 'Urgent' | 'STAT',
-        contrastRequired: newRadiology.contrastRequired,
-        specialInstructions: newRadiology.specialInstructions || undefined,
-        status: 'Sent to Radiology'
-      }]);
-      setNewRadiology({ procedure: "", category: "", bodyPart: "", clinicalIndication: "", priority: "Routine", contrastRequired: false, specialInstructions: "" });
-      setShowAddRadiology(false);
-      toast.success("Radiology order sent to radiology department");
+      // Update status of sent orders
+      setRadiologyOrders(prev => prev.map(order => 
+        draftOrders.some(draft => draft.id === order.id)
+          ? { ...order, status: 'Sent to Radiology' as const }
+          : order
+      ));
+      
+      toast.success(`${draftOrders.length} study/studies sent to Radiology department`);
     } catch (err: any) {
       console.error('Error creating radiology order:', err);
-      toast.error(err.message || 'Failed to create radiology order');
+      toast.error(err.message || 'Failed to send radiology order');
     }
-  };
-
-  const sendRadiologyOrders = () => {
-    if (radiologyOrders.length === 0) {
-      toast.error("No radiology orders to send");
-      return;
-    }
-    const draftOrders = radiologyOrders.filter(r => r.status === 'Draft');
-    if (draftOrders.length === 0) {
-      toast.info("All radiology orders have already been sent");
-      return;
-    }
-    setRadiologyOrders(prev => prev.map(r => r.status === 'Draft' ? { ...r, status: 'Sent to Radiology' } : r));
-    toast.success(`${draftOrders.length} radiology order(s) sent to Radiology department`, {
-      description: `Patient: ${currentPatient?.name}`,
-      action: {
-        label: "View Orders",
-        onClick: () => window.open('/radiology/orders', '_blank')
-      }
-    });
   };
 
   // Vitals trend helper
@@ -1994,7 +2769,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                 <Badge className={getPriorityColor(patient.priority)}>{patient.priority}</Badge>
                                 {patient.vitalsCompleted && <Badge className="bg-green-100 text-green-800 border-green-300 dark:bg-green-900/30 dark:text-green-400" variant="outline">✓ Vitals Done</Badge>}
                               </div>
-                              <p className="text-sm text-muted-foreground mb-2">{patient.chiefComplaint}</p>
                               <div className="flex items-center gap-4 text-xs text-muted-foreground">
                                 <span className="flex items-center gap-1"><User className="h-3 w-3" />{patient.age}y, {patient.gender}</span>
                                 <span className="flex items-center gap-1"><Clock className="h-3 w-3" />Waiting {patient.waitTime} min</span>
@@ -2058,9 +2832,11 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         <Card>
           <CardHeader className="pb-4">
             <div className="flex items-start gap-6">
-              <div className="w-20 h-20 bg-gradient-to-br from-emerald-100 to-emerald-200 dark:from-emerald-800 dark:to-emerald-700 rounded-full flex items-center justify-center">
-                <User className="h-10 w-10 text-emerald-600 dark:text-emerald-300" />
-              </div>
+              <PatientAvatar 
+                name={currentPatient.name} 
+                photoUrl={currentPatient.photo || null}
+                size="lg"
+              />
               <div className="flex-1">
                 <div className="flex items-start justify-between mb-4">
                   <div>
@@ -2075,11 +2851,86 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                     Session Active
                   </Badge>
                 </div>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                  <div><span className="text-muted-foreground">Blood Group:</span><span className="ml-2 font-semibold text-red-600">{currentPatient.bloodGroup || "N/A"}</span></div>
-                  <div><span className="text-muted-foreground">Genotype:</span><span className="ml-2 font-semibold text-green-600">{currentPatient.genotype || "N/A"}</span></div>
-                  <div><span className="text-muted-foreground">Division:</span><span className="ml-2 font-semibold">{currentPatient.division || "N/A"}</span></div>
-                  <div><span className="text-muted-foreground">Location:</span><span className="ml-2 font-semibold">{currentPatient.location || "N/A"}</span></div>
+                <div className="space-y-3">
+                  {/* Medical Information */}
+                  {(currentPatient.bloodGroup || currentPatient.genotype) && (
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                      {currentPatient.bloodGroup && (
+                        <div>
+                          <span className="text-muted-foreground">Blood Group:</span>
+                          <span className="ml-2 font-semibold text-red-600">{currentPatient.bloodGroup}</span>
+                        </div>
+                      )}
+                      {currentPatient.genotype && (
+                        <div>
+                          <span className="text-muted-foreground">Genotype:</span>
+                          <span className="ml-2 font-semibold text-green-600">{currentPatient.genotype}</span>
+                        </div>
+                      )}
+                      {currentPatient.religion && (
+                        <div>
+                          <span className="text-muted-foreground">Religion:</span>
+                          <span className="ml-2 font-semibold">{currentPatient.religion}</span>
+                        </div>
+                      )}
+                      {currentPatient.tribe && (
+                        <div>
+                          <span className="text-muted-foreground">Tribe:</span>
+                          <span className="ml-2 font-semibold">{currentPatient.tribe}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  
+                  {/* Employment/Organization Information */}
+                  {(currentPatient.division || currentPatient.location || currentPatient.employeeType || currentPatient.occupation) && (
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                      {currentPatient.division && (
+                        <div>
+                          <span className="text-muted-foreground">Division:</span>
+                          <span className="ml-2 font-semibold">{currentPatient.division}</span>
+                        </div>
+                      )}
+                      {currentPatient.location && (
+                        <div>
+                          <span className="text-muted-foreground">Location:</span>
+                          <span className="ml-2 font-semibold">{currentPatient.location}</span>
+                        </div>
+                      )}
+                      {currentPatient.employeeType && (
+                        <div>
+                          <span className="text-muted-foreground">Employee Type:</span>
+                          <span className="ml-2 font-semibold">{currentPatient.employeeType}</span>
+                        </div>
+                      )}
+                      {currentPatient.occupation && (
+                        <div>
+                          <span className="text-muted-foreground">Occupation:</span>
+                          <span className="ml-2 font-semibold">{currentPatient.occupation}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  
+                  {/* Contact Information */}
+                  {(currentPatient.phone || currentPatient.email) && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                      {currentPatient.phone && (
+                        <div className="flex items-center gap-2">
+                          <Phone className="h-4 w-4 text-muted-foreground" />
+                          <span className="text-muted-foreground">Phone:</span>
+                          <span className="font-semibold">{currentPatient.phone}</span>
+                        </div>
+                      )}
+                      {currentPatient.email && (
+                        <div className="flex items-center gap-2">
+                          <Mail className="h-4 w-4 text-muted-foreground" />
+                          <span className="text-muted-foreground">Email:</span>
+                          <span className="font-semibold">{currentPatient.email}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
                 {currentPatient.allergies.length > 0 && (
                   <div className="mt-3 p-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
@@ -2140,7 +2991,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
         {/* Tabs Section */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="grid w-full grid-cols-8">
+          <TabsList className="grid w-full grid-cols-7">
             <TabsTrigger value="notes" className="flex items-center gap-1">
               <FileText className="h-4 w-4" />
               <span className="hidden lg:inline">Notes</span>
@@ -2165,10 +3016,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
               <Send className="h-4 w-4" />
               <span className="hidden lg:inline">Referral</span>
             </TabsTrigger>
-            <TabsTrigger value="vitals" className="flex items-center gap-1">
-              <Heart className="h-4 w-4" />
-              <span className="hidden lg:inline">Vitals</span>
-            </TabsTrigger>
             <TabsTrigger value="history" className="flex items-center gap-1">
               <History className="h-4 w-4" />
               <span className="hidden lg:inline">History</span>
@@ -2179,7 +3026,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
             <Card>
               <CardHeader><CardTitle>Medical Notes</CardTitle><CardDescription>Document the consultation findings and plan</CardDescription></CardHeader>
               <CardContent className="space-y-4">
-                <div className="space-y-2"><Label>Chief Complaint</Label><Textarea value={medicalNotes.chiefComplaint} onChange={(e) => setMedicalNotes({ ...medicalNotes, chiefComplaint: e.target.value })} placeholder="Patient's main concern..." rows={2} /></div>
                 <div className="space-y-2"><Label>History of Present Illness</Label><Textarea value={medicalNotes.historyOfPresentIllness} onChange={(e) => setMedicalNotes({ ...medicalNotes, historyOfPresentIllness: e.target.value })} placeholder="Detailed history..." rows={4} /></div>
                 <div className="space-y-2"><Label>Physical Examination</Label><Textarea value={medicalNotes.physicalExamination} onChange={(e) => setMedicalNotes({ ...medicalNotes, physicalExamination: e.target.value })} placeholder="Examination findings..." rows={4} /></div>
                 
@@ -2240,7 +3086,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                     try {
                       // Update the consultation session with medical notes
                       const sessionData = {
-                        chief_complaint: medicalNotes.chiefComplaint || '',
                         history_of_presenting_illness: medicalNotes.historyOfPresentIllness || '',
                         physical_examination: medicalNotes.physicalExamination || '',
                         assessment: medicalNotes.assessment || '',
@@ -2400,25 +3245,38 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
           <TabsContent value="lab">
             <Card>
-              <CardHeader><div className="flex items-center justify-between"><div><CardTitle>Lab Orders</CardTitle><CardDescription>Request laboratory tests - Orders are sent to Lab Tech queue</CardDescription></div><Button onClick={() => setShowAddLabOrder(true)} className="bg-amber-500 hover:bg-amber-600"><Plus className="mr-2 h-4 w-4" />Order Lab Test</Button></div></CardHeader>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle>Lab Orders</CardTitle>
+                    <CardDescription>Request laboratory tests - Orders are sent to Lab Tech queue</CardDescription>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button onClick={() => setShowAddLabOrder(true)} className="bg-amber-500 hover:bg-amber-600">
+                      <Plus className="mr-2 h-4 w-4" />Add Test
+                    </Button>
+                    {labOrders.length > 0 && labOrders.some(order => order.status === 'Draft') && (
+                      <Button onClick={sendLabOrdersToLab} className="bg-amber-600 hover:bg-amber-700">
+                        <TestTube className="mr-2 h-4 w-4" />
+                        Send to Lab ({labOrders.filter(order => order.status === 'Draft').length})
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </CardHeader>
               <CardContent className="space-y-4">
                 {labOrders.length > 0 ? (
                   <div className="space-y-3">
                     {labOrders.map((order, index) => {
-                      // Simulate statuses for demo
-                      const statuses = ['Pending', 'Collected', 'Processing', 'Results Ready'];
-                      const demoStatus = statuses[Math.floor(Math.random() * 2)]; // Most will be Pending or Collected
                       const getLabStatusBadge = (status: string) => {
                         switch (status) {
-                          case 'Pending': return 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300';
-                          case 'Collected': return 'bg-violet-100 text-violet-800 dark:bg-violet-900/30 dark:text-violet-400';
-                          case 'Processing': return 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400';
-                          case 'Results Ready': return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400';
+                          case 'Draft': return 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300';
+                          case 'Sent to Lab': return 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400';
                           default: return 'bg-gray-100 text-gray-800';
                         }
                       };
                       return (
-                        <Card key={index} className={`border-l-4 ${order.priority === 'STAT' ? 'border-l-rose-500 bg-rose-50 dark:bg-rose-900/10' : order.priority === 'Urgent' ? 'border-l-amber-500' : 'border-l-blue-500'}`}>
+                        <Card key={order.id} className={`border-l-4 ${order.status === 'Draft' ? 'border-l-gray-400' : order.status === 'Sent to Lab' ? 'border-l-amber-500' : 'border-l-blue-500'} ${order.priority === 'STAT' ? 'bg-rose-50 dark:bg-rose-900/10' : ''}`}>
                           <CardContent className="p-4">
                             <div className="flex items-start justify-between gap-4">
                               <div className="flex items-start gap-3 flex-1">
@@ -2432,18 +3290,28 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                       {order.priority === 'STAT' && <AlertTriangle className="h-3 w-3 mr-1" />}
                                       {order.priority}
                                     </Badge>
-                                    <Badge className={getLabStatusBadge(demoStatus)}>{demoStatus}</Badge>
+                                    <Badge className={getLabStatusBadge(order.status)}>{order.status}</Badge>
                                   </div>
                                   {order.notes && <p className="text-sm text-muted-foreground mt-1">{order.notes}</p>}
-                                  <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
-                                    <Clock className="h-3 w-3" />
-                                    <span>Ordered just now • Est. TAT: 2-4 hours</span>
-                                  </div>
+                                  {order.status === 'Sent to Lab' && (
+                                    <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
+                                      <Clock className="h-3 w-3" />
+                                      <span>Sent to Lab Tech queue • Est. TAT: {order.priority === 'STAT' ? '30 min - 1 hour' : order.priority === 'Urgent' ? '1 - 2 hours' : '2 - 4 hours'}</span>
+                                    </div>
+                                  )}
                                 </div>
                               </div>
-                              <Button variant="ghost" size="sm" onClick={() => setLabOrders(labOrders.filter((_, i) => i !== index))} className="text-rose-500 hover:text-rose-600">
-                                <X className="h-4 w-4" />
-                              </Button>
+                              {order.status === 'Draft' && (
+                                <Button variant="ghost" size="sm" onClick={() => setLabOrders(labOrders.filter((_, i) => i !== index))} className="text-rose-500 hover:text-rose-600">
+                                  <X className="h-4 w-4" />
+                                </Button>
+                              )}
+                              {order.status === 'Sent to Lab' && (
+                                <Badge className="bg-amber-500 text-white">
+                                  <CheckCircle className="h-3 w-3 mr-1" />
+                                  Queued
+                                </Badge>
+                              )}
                             </div>
                           </CardContent>
                         </Card>
@@ -2541,8 +3409,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                         switch (type) {
                           case 'Injection': return 'bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-400';
                           case 'Dressing': return 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400';
-                          case 'IV Infusion': return 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400';
-                          case 'Nebulization': return 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400';
                           default: return 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900/30 dark:text-cyan-400';
                         }
                       };
@@ -2577,11 +3443,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                       {order.supplies && <span className="text-muted-foreground"> • Supplies: {order.supplies}</span>}
                                     </div>
                                   )}
-                                  {order.type === 'IV Infusion' && order.medication && (
-                                    <div className="text-sm font-medium mb-1">
-                                      {order.medication} • {order.dosage}
-                                    </div>
-                                  )}
                                   
                                   <div className="text-sm text-muted-foreground">
                                     <strong>Instructions:</strong> {order.instructions}
@@ -2592,7 +3453,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                 <Button 
                                   variant="ghost" 
                                   size="sm" 
-                                  onClick={() => setNursingOrders(nursingOrders.filter((_, i) => i !== index))}
+                                  onClick={() => setNursingOrders(nursingOrders.filter(o => o.id !== order.id))}
                                   className="text-red-500 hover:text-red-600"
                                 >
                                   <X className="h-4 w-4" />
@@ -2724,7 +3585,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                 </div>
                               </div>
                               {order.status === 'Draft' && (
-                                <Button variant="ghost" size="sm" onClick={() => setRadiologyOrders(radiologyOrders.filter((_, i) => i !== index))} className="text-red-500 hover:text-red-600">
+                                <Button variant="ghost" size="sm" onClick={() => setRadiologyOrders(radiologyOrders.filter(o => o.id !== order.id))} className="text-red-500 hover:text-red-600">
                                   <X className="h-4 w-4" />
                                 </Button>
                               )}
@@ -2901,193 +3762,38 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
             </Card>
           </TabsContent>
 
-          <TabsContent value="vitals">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Heart className="h-5 w-5 text-rose-500" />
-                  Vitals History
-                </CardTitle>
-                <CardDescription>Patient's vital signs history and trends</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                {/* Current Vitals Summary */}
-                {currentPatient?.vitals && (
-                  <div className="p-4 rounded-lg bg-gradient-to-r from-rose-50 to-pink-50 dark:from-rose-900/20 dark:to-pink-900/20 border border-rose-200 dark:border-rose-800">
-                    <h4 className="font-medium text-rose-900 dark:text-rose-100 mb-3 flex items-center gap-2">
-                      <Activity className="h-4 w-4" />
-                      Current Vitals (Today)
-                    </h4>
-                    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
-                      <div className="text-center p-2 bg-white dark:bg-gray-900 rounded-lg shadow-sm">
-                        <div className="text-xs text-muted-foreground">Temperature</div>
-                        <div className="text-lg font-bold text-blue-600">{currentPatient.vitals.temperature}°C</div>
-                      </div>
-                      <div className="text-center p-2 bg-white dark:bg-gray-900 rounded-lg shadow-sm">
-                        <div className="text-xs text-muted-foreground">Blood Pressure</div>
-                        <div className="text-lg font-bold text-red-600">{currentPatient.vitals.bloodPressure}</div>
-                      </div>
-                      <div className="text-center p-2 bg-white dark:bg-gray-900 rounded-lg shadow-sm">
-                        <div className="text-xs text-muted-foreground">Heart Rate</div>
-                        <div className="text-lg font-bold text-pink-600">{currentPatient.vitals.heartRate} bpm</div>
-                      </div>
-                      <div className="text-center p-2 bg-white dark:bg-gray-900 rounded-lg shadow-sm">
-                        <div className="text-xs text-muted-foreground">Resp. Rate</div>
-                        <div className="text-lg font-bold text-cyan-600">{currentPatient.vitals.respiratoryRate}/min</div>
-                      </div>
-                      <div className="text-center p-2 bg-white dark:bg-gray-900 rounded-lg shadow-sm">
-                        <div className="text-xs text-muted-foreground">SpO2</div>
-                        <div className="text-lg font-bold text-emerald-600">{currentPatient.vitals.oxygenSaturation}%</div>
-                      </div>
-                      <div className="text-center p-2 bg-white dark:bg-gray-900 rounded-lg shadow-sm">
-                        <div className="text-xs text-muted-foreground">Weight</div>
-                        <div className="text-lg font-bold text-purple-600">{currentPatient.vitals.weight} kg</div>
-                      </div>
-                      <div className="text-center p-2 bg-white dark:bg-gray-900 rounded-lg shadow-sm">
-                        <div className="text-xs text-muted-foreground">Height</div>
-                        <div className="text-lg font-bold text-orange-600">{currentPatient.vitals.height} cm</div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Vitals History Table */}
-                <div>
-                  <h4 className="font-medium mb-3 flex items-center gap-2">
-                    <History className="h-4 w-4" />
-                    Historical Records
-                  </h4>
-                  <div className="border rounded-lg overflow-hidden">
-                    <table className="w-full text-sm">
-                      <thead className="bg-muted/50">
-                        <tr>
-                          <th className="px-3 py-2 text-left font-medium">Date</th>
-                          <th className="px-3 py-2 text-center font-medium">Temp (°C)</th>
-                          <th className="px-3 py-2 text-center font-medium">BP (mmHg)</th>
-                          <th className="px-3 py-2 text-center font-medium">HR (bpm)</th>
-                          <th className="px-3 py-2 text-center font-medium">RR (/min)</th>
-                          <th className="px-3 py-2 text-center font-medium">SpO2 (%)</th>
-                          <th className="px-3 py-2 text-center font-medium">Weight (kg)</th>
-                          <th className="px-3 py-2 text-left font-medium">Recorded By</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y">
-                        {demoVitalsHistory.map((vitals, index) => {
-                          const prevVitals = demoVitalsHistory[index + 1];
-                          return (
-                            <tr key={index} className={index === 0 ? 'bg-rose-50 dark:bg-rose-900/10' : ''}>
-                              <td className="px-3 py-2">
-                                <div className="font-medium">{vitals.date}</div>
-                                <div className="text-xs text-muted-foreground">{vitals.time}</div>
-                              </td>
-                              <td className="px-3 py-2 text-center">
-                                <div className="flex items-center justify-center gap-1">
-                                  <span className={parseFloat(vitals.temperature) > 37.5 ? 'text-red-600 font-medium' : ''}>{vitals.temperature}</span>
-                                  {prevVitals && getVitalTrend(vitals.temperature, prevVitals.temperature, 'temp')?.icon}
-                                </div>
-                              </td>
-                              <td className="px-3 py-2 text-center">
-                                <span className={parseInt(vitals.bloodPressure.split('/')[0]) > 140 ? 'text-red-600 font-medium' : ''}>{vitals.bloodPressure}</span>
-                              </td>
-                              <td className="px-3 py-2 text-center">
-                                <div className="flex items-center justify-center gap-1">
-                                  <span className={parseInt(vitals.heartRate) > 100 ? 'text-red-600 font-medium' : ''}>{vitals.heartRate}</span>
-                                  {prevVitals && getVitalTrend(vitals.heartRate, prevVitals.heartRate, 'hr')?.icon}
-                                </div>
-                              </td>
-                              <td className="px-3 py-2 text-center">
-                                <span className={parseInt(vitals.respiratoryRate) > 20 ? 'text-amber-600 font-medium' : ''}>{vitals.respiratoryRate}</span>
-                              </td>
-                              <td className="px-3 py-2 text-center">
-                                <span className={parseInt(vitals.oxygenSaturation) < 95 ? 'text-red-600 font-medium' : 'text-emerald-600'}>{vitals.oxygenSaturation}</span>
-                              </td>
-                              <td className="px-3 py-2 text-center">{vitals.weight}</td>
-                              <td className="px-3 py-2 text-muted-foreground">{vitals.recordedBy}</td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-
-                {/* Vitals Analysis */}
-                <div className="grid gap-4 md:grid-cols-2">
-                  <Card className="border-blue-200 dark:border-blue-800">
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-sm flex items-center gap-2">
-                        <TrendingUp className="h-4 w-4 text-blue-500" />
-                        Blood Pressure Trend
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="space-y-2">
-                        {demoVitalsHistory.slice(0, 4).map((v, i) => (
-                          <div key={i} className="flex items-center gap-2">
-                            <span className="text-xs text-muted-foreground w-20">{v.date.slice(5)}</span>
-                            <div className="flex-1 bg-gray-100 dark:bg-gray-800 rounded-full h-2">
-                              <div 
-                                className={`h-2 rounded-full ${parseInt(v.bloodPressure.split('/')[0]) > 140 ? 'bg-red-500' : parseInt(v.bloodPressure.split('/')[0]) > 130 ? 'bg-amber-500' : 'bg-emerald-500'}`}
-                                style={{ width: `${Math.min(100, (parseInt(v.bloodPressure.split('/')[0]) / 180) * 100)}%` }}
-                              />
-                            </div>
-                            <span className="text-xs font-medium w-16">{v.bloodPressure}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </CardContent>
-                  </Card>
-
-                  <Card className="border-purple-200 dark:border-purple-800">
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-sm flex items-center gap-2">
-                        <Activity className="h-4 w-4 text-purple-500" />
-                        Weight Trend
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="space-y-2">
-                        {demoVitalsHistory.slice(0, 4).map((v, i) => (
-                          <div key={i} className="flex items-center gap-2">
-                            <span className="text-xs text-muted-foreground w-20">{v.date.slice(5)}</span>
-                            <div className="flex-1 bg-gray-100 dark:bg-gray-800 rounded-full h-2">
-                              <div 
-                                className="h-2 rounded-full bg-purple-500"
-                                style={{ width: `${Math.min(100, ((parseFloat(v.weight) - 75) / 15) * 100)}%` }}
-                              />
-                            </div>
-                            <span className="text-xs font-medium w-16">{v.weight} kg</span>
-                          </div>
-                        ))}
-                      </div>
-                    </CardContent>
-                  </Card>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
           <TabsContent value="history">
             <div className="space-y-4">
-              {/* Top Row: Allergies + Background Info Side by Side */}
+              {/* Top Row: Allergies + Chronic Conditions Side by Side */}
               <div className="grid gap-4 lg:grid-cols-2">
                 {/* Allergies Card */}
-                <Card className={`${demoPatientHistory.allergies.length > 0 ? 'border-red-300 dark:border-red-800 bg-red-50/50 dark:bg-red-900/10' : ''}`}>
+                <Card className={`${medicalHistory.allergies && medicalHistory.allergies.length > 0 ? 'border-red-300 dark:border-red-800 bg-red-50/50 dark:bg-red-900/10' : 'border-muted'}`}>
                   <CardHeader className="pb-2">
                     <CardTitle className="text-sm flex items-center gap-2">
-                      <AlertTriangle className={`h-4 w-4 ${demoPatientHistory.allergies.length > 0 ? 'text-red-500' : 'text-muted-foreground'}`} />
+                      <AlertTriangle className={`h-4 w-4 ${medicalHistory.allergies && medicalHistory.allergies.length > 0 ? 'text-red-500' : 'text-muted-foreground'}`} />
                       Allergies
+                      {medicalHistory.allergies && medicalHistory.allergies.length > 0 && (
+                        <Badge variant="outline" className="ml-auto bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400">
+                          {medicalHistory.allergies.length}
+                        </Badge>
+                      )}
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    {demoPatientHistory.allergies.length > 0 ? (
+                    {medicalHistory.allergies && medicalHistory.allergies.length > 0 ? (
                       <div className="flex flex-wrap gap-2">
-                        {demoPatientHistory.allergies.map((allergy: string, index: number) => (
-                          <Badge key={index} className="bg-red-600 text-white">{allergy}</Badge>
+                        {medicalHistory.allergies.map((allergy: string, index: number) => (
+                          <Badge key={index} className="bg-red-600 text-white hover:bg-red-700">
+                            <AlertTriangle className="h-3 w-3 mr-1" />
+                            {allergy}
+                          </Badge>
                         ))}
                       </div>
                     ) : (
-                      <p className="text-sm text-muted-foreground">No known allergies</p>
+                      <div className="text-center py-4 text-sm text-muted-foreground">
+                        <AlertTriangle className="h-6 w-6 mx-auto mb-2 opacity-50" />
+                        <p>No known allergies</p>
+                      </div>
                     )}
                   </CardContent>
                 </Card>
@@ -3098,19 +3804,37 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                     <CardTitle className="text-sm flex items-center gap-2">
                       <Stethoscope className="h-4 w-4 text-amber-500" />
                       Chronic Conditions
+                      {medicalHistory.diagnoses && medicalHistory.diagnoses.filter((d: { status: string }) => d.status === 'Active').length > 0 && (
+                        <Badge variant="outline" className="ml-auto bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400">
+                          {medicalHistory.diagnoses.filter((d: { status: string }) => d.status === 'Active').length}
+                        </Badge>
+                      )}
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    {demoPatientHistory.diagnoses.filter((d: { status: string }) => d.status === 'Active').length > 0 ? (
+                    {medicalHistory.diagnoses && medicalHistory.diagnoses.filter((d: { status: string }) => d.status === 'Active').length > 0 ? (
                       <div className="flex flex-wrap gap-2">
-                        {demoPatientHistory.diagnoses.filter((d: { status: string }) => d.status === 'Active').map((diagnosis: { name: string }, index: number) => (
-                          <Badge key={index} variant="outline" className="bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400">
-                            {diagnosis.name}
-                          </Badge>
+                        {medicalHistory.diagnoses.filter((d: { status: string }) => d.status === 'Active').map((diagnosis: { name: string; code?: string; diagnosedDate?: string }, index: number) => (
+                          <div key={index} className="p-2 bg-amber-50 dark:bg-amber-900/20 rounded-lg border border-amber-200 dark:border-amber-800">
+                            <div className="flex items-center gap-2">
+                              <Badge variant="outline" className="bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400 text-xs">
+                                {diagnosis.code || 'N/A'}
+                              </Badge>
+                              <span className="font-medium text-sm">{diagnosis.name}</span>
+                            </div>
+                            {diagnosis.diagnosedDate && (
+                              <div className="text-xs text-muted-foreground mt-1">
+                                Diagnosed: {diagnosis.diagnosedDate}
+                              </div>
+                            )}
+                          </div>
                         ))}
                       </div>
                     ) : (
-                      <p className="text-sm text-muted-foreground">No chronic conditions</p>
+                      <div className="text-center py-4 text-sm text-muted-foreground">
+                        <Stethoscope className="h-6 w-6 mx-auto mb-2 opacity-50" />
+                        <p>No chronic conditions</p>
+                      </div>
                     )}
                   </CardContent>
                 </Card>
@@ -3120,7 +3844,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
               <Card>
                 <CardHeader className="pb-0">
                   <Tabs defaultValue="consultations" className="w-full">
-                    <TabsList className="grid w-full grid-cols-4">
+                    <TabsList className="grid w-full grid-cols-6">
                       <TabsTrigger value="consultations" className="text-xs">
                         <ClipboardList className="h-3 w-3 mr-1" />
                         Consultations ({demoConsultationSessions.length})
@@ -3132,6 +3856,14 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                       <TabsTrigger value="imaging" className="text-xs">
                         <ScanLine className="h-3 w-3 mr-1" />
                         Imaging ({demoPatientHistory.imagingResults.length})
+                      </TabsTrigger>
+                      <TabsTrigger value="prescriptions" className="text-xs">
+                        <Pill className="h-3 w-3 mr-1" />
+                        Prescriptions ({demoPatientHistory.prescriptions.length})
+                      </TabsTrigger>
+                      <TabsTrigger value="vitals" className="text-xs">
+                        <Heart className="h-3 w-3 mr-1" />
+                        Vitals ({demoVitalsHistory.length})
                       </TabsTrigger>
                       <TabsTrigger value="background" className="text-xs">
                         <User className="h-3 w-3 mr-1" />
@@ -3167,7 +3899,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                 <thead className="bg-muted/50">
                                   <tr>
                                     <th className="px-4 py-2 text-left font-medium">Date</th>
-                                    <th className="px-4 py-2 text-left font-medium">Chief Complaint</th>
                                     <th className="px-4 py-2 text-left font-medium">Doctor</th>
                                     <th className="px-4 py-2 text-left font-medium">Clinic</th>
                                     <th className="px-4 py-2 text-center font-medium">Action</th>
@@ -3177,7 +3908,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                   {paginatedConsultations.map((session) => (
                                     <tr key={session.id} className="hover:bg-muted/30">
                                       <td className="px-4 py-3 text-muted-foreground">{session.date}</td>
-                                      <td className="px-4 py-3 font-medium">{session.chiefComplaint}</td>
                                       <td className="px-4 py-3">{session.doctor}</td>
                                       <td className="px-4 py-3">
                                         <Badge variant="outline">{session.clinic}</Badge>
@@ -3479,8 +4209,473 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                       })()}
                     </TabsContent>
 
+                    {/* Prescriptions Tab */}
+                    <TabsContent value="prescriptions" className="mt-4">
+                      {(() => {
+                        // Filter prescriptions based on date and status filters
+                        let filteredPrescriptions = [...demoPatientHistory.prescriptions];
+                        
+                        // Apply date filter
+                        if (prescriptionsDateFilter !== 'all') {
+                          const days = parseInt(prescriptionsDateFilter);
+                          const cutoffDate = new Date();
+                          cutoffDate.setDate(cutoffDate.getDate() - days);
+                          filteredPrescriptions = filteredPrescriptions.filter(p => {
+                            const prescriptionDate = new Date(p.date);
+                            return prescriptionDate >= cutoffDate;
+                          });
+                        }
+                        
+                        // Apply status filter
+                        if (prescriptionsStatusFilter !== 'all') {
+                          filteredPrescriptions = filteredPrescriptions.filter(p => p.status === prescriptionsStatusFilter);
+                        }
+                        
+                        const totalPrescriptions = filteredPrescriptions.length;
+                        const totalPrescriptionsPages = Math.ceil(totalPrescriptions / prescriptionsPerPage);
+                        const paginatedPrescriptions = filteredPrescriptions.slice(
+                          (prescriptionsPage - 1) * prescriptionsPerPage, 
+                          prescriptionsPage * prescriptionsPerPage
+                        );
+                        return (
+                          <>
+                            <div className="flex items-center justify-between mb-3 gap-2">
+                              <select
+                                value={prescriptionsDateFilter}
+                                onChange={(e) => { setPrescriptionsDateFilter(e.target.value); setPrescriptionsPage(1); }}
+                                className="text-sm border rounded-md px-3 py-1.5 bg-background"
+                              >
+                                <option value="all">All Time</option>
+                                <option value="30">Last 30 Days</option>
+                                <option value="90">Last 3 Months</option>
+                                <option value="365">Last Year</option>
+                              </select>
+                              <select
+                                value={prescriptionsStatusFilter}
+                                onChange={(e) => { setPrescriptionsStatusFilter(e.target.value); setPrescriptionsPage(1); }}
+                                className="text-sm border rounded-md px-3 py-1.5 bg-background"
+                              >
+                                <option value="all">All Status</option>
+                                <option value="pending">Pending</option>
+                                <option value="partially_dispensed">Partially Dispensed</option>
+                                <option value="dispensed">Dispensed</option>
+                              </select>
+                            </div>
+                            <div className="border rounded-lg overflow-hidden">
+                              <table className="w-full text-sm">
+                                <thead className="bg-muted/50">
+                                  <tr>
+                                    <th className="px-4 py-2 text-left font-medium">Date</th>
+                                    <th className="px-4 py-2 text-left font-medium">Prescription ID</th>
+                                    <th className="px-4 py-2 text-left font-medium">Doctor</th>
+                                    <th className="px-4 py-2 text-left font-medium">Diagnosis</th>
+                                    <th className="px-4 py-2 text-left font-medium">Medications</th>
+                                    <th className="px-4 py-2 text-center font-medium">Status</th>
+                                    <th className="px-4 py-2 text-center font-medium">Action</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y">
+                                  {paginatedPrescriptions.map((prescription) => (
+                                    <tr key={prescription.id} className="hover:bg-muted/30">
+                                      <td className="px-4 py-3 text-muted-foreground">{prescription.date}</td>
+                                      <td className="px-4 py-3">
+                                        <Badge variant="outline">{prescription.prescriptionId}</Badge>
+                                      </td>
+                                      <td className="px-4 py-3">{prescription.doctor}</td>
+                                      <td className="px-4 py-3">{prescription.diagnosis}</td>
+                                      <td className="px-4 py-3">
+                                        <div className="flex flex-wrap gap-1">
+                                          {prescription.medications.map((med: string, idx: number) => (
+                                            <Badge key={idx} variant="outline" className="text-xs">
+                                              {med}
+                                            </Badge>
+                                          ))}
+                                        </div>
+                                      </td>
+                                      <td className="px-4 py-3 text-center">
+                                        <Badge 
+                                          variant="outline" 
+                                          className={
+                                            prescription.status === 'dispensed' 
+                                              ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400'
+                                              : prescription.status === 'partially_dispensed'
+                                              ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400'
+                                              : 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300'
+                                          }
+                                        >
+                                          {prescription.status === 'dispensed' ? 'Dispensed' : 
+                                           prescription.status === 'partially_dispensed' ? 'Partially Dispensed' : 
+                                           'Pending'}
+                                        </Badge>
+                                      </td>
+                                      <td className="px-4 py-3 text-center">
+                                        <Button variant="ghost" size="sm" onClick={() => viewPrescriptionDetails(prescription)}>
+                                          <Eye className="h-4 w-4 mr-1" /> View
+                                        </Button>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                            {/* Pagination */}
+                            <div className="flex flex-col gap-3 border-t border-border/60 pt-3 mt-3 md:flex-row md:items-center md:justify-between">
+                              <div className="flex items-center gap-4">
+                                <p className="text-sm text-muted-foreground">
+                                  Showing {totalPrescriptions === 0 ? 0 : `${(prescriptionsPage - 1) * prescriptionsPerPage + 1}-${Math.min(totalPrescriptions, prescriptionsPage * prescriptionsPerPage)}`} of {totalPrescriptions}
+                                </p>
+                                <div className="flex items-center gap-2">
+                                  <label className="text-sm text-muted-foreground">Per page:</label>
+                                  <Select value={String(prescriptionsPerPage)} onValueChange={(value) => { setPrescriptionsPerPage(Number(value)); setPrescriptionsPage(1); }}>
+                                    <SelectTrigger className="w-16 h-8">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="5">5</SelectItem>
+                                      <SelectItem value="10">10</SelectItem>
+                                      <SelectItem value="25">25</SelectItem>
+                                      <SelectItem value="50">50</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Button variant="outline" size="sm" disabled={prescriptionsPage === 1} onClick={() => setPrescriptionsPage(p => p - 1)}>
+                                  <ChevronLeft className="h-4 w-4" />
+                                  Previous
+                                </Button>
+                                <div className="flex items-center gap-1">
+                                  {Array.from({ length: Math.min(5, totalPrescriptionsPages) }, (_, i) => {
+                                    let pageNum: number;
+                                    if (totalPrescriptionsPages <= 5) pageNum = i + 1;
+                                    else if (prescriptionsPage <= 3) pageNum = i + 1;
+                                    else if (prescriptionsPage >= totalPrescriptionsPages - 2) pageNum = totalPrescriptionsPages - 4 + i;
+                                    else pageNum = prescriptionsPage - 2 + i;
+                                    if (pageNum > totalPrescriptionsPages || pageNum < 1) return null;
+                                    return (
+                                      <Button key={pageNum} variant={prescriptionsPage === pageNum ? "default" : "outline"} size="sm" className="w-8 h-8 p-0" onClick={() => setPrescriptionsPage(pageNum)}>
+                                        {pageNum}
+                                      </Button>
+                                    );
+                                  })}
+                                </div>
+                                <Button variant="outline" size="sm" disabled={prescriptionsPage >= totalPrescriptionsPages || totalPrescriptionsPages === 0} onClick={() => setPrescriptionsPage(p => p + 1)}>
+                                  Next
+                                  <ChevronRight className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </div>
+                          </>
+                        );
+                      })()}
+                    </TabsContent>
+
+                    {/* Vitals Tab */}
+                    <TabsContent value="vitals" className="mt-4">
+                      {(() => {
+                        // Filter vitals based on date filter
+                        let filteredVitals = [...demoVitalsHistory];
+                        if (vitalsDateFilter !== 'all') {
+                          const days = parseInt(vitalsDateFilter);
+                          const cutoffDate = new Date();
+                          cutoffDate.setDate(cutoffDate.getDate() - days);
+                          filteredVitals = filteredVitals.filter(v => {
+                            const vitalDate = new Date(v.date);
+                            return vitalDate >= cutoffDate;
+                          });
+                        }
+
+                        const totalVitals = filteredVitals.length;
+                        const totalVitalsPages = Math.ceil(totalVitals / vitalsPerPage);
+                        const paginatedVitals = filteredVitals.slice(
+                          (vitalsPage - 1) * vitalsPerPage, 
+                          vitalsPage * vitalsPerPage
+                        );
+                        // Get most recent vitals for summary
+                        const mostRecentVitals = filteredVitals.length > 0 ? filteredVitals[0] : null;
+                        
+                        return (
+                          <>
+                            {/* Most Recent Vitals Summary */}
+                            {mostRecentVitals && (
+                              <Card className="mb-4 border-rose-200 dark:border-rose-800 bg-gradient-to-r from-rose-50 to-pink-50 dark:from-rose-900/20 dark:to-pink-900/20">
+                                <CardHeader className="pb-3">
+                                  <CardTitle className="text-sm flex items-center gap-2">
+                                    <Heart className="h-4 w-4 text-rose-500" />
+                                    Most Recent Vitals
+                                    <Badge variant="outline" className="ml-auto bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-400">
+                                      {mostRecentVitals.date} • {mostRecentVitals.time}
+                                    </Badge>
+                                  </CardTitle>
+                                </CardHeader>
+                                <CardContent>
+                                  <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
+                                    <div className="text-center p-2 bg-white dark:bg-gray-900 rounded-lg shadow-sm border border-blue-200 dark:border-blue-800">
+                                      <div className="text-xs text-muted-foreground mb-1">Temperature</div>
+                                      <div className={`text-lg font-bold ${
+                                        parseFloat(mostRecentVitals.temperature) > 37.5 ? 'text-red-600' : 
+                                        parseFloat(mostRecentVitals.temperature) < 36.0 ? 'text-blue-600' : 
+                                        'text-blue-600'
+                                      }`}>
+                                        {mostRecentVitals.temperature}°C
+                                      </div>
+                                    </div>
+                                    <div className="text-center p-2 bg-white dark:bg-gray-900 rounded-lg shadow-sm border border-red-200 dark:border-red-800">
+                                      <div className="text-xs text-muted-foreground mb-1">Blood Pressure</div>
+                                      <div className={`text-lg font-bold ${
+                                        parseInt(mostRecentVitals.bloodPressure.split('/')[0]) > 140 || parseInt(mostRecentVitals.bloodPressure.split('/')[1]) > 90 ? 'text-red-600' :
+                                        parseInt(mostRecentVitals.bloodPressure.split('/')[0]) > 130 || parseInt(mostRecentVitals.bloodPressure.split('/')[1]) > 85 ? 'text-amber-600' :
+                                        'text-red-600'
+                                      }`}>
+                                        {mostRecentVitals.bloodPressure}
+                                      </div>
+                                    </div>
+                                    <div className="text-center p-2 bg-white dark:bg-gray-900 rounded-lg shadow-sm border border-pink-200 dark:border-pink-800">
+                                      <div className="text-xs text-muted-foreground mb-1">Heart Rate</div>
+                                      <div className={`text-lg font-bold ${
+                                        parseInt(mostRecentVitals.heartRate) > 100 ? 'text-red-600' : 
+                                        parseInt(mostRecentVitals.heartRate) < 60 ? 'text-blue-600' : 
+                                        'text-pink-600'
+                                      }`}>
+                                        {mostRecentVitals.heartRate} bpm
+                                      </div>
+                                    </div>
+                                    <div className="text-center p-2 bg-white dark:bg-gray-900 rounded-lg shadow-sm border border-cyan-200 dark:border-cyan-800">
+                                      <div className="text-xs text-muted-foreground mb-1">Resp. Rate</div>
+                                      <div className={`text-lg font-bold ${
+                                        parseInt(mostRecentVitals.respiratoryRate) > 20 ? 'text-amber-600' : 
+                                        parseInt(mostRecentVitals.respiratoryRate) < 12 ? 'text-blue-600' : 
+                                        'text-cyan-600'
+                                      }`}>
+                                        {mostRecentVitals.respiratoryRate}/min
+                                      </div>
+                                    </div>
+                                    <div className="text-center p-2 bg-white dark:bg-gray-900 rounded-lg shadow-sm border border-emerald-200 dark:border-emerald-800">
+                                      <div className="text-xs text-muted-foreground mb-1">SpO2</div>
+                                      <div className={`text-lg font-bold ${
+                                        parseInt(mostRecentVitals.oxygenSaturation) < 95 ? 'text-red-600' : 
+                                        parseInt(mostRecentVitals.oxygenSaturation) < 97 ? 'text-amber-600' : 
+                                        'text-emerald-600'
+                                      }`}>
+                                        {mostRecentVitals.oxygenSaturation}%
+                                      </div>
+                                    </div>
+                                    <div className="text-center p-2 bg-white dark:bg-gray-900 rounded-lg shadow-sm border border-purple-200 dark:border-purple-800">
+                                      <div className="text-xs text-muted-foreground mb-1">Weight</div>
+                                      <div className="text-lg font-bold text-purple-600">{mostRecentVitals.weight} kg</div>
+                                    </div>
+                                    <div className="text-center p-2 bg-white dark:bg-gray-900 rounded-lg shadow-sm border border-orange-200 dark:border-orange-800">
+                                      <div className="text-xs text-muted-foreground mb-1">Height</div>
+                                      <div className="text-lg font-bold text-orange-600">{mostRecentVitals.height} cm</div>
+                                    </div>
+                                  </div>
+                                  {mostRecentVitals.recordedBy && (
+                                    <div className="mt-3 text-xs text-muted-foreground text-center">
+                                      Recorded by: <span className="font-medium">{mostRecentVitals.recordedBy}</span>
+                                    </div>
+                                  )}
+                                </CardContent>
+                              </Card>
+                            )}
+                            
+                            <div className="flex items-center justify-between mb-3">
+                              <select
+                                value={vitalsDateFilter}
+                                onChange={(e) => { setVitalsDateFilter(e.target.value); setVitalsPage(1); }}
+                                className="text-sm border rounded-md px-3 py-1.5 bg-background"
+                              >
+                                <option value="all">All Time</option>
+                                <option value="30">Last 30 Days</option>
+                                <option value="90">Last 3 Months</option>
+                                <option value="365">Last Year</option>
+                              </select>
+                            </div>
+                            {paginatedVitals.length === 0 ? (
+                              <div className="text-center py-12 bg-gradient-to-b from-muted/30 to-background rounded-lg border-2 border-dashed border-muted">
+                                <Heart className="h-12 w-12 mx-auto mb-3 text-muted-foreground opacity-50" />
+                                <p className="font-medium text-muted-foreground mb-1">No vitals records found</p>
+                                <p className="text-sm text-muted-foreground">Vitals will appear here once recorded</p>
+                              </div>
+                            ) : (
+                              <div className="border rounded-lg overflow-hidden">
+                                <table className="w-full text-sm">
+                                  <thead className="bg-muted/50">
+                                    <tr>
+                                      <th className="px-4 py-2 text-left font-medium">Date/Time</th>
+                                      <th className="px-4 py-2 text-center font-medium">Temp (°C)</th>
+                                      <th className="px-4 py-2 text-center font-medium">BP (mmHg)</th>
+                                      <th className="px-4 py-2 text-center font-medium">HR (bpm)</th>
+                                      <th className="px-4 py-2 text-center font-medium">RR (/min)</th>
+                                      <th className="px-4 py-2 text-center font-medium">SpO2 (%)</th>
+                                      <th className="px-4 py-2 text-center font-medium">Weight (kg)</th>
+                                      <th className="px-4 py-2 text-center font-medium">Height (cm)</th>
+                                      <th className="px-4 py-2 text-center font-medium">BMI</th>
+                                      <th className="px-4 py-2 text-left font-medium">Recorded By</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y">
+                                    {paginatedVitals.map((vitals, index) => {
+                                      const globalIndex = (vitalsPage - 1) * vitalsPerPage + index;
+                                      const prevVitals = filteredVitals[globalIndex + 1];
+                                      
+                                      // Calculate BMI if weight and height are available
+                                      const weight = parseFloat(vitals.weight);
+                                      const height = parseFloat(vitals.height);
+                                      const bmi = weight && height ? (weight / ((height / 100) ** 2)).toFixed(1) : null;
+                                      const bmiStatus = bmi ? 
+                                        (parseFloat(bmi) < 18.5 ? 'underweight' : 
+                                         parseFloat(bmi) < 25 ? 'normal' : 
+                                         parseFloat(bmi) < 30 ? 'overweight' : 'obese') : null;
+                                      
+                                      return (
+                                        <tr key={index} className={globalIndex === 0 ? 'bg-rose-50 dark:bg-rose-900/10 border-l-4 border-l-rose-500' : 'hover:bg-muted/30'}>
+                                          <td className="px-4 py-3">
+                                            <div className="font-medium">{vitals.date}</div>
+                                            <div className="text-xs text-muted-foreground">{vitals.time}</div>
+                                          </td>
+                                          <td className="px-4 py-3 text-center">
+                                            <div className="flex items-center justify-center gap-1">
+                                              <span className={
+                                                parseFloat(vitals.temperature) > 37.5 ? 'text-red-600 font-semibold' : 
+                                                parseFloat(vitals.temperature) < 36.0 ? 'text-blue-600 font-semibold' : 
+                                                'text-gray-700 dark:text-gray-300'
+                                              }>
+                                                {vitals.temperature}
+                                              </span>
+                                              {prevVitals && getVitalTrend(vitals.temperature, prevVitals.temperature, 'temp')?.icon}
+                                            </div>
+                                          </td>
+                                          <td className="px-4 py-3 text-center">
+                                            <span className={
+                                              parseInt(vitals.bloodPressure.split('/')[0]) > 140 || parseInt(vitals.bloodPressure.split('/')[1]) > 90 ? 'text-red-600 font-semibold' :
+                                              parseInt(vitals.bloodPressure.split('/')[0]) > 130 || parseInt(vitals.bloodPressure.split('/')[1]) > 85 ? 'text-amber-600 font-medium' :
+                                              'text-gray-700 dark:text-gray-300'
+                                            }>
+                                              {vitals.bloodPressure}
+                                            </span>
+                                          </td>
+                                          <td className="px-4 py-3 text-center">
+                                            <div className="flex items-center justify-center gap-1">
+                                              <span className={
+                                                parseInt(vitals.heartRate) > 100 ? 'text-red-600 font-semibold' : 
+                                                parseInt(vitals.heartRate) < 60 ? 'text-blue-600 font-semibold' : 
+                                                'text-gray-700 dark:text-gray-300'
+                                              }>
+                                                {vitals.heartRate}
+                                              </span>
+                                              {prevVitals && getVitalTrend(vitals.heartRate, prevVitals.heartRate, 'hr')?.icon}
+                                            </div>
+                                          </td>
+                                          <td className="px-4 py-3 text-center">
+                                            <span className={
+                                              parseInt(vitals.respiratoryRate) > 20 ? 'text-amber-600 font-semibold' : 
+                                              parseInt(vitals.respiratoryRate) < 12 ? 'text-blue-600 font-semibold' : 
+                                              'text-gray-700 dark:text-gray-300'
+                                            }>
+                                              {vitals.respiratoryRate}
+                                            </span>
+                                          </td>
+                                          <td className="px-4 py-3 text-center">
+                                            <span className={
+                                              parseInt(vitals.oxygenSaturation) < 95 ? 'text-red-600 font-semibold' : 
+                                              parseInt(vitals.oxygenSaturation) < 97 ? 'text-amber-600 font-medium' : 
+                                              'text-emerald-600 font-medium'
+                                            }>
+                                              {vitals.oxygenSaturation}%
+                                            </span>
+                                          </td>
+                                          <td className="px-4 py-3 text-center text-gray-700 dark:text-gray-300">{vitals.weight}</td>
+                                          <td className="px-4 py-3 text-center text-gray-700 dark:text-gray-300">{vitals.height}</td>
+                                          <td className="px-4 py-3 text-center">
+                                            {bmi ? (
+                                              <Badge 
+                                                variant="outline" 
+                                                className={
+                                                  bmiStatus === 'normal' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400' :
+                                                  bmiStatus === 'underweight' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' :
+                                                  bmiStatus === 'overweight' ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400' :
+                                                  'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400'
+                                                }
+                                              >
+                                                {bmi}
+                                              </Badge>
+                                            ) : (
+                                              <span className="text-muted-foreground">—</span>
+                                            )}
+                                          </td>
+                                          <td className="px-4 py-3 text-muted-foreground text-sm">{vitals.recordedBy}</td>
+                                        </tr>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
+                              </div>
+                            )}
+                            {/* Pagination */}
+                            <div className="flex flex-col gap-3 border-t border-border/60 pt-3 mt-3 md:flex-row md:items-center md:justify-between">
+                              <div className="flex items-center gap-4">
+                                <p className="text-sm text-muted-foreground">
+                                  Showing {totalVitals === 0 ? 0 : `${(vitalsPage - 1) * vitalsPerPage + 1}-${Math.min(totalVitals, vitalsPage * vitalsPerPage)}`} of {totalVitals}
+                                </p>
+                                <div className="flex items-center gap-2">
+                                  <label className="text-sm text-muted-foreground">Per page:</label>
+                                  <Select value={String(vitalsPerPage)} onValueChange={(value) => { setVitalsPerPage(Number(value)); setVitalsPage(1); }}>
+                                    <SelectTrigger className="w-16 h-8">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="5">5</SelectItem>
+                                      <SelectItem value="10">10</SelectItem>
+                                      <SelectItem value="25">25</SelectItem>
+                                      <SelectItem value="50">50</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Button variant="outline" size="sm" disabled={vitalsPage === 1} onClick={() => setVitalsPage(p => p - 1)}>
+                                  <ChevronLeft className="h-4 w-4" />
+                                  Previous
+                                </Button>
+                                <div className="flex items-center gap-1">
+                                  {Array.from({ length: Math.min(5, totalVitalsPages) }, (_, i) => {
+                                    let pageNum: number;
+                                    if (totalVitalsPages <= 5) pageNum = i + 1;
+                                    else if (vitalsPage <= 3) pageNum = i + 1;
+                                    else if (vitalsPage >= totalVitalsPages - 2) pageNum = totalVitalsPages - 4 + i;
+                                    else pageNum = vitalsPage - 2 + i;
+                                    if (pageNum > totalVitalsPages || pageNum < 1) return null;
+                                    return (
+                                      <Button key={pageNum} variant={vitalsPage === pageNum ? "default" : "outline"} size="sm" className="w-8 h-8 p-0" onClick={() => setVitalsPage(pageNum)}>
+                                        {pageNum}
+                                      </Button>
+                                    );
+                                  })}
+                                </div>
+                                <Button variant="outline" size="sm" disabled={vitalsPage >= totalVitalsPages} onClick={() => setVitalsPage(p => p + 1)}>
+                                  Next
+                                  <ChevronRight className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </div>
+                          </>
+                        );
+                      })()}
+                    </TabsContent>
+
                     {/* Background Tab */}
                     <TabsContent value="background" className="mt-4">
+                      <div className="flex justify-end mb-4">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setShowEditMedicalHistory(true)}
+                          disabled={!currentPatient}
+                        >
+                          <Edit className="h-4 w-4 mr-2" />
+                          Edit Medical History
+                        </Button>
+                      </div>
                       <div className="grid gap-4 md:grid-cols-2">
                         {/* Surgical History */}
                         <Card>
@@ -3491,17 +4686,28 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                             </CardTitle>
                           </CardHeader>
                           <CardContent>
-                            {demoPatientHistory.surgicalHistory.length > 0 ? (
-                              <ul className="space-y-2">
-                                {demoPatientHistory.surgicalHistory.map((surgery: { procedure: string; date: string }, index: number) => (
-                                  <li key={index} className="text-sm flex justify-between">
-                                    <span className="font-medium">{surgery.procedure}</span>
-                                    <span className="text-muted-foreground">{surgery.date}</span>
-                                  </li>
+                            {medicalHistory.surgicalHistory && medicalHistory.surgicalHistory.length > 0 ? (
+                              <div className="space-y-3">
+                                {medicalHistory.surgicalHistory.map((surgery: { procedure: string; date: string; hospital?: string }, index: number) => (
+                                  <div key={index} className="p-3 bg-rose-50 dark:bg-rose-900/20 rounded-lg border border-rose-200 dark:border-rose-800">
+                                    <div className="flex items-start justify-between mb-1">
+                                      <span className="font-medium text-sm">{surgery.procedure}</span>
+                                      <Badge variant="outline" className="text-xs">{surgery.date}</Badge>
+                                    </div>
+                                    {surgery.hospital && (
+                                      <div className="text-xs text-muted-foreground mt-1">
+                                        <MapPin className="h-3 w-3 inline mr-1" />
+                                        {surgery.hospital}
+                                      </div>
+                                    )}
+                                  </div>
                                 ))}
-                              </ul>
+                              </div>
                             ) : (
-                              <p className="text-sm text-muted-foreground">No surgical history</p>
+                              <div className="text-center py-8 text-sm text-muted-foreground">
+                                <Activity className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                                <p>No surgical history recorded</p>
+                              </div>
                             )}
                           </CardContent>
                         </Card>
@@ -3515,17 +4721,24 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                             </CardTitle>
                           </CardHeader>
                           <CardContent>
-                            {demoPatientHistory.familyHistory.length > 0 ? (
-                              <ul className="space-y-2">
-                                {demoPatientHistory.familyHistory.map((fh: { relation: string; condition: string }, index: number) => (
-                                  <li key={index} className="text-sm flex justify-between">
-                                    <span className="font-medium">{fh.relation}</span>
-                                    <span className="text-muted-foreground">{fh.condition}</span>
-                                  </li>
+                            {medicalHistory.familyHistory && medicalHistory.familyHistory.length > 0 ? (
+                              <div className="space-y-3">
+                                {medicalHistory.familyHistory.map((fh: { relation: string; condition: string }, index: number) => (
+                                  <div key={index} className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                                    <div className="flex items-start justify-between">
+                                      <div className="flex-1">
+                                        <div className="font-medium text-sm mb-1">{fh.relation}</div>
+                                        <div className="text-xs text-muted-foreground">{fh.condition}</div>
+                                      </div>
+                                    </div>
+                                  </div>
                                 ))}
-                              </ul>
+                              </div>
                             ) : (
-                              <p className="text-sm text-muted-foreground">No family history recorded</p>
+                              <div className="text-center py-8 text-sm text-muted-foreground">
+                                <Users className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                                <p>No family history recorded</p>
+                              </div>
                             )}
                           </CardContent>
                         </Card>
@@ -3539,19 +4752,25 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                             </CardTitle>
                           </CardHeader>
                           <CardContent>
-                            <div className="grid grid-cols-3 gap-4">
-                              <div className="text-center p-3 bg-muted/30 rounded-lg">
-                                <div className="text-xs text-muted-foreground mb-1">Smoking</div>
-                                <div className="font-medium">{demoPatientHistory.socialHistory.smoking}</div>
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                              <div className="p-4 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg border border-emerald-200 dark:border-emerald-800 text-center">
+                                <div className="text-xs text-muted-foreground mb-2">Smoking</div>
+                                <div className="font-semibold text-emerald-700 dark:text-emerald-300">{medicalHistory.socialHistory?.smoking || 'Not recorded'}</div>
                               </div>
-                              <div className="text-center p-3 bg-muted/30 rounded-lg">
-                                <div className="text-xs text-muted-foreground mb-1">Alcohol</div>
-                                <div className="font-medium">{demoPatientHistory.socialHistory.alcohol}</div>
+                              <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800 text-center">
+                                <div className="text-xs text-muted-foreground mb-2">Alcohol</div>
+                                <div className="font-semibold text-blue-700 dark:text-blue-300">{medicalHistory.socialHistory?.alcohol || 'Not recorded'}</div>
                               </div>
-                              <div className="text-center p-3 bg-muted/30 rounded-lg">
-                                <div className="text-xs text-muted-foreground mb-1">Exercise</div>
-                                <div className="font-medium">{demoPatientHistory.socialHistory.exercise}</div>
+                              <div className="p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg border border-purple-200 dark:border-purple-800 text-center">
+                                <div className="text-xs text-muted-foreground mb-2">Exercise</div>
+                                <div className="font-semibold text-purple-700 dark:text-purple-300">{medicalHistory.socialHistory?.exercise || 'Not recorded'}</div>
                               </div>
+                              {medicalHistory.socialHistory?.occupation && (
+                                <div className="p-4 bg-amber-50 dark:bg-amber-900/20 rounded-lg border border-amber-200 dark:border-amber-800 text-center">
+                                  <div className="text-xs text-muted-foreground mb-2">Occupation</div>
+                                  <div className="font-semibold text-amber-700 dark:text-amber-300">{medicalHistory.socialHistory.occupation}</div>
+                                </div>
+                              )}
                             </div>
                           </CardContent>
                         </Card>
@@ -3566,7 +4785,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
         {/* Add Diagnosis Dialog */}
         <Dialog open={showAddDiagnosis} onOpenChange={(open) => { setShowAddDiagnosis(open); if (!open) { setDiagnosisSearch(""); setShowDiagnosisDropdown(false); setDiagnosisNotes(""); } }}>
-          <DialogContent className="sm:max-w-[550px]">
+          <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Stethoscope className="h-5 w-5 text-rose-500" />
@@ -3692,15 +4911,23 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           </DialogContent>
         </Dialog>
 
-        <Dialog open={showAddPrescription} onOpenChange={(open) => { setShowAddPrescription(open); if (!open) { setMedicationSearch(""); setShowMedicationDropdown(false); } }}>
-          <DialogContent className="sm:max-w-[650px]">
+        <Dialog open={showAddPrescription} onOpenChange={(open) => { 
+          setShowAddPrescription(open); 
+          if (!open) { 
+            setMedicationSearch("");
+            setSelectedMedications(new Set()); // Clear selections when closing
+            setMedicationConfigs(new Map()); // Clear configs when closing
+            setShowMedicationDropdown(false); 
+          }
+        }}>
+          <DialogContent className="w-[95vw] sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Pill className="h-5 w-5 text-violet-500" />
                 Add Prescription
               </DialogTitle>
               <DialogDescription>
-                Prescribe medication for {currentPatient?.name} - will be sent to Pharmacy queue
+                Search and select medications, then configure dosage details for each individually. All selected medications will be sent as one prescription order to Pharmacy queue.
               </DialogDescription>
             </DialogHeader>
             
@@ -3718,240 +4945,456 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
               {/* Medication Search */}
               <div className="space-y-2">
                 <Label>Medication *</Label>
+                <p className="text-xs text-muted-foreground mb-2">
+                  Search medications by name, generic name, or category. Select multiple medications to add to this prescription order.
+                </p>
                 <div className="relative">
                   <Input 
                     value={medicationSearch} 
                     onChange={(e) => {
                       setMedicationSearch(e.target.value);
-                      setNewPrescription({ ...newPrescription, medication: e.target.value });
-                      setShowMedicationDropdown(true);
+                      // Only show dropdown when user types something
+                      if (e.target.value.trim().length > 0) {
+                        setShowMedicationDropdown(true);
+                      } else {
+                        setShowMedicationDropdown(false);
+                      }
                     }}
-                    onFocus={() => setShowMedicationDropdown(true)}
-                    placeholder="Search medications by name, generic name, or category..." 
+                    onFocus={() => {
+                      // Only show dropdown if user has already typed something
+                      if (medicationSearch.trim().length > 0) {
+                        setShowMedicationDropdown(true);
+                      }
+                    }}
+                    onBlur={() => {
+                      // Delay hiding dropdown to allow click on items
+                      setTimeout(() => setShowMedicationDropdown(false), 200);
+                    }}
+                    placeholder="Search by name, generic name, or category..." 
                   />
-                  {showMedicationDropdown && medicationSearch && filteredMedications.length > 0 && (
-                    <div className="absolute z-50 w-full mt-1 bg-background border rounded-md shadow-lg max-h-[200px] overflow-y-auto">
-                      {filteredMedications.slice(0, 10).map((med) => {
+                  {loadingMedications && (
+                    <div className="absolute z-50 w-full mt-1 bg-background border rounded-md shadow-lg p-4 text-center text-sm text-muted-foreground">
+                      Loading medications...
+                    </div>
+                  )}
+                  {!loadingMedications && showMedicationDropdown && filteredMedications.length > 0 && (
+                    <div className="absolute z-50 w-full mt-1 bg-background border rounded-md shadow-lg max-h-[300px] overflow-y-auto">
+                      {filteredMedications.length > 20 && (
+                        <div className="p-2 text-xs text-muted-foreground border-b">
+                          Showing {Math.min(20, filteredMedications.length)} of {filteredMedications.length} medications
+                        </div>
+                      )}
+                      {filteredMedications.slice(0, 20).map((med) => {
+                        // Handle both API medications (generic_name, form) and demo medications (genericName, dosageForm)
+                        const genericName = med.generic_name || med.genericName || '';
+                        const form = med.form || med.dosageForm || '';
+                        const category = med.category || '';
+                        const medicationId = typeof med.id === 'number' ? med.id : parseInt(med.id, 10);
+                        const isSelected = selectedMedications.has(medicationId);
                         const isAllergyRisk = currentPatient?.allergies.some(allergy => 
-                          med.name.toLowerCase().includes(allergy.toLowerCase()) || 
-                          med.genericName.toLowerCase().includes(allergy.toLowerCase())
+                          med.name?.toLowerCase().includes(allergy.toLowerCase()) || 
+                          genericName.toLowerCase().includes(allergy.toLowerCase())
                         );
                         return (
                           <div 
                             key={med.id}
-                            onClick={() => selectMedication(med)}
-                            className={`p-2 hover:bg-muted cursor-pointer flex items-center justify-between ${isAllergyRisk ? 'bg-red-50 dark:bg-red-900/20' : ''}`}
+                            onClick={() => toggleMedicationSelection(med)}
+                            className={`p-2 hover:bg-muted cursor-pointer flex items-center justify-between ${isAllergyRisk ? 'bg-red-50 dark:bg-red-900/20' : ''} ${isSelected ? 'bg-primary/10 dark:bg-primary/20' : ''}`}
                           >
-                            <div>
-                              <div className="font-medium text-sm flex items-center gap-2">
-                                {med.name}
-                                {isAllergyRisk && <AlertTriangle className="h-3 w-3 text-red-500" />}
+                            <div className="flex items-center gap-2 flex-1">
+                              <Checkbox 
+                                checked={isSelected}
+                                onCheckedChange={() => toggleMedicationSelection(med)}
+                                onClick={(e) => e.stopPropagation()}
+                                className="flex-shrink-0"
+                              />
+                              <div className="flex-1">
+                                <div className="font-medium text-sm flex items-center gap-2">
+                                  {med.name}
+                                  {isAllergyRisk && <AlertTriangle className="h-3 w-3 text-red-500" />}
+                                </div>
+                                <div className="text-xs text-muted-foreground">
+                                  {genericName && `${genericName} • `}
+                                  {category && `${category} • `}
+                                  {form || 'N/A'}
+                                </div>
                               </div>
-                              <div className="text-xs text-muted-foreground">{med.genericName} • {med.category} • {med.dosageForm}</div>
                             </div>
-                            <Badge variant="outline" className={med.stockLevel === 0 ? 'bg-red-100 text-red-700' : med.stockLevel < 50 ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}>
-                              {med.stockLevel === 0 ? 'Out' : med.stockLevel}
-                            </Badge>
+                            {med.stockLevel !== undefined && (
+                              <Badge variant="outline" className={med.stockLevel === 0 ? 'bg-red-100 text-red-700' : med.stockLevel < 50 ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}>
+                                {med.stockLevel === 0 ? 'Out' : med.stockLevel}
+                              </Badge>
+                            )}
                           </div>
                         );
                       })}
                     </div>
                   )}
-                </div>
-                {newPrescription.genericName && (
-                  <p className="text-xs text-muted-foreground">Generic: {newPrescription.genericName}</p>
-                )}
-              </div>
-              
-              {/* Dosage and Route */}
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Dosage *</Label>
-                  <Input 
-                    value={newPrescription.dosage} 
-                    onChange={(e) => setNewPrescription({ ...newPrescription, dosage: e.target.value })} 
-                    placeholder="e.g., 1 tablet, 5ml" 
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Route</Label>
-                  <Select value={newPrescription.route} onValueChange={(v) => setNewPrescription({ ...newPrescription, route: v })}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {routes.map(route => (
-                        <SelectItem key={route} value={route}>{route}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  {!loadingMedications && showMedicationDropdown && filteredMedications.length === 0 && medicationSearch && (
+                    <div className="absolute z-50 w-full mt-1 bg-background border rounded-md shadow-lg p-4 text-center text-sm text-muted-foreground">
+                      No medications found matching "{medicationSearch}"
+                    </div>
+                  )}
+                  {!loadingMedications && showMedicationDropdown && filteredMedications.length === 0 && !medicationSearch && medications.length === 0 && (
+                    <div className="absolute z-50 w-full mt-1 bg-background border rounded-md shadow-lg p-4 text-center text-sm text-muted-foreground">
+                      No medications available. Please check if medications are loaded.
+                    </div>
+                  )}
                 </div>
               </div>
-              
-              {/* Frequency and Duration */}
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Frequency *</Label>
-                  <Select 
-                    value={newPrescription.frequency} 
-                    onValueChange={(v) => {
-                      const qty = calculateQuantity(v, newPrescription.durationDays);
-                      setNewPrescription({ ...newPrescription, frequency: v, quantity: qty });
-                    }}
-                  >
-                    <SelectTrigger><SelectValue placeholder="Select frequency" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Once daily (OD)">Once daily (OD)</SelectItem>
-                      <SelectItem value="Twice daily (BD)">Twice daily (BD)</SelectItem>
-                      <SelectItem value="Three times daily (TDS)">Three times daily (TDS)</SelectItem>
-                      <SelectItem value="Four times daily (QDS)">Four times daily (QDS)</SelectItem>
-                      <SelectItem value="Every 6 hours (Q6H)">Every 6 hours (Q6H)</SelectItem>
-                      <SelectItem value="Every 8 hours (Q8H)">Every 8 hours (Q8H)</SelectItem>
-                      <SelectItem value="Every 12 hours (Q12H)">Every 12 hours (Q12H)</SelectItem>
-                      <SelectItem value="At bedtime (Nocte)">At bedtime (Nocte)</SelectItem>
-                      <SelectItem value="As needed (PRN)">As needed (PRN)</SelectItem>
-                      <SelectItem value="Weekly">Weekly</SelectItem>
-                      <SelectItem value="STAT (Single dose)">STAT (Single dose)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Duration (days)</Label>
-                  <Input 
-                    type="number"
-                    min="1"
-                    value={newPrescription.durationDays || ''} 
-                    onChange={(e) => {
-                      const days = parseInt(e.target.value) || 0;
-                      const qty = calculateQuantity(newPrescription.frequency, days);
-                      setNewPrescription({ 
-                        ...newPrescription, 
-                        durationDays: days, 
-                        duration: days > 0 ? `${days} days` : '',
-                        quantity: qty 
-                      });
-                    }} 
-                    placeholder="e.g., 7" 
-                    disabled={newPrescription.frequency === 'STAT (Single dose)'}
-                  />
-                </div>
-              </div>
-              
-              {/* Calculated Quantity */}
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Calculated Quantity</Label>
-                  <div className="h-10 px-3 py-2 border rounded-md text-sm bg-muted/50 flex items-center justify-between">
-                    <span className="font-medium">{newPrescription.quantity || calculateQuantity(newPrescription.frequency, newPrescription.durationDays) || '—'}</span>
-                    {newPrescription.frequency && newPrescription.durationDays > 0 && (
-                      <span className="text-xs text-muted-foreground">
-                        ({frequencyToDailyDoses[newPrescription.frequency] || 1}/day × {newPrescription.durationDays} days)
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <Label>Priority</Label>
-                  <Select value={newPrescription.priority} onValueChange={(v) => setNewPrescription({ ...newPrescription, priority: v })}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Routine">
-                        <div className="flex items-center gap-2">
-                          <Badge className="bg-blue-100 text-blue-800">Routine</Badge>
-                        </div>
-                      </SelectItem>
-                      <SelectItem value="Urgent">
-                        <div className="flex items-center gap-2">
-                          <Badge className="bg-amber-100 text-amber-800">Urgent</Badge>
-                        </div>
-                      </SelectItem>
-                      <SelectItem value="Emergency">
-                        <div className="flex items-center gap-2">
-                          <Badge className="bg-red-100 text-red-800">Emergency</Badge>
-                        </div>
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              
-              {/* Instructions */}
-              <div className="space-y-2">
-                <Label>Special Instructions</Label>
-                <Textarea 
-                  value={newPrescription.instructions} 
-                  onChange={(e) => setNewPrescription({ ...newPrescription, instructions: e.target.value })} 
-                  placeholder="e.g., Take after meals, Avoid alcohol, Store in refrigerator..." 
-                  rows={2} 
-                />
-              </div>
-
-              {/* Priority Warning */}
-              {newPrescription.priority === 'Emergency' && (
-                <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
-                  <p className="text-sm text-red-700 dark:text-red-300 flex items-center gap-2">
-                    <AlertTriangle className="h-4 w-4" />
-                    Emergency priority will alert pharmacist for immediate dispensing.
-                  </p>
-                </div>
-              )}
             </div>
             
+            {/* Selected Medications List with Individual Configuration */}
+            {selectedMedications.size > 0 && (
+              <div className="space-y-4 border-t pt-4 mt-4">
+                <div className="flex items-center justify-between mb-2">
+                  <div>
+                    <Label className="text-sm font-semibold">
+                      Selected Medications ({selectedMedications.size})
+                    </Label>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Configure dosage details for each medication below. All medications will be sent as one prescription order.
+                    </p>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setSelectedMedications(new Set());
+                      setMedicationConfigs(new Map());
+                    }}
+                  >
+                    Clear All
+                  </Button>
+                </div>
+                <div className="max-h-[400px] overflow-y-auto space-y-3">
+                  {Array.from(selectedMedications).map((medId) => {
+                    const med = medications.find((m: any) => {
+                      const mId = typeof m.id === 'number' ? m.id : parseInt(m.id, 10);
+                      return mId === medId;
+                    });
+                    if (!med) return null;
+                    const config = medicationConfigs.get(medId) || {
+                      dosage: '',
+                      frequency: 'Once daily (OD)',
+                      duration: '',
+                      durationDays: 0,
+                      quantity: 0,
+                      route: 'Oral',
+                      instructions: '',
+                      priority: 'Routine',
+                    };
+                    const dailyDoses = frequencyToDailyDoses[config.frequency] || 1;
+                    const calculatedQty = config.frequency === 'STAT (Single dose)' 
+                      ? 1 
+                      : Math.ceil(dailyDoses * config.durationDays);
+                    return (
+                      <div key={medId} className={`border rounded-lg p-3 space-y-3 ${
+                        (!config.dosage || !config.frequency || (!config.durationDays && config.frequency !== 'STAT (Single dose)')) 
+                          ? 'bg-amber-50 dark:bg-amber-900/10 border-amber-300 dark:border-amber-800' 
+                          : 'bg-muted/30'
+                      }`}>
+                        <div className="flex items-center justify-between">
+                          <div className="flex-1">
+                            <div className="font-medium text-sm flex items-center gap-2">
+                              {med.name}
+                              {(!config.dosage || !config.frequency || (!config.durationDays && config.frequency !== 'STAT (Single dose)')) && (
+                                <Badge variant="outline" className="bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400 text-xs">
+                                  Incomplete
+                                </Badge>
+                              )}
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              {med.generic_name || med.genericName || ''} • {med.form || med.dosageForm || 'N/A'}
+                            </div>
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setSelectedMedications(prev => {
+                                const newSet = new Set(prev);
+                                newSet.delete(medId);
+                                return newSet;
+                              });
+                              setMedicationConfigs(prev => {
+                                const newConfigs = new Map(prev);
+                                newConfigs.delete(medId);
+                                return newConfigs;
+                              });
+                            }}
+                            className="h-6 w-6 p-0"
+                          >
+                            <X className="h-3 w-3" />
+                          </Button>
+                        </div>
+                        
+                        {/* Individual Configuration for each medication */}
+                        <div className="grid grid-cols-2 gap-2 text-xs">
+                          <div className="space-y-1">
+                            <Label className="text-xs">
+                              Dosage <span className="text-red-500">*</span>
+                            </Label>
+                            <Input
+                              value={config.dosage}
+                              onChange={(e) => updateMedicationConfig(medId, 'dosage', e.target.value)}
+                              placeholder="e.g., 1 tablet"
+                              className={`h-8 text-xs ${!config.dosage ? 'border-amber-300 dark:border-amber-700' : ''}`}
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs">
+                              Route <span className="text-red-500">*</span>
+                            </Label>
+                            <Select
+                              value={config.route}
+                              onValueChange={(v) => updateMedicationConfig(medId, 'route', v)}
+                            >
+                              <SelectTrigger className={`h-8 text-xs ${!config.route ? 'border-amber-300 dark:border-amber-700' : ''}`}>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {routes.map(route => (
+                                  <SelectItem key={route} value={route} className="text-xs">{route}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs">
+                              Frequency <span className="text-red-500">*</span>
+                            </Label>
+                            <Select
+                              value={config.frequency}
+                              onValueChange={(v) => updateMedicationConfig(medId, 'frequency', v)}
+                            >
+                              <SelectTrigger className={`h-8 text-xs ${!config.frequency ? 'border-amber-300 dark:border-amber-700' : ''}`}>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="Once daily (OD)" className="text-xs">Once daily (OD)</SelectItem>
+                                <SelectItem value="Twice daily (BD)" className="text-xs">Twice daily (BD)</SelectItem>
+                                <SelectItem value="Three times daily (TDS)" className="text-xs">Three times daily (TDS)</SelectItem>
+                                <SelectItem value="Four times daily (QDS)" className="text-xs">Four times daily (QDS)</SelectItem>
+                                <SelectItem value="Every 6 hours (Q6H)" className="text-xs">Every 6 hours (Q6H)</SelectItem>
+                                <SelectItem value="Every 8 hours (Q8H)" className="text-xs">Every 8 hours (Q8H)</SelectItem>
+                                <SelectItem value="Every 12 hours (Q12H)" className="text-xs">Every 12 hours (Q12H)</SelectItem>
+                                <SelectItem value="At bedtime (Nocte)" className="text-xs">At bedtime (Nocte)</SelectItem>
+                                <SelectItem value="As needed (PRN)" className="text-xs">As needed (PRN)</SelectItem>
+                                <SelectItem value="Weekly" className="text-xs">Weekly</SelectItem>
+                                <SelectItem value="STAT (Single dose)" className="text-xs">STAT (Single dose)</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs">
+                              Duration (days) <span className="text-red-500">*</span>
+                              {config.frequency === 'STAT (Single dose)' && (
+                                <span className="text-muted-foreground ml-1">(Auto: 1)</span>
+                              )}
+                            </Label>
+                            <Input
+                              type="number"
+                              min="1"
+                              value={config.durationDays || ''}
+                              onChange={(e) => {
+                                const days = parseInt(e.target.value) || 0;
+                                updateMedicationConfig(medId, 'durationDays', days);
+                              }}
+                              placeholder="e.g., 7"
+                              className={`h-8 text-xs ${!config.durationDays && config.frequency !== 'STAT (Single dose)' ? 'border-amber-300 dark:border-amber-700' : ''}`}
+                              disabled={config.frequency === 'STAT (Single dose)'}
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs">Calculated Quantity</Label>
+                            <div className="h-8 px-2 border rounded-md text-xs bg-muted/50 flex items-center justify-between">
+                              <span className="font-medium">{calculatedQty || config.quantity || '—'}</span>
+                              {calculatedQty > 0 && (
+                                <span className="text-muted-foreground text-[10px]">
+                                  ({config.frequency} × {config.durationDays} days)
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs">Priority</Label>
+                            <Select
+                              value={config.priority}
+                              onValueChange={(v) => updateMedicationConfig(medId, 'priority', v)}
+                            >
+                              <SelectTrigger className="h-8 text-xs">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="Routine" className="text-xs">Routine</SelectItem>
+                                <SelectItem value="Urgent" className="text-xs">Urgent</SelectItem>
+                                <SelectItem value="Emergency" className="text-xs">Emergency</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">Special Instructions</Label>
+                          <Textarea
+                            value={config.instructions}
+                            onChange={(e) => updateMedicationConfig(medId, 'instructions', e.target.value)}
+                            placeholder="e.g., Take after meals..."
+                            rows={2}
+                            className="text-xs"
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             <DialogFooter>
-              <Button variant="outline" onClick={() => { setShowAddPrescription(false); setMedicationSearch(""); }}>Cancel</Button>
               <Button 
-                onClick={addPrescription} 
-                disabled={!newPrescription.medication || !newPrescription.dosage || !newPrescription.frequency}
-                className="bg-violet-600 hover:bg-violet-700"
+                variant="outline" 
+                onClick={() => { 
+                  setShowAddPrescription(false); 
+                  setMedicationSearch("");
+                  setSelectedMedications(new Set());
+                }}
               >
-                <Pill className="h-4 w-4 mr-2" />
-                Add to Prescription Order
+                Cancel
               </Button>
+              {selectedMedications.size > 0 ? (
+                <Button 
+                  onClick={addSelectedMedicationsToPrescription}
+                  className="bg-violet-600 hover:bg-violet-700"
+                  disabled={Array.from(selectedMedications).some(medId => {
+                    const config = medicationConfigs.get(medId);
+                    return !config || !config.dosage || !config.frequency || (!config.durationDays && config.frequency !== 'STAT (Single dose)');
+                  })}
+                >
+                  <Pill className="h-4 w-4 mr-2" />
+                  Add {selectedMedications.size} Medication{selectedMedications.size > 1 ? 's' : ''} to Order
+                </Button>
+              ) : (
+                <Button 
+                  onClick={addPrescription} 
+                  disabled={!newPrescription.medication || !newPrescription.dosage || !newPrescription.frequency}
+                  className="bg-violet-600 hover:bg-violet-700"
+                >
+                  <Pill className="h-4 w-4 mr-2" />
+                  Add to Prescription Order
+                </Button>
+              )}
             </DialogFooter>
           </DialogContent>
         </Dialog>
 
-        <Dialog open={showAddLabOrder} onOpenChange={setShowAddLabOrder}>
-          <DialogContent className="sm:max-w-[600px]">
+        <Dialog 
+          open={showAddLabOrder} 
+          onOpenChange={(open) => {
+            setShowAddLabOrder(open);
+            if (!open) {
+              setSelectedLabTemplates(new Set());
+              setLabTemplateSearch("");
+              setShowLabTemplateDropdown(false);
+            }
+          }}
+        >
+          <DialogContent className="w-[95vw] sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle className="flex items-center gap-2"><TestTube className="h-5 w-5 text-amber-500" />Order Lab Test</DialogTitle>
-              <DialogDescription>Request a laboratory test - will be sent to Lab Tech queue</DialogDescription>
+              <DialogTitle className="flex items-center gap-2"><TestTube className="h-5 w-5 text-amber-500" />Order Lab Test(s)</DialogTitle>
+              <DialogDescription>Select one or more laboratory tests to order - will be sent to Lab Tech queue</DialogDescription>
             </DialogHeader>
             <div className="space-y-4 py-2">
               <div className="space-y-2">
-                <Label>Select Test *</Label>
-                <Select value={newLabOrder.test} onValueChange={(v) => setNewLabOrder({ ...newLabOrder, test: v })}>
-                  <SelectTrigger><SelectValue placeholder="Select a test..." /></SelectTrigger>
-                  <SelectContent className="max-h-[300px]">
-                    <SelectItem disabled value="hematology-header" className="font-bold text-xs text-muted-foreground">── HEMATOLOGY ──</SelectItem>
-                    <SelectItem value="Complete Blood Count (CBC)">Complete Blood Count (CBC)</SelectItem>
-                    <SelectItem value="Hemoglobin/PCV">Hemoglobin/PCV</SelectItem>
-                    <SelectItem value="ESR">ESR</SelectItem>
-                    <SelectItem value="Blood Group & Rhesus">Blood Group & Rhesus</SelectItem>
-                    <SelectItem value="Coagulation Profile">Coagulation Profile</SelectItem>
-                    <SelectItem disabled value="chemistry-header" className="font-bold text-xs text-muted-foreground">── CHEMISTRY ──</SelectItem>
-                    <SelectItem value="Liver Function Test (LFT)">Liver Function Test (LFT)</SelectItem>
-                    <SelectItem value="Renal Function Test (RFT)">Renal Function Test (RFT)</SelectItem>
-                    <SelectItem value="Lipid Profile">Lipid Profile</SelectItem>
-                    <SelectItem value="Fasting Blood Sugar (FBS)">Fasting Blood Sugar (FBS)</SelectItem>
-                    <SelectItem value="Random Blood Sugar (RBS)">Random Blood Sugar (RBS)</SelectItem>
-                    <SelectItem value="HbA1c">HbA1c</SelectItem>
-                    <SelectItem value="Serum Electrolytes">Serum Electrolytes</SelectItem>
-                    <SelectItem value="Thyroid Function Test">Thyroid Function Test</SelectItem>
-                    <SelectItem value="Uric Acid">Uric Acid</SelectItem>
-                    <SelectItem disabled value="microbiology-header" className="font-bold text-xs text-muted-foreground">── MICROBIOLOGY ──</SelectItem>
-                    <SelectItem value="Malaria Parasite">Malaria Parasite</SelectItem>
-                    <SelectItem value="Widal Test">Widal Test</SelectItem>
-                    <SelectItem value="Urinalysis">Urinalysis</SelectItem>
-                    <SelectItem value="Urine Culture & Sensitivity">Urine Culture & Sensitivity</SelectItem>
-                    <SelectItem value="Stool Analysis">Stool Analysis</SelectItem>
-                    <SelectItem value="Blood Culture">Blood Culture</SelectItem>
-                    <SelectItem disabled value="immunology-header" className="font-bold text-xs text-muted-foreground">── IMMUNOLOGY ──</SelectItem>
-                    <SelectItem value="HIV Screening">HIV Screening</SelectItem>
-                    <SelectItem value="Hepatitis B Surface Antigen">Hepatitis B Surface Antigen</SelectItem>
-                    <SelectItem value="Hepatitis C Antibody">Hepatitis C Antibody</SelectItem>
-                    <SelectItem value="VDRL">VDRL</SelectItem>
-                    <SelectItem value="Pregnancy Test">Pregnancy Test</SelectItem>
-                  </SelectContent>
-                </Select>
+                <Label>Search and Select Tests *</Label>
+                <div className="relative" data-lab-template-dropdown>
+                  <Input
+                    placeholder="Search tests by name, code, or sample type..."
+                    value={labTemplateSearch}
+                    onChange={(e) => {
+                      const searchValue = e.target.value;
+                      setLabTemplateSearch(searchValue);
+                      // Only show dropdown if user has typed something
+                      if (searchValue.trim()) {
+                        setShowLabTemplateDropdown(true);
+                      } else {
+                        setShowLabTemplateDropdown(false);
+                      }
+                    }}
+                    onFocus={() => {
+                      // Only show dropdown if there's search text
+                      if (labTemplateSearch.trim()) {
+                        setShowLabTemplateDropdown(true);
+                      }
+                    }}
+                  />
+                  {showLabTemplateDropdown && labTemplateSearch.trim() && (
+                    <div className="absolute z-50 w-full mt-1 bg-white dark:bg-gray-800 border rounded-md shadow-lg max-h-[300px] overflow-y-auto" data-lab-template-dropdown>
+                      {loadingLabTemplates ? (
+                        <div className="p-4 text-center text-sm text-muted-foreground">
+                          <Loader2 className="h-4 w-4 animate-spin mx-auto mb-2" />
+                          Loading tests...
+                        </div>
+                      ) : filteredLabTemplates.length === 0 ? (
+                        <div className="p-4 text-center text-sm text-muted-foreground">
+                          No tests found. Try a different search term.
+                        </div>
+                      ) : (
+                        filteredLabTemplates.map((template) => {
+                          const isSelected = selectedLabTemplates.has(template.id);
+                          return (
+                            <div
+                              key={template.id}
+                              onClick={() => toggleLabTemplateSelection(template)}
+                              className={`p-3 hover:bg-muted cursor-pointer border-b last:border-b-0 flex items-start gap-3 ${
+                                isSelected ? 'bg-amber-50 dark:bg-amber-900/20' : ''
+                              }`}
+                            >
+                              <Checkbox checked={isSelected} onCheckedChange={() => toggleLabTemplateSelection(template)} />
+                              <div className="flex-1 min-w-0">
+                                <div className="font-medium text-sm">{template.name}</div>
+                                <div className="text-xs text-muted-foreground mt-1">
+                                  {template.code} • {template.sample_type}
+                                </div>
+                                {template.description && (
+                                  <div className="text-xs text-muted-foreground mt-1 line-clamp-1">
+                                    {template.description}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  )}
+                </div>
+                {selectedLabTemplates.size > 0 && (
+                  <div className="mt-2 space-y-2">
+                    <div className="text-sm font-medium">Selected Tests ({selectedLabTemplates.size}):</div>
+                    <div className="flex flex-wrap gap-2">
+                      {labTemplates
+                        .filter(t => selectedLabTemplates.has(t.id))
+                        .map(template => (
+                          <Badge key={template.id} variant="secondary" className="flex items-center gap-1">
+                            {template.name}
+                            <X
+                              className="h-3 w-3 cursor-pointer"
+                              onClick={() => toggleLabTemplateSelection(template)}
+                            />
+                          </Badge>
+                        ))}
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setSelectedLabTemplates(new Set())}
+                      className="text-xs"
+                    >
+                      Clear All
+                    </Button>
+                  </div>
+                )}
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
@@ -3986,23 +5429,35 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
               )}
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setShowAddLabOrder(false)}>Cancel</Button>
-              <Button onClick={addLabOrder} disabled={!newLabOrder.test} className="bg-amber-500 hover:bg-amber-600">
-                <TestTube className="h-4 w-4 mr-2" />Send to Lab
+              <Button variant="outline" onClick={() => {
+                setShowAddLabOrder(false);
+                setSelectedLabTemplates(new Set());
+                setLabTemplateSearch("");
+                setShowLabTemplateDropdown(false);
+              }}>
+                Cancel
+              </Button>
+              <Button 
+                onClick={addLabOrder} 
+                disabled={selectedLabTemplates.size === 0} 
+                className="bg-amber-500 hover:bg-amber-600"
+              >
+                <TestTube className="h-4 w-4 mr-2" />
+                Add {selectedLabTemplates.size > 0 ? `${selectedLabTemplates.size} Test(s)` : 'Test(s)'} to Order
               </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
 
         <Dialog open={showAddNursingOrder} onOpenChange={setShowAddNursingOrder}>
-          <DialogContent className="sm:max-w-[650px]">
+          <DialogContent className="w-[95vw] sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Syringe className="h-5 w-5 text-cyan-500" />
                 Add Nursing Order
               </DialogTitle>
               <DialogDescription>
-                Request a nursing procedure for {currentPatient?.name} - will be sent to Nursing queue
+                Add nursing procedure to order - will be sent to Nursing queue
               </DialogDescription>
             </DialogHeader>
             
@@ -4038,21 +5493,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                         Wound Dressing
                       </div>
                     </SelectItem>
-                    <SelectItem value="IV Infusion">
-                      <div className="flex items-center gap-2">
-                        <Activity className="h-4 w-4 text-blue-500" />
-                        IV Infusion
-                      </div>
-                    </SelectItem>
-                    <SelectItem value="Nebulization">
-                      <div className="flex items-center gap-2">
-                        <Activity className="h-4 w-4 text-purple-500" />
-                        Nebulization
-                      </div>
-                    </SelectItem>
-                    <SelectItem value="Catheterization">Catheterization</SelectItem>
-                    <SelectItem value="Vital Signs">Vital Signs Monitoring</SelectItem>
-                    <SelectItem value="Other">Other Procedure</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -4222,11 +5662,11 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
               <Button variant="outline" onClick={() => setShowAddNursingOrder(false)}>Cancel</Button>
               <Button 
                 onClick={addNursingOrder}
-                disabled={!newNursingOrder.type || !newNursingOrder.instructions}
+                disabled={!newNursingOrder.type || !newNursingOrder.instructions || (newNursingOrder.type === 'Injection' && !newNursingOrder.medication) || (newNursingOrder.type === 'Dressing' && !newNursingOrder.woundLocation)}
                 className="bg-cyan-600 hover:bg-cyan-700"
               >
                 <Syringe className="h-4 w-4 mr-2" />
-                Add to Nursing Orders
+                Add to Order
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -4234,14 +5674,14 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
         {/* Add Radiology Order Dialog */}
         <Dialog open={showAddRadiology} onOpenChange={setShowAddRadiology}>
-          <DialogContent className="sm:max-w-[600px]">
+          <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <ScanLine className="h-5 w-5 text-indigo-500" />
                 Order Imaging Study
               </DialogTitle>
               <DialogDescription>
-                Order radiology procedure for {currentPatient?.name}
+                Add imaging study to order - will be sent to Radiology queue
               </DialogDescription>
             </DialogHeader>
             
@@ -4361,7 +5801,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                 className="bg-indigo-600 hover:bg-indigo-700"
               >
                 <ScanLine className="h-4 w-4 mr-2" />
-                Add Radiology Order
+                Add to Order
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -4369,7 +5809,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
         {/* Add Referral Dialog */}
         <Dialog open={showAddReferral} onOpenChange={setShowAddReferral}>
-          <DialogContent className="sm:max-w-[650px]">
+          <DialogContent className="w-[95vw] sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Send className="h-5 w-5 text-teal-500" />
@@ -4505,7 +5945,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         </Dialog>
 
         <AlertDialog open={showEndDialog} onOpenChange={setShowEndDialog}>
-          <AlertDialogContent className="max-w-2xl">
+          <AlertDialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
             <AlertDialogHeader><AlertDialogTitle>End Consultation Session?</AlertDialogTitle><AlertDialogDescription>Are you sure you want to end the consultation session with {currentPatient?.name}? The session data will be saved and you will return to the room queue.</AlertDialogDescription></AlertDialogHeader>
             <div className="space-y-4 my-4">
               <div className="space-y-3">
@@ -4520,7 +5960,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
         {/* Room Queue Dialog */}
         <Dialog open={showRoomQueueDialog} onOpenChange={setShowRoomQueueDialog}>
-          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogContent className="w-[95vw] sm:max-w-[1000px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Users className="h-5 w-5 text-emerald-500" />
@@ -4596,14 +6036,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                   </span>
                                 </div>
                               </div>
-                              {patient.chiefComplaint && (
-                                <div className="mt-2">
-                                  <p className="text-sm">
-                                    <span className="font-medium text-muted-foreground">Chief Complaint:</span>{' '}
-                                    <span className="text-foreground">{patient.chiefComplaint}</span>
-                                  </p>
-                                </div>
-                              )}
                               {patient.vitals && (
                                 <div className="mt-2 flex items-center gap-4 text-xs text-muted-foreground">
                                   {patient.vitals.temperature && (
@@ -4686,7 +6118,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
         {/* Session Viewer Dialog */}
         <Dialog open={showSessionViewer} onOpenChange={setShowSessionViewer}>
-          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogContent className="w-[95vw] sm:max-w-[1000px] max-h-[90vh] overflow-y-auto">
             {selectedSession && (
               <>
                 <DialogHeader>
@@ -4740,14 +6172,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                         <div><strong>Room:</strong> {selectedSession.room}</div>
                       </div>
                     </div>
-                  </div>
-
-                  {/* Chief Complaint */}
-                  <div>
-                    <h4 className="text-sm font-semibold text-emerald-600 mb-2">CHIEF COMPLAINT</h4>
-                    <p className="p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg border border-emerald-200 dark:border-emerald-800">
-                      {selectedSession.chiefComplaint}
-                    </p>
                   </div>
 
                   {/* Vitals */}
@@ -4958,7 +6382,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
         {/* Lab Result Viewer Dialog */}
         <Dialog open={showLabResultViewer} onOpenChange={setShowLabResultViewer}>
-          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogContent className="w-[95vw] sm:max-w-[1000px] max-h-[90vh] overflow-y-auto">
             {selectedLabResult && (
               <>
                 <DialogHeader>
@@ -5113,6 +6537,626 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                 </div>
               </>
             )}
+          </DialogContent>
+        </Dialog>
+
+        {/* Prescription Viewer Modal */}
+        <Dialog open={showPrescriptionViewer} onOpenChange={setShowPrescriptionViewer}>
+          <DialogContent className="w-[95vw] sm:max-w-[1000px] max-h-[90vh] overflow-y-auto">
+            {selectedPrescription && (
+              <>
+                <DialogHeader>
+                  <div className="flex items-center justify-between">
+                    <DialogTitle className="flex items-center gap-2">
+                      <Pill className="h-5 w-5 text-violet-500" />
+                      Prescription Details
+                      <Badge variant="outline" className="ml-2">
+                        {selectedPrescription.prescriptionId}
+                      </Badge>
+                    </DialogTitle>
+                    <div className="flex items-center gap-2">
+                      <Button variant="outline" size="sm" onClick={() => {}}>
+                        <Download className="h-4 w-4 mr-1" />
+                        Download
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => {}}>
+                        <Printer className="h-4 w-4 mr-1" />
+                        Print
+                      </Button>
+                    </div>
+                  </div>
+                  <DialogDescription>
+                    {selectedPrescription.date} • {selectedPrescription.doctor} • {selectedPrescription.diagnosis}
+                  </DialogDescription>
+                </DialogHeader>
+
+                <div className="space-y-6 mt-4">
+                  {/* Prescription Information */}
+                  <div>
+                    <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">PRESCRIPTION INFORMATION</h4>
+                    <div className="grid md:grid-cols-2 gap-4 p-4 bg-muted/30 rounded-lg border">
+                      <div>
+                        <div><strong>Prescription ID:</strong> {selectedPrescription.prescriptionId}</div>
+                        <div><strong>Date:</strong> {selectedPrescription.date}</div>
+                        <div><strong>Doctor:</strong> {selectedPrescription.doctor}</div>
+                      </div>
+                      <div>
+                        <div><strong>Diagnosis:</strong> {selectedPrescription.diagnosis}</div>
+                        <div className="flex items-center gap-2 mt-2">
+                          <strong>Status:</strong>
+                          <Badge 
+                            variant="outline" 
+                            className={
+                              selectedPrescription.status === 'dispensed' 
+                                ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400'
+                                : selectedPrescription.status === 'partially_dispensed'
+                                ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400'
+                                : 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300'
+                            }
+                          >
+                            {selectedPrescription.status === 'dispensed' ? 'Dispensed' : 
+                             selectedPrescription.status === 'partially_dispensed' ? 'Partially Dispensed' : 
+                             'Pending'}
+                          </Badge>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Medications */}
+                  <div>
+                    <h4 className="text-sm font-semibold text-violet-600 mb-3 flex items-center gap-2">
+                      <Pill className="h-4 w-4" />
+                      PRESCRIBED MEDICATIONS
+                    </h4>
+                    <div className="border rounded-lg overflow-hidden">
+                      <table className="w-full text-sm">
+                        <thead className="bg-muted/50">
+                          <tr>
+                            <th className="px-4 py-2 text-left font-medium">Medication</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y">
+                          {selectedPrescription.medications.map((med: string, index: number) => (
+                            <tr key={index} className="hover:bg-muted/30">
+                              <td className="px-4 py-3">
+                                <Badge variant="outline" className="text-sm">
+                                  {med}
+                                </Badge>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* Notes */}
+                  {selectedPrescription.notes && (
+                    <div>
+                      <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">NOTES</h4>
+                      <p className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800 text-sm">
+                        {selectedPrescription.notes}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Footer */}
+                  <div className="border-t pt-4">
+                    <div className="text-center text-xs text-muted-foreground">
+                      <strong>Nigerian Ports Authority</strong> • Medical Services<br />
+                      Document ID: {selectedPrescription.id}
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
+          </DialogContent>
+        </Dialog>
+
+        {/* Edit Medical History Dialog */}
+        <Dialog open={showEditMedicalHistory} onOpenChange={setShowEditMedicalHistory}>
+          <DialogContent className="w-[95vw] sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <FileText className="h-5 w-5 text-blue-500" />
+                Edit Medical History
+              </DialogTitle>
+              <DialogDescription>
+                Update surgical history, family history, and social history for {currentPatient?.name}
+              </DialogDescription>
+            </DialogHeader>
+            
+            {loadingMedicalHistory ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                <span className="ml-3 text-muted-foreground">Loading medical history...</span>
+              </div>
+            ) : (
+              <div className="space-y-6 py-4">
+                {/* Allergies */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-sm font-medium">Allergies</Label>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        const newAllergy = prompt('Enter allergy name:');
+                        if (newAllergy && newAllergy.trim()) {
+                          setMedicalHistory(prev => ({
+                            ...prev,
+                            allergies: [...prev.allergies, newAllergy.trim()],
+                          }));
+                        }
+                      }}
+                    >
+                      <Plus className="h-3 w-3 mr-1" />
+                      Add Allergy
+                    </Button>
+                  </div>
+                  {medicalHistory.allergies.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">No allergies recorded</p>
+                  ) : (
+                    <div className="flex flex-wrap gap-2">
+                      {medicalHistory.allergies.map((allergy, index) => (
+                        <Badge key={index} className="bg-red-600 text-white hover:bg-red-700 pr-1">
+                          <AlertTriangle className="h-3 w-3 mr-1" />
+                          {allergy}
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setMedicalHistory(prev => ({
+                                ...prev,
+                                allergies: prev.allergies.filter((_, i) => i !== index),
+                              }));
+                            }}
+                            className="h-4 w-4 p-0 ml-1 hover:bg-red-800"
+                          >
+                            <X className="h-3 w-3" />
+                          </Button>
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <Separator />
+
+                {/* Chronic Conditions (Diagnoses) */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-sm font-medium">Chronic Conditions</Label>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setMedicalHistory(prev => ({
+                          ...prev,
+                          diagnoses: [...prev.diagnoses, { name: '', code: '', status: 'Active', diagnosedDate: '' }],
+                        }));
+                      }}
+                    >
+                      <Plus className="h-3 w-3 mr-1" />
+                      Add Condition
+                    </Button>
+                  </div>
+                  {medicalHistory.diagnoses.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">No chronic conditions recorded</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {medicalHistory.diagnoses.map((diagnosis, index) => (
+                        <div key={index} className="p-3 border rounded-lg space-y-2">
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-xs font-medium text-muted-foreground">Condition #{index + 1}</span>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                setMedicalHistory(prev => ({
+                                  ...prev,
+                                  diagnoses: prev.diagnoses.filter((_, i) => i !== index),
+                                }));
+                              }}
+                              className="h-6 w-6 p-0"
+                            >
+                              <X className="h-3 w-3" />
+                            </Button>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div className="space-y-1">
+                              <Label className="text-xs">ICD-10 Code</Label>
+                              <Input
+                                value={diagnosis.code || ''}
+                                onChange={(e) => {
+                                  const updated = [...medicalHistory.diagnoses];
+                                  updated[index].code = e.target.value;
+                                  setMedicalHistory(prev => ({ ...prev, diagnoses: updated }));
+                                }}
+                                placeholder="e.g., I10"
+                                className="h-8 text-xs"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs">Status</Label>
+                              <Select
+                                value={diagnosis.status}
+                                onValueChange={(value) => {
+                                  const updated = [...medicalHistory.diagnoses];
+                                  updated[index].status = value;
+                                  setMedicalHistory(prev => ({ ...prev, diagnoses: updated }));
+                                }}
+                              >
+                                <SelectTrigger className="h-8 text-xs">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="Active">Active</SelectItem>
+                                  <SelectItem value="Resolved">Resolved</SelectItem>
+                                  <SelectItem value="Controlled">Controlled</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs">Condition Name</Label>
+                            <Input
+                              value={diagnosis.name}
+                              onChange={(e) => {
+                                const updated = [...medicalHistory.diagnoses];
+                                updated[index].name = e.target.value;
+                                setMedicalHistory(prev => ({ ...prev, diagnoses: updated }));
+                              }}
+                              placeholder="e.g., Essential Hypertension"
+                              className="h-8 text-xs"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs">Diagnosed Date</Label>
+                            <Input
+                              type="date"
+                              value={diagnosis.diagnosedDate || ''}
+                              onChange={(e) => {
+                                const updated = [...medicalHistory.diagnoses];
+                                updated[index].diagnosedDate = e.target.value;
+                                setMedicalHistory(prev => ({ ...prev, diagnoses: updated }));
+                              }}
+                              className="h-8 text-xs"
+                            />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <Separator />
+
+                {/* Surgical History */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-sm font-medium">Surgical History</Label>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setMedicalHistory(prev => ({
+                          ...prev,
+                          surgicalHistory: [...prev.surgicalHistory, { procedure: '', date: '', hospital: '' }],
+                        }));
+                      }}
+                    >
+                      <Plus className="h-3 w-3 mr-1" />
+                      Add Surgery
+                    </Button>
+                  </div>
+                  {medicalHistory.surgicalHistory.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">No surgical history recorded</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {medicalHistory.surgicalHistory.map((surgery, index) => (
+                        <div key={index} className="p-3 border rounded-lg space-y-2">
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-xs font-medium text-muted-foreground">Surgery #{index + 1}</span>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                setMedicalHistory(prev => ({
+                                  ...prev,
+                                  surgicalHistory: prev.surgicalHistory.filter((_, i) => i !== index),
+                                }));
+                              }}
+                              className="h-6 w-6 p-0"
+                            >
+                              <X className="h-3 w-3" />
+                            </Button>
+                          </div>
+                          <div className="grid grid-cols-3 gap-2">
+                            <div className="space-y-1">
+                              <Label className="text-xs">Procedure</Label>
+                              <Input
+                                value={surgery.procedure}
+                                onChange={(e) => {
+                                  const updated = [...medicalHistory.surgicalHistory];
+                                  updated[index].procedure = e.target.value;
+                                  setMedicalHistory(prev => ({ ...prev, surgicalHistory: updated }));
+                                }}
+                                placeholder="e.g., Appendectomy"
+                                className="h-8 text-xs"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs">Date</Label>
+                              <Input
+                                type="date"
+                                value={surgery.date}
+                                onChange={(e) => {
+                                  const updated = [...medicalHistory.surgicalHistory];
+                                  updated[index].date = e.target.value;
+                                  setMedicalHistory(prev => ({ ...prev, surgicalHistory: updated }));
+                                }}
+                                className="h-8 text-xs"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs">Hospital</Label>
+                              <Input
+                                value={surgery.hospital}
+                                onChange={(e) => {
+                                  const updated = [...medicalHistory.surgicalHistory];
+                                  updated[index].hospital = e.target.value;
+                                  setMedicalHistory(prev => ({ ...prev, surgicalHistory: updated }));
+                                }}
+                                placeholder="Hospital name"
+                                className="h-8 text-xs"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <Separator />
+
+                {/* Family History */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-sm font-medium">Family History</Label>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setMedicalHistory(prev => ({
+                          ...prev,
+                          familyHistory: [...prev.familyHistory, { relation: '', condition: '' }],
+                        }));
+                      }}
+                    >
+                      <Plus className="h-3 w-3 mr-1" />
+                      Add Family Member
+                    </Button>
+                  </div>
+                  {medicalHistory.familyHistory.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">No family history recorded</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {medicalHistory.familyHistory.map((family, index) => (
+                        <div key={index} className="p-3 border rounded-lg space-y-2">
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-xs font-medium text-muted-foreground">Family Member #{index + 1}</span>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                setMedicalHistory(prev => ({
+                                  ...prev,
+                                  familyHistory: prev.familyHistory.filter((_, i) => i !== index),
+                                }));
+                              }}
+                              className="h-6 w-6 p-0"
+                            >
+                              <X className="h-3 w-3" />
+                            </Button>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div className="space-y-1">
+                              <Label className="text-xs">Relation</Label>
+                              <Select
+                                value={family.relation}
+                                onValueChange={(value) => {
+                                  const updated = [...medicalHistory.familyHistory];
+                                  updated[index].relation = value;
+                                  setMedicalHistory(prev => ({ ...prev, familyHistory: updated }));
+                                }}
+                              >
+                                <SelectTrigger className="h-8 text-xs">
+                                  <SelectValue placeholder="Select relation" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="Father">Father</SelectItem>
+                                  <SelectItem value="Mother">Mother</SelectItem>
+                                  <SelectItem value="Sibling">Sibling</SelectItem>
+                                  <SelectItem value="Grandfather">Grandfather</SelectItem>
+                                  <SelectItem value="Grandmother">Grandmother</SelectItem>
+                                  <SelectItem value="Uncle">Uncle</SelectItem>
+                                  <SelectItem value="Aunt">Aunt</SelectItem>
+                                  <SelectItem value="Other">Other</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs">Condition</Label>
+                              <Input
+                                value={family.condition}
+                                onChange={(e) => {
+                                  const updated = [...medicalHistory.familyHistory];
+                                  updated[index].condition = e.target.value;
+                                  setMedicalHistory(prev => ({ ...prev, familyHistory: updated }));
+                                }}
+                                placeholder="e.g., Hypertension, Type 2 Diabetes"
+                                className="h-8 text-xs"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <Separator />
+
+                {/* Social History */}
+                <div className="space-y-3">
+                  <Label className="text-sm font-medium">Social History</Label>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <Label className="text-xs">Smoking</Label>
+                      <Select
+                        value={medicalHistory.socialHistory.smoking}
+                        onValueChange={(value) => {
+                          setMedicalHistory(prev => ({
+                            ...prev,
+                            socialHistory: { ...prev.socialHistory, smoking: value },
+                          }));
+                        }}
+                      >
+                        <SelectTrigger className="h-8 text-xs">
+                          <SelectValue placeholder="Select" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Never">Never</SelectItem>
+                          <SelectItem value="Former">Former</SelectItem>
+                          <SelectItem value="Current">Current</SelectItem>
+                          <SelectItem value="Occasional">Occasional</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Alcohol</Label>
+                      <Select
+                        value={medicalHistory.socialHistory.alcohol}
+                        onValueChange={(value) => {
+                          setMedicalHistory(prev => ({
+                            ...prev,
+                            socialHistory: { ...prev.socialHistory, alcohol: value },
+                          }));
+                        }}
+                      >
+                        <SelectTrigger className="h-8 text-xs">
+                          <SelectValue placeholder="Select" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Never">Never</SelectItem>
+                          <SelectItem value="Occasional">Occasional (social)</SelectItem>
+                          <SelectItem value="Regular">Regular</SelectItem>
+                          <SelectItem value="Heavy">Heavy</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Exercise</Label>
+                      <Input
+                        value={medicalHistory.socialHistory.exercise}
+                        onChange={(e) => {
+                          setMedicalHistory(prev => ({
+                            ...prev,
+                            socialHistory: { ...prev.socialHistory, exercise: e.target.value },
+                          }));
+                        }}
+                        placeholder="e.g., 2-3 times per week"
+                        className="h-8 text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Occupation</Label>
+                      <Input
+                        value={medicalHistory.socialHistory.occupation}
+                        onChange={(e) => {
+                          setMedicalHistory(prev => ({
+                            ...prev,
+                            socialHistory: { ...prev.socialHistory, occupation: e.target.value },
+                          }));
+                        }}
+                        placeholder="e.g., Senior Engineer - NPA"
+                        className="h-8 text-xs"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+            
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowEditMedicalHistory(false)}>
+                Cancel
+              </Button>
+              <Button 
+                onClick={async () => {
+                  if (!currentPatient) return;
+                  setLoadingMedicalHistory(true);
+                  try {
+                    // Get numeric patient ID
+                    const patientIdStr = currentPatient.patientId || currentPatient.id;
+                    let numericPatientId: number;
+                    const parsedId = parseInt(patientIdStr, 10);
+                    if (!isNaN(parsedId) && parsedId > 0) {
+                      numericPatientId = parsedId;
+                    } else {
+                      const searchResult = await patientService.getPatients({ search: patientIdStr });
+                      const matchedPatient = searchResult.results.find(
+                        p => p.patient_id === patientIdStr || p.patient_id.toUpperCase() === patientIdStr.toUpperCase()
+                      );
+                      if (!matchedPatient) {
+                        throw new Error(`Patient with ID "${patientIdStr}" not found`);
+                      }
+                      numericPatientId = matchedPatient.id;
+                    }
+                    
+                    await patientService.updatePatientHistory(numericPatientId, {
+                      allergies: medicalHistory.allergies,
+                      diagnoses: medicalHistory.diagnoses,
+                      surgical_history: medicalHistory.surgicalHistory,
+                      family_history: medicalHistory.familyHistory,
+                      social_history: medicalHistory.socialHistory,
+                    });
+                    
+                    toast.success('Medical history updated successfully');
+                    setShowEditMedicalHistory(false);
+                  } catch (err: any) {
+                    console.error('Error updating medical history:', err);
+                    toast.error(err.message || 'Failed to update medical history');
+                  } finally {
+                    setLoadingMedicalHistory(false);
+                  }
+                }}
+                disabled={loadingMedicalHistory}
+              >
+                {loadingMedicalHistory ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <Save className="h-4 w-4 mr-2" />
+                    Save Changes
+                  </>
+                )}
+              </Button>
+            </DialogFooter>
           </DialogContent>
         </Dialog>
       </div>

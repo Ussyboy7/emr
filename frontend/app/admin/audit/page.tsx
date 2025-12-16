@@ -42,17 +42,39 @@ export default function AuditTrailPage() {
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [moduleFilter, setModuleFilter] = useState('all');
+  const [actionFilter, setActionFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [totalCount, setTotalCount] = useState(0);
+
+  // Dialog states
+  const [selectedLog, setSelectedLog] = useState<AuditLog | null>(null);
+  const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
 
   // Load audit logs from API
   useEffect(() => {
     loadLogs();
-  }, []);
+  }, [currentPage, itemsPerPage]);
 
   const loadLogs = async () => {
     try {
       setLoading(true);
       setError(null);
-      const response = await adminService.getAuditLogs({ page_size: 1000 });
+      const hasActiveFilters = searchQuery || moduleFilter !== 'all' || actionFilter !== 'all' || statusFilter !== 'all' || dateFrom || dateTo;
+      const pageSize = hasActiveFilters ? 1000 : itemsPerPage;
+      
+      const response = await adminService.getAuditLogs({ 
+        page: hasActiveFilters ? 1 : currentPage,
+        page_size: pageSize,
+      });
+      setTotalCount(response.count || response.results.length);
       
       // Transform API logs to frontend format
       const transformedLogs: AuditLog[] = response.results.map((log: ApiAuditLog) => ({
@@ -85,20 +107,6 @@ export default function AuditTrailPage() {
       setLoading(false);
     }
   };
-  const [searchQuery, setSearchQuery] = useState('');
-  const [moduleFilter, setModuleFilter] = useState('all');
-  const [actionFilter, setActionFilter] = useState('all');
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
-
-  // Pagination state
-  const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(10);
-
-  // Dialog states
-  const [selectedLog, setSelectedLog] = useState<AuditLog | null>(null);
-  const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
 
   const filteredLogs = useMemo(() => {
     return logs.filter(log => {
@@ -125,16 +133,13 @@ export default function AuditTrailPage() {
     });
   }, [logs, searchQuery, moduleFilter, actionFilter, statusFilter, dateFrom, dateTo]);
 
-  // Paginated logs
-  const paginatedLogs = useMemo(() => {
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    return filteredLogs.slice(startIndex, startIndex + itemsPerPage);
-  }, [filteredLogs, currentPage, itemsPerPage]);
+  // Use filtered logs directly (server-side pagination when no client-side filters)
+  const paginatedLogs = filteredLogs;
 
-  // Reset to page 1 when filters change
+  // Reset to page 1 when filters change or items per page changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, moduleFilter, actionFilter, statusFilter, dateFrom, dateTo]);
+  }, [searchQuery, moduleFilter, actionFilter, statusFilter, dateFrom, dateTo, itemsPerPage]);
 
   const stats = useMemo(() => ({
     total: logs.length,
@@ -415,7 +420,7 @@ export default function AuditTrailPage() {
 
         {/* View Dialog */}
         <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
-          <DialogContent className="sm:max-w-[700px]">
+          <DialogContent className="w-[95vw] sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2"><ClipboardList className="h-5 w-5 text-violet-500" />Audit Log Details</DialogTitle>
               <DialogDescription>{selectedLog?.id}</DialogDescription>

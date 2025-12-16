@@ -28,7 +28,6 @@ interface MedicationBatch {
   expiryDate: string;
   receivedDate: string;
   supplier: string;
-  unitCost: number;
 }
 
 // Stock adjustment reasons
@@ -45,6 +44,7 @@ const adjustmentReasons = [
 // Type definitions
 interface MedicationInventoryItem {
   id: string;
+  medicationId?: number; // Store medication ID for easier updates
   name: string;
   genericName: string;
   category: string;
@@ -64,14 +64,37 @@ interface MedicationInventoryItem {
 }
 
 const categories = [
-  'All Categories', 'Antibiotics', 'Analgesics', 'Cardiovascular', 'Diabetes',
-  'Gastrointestinal', 'Vitamins & Supplements', 'Oncology', 'Respiratory'
+  'All Categories',
+  'Antibiotics',
+  'Analgesics',
+  'Antimalarials',
+  'Antifungals',
+  'Antivirals',
+  'Anticonvulsants',
+  'Antipsychotics',
+  'Antidepressants',
+  'Antihistamines',
+  'Cardiovascular',
+  'Corticosteroids',
+  'Dermatology',
+  'Diabetes',
+  'Diuretics',
+  'Emergency/Critical Care',
+  'Gastrointestinal',
+  'Hormones',
+  'Ophthalmology',
+  'Oncology',
+  'Pediatrics',
+  'Respiratory',
+  'Vitamins & Supplements',
+  'Other'
 ];
 
 const dosageForms = ['Tablet', 'Capsule', 'Syrup', 'Injection', 'Cream', 'Ointment', 'Drops', 'Inhaler', 'Suspension', 'Powder'];
 
 export default function InventoryPage() {
   const [inventory, setInventory] = useState<MedicationInventoryItem[]>([]);
+  const [allInventoryForStats, setAllInventoryForStats] = useState<MedicationInventoryItem[]>([]); // All inventory for stats calculation
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -81,21 +104,35 @@ export default function InventoryPage() {
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [totalCount, setTotalCount] = useState(0);
+
+  // Load all inventory for stats (separate from paginated data)
+  useEffect(() => {
+    loadAllInventoryForStats();
+  }, []);
 
   // Load inventory from API
   useEffect(() => {
     loadInventory();
-  }, [currentPage]);
+  }, [currentPage, itemsPerPage]);
 
-  const loadInventory = async () => {
+  // Load all inventory for stats calculation
+  const loadAllInventoryForStats = async () => {
     try {
-      setLoading(true);
-      setError(null);
       const response = await pharmacyService.getInventory({
-        page: currentPage,
+        page: 1,
+        page_size: 10000, // Load a large number for stats
       });
-      // Transform API data to frontend format
-      const transformed = response.results.map((item: any) => {
+      const transformed = transformInventoryItems(response.results);
+      setAllInventoryForStats(transformed);
+    } catch (err) {
+      console.error('Error loading all inventory for stats:', err);
+    }
+  };
+
+  // Transform inventory items helper function
+  const transformInventoryItems = (results: any[]): MedicationInventoryItem[] => {
+    return results.map((item: any) => {
         // Extract medication details from nested medication object
         const medication = item.medication || {};
         const medicationName = item.medication_name || medication.name || 'Unknown';
@@ -104,41 +141,45 @@ export default function InventoryPage() {
         const dosageForm = medication.form || medication.dosage_form || '';
         const manufacturer = medication.manufacturer || '';
         
-        // Determine category (could be enhanced with API field)
-        let category = 'All Categories';
-        if (medication.category) {
-          category = medication.category;
-        } else if (genericName) {
-          // Try to infer category from generic name (simplified)
-          const lowerGeneric = genericName.toLowerCase();
-          if (lowerGeneric.includes('antibiotic') || lowerGeneric.includes('penicillin') || lowerGeneric.includes('cephalosporin')) {
-            category = 'Antibiotics';
-          } else if (lowerGeneric.includes('analgesic') || lowerGeneric.includes('paracetamol') || lowerGeneric.includes('ibuprofen')) {
-            category = 'Analgesics';
-          } else if (lowerGeneric.includes('antihypertensive') || lowerGeneric.includes('lisinopril') || lowerGeneric.includes('amlodipine')) {
-            category = 'Cardiovascular';
-          } else if (lowerGeneric.includes('metformin') || lowerGeneric.includes('glibenclamide')) {
-            category = 'Diabetes';
-          }
+      // Get category from medication (now stored in backend)
+      let category = medication.category || 'All Categories';
+      if (category === 'All Categories' && genericName) {
+        // Try to infer category from generic name (simplified)
+        const lowerGeneric = genericName.toLowerCase();
+        if (lowerGeneric.includes('antibiotic') || lowerGeneric.includes('penicillin') || lowerGeneric.includes('cephalosporin')) {
+          category = 'Antibiotics';
+        } else if (lowerGeneric.includes('analgesic') || lowerGeneric.includes('paracetamol') || lowerGeneric.includes('ibuprofen')) {
+          category = 'Analgesics';
+        } else if (lowerGeneric.includes('antihypertensive') || lowerGeneric.includes('lisinopril') || lowerGeneric.includes('amlodipine')) {
+          category = 'Cardiovascular';
+        } else if (lowerGeneric.includes('metformin') || lowerGeneric.includes('glibenclamide')) {
+          category = 'Diabetes';
         }
-        
-        return {
-          id: item.id.toString(),
-          name: medicationName,
-          genericName,
-          category,
-          strength,
-          dosageForm,
-          packSize: 10, // Could be enhanced with API field
-          manufacturer,
-          currentStock: Number(item.quantity),
-          minimumStock: Number(item.min_stock_level),
-          maximumStock: Number(item.min_stock_level) * 10, // Could be enhanced with API field
-          location: item.location || '',
-          prescriptionRequired: false, // Could be enhanced with API field
-          isGeneric: !!genericName && genericName.toLowerCase() === medicationName.toLowerCase(),
-          lastRestocked: (item as any).created_at?.split('T')[0] || (item as any).updated_at?.split('T')[0] || '',
-          expiryDate: item.expiry_date,
+      }
+      
+      // Get medication ID
+      const medicationId = typeof item.medication === 'number' 
+        ? item.medication 
+        : (item.medication?.id ? (typeof item.medication.id === 'number' ? item.medication.id : parseInt(item.medication.id)) : undefined);
+      
+      return {
+        id: item.id.toString(),
+        medicationId, // Store medication ID for easier updates
+        name: medicationName,
+        genericName,
+        category,
+        strength,
+        dosageForm,
+        packSize: medication.pack_size || 10, // Get from backend
+        manufacturer: medication.manufacturer || '', // Get from backend
+        currentStock: Number(item.quantity),
+        minimumStock: Number(item.min_stock_level),
+        maximumStock: item.max_stock_level ? Number(item.max_stock_level) : (Number(item.min_stock_level) * 10), // Get from backend
+        location: item.location || '',
+        prescriptionRequired: medication.prescription_required || false, // Get from backend
+        isGeneric: !!genericName && genericName.toLowerCase() === medicationName.toLowerCase(),
+        lastRestocked: (item as any).created_at?.split('T')[0] || (item as any).updated_at?.split('T')[0] || '',
+        expiryDate: item.expiry_date,
           batches: [{
             id: item.id.toString(),
             batchNumber: item.batch_number,
@@ -146,10 +187,27 @@ export default function InventoryPage() {
             expiryDate: item.expiry_date,
             receivedDate: (item as any).created_at?.split('T')[0] || '',
             supplier: item.supplier || '',
-            unitCost: Number(item.purchase_price) || 0,
           }] as MedicationBatch[],
-        };
+      };
+    });
+  };
+
+  const loadInventory = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      // If filters are active, load more items for client-side filtering
+      // Otherwise, use server-side pagination with itemsPerPage
+      const hasActiveFilters = searchQuery || categoryFilter !== 'All Categories' || stockFilter !== 'all';
+      const pageSize = hasActiveFilters ? 1000 : itemsPerPage;
+      
+      const response = await pharmacyService.getInventory({
+        page: hasActiveFilters ? 1 : currentPage, // If filtering, load from page 1
+        page_size: pageSize,
       });
+      setTotalCount(response.count || response.results.length);
+      // Transform API data to frontend format
+      const transformed = transformInventoryItems(response.results);
       setInventory(transformed);
     } catch (err: any) {
       setError(err.message || 'Failed to load inventory');
@@ -175,7 +233,6 @@ export default function InventoryPage() {
     quantity: 0,
     expiryDate: '',
     supplier: '',
-    unitCost: 0,
   });
   
   // Stock adjustment form
@@ -192,8 +249,24 @@ export default function InventoryPage() {
     packSize: 10, manufacturer: '', minimumStock: 100, maximumStock: 1000, 
     location: '', prescriptionRequired: false, isGeneric: false
   });
+  
+  // Edit medication form
+  const [editMedicationForm, setEditMedicationForm] = useState({
+    name: '',
+    genericName: '',
+    category: 'Analgesics',
+    strength: '',
+    dosageForm: 'Tablet',
+    packSize: 10,
+    manufacturer: '',
+    location: '',
+    minimumStock: 100,
+    maximumStock: 1000,
+    prescriptionRequired: false,
+    isGeneric: false,
+  });
 
-  // Filter inventory
+  // Filter inventory (client-side filtering on current page results)
   const filteredInventory = useMemo(() => {
     return inventory.filter(med => {
       const matchesSearch = 
@@ -210,41 +283,38 @@ export default function InventoryPage() {
     });
   }, [inventory, searchQuery, categoryFilter, stockFilter]);
 
-  // Paginated inventory
-  const paginatedInventory = useMemo(() => {
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    return filteredInventory.slice(startIndex, startIndex + itemsPerPage);
-  }, [filteredInventory, currentPage, itemsPerPage]);
+  // Use filtered inventory directly (no client-side pagination - backend handles it)
+  const paginatedInventory = filteredInventory;
 
-  // Reset to page 1 when filters change
+  // Reset to page 1 when filters change or items per page changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, categoryFilter, stockFilter]);
+  }, [searchQuery, categoryFilter, stockFilter, itemsPerPage]);
 
-  // Check for expiring soon items (within 90 days)
+  // Check for expiring soon items (within 90 days) - use allInventoryForStats
   const getExpiringItems = useMemo(() => {
     const today = new Date();
     const ninetyDaysFromNow = new Date(today.getTime() + 90 * 24 * 60 * 60 * 1000);
-    return inventory.filter(med => {
+    return allInventoryForStats.filter(med => {
       const expiry = new Date(med.expiryDate);
       return expiry <= ninetyDaysFromNow && expiry >= today;
     });
-  }, [inventory]);
+  }, [allInventoryForStats]);
 
   const getExpiredItems = useMemo(() => {
     const today = new Date();
-    return inventory.filter(med => new Date(med.expiryDate) < today);
-  }, [inventory]);
+    return allInventoryForStats.filter(med => new Date(med.expiryDate) < today);
+  }, [allInventoryForStats]);
 
-  // Stats
+  // Stats - use allInventoryForStats to show everything in store, not just current page
   const stats = useMemo(() => ({
-    total: inventory.length,
-    outOfStock: inventory.filter(m => m.currentStock === 0).length,
-    lowStock: inventory.filter(m => m.currentStock > 0 && m.currentStock <= m.minimumStock).length,
-    totalValue: inventory.reduce((sum, m) => sum + m.currentStock, 0),
+    total: allInventoryForStats.length,
+    outOfStock: allInventoryForStats.filter(m => m.currentStock === 0).length,
+    lowStock: allInventoryForStats.filter(m => m.currentStock > 0 && m.currentStock <= m.minimumStock).length,
+    totalValue: allInventoryForStats.reduce((sum, m) => sum + m.currentStock, 0),
     expiringSoon: getExpiringItems.length,
     expired: getExpiredItems.length,
-  }), [inventory, getExpiringItems, getExpiredItems]);
+  }), [allInventoryForStats, getExpiringItems, getExpiredItems]);
   
   const getDaysUntilExpiry = (expiryDate: string) => {
     const today = new Date();
@@ -297,6 +367,20 @@ export default function InventoryPage() {
 
   const handleEditMedication = (med: MedicationInventoryItem) => {
     setSelectedMedication(med);
+    setEditMedicationForm({
+      name: med.name,
+      genericName: med.genericName,
+      category: med.category,
+      strength: med.strength,
+      dosageForm: med.dosageForm,
+      packSize: med.packSize,
+      manufacturer: med.manufacturer,
+      location: med.location || '',
+      minimumStock: med.minimumStock,
+      maximumStock: med.maximumStock,
+      prescriptionRequired: med.prescriptionRequired,
+      isGeneric: med.isGeneric,
+    });
     setShowEditModal(true);
   };
 
@@ -306,7 +390,7 @@ export default function InventoryPage() {
     setShowAddStockModal(true);
   };
 
-  const confirmAddStock = () => {
+  const confirmAddStock = async () => {
     if (!selectedMedication || addStockAmount <= 0) {
       toast.error('Please enter a valid quantity');
       return;
@@ -318,13 +402,16 @@ export default function InventoryPage() {
         : med
     ));
 
+    // Reload all inventory for stats
+    await loadAllInventoryForStats();
+
     toast.success(`Added ${addStockAmount} units to ${selectedMedication.name}`);
     setShowAddStockModal(false);
     setSelectedMedication(null);
     setAddStockAmount(0);
   };
 
-  const handleAddMedication = () => {
+  const handleAddMedication = async () => {
     const newId = `MED-${String(inventory.length + 1).padStart(3, '0')}`;
     const medication = {
       ...newMedication,
@@ -335,6 +422,10 @@ export default function InventoryPage() {
     };
     
     setInventory(prev => [...prev, medication] as MedicationInventoryItem[]);
+    
+    // Reload all inventory for stats
+    await loadAllInventoryForStats();
+    
     toast.success(`${newMedication.name} added to inventory`);
     setShowAddModal(false);
     setNewMedication({
@@ -550,6 +641,9 @@ export default function InventoryPage() {
                             <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => handleViewDetails(med)} title="View Details">
                               <Eye className="h-4 w-4 text-muted-foreground hover:text-primary" />
                             </Button>
+                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => handleEditMedication(med)} title="Edit Medication">
+                              <Edit className="h-4 w-4 text-muted-foreground hover:text-violet-500" />
+                            </Button>
                             <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => { setSelectedMedication(med); setShowBatchesModal(true); }} title="View Batches">
                               <Layers className="h-4 w-4 text-muted-foreground hover:text-violet-500" />
                             </Button>
@@ -606,10 +700,15 @@ export default function InventoryPage() {
           <Card className="p-4">
             <StandardPagination
               currentPage={currentPage}
-              totalItems={filteredInventory.length}
+              totalItems={searchQuery || categoryFilter !== 'All Categories' || stockFilter !== 'all' 
+                ? filteredInventory.length 
+                : totalCount}
               itemsPerPage={itemsPerPage}
               onPageChange={setCurrentPage}
-              onItemsPerPageChange={setItemsPerPage}
+              onItemsPerPageChange={(newSize) => {
+                setItemsPerPage(newSize);
+                setCurrentPage(1); // Reset to first page when changing page size
+              }}
               itemName="medications"
             />
           </Card>
@@ -617,7 +716,7 @@ export default function InventoryPage() {
 
         {/* View Details Modal */}
         <Dialog open={showViewModal} onOpenChange={setShowViewModal}>
-          <DialogContent className="max-w-2xl">
+          <DialogContent className="w-[95vw] sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-3">
                 <Pill className="h-5 w-5 text-violet-500" />
@@ -708,7 +807,7 @@ export default function InventoryPage() {
 
         {/* Enhanced Add Stock Modal with Batch Tracking */}
         <Dialog open={showAddStockModal} onOpenChange={setShowAddStockModal}>
-          <DialogContent className="max-w-lg">
+          <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Plus className="h-5 w-5 text-emerald-500" />
@@ -777,17 +876,6 @@ export default function InventoryPage() {
                       className="mt-1"
                     />
                   </div>
-                  <div className="col-span-2">
-                    <Label>Unit Cost (₦)</Label>
-                    <Input
-                      type="number"
-                      min="0"
-                      value={newBatch.unitCost || ''}
-                      onChange={(e) => setNewBatch({ ...newBatch, unitCost: parseFloat(e.target.value) || 0 })}
-                      placeholder="Cost per unit"
-                      className="mt-1"
-                    />
-                  </div>
                 </div>
 
                 {newBatch.quantity > 0 && (
@@ -795,11 +883,6 @@ export default function InventoryPage() {
                     <p className="text-emerald-700 dark:text-emerald-400">
                       New total stock: <strong>{(selectedMedication.currentStock + newBatch.quantity).toLocaleString()}</strong> units
                     </p>
-                    {newBatch.unitCost > 0 && (
-                      <p className="text-emerald-600 dark:text-emerald-500 text-xs mt-1">
-                        Total value: ₦{(newBatch.quantity * newBatch.unitCost).toLocaleString()}
-                      </p>
-                    )}
                   </div>
                 )}
               </div>
@@ -808,7 +891,7 @@ export default function InventoryPage() {
             <DialogFooter>
               <Button variant="outline" onClick={() => {
                 setShowAddStockModal(false);
-                setNewBatch({ batchNumber: '', quantity: 0, expiryDate: '', supplier: '', unitCost: 0 });
+                setNewBatch({ batchNumber: '', quantity: 0, expiryDate: '', supplier: '' });
               }}>Cancel</Button>
               <Button 
                 className="bg-emerald-600 hover:bg-emerald-700"
@@ -857,13 +940,13 @@ export default function InventoryPage() {
                       min_stock_level: currentItem.minimumStock,
                       location: currentItem.location || newBatch.supplier || '',
                       supplier: newBatch.supplier,
-                      purchase_price: newBatch.unitCost,
                     });
                     
                     toast.success(`Added ${newBatch.quantity} units of ${selectedMedication?.name} (Batch: ${newBatch.batchNumber})`);
                     setShowAddStockModal(false);
-                    setNewBatch({ batchNumber: '', quantity: 0, expiryDate: '', supplier: '', unitCost: 0 });
+                    setNewBatch({ batchNumber: '', quantity: 0, expiryDate: '', supplier: '' });
                     await loadInventory(); // Reload inventory
+                    await loadAllInventoryForStats(); // Reload stats
                   } catch (err: any) {
                     toast.error(err.message || 'Failed to add stock');
                     console.error('Error adding stock:', err);
@@ -880,7 +963,7 @@ export default function InventoryPage() {
 
         {/* Stock Adjustment Modal */}
         <Dialog open={showAdjustStockModal} onOpenChange={setShowAdjustStockModal}>
-          <DialogContent className="max-w-md">
+          <DialogContent className="w-[95vw] sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <ArrowUpDown className="h-5 w-5 text-amber-500" />
@@ -1022,7 +1105,7 @@ export default function InventoryPage() {
 
         {/* View Batches Modal */}
         <Dialog open={showBatchesModal} onOpenChange={setShowBatchesModal}>
-          <DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden">
+          <DialogContent className="w-[95vw] sm:max-w-[800px] max-h-[90vh] overflow-hidden flex flex-col">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Layers className="h-5 w-5 text-violet-500" />
@@ -1071,10 +1154,6 @@ export default function InventoryPage() {
                               <span className="text-muted-foreground">Supplier:</span>{' '}
                               <span className="font-medium">{batch.supplier || 'N/A'}</span>
                             </div>
-                            <div>
-                              <span className="text-muted-foreground">Unit Cost:</span>{' '}
-                              <span className="font-medium">₦{batch.unitCost?.toLocaleString() || 'N/A'}</span>
-                            </div>
                           </div>
                         </CardContent>
                       </Card>
@@ -1107,7 +1186,7 @@ export default function InventoryPage() {
 
         {/* Add Medication Modal */}
         <Dialog open={showAddModal} onOpenChange={setShowAddModal}>
-          <DialogContent className="max-w-2xl max-h-[90vh] overflow-hidden">
+          <DialogContent className="w-[95vw] sm:max-w-[800px] max-h-[90vh] overflow-hidden flex flex-col">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Plus className="h-5 w-5 text-violet-500" />
@@ -1250,7 +1329,7 @@ export default function InventoryPage() {
 
         {/* Edit Medication Modal */}
         <Dialog open={showEditModal} onOpenChange={setShowEditModal}>
-          <DialogContent className="max-w-2xl">
+          <DialogContent className="w-[95vw] sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Edit className="h-5 w-5 text-violet-500" />
@@ -1263,29 +1342,122 @@ export default function InventoryPage() {
                 <p className="text-sm text-muted-foreground">
                   Editing: <strong>{selectedMedication.name}</strong>
                 </p>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <Label>Minimum Stock</Label>
-                    <Input
-                      type="number"
-                      defaultValue={selectedMedication.minimumStock}
-                      className="mt-1"
-                    />
+                <div className="overflow-y-auto max-h-[60vh] space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <Label>Brand Name *</Label>
+                      <Input
+                        value={editMedicationForm.name}
+                        onChange={(e) => setEditMedicationForm({...editMedicationForm, name: e.target.value})}
+                        placeholder="e.g., Amoxil"
+                        className="mt-1"
+                      />
+                    </div>
+                    <div>
+                      <Label>Generic Name *</Label>
+                      <Input
+                        value={editMedicationForm.genericName}
+                        onChange={(e) => setEditMedicationForm({...editMedicationForm, genericName: e.target.value})}
+                        placeholder="e.g., Amoxicillin"
+                        className="mt-1"
+                      />
+                    </div>
+                    <div>
+                      <Label>Category *</Label>
+                      <Select value={editMedicationForm.category} onValueChange={(v) => setEditMedicationForm({...editMedicationForm, category: v})}>
+                        <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {categories.filter(c => c !== 'All Categories').map(cat => (
+                            <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label>Strength *</Label>
+                      <Input
+                        value={editMedicationForm.strength}
+                        onChange={(e) => setEditMedicationForm({...editMedicationForm, strength: e.target.value})}
+                        placeholder="e.g., 500mg"
+                        className="mt-1"
+                      />
+                    </div>
+                    <div>
+                      <Label>Dosage Form *</Label>
+                      <Select value={editMedicationForm.dosageForm} onValueChange={(v) => setEditMedicationForm({...editMedicationForm, dosageForm: v})}>
+                        <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {dosageForms.map(form => (
+                            <SelectItem key={form} value={form}>{form}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label>Pack Size</Label>
+                      <Input
+                        type="number"
+                        value={editMedicationForm.packSize}
+                        onChange={(e) => setEditMedicationForm({...editMedicationForm, packSize: parseInt(e.target.value) || 10})}
+                        className="mt-1"
+                      />
+                    </div>
+                    <div>
+                      <Label>Manufacturer</Label>
+                      <Input
+                        value={editMedicationForm.manufacturer}
+                        onChange={(e) => setEditMedicationForm({...editMedicationForm, manufacturer: e.target.value})}
+                        placeholder="e.g., GSK"
+                        className="mt-1"
+                      />
+                    </div>
+                    <div>
+                      <Label>Storage Location</Label>
+                      <Input
+                        value={editMedicationForm.location}
+                        onChange={(e) => setEditMedicationForm({...editMedicationForm, location: e.target.value})}
+                        placeholder="e.g., Shelf A1"
+                        className="mt-1"
+                      />
+                    </div>
+                    <div>
+                      <Label>Minimum Stock</Label>
+                      <Input
+                        type="number"
+                        value={editMedicationForm.minimumStock}
+                        onChange={(e) => setEditMedicationForm({...editMedicationForm, minimumStock: parseInt(e.target.value) || 0})}
+                        className="mt-1"
+                      />
+                    </div>
+                    <div>
+                      <Label>Maximum Stock</Label>
+                      <Input
+                        type="number"
+                        value={editMedicationForm.maximumStock}
+                        onChange={(e) => setEditMedicationForm({...editMedicationForm, maximumStock: parseInt(e.target.value) || 0})}
+                        className="mt-1"
+                      />
+                    </div>
                   </div>
-                  <div>
-                    <Label>Maximum Stock</Label>
-                    <Input
-                      type="number"
-                      defaultValue={selectedMedication.maximumStock}
-                      className="mt-1"
-                    />
-                  </div>
-                  <div className="col-span-2">
-                    <Label>Storage Location</Label>
-                    <Input
-                      defaultValue={selectedMedication.location}
-                      className="mt-1"
-                    />
+                  <div className="flex items-center gap-6">
+                    <label className="flex items-center gap-2">
+                      <input 
+                        type="checkbox" 
+                        checked={editMedicationForm.prescriptionRequired}
+                        onChange={(e) => setEditMedicationForm({...editMedicationForm, prescriptionRequired: e.target.checked})}
+                        className="rounded"
+                      />
+                      <span className="text-sm">Prescription Required</span>
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input 
+                        type="checkbox" 
+                        checked={editMedicationForm.isGeneric}
+                        onChange={(e) => setEditMedicationForm({...editMedicationForm, isGeneric: e.target.checked})}
+                        className="rounded"
+                      />
+                      <span className="text-sm">Generic Drug</span>
+                    </label>
                   </div>
                 </div>
               </div>
@@ -1295,9 +1467,62 @@ export default function InventoryPage() {
               <Button variant="outline" onClick={() => setShowEditModal(false)}>Cancel</Button>
               <Button 
                 className="bg-violet-600 hover:bg-violet-700"
-                onClick={() => {
-                  toast.success('Medication updated successfully');
-                  setShowEditModal(false);
+                onClick={async () => {
+                  if (!selectedMedication) return;
+                  
+                  try {
+                    // Get inventory item ID
+                    const inventoryId = parseInt(selectedMedication.id || '');
+                    if (!inventoryId) {
+                      toast.error('Invalid medication ID');
+                      return;
+                    }
+                    
+                    // Get medication ID from stored value or fetch it
+                    let medicationId = selectedMedication.medicationId;
+                    if (!medicationId) {
+                      // Fallback: fetch inventory item to get medication ID
+                      const inventoryItems = await pharmacyService.getInventory({ search: selectedMedication.name });
+                      const matchingItem = inventoryItems.results.find((item: any) => {
+                        return item.id?.toString() === selectedMedication.id;
+                      });
+                      
+                      if (!matchingItem || !matchingItem.medication) {
+                        toast.error('Could not find medication. Please try again.');
+                        return;
+                      }
+                      
+                      medicationId = typeof matchingItem.medication === 'number' 
+                        ? matchingItem.medication 
+                        : parseInt(matchingItem.medication);
+                    }
+                    
+                    // Update Medication model with medication details
+                    await pharmacyService.updateMedication(medicationId, {
+                      name: editMedicationForm.name,
+                      generic_name: editMedicationForm.genericName,
+                      strength: editMedicationForm.strength,
+                      form: editMedicationForm.dosageForm,
+                      unit: editMedicationForm.dosageForm.toLowerCase().includes('tablet') ? 'tablet' :
+                            editMedicationForm.dosageForm.toLowerCase().includes('capsule') ? 'capsule' :
+                            editMedicationForm.dosageForm.toLowerCase().includes('syrup') ? 'ml' :
+                            editMedicationForm.dosageForm.toLowerCase().includes('injection') ? 'ml' : 'unit',
+                    });
+                    
+                    // Update MedicationInventory with inventory-specific fields
+                    await pharmacyService.updateInventoryItem(inventoryId, {
+                      min_stock_level: editMedicationForm.minimumStock,
+                      location: editMedicationForm.location,
+                    });
+                    
+                    toast.success('Medication updated successfully');
+                    setShowEditModal(false);
+                    await loadInventory(); // Reload inventory
+                    await loadAllInventoryForStats(); // Reload stats
+                  } catch (err: any) {
+                    toast.error(err.message || 'Failed to update medication');
+                    console.error('Error updating medication:', err);
+                  }
                 }}
               >
                 Save Changes

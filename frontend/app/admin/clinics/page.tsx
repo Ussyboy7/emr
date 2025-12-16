@@ -61,20 +61,41 @@ export default function ClinicDepartmentPage() {
   const [clinicUsers, setClinicUsers] = useState<any[]>([]);
   const [deptUsers, setDeptUsers] = useState<any[]>([]);
   const [loadingDetails, setLoadingDetails] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [totalCount, setTotalCount] = useState(0);
+
+  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [selectedClinic, setSelectedClinic] = useState<Clinic | null>(null);
 
   // Load clinics and departments from API
   useEffect(() => {
     loadData();
-  }, []);
+  }, [currentPage, itemsPerPage]);
 
   const loadData = async () => {
     try {
       setLoading(true);
       setError(null);
+      const hasActiveFilters = searchQuery || statusFilter !== 'all';
+      const pageSize = hasActiveFilters ? 1000 : itemsPerPage;
+      
       const [clinicsResponse, deptsResponse] = await Promise.all([
-        adminService.getClinics({ page_size: 1000 }),
-        adminService.getDepartments({ page_size: 1000 }),
+        adminService.getClinics({ 
+          page: hasActiveFilters ? 1 : currentPage,
+          page_size: pageSize,
+        }),
+        adminService.getDepartments({ 
+          page: hasActiveFilters ? 1 : currentPage,
+          page_size: pageSize,
+        }),
       ]);
+      setTotalCount(clinicsResponse.count || clinicsResponse.results.length);
       
       // Transform clinics
       const transformedClinics: Clinic[] = clinicsResponse.results.map((clinic: ApiClinic) => ({
@@ -116,16 +137,6 @@ export default function ClinicDepartmentPage() {
       setLoading(false);
     }
   };
-  const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(10);
-
-  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
-  const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
-  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
-  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
-  const [selectedClinic, setSelectedClinic] = useState<Clinic | null>(null);
   const [selectedDepartment, setSelectedDepartment] = useState<Department | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -152,17 +163,11 @@ export default function ClinicDepartmentPage() {
     });
   }, [departments, searchQuery, statusFilter]);
 
-  const paginatedClinics = useMemo(() => {
-    const start = (currentPage - 1) * itemsPerPage;
-    return filteredClinics.slice(start, start + itemsPerPage);
-  }, [filteredClinics, currentPage, itemsPerPage]);
+  // Use filtered data directly (server-side pagination when no client-side filters)
+  const paginatedClinics = filteredClinics;
+  const paginatedDepartments = filteredDepartments;
 
-  const paginatedDepartments = useMemo(() => {
-    const start = (currentPage - 1) * itemsPerPage;
-    return filteredDepartments.slice(start, start + itemsPerPage);
-  }, [filteredDepartments, currentPage, itemsPerPage]);
-
-  useEffect(() => { setCurrentPage(1); }, [searchQuery, statusFilter, activeTab]);
+  useEffect(() => { setCurrentPage(1); }, [searchQuery, statusFilter, activeTab, itemsPerPage]);
 
   const stats = useMemo(() => ({
     totalClinics: clinics.length,
@@ -574,7 +579,19 @@ export default function ClinicDepartmentPage() {
             {filteredDepartments.length > 0 && (
               <div className="mt-4">
                 <Card className="p-4">
-                  <StandardPagination currentPage={currentPage} totalItems={filteredDepartments.length} itemsPerPage={itemsPerPage} onPageChange={setCurrentPage} onItemsPerPageChange={setItemsPerPage} itemName="departments" />
+                  <StandardPagination 
+                    currentPage={currentPage} 
+                    totalItems={searchQuery || statusFilter !== 'all'
+                      ? filteredDepartments.length 
+                      : totalCount} 
+                    itemsPerPage={itemsPerPage} 
+                    onPageChange={setCurrentPage} 
+                    onItemsPerPageChange={(newSize) => {
+                      setItemsPerPage(newSize);
+                      setCurrentPage(1);
+                    }} 
+                    itemName="departments" 
+                  />
                 </Card>
               </div>
             )}
@@ -583,7 +600,7 @@ export default function ClinicDepartmentPage() {
 
         {/* Clinic Create/Edit Dialog */}
         <Dialog open={(isCreateDialogOpen || isEditDialogOpen) && activeTab === 'clinics'} onOpenChange={(open) => { if (!open) { setIsCreateDialogOpen(false); setIsEditDialogOpen(false); } }}>
-          <DialogContent className="sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className="w-[95vw] sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
             <DialogHeader><DialogTitle className="flex items-center gap-2"><Building2 className="h-5 w-5 text-teal-500" />{isCreateDialogOpen ? 'Add Clinic' : 'Edit Clinic'}</DialogTitle></DialogHeader>
             <Tabs defaultValue="info" className="mt-4">
               <TabsList className="grid w-full grid-cols-3"><TabsTrigger value="info">Basic Info</TabsTrigger><TabsTrigger value="services">Services</TabsTrigger><TabsTrigger value="hours">Operating Hours</TabsTrigger></TabsList>
@@ -614,7 +631,7 @@ export default function ClinicDepartmentPage() {
 
         {/* Department Create/Edit Dialog */}
         <Dialog open={(isCreateDialogOpen || isEditDialogOpen) && activeTab === 'departments'} onOpenChange={(open) => { if (!open) { setIsCreateDialogOpen(false); setIsEditDialogOpen(false); } }}>
-          <DialogContent className="sm:max-w-[500px]">
+          <DialogContent className="w-[95vw] sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
             <DialogHeader><DialogTitle className="flex items-center gap-2"><Activity className="h-5 w-5 text-blue-500" />{isCreateDialogOpen ? 'Add Department' : 'Edit Department'}</DialogTitle></DialogHeader>
             <div className="space-y-4 mt-4">
               <div className="grid grid-cols-2 gap-4"><div className="space-y-2"><Label>Code *</Label><Input value={deptForm.code || ''} onChange={(e) => setDeptForm(prev => ({ ...prev, code: e.target.value.toUpperCase() }))} placeholder="e.g., MED" /></div><div className="space-y-2"><Label>Name *</Label><Input value={deptForm.name || ''} onChange={(e) => setDeptForm(prev => ({ ...prev, name: e.target.value }))} placeholder="e.g., Medical Services" /></div></div>
@@ -628,7 +645,7 @@ export default function ClinicDepartmentPage() {
 
         {/* View Clinic Dialog */}
         <Dialog open={isViewDialogOpen && activeTab === 'clinics'} onOpenChange={(open) => { if (!open) setIsViewDialogOpen(false); }}>
-          <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
             <DialogHeader><DialogTitle className="flex items-center gap-2"><Building2 className="h-5 w-5 text-teal-500" />{selectedClinic?.name}</DialogTitle><DialogDescription>{selectedClinic?.code}</DialogDescription></DialogHeader>
             {selectedClinic && (<div className="space-y-6 mt-4">
               <p className="text-muted-foreground">{selectedClinic.description}</p>
@@ -649,7 +666,7 @@ export default function ClinicDepartmentPage() {
 
         {/* View Department Dialog */}
         <Dialog open={isViewDialogOpen && activeTab === 'departments'} onOpenChange={(open) => { if (!open) setIsViewDialogOpen(false); }}>
-          <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
             <DialogHeader><DialogTitle className="flex items-center gap-2"><Activity className="h-5 w-5 text-blue-500" />{selectedDepartment?.name}</DialogTitle><DialogDescription>{selectedDepartment?.code}</DialogDescription></DialogHeader>
             {selectedDepartment && (<div className="space-y-4 mt-4">
               <p className="text-muted-foreground">{selectedDepartment.description}</p>

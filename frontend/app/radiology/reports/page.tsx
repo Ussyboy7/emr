@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { radiologyService, type RadiologyReport as ApiRadiologyReport } from '@/lib/services';
+import { PatientAvatar } from "@/components/PatientAvatar";
 import { 
   FileBarChart, Search, Eye, CheckCircle2, AlertTriangle, 
   User, ScanLine, Calendar, Stethoscope, RefreshCw, Loader2
@@ -88,6 +89,7 @@ export default function ReportsPage() {
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [totalCount, setTotalCount] = useState(0);
   
   // Dialog states
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
@@ -96,15 +98,20 @@ export default function ReportsPage() {
   // Load verified reports from API
   useEffect(() => {
     loadReports();
-  }, []);
+  }, [currentPage, itemsPerPage]);
 
   const loadReports = async () => {
     try {
       setLoading(true);
       setError(null);
+      const hasActiveFilters = searchQuery || categoryFilter !== 'all';
+      const pageSize = hasActiveFilters ? 1000 : itemsPerPage;
+      
       const response = await radiologyService.getVerifiedReports({
-        page: currentPage,
+        page: hasActiveFilters ? 1 : currentPage,
+        page_size: pageSize,
       });
+      setTotalCount(response.count || response.results.length);
       const transformedReports = response.results.map(transformReport);
       setReports(transformedReports);
     } catch (err: any) {
@@ -124,16 +131,13 @@ export default function ReportsPage() {
     return matchesSearch && matchesCategory;
   }), [reports, searchQuery, categoryFilter]);
 
-  // Paginated reports
-  const paginatedReports = useMemo(() => {
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    return filteredReports.slice(startIndex, startIndex + itemsPerPage);
-  }, [filteredReports, currentPage, itemsPerPage]);
+  // Use filtered reports directly (server-side pagination when no client-side filters)
+  const paginatedReports = filteredReports;
 
-  // Reset to page 1 when filters change
+  // Reset to page 1 when filters change or items per page changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, categoryFilter]);
+  }, [searchQuery, categoryFilter, itemsPerPage]);
 
   const stats = useMemo(() => [
     { label: 'Total Reports', value: reports.length, icon: FileBarChart, color: 'text-cyan-500', bg: 'bg-cyan-500/10' },
@@ -164,19 +168,7 @@ export default function ReportsPage() {
       <CardContent className="py-3 px-4">
         <div className="flex items-center gap-3">
           {/* Avatar */}
-          <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${
-            report.critical ? 'bg-rose-100 dark:bg-rose-900/30' :
-            report.status === 'Verified' ? 'bg-emerald-100 dark:bg-emerald-900/30' :
-            'bg-amber-100 dark:bg-amber-900/30'
-          }`}>
-            <span className={`font-semibold text-xs ${
-              report.critical ? 'text-rose-600' :
-              report.status === 'Verified' ? 'text-emerald-600' :
-              'text-amber-600'
-            }`}>
-              {report.patient.name.split(' ').map(n => n[0]).join('')}
-            </span>
-          </div>
+          <PatientAvatar name={report.patient.name} photoUrl={(report.patient as any).photoUrl || (report.patient as any).photo} size="sm" />
           
           {/* Info */}
           <div className="flex-1 min-w-0">
@@ -332,17 +324,22 @@ export default function ReportsPage() {
         <Card className="p-4">
           <StandardPagination
             currentPage={currentPage}
-            totalItems={filteredReports.length}
+            totalItems={searchQuery || categoryFilter !== 'all'
+              ? filteredReports.length 
+              : totalCount}
             itemsPerPage={itemsPerPage}
             onPageChange={setCurrentPage}
-            onItemsPerPageChange={setItemsPerPage}
+            onItemsPerPageChange={(newSize) => {
+              setItemsPerPage(newSize);
+              setCurrentPage(1);
+            }}
             itemName="reports"
           />
         </Card>
 
         {/* View Report Dialog */}
         <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
-          <DialogContent className="sm:max-w-[700px] max-h-[85vh] overflow-y-auto">
+          <DialogContent className="w-[95vw] sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <FileBarChart className="h-5 w-5 text-cyan-500" />

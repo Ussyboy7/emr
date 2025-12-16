@@ -17,6 +17,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { radiologyService, type RadiologyOrder as ApiRadiologyOrder, type RadiologyStudy as ApiRadiologyStudy } from '@/lib/services';
 import { transformPriority, transformProcessingMethod, transformToBackendProcessingMethod } from '@/lib/services/transformers';
+import { PatientAvatar } from "@/components/PatientAvatar";
 import {
   ScanLine, Search, Eye, Clock, CheckCircle2, Activity, Loader2,
   AlertTriangle, Calendar, FileText, Play, Stethoscope, Upload,
@@ -165,6 +166,7 @@ export default function RadiologyOrdersPage() {
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [totalCount, setTotalCount] = useState(0);
 
   // Dialog states
   const [selectedOrder, setSelectedOrder] = useState<RadiologyOrder | null>(null);
@@ -238,26 +240,28 @@ export default function RadiologyOrdersPage() {
 
   const filteredOrders = getFilteredOrders();
 
-  const paginatedOrders = useMemo(() => {
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    return filteredOrders.slice(startIndex, startIndex + itemsPerPage);
-  }, [filteredOrders, currentPage, itemsPerPage]);
+  // Use filtered orders directly (server-side pagination when no client-side filters)
+  const paginatedOrders = filteredOrders;
 
   // Load orders from API
   useEffect(() => {
     loadOrders();
-  }, []);
+  }, [currentPage, itemsPerPage]);
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, priorityFilter, modalityFilter, dateFilter, genderFilter, activeTab]);
+  }, [searchQuery, priorityFilter, modalityFilter, dateFilter, genderFilter, activeTab, itemsPerPage]);
 
   const loadOrders = async () => {
     try {
       setLoading(true);
       setError(null);
+      const hasActiveFilters = searchQuery || priorityFilter !== 'all' || modalityFilter !== 'all' || dateFilter !== 'all' || genderFilter !== 'all';
+      const pageSize = hasActiveFilters ? 1000 : itemsPerPage;
+      
       const params: any = {
-        page: currentPage,
+        page: hasActiveFilters ? 1 : currentPage,
+        page_size: pageSize,
       };
       if (priorityFilter !== 'all') {
         params.priority = priorityFilter.toLowerCase();
@@ -267,6 +271,7 @@ export default function RadiologyOrdersPage() {
       }
       
       const response = await radiologyService.getOrders(params);
+      setTotalCount(response.count || response.results.length);
       const transformedOrders = response.results.map(transformOrder);
       setOrders(transformedOrders);
     } catch (err: any) {
@@ -536,11 +541,7 @@ export default function RadiologyOrdersPage() {
       >
         <CardContent className="py-3 px-4">
           <div className="flex items-center gap-3">
-            <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${order.priority === 'STAT' ? 'bg-rose-100 dark:bg-rose-900/30' : 'bg-cyan-100 dark:bg-cyan-900/30'}`}>
-              <span className={`font-semibold text-xs ${order.priority === 'STAT' ? 'text-rose-600' : 'text-cyan-600'}`}>
-                {order.patient.name.split(' ').map(n => n[0]).join('')}
-              </span>
-            </div>
+            <PatientAvatar name={order.patient.name} photoUrl={(order.patient as any).photoUrl || (order.patient as any).photo} size="sm" />
 
             <div className="flex-1 min-w-0">
               <div className="flex items-center justify-between gap-2">
@@ -730,10 +731,15 @@ export default function RadiologyOrdersPage() {
           <Card className="p-4">
             <StandardPagination
               currentPage={currentPage}
-              totalItems={filteredOrders.length}
+              totalItems={searchQuery || priorityFilter !== 'all' || modalityFilter !== 'all' || dateFilter !== 'all' || genderFilter !== 'all'
+                ? filteredOrders.length 
+                : totalCount}
               itemsPerPage={itemsPerPage}
               onPageChange={setCurrentPage}
-              onItemsPerPageChange={setItemsPerPage}
+              onItemsPerPageChange={(newSize) => {
+                setItemsPerPage(newSize);
+                setCurrentPage(1);
+              }}
               itemName="orders"
             />
           </Card>
@@ -741,7 +747,7 @@ export default function RadiologyOrdersPage() {
 
         {/* View & Manage Order Dialog */}
         <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
-          <DialogContent className="sm:max-w-[750px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className="w-[95vw] sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2"><ClipboardList className="h-5 w-5 text-cyan-500" />Manage Order</DialogTitle>
               <DialogDescription>{selectedOrder?.orderId} • Process imaging studies</DialogDescription>
@@ -871,7 +877,7 @@ export default function RadiologyOrdersPage() {
 
         {/* Schedule Dialog */}
         <Dialog open={isScheduleDialogOpen} onOpenChange={setIsScheduleDialogOpen}>
-          <DialogContent className="sm:max-w-[400px]">
+          <DialogContent className="w-[95vw] sm:max-w-[400px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2"><Calendar className="h-5 w-5 text-cyan-500" />Schedule Study</DialogTitle>
               <DialogDescription>Schedule {selectedStudy?.procedure}</DialogDescription>
@@ -905,7 +911,7 @@ export default function RadiologyOrdersPage() {
 
         {/* Acquire Dialog */}
         <Dialog open={isAcquireDialogOpen} onOpenChange={setIsAcquireDialogOpen}>
-          <DialogContent className="sm:max-w-[500px]">
+          <DialogContent className="w-[95vw] sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2"><Camera className="h-5 w-5 text-violet-500" />Complete Acquisition</DialogTitle>
               <DialogDescription>Upload images and choose interpretation method for {selectedStudy?.procedure}</DialogDescription>
@@ -979,7 +985,7 @@ export default function RadiologyOrdersPage() {
 
         {/* Report Dialog */}
         <Dialog open={isReportDialogOpen} onOpenChange={setIsReportDialogOpen}>
-          <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2"><FileText className="h-5 w-5 text-amber-500" />Create Report</DialogTitle>
               <DialogDescription>Enter report for {selectedStudy?.procedure}</DialogDescription>

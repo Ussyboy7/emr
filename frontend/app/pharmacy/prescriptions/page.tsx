@@ -15,6 +15,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import { pharmacyService, type Prescription as ApiPrescription } from '@/lib/services';
+import { PatientAvatar } from "@/components/PatientAvatar";
 import { 
   ClipboardList, Search, Eye, Clock, CheckCircle2, Pill, Calendar,
   AlertTriangle, Package, User, RefreshCw, Activity, Stethoscope,
@@ -28,7 +29,6 @@ const substitutionReasons = [
   { value: 'out_of_stock', label: 'Out of Stock', icon: '📦', description: 'Original medication not available' },
   { value: 'near_expiry', label: 'Near Expiry Stock', icon: '⏰', description: 'Pushing out stock close to expiration' },
   { value: 'patient_preference', label: 'Patient Preference', icon: '👤', description: 'Patient requested different brand/generic' },
-  { value: 'cost_savings', label: 'Cost Savings', icon: '💰', description: 'More affordable alternative available' },
   { value: 'clinical_decision', label: 'Clinical Decision', icon: '⚕️', description: 'Pharmacist/doctor clinical recommendation' },
   { value: 'formulary_change', label: 'Formulary Change', icon: '📋', description: 'Hospital formulary updated' },
   { value: 'allergy_concern', label: 'Allergy/Sensitivity', icon: '⚠️', description: 'Concern about patient reaction' },
@@ -78,21 +78,27 @@ export default function PrescriptionsPage() {
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [totalCount, setTotalCount] = useState(0);
 
   // Load prescriptions from API
   useEffect(() => {
     loadPrescriptions();
-  }, [currentPage, statusFilter]);
+  }, [currentPage, itemsPerPage, statusFilter]);
 
   const loadPrescriptions = async () => {
     try {
       setLoading(true);
       setError(null);
+      const hasActiveFilters = searchQuery || statusFilter !== 'all' || priorityFilter !== 'all' || dateFilter !== 'all' || genderFilter !== 'all';
+      const pageSize = hasActiveFilters ? 1000 : itemsPerPage;
+      
       const response = await pharmacyService.getPrescriptions({
         status: statusFilter !== 'all' ? statusFilter : undefined,
-        page: currentPage,
+        page: hasActiveFilters ? 1 : currentPage,
+        page_size: pageSize,
         search: searchQuery || undefined,
       });
+      setTotalCount(response.count || response.results.length);
       // Transform API data - extract patient and visit details
       const transformed = await Promise.all(response.results.map(async (rx: any) => {
         // Extract patient details from prescription or visit
@@ -109,6 +115,7 @@ export default function PrescriptionsPage() {
         // Extract visit/clinic details
         const clinic = visitDetails.clinic || (visitDetails.consultation_room?.name) || '';
         const location = patientDetails.location || visitDetails.location || '';
+        const visitNotes = visitDetails.clinical_notes || undefined;
         
         // Extract doctor details
         const doctorName = rx.doctor_name || '';
@@ -183,6 +190,7 @@ export default function PrescriptionsPage() {
           waitTime,
           clinicalNotes: rx.diagnosis || '',
           specialInstructions: rx.notes || '',
+          visitNotes, // Notes / Special Instructions from visit
         };
       }));
       setPrescriptions(transformed as Prescription[]);
@@ -462,7 +470,7 @@ export default function PrescriptionsPage() {
     }
   };
 
-  const handleQuickDispense = (prescription: Prescription) => {
+  const handleQuickDispense = async (prescription: Prescription) => {
     // Quick dispense all available medications
     const availableMeds = prescription.medications.filter(m => m.status === 'Available' || m.status === 'Low Stock');
     
@@ -471,25 +479,60 @@ export default function PrescriptionsPage() {
       return;
     }
 
-    setPrescriptions(prev => prev.map(rx => {
-      if (rx.id === prescription.id) {
-        const updatedMeds = rx.medications.map(med => ({
-          ...med,
-          status: (med.status === 'Available' || med.status === 'Low Stock') ? 'Dispensed' : med.status
-        }));
+    try {
+      // Get prescription ID (may be prescription_id string or numeric id)
+      const prescriptionId = parseInt(prescription.id) || prescription.id;
+      const numericPrescriptionId = typeof prescriptionId === 'number' ? prescriptionId : parseInt(prescriptionId);
+      
+      // Get full prescription details to access medication IDs
+      const rxDetail = await pharmacyService.getPrescription(numericPrescriptionId);
+      
+      // Load batches for all medications first
+      const batchMap: Record<string, number | undefined> = {};
+      
+      await Promise.all(availableMeds.map(async (med) => {
+        try {
+          const rxMed = rxDetail.medications.find((m: any) => m.id.toString() === med.id);
+          if (rxMed && rxMed.medication) {
+            const batches = await pharmacyService.getMedicationBatches(rxMed.medication);
+            if (batches.length > 0) {
+              batchMap[med.id] = parseInt(batches[0].id);
+            }
+          }
+        } catch (err) {
+          console.error(`Error loading batches for ${med.name}:`, err);
+        }
+      }));
+      
+      // Dispense each available medication
+      const dispensePromises = availableMeds.map(async (med) => {
+        const quantity = med.quantity;
+        const inventoryId = batchMap[med.id];
+        
+        try {
+          await pharmacyService.dispense(
+            numericPrescriptionId,
+            parseInt(med.id),
+            quantity,
+            inventoryId,
+            'Quick dispense'
+          );
+        } catch (err: any) {
+          console.error(`Error dispensing ${med.name}:`, err);
+          throw err;
+        }
+      });
 
-        const allMedsDispensed = updatedMeds.every(med => med.status === 'Dispensed' || med.status === 'Out of Stock');
+      await Promise.all(dispensePromises);
 
-        return {
-          ...rx,
-          medications: updatedMeds,
-          status: allMedsDispensed ? 'Dispensed' : 'Partially Dispensed'
-        };
-      }
-      return rx;
-    }));
-
-    toast.success(`Prescription ${prescription.id} dispensed for ${prescription.patient.name}`);
+      toast.success(`${availableMeds.length} medication(s) dispensed successfully for ${prescription.patient.name}`);
+      
+      // Reload prescriptions to get updated status
+      await loadPrescriptions();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to dispense medications');
+      console.error('Error dispensing medications:', err);
+    }
   };
 
   const handleUpdateStatus = (prescriptionId: string, newStatus: PrescriptionStatus) => {
@@ -674,11 +717,7 @@ export default function PrescriptionsPage() {
                 <CardContent className="py-3 px-4">
                   <div className="flex items-center gap-3">
                     {/* Avatar */}
-                    <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${rx.priority === 'Emergency' ? 'bg-red-100 dark:bg-red-900/30' : 'bg-violet-100 dark:bg-violet-900/30'}`}>
-                      <span className={`font-semibold text-xs ${rx.priority === 'Emergency' ? 'text-red-600' : 'text-violet-600'}`}>
-                        {rx.patient.name.split(' ').map(n => n[0]).join('')}
-                      </span>
-                    </div>
+                    <PatientAvatar name={rx.patient.name} photoUrl={(rx.patient as any).photoUrl || (rx.patient as any).photo} size="sm" />
                     
                     {/* Info */}
                     <div className="flex-1 min-w-0">
@@ -745,10 +784,15 @@ export default function PrescriptionsPage() {
           <Card className="p-4">
             <StandardPagination
               currentPage={currentPage}
-              totalItems={filteredPrescriptions.length}
+              totalItems={searchQuery || statusFilter !== 'all' || priorityFilter !== 'all' || dateFilter !== 'all' || genderFilter !== 'all'
+                ? filteredPrescriptions.length 
+                : totalCount}
               itemsPerPage={itemsPerPage}
               onPageChange={setCurrentPage}
-              onItemsPerPageChange={setItemsPerPage}
+              onItemsPerPageChange={(newSize) => {
+                setItemsPerPage(newSize);
+                setCurrentPage(1);
+              }}
               itemName="prescriptions"
             />
           </Card>
@@ -756,7 +800,7 @@ export default function PrescriptionsPage() {
 
         {/* View Details Modal */}
         <Dialog open={showViewModal} onOpenChange={setShowViewModal}>
-          <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden">
+          <DialogContent className="w-[95vw] sm:max-w-[1000px] max-h-[90vh] overflow-hidden flex flex-col">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-3">
                 <div className="p-2 bg-violet-100 dark:bg-violet-900/30 rounded-full">
@@ -829,6 +873,14 @@ export default function PrescriptionsPage() {
                   </div>
                 )}
 
+                {/* Visit Notes / Special Instructions */}
+                {selectedPrescription.visitNotes && (
+                  <div className="bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-800 rounded-lg p-3">
+                    <div className="font-medium text-teal-700 dark:text-teal-400 mb-1">Visit Notes / Special Instructions</div>
+                    <p className="text-sm text-teal-900 dark:text-teal-300">{selectedPrescription.visitNotes}</p>
+                  </div>
+                )}
+
                 {/* Medications */}
                 <div>
                   <h4 className="font-semibold mb-3 flex items-center gap-2">
@@ -880,7 +932,7 @@ export default function PrescriptionsPage() {
 
         {/* Enhanced Dispense Modal */}
         <Dialog open={showDispenseModal} onOpenChange={setShowDispenseModal}>
-          <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden">
+          <DialogContent className="w-[95vw] sm:max-w-[1000px] max-h-[90vh] overflow-hidden flex flex-col">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Package className="h-5 w-5 text-violet-500" />
@@ -1149,7 +1201,7 @@ export default function PrescriptionsPage() {
 
         {/* Simplified Substitution Modal */}
         <Dialog open={showSubstitutionModal} onOpenChange={setShowSubstitutionModal}>
-          <DialogContent className="max-w-lg max-h-[85vh] overflow-hidden">
+          <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-hidden flex flex-col">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <ArrowRightLeft className="h-5 w-5 text-amber-500" />
@@ -1260,7 +1312,6 @@ export default function PrescriptionsPage() {
                           <div className="flex items-center gap-3 text-xs text-muted-foreground mt-1">
                             <span>Stock: <strong className={sub.stock < 50 ? 'text-red-600' : 'text-emerald-600'}>{sub.stock}</strong></span>
                             <span>Exp: <strong className={sub.isNearExpiry ? 'text-amber-600' : ''}>{sub.expiryDate}</strong></span>
-                            <span>₦{sub.unitPrice}/unit</span>
                           </div>
                         </div>
                       ))

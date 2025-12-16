@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { pharmacyService, type Dispense as ApiDispense } from '@/lib/services';
+import { PatientAvatar } from "@/components/PatientAvatar";
 import { 
   History, Search, Eye, Clock, CheckCircle2, Pill, Calendar, Package,
   User, RefreshCw, TrendingUp, ArrowUpDown, Printer, Download, Loader2, AlertTriangle
@@ -43,21 +44,27 @@ export default function DispenseHistoryPage() {
   const [genderFilter, setGenderFilter] = useState('all');
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [totalCount, setTotalCount] = useState(0);
   const [selectedRecord, setSelectedRecord] = useState<DispenseHistoryRecord | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
 
   // Load dispense history from API
   useEffect(() => {
     loadHistory();
-  }, [currentPage]);
+  }, [currentPage, itemsPerPage]);
 
   const loadHistory = async () => {
     try {
       setLoading(true);
       setError(null);
+      const hasActiveFilters = searchQuery || statusFilter !== 'all' || dateFilter !== 'all' || genderFilter !== 'all';
+      const pageSize = hasActiveFilters ? 1000 : itemsPerPage;
+      
       const response = await pharmacyService.getDispenseHistory({
-        page: currentPage,
+        page: hasActiveFilters ? 1 : currentPage,
+        page_size: pageSize,
       });
+      setTotalCount(response.count || response.results.length);
       // Transform API data to frontend format
       const transformed = await Promise.all(response.results.map(async (dispense: any) => {
         // Extract patient details from prescription
@@ -173,11 +180,8 @@ export default function DispenseHistoryPage() {
     });
   }, [history, searchQuery, statusFilter, dateFilter]);
 
-  // Pagination
-  const paginatedHistory = useMemo(() => {
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    return filteredHistory.slice(startIndex, startIndex + itemsPerPage);
-  }, [filteredHistory, currentPage, itemsPerPage]);
+  // Use filtered history directly (server-side pagination when no client-side filters)
+  const paginatedHistory = filteredHistory;
 
   // Reset to page 1 when filters change
   useEffect(() => {
@@ -361,11 +365,7 @@ export default function DispenseHistoryPage() {
                 <CardContent className="py-3 px-4">
                   <div className="flex items-center gap-3">
                     {/* Avatar */}
-                    <div className="w-9 h-9 bg-emerald-100 dark:bg-emerald-900/30 rounded-full flex items-center justify-center flex-shrink-0">
-                      <span className="font-semibold text-xs text-emerald-600">
-                        {record.patient.name.split(' ').map(n => n[0]).join('')}
-                      </span>
-                    </div>
+                    <PatientAvatar name={record.patient.name} photoUrl={(record.patient as any).photoUrl || (record.patient as any).photo} size="sm" />
                     
                     {/* Info */}
                     <div className="flex-1 min-w-0">
@@ -419,10 +419,15 @@ export default function DispenseHistoryPage() {
           <Card className="p-4">
             <StandardPagination
               currentPage={currentPage}
-              totalItems={filteredHistory.length}
+              totalItems={searchQuery || statusFilter !== 'all' || dateFilter !== 'all' || genderFilter !== 'all'
+                ? filteredHistory.length 
+                : totalCount}
               itemsPerPage={itemsPerPage}
               onPageChange={setCurrentPage}
-              onItemsPerPageChange={setItemsPerPage}
+              onItemsPerPageChange={(newSize) => {
+                setItemsPerPage(newSize);
+                setCurrentPage(1);
+              }}
               itemName="records"
             />
           </Card>
@@ -430,7 +435,7 @@ export default function DispenseHistoryPage() {
 
         {/* Detail Modal */}
         <Dialog open={showDetailModal} onOpenChange={setShowDetailModal}>
-          <DialogContent className="max-w-3xl max-h-[90vh] overflow-hidden">
+          <DialogContent className="w-[95vw] sm:max-w-[1000px] max-h-[90vh] overflow-hidden flex flex-col">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-3">
                 <Package className="h-5 w-5 text-violet-500" />

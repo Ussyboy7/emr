@@ -15,6 +15,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import { radiologyService, type RadiologyReport as ApiRadiologyReport } from '@/lib/services';
+import { PatientAvatar } from "@/components/PatientAvatar";
 import { transformPriority } from '@/lib/services/transformers';
 import {
   ShieldCheck, Search, Eye, Clock, CheckCircle2, AlertTriangle, XCircle,
@@ -131,6 +132,7 @@ export default function RadiologyVerificationPage() {
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [totalCount, setTotalCount] = useState(0);
 
   // Dialog states
   const [selectedReport, setSelectedReport] = useState<RadiologyReport | null>(null);
@@ -179,34 +181,36 @@ export default function RadiologyVerificationPage() {
     return matchesSearch && matchesCategory && matchesPriority && matchesGender;
   }), [pendingReports, searchQuery, categoryFilter, priorityFilter]);
 
-  // Paginated reports
-  const paginatedReports = useMemo(() => {
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    return filteredReports.slice(startIndex, startIndex + itemsPerPage);
-  }, [filteredReports, currentPage, itemsPerPage]);
+  // Use filtered reports directly (server-side pagination when no client-side filters)
+  const paginatedReports = filteredReports;
 
   // Load reports from API
   useEffect(() => {
     loadReports();
-  }, []);
+  }, [currentPage, itemsPerPage]);
 
-  // Reset to page 1 when filters change
+  // Reset to page 1 when filters change or items per page changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, categoryFilter, priorityFilter, dateFilter, genderFilter]);
+  }, [searchQuery, categoryFilter, priorityFilter, dateFilter, genderFilter, itemsPerPage]);
 
   const loadReports = async () => {
     try {
       setLoading(true);
       setError(null);
+      const hasActiveFilters = searchQuery || categoryFilter !== 'all' || priorityFilter !== 'all' || dateFilter !== 'all' || genderFilter !== 'all';
+      const pageSize = hasActiveFilters ? 1000 : itemsPerPage;
+      
       const params: any = {
-        page: currentPage,
+        page: hasActiveFilters ? 1 : currentPage,
+        page_size: pageSize,
       };
       if (priorityFilter !== 'all') {
         params.priority = priorityFilter.toLowerCase();
       }
       
       const response = await radiologyService.getPendingVerifications(params);
+      setTotalCount(response.count || response.results.length);
       const transformedReports = response.results.map(transformReport);
       setReports(transformedReports);
     } catch (err: any) {
@@ -552,9 +556,7 @@ export default function RadiologyVerificationPage() {
                       <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${
                         report.study.critical ? 'bg-rose-100 dark:bg-rose-900/30' : 'bg-amber-100 dark:bg-amber-900/30'
                       }`}>
-                        <span className={`font-semibold text-xs ${
-                          report.study.critical ? 'text-rose-600' : 'text-amber-600'
-                        }`}>{report.patient.name.split(' ').map(n => n[0]).join('')}</span>
+                        <PatientAvatar name={report.patient.name} photoUrl={(report.patient as any).photoUrl || (report.patient as any).photo} size="sm" />
                       </div>
                       
                       {/* Info */}
@@ -620,10 +622,15 @@ export default function RadiologyVerificationPage() {
           <Card className="p-4">
             <StandardPagination
               currentPage={currentPage}
-              totalItems={filteredReports.length}
+              totalItems={searchQuery || categoryFilter !== 'all' || priorityFilter !== 'all' || dateFilter !== 'all' || genderFilter !== 'all'
+                ? filteredReports.length 
+                : totalCount}
               itemsPerPage={itemsPerPage}
               onPageChange={setCurrentPage}
-              onItemsPerPageChange={setItemsPerPage}
+              onItemsPerPageChange={(newSize) => {
+                setItemsPerPage(newSize);
+                setCurrentPage(1);
+              }}
               itemName="reports"
             />
           </Card>
@@ -631,7 +638,7 @@ export default function RadiologyVerificationPage() {
 
         {/* View Dialog */}
         <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
-          <DialogContent className="sm:max-w-[700px] max-h-[85vh] overflow-y-auto">
+          <DialogContent className="w-[95vw] sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2"><FileText className="h-5 w-5 text-amber-500" />Report Details</DialogTitle>
               <DialogDescription>{selectedReport?.study.procedure} - {selectedReport?.patient.name}</DialogDescription>
@@ -711,7 +718,7 @@ export default function RadiologyVerificationPage() {
 
         {/* Verify Dialog */}
         <Dialog open={isVerifyDialogOpen} onOpenChange={setIsVerifyDialogOpen}>
-          <DialogContent className="sm:max-w-[500px]">
+          <DialogContent className="w-[95vw] sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2"><CheckCircle2 className="h-5 w-5 text-emerald-500" />Verify Report</DialogTitle>
               <DialogDescription>Confirm verification for {selectedReport?.patient.name}</DialogDescription>
@@ -751,7 +758,7 @@ export default function RadiologyVerificationPage() {
 
         {/* Reject Dialog */}
         <Dialog open={isRejectDialogOpen} onOpenChange={setIsRejectDialogOpen}>
-          <DialogContent className="sm:max-w-[500px]">
+          <DialogContent className="w-[95vw] sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2 text-rose-600"><XCircle className="h-5 w-5" />Reject Report</DialogTitle>
               <DialogDescription>Send back to reporting radiologist for correction</DialogDescription>

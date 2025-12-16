@@ -15,6 +15,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import { labService, type LabResult as ApiLabResult } from '@/lib/services';
+import { PatientAvatar } from "@/components/PatientAvatar";
 import { transformPriority } from '@/lib/services/transformers';
 import {
   ShieldCheck, Search, Eye, Clock, CheckCircle2, AlertTriangle, XCircle,
@@ -187,6 +188,7 @@ export default function ResultsVerificationPage() {
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [totalCount, setTotalCount] = useState(0);
 
   // Dialog states
   const [selectedResult, setSelectedResult] = useState<LabResult | null>(null);
@@ -239,18 +241,22 @@ export default function ResultsVerificationPage() {
   // The API handles pagination, but we still filter client-side for search
   const paginatedResults = filteredResults;
 
-  // Reset to page 1 when filters change
+  // Reset to page 1 when filters change or items per page changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, statusFilter, priorityFilter, dateFilter, genderFilter]);
+  }, [searchQuery, statusFilter, priorityFilter, dateFilter, genderFilter, itemsPerPage]);
 
   // Load results function - memoized to prevent infinite loops
   const loadResults = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
+      const hasActiveFilters = searchQuery || statusFilter !== 'all' || priorityFilter !== 'all' || dateFilter !== 'all' || genderFilter !== 'all';
+      const pageSize = hasActiveFilters ? 1000 : itemsPerPage;
+      
       const params: any = {
-        page: currentPage,
+        page: hasActiveFilters ? 1 : currentPage,
+        page_size: pageSize,
       };
       if (statusFilter !== 'all') {
         params.overall_status = statusFilter;
@@ -260,6 +266,7 @@ export default function ResultsVerificationPage() {
       }
       
       const response = await labService.getPendingVerifications(params);
+      setTotalCount(response.count || response.results.length);
       const transformedResults = response.results.map(transformResult);
       setResults(transformedResults);
     } catch (err: any) {
@@ -269,7 +276,7 @@ export default function ResultsVerificationPage() {
     } finally {
       setLoading(false);
     }
-  }, [currentPage, statusFilter, priorityFilter]);
+  }, [currentPage, itemsPerPage, statusFilter, priorityFilter, searchQuery, dateFilter, genderFilter]);
 
   // Load results from API when page or filters change
   useEffect(() => {
@@ -621,11 +628,7 @@ export default function ResultsVerificationPage() {
                         result.overallStatus === 'Abnormal' ? 'bg-amber-100 dark:bg-amber-900/30' :
                         'bg-emerald-100 dark:bg-emerald-900/30'
                       }`}>
-                        <span className={`font-semibold text-xs ${
-                          result.overallStatus === 'Critical' ? 'text-rose-600' :
-                          result.overallStatus === 'Abnormal' ? 'text-amber-600' :
-                          'text-emerald-600'
-                        }`}>{result.patient.name.split(' ').map(n => n[0]).join('')}</span>
+                        <PatientAvatar name={result.patient.name} photoUrl={(result.patient as any).photoUrl || (result.patient as any).photo} size="sm" />
                       </div>
                       
                       {/* Info */}
@@ -689,7 +692,7 @@ export default function ResultsVerificationPage() {
 
         {/* View Dialog */}
         <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
-          <DialogContent className="sm:max-w-[600px]">
+          <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2"><FileText className="h-5 w-5 text-amber-500" />Result Details</DialogTitle>
               <DialogDescription>{selectedResult?.testName} - {selectedResult?.patient.name}</DialogDescription>
@@ -763,7 +766,7 @@ export default function ResultsVerificationPage() {
 
         {/* Verify Dialog */}
         <Dialog open={isVerifyDialogOpen} onOpenChange={setIsVerifyDialogOpen}>
-          <DialogContent className="sm:max-w-[500px]">
+          <DialogContent className="w-[95vw] sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2"><CheckCircle2 className="h-5 w-5 text-emerald-500" />Verify Result</DialogTitle>
               <DialogDescription>Confirm verification for {selectedResult?.patient.name}</DialogDescription>
@@ -801,7 +804,7 @@ export default function ResultsVerificationPage() {
 
         {/* Reject Dialog */}
         <Dialog open={isRejectDialogOpen} onOpenChange={setIsRejectDialogOpen}>
-          <DialogContent className="sm:max-w-[500px]">
+          <DialogContent className="w-[95vw] sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2 text-rose-600"><XCircle className="h-5 w-5" />Reject Result</DialogTitle>
               <DialogDescription>Send back to lab technician for correction</DialogDescription>

@@ -84,6 +84,7 @@ class PharmacyService {
     status?: string;
     search?: string;
     page?: number;
+    page_size?: number;
   }): Promise<{ results: Prescription[]; count: number }> {
     const query = buildQueryString(params || {});
     return apiFetch<{ results: Prescription[]; count: number }>(`/pharmacy/prescriptions/${query}`);
@@ -134,9 +135,20 @@ class PharmacyService {
     form?: string;
     search?: string;
     page?: number;
+    page_size?: number;
   }): Promise<{ results: Medication[]; count: number }> {
     const query = buildQueryString(params || {});
     return apiFetch<{ results: Medication[]; count: number }>(`/pharmacy/medications/${query}`);
+  }
+
+  /**
+   * Update a medication
+   */
+  async updateMedication(id: number, data: Partial<Medication>): Promise<Medication> {
+    return apiFetch<Medication>(`/pharmacy/medications/${id}/`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
   }
 
   /**
@@ -147,6 +159,7 @@ class PharmacyService {
     location?: string;
     search?: string;
     page?: number;
+    page_size?: number;
   }): Promise<{ results: MedicationInventory[]; count: number }> {
     const query = buildQueryString(params || {});
     // Try medication-inventory first, fallback to inventory
@@ -193,6 +206,7 @@ class PharmacyService {
   async getInventoryAlerts(params?: {
     type?: 'low_stock' | 'expiring' | 'expired' | 'all';
     page?: number;
+    page_size?: number;
   }): Promise<{ results: MedicationInventory[]; count: number }> {
     const query = buildQueryString(params || {});
     return apiFetch<{ results: MedicationInventory[]; count: number }>(
@@ -219,6 +233,7 @@ class PharmacyService {
     prescription?: string;
     medication?: string;
     page?: number;
+    page_size?: number;
   }): Promise<{ results: Dispense[]; count: number }> {
     const query = buildQueryString(params || {});
     // Try dispenses endpoint first, fallback to history

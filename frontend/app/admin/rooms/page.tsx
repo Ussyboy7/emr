@@ -21,6 +21,8 @@ import {
   DoorOpen, Search, Plus, Eye, Edit, Trash2, CheckCircle2, XCircle, Clock,
   Loader2, Save, MapPin, Stethoscope, Users, Activity, Settings
 } from 'lucide-react';
+import { CLINICS } from '@/lib/constants/clinics';
+import { normalizeClinicName } from '@/lib/utils/clinic-utils';
 
 interface Room {
   id: string | number;
@@ -42,8 +44,8 @@ interface Room {
 
 // Rooms data will be loaded from API
 
-// NPA Clinics (for Specialty/Clinic Type)
-const clinics = ["General", "Physiotherapy", "Eye", "Sickle Cell", "Diamond"];
+// NPA Clinics (for Specialty/Clinic Type) - standardized list
+const clinics = CLINICS;
 
 // NPA Locations
 const locations = [
@@ -64,13 +66,25 @@ export default function RoomManagementPage() {
   const [typeFilter, setTypeFilter] = useState('all');
   const [locationFilter, setLocationFilter] = useState('all');
   
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [totalCount, setTotalCount] = useState(0);
+
   // Load rooms from API
   useEffect(() => {
     const loadRooms = async () => {
       try {
         setLoading(true);
         setError(null);
-        const result = await roomService.getRooms({ page_size: 1000 });
+        const hasActiveFilters = searchQuery || statusFilter !== 'all' || typeFilter !== 'all' || locationFilter !== 'all';
+        const pageSize = hasActiveFilters ? 1000 : itemsPerPage;
+        
+        const result = await roomService.getRooms({ 
+          page: hasActiveFilters ? 1 : currentPage,
+          page_size: pageSize,
+        });
+        setTotalCount(result.count || result.results.length);
         
         // Transform API rooms to frontend format
         const transformedRooms: Room[] = result.results.map((room: ApiRoom) => ({
@@ -100,11 +114,7 @@ export default function RoomManagementPage() {
     };
     
     loadRooms();
-  }, []);
-  
-  // Pagination state
-  const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(10);
+  }, [currentPage, itemsPerPage]);
 
   // Dialog states
   const [selectedRoom, setSelectedRoom] = useState<Room | null>(null);
@@ -127,16 +137,13 @@ export default function RoomManagementPage() {
     return matchesSearch && matchesStatus && matchesType && matchesLocation;
   }), [rooms, searchQuery, statusFilter, typeFilter, locationFilter]);
 
-  // Paginated rooms
-  const paginatedRooms = useMemo(() => {
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    return filteredRooms.slice(startIndex, startIndex + itemsPerPage);
-  }, [filteredRooms, currentPage, itemsPerPage]);
+  // Use filtered rooms directly (server-side pagination when no client-side filters)
+  const paginatedRooms = filteredRooms;
 
-  // Reset to page 1 when filters change
+  // Reset to page 1 when filters change or items per page changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, statusFilter, typeFilter, locationFilter]);
+  }, [searchQuery, statusFilter, typeFilter, locationFilter, itemsPerPage]);
 
   const stats = {
     total: rooms.length,
@@ -201,7 +208,7 @@ export default function RoomManagementPage() {
         room_number: `ROOM-${String(rooms.length + 1).padStart(3, '0')}`, // Generate room number
         location: formData.location!,
         floor: formData.floor || '',
-        specialty: formData.specialty!,
+        specialty: normalizeClinicName(formData.specialty!),
         capacity: formData.capacity || 2,
         status: backendStatus as 'active' | 'inactive' | 'maintenance',
       });
@@ -250,7 +257,7 @@ export default function RoomManagementPage() {
         name: formData.name,
         location: formData.location || '',
         floor: formData.floor || '',
-        specialty: formData.specialty || '',
+        specialty: normalizeClinicName(formData.specialty || ''),
         capacity: formData.capacity || 2,
         status: backendStatus as 'active' | 'inactive' | 'maintenance',
       });
@@ -570,7 +577,7 @@ export default function RoomManagementPage() {
 
         {/* View Dialog */}
         <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
-          <DialogContent className="sm:max-w-[600px]">
+          <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2"><DoorOpen className="h-5 w-5 text-blue-500" />Room Details</DialogTitle>
               <DialogDescription>{selectedRoom?.room_number || selectedRoom?.id}</DialogDescription>
@@ -612,7 +619,7 @@ export default function RoomManagementPage() {
 
         {/* Create Dialog */}
         <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-          <DialogContent className="sm:max-w-[600px]">
+          <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2"><Plus className="h-5 w-5 text-blue-500" />Create New Room</DialogTitle>
               <DialogDescription>Add a new consultation or procedure room</DialogDescription>
@@ -690,7 +697,7 @@ export default function RoomManagementPage() {
 
         {/* Edit Dialog */}
         <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-          <DialogContent className="sm:max-w-[600px]">
+          <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2"><Edit className="h-5 w-5 text-blue-500" />Edit Room</DialogTitle>
               <DialogDescription>Update room details for {selectedRoom?.name}</DialogDescription>

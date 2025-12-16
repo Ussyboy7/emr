@@ -11,10 +11,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { labService, type LabTest as ApiLabTest } from '@/lib/services';
+import { PatientAvatar } from "@/components/PatientAvatar";
 import {
   CheckCircle2, Search, Eye, Clock, AlertTriangle, Calendar,
   User, FileText, Stethoscope, RefreshCw, Download, Printer, FlaskConical, Loader2
 } from 'lucide-react';
+import { normalizeClinicName, clinicMatches } from '@/lib/utils/clinic-utils';
 
 interface TestResult {
   parameter: string;
@@ -56,6 +58,7 @@ export default function CompletedTestsPage() {
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [totalCount, setTotalCount] = useState(0);
 
   // Dialog states
   const [selectedTest, setSelectedTest] = useState<CompletedTest | null>(null);
@@ -66,9 +69,14 @@ export default function CompletedTestsPage() {
     try {
       setLoading(true);
       setError(null);
+      const hasActiveFilters = searchQuery || statusFilter !== 'all' || dateFilter !== 'all' || genderFilter !== 'all';
+      const pageSize = hasActiveFilters ? 1000 : itemsPerPage;
+      
       const response = await labService.getCompletedTests({
-        page: currentPage,
+        page: hasActiveFilters ? 1 : currentPage,
+        page_size: pageSize,
       });
+      setTotalCount(response.count || response.results.length);
       // Transform API data to frontend format
       const transformed = await Promise.all(response.results.map(async (test: any) => {
         // Extract patient data from test - LabTest has order, order has patient
@@ -163,7 +171,8 @@ export default function CompletedTestsPage() {
     loadTests();
   }, [loadTests]);
 
-  const clinics = [...new Set(tests.map(t => t.clinic).filter(c => c && c.trim() !== ''))];
+  // Normalize clinic names and get unique list
+  const clinics = [...new Set(tests.map(t => normalizeClinicName(t.clinic)).filter(c => c && c.trim() !== ''))].sort();
 
   const filteredTests = useMemo(() => {
     let filtered = tests.filter(test => {
@@ -171,7 +180,7 @@ export default function CompletedTestsPage() {
         test.orderId.toLowerCase().includes(searchQuery.toLowerCase()) ||
         test.testName.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesStatus = statusFilter === 'all' || test.overallStatus.toLowerCase() === statusFilter;
-      const matchesClinic = clinicFilter === 'all' || test.clinic === clinicFilter;
+      const matchesClinic = clinicFilter === 'all' || clinicMatches(test.clinic, clinicFilter);
       const matchesGender = genderFilter === 'all' || test.patient.gender.toLowerCase() === genderFilter.toLowerCase();
       return matchesSearch && matchesStatus && matchesClinic && matchesGender;
     });
@@ -203,16 +212,13 @@ export default function CompletedTestsPage() {
     return filtered;
   }, [tests, searchQuery, statusFilter, clinicFilter, dateFilter, genderFilter]);
 
-  // Paginated tests
-  const paginatedTests = useMemo(() => {
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    return filteredTests.slice(startIndex, startIndex + itemsPerPage);
-  }, [filteredTests, currentPage, itemsPerPage]);
+  // Use filtered tests directly (server-side pagination when no client-side filters)
+  const paginatedTests = filteredTests;
 
-  // Reset to page 1 when filters change
+  // Reset to page 1 when filters change or items per page changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, statusFilter, clinicFilter, dateFilter, genderFilter]);
+  }, [searchQuery, statusFilter, clinicFilter, dateFilter, genderFilter, itemsPerPage]);
 
   const stats = {
     total: tests.length,
@@ -407,11 +413,7 @@ export default function CompletedTestsPage() {
                         test.overallStatus === 'Abnormal' ? 'bg-amber-100 dark:bg-amber-900/30' :
                         'bg-emerald-100 dark:bg-emerald-900/30'
                       }`}>
-                        <span className={`font-semibold text-xs ${
-                          test.overallStatus === 'Critical' ? 'text-rose-600' :
-                          test.overallStatus === 'Abnormal' ? 'text-amber-600' :
-                          'text-emerald-600'
-                        }`}>{test.patient.name.split(' ').map(n => n[0]).join('')}</span>
+                        <PatientAvatar name={test.patient.name} photoUrl={(test.patient as any).photoUrl || (test.patient as any).photo} size="sm" />
                       </div>
                       
                       {/* Info */}
@@ -477,7 +479,7 @@ export default function CompletedTestsPage() {
 
         {/* View Dialog */}
         <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
-          <DialogContent className="sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className="w-[95vw] sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2"><FileText className="h-5 w-5 text-emerald-500" />Lab Report</DialogTitle>
               <DialogDescription>{selectedTest?.testName} - {selectedTest?.patient.name}</DialogDescription>
