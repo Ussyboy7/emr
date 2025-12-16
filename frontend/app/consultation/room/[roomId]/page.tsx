@@ -17,7 +17,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Checkbox } from "@/components/ui/checkbox";
 import { Activity, AlertTriangle, ArrowLeft, CheckCircle, Clock, FileText, History, Loader2, MapPin, Pill, Plus, Save, Stethoscope, Syringe, TestTube, User, Users, X, Send, ScanLine, TrendingUp, TrendingDown, Minus, Building2, UserPlus, Calendar, Phone, Mail, Heart, Download, Eye, Printer, FileDown, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, ClipboardList, RefreshCw, Thermometer, CheckSquare, Square, Edit } from "lucide-react";
 import { toast } from "sonner";
-import { roomService, patientService, pharmacyService, labService, radiologyService, referralService, consultationService } from '@/lib/services';
+import { roomService, patientService, pharmacyService, labService, radiologyService, referralService, consultationService, type ConsultationSession } from '@/lib/services';
 import { apiFetch } from '@/lib/api-client';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
@@ -1159,7 +1159,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       console.log('Restoring active session:', sessionId);
       
       // Load full session data
-      const session = await consultationService.getSession(sessionId);
+      const session: ConsultationSession = await consultationService.getSession(sessionId);
       console.log('Loaded session data:', session);
       
       // Load patient data
