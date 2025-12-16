@@ -48,7 +48,11 @@ export interface ConsultationSession {
   visit?: number;
   status: 'active' | 'completed' | 'cancelled';
   chief_complaint?: string;
+  history_of_presenting_illness?: string;
+  physical_examination?: string;
   assessment?: string;
+  plan?: string;
+  notes?: string;
   started_at: string;
   ended_at?: string;
 }
