@@ -11,6 +11,7 @@ import {
   Stethoscope, UserCheck, FileText, Send, Calendar, Clock, Users,
   CheckCircle2, ArrowRight, Activity
 } from 'lucide-react';
+import { PatientAvatar } from "@/components/PatientAvatar";
 
 const stats = [
   { label: "Today's Queue", value: 18, icon: UserCheck, color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
@@ -99,9 +100,7 @@ export default function ConsultationDashboardPage() {
                     return (
                       <div key={item.id} className="flex items-center justify-between p-3 rounded-lg border hover:bg-muted/50 transition-colors">
                         <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center text-white font-medium">
-                            {item.patient_name?.split(' ').map((n: string) => n[0]).join('').substring(0, 2) || 'P'}
-                          </div>
+                          <PatientAvatar name={item.patient_name || 'Unknown Patient'} photoUrl={undefined} size="md" />
                           <div>
                             <p className="font-medium text-foreground">{item.patient_name || 'Unknown Patient'}</p>
                             <p className="text-xs text-muted-foreground">{item.room_name || 'Room'}</p>

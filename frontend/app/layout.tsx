@@ -20,7 +20,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className="font-sans antialiased">
+      <body className="font-sans antialiased" suppressHydrationWarning>
         {/* Polyfill for crypto.randomUUID - must run before any other scripts */}
         <Script
           id="crypto-polyfill"

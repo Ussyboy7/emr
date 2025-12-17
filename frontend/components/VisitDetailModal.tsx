@@ -91,6 +91,7 @@ export function VisitDetailModal({ visit: visitProp, visitId: visitIdProp, isOpe
         doctor: rawVisitData.doctor_name || 'Doctor',
         status: rawVisitData.status || 'scheduled',
         chiefComplaint: rawVisitData.chief_complaint || '',
+        notes: rawVisitData.clinical_notes || '',
       });
 
       // Load patient
@@ -357,7 +358,7 @@ export function VisitDetailModal({ visit: visitProp, visitId: visitIdProp, isOpe
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-hidden flex flex-col p-0">
+      <DialogContent className="w-[95vw] sm:max-w-[800px] max-h-[90vh] overflow-hidden flex flex-col p-0">
         <DialogHeader className="px-6 pt-6 pb-4 border-b">
           <div className="flex items-center justify-between">
             <div>
@@ -408,6 +409,14 @@ export function VisitDetailModal({ visit: visitProp, visitId: visitIdProp, isOpe
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Chief Complaint:</span>
                       <span className="text-right max-w-[60%]">{visit.chiefComplaint}</span>
+                    </div>
+                  )}
+                  {visit?.notes && (
+                    <div className="mt-3 pt-3 border-t">
+                      <span className="text-muted-foreground block mb-2">Notes / Special Instructions:</span>
+                      <div className="p-3 rounded-lg bg-muted/50 border">
+                        <p className="text-sm whitespace-pre-wrap">{visit.notes}</p>
+                      </div>
                     </div>
                   )}
                 </CardContent>

@@ -147,6 +147,13 @@ class LabOrderSerializer(serializers.ModelSerializer):
         representation['doctor'] = self.get_doctor_details(instance)
         return representation
     
+    def validate_clinic(self, value):
+        """Normalize clinic name before validation."""
+        if value:
+            from common.clinic_utils import normalize_clinic_name
+            return normalize_clinic_name(value)
+        return value
+    
     def create(self, validated_data):
         """Create lab order with nested tests."""
         tests_data = validated_data.pop('tests_data', [])

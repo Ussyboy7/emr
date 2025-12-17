@@ -84,6 +84,7 @@ export default function UserManagementPage() {
   // Pagination
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [totalCount, setTotalCount] = useState(0);
 
   // Load clinics and departments from API
   useEffect(() => {
@@ -93,7 +94,7 @@ export default function UserManagementPage() {
   // Load staff from API
   useEffect(() => {
     loadStaff();
-  }, []);
+  }, [currentPage, itemsPerPage]);
 
   const loadClinicsAndDepartments = async () => {
     try {
@@ -112,7 +113,14 @@ export default function UserManagementPage() {
     try {
       setLoading(true);
       setError(null);
-      const response = await adminService.getUsers({ page_size: 1000 });
+      const hasActiveFilters = searchQuery || roleFilter !== 'all' || departmentFilter !== 'all' || clinicFilter !== 'all' || statusFilter !== 'all';
+      const pageSize = hasActiveFilters ? 1000 : itemsPerPage;
+      
+      const response = await adminService.getUsers({ 
+        page: hasActiveFilters ? 1 : currentPage,
+        page_size: pageSize,
+      });
+      setTotalCount(response.count || response.results.length);
       
       // Transform API users to frontend format
       const transformedStaff: StaffMember[] = response.results.map((user: ApiUser) => ({
@@ -173,16 +181,13 @@ export default function UserManagementPage() {
     });
   }, [staff, searchQuery, roleFilter, departmentFilter, clinicFilter, statusFilter]);
 
-  // Paginated staff
-  const paginatedStaff = useMemo(() => {
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    return filteredStaff.slice(startIndex, startIndex + itemsPerPage);
-  }, [filteredStaff, currentPage, itemsPerPage]);
+  // Use filtered staff directly (server-side pagination when no client-side filters)
+  const paginatedStaff = filteredStaff;
 
-  // Reset page on filter change
+  // Reset page on filter change or items per page changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, roleFilter, departmentFilter, clinicFilter, statusFilter]);
+  }, [searchQuery, roleFilter, departmentFilter, clinicFilter, statusFilter, itemsPerPage]);
 
   // Stats
   const stats = useMemo(() => ({
@@ -668,7 +673,7 @@ export default function UserManagementPage() {
 
         {/* Create/Edit Dialog */}
         <Dialog open={isCreateDialogOpen || isEditDialogOpen} onOpenChange={(open) => { if (!open) { setIsCreateDialogOpen(false); setIsEditDialogOpen(false); } }}>
-          <DialogContent className="sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className="w-[95vw] sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <UserPlus className="h-5 w-5 text-blue-500" />
@@ -815,7 +820,7 @@ export default function UserManagementPage() {
 
         {/* View Dialog */}
         <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
-          <DialogContent className="sm:max-w-[600px]">
+          <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Eye className="h-5 w-5 text-blue-500" />

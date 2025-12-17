@@ -16,6 +16,7 @@ import { toast } from "sonner";
 import { Checkbox } from "@/components/ui/checkbox";
 import { labService, type LabOrder as ApiLabOrder, type LabTest as ApiLabTest } from '@/lib/services';
 import { transformLabTestStatus, transformPriority, transformProcessingMethod, transformToBackendProcessingMethod } from '@/lib/services/transformers';
+import { PatientAvatar } from "@/components/PatientAvatar";
 import {
   TestTube, Search, Eye, Clock, CheckCircle2, Activity, FlaskConical, Loader2,
   Beaker, AlertTriangle, User, Calendar, FileText, Play, Stethoscope,
@@ -46,7 +47,7 @@ interface LabTest {
 interface LabOrder {
   id: string;
   orderId: string;
-  patient: { id: string; name: string; age: number; gender: string; };
+  patient: { id: string; name: string; age: number; gender: string; photoUrl?: string; };
   doctor: { id: string; name: string; specialty: string; };
   tests: LabTest[];
   priority: 'Routine' | 'Urgent' | 'STAT';
@@ -65,6 +66,7 @@ const transformOrder = (apiOrder: ApiLabOrder): LabOrder => {
       name: apiOrder.patient.name || 'Unknown',
       age: apiOrder.patient.age || 0,
       gender: apiOrder.patient.gender || 'Unknown',
+      photoUrl: (apiOrder.patient as any).photo || undefined,
     },
     doctor: {
       id: apiOrder.doctor?.id?.toString() || '',
@@ -237,6 +239,7 @@ export default function LabOrdersPage() {
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [totalCount, setTotalCount] = useState(0);
 
   // Dialog states
   const [selectedOrder, setSelectedOrder] = useState<LabOrder | null>(null);
@@ -320,18 +323,22 @@ export default function LabOrdersPage() {
   // The API handles pagination, but we still filter client-side for tabs
   const paginatedOrders = filteredOrders;
 
-  // Reset to page 1 when filters change
+  // Reset to page 1 when filters change or items per page changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, priorityFilter, dateFilter, genderFilter, activeTab]);
+  }, [searchQuery, priorityFilter, dateFilter, genderFilter, activeTab, itemsPerPage]);
 
   // Load orders function - memoized to prevent infinite loops
   const loadOrders = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
+      const hasActiveFilters = searchQuery || priorityFilter !== 'all' || dateFilter !== 'all' || genderFilter !== 'all';
+      const pageSize = hasActiveFilters ? 1000 : itemsPerPage;
+      
       const params: any = {
-        page: currentPage,
+        page: hasActiveFilters ? 1 : currentPage,
+        page_size: pageSize,
       };
       if (priorityFilter !== 'all') {
         params.priority = priorityFilter.toLowerCase();
@@ -341,6 +348,7 @@ export default function LabOrdersPage() {
       }
       
       const response = await labService.getOrders(params);
+      setTotalCount(response.count || response.results.length);
       const transformedOrders = response.results.map(transformOrder);
       setOrders(transformedOrders);
     } catch (err: any) {
@@ -619,11 +627,7 @@ export default function LabOrdersPage() {
         <CardContent className="py-3 px-4">
           <div className="flex items-center gap-3">
             {/* Avatar */}
-            <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${order.priority === 'STAT' ? 'bg-rose-100 dark:bg-rose-900/30' : 'bg-amber-100 dark:bg-amber-900/30'}`}>
-              <span className={`font-semibold text-xs ${order.priority === 'STAT' ? 'text-rose-600' : 'text-amber-600'}`}>
-                {order.patient.name.split(' ').map(n => n[0]).join('')}
-              </span>
-            </div>
+            <PatientAvatar name={order.patient.name} photoUrl={order.patient.photoUrl} size="sm" />
             
             {/* Info */}
             <div className="flex-1 min-w-0">
@@ -827,12 +831,17 @@ export default function LabOrdersPage() {
         {/* Pagination */}
         {filteredOrders.length > 0 && (
           <Card className="p-4">
-            <StandardPagination
+              <StandardPagination
               currentPage={currentPage}
-              totalItems={filteredOrders.length}
+              totalItems={searchQuery || priorityFilter !== 'all' || dateFilter !== 'all' || genderFilter !== 'all'
+                ? filteredOrders.length 
+                : totalCount}
               itemsPerPage={itemsPerPage}
               onPageChange={setCurrentPage}
-              onItemsPerPageChange={setItemsPerPage}
+              onItemsPerPageChange={(newSize) => {
+                setItemsPerPage(newSize);
+                setCurrentPage(1);
+              }}
               itemName="orders"
             />
             <p className="text-xs text-muted-foreground mt-2 text-center">
@@ -843,7 +852,7 @@ export default function LabOrdersPage() {
 
         {/* View & Manage Order Dialog - All actions happen here */}
         <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
-          <DialogContent className="sm:max-w-[750px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className="w-[95vw] sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2"><ClipboardList className="h-5 w-5 text-amber-500" />Manage Order</DialogTitle>
               <DialogDescription>{selectedOrder?.orderId} • Process individual tests</DialogDescription>
@@ -1001,7 +1010,7 @@ export default function LabOrdersPage() {
 
         {/* Collect Sample Dialog */}
         <Dialog open={isCollectDialogOpen} onOpenChange={setIsCollectDialogOpen}>
-          <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2"><Beaker className="h-5 w-5 text-violet-500" />Collect Sample</DialogTitle>
               <DialogDescription>Collect {selectedTest?.sampleType?.toLowerCase()} sample for testing</DialogDescription>
@@ -1127,7 +1136,7 @@ export default function LabOrdersPage() {
 
         {/* Start Processing Dialog */}
         <Dialog open={isProcessDialogOpen} onOpenChange={setIsProcessDialogOpen}>
-          <DialogContent className="sm:max-w-[500px]">
+          <DialogContent className="w-[95vw] sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2"><Play className="h-5 w-5 text-blue-500" />Process Test</DialogTitle>
               <DialogDescription>Choose processing method for {selectedTest?.name}</DialogDescription>
@@ -1203,7 +1212,7 @@ export default function LabOrdersPage() {
 
         {/* Enter Results Dialog */}
         <Dialog open={isResultsDialogOpen} onOpenChange={setIsResultsDialogOpen}>
-          <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <FileText className="h-5 w-5 text-amber-500" />

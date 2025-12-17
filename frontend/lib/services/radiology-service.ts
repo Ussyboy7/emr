@@ -68,6 +68,7 @@ class RadiologyService {
     priority?: string;
     search?: string;
     page?: number;
+    page_size?: number;
   }): Promise<{ results: RadiologyOrder[]; count: number }> {
     const query = buildQueryString(params || {});
     return apiFetch<{ results: RadiologyOrder[]; count: number }>(`/radiology/orders/${query}`);
@@ -163,6 +164,7 @@ class RadiologyService {
     overall_status?: string;
     priority?: string;
     page?: number;
+    page_size?: number;
   }): Promise<{ results: RadiologyReport[]; count: number }> {
     const query = buildQueryString(params || {});
     return apiFetch<{ results: RadiologyReport[]; count: number }>(
@@ -178,6 +180,7 @@ class RadiologyService {
     overall_status?: string;
     priority?: string;
     page?: number;
+    page_size?: number;
   }): Promise<{ results: RadiologyReport[]; count: number }> {
     const queryParams = { ...params, study_status: 'verified' };
     const query = buildQueryString(queryParams);

@@ -15,6 +15,7 @@ import { apiFetch } from '@/lib/api-client';
 import { patientService } from '@/lib/services';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
+import { PatientAvatar } from "@/components/PatientAvatar";
 import { 
   Activity, Search, RefreshCw, Eye, TrendingUp, TrendingDown, AlertTriangle, 
   CheckCircle2, Heart, Thermometer, Wind, Droplets, Scale, Calendar, 
@@ -619,17 +620,7 @@ export default function PatientVitalsPage() {
                 <CardContent className="py-3 px-4">
                   <div className="flex items-center gap-3">
                     {/* Avatar */}
-                    <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${
-                      patient.status === 'critical' ? 'bg-rose-100 dark:bg-rose-900/30' : 
-                      patient.status === 'warning' ? 'bg-amber-100 dark:bg-amber-900/30' : 
-                      'bg-emerald-100 dark:bg-emerald-900/30'
-                    }`}>
-                      <span className={`font-semibold text-xs ${
-                        patient.status === 'critical' ? 'text-rose-600' : 
-                        patient.status === 'warning' ? 'text-amber-600' : 
-                        'text-emerald-600'
-                      }`}>{patient.name.split(' ').map(n => n[0]).join('')}</span>
-                    </div>
+                    <PatientAvatar name={patient.name} photoUrl={undefined} size="sm" />
                     
                     {/* Info */}
                     <div className="flex-1 min-w-0">
@@ -692,7 +683,7 @@ export default function PatientVitalsPage() {
 
         {/* History Dialog */}
         <Dialog open={isHistoryDialogOpen} onOpenChange={setIsHistoryDialogOpen}>
-          <DialogContent className="sm:max-w-[800px] max-h-[85vh] overflow-hidden flex flex-col">
+          <DialogContent className="w-[95vw] sm:max-w-[800px] max-h-[90vh] overflow-hidden flex flex-col">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Calendar className="h-5 w-5 text-rose-500" />

@@ -89,6 +89,7 @@ class LabService {
     status?: string;
     search?: string;
     page?: number;
+    page_size?: number;
   }): Promise<{ results: LabOrder[]; count: number; next?: string; previous?: string }> {
     const query = buildQueryString(params || {});
     return apiFetch<{ results: LabOrder[]; count: number; next?: string; previous?: string }>(
@@ -241,6 +242,7 @@ class LabService {
     overall_status?: string;
     priority?: string;
     page?: number;
+    page_size?: number;
   }): Promise<{ results: LabResult[]; count: number }> {
     const query = buildQueryString(params || {});
     return apiFetch<{ results: LabResult[]; count: number }>(`/laboratory/verification/${query}`);

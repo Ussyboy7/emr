@@ -5,6 +5,7 @@ import { DashboardLayout } from '@/components/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
@@ -19,16 +20,17 @@ import { isAuthenticationError } from '@/lib/auth-errors';
 import { 
   Search, Filter, Users, Phone, Eye, 
   UserPlus, Calendar, FileText, Edit, X, Loader2,
-  Activity, UserCheck, AlertTriangle, Camera, Upload, Trash2
+  Activity, UserCheck, AlertTriangle, Camera, Upload, Trash2, Plus
 } from 'lucide-react';
 import { StandardPagination } from '@/components/StandardPagination';
 import { PatientOverviewModal } from '@/components/PatientOverviewModal';
+import { PatientAvatar } from "@/components/PatientAvatar";
 
 // Constants for form fields
 const titles = ['Mr', 'Mrs', 'Ms', 'Dr', 'Chief', 'Engr', 'Prof', 'Alhaji', 'Hajia'];
 const maritalStatuses = ['Single', 'Married', 'Divorced', 'Widowed'];
 const religions = ['Christianity', 'Islam', 'Traditional', 'Other', 'None'];
-const tribes = ['Hausa', 'Yoruba', 'Igbo', 'Fulani', 'Ibibio', 'Tiv', 'Kanuri', 'Ijaw', 'Nupe', 'Efik', 'Urhobo', 'Edo', 'Itsekiri', 'Jjaw', 'Edo', 'Other'];
+const tribes = ['Hausa', 'Yoruba', 'Igbo', 'Fulani', 'Ibibio', 'Tiv', 'Kanuri', 'Ijaw', 'Nupe', 'Efik', 'Urhobo', 'Edo', 'Itsekiri', 'Other'];
 const NOK_RELATIONSHIPS = ['Spouse', 'Parent', 'Child', 'Sibling', 'Relative', 'Friend', 'Other'];
 
 // NPA Divisions
@@ -74,6 +76,29 @@ type Patient = {
   nonNpaType?: string;
 };
 
+// Helper function to construct full photo URL from relative path
+const getPhotoUrl = (photoPath: string | null | undefined): string => {
+  if (!photoPath) return '';
+  
+  // If it's already a full URL, return as is
+  if (photoPath.startsWith('http://') || photoPath.startsWith('https://')) {
+    return photoPath;
+  }
+  
+  // If it starts with /media/, construct full URL from API base URL
+  if (photoPath.startsWith('/media/')) {
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001/api';
+    // Remove /api from the end to get base URL, then append the media path
+    const baseUrl = apiUrl.replace(/\/api\/?$/, '');
+    return `${baseUrl}${photoPath}`;
+  }
+  
+  // If it's a relative path without /media/, assume it's already relative to media
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001/api';
+  const baseUrl = apiUrl.replace(/\/api\/?$/, '');
+  return `${baseUrl}/media/${photoPath.startsWith('/') ? photoPath.slice(1) : photoPath}`;
+};
+
 // Transform backend patient to frontend format
 const transformPatient = (apiPatient: ApiPatient): Patient => {
   const categoryMap: Record<string, string> = {
@@ -105,47 +130,12 @@ const transformPatient = (apiPatient: ApiPatient): Patient => {
     lastVisit: '', // Will be populated if visit data is available
     totalVisits: 0, // Will be populated if visit data is available
     location: apiPatient.location || '',
-    photoUrl: apiPatient.photo || '',
+    photoUrl: getPhotoUrl(apiPatient.photo),
     registeredAt: apiPatient.created_at?.split('T')[0] || '',
     primaryPatient: '', // Will be populated if principal_staff data is available
     relationship: apiPatient.nok_relationship || '',
     nonNpaType: apiPatient.nonnpa_type || '',
   };
-};
-
-// Helper component for patient avatar with photo support
-const PatientAvatar = ({ patient, size = 'md' }: { patient: Patient, size?: 'sm' | 'md' | 'lg' }) => {
-  const sizeClasses = {
-    sm: 'w-8 h-8 text-xs',
-    md: 'w-10 h-10 text-sm',
-    lg: 'w-16 h-16 text-xl'
-  };
-  
-  const initials = patient.name.split(' ').map(n => n[0]).join('');
-  
-  if (patient.photoUrl) {
-    return (
-      <div className={`${sizeClasses[size]} rounded-full overflow-hidden bg-muted`}>
-        <img 
-          src={patient.photoUrl} 
-          alt={patient.name}
-          className="w-full h-full object-cover"
-          onError={(e) => {
-            // Fallback to initials if image fails to load
-            const target = e.target as HTMLImageElement;
-            target.style.display = 'none';
-            target.parentElement!.innerHTML = `<div class="${sizeClasses[size]} rounded-full bg-gradient-to-br from-teal-500 to-cyan-500 flex items-center justify-center text-white font-medium">${initials}</div>`;
-          }}
-        />
-      </div>
-    );
-  }
-  
-  return (
-    <div className={`${sizeClasses[size]} rounded-full bg-gradient-to-br from-teal-500 to-cyan-500 flex items-center justify-center text-white font-medium`}>
-      {initials}
-    </div>
-  );
 };
 
 const locations = [
@@ -210,6 +200,28 @@ export default function PatientsListPage() {
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   
+  // Reset form when selectedPatient changes (new patient selected for editing)
+  useEffect(() => {
+    if (selectedPatient && isEditModalOpen && !editFormLoading) {
+      // Form will be populated by openEditModal, this is just a safety reset
+      // The actual population happens in openEditModal after data is fetched
+    }
+  }, [selectedPatient?.id]);
+  
+  // Medical History state
+  const [medicalHistory, setMedicalHistory] = useState({
+    allergies: [] as string[],
+    diagnoses: [] as Array<{ code?: string; name: string; status: string; diagnosedDate?: string; treatingDoctor?: string }>,
+    surgicalHistory: [] as Array<{ procedure: string; date: string; hospital: string }>,
+    familyHistory: [] as Array<{ relation: string; condition: string }>,
+    socialHistory: {
+      smoking: '',
+      alcohol: '',
+      exercise: '',
+      occupation: '',
+    },
+  });
+  
   // Advanced filters
   const [ageRange, setAgeRange] = useState({ min: '', max: '' });
   const [dateRange, setDateRange] = useState({ from: '', to: '' });
@@ -217,6 +229,7 @@ export default function PatientsListPage() {
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [totalCount, setTotalCount] = useState(0);
 
   const filteredPatients = useMemo(() => patients.filter(patient => {
     const matchesSearch = patient.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
@@ -229,21 +242,18 @@ export default function PatientsListPage() {
     return matchesSearch && matchesGender && matchesCategory && matchesLocation && matchesAge;
   }), [patients, searchQuery, genderFilter, categoryFilter, locationFilter, ageRange]);
 
-  // Paginated patients
-  const paginatedPatients = useMemo(() => {
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    return filteredPatients.slice(startIndex, startIndex + itemsPerPage);
-  }, [filteredPatients, currentPage, itemsPerPage]);
+  // Use filtered patients directly (server-side pagination when no client-side filters)
+  const paginatedPatients = filteredPatients;
 
   // Load patients from API
   useEffect(() => {
     loadPatients();
   }, [currentPage, itemsPerPage]);
 
-  // Reset to page 1 when filters change
+  // Reset to page 1 when filters change or items per page changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, genderFilter, categoryFilter, locationFilter, ageRange]);
+  }, [searchQuery, genderFilter, categoryFilter, locationFilter, ageRange, itemsPerPage]);
 
   const loadPatients = async () => {
     try {
@@ -270,6 +280,7 @@ export default function PatientsListPage() {
       }
       
       const response = await patientService.getPatients(params);
+      setTotalCount(response.count || response.results.length);
       
       // Transform patients (visit data will be fetched on-demand when viewing patient details)
       const transformedPatients = response.results.map(transformPatient);
@@ -327,9 +338,42 @@ export default function PatientsListPage() {
   };
 
   const openEditModal = async (patient: Patient) => {
-    setSelectedPatient(patient);
-    setIsEditModalOpen(true);
+    // Don't open modal until we have the data - this prevents showing empty form
     setEditFormLoading(true);
+    setSelectedPatient(patient);
+    
+    // Reset form immediately to clear any stale data from previous edits
+    setEditForm({
+      title: '',
+      firstName: '',
+      lastName: '',
+      middleName: '',
+      dateOfBirth: '',
+      maritalStatus: '',
+      religion: '',
+      tribe: '',
+      occupation: '',
+      phone: '',
+      email: '',
+      residentialAddress: '',
+      permanentAddress: '',
+      stateOfResidence: '',
+      stateOfOrigin: '',
+      lga: '',
+      bloodGroup: '',
+      genotype: '',
+      location: '',
+      division: '',
+      employeeType: '',
+      nokSurname: '',
+      nokFirstName: '',
+      nokMiddleName: '',
+      nokRelationship: '',
+      nokPhone: '',
+      nokAddress: '',
+    });
+    setPhotoPreview(null);
+    setPhotoFile(null);
     
     try {
       // Look up patient by patient_id to get numeric ID and full data
@@ -341,9 +385,8 @@ export default function PatientsListPage() {
       const parsedId = parseInt(patientIdStr, 10);
       if (!isNaN(parsedId) && parsedId > 0) {
         numericId = parsedId;
-        apiPatient = await patientService.getPatient(numericId);
       } else {
-        // It's a string patient_id (like "E-A2962") - search for it
+        // It's a string patient_id (like "E-A2962") - search for it to get numeric ID
         const searchResult = await patientService.getPatients({ search: patientIdStr });
         const matchedPatient = searchResult.results.find(
           p => p.patient_id === patientIdStr || p.patient_id.toUpperCase() === patientIdStr.toUpperCase()
@@ -352,8 +395,10 @@ export default function PatientsListPage() {
           throw new Error(`Patient with ID "${patientIdStr}" not found`);
         }
         numericId = matchedPatient.id;
-        apiPatient = matchedPatient;
       }
+      
+      // Always fetch full patient details using numeric ID (this returns PatientSerializer with all fields)
+      apiPatient = await patientService.getPatient(numericId);
       
       // Parse date of birth
       let dobFormatted = '';
@@ -374,16 +419,18 @@ export default function PatientsListPage() {
       const normalizedEmployeeType = apiPatient.employee_type ? apiPatient.employee_type.charAt(0).toUpperCase() + apiPatient.employee_type.slice(1).toLowerCase() : '';
       const normalizedNokRelationship = apiPatient.nok_relationship ? apiPatient.nok_relationship.charAt(0).toUpperCase() + apiPatient.nok_relationship.slice(1).toLowerCase() : '';
       
-      setEditForm({
+      // Use a single setEditForm call to ensure all fields update together
+      // Note: API returns snake_case (first_name, surname, etc.)
+      const formData = {
         title: normalizedTitle,
         firstName: apiPatient.first_name || '',
         lastName: apiPatient.surname || '',
         middleName: apiPatient.middle_name || '',
         dateOfBirth: dobFormatted,
         maritalStatus: normalizedMaritalStatus,
-        religion: (apiPatient as any).religion || '',
-        tribe: (apiPatient as any).tribe || '',
-        occupation: (apiPatient as any).occupation || '',
+        religion: apiPatient.religion || '',
+        tribe: apiPatient.tribe || '',
+        occupation: apiPatient.occupation || '',
         phone: apiPatient.phone || '',
         email: apiPatient.email || '',
         residentialAddress: apiPatient.residential_address || '',
@@ -402,19 +449,52 @@ export default function PatientsListPage() {
         nokRelationship: normalizedNokRelationship,
         nokPhone: apiPatient.nok_phone || '',
         nokAddress: apiPatient.nok_address || '',
-      });
+      };
+      
+      // Set form data - use functional update to ensure we're updating from the latest state
+      setEditForm(() => ({ ...formData }));
       
       // Set photo preview if patient has photo
       if (apiPatient.photo) {
-        setPhotoPreview(apiPatient.photo);
+        setPhotoPreview(getPhotoUrl(apiPatient.photo));
       } else {
         setPhotoPreview(null);
       }
       setPhotoFile(null);
+      
+      // Load medical history
+      try {
+        const history = await patientService.getPatientHistory(numericId);
+        setMedicalHistory({
+          allergies: Array.isArray(history.allergies) ? history.allergies : [],
+          diagnoses: Array.isArray(history.diagnoses) ? history.diagnoses : [],
+          surgicalHistory: Array.isArray(history.surgical_history) ? history.surgical_history : [],
+          familyHistory: Array.isArray(history.family_history) ? history.family_history : [],
+          socialHistory: {
+            smoking: history.social_history?.smoking || '',
+            alcohol: history.social_history?.alcohol || '',
+            exercise: history.social_history?.exercise || '',
+            occupation: history.social_history?.occupation || '',
+          },
+        });
+      } catch (historyErr: any) {
+        console.warn('Failed to load medical history:', historyErr);
+        // Initialize with empty values if history doesn't exist
+        setMedicalHistory({
+          allergies: [],
+          diagnoses: [],
+          surgicalHistory: [],
+          familyHistory: [],
+          socialHistory: { smoking: '', alcohol: '', exercise: '', occupation: '' },
+        });
+      }
+      
+      // Only open the modal after data is loaded
+      setIsEditModalOpen(true);
     } catch (err: any) {
       console.error('Error loading patient for edit:', err);
       toast.error('Failed to load patient data: ' + (err.message || 'Unknown error'));
-      setIsEditModalOpen(false);
+      // Don't open modal if there's an error
     } finally {
       setEditFormLoading(false);
     }
@@ -588,6 +668,20 @@ export default function PatientsListPage() {
         await patientService.updatePatient(numericId, updateData);
       }
 
+      // Save medical history
+      try {
+        await patientService.updatePatientHistory(numericId, {
+          allergies: medicalHistory.allergies,
+          diagnoses: medicalHistory.diagnoses,
+          surgical_history: medicalHistory.surgicalHistory,
+          family_history: medicalHistory.familyHistory,
+          social_history: medicalHistory.socialHistory,
+        });
+      } catch (historyErr: any) {
+        console.warn('Failed to update medical history:', historyErr);
+        // Don't fail the entire update if history save fails
+      }
+      
       toast.success(`Patient ${editForm.firstName} ${editForm.lastName} updated successfully`);
       
       // Reload patients
@@ -742,7 +836,7 @@ export default function PatientsListPage() {
                     <CardContent className="py-3 px-4">
                       <div className="flex items-center gap-3">
                         {/* Avatar */}
-                        <PatientAvatar patient={patient} size="md" />
+                        <PatientAvatar name={patient.name} photoUrl={patient.photoUrl} size="md" />
                         
                         {/* Info */}
                         <div className="flex-1 min-w-0">
@@ -805,10 +899,15 @@ export default function PatientsListPage() {
               <Card className="p-4">
                 <StandardPagination
                   currentPage={currentPage}
-                  totalItems={filteredPatients.length}
+                  totalItems={searchQuery || genderFilter !== 'all' || categoryFilter !== 'all' || locationFilter !== 'all' || ageRange.min || ageRange.max
+                    ? filteredPatients.length 
+                    : totalCount}
                   itemsPerPage={itemsPerPage}
                   onPageChange={setCurrentPage}
-                  onItemsPerPageChange={setItemsPerPage}
+                  onItemsPerPageChange={(newSize) => {
+                    setItemsPerPage(newSize);
+                    setCurrentPage(1);
+                  }}
                   itemName="patients"
                 />
               </Card>
@@ -869,7 +968,7 @@ export default function PatientsListPage() {
 
         {/* Advanced Filters Dialog */}
         <Dialog open={isFilterDialogOpen} onOpenChange={setIsFilterDialogOpen}>
-          <DialogContent className="sm:max-w-[500px]">
+          <DialogContent className="w-[95vw] sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2"><Filter className="h-5 w-5 text-primary" />Advanced Filters</DialogTitle>
               <DialogDescription>Apply additional filters to narrow down the patient list.</DialogDescription>
@@ -912,7 +1011,7 @@ export default function PatientsListPage() {
 
         {/* Edit Patient Modal */}
         <Dialog open={isEditModalOpen} onOpenChange={setIsEditModalOpen}>
-          <DialogContent className="sm:max-w-[700px] max-h-[85vh] overflow-y-auto">
+          <DialogContent className="w-[95vw] sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Edit className="h-5 w-5 text-blue-500" />
@@ -921,7 +1020,7 @@ export default function PatientsListPage() {
               <DialogDescription>Update patient registration information</DialogDescription>
             </DialogHeader>
             {selectedPatient && (
-              <div className="space-y-4 py-4">
+              <div className="space-y-4 py-4" key={`edit-${selectedPatient.id}`}>
                 {editFormLoading ? (
                   <div className="flex items-center justify-center py-12">
                     <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
@@ -1136,6 +1235,430 @@ export default function PatientsListPage() {
                               {['AA', 'AS', 'SS', 'AC', 'SC'].map(g => <SelectItem key={g} value={g}>{g}</SelectItem>)}
                             </SelectContent>
                           </Select>
+                        </div>
+                      </div>
+                    </div>
+
+                    <Separator />
+
+                    {/* Medical History */}
+                    <div className="space-y-6">
+                      <h3 className="text-sm font-semibold text-foreground">Medical History</h3>
+                      
+                      {/* Allergies */}
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-sm font-medium">Allergies</Label>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              const newAllergy = prompt('Enter allergy name:');
+                              if (newAllergy && newAllergy.trim()) {
+                                setMedicalHistory(prev => ({
+                                  ...prev,
+                                  allergies: [...prev.allergies, newAllergy.trim()],
+                                }));
+                              }
+                            }}
+                          >
+                            <Plus className="h-3 w-3 mr-1" />
+                            Add Allergy
+                          </Button>
+                        </div>
+                        {medicalHistory.allergies.length === 0 ? (
+                          <p className="text-xs text-muted-foreground">No allergies recorded</p>
+                        ) : (
+                          <div className="flex flex-wrap gap-2">
+                            {medicalHistory.allergies.map((allergy, index) => (
+                              <Badge key={index} className="bg-red-600 text-white hover:bg-red-700 pr-1">
+                                <AlertTriangle className="h-3 w-3 mr-1" />
+                                {allergy}
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => {
+                                    setMedicalHistory(prev => ({
+                                      ...prev,
+                                      allergies: prev.allergies.filter((_, i) => i !== index),
+                                    }));
+                                  }}
+                                  className="h-4 w-4 p-0 ml-1 hover:bg-red-800"
+                                >
+                                  <X className="h-3 w-3" />
+                                </Button>
+                              </Badge>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Chronic Conditions */}
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-sm font-medium">Chronic Conditions</Label>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              setMedicalHistory(prev => ({
+                                ...prev,
+                                diagnoses: [...prev.diagnoses, { name: '', code: '', status: 'Active', diagnosedDate: '' }],
+                              }));
+                            }}
+                          >
+                            <Plus className="h-3 w-3 mr-1" />
+                            Add Condition
+                          </Button>
+                        </div>
+                        {medicalHistory.diagnoses.length === 0 ? (
+                          <p className="text-xs text-muted-foreground">No chronic conditions recorded</p>
+                        ) : (
+                          <div className="space-y-2">
+                            {medicalHistory.diagnoses.map((diagnosis, index) => (
+                              <div key={index} className="p-3 border rounded-lg space-y-2">
+                                <div className="flex items-center justify-between mb-2">
+                                  <span className="text-xs font-medium text-muted-foreground">Condition #{index + 1}</span>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => {
+                                      setMedicalHistory(prev => ({
+                                        ...prev,
+                                        diagnoses: prev.diagnoses.filter((_, i) => i !== index),
+                                      }));
+                                    }}
+                                    className="h-6 w-6 p-0"
+                                  >
+                                    <X className="h-3 w-3" />
+                                  </Button>
+                                </div>
+                                <div className="grid grid-cols-2 gap-2">
+                                  <div className="space-y-1">
+                                    <Label className="text-xs">ICD-10 Code</Label>
+                                    <Input
+                                      value={diagnosis.code || ''}
+                                      onChange={(e) => {
+                                        const updated = [...medicalHistory.diagnoses];
+                                        updated[index].code = e.target.value;
+                                        setMedicalHistory(prev => ({ ...prev, diagnoses: updated }));
+                                      }}
+                                      placeholder="e.g., I10"
+                                      className="h-8 text-xs"
+                                    />
+                                  </div>
+                                  <div className="space-y-1">
+                                    <Label className="text-xs">Status</Label>
+                                    <Select
+                                      value={diagnosis.status}
+                                      onValueChange={(value) => {
+                                        const updated = [...medicalHistory.diagnoses];
+                                        updated[index].status = value;
+                                        setMedicalHistory(prev => ({ ...prev, diagnoses: updated }));
+                                      }}
+                                    >
+                                      <SelectTrigger className="h-8 text-xs">
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="Active">Active</SelectItem>
+                                        <SelectItem value="Resolved">Resolved</SelectItem>
+                                        <SelectItem value="Controlled">Controlled</SelectItem>
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                </div>
+                                <div className="space-y-1">
+                                  <Label className="text-xs">Condition Name</Label>
+                                  <Input
+                                    value={diagnosis.name}
+                                    onChange={(e) => {
+                                      const updated = [...medicalHistory.diagnoses];
+                                      updated[index].name = e.target.value;
+                                      setMedicalHistory(prev => ({ ...prev, diagnoses: updated }));
+                                    }}
+                                    placeholder="e.g., Essential Hypertension"
+                                    className="h-8 text-xs"
+                                  />
+                                </div>
+                                <div className="space-y-1">
+                                  <Label className="text-xs">Diagnosed Date</Label>
+                                  <Input
+                                    type="date"
+                                    value={diagnosis.diagnosedDate || ''}
+                                    onChange={(e) => {
+                                      const updated = [...medicalHistory.diagnoses];
+                                      updated[index].diagnosedDate = e.target.value;
+                                      setMedicalHistory(prev => ({ ...prev, diagnoses: updated }));
+                                    }}
+                                    className="h-8 text-xs"
+                                  />
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      <Separator />
+
+                      {/* Surgical History */}
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-sm font-medium">Surgical History</Label>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              setMedicalHistory(prev => ({
+                                ...prev,
+                                surgicalHistory: [...prev.surgicalHistory, { procedure: '', date: '', hospital: '' }],
+                              }));
+                            }}
+                          >
+                            <Plus className="h-3 w-3 mr-1" />
+                            Add Surgery
+                          </Button>
+                        </div>
+                        {medicalHistory.surgicalHistory.length === 0 ? (
+                          <p className="text-xs text-muted-foreground">No surgical history recorded</p>
+                        ) : (
+                          <div className="space-y-2">
+                            {medicalHistory.surgicalHistory.map((surgery, index) => (
+                              <div key={index} className="p-3 border rounded-lg space-y-2">
+                                <div className="flex items-center justify-between mb-2">
+                                  <span className="text-xs font-medium text-muted-foreground">Surgery #{index + 1}</span>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => {
+                                      setMedicalHistory(prev => ({
+                                        ...prev,
+                                        surgicalHistory: prev.surgicalHistory.filter((_, i) => i !== index),
+                                      }));
+                                    }}
+                                    className="h-6 w-6 p-0"
+                                  >
+                                    <X className="h-3 w-3" />
+                                  </Button>
+                                </div>
+                                <div className="grid grid-cols-3 gap-2">
+                                  <div className="space-y-1">
+                                    <Label className="text-xs">Procedure</Label>
+                                    <Input
+                                      value={surgery.procedure}
+                                      onChange={(e) => {
+                                        const updated = [...medicalHistory.surgicalHistory];
+                                        updated[index].procedure = e.target.value;
+                                        setMedicalHistory(prev => ({ ...prev, surgicalHistory: updated }));
+                                      }}
+                                      placeholder="e.g., Appendectomy"
+                                      className="h-8 text-xs"
+                                    />
+                                  </div>
+                                  <div className="space-y-1">
+                                    <Label className="text-xs">Date</Label>
+                                    <Input
+                                      type="date"
+                                      value={surgery.date}
+                                      onChange={(e) => {
+                                        const updated = [...medicalHistory.surgicalHistory];
+                                        updated[index].date = e.target.value;
+                                        setMedicalHistory(prev => ({ ...prev, surgicalHistory: updated }));
+                                      }}
+                                      className="h-8 text-xs"
+                                    />
+                                  </div>
+                                  <div className="space-y-1">
+                                    <Label className="text-xs">Hospital</Label>
+                                    <Input
+                                      value={surgery.hospital}
+                                      onChange={(e) => {
+                                        const updated = [...medicalHistory.surgicalHistory];
+                                        updated[index].hospital = e.target.value;
+                                        setMedicalHistory(prev => ({ ...prev, surgicalHistory: updated }));
+                                      }}
+                                      placeholder="Hospital name"
+                                      className="h-8 text-xs"
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Family History */}
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-sm font-medium">Family History</Label>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              setMedicalHistory(prev => ({
+                                ...prev,
+                                familyHistory: [...prev.familyHistory, { relation: '', condition: '' }],
+                              }));
+                            }}
+                          >
+                            <Plus className="h-3 w-3 mr-1" />
+                            Add Family Member
+                          </Button>
+                        </div>
+                        {medicalHistory.familyHistory.length === 0 ? (
+                          <p className="text-xs text-muted-foreground">No family history recorded</p>
+                        ) : (
+                          <div className="space-y-2">
+                            {medicalHistory.familyHistory.map((family, index) => (
+                              <div key={index} className="p-3 border rounded-lg space-y-2">
+                                <div className="flex items-center justify-between mb-2">
+                                  <span className="text-xs font-medium text-muted-foreground">Family Member #{index + 1}</span>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => {
+                                      setMedicalHistory(prev => ({
+                                        ...prev,
+                                        familyHistory: prev.familyHistory.filter((_, i) => i !== index),
+                                      }));
+                                    }}
+                                    className="h-6 w-6 p-0"
+                                  >
+                                    <X className="h-3 w-3" />
+                                  </Button>
+                                </div>
+                                <div className="grid grid-cols-2 gap-2">
+                                  <div className="space-y-1">
+                                    <Label className="text-xs">Relation</Label>
+                                    <Select
+                                      value={family.relation}
+                                      onValueChange={(value) => {
+                                        const updated = [...medicalHistory.familyHistory];
+                                        updated[index].relation = value;
+                                        setMedicalHistory(prev => ({ ...prev, familyHistory: updated }));
+                                      }}
+                                    >
+                                      <SelectTrigger className="h-8 text-xs">
+                                        <SelectValue placeholder="Select relation" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="Father">Father</SelectItem>
+                                        <SelectItem value="Mother">Mother</SelectItem>
+                                        <SelectItem value="Sibling">Sibling</SelectItem>
+                                        <SelectItem value="Grandfather">Grandfather</SelectItem>
+                                        <SelectItem value="Grandmother">Grandmother</SelectItem>
+                                        <SelectItem value="Uncle">Uncle</SelectItem>
+                                        <SelectItem value="Aunt">Aunt</SelectItem>
+                                        <SelectItem value="Other">Other</SelectItem>
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                  <div className="space-y-1">
+                                    <Label className="text-xs">Condition</Label>
+                                    <Input
+                                      value={family.condition}
+                                      onChange={(e) => {
+                                        const updated = [...medicalHistory.familyHistory];
+                                        updated[index].condition = e.target.value;
+                                        setMedicalHistory(prev => ({ ...prev, familyHistory: updated }));
+                                      }}
+                                      placeholder="e.g., Hypertension, Type 2 Diabetes"
+                                      className="h-8 text-xs"
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Social History */}
+                      <div className="space-y-3">
+                        <Label className="text-sm font-medium">Social History</Label>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-1">
+                            <Label className="text-xs">Smoking</Label>
+                            <Select
+                              value={medicalHistory.socialHistory.smoking}
+                              onValueChange={(value) => {
+                                setMedicalHistory(prev => ({
+                                  ...prev,
+                                  socialHistory: { ...prev.socialHistory, smoking: value },
+                                }));
+                              }}
+                            >
+                              <SelectTrigger className="h-8 text-xs">
+                                <SelectValue placeholder="Select" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="Never">Never</SelectItem>
+                                <SelectItem value="Former">Former</SelectItem>
+                                <SelectItem value="Current">Current</SelectItem>
+                                <SelectItem value="Occasional">Occasional</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs">Alcohol</Label>
+                            <Select
+                              value={medicalHistory.socialHistory.alcohol}
+                              onValueChange={(value) => {
+                                setMedicalHistory(prev => ({
+                                  ...prev,
+                                  socialHistory: { ...prev.socialHistory, alcohol: value },
+                                }));
+                              }}
+                            >
+                              <SelectTrigger className="h-8 text-xs">
+                                <SelectValue placeholder="Select" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="Never">Never</SelectItem>
+                                <SelectItem value="Occasional">Occasional (social)</SelectItem>
+                                <SelectItem value="Regular">Regular</SelectItem>
+                                <SelectItem value="Heavy">Heavy</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs">Exercise</Label>
+                            <Input
+                              value={medicalHistory.socialHistory.exercise}
+                              onChange={(e) => {
+                                setMedicalHistory(prev => ({
+                                  ...prev,
+                                  socialHistory: { ...prev.socialHistory, exercise: e.target.value },
+                                }));
+                              }}
+                              placeholder="e.g., 2-3 times per week"
+                              className="h-8 text-xs"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs">Occupation</Label>
+                            <Input
+                              value={medicalHistory.socialHistory.occupation}
+                              onChange={(e) => {
+                                setMedicalHistory(prev => ({
+                                  ...prev,
+                                  socialHistory: { ...prev.socialHistory, occupation: e.target.value },
+                                }));
+                              }}
+                              placeholder="e.g., Senior Engineer - NPA"
+                              className="h-8 text-xs"
+                            />
+                          </div>
                         </div>
                       </div>
                     </div>

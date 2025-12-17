@@ -49,6 +49,13 @@ class RadiologyOrderSerializer(serializers.ModelSerializer):
             }
         return None
     
+    def validate_clinic(self, value):
+        """Normalize clinic name before validation."""
+        if value:
+            from common.clinic_utils import normalize_clinic_name
+            return normalize_clinic_name(value)
+        return value
+    
     class Meta:
         model = RadiologyOrder
         fields = '__all__'

@@ -7,6 +7,7 @@ import { visitService } from './visit-service';
 import { labService } from './lab-service';
 import { pharmacyService } from './pharmacy-service';
 import { radiologyService } from './radiology-service';
+import { normalizeClinicName } from '../utils/clinic-utils';
 
 export interface AnalyticsStats {
   totalPatients: number;
@@ -204,9 +205,11 @@ class AnalyticsService {
     const visits = await visitService.getVisits({ page: 1 });
     const clinicCounts: Record<string, number> = {};
     
+    // Use standardized normalization utility
     visits.results.forEach((visit: any) => {
-      const clinic = visit.clinic || visit.location || 'General';
-      clinicCounts[clinic] = (clinicCounts[clinic] || 0) + 1;
+      const rawClinic = visit.clinic || visit.location || 'General';
+      const normalizedClinic = normalizeClinicName(rawClinic);
+      clinicCounts[normalizedClinic] = (clinicCounts[normalizedClinic] || 0) + 1;
     });
     
     const colors = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4'];

@@ -24,6 +24,8 @@ import { patientService, consultationService } from '@/lib/services';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { useCurrentUser } from '@/hooks/use-current-user';
+import { CLINICS } from '@/lib/constants/clinics';
+import { clinicMatches } from '@/lib/utils/clinic-utils';
 
 // Types
 interface ConsultationRecord {
@@ -187,6 +189,7 @@ export default function ConsultationHistoryPage() {
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [totalCount, setTotalCount] = useState(0);
   
   // Modal states
   const [selectedConsultation, setSelectedConsultation] = useState<ConsultationRecord | null>(null);
@@ -208,8 +211,13 @@ export default function ConsultationHistoryPage() {
       try {
         setLoading(true);
         
+        // Use itemsPerPage for server-side pagination, or load more if filters are active
+        const hasActiveFilters = searchQuery || statusFilter !== 'all' || clinicFilter !== 'all' || genderFilter !== 'all';
+        const pageSize = hasActiveFilters ? 1000 : itemsPerPage;
+        
         // Fetch consultation sessions from API
-        const sessionsResult = await apiFetch<{ results: any[] }>('/consultation/sessions/?page_size=1000');
+        const sessionsResult = await apiFetch<{ results: any[]; count: number }>(`/consultation/sessions/?page=${hasActiveFilters ? 1 : currentPage}&page_size=${pageSize}`);
+        setTotalCount(sessionsResult.count || sessionsResult.results.length);
         const sessions = sessionsResult.results || [];
         
         // Transform sessions to consultation records
@@ -381,7 +389,7 @@ export default function ConsultationHistoryPage() {
     };
     
     loadConsultations();
-  }, []);
+  }, [currentPage, itemsPerPage]);
 
   const filteredConsultations = useMemo(() => {
     const currentUserId = currentUser?.id ? String(currentUser.id) : '';
@@ -408,22 +416,19 @@ export default function ConsultationHistoryPage() {
         }
       }
       
-      const matchesClinic = clinicFilter === "all" || c.clinic === clinicFilter;
+      const matchesClinic = clinicFilter === "all" || clinicMatches(c.clinic, clinicFilter);
       const matchesGender = genderFilter === 'all' || !c.patientGender || c.patientGender.toLowerCase() === genderFilter.toLowerCase();
       return matchesSearch && matchesScope && matchesStatus && matchesClinic && matchesGender;
     });
   }, [consultations, searchQuery, scopeFilter, statusFilter, dateFilter, clinicFilter, genderFilter, currentUser]);
 
-  // Paginated consultations
-  const paginatedConsultations = useMemo(() => {
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    return filteredConsultations.slice(startIndex, startIndex + itemsPerPage);
-  }, [filteredConsultations, currentPage, itemsPerPage]);
+  // Use filtered consultations directly (server-side pagination when no client-side filters)
+  const paginatedConsultations = filteredConsultations;
 
   // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, scopeFilter, statusFilter, dateFilter, clinicFilter, genderFilter]);
+  }, [searchQuery, scopeFilter, statusFilter, dateFilter, clinicFilter, genderFilter, itemsPerPage]);
 
   // Stats
   const stats = useMemo(() => {
@@ -679,11 +684,9 @@ export default function ConsultationHistoryPage() {
                   <SelectTrigger className="w-[140px]"><SelectValue placeholder="Clinic" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Clinics</SelectItem>
-                    <SelectItem value="General">General</SelectItem>
-                    <SelectItem value="Eye">Eye Clinic</SelectItem>
-                    <SelectItem value="Physiotherapy">Physiotherapy</SelectItem>
-                    <SelectItem value="Sickle Cell">Sickle Cell</SelectItem>
-                    <SelectItem value="Cardiology">Cardiology</SelectItem>
+                    {CLINICS.map(clinic => (
+                      <SelectItem key={clinic} value={clinic}>{clinic}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
                 <Select value={genderFilter} onValueChange={setGenderFilter}>
@@ -809,7 +812,7 @@ export default function ConsultationHistoryPage() {
 
         {/* View Modal with Tabs */}
         <Dialog open={showViewModal} onOpenChange={setShowViewModal}>
-          <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
+          <DialogContent className="w-[95vw] sm:max-w-[1000px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2"><Stethoscope className="h-5 w-5 text-emerald-500" />Consultation Details</DialogTitle>
               <DialogDescription>{selectedConsultation?.id} • {selectedConsultation?.patient} • {selectedConsultation?.date}</DialogDescription>
@@ -957,7 +960,7 @@ export default function ConsultationHistoryPage() {
 
         {/* Edit Modal */}
         <Dialog open={showEditModal} onOpenChange={setShowEditModal}>
-          <DialogContent className="sm:max-w-[600px]">
+          <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2"><Edit className="h-5 w-5 text-emerald-500" />Edit Consultation</DialogTitle>
               <DialogDescription>Update consultation details for {selectedConsultation?.patient}</DialogDescription>

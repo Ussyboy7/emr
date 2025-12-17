@@ -379,7 +379,7 @@ export default function HelpPage() {
 
         {/* Submit Ticket Dialog */}
         <Dialog open={isTicketDialogOpen} onOpenChange={setIsTicketDialogOpen}>
-          <DialogContent className="sm:max-w-[500px]">
+          <DialogContent className="w-[95vw] sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2"><Send className="h-5 w-5 text-cyan-500" />Submit Support Ticket</DialogTitle>
               <DialogDescription>Describe your issue and our team will get back to you</DialogDescription>

@@ -115,6 +115,7 @@ class Patient(models.Model):
     # Medical Information
     blood_group = models.CharField(max_length=5, choices=BLOOD_GROUP_CHOICES, blank=True)
     genotype = models.CharField(max_length=5, choices=GENOTYPE_CHOICES, blank=True)
+    allergies = models.TextField(blank=True, help_text="Known allergies (comma-separated or newline-separated)")
     
     # Next of Kin
     nok_surname = models.CharField(max_length=100, blank=True)
@@ -150,7 +151,25 @@ class Patient(models.Model):
     
     def get_full_name(self):
         """Return the patient's full name."""
-        parts = [self.title.title() if self.title else '', self.first_name, self.middle_name, self.surname]
+        # Capitalize title properly (handle common abbreviations)
+        title_str = ''
+        if self.title:
+            title_lower = self.title.lower().strip()
+            # Map common title abbreviations to proper capitalized form
+            title_map = {
+                'mr': 'Mr',
+                'mrs': 'Mrs',
+                'ms': 'Ms',
+                'dr': 'Dr',
+                'chief': 'Chief',
+                'engr': 'Engr',
+                'prof': 'Prof',
+                'alhaji': 'Alhaji',
+                'hajia': 'Hajia',
+            }
+            title_str = title_map.get(title_lower, self.title.title())
+        
+        parts = [title_str, self.first_name, self.middle_name, self.surname]
         return ' '.join(filter(None, parts))
     
     @property
@@ -280,6 +299,7 @@ class Visit(models.Model):
     date = models.DateField()
     time = models.TimeField()
     clinic = models.CharField(max_length=100, blank=True)
+    location = models.CharField(max_length=100, blank=True, null=True)
     doctor = models.ForeignKey(
         'accounts.User',
         on_delete=models.SET_NULL,
@@ -325,7 +345,12 @@ class Visit(models.Model):
             self.visit_id = f"VIS-{date_str}-{sequence}"
     
     def save(self, *args, **kwargs):
-        """Override save to auto-generate visit_id for new visits."""
+        """Override save to auto-generate visit_id for new visits and normalize clinic names."""
+        # Normalize clinic name before saving
+        if self.clinic:
+            from common.clinic_utils import normalize_clinic_name
+            self.clinic = normalize_clinic_name(self.clinic)
+        
         if not self.pk:
             self.generate_visit_id()
             
@@ -396,9 +421,18 @@ class VitalReading(models.Model):
     def save(self, *args, **kwargs):
         """Calculate BMI if weight and height are provided."""
         if self.weight and self.height:
+            # Validate reasonable ranges (height in cm: 30-300, weight in kg: 1-500)
+            if self.height < 30 or self.height > 300:
+                raise ValueError(f"Height must be between 30 and 300 cm. Got: {self.height} cm")
+            if self.weight < 1 or self.weight > 500:
+                raise ValueError(f"Weight must be between 1 and 500 kg. Got: {self.weight} kg")
+            
             height_in_meters = self.height / 100
             if height_in_meters > 0:
-                self.bmi = round(self.weight / (height_in_meters ** 2), 2)
+                calculated_bmi = round(self.weight / (height_in_meters ** 2), 2)
+                # Cap BMI at 999.99 to fit within max_digits=5, decimal_places=2
+                # This handles edge cases where calculation exceeds field capacity
+                self.bmi = min(calculated_bmi, 999.99)
         super().save(*args, **kwargs)
 
 

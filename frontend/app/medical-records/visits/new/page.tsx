@@ -23,9 +23,11 @@ import {
   MapPin, FileText, Users, CheckCircle2, Clock, Loader2, CheckCircle
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { CLINICS } from '@/lib/constants/clinics';
+import { normalizeClinicName } from '@/lib/utils/clinic-utils';
 
-// NPA Clinics
-const clinics = ["General", "Physiotherapy", "Eye", "Sickle Cell", "Diamond"];
+// NPA Clinics - standardized list
+const clinics = CLINICS;
 
 // NPA Locations
 const locations = [
@@ -83,7 +85,7 @@ function NewVisitPageContent() {
           age: p.age || 0,
           gender: p.gender === 'male' ? 'Male' : 'Female',
           bloodGroup: p.blood_group || '',
-          allergies: [], // TODO: Load from patient allergies if available
+          allergies: p.allergies ? p.allergies.split(/[,\n]/).map(a => a.trim()).filter(a => a) : [],
         })));
 
         // If patientIdParam is provided, select that patient
@@ -155,7 +157,7 @@ function NewVisitPageContent() {
       const visitData = {
         patient: selectedPatient.numericId || selectedPatient.id,
         visit_type: formData.visitType,
-        clinic: formData.clinic,
+        clinic: normalizeClinicName(formData.clinic),
         location: formData.location || '',
         date: formData.visitDate,
         time: formData.visitTime,
@@ -381,7 +383,7 @@ function NewVisitPageContent() {
                       </SelectTrigger>
                       <SelectContent>
                         {clinics.map(clinic => (
-                          <SelectItem key={clinic} value={clinic.toLowerCase()}>{clinic}</SelectItem>
+                          <SelectItem key={clinic} value={clinic}>{clinic}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
@@ -549,7 +551,7 @@ function NewVisitPageContent() {
 
         {/* Success Dialog */}
         <Dialog open={isSuccessDialogOpen} onOpenChange={setIsSuccessDialogOpen}>
-          <DialogContent className="sm:max-w-[500px]">
+          <DialogContent className="w-[95vw] sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <CheckCircle className="h-5 w-5 text-green-500" />

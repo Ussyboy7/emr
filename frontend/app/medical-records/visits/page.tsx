@@ -22,9 +22,11 @@ import {
   Edit, Send, AlertTriangle, Loader2, Eye
 } from 'lucide-react';
 import { StandardPagination } from '@/components/StandardPagination';
+import { getAllClinicsWithAll, CLINICS } from '@/lib/constants/clinics';
+import { clinicMatches, normalizeClinicName } from '@/lib/utils/clinic-utils';
 
-// NPA Clinics
-const clinics = ["All Clinics", "General", "Physiotherapy", "Eye", "Sickle Cell", "Diamond"];
+// NPA Clinics - standardized list
+const clinics = getAllClinicsWithAll();
 
 // NPA Locations
 const locations = [
@@ -54,16 +56,18 @@ export default function VisitsPage() {
   
   // Modal states
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [isForwardModalOpen, setIsForwardModalOpen] = useState(false);
   type TransformedVisit = ReturnType<typeof transformVisit>;
   const [selectedVisit, setSelectedVisit] = useState<TransformedVisit | null>(null);
   
   // Edit form state
-  const [editForm, setEditForm] = useState({ type: '', clinic: '', location: '', notes: '', chiefComplaint: '' });
+  const [editForm, setEditForm] = useState({ type: '', clinic: '', location: '', notes: '' });
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [totalCount, setTotalCount] = useState(0);
 
   // Helper function to transform visit from API to frontend format
   const transformVisit = (visit: Visit) => ({
@@ -83,7 +87,7 @@ export default function VisitsPage() {
     department: visit.clinic || 'General',
     notes: visit.clinical_notes || '',
     chiefComplaint: visit.chief_complaint || '',
-    location: (visit as any).location || '', // Location may be available from backend
+    location: visit.location || '',
   });
 
   // Load visits from API
@@ -93,7 +97,15 @@ export default function VisitsPage() {
         setLoading(true);
         setError(null);
 
-        const result = await visitService.getVisits({ page_size: 500 });
+        // Use itemsPerPage for server-side pagination, or load more if filters are active
+        const hasActiveFilters = searchQuery || statusFilter !== 'all' || typeFilter !== 'all' || clinicFilter !== 'all' || dateFilter !== 'all';
+        const pageSize = hasActiveFilters ? 1000 : itemsPerPage;
+        
+        const result = await visitService.getVisits({ 
+          page: hasActiveFilters ? 1 : currentPage,
+          page_size: pageSize 
+        });
+        setTotalCount(result.count || result.results.length);
         
         // Transform visits to match frontend structure
         const transformedVisits = result.results.map(transformVisit);
@@ -111,7 +123,7 @@ export default function VisitsPage() {
     };
 
     loadVisits();
-  }, []);
+  }, [currentPage, itemsPerPage, searchQuery, statusFilter, typeFilter, clinicFilter, dateFilter]);
 
   const filteredVisits = useMemo(() => visits.filter(visit => {
     const matchesSearch = visit.patient.toLowerCase().includes(searchQuery.toLowerCase()) || 
@@ -119,7 +131,7 @@ export default function VisitsPage() {
       visit.patientId.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesStatus = statusFilter === 'all' || visit.status.toLowerCase().replace(/ /g, '-') === statusFilter;
     const matchesType = typeFilter === 'all' || visit.type === typeFilter; // visit.type is already lowercase from backend
-    const matchesClinic = clinicFilter === 'all' || visit.clinic.toLowerCase() === clinicFilter.toLowerCase();
+    const matchesClinic = clinicFilter === 'all' || clinicMatches(visit.clinic, clinicFilter);
     
     // Date filter
     if (dateFilter !== 'all') {
@@ -143,11 +155,8 @@ export default function VisitsPage() {
     return matchesSearch && matchesStatus && matchesType && matchesClinic;
   }), [visits, searchQuery, statusFilter, typeFilter, clinicFilter, dateFilter]);
 
-  // Paginated visits
-  const paginatedVisits = useMemo(() => {
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    return filteredVisits.slice(startIndex, startIndex + itemsPerPage);
-  }, [filteredVisits, currentPage, itemsPerPage]);
+  // Use filtered visits directly (server-side pagination when no client-side filters)
+  const paginatedVisits = filteredVisits;
 
   // Reset to page 1 when filters change
   useEffect(() => {
@@ -173,7 +182,6 @@ export default function VisitsPage() {
       clinic: visit.clinic,
       location: visit.location,
       notes: visit.notes,
-      chiefComplaint: visit.chiefComplaint || '',
     });
     setIsEditModalOpen(true);
   };
@@ -203,10 +211,9 @@ export default function VisitsPage() {
       
       const updateData: any = {
         visit_type: editForm.type || undefined,
-        clinic: editForm.clinic || undefined,
+        clinic: editForm.clinic ? normalizeClinicName(editForm.clinic) : undefined,
         location: editForm.location || undefined,
         clinical_notes: editForm.notes || undefined,
-        chief_complaint: editForm.chiefComplaint || undefined,
       };
 
       await visitService.updateVisit(visitId, updateData);
@@ -400,7 +407,7 @@ export default function VisitsPage() {
                 <Select value={clinicFilter} onValueChange={setClinicFilter}>
                   <SelectTrigger className="w-[140px]"><SelectValue placeholder="Clinic" /></SelectTrigger>
                   <SelectContent>
-                    {clinics.map(c => <SelectItem key={c} value={c === 'All Clinics' ? 'all' : c.toLowerCase()}>{c}</SelectItem>)}
+                    {clinics.map(c => <SelectItem key={c} value={c === 'All Clinics' ? 'all' : c}>{c}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
@@ -455,10 +462,22 @@ export default function VisitsPage() {
                     <p className="text-xs text-muted-foreground mt-0.5 truncate">
                       {visit.patientId} • {visit.id} • {visit.clinic} • {visit.location} • {visit.date} {visit.time}
                     </p>
+                    {/* Row 3: Notes (if available) */}
+                    {visit.notes && (
+                      <p className="text-xs text-muted-foreground mt-1 line-clamp-1">
+                        <span className="font-medium">Notes:</span> {visit.notes}
+                      </p>
+                    )}
                   </div>
                   
                   {/* Actions */}
                   <div className="flex items-center gap-1 flex-shrink-0">
+                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => {
+                      setSelectedVisit(visit);
+                      setIsViewModalOpen(true);
+                    }} title="View Visit">
+                      <Eye className="h-3.5 w-3.5" />
+                    </Button>
                     {visit.status === 'Scheduled' && (
                       <>
                         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleEditVisit(visit)} title="Edit Visit">
@@ -499,10 +518,15 @@ export default function VisitsPage() {
             {filteredVisits.length > 0 && (
               <StandardPagination
                 currentPage={currentPage}
-                totalItems={filteredVisits.length}
+                totalItems={searchQuery || statusFilter !== 'all' || typeFilter !== 'all' || clinicFilter !== 'all' || dateFilter !== 'all'
+                  ? filteredVisits.length 
+                  : totalCount}
                 itemsPerPage={itemsPerPage}
                 onPageChange={setCurrentPage}
-                onItemsPerPageChange={setItemsPerPage}
+                onItemsPerPageChange={(newSize) => {
+                  setItemsPerPage(newSize);
+                  setCurrentPage(1);
+                }}
                 itemName="visits"
               />
             )}
@@ -511,7 +535,7 @@ export default function VisitsPage() {
 
         {/* Edit Visit Modal */}
         <Dialog open={isEditModalOpen} onOpenChange={setIsEditModalOpen}>
-          <DialogContent className="sm:max-w-[500px]">
+          <DialogContent className="w-[95vw] sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Edit className="h-5 w-5 text-blue-500" />
@@ -540,7 +564,7 @@ export default function VisitsPage() {
                   <Select value={editForm.clinic} onValueChange={(v) => setEditForm(prev => ({ ...prev, clinic: v }))}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      {clinics.slice(1).map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                      {CLINICS.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
@@ -555,20 +579,11 @@ export default function VisitsPage() {
                 </div>
               </div>
               <div className="space-y-2">
-                <Label>Chief Complaint</Label>
-                <Textarea 
-                  value={editForm.chiefComplaint} 
-                  onChange={(e) => setEditForm(prev => ({ ...prev, chiefComplaint: e.target.value }))}
-                  placeholder="Primary reason for visit"
-                  rows={2}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Clinical Notes</Label>
+                <Label>Notes / Special Instructions</Label>
                 <Textarea 
                   value={editForm.notes} 
                   onChange={(e) => setEditForm(prev => ({ ...prev, notes: e.target.value }))}
-                  placeholder="Additional clinical notes or observations"
+                  placeholder="Any special instructions, referral notes, or additional information..."
                   rows={3}
                 />
               </div>
@@ -580,11 +595,77 @@ export default function VisitsPage() {
           </DialogContent>
         </Dialog>
 
-        {/* Visit Detail Modal */}
+        {/* View Visit Modal */}
+        <Dialog open={isViewModalOpen} onOpenChange={setIsViewModalOpen}>
+          <DialogContent className="w-[95vw] sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Eye className="h-5 w-5 text-blue-500" />
+                Visit Details
+              </DialogTitle>
+              <DialogDescription>
+                {selectedVisit?.patient} - {selectedVisit?.id}
+              </DialogDescription>
+            </DialogHeader>
+            {selectedVisit && (
+              <div className="grid gap-4 py-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label className="text-muted-foreground">Visit Type</Label>
+                    <p className="font-medium">{getVisitTypeLabel(selectedVisit.type)}</p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-muted-foreground">Status</Label>
+                    <p className="font-medium">{selectedVisit.status}</p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label className="text-muted-foreground">Clinic</Label>
+                    <p className="font-medium">{selectedVisit.clinic || 'Not specified'}</p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-muted-foreground">Location</Label>
+                    <p className="font-medium">{selectedVisit.location || 'Not specified'}</p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label className="text-muted-foreground">Date</Label>
+                    <p className="font-medium">{selectedVisit.date}</p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-muted-foreground">Time</Label>
+                    <p className="font-medium">{selectedVisit.time}</p>
+                  </div>
+                </div>
+                {selectedVisit.notes && (
+                  <div className="space-y-2">
+                    <Label className="text-muted-foreground">Notes / Special Instructions</Label>
+                    <div className="p-3 rounded-lg bg-muted/50 border">
+                      <p className="text-sm whitespace-pre-wrap">{selectedVisit.notes}</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsViewModalOpen(false)}>Close</Button>
+              {selectedVisit?.status === 'Scheduled' && (
+                <Button onClick={() => {
+                  setIsViewModalOpen(false);
+                  handleEditVisit(selectedVisit);
+                }}>
+                  <Edit className="h-4 w-4 mr-2" />Edit
+                </Button>
+              )}
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* Send to Nursing Confirmation Modal */}
         <Dialog open={isForwardModalOpen} onOpenChange={setIsForwardModalOpen}>
-          <DialogContent className="sm:max-w-[400px]">
+          <DialogContent className="w-[95vw] sm:max-w-[400px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Send className="h-5 w-5 text-emerald-500" />

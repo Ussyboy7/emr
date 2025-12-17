@@ -17,7 +17,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Checkbox } from "@/components/ui/checkbox";
 import { Activity, AlertTriangle, ArrowLeft, CheckCircle, Clock, FileText, History, Loader2, MapPin, Pill, Plus, Save, Stethoscope, Syringe, TestTube, User, Users, X, Send, ScanLine, TrendingUp, TrendingDown, Minus, Building2, UserPlus, Calendar, Phone, Mail, Heart, Download, Eye, Printer, FileDown, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, ClipboardList, RefreshCw, Thermometer, CheckSquare, Square, Edit } from "lucide-react";
 import { toast } from "sonner";
-import { roomService, patientService, pharmacyService, labService, radiologyService, referralService, consultationService, type ConsultationSession } from '@/lib/services';
+import { roomService, patientService, pharmacyService, labService, radiologyService, referralService, consultationService, appointmentService, type ConsultationSession } from '@/lib/services';
 import { apiFetch } from '@/lib/api-client';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
@@ -1079,7 +1079,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
               gender: patient.gender || '',
               mrn: patient.patient_id || '',
               personalNumber: patient.personal_number || '',
-              allergies: [], // TODO: Load from patient allergies
+              allergies: patient.allergies ? patient.allergies.split(/[,\n]/).map(a => a.trim()).filter(a => a) : [],
               waitTime: waitTime > 0 ? waitTime : 0,
               vitalsCompleted: !!vitalsData,
               priority: getPriority(typeof item.priority === 'number' ? item.priority : parseInt(item.priority) || 0), // Default to 0 (Emergency) to match backend default
@@ -1189,7 +1189,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         gender: patient.gender || '',
         mrn: patient.patient_id || '',
         personalNumber: (patient as any).personal_number,
-        allergies: (patient as any).allergies || [],
+        allergies: patient.allergies ? patient.allergies.split(/[,\n]/).map(a => a.trim()).filter(a => a) : [],
         waitTime: 0,
         vitalsCompleted: false,
         priority: 'Medium' as const,
@@ -1732,8 +1732,28 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           ? `${sessionUpdateData.notes}${followUpNote}`
           : followUpNote.trim();
         
-        // TODO: Create follow-up appointment in appointments module when available
-        // For now, the follow-up information is saved in the session notes
+        // Create follow-up appointment
+        if (currentPatient && sessionId) {
+          try {
+            const patientId = typeof currentPatient.id === 'string' ? parseInt(currentPatient.id, 10) : currentPatient.id;
+            const doctorId = undefined; // Doctor ID can be set later or obtained from room/context
+            await appointmentService.createAppointment({
+              patient: patientId,
+              doctor: doctorId,
+              clinic: undefined, // Clinic can be obtained from room context if needed
+              room: typeof room?.id === 'number' ? room.id : (typeof roomId === 'string' ? parseInt(roomId, 10) : undefined),
+              appointment_type: 'follow_up',
+              appointment_date: followUpDate,
+              appointment_time: '09:00', // Default time, can be made configurable
+              duration_minutes: 30,
+              reason: followUpReason,
+              notes: `Follow-up from consultation session ${sessionId}. ${sessionUpdateData.notes || ''}`,
+            });
+          } catch (apptError) {
+            console.warn('Failed to create follow-up appointment:', apptError);
+            // Continue - follow-up info is still saved in session notes as fallback
+          }
+        }
       }
 
       // Update session with all medical data

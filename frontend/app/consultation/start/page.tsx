@@ -375,7 +375,7 @@ const StartConsultation = () => {
           age: patient.age || 0,
           gender: patient.gender || '',
           mrn: patient.patient_id || '',
-          allergies: [], // TODO: Load from patient allergies
+          allergies: patient.allergies ? patient.allergies.split(/[,\n]/).map(a => a.trim()).filter(a => a) : [],
           chiefComplaint,
           consultationRoom: selectedRoom,
           waitTime,

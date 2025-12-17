@@ -338,7 +338,7 @@ export default function LoginPage() {
 
       {/* Forgot Password Dialog */}
       <Dialog open={showForgotPassword} onOpenChange={setShowForgotPassword}>
-        <DialogContent className="bg-slate-900 border-slate-800 text-white">
+        <DialogContent className="w-[95vw] sm:max-w-[500px] max-h-[90vh] overflow-y-auto bg-slate-900 border-slate-800 text-white">
           <DialogHeader>
             <DialogTitle className="text-white">Reset Password</DialogTitle>
             <DialogDescription className="text-slate-400">

@@ -875,7 +875,7 @@ export default function RoomQueuePage() {
 
         {/* Reassign Dialog */}
         <Dialog open={isReassignDialogOpen} onOpenChange={setIsReassignDialogOpen}>
-          <DialogContent className="sm:max-w-[500px]">
+          <DialogContent className="w-[95vw] sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <ArrowLeftRight className="h-5 w-5 text-blue-500" />
@@ -935,7 +935,7 @@ export default function RoomQueuePage() {
 
         {/* Patient Details Dialog */}
         <Dialog open={isPatientDetailsOpen} onOpenChange={setIsPatientDetailsOpen}>
-          <DialogContent className="sm:max-w-[500px]">
+          <DialogContent className="w-[95vw] sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <User className="h-5 w-5 text-emerald-500" />

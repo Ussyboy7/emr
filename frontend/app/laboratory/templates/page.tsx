@@ -230,7 +230,7 @@ export default function TestTemplatesPage() {
         description: formData.description,
         sample_type: formData.specimenType,
         turnaround_time: formData.turnaroundTime,
-        price: formData.price,
+        price: 0, // Price removed from EMR
         normal_range: normalRange,
         is_active: true,
       };
@@ -281,7 +281,7 @@ export default function TestTemplatesPage() {
         description: formData.description,
         sample_type: formData.specimenType,
         turnaround_time: formData.turnaroundTime,
-        price: formData.price,
+        price: 0, // Price removed from EMR
         normal_range: normalRange,
         is_active: selectedTemplate?.status === 'Active' || true,
       };
@@ -569,7 +569,6 @@ export default function TestTemplatesPage() {
                         <span>•</span>
                         <span>TAT: {template.turnaroundTime}</span>
                         <span>•</span>
-                        <span>₦{template.price.toLocaleString()}</span>
                       </div>
                     </div>
                   </div>
@@ -595,7 +594,7 @@ export default function TestTemplatesPage() {
 
         {/* View Dialog */}
         <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
-          <DialogContent className="sm:max-w-[600px]">
+          <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2"><FileText className="h-5 w-5 text-amber-500" />Template Details</DialogTitle>
               <DialogDescription>{selectedTemplate?.name}</DialogDescription>
@@ -611,7 +610,6 @@ export default function TestTemplatesPage() {
                 <div className="grid grid-cols-2 gap-4 p-4 rounded-lg bg-muted/50 text-sm">
                   <div><span className="text-muted-foreground">Specimen:</span> <span className="font-medium">{selectedTemplate.specimenType}</span></div>
                   <div><span className="text-muted-foreground">TAT:</span> <span className="font-medium">{selectedTemplate.turnaroundTime}</span></div>
-                  <div><span className="text-muted-foreground">Price:</span> <span className="font-medium">₦{selectedTemplate.price.toLocaleString()}</span></div>
                   <div><span className="text-muted-foreground">Version:</span> <span className="font-medium">v{selectedTemplate.version}</span></div>
                 </div>
                 <div>
@@ -650,7 +648,7 @@ export default function TestTemplatesPage() {
 
         {/* Create/Edit Dialog */}
         <Dialog open={isCreateDialogOpen || isEditDialogOpen} onOpenChange={(open) => { if (!open) { setIsCreateDialogOpen(false); setIsEditDialogOpen(false); } }}>
-          <DialogContent className="sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className="w-[95vw] sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 {isEditDialogOpen ? <Edit className="h-5 w-5 text-amber-500" /> : <Plus className="h-5 w-5 text-emerald-500" />}
@@ -672,7 +670,6 @@ export default function TestTemplatesPage() {
                 </div>
                 <div className="space-y-2"><Label>Specimen Type</Label><Input value={formData.specimenType} onChange={(e) => setFormData(p => ({ ...p, specimenType: e.target.value }))} placeholder="EDTA Blood" /></div>
                 <div className="space-y-2"><Label>Turnaround Time</Label><Input value={formData.turnaroundTime} onChange={(e) => setFormData(p => ({ ...p, turnaroundTime: e.target.value }))} placeholder="2 hours" /></div>
-                <div className="space-y-2"><Label>Price (₦)</Label><Input type="number" value={formData.price} onChange={(e) => setFormData(p => ({ ...p, price: Number(e.target.value) }))} placeholder="3500" /></div>
               </div>
               <div className="space-y-2"><Label>Description</Label><Textarea value={formData.description} onChange={(e) => setFormData(p => ({ ...p, description: e.target.value }))} placeholder="Test description..." rows={2} /></div>
 

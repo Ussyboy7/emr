@@ -273,7 +273,7 @@ export default function ReportsPage() {
 
         {/* New Report Dialog */}
         <Dialog open={isNewReportOpen} onOpenChange={setIsNewReportOpen}>
-          <DialogContent className="sm:max-w-[600px] max-h-[80vh] overflow-y-auto">
+          <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2"><FileText className="h-5 w-5 text-primary" />Create New Report</DialogTitle>
               <DialogDescription>Generate a new medical report or certificate.</DialogDescription>
@@ -342,7 +342,7 @@ export default function ReportsPage() {
 
         {/* View Report Dialog */}
         <Dialog open={isViewReportOpen} onOpenChange={setIsViewReportOpen}>
-          <DialogContent className="sm:max-w-[500px]">
+          <DialogContent className="w-[95vw] sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Report Details</DialogTitle>
             </DialogHeader>

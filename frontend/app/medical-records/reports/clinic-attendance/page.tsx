@@ -15,6 +15,7 @@ import { toast } from "sonner";
 import { apiFetch } from "@/lib/api-client";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { CLINICS, CLINIC_LABELS } from '@/lib/constants/clinics';
 
 interface MonthlyData {
   sn: number;
@@ -35,13 +36,10 @@ export default function ClinicAttendanceReport() {
   const [summary, setSummary] = useState({ total_employee: 0, total_non_employee: 0, grand_total: 0 });
   const [isLoading, setIsLoading] = useState(true);
 
-  const clinics = [
-    { value: "Diamond", label: "Diamond Club Clinic" },
-    { value: "Sickle Cell", label: "Sickle Cell Clinic" },
-    { value: "Healthron", label: "Healthron Clinic" },
-    { value: "Ophthalmology", label: "Ophthalmology (Eye) Clinic" },
-    { value: "Physiotherapy", label: "Physiotherapy Clinic" }
-  ];
+  const clinics = CLINICS.map(clinic => ({
+    value: clinic,
+    label: CLINIC_LABELS[clinic] || clinic
+  }));
 
   const setThisMonth = () => {
     const now = new Date();

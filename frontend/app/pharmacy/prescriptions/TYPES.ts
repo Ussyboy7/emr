@@ -40,6 +40,7 @@ export interface Prescription {
   waitTime: number;
   clinicalNotes: string;
   specialInstructions: string;
+  visitNotes?: string; // Notes / Special Instructions from visit
 }
 
 export interface DrugInteraction {

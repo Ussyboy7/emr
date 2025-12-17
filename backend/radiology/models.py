@@ -32,6 +32,13 @@ class RadiologyOrder(models.Model):
         db_table = 'radiology_orders'
         ordering = ['-ordered_at']
     
+    def save(self, *args, **kwargs):
+        """Normalize clinic name before saving."""
+        if self.clinic:
+            from common.clinic_utils import normalize_clinic_name
+            self.clinic = normalize_clinic_name(self.clinic)
+        super().save(*args, **kwargs)
+    
     def __str__(self):
         return f"{self.order_id} - {self.patient.get_full_name()}"
 

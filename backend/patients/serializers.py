@@ -10,6 +10,7 @@ class PatientSerializer(serializers.ModelSerializer):
     
     full_name = serializers.SerializerMethodField()
     age = serializers.ReadOnlyField()
+    photo = serializers.SerializerMethodField()
     
     class Meta:
         model = Patient
@@ -20,7 +21,7 @@ class PatientSerializer(serializers.ModelSerializer):
             'nonnpa_type', 'dependent_type', 'principal_staff',
             'email', 'phone', 'state_of_residence', 'residential_address',
             'state_of_origin', 'lga', 'permanent_address',
-            'blood_group', 'genotype',
+            'blood_group', 'genotype', 'allergies',
             'nok_surname', 'nok_first_name', 'nok_middle_name', 'nok_relationship', 'nok_address', 'nok_phone',
             'created_at', 'updated_at', 'is_active',
         ]
@@ -28,6 +29,13 @@ class PatientSerializer(serializers.ModelSerializer):
     
     def get_full_name(self, obj):
         return obj.get_full_name()
+    
+    def get_photo(self, obj):
+        """Return the photo URL if photo exists."""
+        if obj.photo:
+            # Return relative URL - frontend will construct full URL
+            return obj.photo.url
+        return None
 
 
 class PatientListSerializer(serializers.ModelSerializer):
@@ -35,17 +43,25 @@ class PatientListSerializer(serializers.ModelSerializer):
     
     full_name = serializers.SerializerMethodField()
     age = serializers.ReadOnlyField()
+    photo = serializers.SerializerMethodField()
     
     class Meta:
         model = Patient
         fields = [
             'id', 'patient_id', 'category', 'full_name', 'gender', 'age',
-            'phone', 'email', 'blood_group', 'is_active', 'created_at',
+            'phone', 'email', 'blood_group', 'is_active', 'created_at', 'photo',
         ]
         read_only_fields = ['id', 'patient_id', 'created_at', 'age']
     
     def get_full_name(self, obj):
         return obj.get_full_name()
+    
+    def get_photo(self, obj):
+        """Return the photo URL if photo exists."""
+        if obj.photo:
+            # Return relative URL - frontend will construct full URL
+            return obj.photo.url
+        return None
 
 
 class VisitSerializer(serializers.ModelSerializer):
@@ -73,11 +89,18 @@ class VisitSerializer(serializers.ModelSerializer):
             'bp': '', 'pulse': '', 'temp': '', 'respRate': '', 'spo2': '', 'weight': '', 'height': '', 'bmi': ''
         }
     
+    def validate_clinic(self, value):
+        """Normalize clinic name before validation."""
+        if value:
+            from common.clinic_utils import normalize_clinic_name
+            return normalize_clinic_name(value)
+        return value
+    
     class Meta:
         model = Visit
         fields = [
             'id', 'visit_id', 'patient', 'patient_name', 'visit_type', 'status',
-            'date', 'time', 'clinic', 'doctor', 'doctor_name',
+            'date', 'time', 'clinic', 'location', 'doctor', 'doctor_name',
             'chief_complaint', 'clinical_notes', 'vitals',
             'created_at', 'updated_at',
         ]
@@ -100,6 +123,26 @@ class VitalReadingSerializer(serializers.ModelSerializer):
             'notes', 'recorded_at', 'recorded_by', 'recorded_by_name',
         ]
         read_only_fields = ['id', 'bmi', 'recorded_at']
+    
+    def validate_height(self, value):
+        """Validate height is in reasonable range (30-300 cm)."""
+        if value is not None:
+            if value < 30 or value > 300:
+                raise serializers.ValidationError(
+                    f"Height must be between 30 and 300 cm. Got: {value} cm. "
+                    "Please check if height is entered in the correct unit (cm)."
+                )
+        return value
+    
+    def validate_weight(self, value):
+        """Validate weight is in reasonable range (1-500 kg)."""
+        if value is not None:
+            if value < 1 or value > 500:
+                raise serializers.ValidationError(
+                    f"Weight must be between 1 and 500 kg. Got: {value} kg. "
+                    "Please check if weight is entered in the correct unit (kg)."
+                )
+        return value
 
 
 class MedicalHistorySerializer(serializers.ModelSerializer):

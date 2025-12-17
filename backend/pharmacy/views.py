@@ -19,6 +19,83 @@ from .serializers import (
     PrescriptionItemSerializer,
     DispenseSerializer,
 )
+from .pagination import FlexiblePageNumberPagination
+
+
+def check_drug_interactions(medication_ids):
+    """
+    Check for drug interactions between medications.
+    This is a basic implementation - in production, integrate with a drug interaction database/API.
+    """
+    interactions = []
+    
+    if len(medication_ids) < 2:
+        return interactions
+    
+    # Get medication objects
+    medications = Medication.objects.filter(id__in=medication_ids).values_list('id', 'name', 'generic_name')
+    med_dict = {med[0]: {'name': med[1], 'generic': med[2]} for med in medications}
+    
+    # Basic interaction rules (expand this with real drug interaction database)
+    # Example: ACE inhibitors + Potassium supplements = Hyperkalemia risk
+    # Example: Warfarin + Aspirin = Increased bleeding risk
+    # Example: Beta-blockers + Calcium channel blockers = Bradycardia/hypotension risk
+    
+    # Convert to list for easier iteration
+    med_list = list(medication_ids)
+    
+    # Check each pair
+    for i in range(len(med_list)):
+        for j in range(i + 1, len(med_list)):
+            med1_id = med_list[i]
+            med2_id = med_list[j]
+            
+            med1 = med_dict.get(med1_id)
+            med2 = med_dict.get(med2_id)
+            
+            if not med1 or not med2:
+                continue
+            
+            # Basic interaction checking based on categories/generic names
+            med1_name = (med1['generic'] or med1['name']).lower()
+            med2_name = (med2['generic'] or med2['name']).lower()
+            
+            # Example interactions (this should be replaced with proper drug interaction API)
+            interaction = None
+            
+            # Check for known interaction patterns
+            if any(term in med1_name for term in ['warfarin', 'aspirin', 'clopidogrel']) and \
+               any(term in med2_name for term in ['warfarin', 'aspirin', 'clopidogrel', 'ibuprofen']):
+                interaction = {
+                    'drug1': med1['name'],
+                    'drug2': med2['name'],
+                    'severity': 'Major',
+                    'description': 'Increased risk of bleeding when anticoagulants are combined',
+                    'recommendation': 'Monitor for signs of bleeding. Consider alternative medication or adjust dosages under medical supervision.'
+                }
+            elif any(term in med1_name for term in ['ace inhibitor', 'lisinopril', 'enalapril', 'captopril']) and \
+                 any(term in med2_name for term in ['potassium', 'spironolactone', 'amiloride']):
+                interaction = {
+                    'drug1': med1['name'],
+                    'drug2': med2['name'],
+                    'severity': 'Moderate',
+                    'description': 'Risk of hyperkalemia when ACE inhibitors are combined with potassium supplements or potassium-sparing diuretics',
+                    'recommendation': 'Monitor serum potassium levels regularly. Avoid potassium supplements unless prescribed.'
+                }
+            elif any(term in med1_name for term in ['beta blocker', 'propranolol', 'metoprolol', 'atenolol']) and \
+                 any(term in med2_name for term in ['calcium channel blocker', 'verapamil', 'diltiazem']):
+                interaction = {
+                    'drug1': med1['name'],
+                    'drug2': med2['name'],
+                    'severity': 'Moderate',
+                    'description': 'Combination may cause bradycardia, hypotension, or heart block',
+                    'recommendation': 'Monitor heart rate and blood pressure closely. Use with caution, especially in elderly patients.'
+                }
+            
+            if interaction:
+                interactions.append(interaction)
+    
+    return interactions
 
 
 class MedicationViewSet(viewsets.ModelViewSet):
@@ -26,6 +103,7 @@ class MedicationViewSet(viewsets.ModelViewSet):
     
     permission_classes = [IsAuthenticated]
     serializer_class = MedicationSerializer
+    pagination_class = FlexiblePageNumberPagination
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['form', 'is_active']
     search_fields = ['name', 'generic_name', 'code']
@@ -41,6 +119,7 @@ class MedicationInventoryViewSet(viewsets.ModelViewSet):
     
     permission_classes = [IsAuthenticated]
     serializer_class = MedicationInventorySerializer
+    pagination_class = FlexiblePageNumberPagination
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['medication', 'location']
     search_fields = ['medication__name', 'batch_number']
@@ -71,6 +150,28 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
             serializer.save(created_by=self.request.user, doctor=self.request.user)
         else:
             serializer.save(created_by=self.request.user)
+    
+    @action(detail=False, methods=['post'])
+    def check_interactions(self, request):
+        """Check for drug interactions between medications."""
+        medication_ids = request.data.get('medication_ids', [])
+        
+        if not medication_ids:
+            return Response(
+                {'error': 'medication_ids is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            # Convert to integers
+            medication_ids = [int(id) for id in medication_ids]
+            interactions = check_drug_interactions(medication_ids)
+            return Response({'interactions': interactions})
+        except (ValueError, TypeError) as e:
+            return Response(
+                {'error': 'Invalid medication_ids format'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
     
     @action(detail=True, methods=['post'])
     def dispense(self, request, pk=None):
@@ -109,18 +210,13 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
             
             # Update prescription item
             item.dispensed_quantity += quantity
+            # Mark as dispensed if dispensed quantity meets or exceeds required quantity
             if item.dispensed_quantity >= item.quantity:
                 item.is_dispensed = True
-            
-            # Update prescription status
-            all_dispensed = all(m.is_dispensed for m in prescription.medications.all())
-            if all_dispensed:
-                prescription.status = 'dispensed'
-                prescription.dispensed_at = timezone.now()
-            else:
-                prescription.status = 'partially_dispensed'
-            prescription.save()
             item.save()
+            
+            # Recalculate prescription status based on all items
+            prescription.recalculate_status()
             
             return Response(DispenseSerializer(dispense).data)
         except (PrescriptionItem.DoesNotExist, MedicationInventory.DoesNotExist) as e:

@@ -210,7 +210,14 @@ export default function RolesPermissionsPage() {
     try {
       setLoading(true);
       setError(null);
-      const response = await adminService.getRoles({ page_size: 1000 });
+      const hasActiveFilters = searchQuery || typeFilter !== 'all' || statusFilter !== 'all';
+      const pageSize = hasActiveFilters ? 1000 : itemsPerPage;
+      
+      const response = await adminService.getRoles({ 
+        page: hasActiveFilters ? 1 : currentPage,
+        page_size: pageSize,
+      });
+      setTotalCount(response.count || response.results.length);
       
       // Transform API roles to frontend format
       const transformedRoles: Role[] = response.results.map((role: ApiRole) => ({
@@ -239,6 +246,7 @@ export default function RolesPermissionsPage() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [totalCount, setTotalCount] = useState(0);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
@@ -256,12 +264,10 @@ export default function RolesPermissionsPage() {
     });
   }, [roles, searchQuery, typeFilter, statusFilter]);
 
-  const paginatedRoles = useMemo(() => {
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    return filteredRoles.slice(startIndex, startIndex + itemsPerPage);
-  }, [filteredRoles, currentPage, itemsPerPage]);
+  // Use filtered roles directly (server-side pagination when no client-side filters)
+  const paginatedRoles = filteredRoles;
 
-  useEffect(() => { setCurrentPage(1); }, [searchQuery, typeFilter, statusFilter]);
+  useEffect(() => { setCurrentPage(1); }, [searchQuery, typeFilter, statusFilter, itemsPerPage]);
 
   const stats = useMemo(() => ({
     total: roles.length, active: roles.filter(r => r.isActive).length,
@@ -494,7 +500,7 @@ export default function RolesPermissionsPage() {
         )}
 
         <Dialog open={isCreateDialogOpen || isEditDialogOpen} onOpenChange={(open) => { if (!open) { setIsCreateDialogOpen(false); setIsEditDialogOpen(false); } }}>
-          <DialogContent className="sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className="w-[95vw] sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
             <DialogHeader><DialogTitle className="flex items-center gap-2"><Shield className="h-5 w-5 text-purple-500" />{isCreateDialogOpen ? 'Create Role' : 'Edit Role'}</DialogTitle><DialogDescription>{isCreateDialogOpen ? 'Define a new role with specific permissions' : `Update "${selectedRole?.name}" role settings`}</DialogDescription></DialogHeader>
             <Tabs defaultValue="details" className="mt-4">
               <TabsList className="grid w-full grid-cols-2"><TabsTrigger value="details">Role Details</TabsTrigger><TabsTrigger value="permissions">Permissions ({formData.permissions.length})</TabsTrigger></TabsList>
@@ -525,7 +531,7 @@ export default function RolesPermissionsPage() {
         </Dialog>
 
         <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
-          <DialogContent className="sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className="w-[95vw] sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
             <DialogHeader><DialogTitle className="flex items-center gap-2"><Shield className="h-5 w-5 text-purple-500" />{selectedRole?.name}</DialogTitle><DialogDescription>{selectedRole?.description}</DialogDescription></DialogHeader>
             {selectedRole && (<div className="space-y-6 mt-4">
               <div className="flex items-center gap-4"><Badge variant="outline" className={getTypeBadgeColor(selectedRole.type)}>{getRoleIcon(selectedRole.type)} {selectedRole.type}</Badge><Badge variant={selectedRole.isActive ? 'default' : 'secondary'}>{selectedRole.isActive ? 'Active' : 'Inactive'}</Badge><span className="text-sm text-muted-foreground">{selectedRole.userCount} users assigned</span></div>

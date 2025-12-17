@@ -60,7 +60,12 @@ class LabOrder(models.Model):
         ]
     
     def save(self, *args, **kwargs):
-        """Auto-generate order_id if not provided."""
+        """Auto-generate order_id if not provided and normalize clinic names."""
+        # Normalize clinic name before saving
+        if self.clinic:
+            from common.clinic_utils import normalize_clinic_name
+            self.clinic = normalize_clinic_name(self.clinic)
+        
         if not self.order_id:
             # Generate lab order ID: LAB-YYYYMMDD-HHMMSS-XXXX
             from datetime import datetime

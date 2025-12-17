@@ -22,9 +22,12 @@ import {
   RefreshCw, Eye, Edit, CheckCircle2, Calendar, Activity, Thermometer, 
   Heart, Wind, Droplets, Scale, Loader2, Save, X
 } from 'lucide-react';
+import { getAllClinicsWithAll } from '@/lib/constants/clinics';
+import { clinicMatches } from '@/lib/utils/clinic-utils';
+import { PatientAvatar } from "@/components/PatientAvatar";
 
-// Constants
-const clinics = ["All Clinics", "General", "Physiotherapy", "Eye", "Sickle Cell", "Diamond"];
+// Constants - standardized clinic list
+const clinics = getAllClinicsWithAll();
 
 // Types
 interface Patient {
@@ -38,6 +41,7 @@ interface Patient {
   visitDate: string;
   visitTime: string;
   visitType: string;
+  visitNotes?: string; // Notes / Special Instructions from visit
   nursingStatus: 'Pending' | 'Vitals Recorded' | 'Ready for Consultation' | 'Sent to Room';
   consultationRoom?: string;
   vitals?: VitalsData;
@@ -248,7 +252,7 @@ export default function NursingPoolQueuePage() {
                          (p.personalNumber && p.personalNumber.toLowerCase().includes(searchLower));
     const matchesStatus = statusFilter === 'all' || p.nursingStatus.toLowerCase().replace(' ', '-') === statusFilter;
     const matchesType = typeFilter === 'all' || p.visitType.toLowerCase() === typeFilter.toLowerCase();
-    const matchesClinic = clinicFilter === 'all' || p.clinic.toLowerCase() === clinicFilter.toLowerCase();
+    const matchesClinic = clinicFilter === 'all' || clinicMatches(p.clinic, clinicFilter);
     
     // Date filter
     if (dateFilter !== 'all') {
@@ -374,6 +378,7 @@ export default function NursingPoolQueuePage() {
             visitType: visit.visit_type === 'emergency' ? 'Emergency' :
                       visit.visit_type === 'consultation' ? 'Consultation' :
                       visit.visit_type === 'follow_up' ? 'Follow-up' : 'Consultation',
+            visitNotes: (visit as any).clinical_notes || undefined,
             nursingStatus,
             vitals,
             waitTime: waitTime > 0 ? waitTime : 0,
@@ -520,6 +525,7 @@ export default function NursingPoolQueuePage() {
           visitType: v.visit_type === 'emergency' ? 'Emergency' :
                     v.visit_type === 'consultation' ? 'Consultation' :
                     v.visit_type === 'follow_up' ? 'Follow-up' : 'Consultation',
+          visitNotes: (v as any).clinical_notes || undefined,
           nursingStatus,
           vitals,
           waitTime: waitTime > 0 ? waitTime : 0,
@@ -532,13 +538,47 @@ export default function NursingPoolQueuePage() {
       
     } catch (err: any) {
       console.error('[Pool Queue] Error saving vitals:', err);
+      
+      // Extract error message from apiFetch error structure
+      let errorMessage = 'Failed to save vitals. Please try again.';
+      
+      if (err?.message) {
+        // apiFetch formats errors into err.message
+        errorMessage = err.message;
+      } else if (typeof err === 'string') {
+        errorMessage = err;
+      } else if (err?.response?.data) {
+        // Handle DRF validation errors
+        const errorData = err.response.data;
+        if (typeof errorData === 'string') {
+          errorMessage = errorData;
+        } else if (errorData.detail) {
+          errorMessage = errorData.detail;
+        } else if (errorData.non_field_errors) {
+          errorMessage = Array.isArray(errorData.non_field_errors) 
+            ? errorData.non_field_errors.join(', ') 
+            : String(errorData.non_field_errors);
+        } else {
+          // Format field errors (e.g., height: ["Height must be between 30 and 300 cm..."]})
+          const fieldErrors = Object.entries(errorData)
+            .map(([field, errors]: [string, any]) => {
+              const fieldName = field.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+              const errorText = Array.isArray(errors) ? errors.join(', ') : String(errors);
+              return `${fieldName}: ${errorText}`;
+            })
+            .join('; ');
+          if (fieldErrors) {
+            errorMessage = fieldErrors;
+          }
+        }
+      }
+      
       console.error('[Pool Queue] Error details:', {
-        message: err?.message,
+        message: errorMessage,
+        originalError: err,
         status: err?.status,
-        response: err?.response,
-        stack: err?.stack
       });
-      const errorMessage = err?.message || err?.response?.data?.detail || 'Failed to save vitals. Please try again.';
+      
       toast.error('Failed to save vitals', {
         description: errorMessage
       });
@@ -821,7 +861,7 @@ export default function NursingPoolQueuePage() {
                 <Select value={clinicFilter} onValueChange={setClinicFilter}>
                   <SelectTrigger className="w-[140px]"><SelectValue placeholder="Clinic" /></SelectTrigger>
                   <SelectContent>
-                    {clinics.map(c => <SelectItem key={c} value={c === 'All Clinics' ? 'all' : c.toLowerCase()}>{c}</SelectItem>)}
+                    {clinics.map(c => <SelectItem key={c} value={c === 'All Clinics' ? 'all' : c}>{c}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
@@ -854,17 +894,7 @@ export default function NursingPoolQueuePage() {
                 <CardContent className="py-3 px-4">
                   <div className="flex items-center gap-3">
                     {/* Avatar */}
-                    <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${
-                      patient.visitType === 'Emergency' ? 'bg-rose-100 dark:bg-rose-900/30' :
-                      patient.visitType === 'Consultation' ? 'bg-blue-100 dark:bg-blue-900/30' :
-                      'bg-emerald-100 dark:bg-emerald-900/30'
-                    }`}>
-                      <span className={`font-semibold text-xs ${
-                        patient.visitType === 'Emergency' ? 'text-rose-600' :
-                        patient.visitType === 'Consultation' ? 'text-blue-600' :
-                        'text-emerald-600'
-                      }`}>{patient.name.split(' ').map(n => n[0]).join('')}</span>
-                    </div>
+                    <PatientAvatar name={patient.name} photoUrl={undefined} size="sm" />
                     
                     {/* Info */}
                     <div className="flex-1 min-w-0">
@@ -912,6 +942,12 @@ export default function NursingPoolQueuePage() {
                         <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{patient.waitTime}m</span>
                         {patient.age && <><span>•</span><span>{patient.age}y {patient.gender}</span></>}
                       </div>
+                      {/* Row 3: Visit Notes (if available) */}
+                      {patient.visitNotes && (
+                        <p className="text-xs text-muted-foreground mt-1 line-clamp-1">
+                          <span className="font-medium">Notes:</span> {patient.visitNotes}
+                        </p>
+                      )}
                     </div>
                   </div>
                 </CardContent>
@@ -944,7 +980,7 @@ export default function NursingPoolQueuePage() {
             }
           }
         }}>
-          <DialogContent className="sm:max-w-[700px] max-h-[90vh] overflow-y-auto" onInteractOutside={(e) => {
+          <DialogContent className="w-[95vw] sm:max-w-[700px] max-h-[90vh] overflow-y-auto" onInteractOutside={(e) => {
             // Prevent closing while submitting
             if (isSubmitting) {
               e.preventDefault();
@@ -959,6 +995,12 @@ export default function NursingPoolQueuePage() {
                 {selectedPatient?.name} - {selectedPatient?.patientId}
               </DialogDescription>
             </DialogHeader>
+            {selectedPatient?.visitNotes && (
+              <div className="p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 mb-4">
+                <p className="text-xs font-medium text-blue-700 dark:text-blue-400 mb-1">Visit Notes / Special Instructions:</p>
+                <p className="text-sm text-blue-900 dark:text-blue-300">{selectedPatient.visitNotes}</p>
+              </div>
+            )}
             <form onSubmit={handleSaveVitals} className="py-4 space-y-6">
               {/* Basic Vitals */}
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
@@ -1080,7 +1122,7 @@ export default function NursingPoolQueuePage() {
 
         {/* View Vitals Dialog */}
         <Dialog open={isViewVitalsDialogOpen} onOpenChange={setIsViewVitalsDialogOpen}>
-          <DialogContent className="sm:max-w-[600px]">
+          <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Eye className="h-5 w-5 text-rose-500" />
@@ -1135,7 +1177,7 @@ export default function NursingPoolQueuePage() {
 
         {/* Room Picker Dialog */}
         <Dialog open={isRoomPickerOpen} onOpenChange={setIsRoomPickerOpen}>
-          <DialogContent className="sm:max-w-[600px]">
+          <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <ArrowRight className="h-5 w-5 text-emerald-500" />

@@ -331,9 +331,23 @@ class PharmacyService {
    * Check drug interactions
    */
   async checkInteractions(medicationIds: number[]): Promise<DrugInteraction[]> {
-    // TODO: Implement API call for drug interaction checking
-    // For now, return empty array
-    return [];
+    if (!medicationIds || medicationIds.length < 2) {
+      return [];
+    }
+    
+    try {
+      const response = await apiFetch<{ interactions: DrugInteraction[] }>(
+        '/pharmacy/prescriptions/check_interactions/',
+        {
+          method: 'POST',
+          body: JSON.stringify({ medication_ids: medicationIds }),
+        }
+      );
+      return response.interactions || [];
+    } catch (error) {
+      console.error('Error checking drug interactions:', error);
+      return [];
+    }
   }
 }
 
@@ -358,7 +372,7 @@ interface SubstituteOption {
   daysToExpiry: number;
 }
 
-interface DrugInteraction {
+export interface DrugInteraction {
   drug1: string;
   drug2: string;
   severity: 'Major' | 'Moderate' | 'Minor';

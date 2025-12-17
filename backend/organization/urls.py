@@ -11,5 +11,5 @@ router.register(r'departments', DepartmentViewSet, basename='department')
 router.register(r'rooms', RoomViewSet, basename='room')
 
 urlpatterns = [
-    path('organization/', include(router.urls)),
+    path('', include(router.urls)),
 ]

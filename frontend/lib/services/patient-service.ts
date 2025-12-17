@@ -36,6 +36,7 @@ export interface Patient {
   permanent_address?: string;
   blood_group?: string;
   genotype?: string;
+  allergies?: string;
   nok_surname?: string;
   nok_first_name?: string;
   nok_middle_name?: string;
@@ -57,6 +58,7 @@ export interface Visit {
   date: string;
   time: string;
   clinic?: string;
+  location?: string;
   doctor?: number;
   doctor_name?: string;
   chief_complaint?: string;
@@ -92,6 +94,7 @@ class PatientService {
     blood_group?: string;
     search?: string;
     page?: number;
+    page_size?: number;
   }): Promise<{ results: Patient[]; count: number; next?: string; previous?: string }> {
     const query = buildQueryString(params || {});
     return apiFetch<{ results: Patient[]; count: number; next?: string; previous?: string }>(

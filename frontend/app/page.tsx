@@ -110,7 +110,7 @@ const stats = [
 
 export default function LandingPage() {
   return (
-    <main className="relative min-h-screen overflow-hidden bg-slate-950">
+    <main className="relative min-h-screen overflow-hidden bg-slate-950" suppressHydrationWarning>
       {/* Background Effects */}
       <div className="pointer-events-none absolute inset-0 -z-10">
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-teal-900/20 via-slate-950 to-slate-950" />

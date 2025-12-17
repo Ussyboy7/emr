@@ -23,5 +23,7 @@ export * from './referral-service';
 export { referralService } from './referral-service';
 export * from './consultation-service';
 export { consultationService } from './consultation-service';
+export * from './appointment-service';
+export { appointmentService } from './appointment-service';
 
 
