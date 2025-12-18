@@ -16,6 +16,7 @@ import { patientService } from '@/lib/services';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { PatientAvatar } from "@/components/PatientAvatar";
+import { VitalsDetailModal } from "@/components/VitalsDetailModal";
 import { 
   Activity, Search, RefreshCw, Eye, TrendingUp, TrendingDown, AlertTriangle, 
   CheckCircle2, Heart, Thermometer, Wind, Droplets, Scale, Calendar, 
@@ -240,6 +241,8 @@ export default function PatientVitalsPage() {
   const [isHistoryDialogOpen, setIsHistoryDialogOpen] = useState(false);
   const [selectedPatient, setSelectedPatient] = useState<PatientVitals | null>(null);
   const [historyPage, setHistoryPage] = useState(1);
+  const [selectedVitals, setSelectedVitals] = useState<VitalsData | null>(null);
+  const [isVitalsDetailModalOpen, setIsVitalsDetailModalOpen] = useState(false);
 
   // Filter patients
   const filteredPatients = useMemo(() => {
@@ -693,95 +696,63 @@ export default function PatientVitalsPage() {
                 {selectedPatient?.patientId} | {selectedPatient?.personalNumber} | {selectedPatient?.vitalsHistory?.length || 0} records
               </DialogDescription>
             </DialogHeader>
-            <div className="flex-1 overflow-y-auto py-4 space-y-4">
-              {selectedPatient?.vitalsHistory.map((vitals, index) => {
-                // Calculate BMI if weight and height are available
-                const weight = parseFloat(vitals.weight || '0');
-                const height = parseFloat(vitals.height || '0');
-                const bmi = weight && height ? (weight / Math.pow(height / 100, 2)).toFixed(1) : null;
-                const bmiStatus = bmi ? (parseFloat(bmi) < 18.5 ? 'Underweight' : parseFloat(bmi) < 25 ? 'Normal' : parseFloat(bmi) < 30 ? 'Overweight' : 'Obese') : null;
-                
-                return (
-                  <Card key={vitals.id} className={`${index === 0 ? 'border-rose-500/50 bg-rose-500/5' : ''}`}>
-                    <CardHeader className="pb-2">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
+            <div className="flex-1 overflow-y-auto py-4 space-y-3">
+              {selectedPatient?.vitalsHistory.map((vitals, index) => (
+                <Card key={vitals.id} className={`${index === 0 ? 'border-rose-500/50 bg-rose-500/5' : ''}`}>
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-2">
                           <Clock className="h-4 w-4 text-muted-foreground" />
-                          <span className="font-medium">{new Date(vitals.recordedAt).toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })}</span>
-                          <span className="text-sm text-muted-foreground">{new Date(vitals.recordedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                          <span className="font-medium">
+                            {new Date(vitals.recordedAt).toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })}
+                          </span>
+                          <span className="text-sm text-muted-foreground">
+                            {new Date(vitals.recordedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                          {index === 0 && <Badge className="bg-rose-500 text-white text-xs">Latest</Badge>}
                         </div>
-                        {index === 0 && <Badge className="bg-rose-500 text-white">Latest</Badge>}
-                      </div>
-                      <p className="text-xs text-muted-foreground">Recorded by: {vitals.recordedBy}</p>
-                    </CardHeader>
-                    <CardContent className="space-y-3">
-                      {/* Primary Vitals */}
-                      <div className="grid grid-cols-5 gap-2">
-                        {[
-                          { label: 'Blood Pressure', value: `${vitals.bloodPressureSystolic}/${vitals.bloodPressureDiastolic}`, unit: 'mmHg', icon: Activity },
-                          { label: 'Pulse', value: vitals.pulse, unit: 'bpm', icon: Heart },
-                          { label: 'Temperature', value: vitals.temperature, unit: '°C', icon: Thermometer },
-                          { label: 'Resp. Rate', value: vitals.respiratoryRate, unit: '/min', icon: Wind },
-                          { label: 'SpO2', value: vitals.oxygenSaturation, unit: '%', icon: Droplets },
-                        ].map((item, i) => (
-                          <div key={i} className="text-center p-2 bg-muted/30 rounded">
-                            <item.icon className="h-3 w-3 mx-auto text-muted-foreground mb-1" />
-                            <p className="text-xs text-muted-foreground">{item.label}</p>
-                            <p className="text-sm font-semibold">{item.value || '-'} <span className="font-normal text-muted-foreground">{item.unit}</span></p>
-                          </div>
-                        ))}
-                      </div>
-                      
-                      {/* Secondary Vitals (Weight, Height, BMI) */}
-                      <div className="grid grid-cols-3 gap-2">
-                        <div className="text-center p-2 bg-muted/30 rounded">
-                          <Scale className="h-3 w-3 mx-auto text-muted-foreground mb-1" />
-                          <p className="text-xs text-muted-foreground">Weight</p>
-                          <p className="text-sm font-semibold">{vitals.weight || '-'} <span className="font-normal text-muted-foreground">kg</span></p>
-                        </div>
-                        <div className="text-center p-2 bg-muted/30 rounded">
-                          <TrendingUp className="h-3 w-3 mx-auto text-muted-foreground mb-1" />
-                          <p className="text-xs text-muted-foreground">Height</p>
-                          <p className="text-sm font-semibold">{vitals.height || '-'} <span className="font-normal text-muted-foreground">cm</span></p>
-                        </div>
-                        <div className="text-center p-2 bg-muted/30 rounded">
-                          <p className="text-xs text-muted-foreground mb-1">BMI</p>
-                          {bmi ? (
-                            <div>
-                              <p className={`text-sm font-semibold ${
-                                bmiStatus === 'Normal' ? 'text-emerald-600' :
-                                bmiStatus === 'Underweight' ? 'text-blue-600' :
-                                bmiStatus === 'Overweight' ? 'text-amber-600' : 'text-rose-600'
-                              }`}>{bmi} kg/m²</p>
-                              <p className={`text-xs ${
-                                bmiStatus === 'Normal' ? 'text-emerald-500' :
-                                bmiStatus === 'Underweight' ? 'text-blue-500' :
-                                bmiStatus === 'Overweight' ? 'text-amber-500' : 'text-rose-500'
-                              }`}>{bmiStatus}</p>
-                            </div>
-                          ) : (
-                            <p className="text-sm text-muted-foreground">-</p>
-                          )}
+                        <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                          <span>BP: {vitals.bloodPressureSystolic}/{vitals.bloodPressureDiastolic}</span>
+                          <span>P: {vitals.pulse}</span>
+                          <span>T: {vitals.temperature}°C</span>
+                          <span>SpO2: {vitals.oxygenSaturation}%</span>
+                          {vitals.recordedBy && <span className="ml-auto">Recorded by: {vitals.recordedBy}</span>}
                         </div>
                       </div>
-                      
-                      {/* Notes if available */}
-                      {vitals.notes && (
-                        <div className="p-2 bg-muted/20 rounded text-sm">
-                          <p className="text-xs text-muted-foreground mb-1">Notes:</p>
-                          <p>{vitals.notes}</p>
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                );
-              })}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setSelectedVitals(vitals);
+                          setIsVitalsDetailModalOpen(true);
+                        }}
+                        className="ml-4"
+                      >
+                        <Eye className="h-4 w-4 mr-1" />
+                        View Details
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+              {selectedPatient?.vitalsHistory.length === 0 && (
+                <p className="text-sm text-muted-foreground text-center py-8">No vitals history available</p>
+              )}
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setIsHistoryDialogOpen(false)}>Close</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        {/* Vitals Detail Modal */}
+        <VitalsDetailModal
+          vitals={selectedVitals}
+          patientName={selectedPatient?.name}
+          isOpen={isVitalsDetailModalOpen}
+          onClose={() => setIsVitalsDetailModalOpen(false)}
+        />
       </div>
     </DashboardLayout>
   );

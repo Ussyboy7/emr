@@ -129,6 +129,22 @@ export default function ProceduresQueuePage() {
             // Get patient details
             const patient = await patientService.getPatient(order.patient);
             
+            // Load patient allergies from medical history
+            let allergies: string[] = [];
+            try {
+              const history = await patientService.getPatientHistory(order.patient);
+              if (history && history.allergies) {
+                allergies = Array.isArray(history.allergies) 
+                  ? history.allergies 
+                  : typeof history.allergies === 'string' 
+                    ? history.allergies.split(/[,\n]/).map((a: string) => a.trim()).filter((a: string) => a)
+                    : [];
+              }
+            } catch (historyErr) {
+              // If history fetch fails, continue without allergies
+              console.warn(`Could not load allergies for patient ${order.patient}:`, historyErr);
+            }
+            
             // Map backend order_type to frontend type
             const typeMap: Record<string, Procedure['type']> = {
               'injection': 'injection',
@@ -192,7 +208,7 @@ export default function ProceduresQueuePage() {
               orderedAt: order.ordered_at,
               orderedBy: order.ordered_by_name || 'Unknown',
               priority: priorityMap[order.priority] || 'Medium',
-              allergies: [],
+              allergies,
               details,
             } as Procedure;
           } catch (err) {
@@ -286,9 +302,25 @@ export default function ProceduresQueuePage() {
       const ordersResult = await apiFetch<{ results: any[] }>('/nursing/orders/?status=pending&page_size=1000');
       const orders = ordersResult.results || [];
       
-      const transformedProcedures = await Promise.all(orders.map(async (order: any) => {
+          const transformedProcedures = await Promise.all(orders.map(async (order: any) => {
         try {
           const patient = await patientService.getPatient(order.patient);
+          
+          // Load patient allergies from medical history
+          let allergies: string[] = [];
+          try {
+            const history = await patientService.getPatientHistory(order.patient);
+            if (history && history.allergies) {
+              allergies = Array.isArray(history.allergies) 
+                ? history.allergies 
+                : typeof history.allergies === 'string' 
+                  ? history.allergies.split(/[,\n]/).map((a: string) => a.trim()).filter((a: string) => a)
+                  : [];
+            }
+          } catch (historyErr) {
+            // If history fetch fails, continue without allergies
+            console.warn(`Could not load allergies for patient ${order.patient}:`, historyErr);
+          }
           
           const typeMap: Record<string, Procedure['type']> = {
             'injection': 'injection',
@@ -349,7 +381,7 @@ export default function ProceduresQueuePage() {
             orderedAt: order.ordered_at,
             orderedBy: order.ordered_by_name || 'Unknown',
             priority: priorityMap[order.priority] || 'Medium',
-            allergies: [],
+            allergies,
             details,
           } as Procedure;
         } catch (err) {
