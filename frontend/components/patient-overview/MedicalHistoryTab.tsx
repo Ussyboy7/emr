@@ -6,10 +6,29 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { toast } from 'sonner';
+import { patientService } from '@/lib/services';
+import { VitalsDetailModal } from '@/components/VitalsDetailModal';
 import { 
   FileText, Stethoscope, TestTube, ScanLine, Pill, Heart,
-  AlertTriangle, Users, User, Eye, ChevronLeft, ChevronRight
+  AlertTriangle, Users, User, Eye, ChevronLeft, ChevronRight, Plus, X, Calendar
 } from 'lucide-react';
+
+// Helper function to safely parse date
+const safeParseDate = (dateString: string | undefined): Date | null => {
+  if (!dateString) return null;
+  try {
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return null;
+    return date;
+  } catch {
+    return null;
+  }
+};
 
 interface PatientDetail {
   allergies: string[];
@@ -45,6 +64,8 @@ interface MedicalHistoryTabProps {
   historySubTab: string;
   onHistorySubTabChange: (tab: string) => void;
   onViewVisit?: (visit: Visit) => void;
+  patientNumericId?: number;
+  onAllergiesUpdate?: (allergies: string[]) => void;
 }
 
 export function MedicalHistoryTab({
@@ -58,6 +79,8 @@ export function MedicalHistoryTab({
   historySubTab,
   onHistorySubTabChange,
   onViewVisit,
+  patientNumericId,
+  onAllergiesUpdate,
 }: MedicalHistoryTabProps) {
   // Filter and pagination state
   const [sessionDateFilter, setSessionDateFilter] = useState<string>('all');
@@ -80,15 +103,92 @@ export function MedicalHistoryTab({
   const [imagingPerPage, setImagingPerPage] = useState(10);
   const [prescriptionsPerPage, setPrescriptionsPerPage] = useState(10);
   const [vitalsPerPage, setVitalsPerPage] = useState(10);
+  
+  // Allergies editing state
+  const [isAddAllergyDialogOpen, setIsAddAllergyDialogOpen] = useState(false);
+  const [allergyInput, setAllergyInput] = useState('');
+  const [isUpdatingAllergies, setIsUpdatingAllergies] = useState(false);
+
+  // Vitals detail modal state
+  const [selectedVitals, setSelectedVitals] = useState<any>(null);
+  const [isVitalsDetailModalOpen, setIsVitalsDetailModalOpen] = useState(false);
+
+  // Handle adding allergies
+  const handleAddAllergy = async () => {
+    if (!allergyInput.trim() || !patientNumericId || !patientDetail) {
+      return;
+    }
+
+    const newAllergy = allergyInput.trim();
+    const currentAllergies = patientDetail.allergies || [];
+    
+    // Check if allergy already exists
+    if (currentAllergies.some((a: string) => a.toLowerCase() === newAllergy.toLowerCase())) {
+      toast.error('This allergy is already recorded');
+      return;
+    }
+
+    setIsUpdatingAllergies(true);
+    try {
+      const updatedAllergies = [...currentAllergies, newAllergy];
+      await patientService.updatePatientHistory(patientNumericId, {
+        allergies: updatedAllergies,
+      });
+      
+      toast.success('Allergy added successfully');
+      setAllergyInput('');
+      setIsAddAllergyDialogOpen(false);
+      
+      // Notify parent to refresh data
+      if (onAllergiesUpdate) {
+        onAllergiesUpdate(updatedAllergies);
+      }
+    } catch (error: any) {
+      console.error('Error updating allergies:', error);
+      toast.error(error.message || 'Failed to add allergy');
+    } finally {
+      setIsUpdatingAllergies(false);
+    }
+  };
+
+  // Handle removing allergy
+  const handleRemoveAllergy = async (allergyToRemove: string) => {
+    if (!patientNumericId || !patientDetail) {
+      return;
+    }
+
+    const currentAllergies = patientDetail.allergies || [];
+    const updatedAllergies = currentAllergies.filter((a: string) => a !== allergyToRemove);
+
+    setIsUpdatingAllergies(true);
+    try {
+      await patientService.updatePatientHistory(patientNumericId, {
+        allergies: updatedAllergies,
+      });
+      
+      toast.success('Allergy removed successfully');
+      
+      // Notify parent to refresh data
+      if (onAllergiesUpdate) {
+        onAllergiesUpdate(updatedAllergies);
+      }
+    } catch (error: any) {
+      console.error('Error updating allergies:', error);
+      toast.error(error.message || 'Failed to remove allergy');
+    } finally {
+      setIsUpdatingAllergies(false);
+    }
+  };
 
   // Combined visits and consultations for visits-consultations tab
   const allVisitsAndConsultations = [
     ...visits.map(v => ({ ...v, type: 'visit' })),
     ...consultationSessions.map(c => ({ ...c, type: 'consultation' })),
   ].sort((a, b) => {
-    const dateA = new Date(a.date || a.created_at || '').getTime();
-    const dateB = new Date(b.date || b.created_at || '').getTime();
-    return dateB - dateA; // Newest first
+    const dateA = safeParseDate(a.date || a.created_at);
+    const dateB = safeParseDate(b.date || b.created_at);
+    if (!dateA || !dateB) return 0;
+    return dateB.getTime() - dateA.getTime(); // Newest first
   });
 
   return (
@@ -133,20 +233,44 @@ export function MedicalHistoryTab({
                   {/* Allergies Card */}
                   <Card className={patientDetail.allergies.length > 0 ? 'border-red-300 dark:border-red-800 bg-red-50/50 dark:bg-red-900/10' : ''}>
                     <CardHeader className="pb-2">
-                      <CardTitle className="text-sm flex items-center gap-2">
-                        <AlertTriangle className={`h-4 w-4 ${patientDetail.allergies.length > 0 ? 'text-red-500' : 'text-muted-foreground'}`} />
-                        Allergies
-                      </CardTitle>
+                      <div className="flex items-center justify-between">
+                        <CardTitle className="text-sm flex items-center gap-2">
+                          <AlertTriangle className={`h-4 w-4 ${patientDetail.allergies.length > 0 ? 'text-red-500' : 'text-muted-foreground'}`} />
+                          Allergies
+                        </CardTitle>
+                        {patientNumericId && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setIsAddAllergyDialogOpen(true)}
+                            className="h-7 text-xs"
+                          >
+                            <Plus className="h-3 w-3 mr-1" />
+                            Add Allergy
+                          </Button>
+                        )}
+                      </div>
                     </CardHeader>
                     <CardContent>
                       {patientDetail.allergies.length > 0 ? (
                         <div className="flex flex-wrap gap-2">
                           {patientDetail.allergies.map((allergy: string, index: number) => (
-                            <Badge key={index} className="bg-red-600 text-white">{allergy}</Badge>
+                            <Badge key={index} className="bg-red-600 text-white flex items-center gap-1">
+                              {allergy}
+                              {patientNumericId && (
+                                <button
+                                  onClick={() => handleRemoveAllergy(allergy)}
+                                  className="ml-1 hover:bg-red-700 rounded-full p-0.5"
+                                  disabled={isUpdatingAllergies}
+                                >
+                                  <X className="h-3 w-3" />
+                                </button>
+                              )}
+                            </Badge>
                           ))}
                         </div>
                       ) : (
-                        <p className="text-sm text-muted-foreground">No known allergies</p>
+                        <p className="text-sm text-muted-foreground">No allergies recorded</p>
                       )}
                     </CardContent>
                   </Card>
@@ -234,14 +358,18 @@ export function MedicalHistoryTab({
                     {allVisitsAndConsultations
                       .filter((item: any) => {
                         if (sessionDateFilter === 'all') return true;
-                        const itemDate = new Date(item.date || item.created_at || '');
+                        const itemDate = safeParseDate(item.date || item.created_at);
+                        if (!itemDate) return false;
                         const daysAgo = Math.floor((Date.now() - itemDate.getTime()) / (1000 * 60 * 60 * 24));
                         return daysAgo <= parseInt(sessionDateFilter);
                       })
                       .slice((consultationsPage - 1) * consultationsPerPage, consultationsPage * consultationsPerPage)
-                      .map((item: any) => (
+                      .map((item: any) => {
+                        const itemDate = safeParseDate(item.date || item.created_at);
+                        const formattedDate = itemDate ? itemDate.toLocaleDateString() : (item.date || 'N/A');
+                        return (
                       <tr key={item.id} className="hover:bg-muted/30">
-                        <td className="px-4 py-3 text-muted-foreground">{item.date || (item.created_at ? new Date(item.created_at).toLocaleDateString() : '')}</td>
+                        <td className="px-4 py-3 text-muted-foreground">{formattedDate}</td>
                         <td className="px-4 py-3">
                           <Badge variant="outline">{item.type === 'visit' ? item.type : 'Consultation'}</Badge>
                         </td>
@@ -262,7 +390,8 @@ export function MedicalHistoryTab({
                           )}
                         </td>
                       </tr>
-                    ))}
+                        );
+                      })}
                     {allVisitsAndConsultations.length === 0 && (
                       <tr>
                         <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">
@@ -349,7 +478,8 @@ export function MedicalHistoryTab({
                       .filter((lab: any) => {
                         if (labStatusFilter !== 'all' && lab.status.toLowerCase() !== labStatusFilter.toLowerCase()) return false;
                         if (labDateFilter === 'all') return true;
-                        const labDate = new Date(lab.date);
+                        const labDate = safeParseDate(lab.date);
+                        if (!labDate) return false;
                         const daysAgo = Math.floor((Date.now() - labDate.getTime()) / (1000 * 60 * 60 * 24));
                         return daysAgo <= parseInt(labDateFilter);
                       })
@@ -458,7 +588,8 @@ export function MedicalHistoryTab({
                       .filter((img: any) => {
                         if (imagingStatusFilter !== 'all' && img.status.toLowerCase() !== imagingStatusFilter.toLowerCase()) return false;
                         if (imagingDateFilter === 'all') return true;
-                        const imgDate = new Date(img.date);
+                        const imgDate = safeParseDate(img.date);
+                        if (!imgDate) return false;
                         const daysAgo = Math.floor((Date.now() - imgDate.getTime()) / (1000 * 60 * 60 * 24));
                         return daysAgo <= parseInt(imagingDateFilter);
                       })
@@ -557,7 +688,8 @@ export function MedicalHistoryTab({
                   .filter((rx: any) => {
                     if (prescriptionsStatusFilter !== 'all' && rx.status.toLowerCase() !== prescriptionsStatusFilter.toLowerCase()) return false;
                     if (prescriptionsDateFilter === 'all') return true;
-                    const rxDate = new Date(rx.date);
+                    const rxDate = safeParseDate(rx.date);
+                    if (!rxDate) return false;
                     const daysAgo = Math.floor((Date.now() - rxDate.getTime()) / (1000 * 60 * 60 * 24));
                     return daysAgo <= parseInt(prescriptionsDateFilter);
                   })
@@ -663,44 +795,65 @@ export function MedicalHistoryTab({
                 {vitalSigns
                   .filter((vital: any) => {
                     if (vitalsDateFilter === 'all') return true;
-                    const vitalDate = new Date(vital.date);
+                    const vitalDate = safeParseDate(vital.date);
+                    if (!vitalDate) return false;
                     const daysAgo = Math.floor((Date.now() - vitalDate.getTime()) / (1000 * 60 * 60 * 24));
                     return daysAgo <= parseInt(vitalsDateFilter);
                   })
                   .slice((vitalsPage - 1) * vitalsPerPage, vitalsPage * vitalsPerPage)
                   .map((vital: any) => (
-                  <div key={vital.id} className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4 p-4 rounded-lg border">
-                    <div>
-                      <p className="text-xs text-muted-foreground">Date/Time</p>
-                      <p className="font-medium text-sm">{vital.date}</p>
-                      <p className="font-medium text-xs">{vital.time}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">Blood Pressure</p>
-                      <p className="font-medium">{vital.bp}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">Pulse</p>
-                      <p className="font-medium">{vital.pulse} bpm</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">Temperature</p>
-                      <p className="font-medium">{vital.temp}°C</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">SPO2</p>
-                      <p className="font-medium">{vital.spo2}%</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">Weight</p>
-                      <p className="font-medium">{vital.weight} kg</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">BMI</p>
-                      <p className="font-medium">{vital.bmi}</p>
-                    </div>
-                  </div>
-                ))}
+                    <Card key={vital.id}>
+                      <CardContent className="p-4">
+                        <div className="flex items-center justify-between">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-2">
+                              <Calendar className="h-4 w-4 text-muted-foreground" />
+                              <span className="font-medium">{vital.date}</span>
+                              <span className="text-sm text-muted-foreground">{vital.time}</span>
+                              {vital.recordedBy && vital.recordedBy !== 'Unknown' && (
+                                <span className="text-xs text-muted-foreground ml-auto">Recorded by: {vital.recordedBy}</span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                              <span>BP: {vital.bp}</span>
+                              <span>P: {vital.pulse} bpm</span>
+                              <span>T: {vital.temp}°C</span>
+                              <span>SpO2: {vital.spo2}%</span>
+                              {vital.weight && vital.weight !== '-' && <span>Weight: {vital.weight} kg</span>}
+                            </div>
+                          </div>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              // Convert vital to format expected by VitalsDetailModal
+                              const [systolic, diastolic] = vital.bp?.split('/') || ['', ''];
+                              setSelectedVitals({
+                                id: vital.id,
+                                date: vital.date,
+                                time: vital.time,
+                                bloodPressureSystolic: systolic,
+                                bloodPressureDiastolic: diastolic,
+                                pulse: vital.pulse,
+                                temperature: vital.temp,
+                                oxygenSaturation: vital.spo2,
+                                weight: vital.weight,
+                                height: vital.height,
+                                bmi: vital.bmi,
+                                recordedBy: vital.recordedBy,
+                                notes: vital.notes,
+                              });
+                              setIsVitalsDetailModalOpen(true);
+                            }}
+                            className="ml-4"
+                          >
+                            <Eye className="h-4 w-4 mr-1" />
+                            View Details
+                          </Button>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
                 {vitalSigns.length === 0 && (
                   <p className="text-sm text-muted-foreground text-center py-8">No vital signs recorded</p>
                 )}
@@ -739,6 +892,62 @@ export function MedicalHistoryTab({
           </Tabs>
         </CardContent>
       </Card>
+
+      {/* Vitals Detail Modal */}
+      <VitalsDetailModal
+        vitals={selectedVitals}
+        patientName={patientDetail?.name}
+        isOpen={isVitalsDetailModalOpen}
+        onClose={() => setIsVitalsDetailModalOpen(false)}
+      />
+
+      {/* Add Allergy Dialog */}
+      <Dialog open={isAddAllergyDialogOpen} onOpenChange={setIsAddAllergyDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add Allergy</DialogTitle>
+            <DialogDescription>
+              Add a new allergy to the patient's medical history.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="allergy">Allergy Name</Label>
+              <Input
+                id="allergy"
+                placeholder="e.g., Penicillin, Latex, Peanuts"
+                value={allergyInput}
+                onChange={(e) => setAllergyInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleAddAllergy();
+                  }
+                }}
+                disabled={isUpdatingAllergies}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setIsAddAllergyDialogOpen(false);
+                setAllergyInput('');
+              }}
+              disabled={isUpdatingAllergies}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleAddAllergy}
+              disabled={!allergyInput.trim() || isUpdatingAllergies}
+            >
+              {isUpdatingAllergies ? 'Adding...' : 'Add Allergy'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

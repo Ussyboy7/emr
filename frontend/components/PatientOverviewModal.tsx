@@ -173,21 +173,22 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
       let numericId: number;
       let apiPatient: ApiPatient;
       
-      const parsedId = parseInt(patientIdStr, 10);
-      if (!isNaN(parsedId) && parsedId > 0) {
-        numericId = parsedId;
-        apiPatient = await patientService.getPatient(numericId);
-      } else {
-        const searchResult = await patientService.getPatients({ search: patientIdStr });
-        const matchedPatient = searchResult.results.find(
-          p => p.patient_id === patientIdStr || p.patient_id.toUpperCase() === patientIdStr.toUpperCase()
-        );
-        if (!matchedPatient) {
-          throw new Error(`Patient with ID "${patientIdStr}" not found`);
+        const parsedId = parseInt(patientIdStr, 10);
+        if (!isNaN(parsedId) && parsedId > 0) {
+          numericId = parsedId;
+        } else {
+          const searchResult = await patientService.getPatients({ search: patientIdStr });
+          const matchedPatient = searchResult.results.find(
+            p => p.patient_id === patientIdStr || p.patient_id.toUpperCase() === patientIdStr.toUpperCase()
+          );
+          if (!matchedPatient) {
+            throw new Error(`Patient with ID "${patientIdStr}" not found`);
+          }
+          numericId = matchedPatient.id;
         }
-        numericId = matchedPatient.id;
-        apiPatient = matchedPatient;
-      }
+        
+        // Always fetch full patient details using the detailed serializer
+        apiPatient = await patientService.getPatient(numericId);
       
       // Load all patient data in parallel
       const [visitsData, vitalsData, labData, historyData, prescriptionsData, consultationsData, imagingData] = await Promise.allSettled([
@@ -353,6 +354,42 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
         }));
       }
 
+      // Format date of birth
+      let formattedDateOfBirth = '';
+      if (apiPatient.date_of_birth) {
+        try {
+          const date = new Date(apiPatient.date_of_birth);
+          if (!isNaN(date.getTime())) {
+            formattedDateOfBirth = date.toLocaleDateString('en-US', { 
+              year: 'numeric', 
+              month: 'long', 
+              day: 'numeric' 
+            });
+          }
+        } catch (e) {
+          // If date parsing fails, use the original string
+          formattedDateOfBirth = apiPatient.date_of_birth;
+        }
+      }
+      
+      // Format address - combine residential and permanent if both exist
+      let formattedAddress = '';
+      if (apiPatient.residential_address && apiPatient.permanent_address) {
+        if (apiPatient.residential_address === apiPatient.permanent_address) {
+          formattedAddress = apiPatient.residential_address;
+        } else {
+          formattedAddress = `Residential: ${apiPatient.residential_address}\nPermanent: ${apiPatient.permanent_address}`;
+        }
+      } else {
+        formattedAddress = apiPatient.residential_address || apiPatient.permanent_address || '';
+      }
+
+      // Format next of kin name - include surname if available
+      const nokFirstName = apiPatient.nok_first_name || '';
+      const nokMiddleName = apiPatient.nok_middle_name || '';
+      const nokSurname = apiPatient.nok_surname || '';
+      const nokName = [nokFirstName, nokMiddleName, nokSurname].filter(Boolean).join(' ').trim();
+
       // Transform to PatientDetail
       const detail: PatientDetail = {
         id: apiPatient.id.toString(),
@@ -360,7 +397,7 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
         firstName: apiPatient.first_name || '',
         lastName: apiPatient.surname || '',
         middleName: apiPatient.middle_name || '',
-        dateOfBirth: apiPatient.date_of_birth || '',
+        dateOfBirth: formattedDateOfBirth,
         age: apiPatient.age || 0,
         gender: apiPatient.gender === 'male' ? 'Male' : 'Female',
         maritalStatus: apiPatient.marital_status || '',
@@ -371,7 +408,7 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
         genotype: apiPatient.genotype || '',
         phone: apiPatient.phone || '',
         email: apiPatient.email || '',
-        address: apiPatient.residential_address || apiPatient.permanent_address || '',
+        address: formattedAddress,
         city: '',
         state: apiPatient.state_of_residence || '',
         status: 'active',
@@ -398,12 +435,12 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
         chronicConditions: conditions,
         currentMedications: medications,
         emergencyContact: {
-          name: apiPatient.nok_first_name ? `${apiPatient.nok_first_name} ${apiPatient.nok_middle_name || ''}`.trim() : '',
+          name: nokName,
           relationship: apiPatient.nok_relationship || '',
           phone: apiPatient.nok_phone || '',
         },
         nextOfKin: {
-          name: apiPatient.nok_first_name ? `${apiPatient.nok_first_name} ${apiPatient.nok_middle_name || ''}`.trim() : '',
+          name: nokName,
           relationship: apiPatient.nok_relationship || '',
           phone: apiPatient.nok_phone || '',
         },
@@ -446,8 +483,8 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="w-[95vw] sm:max-w-[1000px] max-h-[90vh] overflow-hidden flex flex-col p-0">
-        <DialogHeader className="px-6 pt-6 pb-4 border-b">
+      <DialogContent className="w-[95vw] sm:max-w-[1000px] max-h-[90vh] overflow-y-auto p-0 flex flex-col">
+        <DialogHeader className="px-6 pt-6 pb-4 border-b flex-shrink-0">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
               {loading ? (
@@ -478,44 +515,40 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
           </div>
         </DialogHeader>
 
-        <div className="flex-1 overflow-hidden">
-          {loading ? (
-            <div className="flex items-center justify-center h-full">
-              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-              <span className="ml-3 text-muted-foreground">Loading patient data...</span>
+        {loading ? (
+          <div className="flex items-center justify-center py-12 flex-1">
+            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            <span className="ml-3 text-muted-foreground">Loading patient data...</span>
+          </div>
+        ) : (
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-h-0">
+            <div className="px-6 pt-4 border-b flex-shrink-0">
+              <TabsList className="bg-muted border border-border p-1 flex-wrap h-auto gap-1">
+                <TabsTrigger value="overview" className="data-[state=active]:bg-primary/20 data-[state=active]:text-primary">
+                  <Activity className="h-4 w-4 mr-2" />Overview
+                </TabsTrigger>
+                <TabsTrigger value="timeline" className="data-[state=active]:bg-primary/20 data-[state=active]:text-primary">
+                  <Clock className="h-4 w-4 mr-2" />Timeline
+                </TabsTrigger>
+                <TabsTrigger value="medical-history" className="data-[state=active]:bg-primary/20 data-[state=active]:text-primary">
+                  <History className="h-4 w-4 mr-2" />Medical History
+                </TabsTrigger>
+                <TabsTrigger value="current-care" className="data-[state=active]:bg-primary/20 data-[state=active]:text-primary">
+                  <AlertCircle className="h-4 w-4 mr-2" />Current Care
+                </TabsTrigger>
+              </TabsList>
             </div>
-          ) : (
-            <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col">
-              <div className="px-6 pt-4 border-b">
-                <TabsList className="bg-muted border border-border p-1 flex-wrap h-auto gap-1">
-                  <TabsTrigger value="overview" className="data-[state=active]:bg-primary/20 data-[state=active]:text-primary">
-                    <Activity className="h-4 w-4 mr-2" />Overview
-                  </TabsTrigger>
-                  <TabsTrigger value="timeline" className="data-[state=active]:bg-primary/20 data-[state=active]:text-primary">
-                    <Clock className="h-4 w-4 mr-2" />Timeline
-                  </TabsTrigger>
-                  <TabsTrigger value="medical-history" className="data-[state=active]:bg-primary/20 data-[state=active]:text-primary">
-                    <History className="h-4 w-4 mr-2" />Medical History
-                  </TabsTrigger>
-                  <TabsTrigger value="current-care" className="data-[state=active]:bg-primary/20 data-[state=active]:text-primary">
-                    <AlertCircle className="h-4 w-4 mr-2" />Current Care
-                  </TabsTrigger>
-                </TabsList>
-              </div>
 
-              <div className="flex-1 overflow-y-auto px-6 py-4">
-                {/* OVERVIEW TAB */}
-                <TabsContent value="overview" className="space-y-6 mt-0">
+            <TabsContent value="overview" className="flex-1 overflow-y-auto px-6 py-4 space-y-6 mt-0">
                   {patientDetail ? (
                     <>
                       <div className="grid gap-6 lg:grid-cols-3">
                         <div className="space-y-6 lg:col-span-2">
-                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                          <div className="grid grid-cols-3 gap-4">
                             {[
                               { icon: Calendar, value: visits.length, label: 'Total Visits', color: 'text-blue-500' },
                               { icon: Pill, value: patientDetail.currentMedications.length, label: 'Active Meds', color: 'text-violet-500' },
-                              { icon: TestTube, value: labResults.length, label: 'Lab Tests', color: 'text-amber-500' },
-                              { icon: AlertCircle, value: patientDetail.chronicConditions.length, label: 'Conditions', color: 'text-rose-500' }
+                              { icon: TestTube, value: labResults.length, label: 'Lab Tests', color: 'text-amber-500' }
                             ].map((stat, i) => (
                               <Card key={i}>
                                 <CardContent className="p-4 text-center">
@@ -532,7 +565,10 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
                               <CardTitle className="flex items-center gap-2">
                                 <Calendar className="h-5 w-5 text-blue-500" />Recent Visits
                               </CardTitle>
-                              <Button variant="ghost" size="sm" onClick={() => setActiveTab('visits')}>
+                              <Button variant="ghost" size="sm" onClick={() => {
+                                setActiveTab('medical-history');
+                                setHistorySubTab('visits-consultations');
+                              }}>
                                 View All<ChevronRight className="h-4 w-4 ml-1" />
                               </Button>
                             </CardHeader>
@@ -600,7 +636,7 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
                                     </div>
                                   ))
                                 ) : (
-                                  <p className="text-sm text-muted-foreground">No known allergies</p>
+                                  <p className="text-sm text-muted-foreground">No allergies recorded</p>
                                 )}
                               </CardContent>
                             </Card>
@@ -658,10 +694,18 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
                                   {patientDetail.bloodGroup || 'Not provided'}
                                 </span>
                               </div>
+                              <div className="flex justify-between">
+                                <span className="text-muted-foreground">Genotype</span>
+                                <span>{patientDetail.genotype || 'Not provided'}</span>
+                              </div>
                               <Separator />
                               <div>
                                 <p className="text-muted-foreground mb-1">Address</p>
-                                <p>{patientDetail.address || 'Not provided'}</p>
+                                {patientDetail.address ? (
+                                  <p className="whitespace-pre-line">{patientDetail.address}</p>
+                                ) : (
+                                  <p className="text-muted-foreground">Not provided</p>
+                                )}
                               </div>
                             </CardContent>
                           </Card>
@@ -697,16 +741,18 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
                             <CardContent className="space-y-2 text-sm">
                               <div className="flex items-center gap-2">
                                 <Phone className="h-4 w-4 text-muted-foreground" />
-                                <span>{patient.phone}</span>
+                                <span>{patientDetail.phone || 'Not provided'}</span>
                               </div>
                               <div className="flex items-center gap-2">
                                 <Mail className="h-4 w-4 text-muted-foreground" />
-                                <span>{patient.email || 'Not provided'}</span>
+                                <span>{patientDetail.email || 'Not provided'}</span>
                               </div>
-                              <div className="flex items-start gap-2">
-                                <MapPin className="h-4 w-4 text-muted-foreground mt-0.5" />
-                                <span>{patient.location || 'Not provided'}</span>
-                              </div>
+                              {patientDetail.state && (
+                                <div className="flex items-start gap-2">
+                                  <MapPin className="h-4 w-4 text-muted-foreground mt-0.5" />
+                                  <span>{patientDetail.state}</span>
+                                </div>
+                              )}
                             </CardContent>
                           </Card>
                         </div>
@@ -718,11 +764,9 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
                       <p className="text-muted-foreground">Loading patient details...</p>
                     </div>
                   )}
-                </TabsContent>
+            </TabsContent>
 
-                {/* VISITS TAB */}
-
-                {/* MEDICATIONS TAB */}
+            {/* TIMELINE TAB */}
 
                 {/* LAB RESULTS TAB */}
 
@@ -730,53 +774,61 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
 
                 {/* PRESCRIPTIONS TAB */}
 
-                {/* TIMELINE TAB */}
-                <TabsContent value="timeline" className="mt-0">
-                  <TimelineTab
-                    visits={visits}
-                    consultationSessions={consultationSessions}
-                    labResults={labResults}
-                    imagingResults={imagingResults}
-                    prescriptions={prescriptions}
-                    vitalSigns={vitalSigns}
-                  />
-                </TabsContent>
+            {/* TIMELINE TAB */}
+            <TabsContent value="timeline" className="flex-1 overflow-y-auto px-6 py-4 mt-0">
+              <TimelineTab
+                visits={visits}
+                consultationSessions={consultationSessions}
+                labResults={labResults}
+                imagingResults={imagingResults}
+                prescriptions={prescriptions}
+                vitalSigns={vitalSigns}
+              />
+            </TabsContent>
 
-                {/* MEDICAL HISTORY TAB */}
-                <TabsContent value="medical-history" className="mt-0">
-                  <MedicalHistoryTab
-                    patientDetail={patientDetail}
-                    visits={visits}
-                    consultationSessions={consultationSessions}
-                    labResults={labResults}
-                    imagingResults={imagingResults}
-                    prescriptions={prescriptions}
-                    vitalSigns={vitalSigns}
-                    historySubTab={historySubTab}
-                    onHistorySubTabChange={setHistorySubTab}
-                    onViewVisit={(visit) => {
-                      setSelectedVisit(visit);
-                      setIsVisitDetailModalOpen(true);
-                    }}
-                  />
-                </TabsContent>
+            {/* MEDICAL HISTORY TAB */}
+            <TabsContent value="medical-history" className="flex-1 overflow-y-auto px-6 py-4 mt-0">
+              <MedicalHistoryTab
+                patientDetail={patientDetail}
+                visits={visits}
+                consultationSessions={consultationSessions}
+                labResults={labResults}
+                imagingResults={imagingResults}
+                prescriptions={prescriptions}
+                vitalSigns={vitalSigns}
+                historySubTab={historySubTab}
+                onHistorySubTabChange={setHistorySubTab}
+                onViewVisit={(visit) => {
+                  setSelectedVisit(visit);
+                  setIsVisitDetailModalOpen(true);
+                }}
+                patientNumericId={patientDetail?.numericId}
+                onAllergiesUpdate={(updatedAllergies) => {
+                  if (patientDetail) {
+                    setPatientDetail({
+                      ...patientDetail,
+                      allergies: updatedAllergies,
+                    });
+                  }
+                  // Reload patient data to get latest history
+                  loadPatientData();
+                }}
+              />
+            </TabsContent>
 
-                {/* CURRENT CARE TAB */}
-                <TabsContent value="current-care" className="mt-0">
-                  <CurrentCareTab
-                    patientDetail={patientDetail}
-                    prescriptions={prescriptions}
-                    labResults={labResults}
-                    imagingResults={imagingResults}
-                    currentCareSubTab={currentCareSubTab}
-                    onCurrentCareSubTabChange={setCurrentCareSubTab}
-                  />
-                </TabsContent>
-
-              </div>
-            </Tabs>
-          )}
-        </div>
+            {/* CURRENT CARE TAB */}
+            <TabsContent value="current-care" className="flex-1 overflow-y-auto px-6 py-4 mt-0">
+              <CurrentCareTab
+                patientDetail={patientDetail}
+                prescriptions={prescriptions}
+                labResults={labResults}
+                imagingResults={imagingResults}
+                currentCareSubTab={currentCareSubTab}
+                onCurrentCareSubTabChange={setCurrentCareSubTab}
+              />
+            </TabsContent>
+          </Tabs>
+        )}
       </DialogContent>
       
       {/* Visit Detail Modal */}

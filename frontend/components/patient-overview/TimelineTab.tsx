@@ -5,6 +5,30 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Calendar, Clock, Stethoscope, TestTube, ScanLine, Pill, Heart, FileText } from 'lucide-react';
 
+// Helper function to normalize date to YYYY-MM-DD format for consistent grouping
+const normalizeDate = (dateString: string | undefined): string => {
+  if (!dateString) return '';
+  try {
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return '';
+    return date.toISOString().split('T')[0];
+  } catch {
+    return '';
+  }
+};
+
+// Helper function to safely parse date
+const safeParseDate = (dateString: string | undefined): Date | null => {
+  if (!dateString) return null;
+  try {
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return null;
+    return date;
+  } catch {
+    return null;
+  }
+};
+
 interface TimelineTabProps {
   visits: any[];
   consultationSessions: any[];
@@ -41,7 +65,7 @@ export function TimelineTab({
       events.push({
         id: `visit-${visit.id}`,
         type: 'visit',
-        date: visit.date,
+        date: normalizeDate(visit.date),
         time: visit.time,
         title: `Visit: ${visit.type}`,
         description: visit.chiefComplaint || visit.diagnosis || visit.notes,
@@ -52,13 +76,14 @@ export function TimelineTab({
 
     // Add consultations
     consultationSessions.forEach((session) => {
+      const consultationDate = session.date || session.created_at;
       events.push({
         id: `consultation-${session.id}`,
         type: 'consultation',
-        date: session.date || session.created_at,
+        date: normalizeDate(consultationDate),
         time: session.time,
         title: 'Consultation Session',
-        description: session.chief_complaint || session.chiefComplaint,
+        description: session.chief_complaint || session.chiefComplaint || session.notes,
         icon: FileText,
         metadata: session,
       });
@@ -69,7 +94,7 @@ export function TimelineTab({
       events.push({
         id: `lab-${lab.id}`,
         type: 'lab',
-        date: lab.date,
+        date: normalizeDate(lab.date),
         title: `Lab Test: ${lab.test}`,
         description: lab.result || 'Pending results',
         icon: TestTube,
@@ -82,9 +107,9 @@ export function TimelineTab({
       events.push({
         id: `imaging-${img.id}`,
         type: 'imaging',
-        date: img.date,
+        date: normalizeDate(img.date),
         title: `Imaging: ${img.type}`,
-        description: img.description || img.result,
+        description: img.description || img.result || 'No description',
         icon: ScanLine,
         metadata: img,
       });
@@ -95,8 +120,8 @@ export function TimelineTab({
       events.push({
         id: `prescription-${rx.id}`,
         type: 'prescription',
-        date: rx.date,
-        title: `Prescription: ${rx.prescriptionId}`,
+        date: normalizeDate(rx.date),
+        title: `Prescription: ${rx.prescriptionId || rx.id}`,
         description: `${rx.medications?.length || 0} medication(s)`,
         icon: Pill,
         metadata: rx,
@@ -108,7 +133,7 @@ export function TimelineTab({
       events.push({
         id: `vital-${vital.id}`,
         type: 'vital',
-        date: vital.date,
+        date: normalizeDate(vital.date),
         time: vital.time,
         title: 'Vital Signs Recorded',
         description: `BP: ${vital.bp} | Pulse: ${vital.pulse} bpm | Temp: ${vital.temp}°C`,
@@ -117,12 +142,15 @@ export function TimelineTab({
       });
     });
 
-    // Sort by date (newest first)
-    return events.sort((a, b) => {
-      const dateA = new Date(a.date).getTime();
-      const dateB = new Date(b.date).getTime();
-      return dateB - dateA;
-    });
+    // Filter out events with invalid dates and sort by date (newest first)
+    return events
+      .filter(event => event.date && safeParseDate(event.date))
+      .sort((a, b) => {
+        const dateA = safeParseDate(a.date);
+        const dateB = safeParseDate(b.date);
+        if (!dateA || !dateB) return 0;
+        return dateB.getTime() - dateA.getTime();
+      });
   }, [visits, consultationSessions, labResults, imagingResults, prescriptions, vitalSigns]);
 
   // Group events by date
@@ -137,9 +165,27 @@ export function TimelineTab({
       groups[dateKey].push(event);
     });
 
+    // Sort events within each group by time (if available), then by type
+    Object.values(groups).forEach(events => {
+      events.sort((a, b) => {
+        // If both have time, sort by time (descending - latest first)
+        if (a.time && b.time) {
+          return b.time.localeCompare(a.time);
+        }
+        // Events with time come before those without
+        if (a.time && !b.time) return -1;
+        if (!a.time && b.time) return 1;
+        // If no time, maintain type order (visits, consultations, labs, etc.)
+        return 0;
+      });
+    });
+
     // Sort groups by date (newest first)
     return Object.entries(groups).sort(([dateA], [dateB]) => {
-      return new Date(dateB).getTime() - new Date(dateA).getTime();
+      const parsedA = safeParseDate(dateA);
+      const parsedB = safeParseDate(dateB);
+      if (!parsedA || !parsedB) return 0;
+      return parsedB.getTime() - parsedA.getTime();
     });
   }, [timelineEvents]);
 
@@ -183,7 +229,6 @@ export function TimelineTab({
 
   return (
     <div className="space-y-6">
-      <div className="space-y-4">
         {groupedEvents.length === 0 ? (
           <Card>
             <CardContent className="py-12 text-center">
@@ -191,18 +236,19 @@ export function TimelineTab({
             </CardContent>
           </Card>
         ) : (
-          groupedEvents.map(([date, events]) => (
+          <div className="space-y-4">
+            {groupedEvents.map(([date, events]) => (
             <div key={date} className="space-y-4">
               {/* Date Header */}
-              <div className="flex items-center gap-3 sticky top-0 bg-background/95 backdrop-blur-sm z-10 py-2">
+              <div className="flex items-center gap-3 sticky top-0 bg-background/95 backdrop-blur-sm z-10 py-2 border-b pb-2">
                 <Calendar className="h-5 w-5 text-muted-foreground" />
                 <h3 className="text-lg font-semibold">
-                  {new Date(date).toLocaleDateString('en-US', {
+                  {safeParseDate(date)?.toLocaleDateString('en-US', {
                     weekday: 'long',
                     year: 'numeric',
                     month: 'long',
                     day: 'numeric',
-                  })}
+                  }) || date}
                 </h3>
                 <Badge variant="outline" className="ml-auto">
                   {events.length} {events.length === 1 ? 'event' : 'events'}
@@ -243,12 +289,17 @@ export function TimelineTab({
                                   {event.time}
                                 </div>
                               )}
-                              {event.type === 'visit' && event.metadata.doctor && (
+                              {event.type === 'visit' && event.metadata.doctor && event.metadata.doctor !== 'Unknown' && (
                                 <p className="text-xs text-muted-foreground mt-1">
                                   Doctor: {event.metadata.doctor}
                                 </p>
                               )}
-                              {event.type === 'prescription' && event.metadata.doctor && (
+                              {event.type === 'consultation' && event.metadata.doctor && event.metadata.doctor !== 'Unknown' && (
+                                <p className="text-xs text-muted-foreground mt-1">
+                                  Doctor: {event.metadata.doctor}
+                                </p>
+                              )}
+                              {event.type === 'prescription' && event.metadata.doctor && event.metadata.doctor !== 'Unknown' && (
                                 <p className="text-xs text-muted-foreground mt-1">
                                   Prescribed by: {event.metadata.doctor}
                                 </p>
@@ -262,9 +313,9 @@ export function TimelineTab({
                 })}
               </div>
             </div>
-          ))
+            ))}
+          </div>
         )}
-      </div>
     </div>
   );
 }
