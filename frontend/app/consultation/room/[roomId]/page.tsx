@@ -23,6 +23,7 @@ import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { getPriorityLabel, getPriorityColor } from '@/lib/utils/priority';
 import { PatientAvatar } from '@/components/PatientAvatar';
+import { VitalsDetailModal } from '@/components/VitalsDetailModal';
 
 // Types
 interface Patient {
@@ -88,29 +89,6 @@ const frequencyToDailyDoses: Record<string, number> = {
 
 const routes = ['Oral', 'Sublingual', 'Topical', 'Inhalation', 'Intramuscular (IM)', 'Intravenous (IV)', 'Subcutaneous (SC)', 'Rectal', 'Ophthalmic', 'Otic'];
 
-// Nursing procedure data
-const injectionMedications = [
-  { name: 'Diclofenac 75mg', category: 'Analgesic/Anti-inflammatory' },
-  { name: 'Tramadol 100mg', category: 'Analgesic' },
-  { name: 'Metoclopramide 10mg', category: 'Antiemetic' },
-  { name: 'Omeprazole 40mg', category: 'PPI' },
-  { name: 'Ceftriaxone 1g', category: 'Antibiotic' },
-  { name: 'Gentamicin 80mg', category: 'Antibiotic' },
-  { name: 'Metronidazole 500mg', category: 'Antibiotic' },
-  { name: 'Hydrocortisone 100mg', category: 'Corticosteroid' },
-  { name: 'Dexamethasone 8mg', category: 'Corticosteroid' },
-  { name: 'Vitamin B Complex', category: 'Vitamin' },
-  { name: 'Vitamin C 500mg', category: 'Vitamin' },
-  { name: 'Artesunate 60mg', category: 'Antimalarial' },
-  { name: 'Quinine 600mg', category: 'Antimalarial' },
-  { name: 'Insulin (Regular)', category: 'Diabetes' },
-  { name: 'Insulin (NPH)', category: 'Diabetes' },
-  { name: 'Tetanus Toxoid (TT)', category: 'Vaccine' },
-  { name: 'Anti-rabies Vaccine', category: 'Vaccine' },
-  { name: 'Furosemide 20mg', category: 'Diuretic' },
-  { name: 'Promethazine 25mg', category: 'Antihistamine' },
-  { name: 'Chlorpheniramine 10mg', category: 'Antihistamine' },
-];
 
 const injectionRoutes = ['Intramuscular (IM)', 'Intravenous (IV)', 'Subcutaneous (SC)', 'Intradermal (ID)'];
 
@@ -288,15 +266,6 @@ const radiologyProcedures = [
   { name: 'Fluoroscopy - Barium Enema', category: 'Fluoroscopy', bodyPart: 'GI Tract' },
 ];
 
-// Demo vitals history for patient
-const demoVitalsHistory = [
-  { date: '2024-11-28', time: '09:15', temperature: '36.8', bloodPressure: '130/85', heartRate: '78', respiratoryRate: '16', oxygenSaturation: '98', weight: '82', height: '175', recordedBy: 'Nurse Adaeze' },
-  { date: '2024-11-15', time: '10:30', temperature: '37.2', bloodPressure: '135/88', heartRate: '82', respiratoryRate: '18', oxygenSaturation: '97', weight: '82.5', height: '175', recordedBy: 'Nurse Funke' },
-  { date: '2024-10-22', time: '14:45', temperature: '36.5', bloodPressure: '128/82', heartRate: '75', respiratoryRate: '16', oxygenSaturation: '99', weight: '83', height: '175', recordedBy: 'Nurse Adaeze' },
-  { date: '2024-09-18', time: '09:00', temperature: '38.1', bloodPressure: '140/92', heartRate: '92', respiratoryRate: '20', oxygenSaturation: '96', weight: '81', height: '175', recordedBy: 'Nurse Bola' },
-  { date: '2024-08-05', time: '11:20', temperature: '36.7', bloodPressure: '125/80', heartRate: '72', respiratoryRate: '15', oxygenSaturation: '98', weight: '82', height: '175', recordedBy: 'Nurse Funke' },
-  { date: '2024-07-12', time: '08:45', temperature: '36.6', bloodPressure: '122/78', heartRate: '70', respiratoryRate: '16', oxygenSaturation: '99', weight: '81.5', height: '175', recordedBy: 'Nurse Adaeze' },
-];
 
 // Patient medical history will be loaded from API
 const demoPatientHistory: any = {
@@ -749,6 +718,95 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     instructions: "",
     priority: "Routine"
   });
+  const [injectionMedications, setInjectionMedications] = useState<Array<{ id: number; name: string; category?: string; strength?: string; generic_name?: string }>>([]);
+  const [loadingInjectionMedications, setLoadingInjectionMedications] = useState(false);
+
+  // Load injection medications from API
+  useEffect(() => {
+    const loadInjectionMedications = async () => {
+      try {
+        setLoadingInjectionMedications(true);
+        // Fetch medications with form filter for injections
+        // Try common injection form variations
+        const formFilters = ['injection', 'injectable', 'injections', 'ampoule', 'vial', 'syringe'];
+        let allMedications: Array<{ id: number; name: string; category?: string; strength?: string; generic_name?: string }> = [];
+        
+        // Try fetching with each form filter
+        for (const form of formFilters) {
+          try {
+            const response = await pharmacyService.getMedications({ 
+              form: form,
+              page_size: 1000 
+            });
+            if (response.results && response.results.length > 0) {
+              allMedications = [
+                ...allMedications,
+                ...response.results
+                  .filter((m: any) => !allMedications.some(existing => existing.id === m.id))
+                  .map((m: any) => ({
+                    id: m.id,
+                    name: m.name,
+                    category: m.category || '',
+                    strength: m.strength || '',
+                    generic_name: m.generic_name || '',
+                  }))
+              ];
+            }
+          } catch (formErr) {
+            // Continue to next form filter
+            continue;
+          }
+        }
+        
+        // If no results from form filters, try fetching all medications and filtering by name/unit
+        if (allMedications.length === 0) {
+          try {
+            const allResponse = await pharmacyService.getMedications({ page_size: 1000 });
+            if (allResponse.results && allResponse.results.length > 0) {
+              // Filter for medications that are likely injections (by unit or name)
+              const injectionKeywords = ['injection', 'inj', 'amp', 'vial', 'ml'];
+              allMedications = allResponse.results
+                .filter((m: any) => {
+                  const nameLower = (m.name || '').toLowerCase();
+                  const unitLower = (m.unit || '').toLowerCase();
+                  const formLower = (m.form || '').toLowerCase();
+                  return injectionKeywords.some(keyword => 
+                    nameLower.includes(keyword) || 
+                    unitLower.includes(keyword) || 
+                    formLower.includes(keyword)
+                  );
+                })
+                .map((m: any) => ({
+                  id: m.id,
+                  name: m.name,
+                  category: m.category || '',
+                  strength: m.strength || '',
+                  generic_name: m.generic_name || '',
+                }));
+            }
+          } catch (allErr) {
+            console.warn('Failed to load all medications:', allErr);
+          }
+        }
+        
+        // Set medications from API (empty array if none found)
+        setInjectionMedications(allMedications);
+        if (allMedications.length > 0) {
+          console.log(`[Nursing Orders] Loaded ${allMedications.length} injection medications from API`);
+        } else {
+          console.warn('[Nursing Orders] No injection medications found in API');
+        }
+      } catch (err) {
+        console.error('Failed to load injection medications:', err);
+        toast.error('Failed to load injection medications. Please try again.');
+        setInjectionMedications([]);
+      } finally {
+        setLoadingInjectionMedications(false);
+      }
+    };
+
+    loadInjectionMedications();
+  }, []);
 
   // Referral state
   const [referrals, setReferrals] = useState<{
@@ -810,6 +868,18 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
   const [selectedPrescription, setSelectedPrescription] = useState<any | null>(null);
   const [showPrescriptionViewer, setShowPrescriptionViewer] = useState(false);
+  
+  // Vitals detail modal state
+  const [selectedVital, setSelectedVital] = useState<any | null>(null);
+  const [isVitalsDetailModalOpen, setIsVitalsDetailModalOpen] = useState(false);
+  const [vitalsHistory, setVitalsHistory] = useState<any[]>([]);
+  const [loadingVitals, setLoadingVitals] = useState(false);
+  
+  // View vitals details
+  const viewVitalsDetails = (vital: any) => {
+    setSelectedVital(vital);
+    setIsVitalsDetailModalOpen(true);
+  };
 
   // History tab filters
   const [sessionDateFilter, setSessionDateFilter] = useState<string>('all');
@@ -1573,6 +1643,41 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           familyHistory: [],
           socialHistory: { smoking: '', alcohol: '', exercise: '', occupation: '' },
         });
+      }
+      
+      // Load vitals history
+      try {
+        setLoadingVitals(true);
+        const vitals = await patientService.getPatientVitals(numericPatientId);
+        // Transform vitals to match the format expected by the UI
+        const transformedVitals = vitals.map((v: any) => ({
+          id: v.id?.toString() || '',
+          date: v.recorded_at ? new Date(v.recorded_at).toLocaleDateString() : '',
+          time: v.recorded_at ? new Date(v.recorded_at).toLocaleTimeString() : '',
+          temperature: v.temperature?.toString() || '',
+          bloodPressure: v.blood_pressure_systolic && v.blood_pressure_diastolic 
+            ? `${v.blood_pressure_systolic}/${v.blood_pressure_diastolic}` 
+            : '',
+          heartRate: v.heart_rate?.toString() || '',
+          respiratoryRate: v.respiratory_rate?.toString() || '',
+          oxygenSaturation: v.oxygen_saturation?.toString() || '',
+          weight: v.weight?.toString() || '',
+          height: v.height?.toString() || '',
+          recordedBy: v.recorded_by_name || 'Unknown',
+          // For VitalsDetailModal
+          recordedAt: v.recorded_at || '',
+          bloodPressureSystolic: v.blood_pressure_systolic?.toString() || '',
+          bloodPressureDiastolic: v.blood_pressure_diastolic?.toString() || '',
+          pulse: v.heart_rate?.toString() || '',
+          bmi: v.bmi?.toString() || '',
+          notes: v.notes || '',
+        }));
+        setVitalsHistory(transformedVitals);
+      } catch (vitalsErr) {
+        console.warn('Could not load vitals:', vitalsErr);
+        setVitalsHistory([]);
+      } finally {
+        setLoadingVitals(false);
       }
       
       toast.success(`Session started with ${patient.name}`);
@@ -3883,7 +3988,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                       </TabsTrigger>
                       <TabsTrigger value="vitals" className="text-xs">
                         <Heart className="h-3 w-3 mr-1" />
-                        Vitals ({demoVitalsHistory.length})
+                        Vitals ({vitalsHistory.length})
                       </TabsTrigger>
                       <TabsTrigger value="background" className="text-xs">
                         <User className="h-3 w-3 mr-1" />
@@ -4394,13 +4499,14 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                     <TabsContent value="vitals" className="mt-4">
                       {(() => {
                         // Filter vitals based on date filter
-                        let filteredVitals = [...demoVitalsHistory];
+                        let filteredVitals = [...vitalsHistory];
                         if (vitalsDateFilter !== 'all') {
                           const days = parseInt(vitalsDateFilter);
                           const cutoffDate = new Date();
                           cutoffDate.setDate(cutoffDate.getDate() - days);
                           filteredVitals = filteredVitals.filter(v => {
-                            const vitalDate = new Date(v.date);
+                            if (!v.recordedAt) return false;
+                            const vitalDate = new Date(v.recordedAt);
                             return vitalDate >= cutoffDate;
                           });
                         }
@@ -4411,93 +4517,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                           (vitalsPage - 1) * vitalsPerPage, 
                           vitalsPage * vitalsPerPage
                         );
-                        // Get most recent vitals for summary
-                        const mostRecentVitals = filteredVitals.length > 0 ? filteredVitals[0] : null;
                         
                         return (
                           <>
-                            {/* Most Recent Vitals Summary */}
-                            {mostRecentVitals && (
-                              <Card className="mb-4 border-rose-200 dark:border-rose-800 bg-gradient-to-r from-rose-50 to-pink-50 dark:from-rose-900/20 dark:to-pink-900/20">
-                                <CardHeader className="pb-3">
-                                  <CardTitle className="text-sm flex items-center gap-2">
-                                    <Heart className="h-4 w-4 text-rose-500" />
-                                    Most Recent Vitals
-                                    <Badge variant="outline" className="ml-auto bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-400">
-                                      {mostRecentVitals.date} • {mostRecentVitals.time}
-                                    </Badge>
-                                  </CardTitle>
-                                </CardHeader>
-                                <CardContent>
-                                  <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
-                                    <div className="text-center p-2 bg-white dark:bg-gray-900 rounded-lg shadow-sm border border-blue-200 dark:border-blue-800">
-                                      <div className="text-xs text-muted-foreground mb-1">Temperature</div>
-                                      <div className={`text-lg font-bold ${
-                                        parseFloat(mostRecentVitals.temperature) > 37.5 ? 'text-red-600' : 
-                                        parseFloat(mostRecentVitals.temperature) < 36.0 ? 'text-blue-600' : 
-                                        'text-blue-600'
-                                      }`}>
-                                        {mostRecentVitals.temperature}°C
-                                      </div>
-                                    </div>
-                                    <div className="text-center p-2 bg-white dark:bg-gray-900 rounded-lg shadow-sm border border-red-200 dark:border-red-800">
-                                      <div className="text-xs text-muted-foreground mb-1">Blood Pressure</div>
-                                      <div className={`text-lg font-bold ${
-                                        parseInt(mostRecentVitals.bloodPressure.split('/')[0]) > 140 || parseInt(mostRecentVitals.bloodPressure.split('/')[1]) > 90 ? 'text-red-600' :
-                                        parseInt(mostRecentVitals.bloodPressure.split('/')[0]) > 130 || parseInt(mostRecentVitals.bloodPressure.split('/')[1]) > 85 ? 'text-amber-600' :
-                                        'text-red-600'
-                                      }`}>
-                                        {mostRecentVitals.bloodPressure}
-                                      </div>
-                                    </div>
-                                    <div className="text-center p-2 bg-white dark:bg-gray-900 rounded-lg shadow-sm border border-pink-200 dark:border-pink-800">
-                                      <div className="text-xs text-muted-foreground mb-1">Heart Rate</div>
-                                      <div className={`text-lg font-bold ${
-                                        parseInt(mostRecentVitals.heartRate) > 100 ? 'text-red-600' : 
-                                        parseInt(mostRecentVitals.heartRate) < 60 ? 'text-blue-600' : 
-                                        'text-pink-600'
-                                      }`}>
-                                        {mostRecentVitals.heartRate} bpm
-                                      </div>
-                                    </div>
-                                    <div className="text-center p-2 bg-white dark:bg-gray-900 rounded-lg shadow-sm border border-cyan-200 dark:border-cyan-800">
-                                      <div className="text-xs text-muted-foreground mb-1">Resp. Rate</div>
-                                      <div className={`text-lg font-bold ${
-                                        parseInt(mostRecentVitals.respiratoryRate) > 20 ? 'text-amber-600' : 
-                                        parseInt(mostRecentVitals.respiratoryRate) < 12 ? 'text-blue-600' : 
-                                        'text-cyan-600'
-                                      }`}>
-                                        {mostRecentVitals.respiratoryRate}/min
-                                      </div>
-                                    </div>
-                                    <div className="text-center p-2 bg-white dark:bg-gray-900 rounded-lg shadow-sm border border-emerald-200 dark:border-emerald-800">
-                                      <div className="text-xs text-muted-foreground mb-1">SpO2</div>
-                                      <div className={`text-lg font-bold ${
-                                        parseInt(mostRecentVitals.oxygenSaturation) < 95 ? 'text-red-600' : 
-                                        parseInt(mostRecentVitals.oxygenSaturation) < 97 ? 'text-amber-600' : 
-                                        'text-emerald-600'
-                                      }`}>
-                                        {mostRecentVitals.oxygenSaturation}%
-                                      </div>
-                                    </div>
-                                    <div className="text-center p-2 bg-white dark:bg-gray-900 rounded-lg shadow-sm border border-purple-200 dark:border-purple-800">
-                                      <div className="text-xs text-muted-foreground mb-1">Weight</div>
-                                      <div className="text-lg font-bold text-purple-600">{mostRecentVitals.weight} kg</div>
-                                    </div>
-                                    <div className="text-center p-2 bg-white dark:bg-gray-900 rounded-lg shadow-sm border border-orange-200 dark:border-orange-800">
-                                      <div className="text-xs text-muted-foreground mb-1">Height</div>
-                                      <div className="text-lg font-bold text-orange-600">{mostRecentVitals.height} cm</div>
-                                    </div>
-                                  </div>
-                                  {mostRecentVitals.recordedBy && (
-                                    <div className="mt-3 text-xs text-muted-foreground text-center">
-                                      Recorded by: <span className="font-medium">{mostRecentVitals.recordedBy}</span>
-                                    </div>
-                                  )}
-                                </CardContent>
-                              </Card>
-                            )}
-                            
                             <div className="flex items-center justify-between mb-3">
                               <select
                                 value={vitalsDateFilter}
@@ -4510,7 +4532,12 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                 <option value="365">Last Year</option>
                               </select>
                             </div>
-                            {paginatedVitals.length === 0 ? (
+                            {loadingVitals ? (
+                              <div className="text-center py-12">
+                                <Loader2 className="h-8 w-8 mx-auto mb-3 animate-spin text-muted-foreground" />
+                                <p className="text-sm text-muted-foreground">Loading vitals...</p>
+                              </div>
+                            ) : paginatedVitals.length === 0 ? (
                               <div className="text-center py-12 bg-gradient-to-b from-muted/30 to-background rounded-lg border-2 border-dashed border-muted">
                                 <Heart className="h-12 w-12 mx-auto mb-3 text-muted-foreground opacity-50" />
                                 <p className="font-medium text-muted-foreground mb-1">No vitals records found</p>
@@ -4521,118 +4548,58 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                 <table className="w-full text-sm">
                                   <thead className="bg-muted/50">
                                     <tr>
-                                      <th className="px-4 py-2 text-left font-medium">Date/Time</th>
-                                      <th className="px-4 py-2 text-center font-medium">Temp (°C)</th>
-                                      <th className="px-4 py-2 text-center font-medium">BP (mmHg)</th>
-                                      <th className="px-4 py-2 text-center font-medium">HR (bpm)</th>
-                                      <th className="px-4 py-2 text-center font-medium">RR (/min)</th>
-                                      <th className="px-4 py-2 text-center font-medium">SpO2 (%)</th>
-                                      <th className="px-4 py-2 text-center font-medium">Weight (kg)</th>
-                                      <th className="px-4 py-2 text-center font-medium">Height (cm)</th>
-                                      <th className="px-4 py-2 text-center font-medium">BMI</th>
+                                      <th className="px-4 py-2 text-left font-medium">Date</th>
+                                      <th className="px-4 py-2 text-left font-medium">Summary</th>
                                       <th className="px-4 py-2 text-left font-medium">Recorded By</th>
+                                      <th className="px-4 py-2 text-center font-medium">Action</th>
                                     </tr>
                                   </thead>
                                   <tbody className="divide-y">
-                                    {paginatedVitals.map((vitals, index) => {
-                                      const globalIndex = (vitalsPage - 1) * vitalsPerPage + index;
-                                      const prevVitals = filteredVitals[globalIndex + 1];
-                                      
-                                      // Calculate BMI if weight and height are available
-                                      const weight = parseFloat(vitals.weight);
-                                      const height = parseFloat(vitals.height);
-                                      const bmi = weight && height ? (weight / ((height / 100) ** 2)).toFixed(1) : null;
-                                      const bmiStatus = bmi ? 
-                                        (parseFloat(bmi) < 18.5 ? 'underweight' : 
-                                         parseFloat(bmi) < 25 ? 'normal' : 
-                                         parseFloat(bmi) < 30 ? 'overweight' : 'obese') : null;
-                                      
-                                      return (
-                                        <tr key={index} className={globalIndex === 0 ? 'bg-rose-50 dark:bg-rose-900/10 border-l-4 border-l-rose-500' : 'hover:bg-muted/30'}>
-                                          <td className="px-4 py-3">
-                                            <div className="font-medium">{vitals.date}</div>
-                                            <div className="text-xs text-muted-foreground">{vitals.time}</div>
-                                          </td>
-                                          <td className="px-4 py-3 text-center">
-                                            <div className="flex items-center justify-center gap-1">
-                                              <span className={
-                                                parseFloat(vitals.temperature) > 37.5 ? 'text-red-600 font-semibold' : 
-                                                parseFloat(vitals.temperature) < 36.0 ? 'text-blue-600 font-semibold' : 
-                                                'text-gray-700 dark:text-gray-300'
-                                              }>
-                                                {vitals.temperature}
-                                              </span>
-                                              {prevVitals && getVitalTrend(vitals.temperature, prevVitals.temperature, 'temp')?.icon}
-                                            </div>
-                                          </td>
-                                          <td className="px-4 py-3 text-center">
-                                            <span className={
-                                              parseInt(vitals.bloodPressure.split('/')[0]) > 140 || parseInt(vitals.bloodPressure.split('/')[1]) > 90 ? 'text-red-600 font-semibold' :
-                                              parseInt(vitals.bloodPressure.split('/')[0]) > 130 || parseInt(vitals.bloodPressure.split('/')[1]) > 85 ? 'text-amber-600 font-medium' :
-                                              'text-gray-700 dark:text-gray-300'
-                                            }>
-                                              {vitals.bloodPressure}
-                                            </span>
-                                          </td>
-                                          <td className="px-4 py-3 text-center">
-                                            <div className="flex items-center justify-center gap-1">
-                                              <span className={
-                                                parseInt(vitals.heartRate) > 100 ? 'text-red-600 font-semibold' : 
-                                                parseInt(vitals.heartRate) < 60 ? 'text-blue-600 font-semibold' : 
-                                                'text-gray-700 dark:text-gray-300'
-                                              }>
-                                                {vitals.heartRate}
-                                              </span>
-                                              {prevVitals && getVitalTrend(vitals.heartRate, prevVitals.heartRate, 'hr')?.icon}
-                                            </div>
-                                          </td>
-                                          <td className="px-4 py-3 text-center">
-                                            <span className={
-                                              parseInt(vitals.respiratoryRate) > 20 ? 'text-amber-600 font-semibold' : 
-                                              parseInt(vitals.respiratoryRate) < 12 ? 'text-blue-600 font-semibold' : 
-                                              'text-gray-700 dark:text-gray-300'
-                                            }>
-                                              {vitals.respiratoryRate}
-                                            </span>
-                                          </td>
-                                          <td className="px-4 py-3 text-center">
-                                            <span className={
-                                              parseInt(vitals.oxygenSaturation) < 95 ? 'text-red-600 font-semibold' : 
-                                              parseInt(vitals.oxygenSaturation) < 97 ? 'text-amber-600 font-medium' : 
-                                              'text-emerald-600 font-medium'
-                                            }>
-                                              {vitals.oxygenSaturation}%
-                                            </span>
-                                          </td>
-                                          <td className="px-4 py-3 text-center text-gray-700 dark:text-gray-300">{vitals.weight}</td>
-                                          <td className="px-4 py-3 text-center text-gray-700 dark:text-gray-300">{vitals.height}</td>
-                                          <td className="px-4 py-3 text-center">
-                                            {bmi ? (
-                                              <Badge 
-                                                variant="outline" 
-                                                className={
-                                                  bmiStatus === 'normal' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400' :
-                                                  bmiStatus === 'underweight' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' :
-                                                  bmiStatus === 'overweight' ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400' :
-                                                  'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400'
-                                                }
-                                              >
-                                                {bmi}
+                                    {paginatedVitals.map((vital) => (
+                                      <tr key={vital.id} className="hover:bg-muted/30">
+                                        <td className="px-4 py-3 text-muted-foreground">
+                                          <div className="font-medium">{vital.date}</div>
+                                          <div className="text-xs text-muted-foreground">{vital.time}</div>
+                                        </td>
+                                        <td className="px-4 py-3">
+                                          <div className="flex flex-wrap gap-2 text-xs">
+                                            {vital.temperature && (
+                                              <Badge variant="outline" className="text-xs">
+                                                T: {vital.temperature}°C
                                               </Badge>
-                                            ) : (
-                                              <span className="text-muted-foreground">—</span>
                                             )}
-                                          </td>
-                                          <td className="px-4 py-3 text-muted-foreground text-sm">{vitals.recordedBy}</td>
-                                        </tr>
-                                      );
-                                    })}
+                                            {vital.bloodPressure && (
+                                              <Badge variant="outline" className="text-xs">
+                                                BP: {vital.bloodPressure}
+                                              </Badge>
+                                            )}
+                                            {vital.heartRate && (
+                                              <Badge variant="outline" className="text-xs">
+                                                HR: {vital.heartRate} bpm
+                                              </Badge>
+                                            )}
+                                            {vital.oxygenSaturation && (
+                                              <Badge variant="outline" className="text-xs">
+                                                SpO2: {vital.oxygenSaturation}%
+                                              </Badge>
+                                            )}
+                                          </div>
+                                        </td>
+                                        <td className="px-4 py-3 text-muted-foreground text-sm">{vital.recordedBy}</td>
+                                        <td className="px-4 py-3 text-center">
+                                          <Button variant="ghost" size="sm" onClick={() => viewVitalsDetails(vital)}>
+                                            <Eye className="h-4 w-4 mr-1" /> View
+                                          </Button>
+                                        </td>
+                                      </tr>
+                                    ))}
                                   </tbody>
                                 </table>
                               </div>
                             )}
                             {/* Pagination */}
-                            <div className="flex flex-col gap-3 border-t border-border/60 pt-3 mt-3 md:flex-row md:items-center md:justify-between">
+                            {totalVitals > 0 && (
+                              <div className="flex flex-col gap-3 border-t border-border/60 pt-3 mt-3 md:flex-row md:items-center md:justify-between">
                               <div className="flex items-center gap-4">
                                 <p className="text-sm text-muted-foreground">
                                   Showing {totalVitals === 0 ? 0 : `${(vitalsPage - 1) * vitalsPerPage + 1}-${Math.min(totalVitals, vitalsPage * vitalsPerPage)}`} of {totalVitals}
@@ -4672,12 +4639,13 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                     );
                                   })}
                                 </div>
-                                <Button variant="outline" size="sm" disabled={vitalsPage >= totalVitalsPages} onClick={() => setVitalsPage(p => p + 1)}>
+                                <Button variant="outline" size="sm" disabled={vitalsPage >= totalVitalsPages || totalVitalsPages === 0} onClick={() => setVitalsPage(p => p + 1)}>
                                   Next
                                   <ChevronRight className="h-4 w-4" />
                                 </Button>
                               </div>
                             </div>
+                            )}
                           </>
                         );
                       })()}
@@ -5522,19 +5490,39 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                 <>
                   <div className="space-y-2">
                     <Label>Medication *</Label>
-                    <Select value={newNursingOrder.medication} onValueChange={(v) => setNewNursingOrder({ ...newNursingOrder, medication: v })}>
-                      <SelectTrigger><SelectValue placeholder="Select medication" /></SelectTrigger>
+                    <Select 
+                      value={newNursingOrder.medication} 
+                      onValueChange={(v) => setNewNursingOrder({ ...newNursingOrder, medication: v })}
+                      disabled={loadingInjectionMedications}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder={loadingInjectionMedications ? "Loading medications..." : "Select medication"} />
+                      </SelectTrigger>
                       <SelectContent className="max-h-[250px]">
-                        {injectionMedications.map(med => (
-                          <SelectItem key={med.name} value={med.name}>
-                            <div className="flex items-center justify-between w-full">
-                              <span>{med.name}</span>
-                              <span className="text-xs text-muted-foreground ml-2">{med.category}</span>
-                            </div>
-                          </SelectItem>
-                        ))}
+                        {injectionMedications.map(med => {
+                          // Format display name: "Name Strength" (e.g., "Diclofenac 75mg")
+                          const displayName = med.strength 
+                            ? `${med.name} ${med.strength}`.trim()
+                            : med.name;
+                          return (
+                            <SelectItem key={med.id || med.name} value={displayName}>
+                              <div className="flex items-center justify-between w-full">
+                                <span>{displayName}</span>
+                                {med.category && (
+                                  <span className="text-xs text-muted-foreground ml-2">{med.category}</span>
+                                )}
+                              </div>
+                            </SelectItem>
+                          );
+                        })}
+                        {injectionMedications.length === 0 && !loadingInjectionMedications && (
+                          <SelectItem value="" disabled>No medications available</SelectItem>
+                        )}
                       </SelectContent>
                     </Select>
+                    {loadingInjectionMedications && (
+                      <p className="text-xs text-muted-foreground">Loading medications from database...</p>
+                    )}
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
@@ -7179,6 +7167,14 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        {/* Vitals Detail Modal */}
+        <VitalsDetailModal
+          isOpen={isVitalsDetailModalOpen}
+          onClose={() => setIsVitalsDetailModalOpen(false)}
+          vitals={selectedVital}
+          patientName={currentPatient?.name || 'Patient'}
+        />
       </div>
     </DashboardLayout>
   );
