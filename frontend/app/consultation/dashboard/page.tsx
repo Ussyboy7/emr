@@ -192,7 +192,7 @@ export default function DoctorDashboardPage() {
                   <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">{safeStats.today.sessions}</p>
                 </div>
                 <div className="flex items-center justify-center gap-1 mb-1">
-                  <p className="text-xs text-muted-foreground">Sessions</p>
+                  <p className="text-xs text-muted-foreground">Consultations</p>
                   {safeStats.today.sessions > 0 && (
                     <div className="flex items-center text-xs text-green-600 dark:text-green-400">
                       <TrendingUp className="h-3 w-3" />
@@ -225,7 +225,7 @@ export default function DoctorDashboardPage() {
                   <Timer className="h-5 w-5 text-purple-500 mr-2" />
                   <p className="text-2xl font-bold text-purple-600 dark:text-purple-400">{safeStats.today.avg_duration}</p>
                 </div>
-                <p className="text-xs text-muted-foreground">Avg Min</p>
+                <p className="text-xs text-muted-foreground">Avg</p>
               </CardContent>
             </Card>
             <Card className="border-l-4 border-l-pink-500">
@@ -269,7 +269,7 @@ export default function DoctorDashboardPage() {
                   <BarChart3 className="h-5 w-5 text-blue-500" />
                   This Week's Activity
                 </CardTitle>
-                <CardDescription>{safeStats.week.sessions} sessions • {safeStats.week.patients} patients</CardDescription>
+                <CardDescription>{safeStats.week.sessions} consultations • {safeStats.week.patients} patients</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="space-y-3">
@@ -307,7 +307,7 @@ export default function DoctorDashboardPage() {
                   <div className="grid grid-cols-2 gap-4">
                     <div className="text-center p-3 bg-purple-50 dark:bg-purple-900/20 rounded-lg">
                       <p className="text-2xl font-bold text-purple-600 dark:text-purple-400">{safeStats.month.sessions}</p>
-                      <p className="text-xs text-muted-foreground">Sessions</p>
+                      <p className="text-xs text-muted-foreground">Consultations</p>
                     </div>
                     <div className="text-center p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
                       <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">{safeStats.month.patients}</p>
@@ -441,7 +441,7 @@ export default function DoctorDashboardPage() {
                 ) : (
                   <div className="text-center py-8">
                     <Clock className="h-8 w-8 mx-auto mb-2 text-muted-foreground/50" />
-                    <p className="text-muted-foreground text-sm mb-2">No recent sessions today</p>
+                    <p className="text-muted-foreground text-sm mb-2">No recent consultations today</p>
                     <Link href="/consultation/start">
                       <Button variant="outline" size="sm">
                         <Play className="h-3 w-3 mr-2" />
