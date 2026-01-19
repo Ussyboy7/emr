@@ -184,7 +184,7 @@ export default function DoctorDashboardPage() {
             <Calendar className="h-5 w-5 text-blue-500" />
             Today's Overview
           </h2>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
             <Card className="border-l-4 border-l-blue-500">
               <CardContent className="p-4 text-center">
                 <div className="flex items-center justify-center mb-2">
@@ -217,15 +217,6 @@ export default function DoctorDashboardPage() {
                     </div>
                   )}
                 </div>
-              </CardContent>
-            </Card>
-            <Card className="border-l-4 border-l-purple-500">
-              <CardContent className="p-4 text-center">
-                <div className="flex items-center justify-center mb-2">
-                  <Timer className="h-5 w-5 text-purple-500 mr-2" />
-                  <p className="text-2xl font-bold text-purple-600 dark:text-purple-400">{safeStats.today.avg_duration}</p>
-                </div>
-                <p className="text-xs text-muted-foreground">Avg</p>
               </CardContent>
             </Card>
             <Card className="border-l-4 border-l-pink-500">
