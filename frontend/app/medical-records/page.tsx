@@ -5,18 +5,11 @@ import { DashboardLayout } from '@/components/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import {
-  MetricCard,
-  StatusBadge,
-  LoadingState,
-  EmptyState,
-  PageHeader,
-} from "@/components/ui/design-system";
 import Link from 'next/link';
 import { patientService, visitService, wardService } from '@/lib/services';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
-import { 
+import {
   FileText,
   Search,
   Plus,
@@ -33,7 +26,8 @@ import {
   Bed,
   Hospital,
   UserCheck,
-  UserX
+  UserX,
+  TrendingUp
 } from 'lucide-react';
 
 const quickActions = [
@@ -198,27 +192,44 @@ export default function MedicalRecordsPage() {
 
   return (
     <DashboardLayout>
-      <PageHeader
-        title="Medical Records Department"
-        description="Comprehensive patient records management with visits, diagnoses, and medical history"
-        icon={<FileText className="h-6 w-6" />}
-        actions={
-          <div className="flex gap-2">
-            <Button variant="outline" asChild>
-              <Link href="/medical-records/patients">
-                <Search className="h-4 w-4 mr-2" />
-                Find Patient
-              </Link>
-            </Button>
-            <Button asChild>
-              <Link href="/medical-records/patients/new">
-                <Plus className="h-4 w-4 mr-2" />
-                Register Patient
-              </Link>
-            </Button>
-          </div>
-        }
-      />
+      <div className="container mx-auto p-6 space-y-6">
+        {/* Header */}
+        <Card className="bg-gradient-to-r from-blue-500 to-indigo-600 text-white border-0">
+          <CardContent className="p-6">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="flex items-center gap-4">
+                <div className="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center">
+                  <FileText className="h-8 w-8 text-white" />
+                </div>
+                <div>
+                  <h1 className="text-2xl font-bold">Medical Records Department</h1>
+                  <p className="text-blue-100">Comprehensive patient records management with visits, diagnoses, and medical history</p>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  className="border-white text-white hover:bg-white/20"
+                  asChild
+                >
+                  <Link href="/medical-records/patients">
+                    <Search className="h-4 w-4 mr-2" />
+                    Find Patient
+                  </Link>
+                </Button>
+                <Button
+                  className="bg-white text-blue-600 hover:bg-blue-50"
+                  asChild
+                >
+                  <Link href="/medical-records/patients/new">
+                    <Plus className="h-4 w-4 mr-2" />
+                    Register Patient
+                  </Link>
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
 
       <div className="container mx-auto p-6 space-y-6">
 
@@ -242,36 +253,84 @@ export default function MedicalRecordsPage() {
           </h2>
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
             {loading ? (
-              <>
-                <MetricCard title="Total Patients" value={0} icon={<Users className="h-4 w-4" />} isLoading />
-                <MetricCard title="Active Visits Today" value={0} icon={<Activity className="h-4 w-4" />} isLoading />
-                <MetricCard title="Current Admissions" value={0} icon={<Hospital className="h-4 w-4" />} isLoading />
-                <MetricCard title="Ward Beds Available" value={0} icon={<Bed className="h-4 w-4" />} isLoading />
-              </>
+              Array.from({ length: 4 }).map((_, i) => (
+                <Card key={i}>
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-muted-foreground">Loading...</p>
+                        <p className="text-3xl font-bold mt-1"><Loader2 className="h-8 w-8 animate-spin" /></p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))
             ) : (
               <>
-                <MetricCard
-                  title="Total Patients"
-                  value={totalPatients}
-                  icon={<Users className="h-4 w-4" />}
-                  trend={{ value: Math.round((totalPatients / Math.max(totalPatients * 0.95, 1)) * 100 - 100), isPositive: true }}
-                />
-                <MetricCard
-                  title="Active Visits Today"
-                  value={activeVisitsToday}
-                  icon={<Activity className="h-4 w-4" />}
-                  trend={{ value: Math.round((activeVisitsToday / Math.max(activeVisitsToday * 0.9, 1)) * 100 - 100), isPositive: true }}
-                />
-                <MetricCard
-                  title="Current Admissions"
-                  value={admissions}
-                  icon={<Hospital className="h-4 w-4" />}
-                />
-                <MetricCard
-                  title="Ward Beds Available"
-                  value={wards.reduce((acc, ward) => acc + (ward.available_beds || 0), 0)}
-                  icon={<Bed className="h-4 w-4" />}
-                />
+                <Card className="border-l-4 border-l-blue-500">
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-muted-foreground">Total Patients</p>
+                        <div className="flex items-center gap-2 mt-1">
+                          <Users className="h-5 w-5 text-blue-500" />
+                          <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">{totalPatients}</p>
+                        </div>
+                        {totalPatients > 0 && (
+                          <div className="flex items-center text-xs text-green-600 dark:text-green-400 mt-1">
+                            <TrendingUp className="h-3 w-3 mr-1" />
+                            +{Math.round((totalPatients / Math.max(totalPatients * 0.95, 1)) * 100 - 100)}%
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+                <Card className="border-l-4 border-l-emerald-500">
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-muted-foreground">Active Visits Today</p>
+                        <div className="flex items-center gap-2 mt-1">
+                          <Activity className="h-5 w-5 text-emerald-500" />
+                          <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{activeVisitsToday}</p>
+                        </div>
+                        {activeVisitsToday > 0 && (
+                          <div className="flex items-center text-xs text-green-600 dark:text-green-400 mt-1">
+                            <TrendingUp className="h-3 w-3 mr-1" />
+                            +{Math.round((activeVisitsToday / Math.max(activeVisitsToday * 0.9, 1)) * 100 - 100)}%
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+                <Card className="border-l-4 border-l-rose-500">
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-muted-foreground">Current Admissions</p>
+                        <div className="flex items-center gap-2 mt-1">
+                          <Hospital className="h-5 w-5 text-rose-500" />
+                          <p className="text-2xl font-bold text-rose-600 dark:text-rose-400">{admissions}</p>
+                        </div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+                <Card className="border-l-4 border-l-cyan-500">
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-muted-foreground">Ward Beds Available</p>
+                        <div className="flex items-center gap-2 mt-1">
+                          <Bed className="h-5 w-5 text-cyan-500" />
+                          <p className="text-2xl font-bold text-cyan-600 dark:text-cyan-400">{wards.reduce((acc, ward) => acc + (ward.available_beds || 0), 0)}</p>
+                        </div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
               </>
             )}
           </div>
@@ -301,6 +360,7 @@ export default function MedicalRecordsPage() {
               </Card>
             </Link>
           ))}
+          </div>
         </div>
 
         <div className="grid gap-6 lg:grid-cols-2">
@@ -585,6 +645,8 @@ export default function MedicalRecordsPage() {
             </CardContent>
           </Card>
         )}
+        </div>
+      </div>
       </div>
     </DashboardLayout>
   );
