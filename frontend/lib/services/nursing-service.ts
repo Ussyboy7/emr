@@ -88,7 +88,7 @@ class NursingService {
 
       // High priority alerts from active visits
       activeVisits.slice(0, 2).forEach((visit, index) => {
-        if (visit.priority === 'emergency' || visit.priority === 'urgent') {
+        if (visit.visit_type === 'emergency') {
           alerts.push({
             id: `visit-${visit.id}`,
             patient: visit.patient_name || `Patient ${visit.patient}`,
@@ -105,7 +105,7 @@ class NursingService {
         alerts.push({
           id: `admission-${admission.id}`,
           patient: admission.patient_name || `Patient ${admission.patient}`,
-          room: admission.ward_name || `Room ${admission.room_number || 'Unknown'}`,
+          room: admission.ward_name || `Bed ${admission.bed_number || 'Unknown'}`,
           alert: 'Post-admission monitoring required',
           time: '15 min ago',
           priority: 'medium'
@@ -135,7 +135,7 @@ class NursingService {
           type: this.mapVisitTypeToActivityType(visit.visit_type || 'consultation'),
           patient: visit.patient_name || `Patient ${visit.patient}`,
           action: this.getActivityDescription(visit),
-          time: this.getRelativeTime(visit.created_at),
+          time: this.getRelativeTime(`${visit.date}T${visit.time || '00:00:00'}`),
           status: this.mapVisitStatusToActivityStatus(visit.status)
         }));
 

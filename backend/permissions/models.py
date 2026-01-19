@@ -26,8 +26,8 @@ class Role(models.Model):
     description = models.TextField(blank=True)
     
     # Permissions - stored as JSON for flexibility
-    # Format: {"module": ["page1", "page2"], ...}
-    permissions = models.JSONField(default=dict, blank=True, help_text="Module and page permissions")
+    # Format: ["/page1", "/page2", "/module/page3"] - list of allowed page URLs
+    permissions = models.JSONField(default=list, blank=True, help_text="List of allowed page URLs")
     
     is_active = models.BooleanField(default=True, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -41,23 +41,40 @@ class Role(models.Model):
         return self.name
     
     def has_permission(self, module: str, page: str = None) -> bool:
-        """Check if role has permission for a module/page."""
+        """Check if role has permission for a page."""
         if not self.is_active:
             return False
-        
+
         # Admin type has all permissions
         if self.type == 'admin':
             return True
-        
-        # Check module permissions
-        if module in self.permissions:
-            module_perms = self.permissions[module]
-            # If page is specified, check if it's in the list or if '*' (all) is present
-            if page:
-                return '*' in module_perms or page in module_perms
-            # If no page specified, check if module has any permissions
-            return len(module_perms) > 0
-        
+
+        # Check if the specific page URL is in the allowed pages list
+        allowed_pages = self.permissions or []
+        if isinstance(allowed_pages, list):
+            # Check exact page match
+            if page and page in allowed_pages:
+                return True
+            # Check if module dashboard is allowed (for module-level access)
+            module_dashboard = f"/{module.lower().replace(' ', '-')}"
+            if module_dashboard in allowed_pages:
+                return True
+
+        return False
+
+    def has_page_access(self, page_url: str) -> bool:
+        """Check if role has access to a specific page URL."""
+        if not self.is_active:
+            return False
+
+        # Admin type has all permissions
+        if self.type == 'admin':
+            return True
+
+        allowed_pages = self.permissions or []
+        if isinstance(allowed_pages, list):
+            return page_url in allowed_pages
+
         return False
 
 

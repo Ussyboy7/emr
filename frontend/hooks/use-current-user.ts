@@ -32,6 +32,8 @@ const mapApiUserToUser = (data: any): User => {
     division: toOptionalString(data.division ?? data.division_id),
     department: toOptionalString(data.department ?? data.department_id),
     systemRole: roleName, // Use role name for display
+    permissions: data.permissions?.pages || [],
+    permissionActions: data.permissions?.actions || {},
     avatar: undefined,
     active: data.is_active ?? true,
     isSuperuser: data.is_superuser ?? false,
@@ -59,6 +61,8 @@ export const useCurrentUser = () => {
             employeeId: demoUser.employeeId,
             gradeLevel: demoUser.gradeLevel,
             systemRole: demoUser.systemRole,
+            permissions: demoUser.permissions?.pages || [],
+            permissionActions: demoUser.permissions?.actions || {},
             isSuperuser: demoUser.isSuperuser,
             directorate: demoUser.directorate,
             division: demoUser.division,
@@ -115,6 +119,8 @@ export const useCurrentUser = () => {
       department: orgMatch.department ?? remoteUser.department,
       systemRole: remoteUser.systemRole || orgMatch.systemRole,
       gradeLevel: remoteUser.gradeLevel || orgMatch.gradeLevel,
+      permissions: remoteUser.permissions,
+      permissionActions: remoteUser.permissionActions,
       active: orgMatch.active,
       // Preserve isSuperuser from remoteUser (API) as it's the source of truth
       isSuperuser: remoteUser.isSuperuser ?? orgMatch.isSuperuser ?? false,

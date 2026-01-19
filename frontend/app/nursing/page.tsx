@@ -12,7 +12,7 @@ import {
   Heart, Thermometer, Syringe, ClipboardList, Users,
   Clock, CheckCircle2, Activity, ArrowRight, DoorOpen, FileCheck,
   AlertTriangle, Zap, UserCheck, Pill, Stethoscope,
-  Loader2, TrendingUp
+  Loader2, TrendingUp, FileText
 } from 'lucide-react';
 import { nursingService } from '@/lib/services';
 

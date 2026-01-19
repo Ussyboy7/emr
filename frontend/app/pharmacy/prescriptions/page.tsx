@@ -163,7 +163,6 @@ export default function PrescriptionsPage() {
 
   // Load prescriptions from API
   useEffect(() => {
-    console.log('Loading prescriptions due to dependency change:', { currentPage, itemsPerPage, statusFilter });
     loadPrescriptions();
   }, [currentPage, itemsPerPage, statusFilter]);
 
@@ -226,7 +225,6 @@ export default function PrescriptionsPage() {
   const loadPrescriptions = async () => {
     // Prevent concurrent calls
     if (isLoadingPrescriptions) {
-      console.log('Skipping loadPrescriptions - already loading');
       return;
     }
 
@@ -807,23 +805,22 @@ export default function PrescriptionsPage() {
       setDispenseNotes('');
       setSelectedBatches({});
 
-      // Reload prescriptions to get updated status
-      console.log('Reloading prescriptions after dispense...');
-      await loadPrescriptions();
-      console.log('Prescriptions reloaded successfully');
-
-      // Also force a status recalculation on the backend
+      // Force a status recalculation on the backend first
       try {
         if (selectedPrescription?.id) {
+          console.log('🔄 Recalculating prescription status on backend...');
           await pharmacyService.recalculatePrescriptionStatus(selectedPrescription.id);
+          console.log('✅ Prescription status recalculated on backend');
         }
-        console.log('Prescription status recalculated on backend');
-        // Reload again to get the recalculated status
-        await loadPrescriptions();
       } catch (recalcError) {
-        console.warn('Status recalculation failed:', recalcError);
-        // Continue anyway - the reload above should be sufficient
+        console.warn('⚠️ Status recalculation failed:', recalcError);
+        // Continue anyway
       }
+
+      // Single reload after both dispensing and recalculation
+      console.log('🔄 Reloading prescriptions after dispense and recalculation...');
+      await loadPrescriptions();
+      console.log('✅ Prescriptions reloaded successfully');
     } catch (err: any) {
       const errorMessage = err.message || 'Failed to dispense medications';
       toast.error(errorMessage);

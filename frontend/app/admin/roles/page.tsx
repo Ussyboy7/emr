@@ -32,60 +32,96 @@ interface Role {
   name: string;
   description: string;
   type: 'System' | 'Clinical' | 'Administrative' | 'Custom';
-  permissions: string[];
+  permissions: string[]; // Now contains page URLs instead of permission IDs
   userCount: number;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
 }
 
-const allPermissions: Permission[] = [
-  { id: 'patient_view', name: 'View Patients', description: 'View patient records', module: 'Medical Records' },
-  { id: 'patient_create', name: 'Register Patients', description: 'Register new patients', module: 'Medical Records' },
-  { id: 'patient_edit', name: 'Edit Patients', description: 'Edit patient information', module: 'Medical Records' },
-  { id: 'patient_delete', name: 'Delete Patients', description: 'Delete patient records', module: 'Medical Records' },
-  { id: 'visit_view', name: 'View Visits', description: 'View visit records', module: 'Medical Records' },
-  { id: 'visit_create', name: 'Create Visits', description: 'Create new visits', module: 'Medical Records' },
-  { id: 'visit_edit', name: 'Edit Visits', description: 'Edit visit information', module: 'Medical Records' },
-  { id: 'reports_view', name: 'View Reports', description: 'View medical reports', module: 'Medical Records' },
-  { id: 'reports_generate', name: 'Generate Reports', description: 'Generate medical reports', module: 'Medical Records' },
-  { id: 'consultation_view', name: 'View Consultations', description: 'View consultation records', module: 'Consultation' },
-  { id: 'consultation_start', name: 'Start Consultation', description: 'Start consultation sessions', module: 'Consultation' },
-  { id: 'consultation_prescribe', name: 'Prescribe Medications', description: 'Write prescriptions', module: 'Consultation' },
-  { id: 'consultation_diagnosis', name: 'Add Diagnosis', description: 'Add diagnosis to patient records', module: 'Consultation' },
-  { id: 'consultation_lab_order', name: 'Order Lab Tests', description: 'Order laboratory tests', module: 'Consultation' },
-  { id: 'consultation_radiology_order', name: 'Order Imaging', description: 'Order radiology studies', module: 'Consultation' },
-  { id: 'consultation_referral', name: 'Make Referrals', description: 'Refer patients to specialists', module: 'Consultation' },
-  { id: 'consultation_nursing_order', name: 'Order Nursing Procedures', description: 'Order nursing procedures', module: 'Consultation' },
-  { id: 'nursing_vitals', name: 'Record Vitals', description: 'Record patient vital signs', module: 'Nursing' },
-  { id: 'nursing_triage', name: 'Triage Patients', description: 'Perform patient triage', module: 'Nursing' },
-  { id: 'nursing_administer', name: 'Administer Medications', description: 'Administer medications to patients', module: 'Nursing' },
-  { id: 'nursing_procedures', name: 'Perform Procedures', description: 'Perform nursing procedures', module: 'Nursing' },
-  { id: 'nursing_notes', name: 'Write Nursing Notes', description: 'Document nursing notes', module: 'Nursing' },
-  { id: 'nursing_queue', name: 'Manage Queue', description: 'Manage nursing queue', module: 'Nursing' },
-  { id: 'lab_orders_view', name: 'View Lab Orders', description: 'View laboratory orders', module: 'Laboratory' },
-  { id: 'lab_collect', name: 'Collect Specimens', description: 'Collect lab specimens', module: 'Laboratory' },
-  { id: 'lab_process', name: 'Process Tests', description: 'Process laboratory tests', module: 'Laboratory' },
-  { id: 'lab_results', name: 'Enter Results', description: 'Enter lab results', module: 'Laboratory' },
-  { id: 'lab_verify', name: 'Verify Results', description: 'Verify lab results', module: 'Laboratory' },
-  { id: 'lab_templates', name: 'Manage Templates', description: 'Manage test templates', module: 'Laboratory' },
-  { id: 'pharmacy_view', name: 'View Prescriptions', description: 'View prescription queue', module: 'Pharmacy' },
-  { id: 'pharmacy_dispense', name: 'Dispense Medications', description: 'Dispense medications', module: 'Pharmacy' },
-  { id: 'pharmacy_inventory', name: 'Manage Inventory', description: 'Manage drug inventory', module: 'Pharmacy' },
-  { id: 'pharmacy_substitute', name: 'Substitute Drugs', description: 'Substitute medications', module: 'Pharmacy' },
-  { id: 'radiology_view', name: 'View Studies', description: 'View radiology studies', module: 'Radiology' },
-  { id: 'radiology_perform', name: 'Perform Studies', description: 'Perform imaging studies', module: 'Radiology' },
-  { id: 'radiology_report', name: 'Write Reports', description: 'Write radiology reports', module: 'Radiology' },
-  { id: 'radiology_verify', name: 'Verify Reports', description: 'Verify radiology reports', module: 'Radiology' },
-  { id: 'admin_users', name: 'Manage Users', description: 'Manage user accounts', module: 'Administration' },
-  { id: 'admin_roles', name: 'Manage Roles', description: 'Manage roles and permissions', module: 'Administration' },
-  { id: 'admin_rooms', name: 'Manage Rooms', description: 'Manage consultation rooms', module: 'Administration' },
-  { id: 'admin_clinics', name: 'Manage Clinics', description: 'Manage clinic settings', module: 'Administration' },
-  { id: 'admin_settings', name: 'System Settings', description: 'Access system settings', module: 'Administration' },
-  { id: 'admin_audit', name: 'View Audit Trail', description: 'View audit logs', module: 'Administration' },
+// Page-based permissions instead of action-based
+interface PagePermission {
+  id: string; // Page URL
+  name: string;
+  description: string;
+  module: string;
+}
+
+const allPagePermissions: PagePermission[] = [
+  // Medical Records
+  { id: '/medical-records', name: 'Dashboard', description: 'Medical Records Dashboard', module: 'Medical Records' },
+  { id: '/medical-records/patients/new', name: 'Register Patient', description: 'Register new patients', module: 'Medical Records' },
+  { id: '/medical-records/patients', name: 'Manage Patients', description: 'View and manage patient records', module: 'Medical Records' },
+  { id: '/medical-records/visits/new', name: 'Create Visit', description: 'Create new patient visits', module: 'Medical Records' },
+  { id: '/medical-records/visits', name: 'Manage Visits', description: 'View and manage patient visits', module: 'Medical Records' },
+  { id: '/medical-records/appointments', name: 'Appointments', description: 'Manage patient appointments', module: 'Medical Records' },
+  { id: '/medical-records/dependents', name: 'Manage Dependents', description: 'Manage patient dependents', module: 'Medical Records' },
+  { id: '/medical-records/reports', name: 'Reports', description: 'View and generate reports', module: 'Medical Records' },
+
+  // Nursing
+  { id: '/nursing', name: 'Dashboard', description: 'Nursing Dashboard', module: 'Nursing' },
+  { id: '/nursing/pool-queue', name: 'Pool Queue', description: 'Manage nursing pool queue', module: 'Nursing' },
+  { id: '/nursing/room-queue', name: 'Room Queue', description: 'Manage nursing room queue', module: 'Nursing' },
+  { id: '/nursing/patient-vitals', name: 'Patient Vitals', description: 'Record patient vital signs', module: 'Nursing' },
+  { id: '/nursing/procedures', name: 'Procedures', description: 'Perform nursing procedures', module: 'Nursing' },
+  { id: '/nursing/procedures/history', name: 'Procedures History', description: 'View procedures history', module: 'Nursing' },
+  { id: '/nursing/wards', name: 'Ward Management', description: 'Manage ward operations', module: 'Nursing' },
+
+  // Consultation
+  { id: '/consultation/dashboard', name: 'My Dashboard', description: 'Consultation Dashboard', module: 'Consultation' },
+  { id: '/consultation/start', name: 'Start Consultation', description: 'Start consultation sessions', module: 'Consultation' },
+  { id: '/consultation/history', name: 'Consultation History', description: 'View consultation history', module: 'Consultation' },
+  { id: '/consultation/wards', name: 'Ward Overview', description: 'View ward overview', module: 'Consultation' },
+  { id: '/consultation/referrals', name: 'Referrals', description: 'Manage patient referrals', module: 'Consultation' },
+
+  // Laboratory
+  { id: '/laboratory', name: 'Dashboard', description: 'Laboratory Dashboard', module: 'Laboratory' },
+  { id: '/laboratory/orders', name: 'Lab Orders', description: 'View laboratory orders', module: 'Laboratory' },
+  { id: '/laboratory/verification', name: 'Results Verification', description: 'Verify lab results', module: 'Laboratory' },
+  { id: '/laboratory/completed', name: 'Completed Tests', description: 'View completed tests', module: 'Laboratory' },
+  { id: '/laboratory/templates', name: 'Test Templates', description: 'Manage test templates', module: 'Laboratory' },
+
+  // Pharmacy
+  { id: '/pharmacy', name: 'Dashboard', description: 'Pharmacy Dashboard', module: 'Pharmacy' },
+  { id: '/pharmacy/prescriptions', name: 'Prescriptions', description: 'View and manage prescriptions', module: 'Pharmacy' },
+  { id: '/pharmacy/history', name: 'Dispense History', description: 'View dispense history', module: 'Pharmacy' },
+  { id: '/pharmacy/inventory', name: 'Inventory', description: 'Manage drug inventory', module: 'Pharmacy' },
+
+  // Radiology
+  { id: '/radiology', name: 'Dashboard', description: 'Radiology Dashboard', module: 'Radiology' },
+  { id: '/radiology/orders', name: 'Study Orders', description: 'View radiology orders', module: 'Radiology' },
+  { id: '/radiology/verification', name: 'Results Verification', description: 'Verify radiology results', module: 'Radiology' },
+  { id: '/radiology/completed', name: 'Completed Studies', description: 'View completed studies', module: 'Radiology' },
+  { id: '/radiology/templates', name: 'Study Templates', description: 'Manage study templates', module: 'Radiology' },
+
+  // Physiotherapy
+  { id: '/physiotherapy', name: 'Dashboard', description: 'Physiotherapy Dashboard', module: 'Physiotherapy' },
+  { id: '/physiotherapy/pool-queue', name: 'Pool Queue', description: 'Manage physiotherapy pool queue', module: 'Physiotherapy' },
+  { id: '/physiotherapy/completed', name: 'Completed Sessions', description: 'View completed sessions', module: 'Physiotherapy' },
+
+  // Analytics
+  { id: '/analytics', name: 'Clinical Reports', description: 'View clinical reports', module: 'Analytics' },
+  { id: '/analytics/executive', name: 'Executive Dashboard', description: 'Executive analytics dashboard', module: 'Analytics' },
+
+  // Administration
+  { id: '/admin', name: 'Dashboard', description: 'Administration Dashboard', module: 'Administration' },
+  { id: '/admin/users', name: 'User Management', description: 'Manage user accounts', module: 'Administration' },
+  { id: '/admin/roles', name: 'Roles & Permissions', description: 'Manage roles and permissions', module: 'Administration' },
+  { id: '/admin/clinics', name: 'Clinics & Departments', description: 'Manage clinics and departments', module: 'Administration' },
+  { id: '/admin/rooms', name: 'Room Management', description: 'Manage consultation rooms', module: 'Administration' },
+  { id: '/admin/settings', name: 'System Settings', description: 'Access system settings', module: 'Administration' },
+  { id: '/admin/audit', name: 'Audit Trail', description: 'View audit logs', module: 'Administration' },
 ];
 
-const permissionModules = [...new Set(allPermissions.map(p => p.module))];
+// Legacy permission mapping for backward compatibility
+const allPermissions: Permission[] = allPagePermissions.map(page => ({
+  id: page.id,
+  name: page.name,
+  description: page.description,
+  module: page.module,
+}));
+
+const pageModules = [...new Set(allPagePermissions.map(p => p.module))];
 const roleTypes = ['All Types', 'System', 'Clinical', 'Administrative', 'Custom'];
 
 export default function RolesPermissionsPage() {
@@ -126,84 +162,26 @@ export default function RolesPermissionsPage() {
 
   // Convert permissions from backend JSON format to frontend array format
   const convertPermissionsFromBackend = (backendPerms: any): string[] => {
+    // Backend now sends permissions as {pages: [...], actions: {...}}
+    if (backendPerms && typeof backendPerms === 'object' && backendPerms.pages) {
+      // New format: return the pages array directly
+      return Array.isArray(backendPerms.pages) ? backendPerms.pages : [];
+    }
+
+    // Fallback: if it's an array, return it directly (old format compatibility)
     if (Array.isArray(backendPerms)) {
       return backendPerms;
     }
-    if (typeof backendPerms === 'object' && backendPerms !== null) {
-      // Backend stores as {module: [pages]}, convert to flat array of permission IDs
-      const permIds: string[] = [];
-      Object.keys(backendPerms).forEach(module => {
-        const pages = backendPerms[module];
-        if (Array.isArray(pages)) {
-          pages.forEach(page => {
-            // Try to find matching permission by constructing ID
-            // Backend format: {"Medical Records": ["view", "create"]}
-            // Frontend format: ["patient_view", "patient_create"]
-            const moduleName = module.toLowerCase().replace(/\s+/g, '_');
-            const pageName = page.toLowerCase().replace(/\s+/g, '_');
-            
-            // Try exact match first
-            const exactMatch = allPermissions.find(p => 
-              p.id === `${moduleName}_${pageName}` || 
-              p.id === pageName ||
-              (p.module.toLowerCase() === module.toLowerCase() && p.id.includes(pageName))
-            );
-            
-            if (exactMatch) {
-              if (!permIds.includes(exactMatch.id)) {
-                permIds.push(exactMatch.id);
-              }
-            } else {
-              // Fallback: try to match by module and page name pattern
-              const modulePerms = allPermissions.filter(p => 
-                p.module.toLowerCase() === module.toLowerCase()
-              );
-              const matched = modulePerms.find(p => {
-                const permIdParts = p.id.split('_');
-                return permIdParts.includes(pageName) || permIdParts[permIdParts.length - 1] === pageName;
-              });
-              if (matched && !permIds.includes(matched.id)) {
-                permIds.push(matched.id);
-              }
-            }
-          });
-        }
-      });
-      return permIds;
-    }
+
+    // Fallback: empty array for any other format
     return [];
   };
 
-  // Convert permissions from frontend array format to backend JSON format
-  const convertPermissionsToBackend = (frontendPerms: string[]): Record<string, string[]> => {
-    const backendPerms: Record<string, string[]> = {};
-    frontendPerms.forEach(permId => {
-      const perm = allPermissions.find(p => p.id === permId);
-      if (perm) {
-        if (!backendPerms[perm.module]) {
-          backendPerms[perm.module] = [];
-        }
-        // Extract action/page name from permission ID
-        // e.g., 'patient_view' -> 'view', 'consultation_start' -> 'start'
-        const parts = permId.split('_');
-        // Remove module name part and keep the action
-        const moduleName = perm.module.toLowerCase().replace(/\s+/g, '_');
-        let actionName = parts[parts.length - 1]; // Default to last part
-        
-        // If permission ID starts with module name, remove it
-        if (permId.startsWith(moduleName + '_')) {
-          actionName = permId.substring(moduleName.length + 1);
-        } else if (parts.length > 1) {
-          // Try to find the action part (usually the last part)
-          actionName = parts[parts.length - 1];
-        }
-        
-        if (!backendPerms[perm.module].includes(actionName)) {
-          backendPerms[perm.module].push(actionName);
-        }
-      }
-    });
-    return backendPerms;
+  // Convert permissions from frontend array format to backend page-based format
+  const convertPermissionsToBackend = (frontendPerms: string[]): string[] => {
+    // For page-based permissions, frontendPerms are already the page URLs
+    // We just return them as-is since the backend expects an array of page URLs
+    return frontendPerms;
   };
 
   const loadRoles = async () => {
@@ -293,11 +271,14 @@ export default function RolesPermissionsPage() {
     }
   };
 
-  const getPermissionsByModule = (permissionIds: string[]) => {
-    const grouped: Record<string, Permission[]> = {};
-    permissionIds.forEach(id => {
-      const perm = allPermissions.find(p => p.id === id);
-      if (perm) { if (!grouped[perm.module]) grouped[perm.module] = []; grouped[perm.module].push(perm); }
+  const getPermissionsByModule = (pageIds: string[]) => {
+    const grouped: Record<string, PagePermission[]> = {};
+    pageIds.forEach(id => {
+      const page = allPagePermissions.find(p => p.id === id);
+      if (page) {
+        if (!grouped[page.module]) grouped[page.module] = [];
+        grouped[page.module].push(page);
+      }
     });
     return grouped;
   };
@@ -307,9 +288,14 @@ export default function RolesPermissionsPage() {
   };
 
   const toggleModulePermissions = (module: string) => {
-    const modulePermIds = allPermissions.filter(p => p.module === module).map(p => p.id);
-    const allSelected = modulePermIds.every(id => formData.permissions.includes(id));
-    setFormData(prev => ({ ...prev, permissions: allSelected ? prev.permissions.filter(p => !modulePermIds.includes(p)) : [...new Set([...prev.permissions, ...modulePermIds])] }));
+    const modulePageIds = allPagePermissions.filter(p => p.module === module).map(p => p.id);
+    const allSelected = modulePageIds.every(id => formData.permissions.includes(id));
+    setFormData(prev => ({
+      ...prev,
+      permissions: allSelected
+        ? prev.permissions.filter(p => !modulePageIds.includes(p))
+        : [...new Set([...prev.permissions, ...modulePageIds])]
+    }));
   };
 
   const resetForm = () => { setFormData({ name: '', description: '', type: 'Clinical', permissions: [], isActive: true }); };
@@ -470,7 +456,7 @@ export default function RolesPermissionsPage() {
                         <span>•</span>
                         <span className="flex items-center gap-1"><Users className="h-3 w-3" />{role.userCount} users</span>
                         <span>•</span>
-                        <span className="flex items-center gap-1"><Lock className="h-3 w-3" />{role.permissions.length} permissions</span>
+                        <span className="flex items-center gap-1"><Lock className="h-3 w-3" />{role.permissions.length} pages</span>
                         {Object.keys(permsByModule).length > 0 && (
                           <>
                             <span>•</span>
@@ -503,7 +489,7 @@ export default function RolesPermissionsPage() {
           <DialogContent className="w-[95vw] sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
             <DialogHeader><DialogTitle className="flex items-center gap-2"><Shield className="h-5 w-5 text-purple-500" />{isCreateDialogOpen ? 'Create Role' : 'Edit Role'}</DialogTitle><DialogDescription>{isCreateDialogOpen ? 'Define a new role with specific permissions' : `Update "${selectedRole?.name}" role settings`}</DialogDescription></DialogHeader>
             <Tabs defaultValue="details" className="mt-4">
-              <TabsList className="grid w-full grid-cols-2"><TabsTrigger value="details">Role Details</TabsTrigger><TabsTrigger value="permissions">Permissions ({formData.permissions.length})</TabsTrigger></TabsList>
+              <TabsList className="grid w-full grid-cols-2"><TabsTrigger value="details">Role Details</TabsTrigger><TabsTrigger value="permissions">Pages ({formData.permissions.length})</TabsTrigger></TabsList>
               <TabsContent value="details" className="space-y-4 mt-4">
                 <div className="space-y-2"><Label>Role Name *</Label><Input value={formData.name} onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))} placeholder="e.g., Senior Nurse" /></div>
                 <div className="space-y-2"><Label>Description</Label><Input value={formData.description} onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))} placeholder="Brief description" /></div>
@@ -513,13 +499,40 @@ export default function RolesPermissionsPage() {
                 </div>
               </TabsContent>
               <TabsContent value="permissions" className="mt-4">
-                <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2">
-                  {permissionModules.map(module => {
-                    const modulePerms = allPermissions.filter(p => p.module === module);
-                    const allChecked = modulePerms.every(p => formData.permissions.includes(p.id));
+                <div className="space-y-4 max-h-[500px] overflow-y-auto pr-2">
+                  {pageModules.map(module => {
+                    const modulePages = allPagePermissions.filter(p => p.module === module);
+                    const allChecked = modulePages.every(p => formData.permissions.includes(p.id));
                     return (
-                      <Card key={module}><CardHeader className="py-3 px-4"><div className="flex items-center gap-2"><Checkbox checked={allChecked} onCheckedChange={() => toggleModulePermissions(module)} /><CardTitle className="text-base">{module}</CardTitle><Badge variant="secondary" className="ml-auto">{modulePerms.filter(p => formData.permissions.includes(p.id)).length}/{modulePerms.length}</Badge></div></CardHeader>
-                        <CardContent className="py-2 px-4"><div className="grid grid-cols-2 gap-2">{modulePerms.map(perm => (<div key={perm.id} className="flex items-center gap-2"><Checkbox id={perm.id} checked={formData.permissions.includes(perm.id)} onCheckedChange={() => togglePermission(perm.id)} /><label htmlFor={perm.id} className="text-sm cursor-pointer">{perm.name}</label></div>))}</div></CardContent>
+                      <Card key={module}>
+                        <CardHeader className="py-3 px-4">
+                          <div className="flex items-center gap-2">
+                            <Checkbox
+                              checked={allChecked}
+                              onCheckedChange={() => toggleModulePermissions(module)}
+                            />
+                            <CardTitle className="text-base">{module}</CardTitle>
+                            <Badge variant="secondary" className="ml-auto">
+                              {modulePages.filter(p => formData.permissions.includes(p.id)).length}/{modulePages.length}
+                            </Badge>
+                          </div>
+                        </CardHeader>
+                        <CardContent className="py-2 px-4">
+                          <div className="grid grid-cols-2 gap-2">
+                            {modulePages.map(page => (
+                              <div key={page.id} className="flex items-center gap-2" title={page.description}>
+                                <Checkbox
+                                  id={page.id}
+                                  checked={formData.permissions.includes(page.id)}
+                                  onCheckedChange={() => togglePermission(page.id)}
+                                />
+                                <label htmlFor={page.id} className="text-sm cursor-pointer flex-1 truncate">
+                                  {page.name}
+                                </label>
+                              </div>
+                            ))}
+                          </div>
+                        </CardContent>
                       </Card>
                     );
                   })}
@@ -535,7 +548,7 @@ export default function RolesPermissionsPage() {
             <DialogHeader><DialogTitle className="flex items-center gap-2"><Shield className="h-5 w-5 text-purple-500" />{selectedRole?.name}</DialogTitle><DialogDescription>{selectedRole?.description}</DialogDescription></DialogHeader>
             {selectedRole && (<div className="space-y-6 mt-4">
               <div className="flex items-center gap-4"><Badge variant="outline" className={getTypeBadgeColor(selectedRole.type)}>{getRoleIcon(selectedRole.type)} {selectedRole.type}</Badge><Badge variant={selectedRole.isActive ? 'default' : 'secondary'}>{selectedRole.isActive ? 'Active' : 'Inactive'}</Badge><span className="text-sm text-muted-foreground">{selectedRole.userCount} users assigned</span></div>
-              <div><h4 className="font-medium mb-3">Permissions ({selectedRole.permissions.length})</h4><div className="space-y-3">{Object.entries(getPermissionsByModule(selectedRole.permissions)).map(([module, perms]) => (<Card key={module}><CardHeader className="py-2 px-4"><CardTitle className="text-sm">{module}</CardTitle></CardHeader><CardContent className="py-2 px-4"><div className="flex flex-wrap gap-1">{perms.map(p => (<Badge key={p.id} variant="secondary" className="text-xs"><Check className="h-3 w-3 mr-1" />{p.name}</Badge>))}</div></CardContent></Card>))}</div></div>
+              <div><h4 className="font-medium mb-3">Pages ({selectedRole.permissions.length})</h4><div className="space-y-3">{Object.entries(getPermissionsByModule(selectedRole.permissions)).map(([module, perms]) => (<Card key={module}><CardHeader className="py-2 px-4"><CardTitle className="text-sm">{module}</CardTitle></CardHeader><CardContent className="py-2 px-4"><div className="flex flex-wrap gap-1">{perms.map(p => (<Badge key={p.id} variant="secondary" className="text-xs"><Check className="h-3 w-3 mr-1" />{p.name}</Badge>))}</div></CardContent></Card>))}</div></div>
               <div className="text-xs text-muted-foreground"><p>Created: {selectedRole.createdAt}</p><p>Last updated: {selectedRole.updatedAt}</p></div>
             </div>)}
             <DialogFooter><Button variant="outline" onClick={() => setIsViewDialogOpen(false)}>Close</Button><Button onClick={() => { setIsViewDialogOpen(false); if (selectedRole) openEdit(selectedRole); }}><Edit className="h-4 w-4 mr-2" />Edit Role</Button></DialogFooter>

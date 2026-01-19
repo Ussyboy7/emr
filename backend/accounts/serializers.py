@@ -8,19 +8,20 @@ from .models import User
 
 class UserSerializer(serializers.ModelSerializer):
     """Serializer for User model."""
-    
+
     full_name = serializers.SerializerMethodField()
     clinic_name = serializers.CharField(source='clinic.name', read_only=True)
     department_name = serializers.CharField(source='department.name', read_only=True)
-    
+    permissions = serializers.SerializerMethodField()
+
     class Meta:
         model = User
         fields = [
             'id', 'username', 'email', 'first_name', 'last_name', 'full_name',
-            'employee_id', 'grade_level', 'system_role',
+            'employee_id', 'grade_level', 'system_role', 'permissions',
             'clinic', 'clinic_name', 'department', 'department_name',
             'directorate', 'division',  # Legacy fields
-            'phone', 'bio', 'is_management', 'is_active', 'is_staff',
+            'phone', 'bio', 'is_management', 'is_active', 'is_staff', 'is_superuser',
             'avatar', 'last_activity', 'date_joined',
         ]
         read_only_fields = ['id', 'date_joined', 'last_activity', 'clinic_name', 'department_name']
@@ -30,6 +31,147 @@ class UserSerializer(serializers.ModelSerializer):
     
     def get_full_name(self, obj):
         return obj.get_full_name()
+
+    def get_permissions(self, obj):
+        """Get user permissions from their roles."""
+        allowed_pages = set()
+        permission_counts = {}
+
+        for user_role in obj.user_roles.all():
+            role_permissions = user_role.role.permissions or []
+            if isinstance(role_permissions, list):
+                # Add all allowed pages from this role
+                allowed_pages.update(role_permissions)
+
+                # Build permission counts for UI display
+                # Map page URLs to permission IDs that match the UI
+                page_to_permission_map = {
+                    # Medical Records
+                    '/medical-records': 'patient_view',
+                    '/medical-records/patients/new': 'patient_create',
+                    '/medical-records/patients': 'patient_view',
+                    '/medical-records/visits/new': 'visit_create',
+                    '/medical-records/visits': 'visit_view',
+                    '/medical-records/appointments': 'visit_view',
+                    '/medical-records/dependents': 'patient_view',
+                    '/medical-records/reports': 'reports_view',
+
+                    # Nursing
+                    '/nursing': 'nursing_vitals',  # Just need one permission to count as having nursing access
+                    '/nursing/pool-queue': 'nursing_queue',
+                    '/nursing/room-queue': 'nursing_queue',
+                    '/nursing/patient-vitals': 'nursing_vitals',
+                    '/nursing/procedures': 'nursing_procedures',
+                    '/nursing/procedures/history': 'nursing_procedures',
+                    '/nursing/wards': 'nursing_vitals',
+
+                    # Consultation
+                    '/consultation/dashboard': 'consultation_view',
+                    '/consultation/start': 'consultation_start',
+                    '/consultation/history': 'consultation_view',
+                    '/consultation/wards': 'consultation_view',
+                    '/consultation/referrals': 'consultation_referral',
+
+                    # Laboratory
+                    '/laboratory': 'lab_orders_view',
+                    '/laboratory/orders': 'lab_orders_view',
+                    '/laboratory/verification': 'lab_verify',
+                    '/laboratory/completed': 'lab_orders_view',
+                    '/laboratory/templates': 'lab_templates',
+
+                    # Pharmacy
+                    '/pharmacy': 'pharmacy_view',
+                    '/pharmacy/prescriptions': 'pharmacy_view',
+                    '/pharmacy/history': 'pharmacy_view',
+                    '/pharmacy/inventory': 'pharmacy_inventory',
+
+                    # Radiology
+                    '/radiology': 'radiology_view',
+                    '/radiology/orders': 'radiology_view',
+                    '/radiology/verification': 'radiology_verify',
+                    '/radiology/completed': 'radiology_view',
+                    '/radiology/templates': 'radiology_view',
+
+                    # Physiotherapy
+                    '/physiotherapy': 'physio_view',
+                    '/physiotherapy/pool-queue': 'physio_view',
+                    '/physiotherapy/completed': 'physio_view',
+
+                    # Analytics
+                    '/analytics': 'analytics_view',
+                    '/analytics/executive': 'analytics_executive',
+
+                    # Administration
+                    '/admin': 'admin_users',
+                    '/admin/users': 'admin_users',
+                    '/admin/roles': 'admin_roles',
+                    '/admin/clinics': 'admin_clinics',
+                    '/admin/rooms': 'admin_rooms',
+                    '/admin/settings': 'admin_settings',
+                    '/admin/audit': 'admin_audit',
+                }
+
+                # Collect all permission IDs from page mappings
+                collected_permissions = set()
+                for page_url in role_permissions:
+                    if page_url in page_to_permission_map:
+                        permission_id = page_to_permission_map[page_url]
+                        collected_permissions.add(permission_id)
+
+                # Special handling: if user has any nursing permission, give them all nursing permissions
+                nursing_permissions = ['nursing_vitals', 'nursing_triage', 'nursing_administer', 'nursing_procedures', 'nursing_notes', 'nursing_queue']
+                if any(p in nursing_permissions for p in collected_permissions):
+                    collected_permissions.update(nursing_permissions)
+
+                # Group permissions by module
+                permission_to_module_map = {
+                    # Medical Records
+                    'patient_view': 'Medical Records', 'patient_create': 'Medical Records', 'patient_edit': 'Medical Records',
+                    'patient_delete': 'Medical Records', 'visit_view': 'Medical Records', 'visit_create': 'Medical Records',
+                    'visit_edit': 'Medical Records', 'reports_view': 'Medical Records', 'reports_generate': 'Medical Records',
+
+                    # Consultation
+                    'consultation_view': 'Consultation', 'consultation_start': 'Consultation', 'consultation_prescribe': 'Consultation',
+                    'consultation_diagnosis': 'Consultation', 'consultation_lab_order': 'Consultation',
+                    'consultation_radiology_order': 'Consultation', 'consultation_referral': 'Consultation',
+                    'consultation_nursing_order': 'Consultation',
+
+                    # Nursing
+                    'nursing_vitals': 'Nursing', 'nursing_triage': 'Nursing', 'nursing_administer': 'Nursing',
+                    'nursing_procedures': 'Nursing', 'nursing_notes': 'Nursing', 'nursing_queue': 'Nursing',
+
+                    # Laboratory
+                    'lab_orders_view': 'Laboratory', 'lab_collect': 'Laboratory', 'lab_process': 'Laboratory',
+                    'lab_results': 'Laboratory', 'lab_verify': 'Laboratory', 'lab_templates': 'Laboratory',
+
+                    # Pharmacy
+                    'pharmacy_view': 'Pharmacy', 'pharmacy_dispense': 'Pharmacy', 'pharmacy_inventory': 'Pharmacy',
+                    'pharmacy_substitute': 'Pharmacy',
+
+                    # Radiology
+                    'radiology_view': 'Radiology', 'radiology_perform': 'Radiology', 'radiology_report': 'Radiology',
+                    'radiology_verify': 'Radiology',
+
+                    # Administration
+                    'admin_users': 'Administration', 'admin_roles': 'Administration', 'admin_rooms': 'Administration',
+                    'admin_clinics': 'Administration', 'admin_settings': 'Administration', 'admin_audit': 'Administration',
+
+                    # Other modules
+                    'physio_view': 'Physiotherapy', 'analytics_view': 'Analytics', 'analytics_executive': 'Analytics',
+                }
+
+                for permission_id in collected_permissions:
+                    if permission_id in permission_to_module_map:
+                        module = permission_to_module_map[permission_id]
+                        if module not in permission_counts:
+                            permission_counts[module] = []
+                        if permission_id not in permission_counts[module]:
+                            permission_counts[module].append(permission_id)
+
+        return {
+            'pages': list(allowed_pages),
+            'actions': permission_counts
+        }
 
 
 class UserCreateSerializer(serializers.ModelSerializer):

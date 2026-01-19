@@ -33,7 +33,8 @@ import {
   Hospital,
   UserCheck,
   UserX,
-  TrendingUp
+  TrendingUp,
+  CheckCircle
 } from 'lucide-react';
 
 const quickActions = [
@@ -262,18 +263,6 @@ export default function MedicalRecordsPage() {
                 <MetricCard key={i} title="Loading..." value={0} icon={<Loader2 className="h-4 w-4" />} isLoading />
               ))
             ) : (
-                <Card key={i}>
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-muted-foreground">Loading...</p>
-                        <p className="text-3xl font-bold mt-1"><Loader2 className="h-8 w-8 animate-spin" /></p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))
-            ) : (
               <>
                 <MetricCard
                   title="Total Patients"
@@ -295,7 +284,7 @@ export default function MedicalRecordsPage() {
                 <MetricCard
                   title="Completed Today"
                   value={Math.floor(activeVisitsToday * 2.5)}
-                  icon={<CheckCircle2 className="h-4 w-4" />}
+                  icon={<CheckCircle className="h-4 w-4" />}
                   trend={{ value: Math.round((Math.floor(activeVisitsToday * 2.5) / Math.max(Math.floor(activeVisitsToday * 2.5) * 0.92, 1)) * 100 - 100), isPositive: true }}
                 />
                 <MetricCard
@@ -680,7 +669,7 @@ export default function MedicalRecordsPage() {
                     You have <span className="text-foreground font-medium">{pendingReports} pending report{pendingReports !== 1 ? 's' : ''}</span> to review.
                   </p>
                 </div>
-                <Button variant="outline" size="sm" className="border-amber-500/50 text-amber-600 dark:text-amber-400 hover:bg-amber-500/10" asChild>
+                <Button variant="outline" size="sm" className="border-amber-500/50 text-amber-600 dark:text-amber-400 hover:bg-amber-500/10">
                   <Link href="/medical-records/reports">
                     Review Now
                   </Link>
@@ -689,8 +678,6 @@ export default function MedicalRecordsPage() {
             </CardContent>
           </Card>
         )}
-        </div>
-      </div>
       </div>
     </DashboardLayout>
   );

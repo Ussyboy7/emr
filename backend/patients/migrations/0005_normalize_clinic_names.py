@@ -70,6 +70,7 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ('patients', '0004_add_religion_tribe_occupation'),
+        ('laboratory', '0001_initial'),  # Ensure laboratory app is migrated first
         ('radiology', '0001_initial'),  # Ensure radiology app is migrated first
     ]
 

@@ -13,7 +13,6 @@ from datetime import datetime, timedelta
 from django.contrib.auth import get_user_model
 
 from accounts.models import User
-from patients.models import Patient, Visit, VitalReading, MedicalHistory
 from laboratory.models import LabTemplate, LabOrder, LabTest
 from pharmacy.models import Medication, MedicationInventory, Prescription, PrescriptionItem
 from radiology.models import RadiologyOrder, RadiologyStudy
@@ -49,15 +48,14 @@ class Command(BaseCommand):
             users = self._create_users(clinic, departments, roles)
             # Create wards and beds after users (for head nurse assignment)
             wards_created, beds_created = self._create_wards_and_beds(clinic, users.get('admin'))
-            patients = self._create_patients(users)
             lab_templates = self._create_lab_templates()
             medications = self._create_medications()
             icd10_codes = self._create_icd10_codes()
-            # self._create_diagnoses(patients, users, icd10_codes)  # Disabled - no demo diagnosis data
-            # self._create_prescriptions(patients, users, medications)  # Disabled - no demo prescription data
-            # self._create_radiology_orders(patients, users)  # Disabled - no demo radiology data
-            # self._create_consultation_data(patients, users, clinic)  # Disabled - no demo consultation data
-            # self._create_nursing_orders(patients, users)  # Disabled - no demo nursing data
+            # self._create_diagnoses(users, icd10_codes)  # Disabled - no demo diagnosis data
+            # self._create_prescriptions(users, medications)  # Disabled - no demo prescription data
+            # self._create_radiology_orders(users)  # Disabled - no demo radiology data
+            # self._create_consultation_data(users, clinic)  # Disabled - no demo consultation data
+            # self._create_nursing_orders(users)  # Disabled - no demo nursing data
             # self._create_notifications(users)  # Disabled - no demo notification data
 
         self.stdout.write(self.style.SUCCESS("\n✅ Demo data seeding complete!"))
@@ -68,6 +66,7 @@ class Command(BaseCommand):
         self.stdout.write("  Lab Tech: labtech / ChangeMe123!")
         self.stdout.write("  Pharmacist: pharmacist / ChangeMe123!")
         self.stdout.write("  Radiologist: radiologist / ChangeMe123!")
+        self.stdout.write("  Physiotherapist: physio / ChangeMe123!")
 
     def _reset_data(self):
         """Delete existing demo data."""
@@ -87,10 +86,6 @@ class Command(BaseCommand):
         LabTest.objects.all().delete()
         LabOrder.objects.all().delete()
         LabTemplate.objects.all().delete()
-        VitalReading.objects.all().delete()
-        MedicalHistory.objects.all().delete()
-        Visit.objects.all().delete()
-        Patient.objects.all().delete()
         Room.objects.all().delete()  # Delete organization rooms
         Department.objects.all().delete()  # Delete departments
         Clinic.objects.all().delete()  # Delete clinics (will cascade delete departments and rooms)
@@ -154,7 +149,14 @@ class Command(BaseCommand):
             'radiology_perform': ('Radiology', 'perform'),
             'radiology_report': ('Radiology', 'report'),
             'radiology_verify': ('Radiology', 'verify'),
-            
+
+            # Physiotherapy
+            'physio_view': ('Physiotherapy', 'view'),
+
+            # Analytics
+            'analytics_view': ('Analytics', 'view'),
+            'analytics_executive': ('Analytics', 'executive'),
+
             # Administration
             'admin_users': ('Administration', 'users'),
             'admin_roles': ('Administration', 'roles'),
@@ -176,23 +178,23 @@ class Command(BaseCommand):
                         perms[module].append(action)
             return perms
         
-        # System Administrator - Full access
+        # System Administrator - Full access to ALL pages
         admin_role, _ = Role.objects.get_or_create(
             name='System Administrator',
             defaults={
                 'type': 'admin',
                 'description': 'Full system access with all permissions',
-                'permissions': build_permissions([
-                    'patient_view', 'patient_create', 'patient_edit', 'patient_delete',
-                    'visit_view', 'visit_create', 'visit_edit', 'reports_view', 'reports_generate',
-                    'consultation_view', 'consultation_start', 'consultation_prescribe', 'consultation_diagnosis',
-                    'consultation_lab_order', 'consultation_radiology_order', 'consultation_referral', 'consultation_nursing_order',
-                    'nursing_vitals', 'nursing_triage', 'nursing_administer', 'nursing_procedures', 'nursing_notes', 'nursing_queue',
-                    'lab_orders_view', 'lab_collect', 'lab_process', 'lab_results', 'lab_verify', 'lab_templates',
-                    'pharmacy_view', 'pharmacy_dispense', 'pharmacy_inventory', 'pharmacy_substitute',
-                    'radiology_view', 'radiology_perform', 'radiology_report', 'radiology_verify',
-                    'admin_users', 'admin_roles', 'admin_rooms', 'admin_clinics', 'admin_settings', 'admin_audit',
-                ]),
+                'permissions': [
+                    "/admin", "/admin/audit", "/admin/clinics", "/admin/roles", "/admin/rooms", "/admin/settings", "/admin/users",
+                    "/analytics", "/analytics/executive",
+                    "/consultation/dashboard", "/consultation/history", "/consultation/referrals", "/consultation/start", "/consultation/wards",
+                    "/laboratory", "/laboratory/completed", "/laboratory/orders", "/laboratory/templates", "/laboratory/verification",
+                    "/medical-records", "/medical-records/appointments", "/medical-records/dependents", "/medical-records/patients", "/medical-records/patients/new", "/medical-records/reports", "/medical-records/visits", "/medical-records/visits/new",
+                    "/nursing", "/nursing/patient-vitals", "/nursing/pool-queue", "/nursing/procedures", "/nursing/procedures/history", "/nursing/room-queue", "/nursing/wards",
+                    "/pharmacy", "/pharmacy/history", "/pharmacy/inventory", "/pharmacy/prescriptions",
+                    "/physiotherapy", "/physiotherapy/completed", "/physiotherapy/pool-queue",
+                    "/radiology", "/radiology/completed", "/radiology/orders", "/radiology/templates", "/radiology/verification",
+                ],
                 'is_active': True,
             }
         )
@@ -204,16 +206,27 @@ class Command(BaseCommand):
             defaults={
                 'type': 'doctor',
                 'description': 'Full clinical access for patient care and consultation',
-                'permissions': build_permissions([
-                    'patient_view', 'patient_create', 'patient_edit',
-                    'visit_view', 'visit_create', 'visit_edit', 'reports_view', 'reports_generate',
-                    'consultation_view', 'consultation_start', 'consultation_prescribe', 'consultation_diagnosis',
-                    'consultation_lab_order', 'consultation_radiology_order', 'consultation_referral', 'consultation_nursing_order',
-                    'nursing_vitals', 'nursing_queue',
-                    'lab_orders_view', 'lab_results',
-                    'pharmacy_view',
-                    'radiology_view', 'radiology_report',
-                ]),
+                'permissions': [
+                    # Medical Records - All pages
+                    '/medical-records', '/medical-records/patients/new', '/medical-records/patients',
+                    '/medical-records/visits/new', '/medical-records/visits', '/medical-records/appointments',
+                    '/medical-records/dependents', '/medical-records/reports',
+                    # Consultation - All pages
+                    '/consultation/dashboard', '/consultation/start', '/consultation/history',
+                    '/consultation/wards', '/consultation/referrals',
+                    # Nursing - Limited access
+                    '/nursing', '/nursing/patient-vitals', '/nursing/pool-queue', '/nursing/room-queue',
+                    # Laboratory - View access
+                    '/laboratory', '/laboratory/orders', '/laboratory/verification', '/laboratory/completed',
+                    # Pharmacy - View access
+                    '/pharmacy', '/pharmacy/prescriptions', '/pharmacy/history',
+                    # Radiology - View access
+                    '/radiology', '/radiology/orders', '/radiology/verification', '/radiology/completed',
+                    # Physiotherapy - View access
+                    '/physiotherapy', '/physiotherapy/pool-queue', '/physiotherapy/completed',
+                    # Analytics - View access
+                    '/analytics',
+                ],
                 'is_active': True,
             }
         )
@@ -225,14 +238,37 @@ class Command(BaseCommand):
             defaults={
                 'type': 'nurse',
                 'description': 'Nursing care, vitals, and patient triage',
-                'permissions': build_permissions([
-                    'patient_view', 'patient_edit',
-                    'visit_view', 'visit_create', 'visit_edit',
-                    'consultation_view',
-                    'nursing_vitals', 'nursing_triage', 'nursing_administer', 'nursing_procedures', 'nursing_notes', 'nursing_queue',
-                    'lab_orders_view',
-                    'pharmacy_view',
-                ]),
+                'permissions': [
+                    # Medical Records - Selected pages only
+                    '/medical-records',  # Dashboard - patient_view
+                    '/medical-records/patients/new',  # Register Patient - patient_create
+                    '/medical-records/patients',  # Manage Patients - patient_view
+                    '/medical-records/visits',  # NEW: Manage Visits - visit_view
+
+                    # Consultation - Selected pages only
+                    '/consultation/dashboard',  # My Dashboard - consultation_view
+
+                    # Nursing - All permissions (add explicit permissions for UI display)
+                    '/nursing/patient-vitals',  # nursing_vitals
+                    '/nursing/pool-queue',  # nursing_queue
+                    '/nursing/room-queue',  # nursing_queue
+                    '/nursing/procedures',  # nursing_procedures
+                    '/nursing/procedures/history',  # nursing_notes (map to notes)
+                    '/nursing/wards',  # nursing_triage (map to triage)
+
+                    # Laboratory - Selected pages only
+                    '/laboratory/orders',  # Lab Orders - lab_orders_view
+
+                    # Pharmacy - Selected pages only
+                    '/pharmacy/prescriptions',  # Prescriptions - pharmacy_view
+
+                    # Physiotherapy - Selected pages only
+                    '/physiotherapy/pool-queue',  # Pool Queue - physio_view
+
+                    # Radiology: None
+                    # Analytics: None
+                    # Administration: None
+                ],
                 'is_active': True,
             }
         )
@@ -244,11 +280,16 @@ class Command(BaseCommand):
             defaults={
                 'type': 'lab_tech',
                 'description': 'Laboratory testing and result management',
-                'permissions': build_permissions([
-                    'patient_view',
-                    'visit_view',
-                    'lab_orders_view', 'lab_collect', 'lab_process', 'lab_results', 'lab_verify', 'lab_templates',
-                ]),
+                'permissions': [
+                    # Basic patient access for lab work
+                    '/medical-records/patients',  # View patients for lab orders
+
+                    # Laboratory - All pages
+                    '/laboratory', '/laboratory/orders', '/laboratory/verification',
+                    '/laboratory/completed', '/laboratory/templates',
+
+                    # No other modules
+                ],
                 'is_active': True,
             }
         )
@@ -260,11 +301,15 @@ class Command(BaseCommand):
             defaults={
                 'type': 'pharmacist',
                 'description': 'Prescription dispensing and inventory management',
-                'permissions': build_permissions([
-                    'patient_view',
-                    'visit_view',
-                    'pharmacy_view', 'pharmacy_dispense', 'pharmacy_inventory', 'pharmacy_substitute',
-                ]),
+                'permissions': [
+                    # Basic patient access for prescriptions
+                    '/medical-records/patients',  # View patients for prescriptions
+
+                    # Pharmacy - All pages
+                    '/pharmacy', '/pharmacy/prescriptions', '/pharmacy/history', '/pharmacy/inventory',
+
+                    # No other modules
+                ],
                 'is_active': True,
             }
         )
@@ -276,27 +321,57 @@ class Command(BaseCommand):
             defaults={
                 'type': 'radiologist',
                 'description': 'Radiology studies and reporting',
-                'permissions': build_permissions([
-                    'patient_view',
-                    'visit_view',
-                    'radiology_view', 'radiology_perform', 'radiology_report', 'radiology_verify',
-                ]),
+                'permissions': [
+                    # Basic patient access for radiology work
+                    '/medical-records/patients',  # View patients for radiology orders
+
+                    # Radiology - All pages
+                    '/radiology', '/radiology/orders', '/radiology/verification', '/radiology/completed', '/radiology/templates',
+
+                    # No other modules
+                ],
                 'is_active': True,
             }
         )
         roles['Radiologist'] = radiologist_role
-        
+
+        # Physiotherapist - Rehabilitation and physiotherapy services
+        physio_role, _ = Role.objects.get_or_create(
+            name='Physiotherapist',
+            defaults={
+                'type': 'physiotherapist',
+                'description': 'Rehabilitation and physiotherapy treatment services',
+                'permissions': [
+                    # Basic patient access for physiotherapy work
+                    '/medical-records/patients',  # View patients for physiotherapy sessions
+
+                    # Physiotherapy - All pages
+                    '/physiotherapy', '/physiotherapy/pool-queue', '/physiotherapy/completed',
+
+                    # Nursing coordination for patient management
+                    '/nursing/pool-queue',  # Access to pool queue for patient coordination
+
+                    # Limited consultation access for referrals
+                    '/consultation/referrals',  # View physiotherapy referrals
+                ],
+                'is_active': True,
+            }
+        )
+        roles['Physiotherapist'] = physio_role
+
         # Medical Records Officer - Records management
         records_role, _ = Role.objects.get_or_create(
             name='Medical Records Officer',
             defaults={
                 'type': 'records',
                 'description': 'Patient and visit record management',
-                'permissions': build_permissions([
-                    'patient_view', 'patient_create', 'patient_edit',
-                    'visit_view', 'visit_create', 'visit_edit',
-                    'reports_view', 'reports_generate',
-                ]),
+                'permissions': [
+                    # Medical Records - All pages
+                    '/medical-records', '/medical-records/patients/new', '/medical-records/patients',
+                    '/medical-records/visits/new', '/medical-records/visits', '/medical-records/appointments',
+                    '/medical-records/dependents', '/medical-records/reports',
+                    # No other modules
+                ],
                 'is_active': True,
             }
         )
@@ -318,6 +393,7 @@ class Command(BaseCommand):
             'Laboratory Scientist': 'Laboratory',
             'Pharmacist': 'Pharmacy',
             'Radiologist': 'Radiology',
+            'Physiotherapist': 'Physiotherapy',
             'Medical Records Officer': 'Medical Records',
         }
 
@@ -371,6 +447,14 @@ class Command(BaseCommand):
                 'last_name': 'Bello',
                 'system_role': 'Radiologist',
                 'employee_id': 'NPA-RAD-001',
+            },
+            {
+                'username': 'physio',
+                'email': 'physio@npa.gov.ng',
+                'first_name': 'Ahmed',
+                'last_name': 'Yusuf',
+                'system_role': 'Physiotherapist',
+                'employee_id': 'NPA-PHY-001',
             },
             {
                 'username': 'records',
@@ -450,6 +534,7 @@ class Command(BaseCommand):
             {'name': 'Laboratory', 'code': 'LAB'},
             {'name': 'Pharmacy', 'code': 'PHARM'},
             {'name': 'Radiology', 'code': 'RAD'},
+            {'name': 'Physiotherapy', 'code': 'PHYSIO'},
         ]
 
         for dept_data in department_data:
@@ -573,102 +658,6 @@ class Command(BaseCommand):
         self.stdout.write(f"  ✓ Created {wards_created} wards")
         self.stdout.write(f"  ✓ Created {beds_created} beds")
         return wards_created, beds_created
-
-    def _create_patients(self, users):
-        """Create demo patients."""
-        self.stdout.write("Creating patients...")
-        patients = []
-
-        patient_data = [
-            {
-                'patient_id': 'PAT-2024-001',
-                'category': 'employee',
-                'personal_number': 'NPA-EMP-001',
-                'surname': 'Johnson',
-                'first_name': 'Adebayo',
-                'gender': 'male',
-                'date_of_birth': '1979-05-15',
-                'employee_type': 'officer',
-                'division': 'Engineering',
-                'location': 'Headquarters',
-                'phone': '08012345678',
-                'email': 'a.johnson@npa.gov.ng',
-                'blood_group': 'O+',
-                'genotype': 'AA',
-            },
-            {
-                'patient_id': 'PAT-2024-002',
-                'category': 'employee',
-                'personal_number': 'NPA-EMP-002',
-                'surname': 'Mohammed',
-                'first_name': 'Fatima',
-                'gender': 'female',
-                'date_of_birth': '1992-03-20',
-                'employee_type': 'staff',
-                'division': 'HR',
-                'location': 'Headquarters',
-                'phone': '08023456789',
-                'email': 'f.mohammed@npa.gov.ng',
-                'blood_group': 'A+',
-                'genotype': 'AS',
-            },
-            {
-                'patient_id': 'PAT-2024-003',
-                'category': 'retiree',
-                'personal_number': 'NPA-RET-001',
-                'surname': 'Okonkwo',
-                'first_name': 'Grace',
-                'gender': 'female',
-                'date_of_birth': '1958-11-10',
-                'phone': '08034567890',
-                'blood_group': 'B+',
-            },
-            {
-                'patient_id': 'PAT-2024-004',
-                'category': 'employee',
-                'personal_number': 'NPA-EMP-003',
-                'surname': 'Emeka',
-                'first_name': 'Chukwu',
-                'gender': 'male',
-                'date_of_birth': '1969-08-22',
-                'employee_type': 'officer',
-                'division': 'Medical',
-                'location': 'Headquarters',
-                'phone': '08045678901',
-                'blood_group': 'AB+',
-            },
-            {
-                'patient_id': 'PAT-2024-005',
-                'category': 'dependent',
-                'surname': 'Johnson',
-                'first_name': 'Tunde',
-                'middle_name': 'Adebayo',
-                'gender': 'male',
-                'date_of_birth': '2010-07-05',
-                'dependent_type': 'Employee Dependent',
-                'phone': '08056789012',
-            },
-        ]
-
-        for data in patient_data:
-            patient_id = data.pop('patient_id')
-            principal_staff_id = data.pop('principal_staff', None)
-            
-            patient, _ = Patient.objects.get_or_create(
-                patient_id=patient_id,
-                defaults=data
-            )
-            
-            if principal_staff_id:
-                principal = Patient.objects.filter(patient_id=principal_staff_id).first()
-                if principal:
-                    patient.principal_staff = principal
-                    patient.save()
-            
-            patients.append(patient)
-
-        self.stdout.write(f"  ✓ Created {len(patients)} patients")
-        return patients
 
     def _create_lab_templates(self):
         """Create comprehensive lab templates with parameters and TAT."""

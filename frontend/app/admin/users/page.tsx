@@ -952,6 +952,10 @@ export default function UserManagementPage() {
                     <p className="font-medium">{selectedStaff.email}</p>
                   </div>
                   <div>
+                    <p className="text-muted-foreground">Username</p>
+                    <p className="font-medium">{selectedStaff.username || 'N/A'}</p>
+                  </div>
+                  <div>
                     <p className="text-muted-foreground">Phone</p>
                     <p className="font-medium">{selectedStaff.phone}</p>
                   </div>

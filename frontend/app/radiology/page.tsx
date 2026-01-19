@@ -119,21 +119,46 @@ export default function RadiologyDashboardPage() {
   return (
     <DashboardLayout>
       <div className="container mx-auto p-6 space-y-6">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <h1 className="text-3xl font-bold text-foreground flex items-center gap-3">
-              <ScanLine className="h-8 w-8 text-cyan-500" />
-              Radiology Dashboard
-            </h1>
-            <p className="text-muted-foreground mt-1">Medical imaging, study processing, and radiologist reporting</p>
-          </div>
-          <Button variant="outline" onClick={loadDashboardData} className="gap-2">
-            <Activity className="h-4 w-4" />
-            Refresh
-          </Button>
-        </div>
+        <Card className="bg-gradient-to-r from-cyan-500 to-blue-600 text-white border-0">
+          <CardContent className="p-6">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="flex items-center gap-4">
+                <div className="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center">
+                  <ScanLine className="h-8 w-8 text-white" />
+                </div>
+                <div>
+                  <h1 className="text-2xl font-bold">Radiology Department</h1>
+                  <p className="text-cyan-100">Medical imaging, study processing, and radiologist reporting</p>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  className="bg-white text-cyan-600 hover:bg-cyan-50"
+                  onClick={() => router.push('/radiology/orders')}
+                >
+                  <ClipboardList className="h-4 w-4 mr-2" />
+                  Orders Queue
+                </Button>
+                <Button
+                  variant="outline"
+                  className="border-white text-white hover:bg-white/20"
+                  onClick={loadDashboardData}
+                >
+                  <Activity className="h-4 w-4 mr-2" />
+                  Refresh
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {/* Today's Overview */}
+        <div>
+          <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
+            <Clock className="h-5 w-5 text-blue-500" />
+            Today's Overview
+          </h2>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {loading ? (
             Array.from({ length: 4 }).map((_, i) => (
               <Card key={i}>
@@ -149,19 +174,22 @@ export default function RadiologyDashboardPage() {
             ))
           ) : (
             stats.map((stat, i) => (
-              <Card key={i}>
+              <Card key={i} className="border-l-4 border-l-cyan-500">
                 <CardContent className="p-4">
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-sm text-muted-foreground">{stat.label}</p>
-                      <p className={`text-3xl font-bold ${stat.color} mt-1`}>{stat.value}</p>
+                      <div className="flex items-center gap-2 mt-1">
+                        <stat.icon className={`h-5 w-5 ${stat.color}`} />
+                        <p className={`text-2xl font-bold ${stat.color}`}>{stat.value}</p>
+                      </div>
                     </div>
-                    <div className={`p-3 rounded-full ${stat.bg}`}><stat.icon className={`h-5 w-5 ${stat.color}`} /></div>
                   </div>
                 </CardContent>
               </Card>
             ))
           )}
+          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-5 gap-4">

@@ -140,18 +140,46 @@ export default function PharmacyDashboardPage() {
     <DashboardLayout>
       <div className="container mx-auto p-6 space-y-6">
         {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <h1 className="text-3xl font-bold text-foreground flex items-center gap-3">
-              <Pill className="h-8 w-8 text-violet-500" />
-              Pharmacy
-            </h1>
-            <p className="text-muted-foreground mt-1">Prescription management, dispensing, and inventory control</p>
-          </div>
-        </div>
+        <Card className="bg-gradient-to-r from-violet-500 to-purple-600 text-white border-0">
+          <CardContent className="p-6">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="flex items-center gap-4">
+                <div className="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center">
+                  <Pill className="h-8 w-8 text-white" />
+                </div>
+                <div>
+                  <h1 className="text-2xl font-bold">Pharmacy Department</h1>
+                  <p className="text-violet-100">Prescription management, dispensing, and inventory control</p>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  className="bg-white text-violet-600 hover:bg-violet-50"
+                  onClick={() => router.push('/pharmacy/prescriptions')}
+                >
+                  <ClipboardList className="h-4 w-4 mr-2" />
+                  Manage Prescriptions
+                </Button>
+                <Button
+                  variant="outline"
+                  className="border-white text-white hover:bg-white/20"
+                  onClick={() => router.push('/pharmacy/inventory')}
+                >
+                  <Database className="h-4 w-4 mr-2" />
+                  Inventory
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
 
-        {/* Stats */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {/* Today's Overview */}
+        <div>
+          <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
+            <Clock className="h-5 w-5 text-blue-500" />
+            Today's Overview
+          </h2>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {loading ? (
             Array.from({ length: 4 }).map((_, i) => (
               <Card key={i}>
@@ -167,19 +195,22 @@ export default function PharmacyDashboardPage() {
             ))
           ) : (
             stats.map((stat, i) => (
-              <Card key={i}>
+              <Card key={i} className="border-l-4 border-l-violet-500">
                 <CardContent className="p-4">
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-sm text-muted-foreground">{stat.label}</p>
-                      <p className={`text-3xl font-bold ${stat.color} mt-1`}>{stat.value}</p>
+                      <div className="flex items-center gap-2 mt-1">
+                        <stat.icon className={`h-5 w-5 ${stat.color}`} />
+                        <p className={`text-2xl font-bold ${stat.color}`}>{stat.value}</p>
+                      </div>
                     </div>
-                    <div className={`p-3 rounded-full ${stat.bg}`}><stat.icon className={`h-5 w-5 ${stat.color}`} /></div>
                   </div>
                 </CardContent>
               </Card>
             ))
           )}
+          </div>
         </div>
 
         {/* Quick Actions */}

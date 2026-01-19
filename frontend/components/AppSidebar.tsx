@@ -64,6 +64,7 @@ import { NPA_LOGO_URL, NPA_EMR_TITLE } from "@/lib/branding";
 import { Badge } from "@/components/ui/badge";
 import { TooltipProvider, Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { useCurrentUser } from "@/hooks/use-current-user";
 
 // Types for menu structure
 interface MenuItem {
@@ -218,6 +219,8 @@ export function AppSidebar() {
   const { state, toggleSidebar } = useSidebar();
   const pathname = usePathname();
   const isCollapsed = state === "collapsed";
+  const { currentUser, hydrated } = useCurrentUser();
+
 
   // Track which sections are open
   const [openSections, setOpenSections] = useState<Record<string, boolean>>(() => {
@@ -241,7 +244,7 @@ export function AppSidebar() {
 
   const isItemActive = (href: string, basePath: string) => {
     // Dashboard pages should be exact match only
-    if (href === basePath || href === "/medical-records" || href === "/nursing" || 
+    if (href === basePath || href === "/medical-records" || href === "/nursing" ||
         href === "/laboratory" || href === "/pharmacy" || href === "/radiology" ||
         href === "/consultation/dashboard") {
       return pathname === href;
@@ -258,6 +261,49 @@ export function AppSidebar() {
     }
     return isActive(href);
   };
+
+  // Filter menu sections based on user permissions
+  const getFilteredMenuSections = () => {
+    if (!hydrated || !currentUser) {
+      // If not hydrated or no user, show nothing except overview
+      return [];
+    }
+
+    // Super admin users see ALL sections and ALL pages
+    if (currentUser.isSuperuser) {
+      return menuSections;
+    }
+
+    // Check if user has access to pages from each module
+    const allowedPages = Array.isArray(currentUser.permissions) ? currentUser.permissions : [];
+
+    return menuSections.filter(section => {
+      // Check if user has access to any page in this section
+      return section.items.some(item => allowedPages.includes(item.href));
+    });
+  };
+
+  // Filter menu items within sections based on permissions
+  const getFilteredMenuItems = (section: MenuSection) => {
+    if (!currentUser) {
+      return [];
+    }
+
+    // Super admin users see ALL items in ALL sections
+    if (currentUser.isSuperuser) {
+      return section.items;
+    }
+
+    // Check if user has access to specific pages
+    const allowedPages = Array.isArray(currentUser.permissions) ? currentUser.permissions : [];
+
+    return section.items.filter(item => {
+      // Check if the specific page URL is in the allowed pages
+      return allowedPages.includes(item.href);
+    });
+  };
+
+  const filteredMenuSections = getFilteredMenuSections();
 
   return (
     <TooltipProvider delayDuration={0}>
@@ -325,63 +371,69 @@ export function AppSidebar() {
           </SidebarGroup>
 
           {/* Module Sections */}
-          {menuSections.map((section) => (
-            <SidebarGroup key={section.label}>
-              {isCollapsed ? (
-                // Collapsed: Show only icons for first item of each section as a quick access
-                <SidebarGroupContent>
-                  <SidebarMenu>
-                    <SidebarMenuItem>
-                      <SidebarMenuButton
-                        asChild
-                        isActive={pathname.startsWith(section.basePath)}
-                        tooltip={section.label}
-                        className={cn("text-sidebar-foreground/80 hover:text-sidebar-foreground hover:bg-sidebar-accent", section.activeColor)}
-                      >
-                        <Link href={section.items[0].href}>
-                          <section.icon className={cn("h-4 w-4", section.color)} />
-                        </Link>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  </SidebarMenu>
-                </SidebarGroupContent>
-              ) : (
-                // Expanded: Show collapsible groups
-                <Collapsible open={openSections[section.label]} onOpenChange={() => toggleSection(section.label)}>
-                  <SidebarGroupLabel asChild className="text-sidebar-foreground/50 text-xs uppercase tracking-wider">
-                    <CollapsibleTrigger className="group/collapsible flex items-center justify-between w-full cursor-pointer hover:text-sidebar-foreground">
-                      <span className="flex items-center gap-2">
-                        <section.icon className={cn("h-3.5 w-3.5", section.color)} />
-                        {section.label}
-                      </span>
-                      <ChevronDown className="h-4 w-4 transition-transform group-data-[state=open]/collapsible:rotate-180" />
-                    </CollapsibleTrigger>
-                  </SidebarGroupLabel>
-                  <CollapsibleContent>
-                    <SidebarGroupContent>
-                      <SidebarMenu>
-                        {section.items.map((item) => (
-                          <SidebarMenuItem key={item.href}>
-                            <SidebarMenuButton
-                              asChild
-                              isActive={isItemActive(item.href, section.basePath)}
-                              tooltip={item.label}
-                              className={cn("text-sidebar-foreground/80 hover:text-sidebar-foreground hover:bg-sidebar-accent", section.activeColor)}
-                            >
-                              <Link href={item.href}>
-                                <item.icon className={cn("h-4 w-4", section.color)} />
-                                <span>{item.label}</span>
-                              </Link>
-                            </SidebarMenuButton>
-                          </SidebarMenuItem>
-                        ))}
-                      </SidebarMenu>
-                    </SidebarGroupContent>
-                  </CollapsibleContent>
-                </Collapsible>
-              )}
-            </SidebarGroup>
-          ))}
+          {filteredMenuSections.map((section) => {
+            const filteredItems = getFilteredMenuItems(section);
+            // Only show section if it has items the user can access
+            if (filteredItems.length === 0) return null;
+
+            return (
+              <SidebarGroup key={section.label}>
+                {isCollapsed ? (
+                  // Collapsed: Show only icons for first item of each section as a quick access
+                  <SidebarGroupContent>
+                    <SidebarMenu>
+                      <SidebarMenuItem>
+                        <SidebarMenuButton
+                          asChild
+                          isActive={pathname.startsWith(section.basePath)}
+                          tooltip={section.label}
+                          className={cn("text-sidebar-foreground/80 hover:text-sidebar-foreground hover:bg-sidebar-accent", section.activeColor)}
+                        >
+                          <Link href={filteredItems[0].href}>
+                            <section.icon className={cn("h-4 w-4", section.color)} />
+                          </Link>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    </SidebarMenu>
+                  </SidebarGroupContent>
+                ) : (
+                  // Expanded: Show collapsible groups
+                  <Collapsible open={openSections[section.label]} onOpenChange={() => toggleSection(section.label)}>
+                    <SidebarGroupLabel asChild className="text-sidebar-foreground/50 text-xs uppercase tracking-wider">
+                      <CollapsibleTrigger className="group/collapsible flex items-center justify-between w-full cursor-pointer hover:text-sidebar-foreground">
+                        <span className="flex items-center gap-2">
+                          <section.icon className={cn("h-3.5 w-3.5", section.color)} />
+                          {section.label}
+                        </span>
+                        <ChevronDown className="h-4 w-4 transition-transform group-data-[state=open]/collapsible:rotate-180" />
+                      </CollapsibleTrigger>
+                    </SidebarGroupLabel>
+                    <CollapsibleContent>
+                      <SidebarGroupContent>
+                        <SidebarMenu>
+                          {filteredItems.map((item) => (
+                            <SidebarMenuItem key={item.href}>
+                              <SidebarMenuButton
+                                asChild
+                                isActive={isItemActive(item.href, section.basePath)}
+                                tooltip={item.label}
+                                className={cn("text-sidebar-foreground/80 hover:text-sidebar-foreground hover:bg-sidebar-accent", section.activeColor)}
+                              >
+                                <Link href={item.href}>
+                                  <item.icon className={cn("h-4 w-4", section.color)} />
+                                  <span>{item.label}</span>
+                                </Link>
+                              </SidebarMenuButton>
+                            </SidebarMenuItem>
+                          ))}
+                        </SidebarMenu>
+                      </SidebarGroupContent>
+                    </CollapsibleContent>
+                  </Collapsible>
+                )}
+              </SidebarGroup>
+            );
+          })}
 
           {/* Help - Always visible */}
           <SidebarGroup>
