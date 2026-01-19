@@ -118,18 +118,26 @@ export default function NursingPoolQueuePage() {
         setRooms(transformedRooms);
 
         // Fetch visits with status 'completed' (sent to nursing)
-        // Also get today's visits to filter by date
-        const today = new Date().toISOString().split('T')[0];
-        const result = await visitService.getVisits({ 
+        // Remove date filter to show all completed visits that need nursing
+        const result = await visitService.getVisits({
           status: 'completed',
-          date: today,
-          page_size: 500 
+          page_size: 500
         });
+
+        console.log('Nursing pool queue - loaded visits:', result.results.length);
+        console.log('Visit details:', result.results.map(v => ({
+          id: v.id,
+          patient: v.patient_name,
+          status: v.status,
+          date: v.date,
+          time: v.time
+        })));
         
         // Fetch vitals for all visits in parallel
         const vitalsPromises = result.results.map(async (visit: Visit) => {
           try {
             const vitalsResult = await apiFetch<{ results: any[] }>(`/vitals/?visit=${visit.id}&ordering=-recorded_at`);
+            console.log(`Vitals for visit ${visit.id}:`, vitalsResult.results[0] || 'No vitals');
             return { visitId: visit.id, vitals: vitalsResult.results[0] || null };
           } catch (err) {
             console.error(`Error fetching vitals for visit ${visit.id}:`, err);
@@ -149,6 +157,7 @@ export default function NursingPoolQueuePage() {
         }
         
         // Transform visits to NursingPatient format
+        console.log('Starting transformation of', result.results.length, 'visits to nursing patients');
         const transformedPatients: NursingPatient[] = result.results.map((visit: Visit) => {
           // Calculate wait time (minutes since visit was created)
           const visitDateTime = new Date(`${visit.date}T${visit.time}`);
@@ -206,7 +215,10 @@ export default function NursingPoolQueuePage() {
             visitNotes: visit.clinical_notes, // Clinical notes from the visit
           };
         });
-        
+
+        console.log('Nursing patients created:', transformedPatients.length);
+        console.log('Sample patient:', transformedPatients[0]);
+
         setPatients(transformedPatients);
       } catch (err) {
         console.error('Error loading nursing pool data:', err);
@@ -291,6 +303,21 @@ export default function NursingPoolQueuePage() {
     const matchesStatus = statusFilter === 'all' || p.nursingStatus.toLowerCase().replace(' ', '-') === statusFilter;
     const matchesType = typeFilter === 'all' || p.visitType.toLowerCase() === typeFilter.toLowerCase();
     const matchesClinic = clinicFilter === 'all' || clinicMatches(p.clinic, clinicFilter);
+
+    // Debug logging
+    const passesAllFilters = matchesSearch && matchesStatus && matchesType && matchesClinic;
+    if (!passesAllFilters && patients.length > 0) {
+      console.log('Patient filtered out:', p.name, {
+        matchesSearch,
+        matchesStatus,
+        matchesType,
+        matchesClinic,
+        statusFilter,
+        typeFilter,
+        clinicFilter,
+        patientStatus: p.nursingStatus
+      });
+    }
     
     // Date filter
     if (dateFilter !== 'all') {
@@ -325,9 +352,16 @@ export default function NursingPoolQueuePage() {
 
   // Paginated patients
   const paginatedPatients = useMemo(() => {
+    console.log('Total patients:', patients.length);
+    console.log('Filtered patients:', filteredPatients.length);
+    console.log('Sorted patients:', sortedPatients.length);
+    console.log('Current filters:', { statusFilter, typeFilter, clinicFilter, dateFilter, searchQuery });
+
     const startIndex = (currentPage - 1) * itemsPerPage;
-    return sortedPatients.slice(startIndex, startIndex + itemsPerPage);
-  }, [sortedPatients, currentPage, itemsPerPage]);
+    const result = sortedPatients.slice(startIndex, startIndex + itemsPerPage);
+    console.log('Paginated patients:', result.length);
+    return result;
+  }, [patients, filteredPatients, sortedPatients, currentPage, itemsPerPage, statusFilter, typeFilter, clinicFilter, dateFilter, searchQuery]);
 
   // Reset to page 1 when filters change
   useEffect(() => {
