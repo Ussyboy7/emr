@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from 'react';
+import React, { useState, lazy, Suspense } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -13,6 +13,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import { patientService } from '@/lib/services';
 import { VitalsDetailModal } from '@/components/VitalsDetailModal';
+const ConsultationDetailModal = lazy(() => import('@/components/consultation/ConsultationDetailModal').then(module => ({ default: module.ConsultationDetailModal })));
 import { 
   FileText, Stethoscope, TestTube, ScanLine, Pill, Heart,
   AlertTriangle, Users, User, Eye, ChevronLeft, ChevronRight, Plus, X, Calendar
@@ -46,7 +47,6 @@ interface Visit {
   type: string;
   department: string;
   doctor: string;
-  chiefComplaint?: string;
   diagnosis?: string;
   notes?: string;
   status: string;
@@ -112,6 +112,11 @@ export function MedicalHistoryTab({
   // Vitals detail modal state
   const [selectedVitals, setSelectedVitals] = useState<any>(null);
   const [isVitalsDetailModalOpen, setIsVitalsDetailModalOpen] = useState(false);
+  
+  // Consultation detail modal state
+  const [typeFilter, setTypeFilter] = useState<'all' | 'visits' | 'consultations'>('all');
+  const [selectedItem, setSelectedItem] = useState<any>(null);
+  const [showDetailModal, setShowDetailModal] = useState(false);
 
   // Handle adding allergies
   const handleAddAllergy = async () => {
@@ -180,7 +185,7 @@ export function MedicalHistoryTab({
     }
   };
 
-  // Combined visits and consultations for visits-consultations tab
+  // Combined visits and consultations for consultations tab
   const allVisitsAndConsultations = [
     ...visits.map(v => ({ ...v, type: 'visit' })),
     ...consultationSessions.map(c => ({ ...c, type: 'consultation' })),
@@ -204,9 +209,9 @@ export function MedicalHistoryTab({
                 <FileText className="h-3 w-3 mr-1" />
                 Background
               </TabsTrigger>
-              <TabsTrigger value="visits-consultations" className="text-xs">
+              <TabsTrigger value="consultations" className="text-xs">
                 <Stethoscope className="h-3 w-3 mr-1" />
-                Visits & Consultations ({visits.length + consultationSessions.length})
+                Consultations ({visits.length + consultationSessions.length})
               </TabsTrigger>
               <TabsTrigger value="labs" className="text-xs">
                 <TestTube className="h-3 w-3 mr-1" />
@@ -327,20 +332,32 @@ export function MedicalHistoryTab({
               )}
             </TabsContent>
 
-            {/* Visits & Consultations Sub-Tab */}
-            <TabsContent value="visits-consultations" className="mt-4">
-              <div className="flex items-center justify-between mb-3">
-                <Select value={sessionDateFilter} onValueChange={(v) => { setSessionDateFilter(v); setConsultationsPage(1); }}>
-                  <SelectTrigger className="w-[150px]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Time</SelectItem>
-                    <SelectItem value="30">Last 30 Days</SelectItem>
-                    <SelectItem value="90">Last 3 Months</SelectItem>
-                    <SelectItem value="365">Last Year</SelectItem>
-                  </SelectContent>
-                </Select>
+            {/* Consultations Sub-Tab */}
+            <TabsContent value="consultations" className="mt-4">
+              <div className="flex items-center justify-between mb-3 gap-2">
+                <div className="flex items-center gap-2">
+                  <Select value={typeFilter} onValueChange={(v) => { setTypeFilter(v as 'all' | 'visits' | 'consultations'); setConsultationsPage(1); }}>
+                    <SelectTrigger className="w-[130px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All</SelectItem>
+                      <SelectItem value="visits">Visits Only</SelectItem>
+                      <SelectItem value="consultations">Consultations Only</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select value={sessionDateFilter} onValueChange={(v) => { setSessionDateFilter(v); setConsultationsPage(1); }}>
+                    <SelectTrigger className="w-[150px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Time</SelectItem>
+                      <SelectItem value="30">Last 30 Days</SelectItem>
+                      <SelectItem value="90">Last 3 Months</SelectItem>
+                      <SelectItem value="365">Last Year</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
               <div className="border rounded-lg overflow-hidden">
                 <table className="w-full text-sm">
@@ -348,7 +365,6 @@ export function MedicalHistoryTab({
                     <tr>
                       <th className="px-4 py-2 text-left font-medium">Date</th>
                       <th className="px-4 py-2 text-left font-medium">Type</th>
-                      <th className="px-4 py-2 text-left font-medium">Chief Complaint</th>
                       <th className="px-4 py-2 text-left font-medium">Doctor</th>
                       <th className="px-4 py-2 text-left font-medium">Clinic</th>
                       <th className="px-4 py-2 text-center font-medium">Action</th>
@@ -357,6 +373,11 @@ export function MedicalHistoryTab({
                   <tbody className="divide-y">
                     {allVisitsAndConsultations
                       .filter((item: any) => {
+                        // Type filter
+                        if (typeFilter === 'visits' && item.type !== 'visit') return false;
+                        if (typeFilter === 'consultations' && item.type === 'visit') return false;
+                        
+                        // Date filter
                         if (sessionDateFilter === 'all') return true;
                         const itemDate = safeParseDate(item.date || item.created_at);
                         if (!itemDate) return false;
@@ -373,21 +394,21 @@ export function MedicalHistoryTab({
                         <td className="px-4 py-3">
                           <Badge variant="outline">{item.type === 'visit' ? item.type : 'Consultation'}</Badge>
                         </td>
-                        <td className="px-4 py-3 font-medium">{item.chiefComplaint || item.chief_complaint || 'N/A'}</td>
                         <td className="px-4 py-3">{item.doctor || item.doctor_name || 'Unknown'}</td>
                         <td className="px-4 py-3">
                           <Badge variant="outline">{item.clinic || item.clinic_name || 'N/A'}</Badge>
                         </td>
                         <td className="px-4 py-3 text-center">
-                          {onViewVisit && item.type === 'visit' ? (
-                            <Button variant="ghost" size="sm" onClick={() => onViewVisit(item)}>
-                              <Eye className="h-4 w-4 mr-1" /> View
-                            </Button>
-                          ) : (
-                            <Button variant="ghost" size="sm">
-                              <Eye className="h-4 w-4 mr-1" /> View
-                            </Button>
-                          )}
+                          <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            onClick={() => {
+                              setSelectedItem(item);
+                              setShowDetailModal(true);
+                            }}
+                          >
+                            <Eye className="h-4 w-4 mr-1" /> View
+                          </Button>
                         </td>
                       </tr>
                         );
@@ -948,6 +969,17 @@ export function MedicalHistoryTab({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      
+      {/* Consultation Detail Modal */}
+      <Suspense fallback={<div className="flex items-center justify-center p-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div></div>}>
+        <ConsultationDetailModal
+          open={showDetailModal}
+          onOpenChange={setShowDetailModal}
+          consultation={selectedItem?.type === 'visit' ? undefined : selectedItem}
+          visitId={selectedItem?.type === 'visit' ? selectedItem?.id || selectedItem?.numericId : undefined}
+          consultationSessionId={selectedItem?.type !== 'visit' ? selectedItem?.id : undefined}
+        />
+      </Suspense>
     </div>
   );
 }

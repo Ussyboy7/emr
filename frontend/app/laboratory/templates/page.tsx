@@ -13,10 +13,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
-import { labService, type LabTemplate as ApiLabTemplate } from '@/lib/services';
+import { labService, radiologyService, type RadiologyTemplate as ApiRadiologyTemplate, type LabTemplate as ApiLabTemplate } from '@/lib/services';
 import {
   FileText, Search, Eye, Plus, Edit, Trash2, Copy, CheckCircle2,
-  Loader2, Settings, ListPlus, FlaskConical, Activity, Clock
+  Loader2, Settings, ListPlus, ScanLine, Activity, Clock,
+  Heart, Scan, FlaskConical, Microscope
 } from 'lucide-react';
 
 interface TemplateField {
@@ -40,7 +41,6 @@ interface TestTemplate {
   fields: TemplateField[];
   specimenType: string;
   turnaroundTime: string;
-  price: number;
   status: 'Active' | 'Inactive';
   createdAt: string;
   updatedAt: string;
@@ -75,12 +75,11 @@ const transformTemplate = (apiTemplate: ApiLabTemplate): TestTemplate => {
     id: apiTemplate.id.toString(),
     name: apiTemplate.name,
     code: apiTemplate.code,
-    category: apiTemplate.category || 'Chemistry',
+    category: (apiTemplate as any).category || 'chemistry', // Read from backend API
     description: apiTemplate.description || '',
     fields,
     specimenType: apiTemplate.sample_type,
-    turnaroundTime: apiTemplate.turnaround_time || '',
-    price: apiTemplate.price || 0,
+    turnaroundTime: (apiTemplate as any).turnaround_time || '', // Read from backend API
     status: apiTemplate.is_active !== false ? 'Active' : 'Inactive',
     createdAt: apiTemplate.created_at || new Date().toISOString().split('T')[0],
     updatedAt: apiTemplate.updated_at || new Date().toISOString().split('T')[0],
@@ -88,7 +87,7 @@ const transformTemplate = (apiTemplate: ApiLabTemplate): TestTemplate => {
   };
 };
 
-const categories = ['All', 'Hematology', 'Chemistry', 'Parasitology', 'Microbiology', 'Immunology'];
+const categories = ['All', 'chemistry', 'hematology', 'microbiology', 'endocrinology'];
 
 export default function TestTemplatesPage() {
   const [templates, setTemplates] = useState<TestTemplate[]>([]);
@@ -108,16 +107,26 @@ export default function TestTemplatesPage() {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [isFieldEditDialogOpen, setIsFieldEditDialogOpen] = useState(false);
+  const [editingField, setEditingField] = useState<TemplateField | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Form states
   const [formData, setFormData] = useState({
-    name: '', code: '', category: 'Chemistry', description: '',
-    specimenType: '', turnaroundTime: '', price: 0,
+    name: '', code: '', category: 'chemistry', description: '',
+    specimenType: '', turnaroundTime: '',
     fields: [] as TemplateField[]
   });
-  const [newField, setNewField] = useState({
-    name: '', unit: '', normalRangeMin: '', normalRangeMax: '', dataType: 'numeric' as const
+  const [newField, setNewField] = useState<{
+    name: string;
+    unit: string;
+    normalRangeMin: string;
+    normalRangeMax: string;
+    normalRangeText: string;
+    dataType: 'numeric' | 'text' | 'select';
+    required: boolean;
+  }>({
+    name: '', unit: '', normalRangeMin: '', normalRangeMax: '', normalRangeText: '', dataType: 'numeric', required: false
   });
 
   const filteredTemplates = useMemo(() => templates.filter(t => {
@@ -164,17 +173,20 @@ export default function TestTemplatesPage() {
   const stats = {
     total: templates.length,
     active: templates.filter(t => t.status === 'Active').length,
-    hematology: templates.filter(t => t.category === 'Hematology').length,
-    chemistry: templates.filter(t => t.category === 'Chemistry').length,
+    // Top 4 categories by usage
+    chemistry: templates.filter(t => t.category === 'chemistry').length,
+    hematology: templates.filter(t => t.category === 'hematology').length,
+    microbiology: templates.filter(t => t.category === 'microbiology').length,
+    endocrinology: templates.filter(t => t.category === 'endocrinology').length,
   };
 
   const getCategoryBadge = (category: string) => {
     switch (category) {
-      case 'Hematology': return 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/50';
-      case 'Chemistry': return 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/50';
-      case 'Parasitology': return 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/50';
-      case 'Microbiology': return 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/50';
-      default: return 'bg-violet-500/10 text-violet-600 dark:text-violet-400 border-violet-500/50';
+      case 'chemistry': return 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/50';
+      case 'hematology': return 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/50';
+      case 'microbiology': return 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/50';
+      case 'endocrinology': return 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/50';
+      default: return 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/50';
     }
   };
 
@@ -193,12 +205,43 @@ export default function TestTemplatesPage() {
       required: true
     };
     setFormData(prev => ({ ...prev, fields: [...prev.fields, field] }));
-    setNewField({ name: '', unit: '', normalRangeMin: '', normalRangeMax: '', dataType: 'numeric' });
+    setNewField({ name: '', unit: '', normalRangeMin: '', normalRangeMax: '', normalRangeText: '', dataType: 'numeric', required: false });
     toast.success('Field added');
   };
 
   const removeField = (fieldId: string) => {
     setFormData(prev => ({ ...prev, fields: prev.fields.filter(f => f.id !== fieldId) }));
+  };
+
+  const editField = (field: TemplateField) => {
+    setEditingField(field);
+    setNewField({
+      name: field.name,
+      unit: field.unit,
+      normalRangeMin: field.normalRangeMin || '',
+      normalRangeMax: field.normalRangeMax || '',
+      normalRangeText: field.normalRangeText || '',
+      dataType: field.dataType,
+      required: field.required
+    });
+    setIsFieldEditDialogOpen(true);
+  };
+
+  const updateField = () => {
+    if (!editingField) return;
+
+    setFormData(prev => ({
+      ...prev,
+      fields: prev.fields.map(f =>
+        f.id === editingField.id
+          ? { ...editingField, ...newField }
+          : f
+      )
+    }));
+
+    setEditingField(null);
+    setNewField({ name: '', unit: '', normalRangeMin: '', normalRangeMax: '', normalRangeText: '', dataType: 'numeric' as const, required: false });
+    setIsFieldEditDialogOpen(false);
   };
 
   const handleCreate = async () => {
@@ -223,14 +266,12 @@ export default function TestTemplatesPage() {
         };
       });
 
+      // Only send fields that exist in the backend model
       const templateData = {
         name: formData.name,
         code: formData.code,
-        category: formData.category,
         description: formData.description,
         sample_type: formData.specimenType,
-        turnaround_time: formData.turnaroundTime,
-        price: 0, // Price removed from EMR
         normal_range: normalRange,
         is_active: true,
       };
@@ -274,14 +315,12 @@ export default function TestTemplatesPage() {
         };
       });
 
+      // Only send fields that exist in the backend model
       const templateData = {
         name: formData.name,
         code: formData.code,
-        category: formData.category,
         description: formData.description,
         sample_type: formData.specimenType,
-        turnaround_time: formData.turnaroundTime,
-        price: 0, // Price removed from EMR
         normal_range: normalRange,
         is_active: selectedTemplate?.status === 'Active' || true,
       };
@@ -336,15 +375,13 @@ export default function TestTemplatesPage() {
       const original = await labService.getTemplate(templateId);
       
       // Create a duplicate with modified name and code
+      // Only include fields that exist in the backend model
       const duplicateData = {
         name: `${original.name} (Copy)`,
         code: `${original.code}_COPY`,
-        category: original.category,
-        description: original.description,
+        description: original.description || '',
         sample_type: original.sample_type,
-        turnaround_time: original.turnaround_time,
-        price: original.price,
-        normal_range: original.normal_range, // Use normal_range instead of fields
+        normal_range: original.normal_range || {},
         is_active: false, // Start as inactive
       };
 
@@ -380,8 +417,8 @@ export default function TestTemplatesPage() {
   };
 
   const resetForm = () => {
-    setFormData({ name: '', code: '', category: 'Chemistry', description: '', specimenType: '', turnaroundTime: '', price: 0, fields: [] });
-    setNewField({ name: '', unit: '', normalRangeMin: '', normalRangeMax: '', dataType: 'numeric' });
+    setFormData({ name: '', code: '', category: 'chemistry', description: '', specimenType: '', turnaroundTime: '', fields: [] });
+    setNewField({ name: '', unit: '', normalRangeMin: '', normalRangeMax: '', normalRangeText: '', dataType: 'numeric', required: false });
   };
 
   const openViewDialog = (template: TestTemplate) => { setSelectedTemplate(template); setIsViewDialogOpen(true); };
@@ -394,7 +431,6 @@ export default function TestTemplatesPage() {
       description: template.description, 
       specimenType: template.specimenType,
       turnaroundTime: template.turnaroundTime, 
-      price: template.price, 
       fields: template.fields.map(f => ({ ...f })) // Create a copy to avoid reference issues
     });
     setIsEditDialogOpen(true);
@@ -463,6 +499,28 @@ export default function TestTemplatesPage() {
               </div>
             </CardContent>
           </Card>
+          <Card className="border-l-4 border-l-emerald-500">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Microbiology</p>
+                  <p className="text-3xl font-bold text-emerald-600 dark:text-emerald-400">{stats.microbiology}</p>
+                </div>
+                <Microscope className="h-8 w-8 text-emerald-400" />
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="border-l-4 border-l-purple-500">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Endocrinology</p>
+                  <p className="text-3xl font-bold text-purple-600 dark:text-purple-400">{stats.endocrinology}</p>
+                </div>
+                <Heart className="h-8 w-8 text-purple-400" />
+              </div>
+            </CardContent>
+          </Card>
         </div>
 
         {/* Filters */}
@@ -513,23 +571,25 @@ export default function TestTemplatesPage() {
             paginatedTemplates.map(template => (
               <Card key={template.id} className={`border-l-4 hover:shadow-md transition-shadow ${
                 template.status === 'Inactive' ? 'border-l-gray-400 opacity-60' :
-                template.category === 'Hematology' ? 'border-l-rose-500' :
-                template.category === 'Chemistry' ? 'border-l-amber-500' :
-                template.category === 'Microbiology' ? 'border-l-emerald-500' : 'border-l-blue-500'
+                template.category === 'chemistry' ? 'border-l-amber-500' :
+                template.category === 'hematology' ? 'border-l-rose-500' :
+                template.category === 'microbiology' ? 'border-l-emerald-500' :
+                template.category === 'endocrinology' ? 'border-l-purple-500' : 'border-l-blue-500'
               }`}>
                 <CardContent className="py-3 px-4">
                   <div className="flex items-center gap-3">
                     {/* Avatar */}
                     <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${
-                      template.category === 'Hematology' ? 'bg-rose-100 dark:bg-rose-900/30' :
-                      template.category === 'Chemistry' ? 'bg-amber-100 dark:bg-amber-900/30' :
-                      template.category === 'Microbiology' ? 'bg-emerald-100 dark:bg-emerald-900/30' : 'bg-blue-100 dark:bg-blue-900/30'
+                      template.category === 'chemistry' ? 'bg-amber-100 dark:bg-amber-900/30' :
+                      template.category === 'hematology' ? 'bg-rose-100 dark:bg-rose-900/30' :
+                      template.category === 'microbiology' ? 'bg-emerald-100 dark:bg-emerald-900/30' :
+                      template.category === 'endocrinology' ? 'bg-purple-100 dark:bg-purple-900/30' : 'bg-blue-100 dark:bg-blue-900/30'
                     }`}>
-                      <FlaskConical className={`h-4 w-4 ${
-                        template.category === 'Hematology' ? 'text-rose-600' :
-                        template.category === 'Chemistry' ? 'text-amber-600' :
-                        template.category === 'Microbiology' ? 'text-emerald-600' : 'text-blue-600'
-                      }`} />
+                      {template.category === 'chemistry' ? <FlaskConical className="h-4 w-4 text-amber-600" /> :
+                       template.category === 'hematology' ? <Activity className="h-4 w-4 text-rose-600" /> :
+                       template.category === 'microbiology' ? <Microscope className="h-4 w-4 text-emerald-600" /> :
+                       template.category === 'endocrinology' ? <Heart className="h-4 w-4 text-purple-600" /> :
+                       <FlaskConical className="h-4 w-4 text-blue-600" />}
                     </div>
                     
                     {/* Info */}
@@ -682,7 +742,10 @@ export default function TestTemplatesPage() {
                       <div key={field.id} className="flex items-center gap-2 p-2 rounded border bg-muted/50">
                         <span className="flex-1 font-medium">{field.name}</span>
                         <span className="text-sm text-muted-foreground">{field.unit}</span>
-                        <span className="text-sm text-muted-foreground">{field.normalRangeMin && field.normalRangeMax ? `${field.normalRangeMin}-${field.normalRangeMax}` : ''}</span>
+                        <span className="text-sm text-muted-foreground">{field.normalRangeMin && field.normalRangeMax ? `${field.normalRangeMin}-${field.normalRangeMax}` : field.normalRangeText || ''}</span>
+                        <Button variant="ghost" size="sm" onClick={() => editField(field)} className="text-blue-500">
+                          <Edit className="h-4 w-4" />
+                        </Button>
                         <Button variant="ghost" size="sm" onClick={() => removeField(field.id)} className="text-rose-500">
                           <Trash2 className="h-4 w-4" />
                         </Button>
@@ -729,6 +792,103 @@ export default function TestTemplatesPage() {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+
+        {/* Field Edit Dialog */}
+        <Dialog open={isFieldEditDialogOpen} onOpenChange={setIsFieldEditDialogOpen}>
+          <DialogContent className="w-[95vw] sm:max-w-[500px]">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Edit className="h-5 w-5 text-blue-500" />
+                Edit Parameter
+              </DialogTitle>
+              <DialogDescription>Modify parameter settings and normal ranges</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Parameter Name *</Label>
+                  <Input
+                    value={newField.name}
+                    onChange={(e) => setNewField(p => ({ ...p, name: e.target.value }))}
+                    placeholder="e.g., Glucose"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Unit</Label>
+                  <Input
+                    value={newField.unit}
+                    onChange={(e) => setNewField(p => ({ ...p, unit: e.target.value }))}
+                    placeholder="e.g., mg/dL"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Data Type</Label>
+                <Select value={newField.dataType} onValueChange={(v: 'numeric' | 'text' | 'select') => setNewField(p => ({ ...p, dataType: v }))}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="numeric">Numeric</SelectItem>
+                    <SelectItem value="text">Text</SelectItem>
+                    <SelectItem value="select">Select Options</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {newField.dataType === 'numeric' && (
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Normal Range Min</Label>
+                    <Input
+                      type="number"
+                      value={newField.normalRangeMin}
+                      onChange={(e) => setNewField(p => ({ ...p, normalRangeMin: e.target.value }))}
+                      placeholder="e.g., 70"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Normal Range Max</Label>
+                    <Input
+                      type="number"
+                      value={newField.normalRangeMax}
+                      onChange={(e) => setNewField(p => ({ ...p, normalRangeMax: e.target.value }))}
+                      placeholder="e.g., 140"
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <Label>Normal Range Text (Optional)</Label>
+                <Input
+                  value={newField.normalRangeText}
+                  onChange={(e) => setNewField(p => ({ ...p, normalRangeText: e.target.value }))}
+                  placeholder="e.g., 70-140 mg/dL (Fasting)"
+                />
+              </div>
+
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="required"
+                  checked={newField.required}
+                  onChange={(e) => setNewField(p => ({ ...p, required: e.target.checked }))}
+                  className="rounded"
+                />
+                <Label htmlFor="required">Required field</Label>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsFieldEditDialogOpen(false)}>Cancel</Button>
+              <Button onClick={updateField} className="bg-blue-500 hover:bg-blue-600">
+                <Edit className="h-4 w-4 mr-2" />
+                Update Parameter
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </DashboardLayout>
   );

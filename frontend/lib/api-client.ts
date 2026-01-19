@@ -19,6 +19,9 @@ const isBrowser = () => typeof window !== "undefined";
 type FetchOptions = RequestInit & {
   skipAuth?: boolean;
   responseType?: "json" | "text" | "blob";
+  retryOnFailure?: boolean;
+  maxRetries?: number;
+  retryDelay?: number;
 };
 
 export const getStoredAccessToken = () => {
@@ -160,7 +163,16 @@ const ensureAccessToken = async (): Promise<string | null> => {
 };
 
 export const apiFetch = async <T = unknown>(path: string, options: FetchOptions = {}): Promise<T> => {
-  const { skipAuth, headers, responseType = "json", ...rest } = options;
+  const {
+    skipAuth,
+    headers,
+    responseType = "json",
+    retryOnFailure = true,
+    maxRetries = 3,
+    retryDelay = 1000,
+    ...rest
+  } = options;
+
   const requestHeaders = new Headers(headers);
 
   if (!skipAuth) {
@@ -175,140 +187,112 @@ export const apiFetch = async <T = unknown>(path: string, options: FetchOptions 
     requestHeaders.set("Content-Type", "application/json");
   }
 
-  let response: Response;
-  try {
-    response = await fetch(`${getBaseUrl()}${path}`, {
-      ...rest,
-      headers: requestHeaders,
-      credentials: "include",
-    });
-  } catch (networkError: any) {
-    // Handle network errors (Failed to fetch, CORS, etc.)
-    // This typically means the backend is not running or unreachable
-    const baseUrl = getBaseUrl();
-    if (networkError?.message === "Failed to fetch" || networkError?.name === "TypeError") {
-      const error = new Error(`Unable to connect to the API server at ${baseUrl}. Please ensure the backend is running on the correct port.`);
-      error.name = "NetworkError";
-      // Don't log network errors as they're expected when backend is down
-      // They'll be handled by the calling code
-      throw error;
-    }
-    throw networkError;
+  // Force JSON responses instead of HTML (Django REST Framework browsable API)
+  if (!requestHeaders.has("Accept")) {
+    requestHeaders.set("Accept", "application/json");
   }
 
-  if (response.status === 401 && !skipAuth) {
-    const refreshed = await refreshAccessToken();
-    if (refreshed) {
-      requestHeaders.set("Authorization", `Bearer ${refreshed}`);
-      const retryResponse = await fetch(`${getBaseUrl()}${path}`, {
-        ...rest,
-        headers: requestHeaders,
-        credentials: "include",
-      });
-      if (!retryResponse.ok) {
-        throw new Error(`API request failed: ${retryResponse.status}`);
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      let response: Response;
+      const fullUrl = `${getBaseUrl()}${path}`;
+      console.log(`🔍 API Call: ${rest.method || 'GET'} ${fullUrl}`);
+
+      try {
+        response = await fetch(fullUrl, {
+          ...rest,
+          headers: requestHeaders,
+          credentials: "include",
+        });
+      } catch (networkError: any) {
+        // Handle network errors (Failed to fetch, CORS, etc.)
+        // This typically means the backend is not running or unreachable
+        const baseUrl = getBaseUrl();
+        if (networkError?.message === "Failed to fetch" || networkError?.name === "TypeError") {
+          const error = new Error(`Unable to connect to the API server at ${baseUrl}. Please ensure the backend is running on the correct port.`);
+          error.name = "NetworkError";
+          // Don't log network errors as they're expected when backend is down
+          // They'll be handled by the calling code
+          throw error;
+        }
+        throw networkError;
       }
-      if (retryResponse.status === 204) {
+
+      // If we get here, the network request succeeded
+      lastError = null;
+
+      if (response.status === 401 && !skipAuth) {
+        const refreshed = await refreshAccessToken();
+        if (refreshed) {
+          requestHeaders.set("Authorization", `Bearer ${refreshed}`);
+          const retryResponse = await fetch(`${getBaseUrl()}${path}`, {
+            ...rest,
+            headers: requestHeaders,
+            credentials: "include",
+          });
+          if (!retryResponse.ok) {
+            throw new Error(`API request failed: ${retryResponse.status}`);
+          }
+          if (retryResponse.status === 204) {
+            return undefined as T;
+          }
+          return await retryResponse.json() as T;
+        }
+      }
+
+      if (!response.ok) {
+        // For certain status codes, we might want to retry
+        const shouldRetry = retryOnFailure && (
+          response.status >= 500 || // Server errors
+          response.status === 429 || // Rate limiting
+          response.status === 408 // Request timeout
+        );
+
+        if (shouldRetry && attempt < maxRetries) {
+          logWarn(`API request failed with ${response.status}, retrying (${attempt + 1}/${maxRetries})`);
+          await new Promise(resolve => setTimeout(resolve, retryDelay * (attempt + 1)));
+          continue;
+        }
+
+        throw new Error(`API request failed: ${response.status}`);
+      }
+
+      if (response.status === 204) {
         return undefined as T;
       }
-      return retryResponse.json() as Promise<T>;
-    }
 
-    clearTokens();
-    throw new AuthenticationExpiredError("Authentication expired");
-  }
+      return await response.json() as T;
 
-  if (!response.ok) {
-    let errorMessage = `API request failed with status ${response.status}`;
-    let errorDetails: unknown = undefined;
-    try {
-      const contentType = response.headers.get('content-type');
-      if (contentType && contentType.includes('application/json')) {
-        const errorData = await response.json();
-        errorDetails = (errorData as Record<string, unknown> | undefined)?.details;
-        
-        // Handle different error formats
-        if (errorData.detail) {
-          errorMessage = errorData.detail;
-        } else if (errorData.message) {
-          errorMessage = errorData.message;
-        } else if (typeof errorData === 'string') {
-          errorMessage = errorData;
-        } else if (errorData.non_field_errors) {
-          errorMessage = Array.isArray(errorData.non_field_errors) 
-            ? errorData.non_field_errors.join(', ') 
-            : String(errorData.non_field_errors);
-        } else {
-          // Handle field-level validation errors (e.g., {height: ["Height must be between..."], weight: [...]})
-          const fieldErrors = Object.entries(errorData)
-            .filter(([key]) => key !== 'details') // Exclude 'details' as it's handled separately
-            .map(([field, errors]: [string, any]) => {
-              const fieldName = field.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-              let errorText: string;
-              if (Array.isArray(errors)) {
-                errorText = errors.map(e => typeof e === 'object' ? JSON.stringify(e) : String(e)).join(', ');
-              } else if (typeof errors === 'object' && errors !== null) {
-                errorText = JSON.stringify(errors);
-              } else {
-                errorText = String(errors);
-              }
-              return `${fieldName}: ${errorText}`;
-            });
-          
-          if (fieldErrors.length > 0) {
-            errorMessage = fieldErrors.join('; ');
-          } else {
-            // Fallback to JSON stringify if no recognized format
-            errorMessage = JSON.stringify(errorData);
-          }
-        }
-      } else {
-        const body = await response.text();
-        if (body) {
-          errorMessage = body;
-        }
+    } catch (error: any) {
+      lastError = error;
+
+      // Don't retry for certain types of errors
+      if (error.name === "NetworkError" ||
+          error.name === "AuthenticationError" ||
+          error.name === "AuthenticationExpiredError" ||
+          (error.message && error.message.includes("API request failed: 4"))) {
+        throw error;
       }
-    } catch (parseError) {
-      // If we can't parse the error, use the status text
-      errorMessage = response.statusText || `HTTP ${response.status}`;
-    }
 
-    if (errorDetails && typeof errorDetails === "object") {
-      const flattened = Object.entries(errorDetails)
-        .map(([key, value]) => {
-          if (Array.isArray(value)) {
-            return `${key}: ${value.join(", ")}`;
-          }
-          if (typeof value === "string") {
-            return `${key}: ${value}`;
-          }
-          return `${key}: ${JSON.stringify(value)}`;
-        })
-        .filter(Boolean)
-        .join(" | ");
-      if (flattened) {
-        errorMessage = `${errorMessage} — ${flattened}`;
+      // For other errors, retry if we haven't exceeded max attempts
+      if (retryOnFailure && attempt < maxRetries) {
+        logWarn(`API request failed, retrying (${attempt + 1}/${maxRetries}): ${error.message}`);
+        await new Promise(resolve => setTimeout(resolve, retryDelay * (attempt + 1)));
+        continue;
       }
+
+      break; // Exit the retry loop
     }
-
-    const error = new Error(errorMessage);
-    (error as any).status = response.status;
-    throw error;
   }
 
-  if (response.status === 204) {
-    return undefined as T;
+  // If we get here, all retries failed
+  if (lastError) {
+    throw lastError;
   }
 
-  if (responseType === "blob") {
-    return (await response.blob()) as T;
-  }
-
-  if (responseType === "text") {
-    return (await response.text()) as T;
-  }
-
-  return response.json() as Promise<T>;
+  throw new Error("API request failed after all retries");
 };
 
 export interface LoginResponse {

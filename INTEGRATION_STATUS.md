@@ -38,7 +38,7 @@
 - ⏳ Studies/Orders (`/radiology/studies`)
 - ⏳ Verification (`/radiology/verification`)
 - ⏳ Completed Reports (`/radiology/reports`)
-- ⏳ Image Viewer (`/radiology/viewer`)
+- ❌ Image Viewer (removed - not needed for current workflow)
 
 ## Integration Pattern Used
 

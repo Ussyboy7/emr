@@ -2,7 +2,7 @@
 Serializers for the Consultation app.
 """
 from rest_framework import serializers
-from .models import ConsultationRoom, ConsultationSession, ConsultationQueue, Referral
+from .models import ConsultationRoom, ConsultationSession, ConsultationQueue, Referral, Diagnosis, ICD10Code
 
 
 class ConsultationRoomSerializer(serializers.ModelSerializer):
@@ -38,8 +38,12 @@ class ConsultationSessionSerializer(serializers.ModelSerializer):
     """Serializer for ConsultationSession model."""
     
     patient_name = serializers.CharField(source='patient.get_full_name', read_only=True)
+    patient_id = serializers.CharField(source='patient.patient_id', read_only=True)
+    patient_age = serializers.IntegerField(source='patient.age', read_only=True)
+    patient_gender = serializers.CharField(source='patient.gender', read_only=True)
     doctor_name = serializers.CharField(source='doctor.get_full_name', read_only=True, allow_null=True)
     room_name = serializers.CharField(source='room.name', read_only=True)
+    clinic_name = serializers.CharField(source='visit.clinic', read_only=True, allow_null=True)
     
     class Meta:
         model = ConsultationSession
@@ -61,12 +65,43 @@ class ConsultationQueueSerializer(serializers.ModelSerializer):
 
 class ReferralSerializer(serializers.ModelSerializer):
     """Serializer for Referral model."""
-    
+
     patient_name = serializers.CharField(source='patient.get_full_name', read_only=True)
     referred_by_name = serializers.CharField(source='referred_by.get_full_name', read_only=True, allow_null=True)
-    
+
     class Meta:
         model = Referral
         fields = '__all__'
         read_only_fields = ['referral_id', 'referred_at', 'created_at']
+
+
+class ICD10CodeSerializer(serializers.ModelSerializer):
+    """Serializer for ICD10Code model."""
+
+    class Meta:
+        model = ICD10Code
+        fields = '__all__'
+
+
+class DiagnosisSerializer(serializers.ModelSerializer):
+    """Serializer for Diagnosis model."""
+
+    patient_name = serializers.CharField(source='patient.get_full_name', read_only=True)
+    diagnosed_by_name = serializers.CharField(source='diagnosed_by.get_full_name', read_only=True, allow_null=True)
+    icd10_code_details = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Diagnosis
+        fields = '__all__'
+        read_only_fields = ['diagnosed_at']
+
+    def get_icd10_code_details(self, obj):
+        """Get full ICD-10 code details."""
+        if obj.icd10_code:
+            return {
+                'code': obj.icd10_code.code,
+                'description': obj.icd10_code.description,
+                'category': obj.icd10_code.category,
+            }
+        return None
 

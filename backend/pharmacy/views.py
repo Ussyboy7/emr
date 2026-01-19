@@ -20,6 +20,7 @@ from .serializers import (
     DispenseSerializer,
 )
 from .pagination import FlexiblePageNumberPagination
+from audit.services import AuditService
 
 
 def check_drug_interactions(medication_ids):
@@ -128,6 +129,47 @@ class MedicationInventoryViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         return MedicationInventory.objects.all().select_related('medication')
+    
+    def perform_create(self, serializer):
+        """Create inventory item and log audit."""
+        inventory = serializer.save()
+        AuditService.log_activity(
+            user=self.request.user,
+            action='create',
+            object_type='medication_inventory',
+            object_id=str(inventory.id),
+            module='pharmacy',
+            object_repr=f'Inventory {inventory.batch_number} - {inventory.medication.name}',
+            description=f'Created inventory item: {inventory.medication.name} (Batch: {inventory.batch_number}, Qty: {inventory.quantity})',
+            new_values={'batch_number': inventory.batch_number, 'quantity': float(inventory.quantity), 'medication_id': str(inventory.medication.id)},
+            request=self.request,
+        )
+    
+    def perform_update(self, serializer):
+        """Update inventory item and log audit."""
+        old_instance = self.get_object()
+        old_values = {
+            'quantity': float(old_instance.quantity),
+            'expiry_date': str(old_instance.expiry_date),
+        }
+        inventory = serializer.save()
+        new_values = {
+            'quantity': float(inventory.quantity),
+            'expiry_date': str(inventory.expiry_date),
+        }
+        
+        AuditService.log_activity(
+            user=self.request.user,
+            action='update',
+            object_type='medication_inventory',
+            object_id=str(inventory.id),
+            module='pharmacy',
+            object_repr=f'Inventory {inventory.batch_number} - {inventory.medication.name}',
+            description=f'Updated inventory item: {inventory.medication.name} (Batch: {inventory.batch_number})',
+            old_values=old_values,
+            new_values=new_values,
+            request=self.request,
+        )
 
 
 class PrescriptionViewSet(viewsets.ModelViewSet):
@@ -136,20 +178,55 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     serializer_class = PrescriptionSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['patient', 'doctor', 'status']
+    filterset_fields = ['patient', 'doctor', 'status', 'consultation_session', 'visit']
     search_fields = ['prescription_id', 'diagnosis', 'notes']
     ordering_fields = ['prescribed_at']
     ordering = ['-prescribed_at']
     
     def get_queryset(self):
-        return Prescription.objects.all().select_related('patient', 'doctor', 'visit', 'created_by').prefetch_related('medications')
+        return Prescription.objects.all().select_related('patient', 'doctor', 'visit', 'consultation_session', 'created_by').prefetch_related('medications')
+    
+    def perform_update(self, serializer):
+        """Update prescription and log audit."""
+        old_instance = self.get_object()
+        old_values = {
+            'status': old_instance.status,
+            'diagnosis': old_instance.diagnosis,
+        }
+        prescription = serializer.save()
+        new_values = {
+            'status': prescription.status,
+            'diagnosis': prescription.diagnosis,
+        }
+        
+        # Log audit
+        AuditService.log_prescription_action(
+            user=self.request.user,
+            action='update',
+            prescription=prescription,
+            module='pharmacy',
+            description=f'Updated prescription {prescription.prescription_id}',
+            old_values=old_values,
+            new_values=new_values,
+            request=self.request,
+        )
     
     def perform_create(self, serializer):
         # Set doctor from request user if not provided
         if not serializer.validated_data.get('doctor') and self.request.user.is_authenticated:
-            serializer.save(created_by=self.request.user, doctor=self.request.user)
+            prescription = serializer.save(created_by=self.request.user, doctor=self.request.user)
         else:
-            serializer.save(created_by=self.request.user)
+            prescription = serializer.save(created_by=self.request.user)
+        
+        # Log audit
+        AuditService.log_prescription_action(
+            user=self.request.user,
+            action='create',
+            prescription=prescription,
+            module='pharmacy',
+            description=f'Created prescription {prescription.prescription_id} for patient {prescription.patient.get_full_name()}',
+            request=self.request,
+        )
     
     @action(detail=False, methods=['post'])
     def check_interactions(self, request):
@@ -166,6 +243,20 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
             # Convert to integers
             medication_ids = [int(id) for id in medication_ids]
             interactions = check_drug_interactions(medication_ids)
+            
+            # Log audit
+            AuditService.log_activity(
+                user=self.request.user,
+                action='verify',
+                object_type='prescription',
+                object_id='',
+                module='pharmacy',
+                object_repr=f'Drug interaction check for {len(medication_ids)} medications',
+                description=f'Checked drug interactions for {len(medication_ids)} medications. Found {len(interactions)} interactions.',
+                metadata={'medication_ids': medication_ids, 'interactions_count': len(interactions)},
+                request=self.request,
+            )
+            
             return Response({'interactions': interactions})
         except (ValueError, TypeError) as e:
             return Response(
@@ -183,8 +274,16 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
         
         try:
             item = prescription.medications.get(id=item_id)
-            
-            # Check if enough quantity available
+
+            # Check if dispensing quantity exceeds remaining prescribed amount
+            remaining_quantity = item.quantity - item.dispensed_quantity
+            if quantity > remaining_quantity:
+                return Response(
+                    {'error': f'Cannot dispense {quantity} units. Only {remaining_quantity} units remaining to be dispensed.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            # Check if enough quantity available in stock
             if inventory_id:
                 inventory = MedicationInventory.objects.get(id=inventory_id)
                 if inventory.quantity < quantity:
@@ -216,7 +315,23 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
             item.save()
             
             # Recalculate prescription status based on all items
+            old_status = prescription.status
             prescription.recalculate_status()
+            
+            # Log audit
+            AuditService.log_activity(
+                user=self.request.user,
+                action='update',
+                object_type='prescription',
+                object_id=str(prescription.id),
+                module='pharmacy',
+                object_repr=f'Prescription {prescription.prescription_id}',
+                description=f'Dispensed {quantity} {item.unit} of {item.medication.name} from prescription {prescription.prescription_id}',
+                old_values={'status': old_status, 'item_dispensed_quantity': float(item.dispensed_quantity - quantity)},
+                new_values={'status': prescription.status, 'item_dispensed_quantity': float(item.dispensed_quantity)},
+                metadata={'dispense_id': str(dispense.id), 'batch_number': inventory.batch_number if inventory_id else ''},
+                request=self.request,
+            )
             
             return Response(DispenseSerializer(dispense).data)
         except (PrescriptionItem.DoesNotExist, MedicationInventory.DoesNotExist) as e:
@@ -224,6 +339,164 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
                 {'error': str(e)},
                 status=status.HTTP_404_NOT_FOUND
             )
+
+    @action(detail=True, methods=['post'], url_path='substitute-item')
+    def substitute_item(self, request, pk=None):
+        """Substitute medication in a prescription item."""
+        prescription = self.get_object()
+        item_id = request.data.get('item_id')
+        new_medication_id = request.data.get('new_medication_id')
+        reason = request.data.get('reason', '')
+        notes = request.data.get('notes', '')
+
+        print(f"🔄 SUBSTITUTION DEBUG: Prescription {pk}, Item {item_id}, New Med {new_medication_id}")
+
+        # Debug: Show current prescription medications
+        print(f"📋 Current prescription medications:")
+        for med in prescription.medications.all():
+            print(f"   - {med.medication.name} (ID: {med.id}, MedID: {med.medication.id})")
+
+        try:
+            print(f"🔄 Starting substitution for prescription {prescription.id}, item {item_id}, new_med {new_medication_id}")
+
+            # Get the prescription item
+            try:
+                item = prescription.medications.get(id=item_id)
+                print(f"📋 Found prescription item {item.id}")
+            except PrescriptionItem.DoesNotExist:
+                print(f"❌ Prescription item {item_id} not found in prescription {prescription.id}")
+                return Response(
+                    {'error': f'Prescription item {item_id} not found'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+            old_medication = item.medication
+            print(f"📋 Current medication: {old_medication.name} (ID: {old_medication.id})")
+
+            # Get the new medication
+            try:
+                from pharmacy.models import Medication
+                new_medication = Medication.objects.get(id=new_medication_id)
+                print(f"💊 New medication found: {new_medication.name} (ID: {new_medication.id})")
+            except Medication.DoesNotExist:
+                print(f"❌ New medication {new_medication_id} not found")
+                return Response(
+                    {'error': f'Medication {new_medication_id} not found'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+            # Update the prescription item
+            print(f"🔄 Updating item.medication from {old_medication.name} to {new_medication.name}")
+            item.medication = new_medication
+            item.save()
+            print(f"✅ Item updated and saved")
+
+            # Verify the change persisted
+            item.refresh_from_db()
+            print(f"🔍 After refresh: medication is {item.medication.name} (ID: {item.medication.id})")
+
+            # Double-check by re-querying
+            recheck_item = prescription.medications.get(id=item_id)
+            print(f"🔄 Double-check: medication is {recheck_item.medication.name} (ID: {recheck_item.medication.id})")
+
+            # Log audit
+            try:
+                AuditService.log_prescription_action(
+                    user=self.request.user,
+                    prescription=prescription,
+                    action='substitute_item',
+                    old_values={'medication': old_medication.name, 'medication_id': old_medication.id},
+                    new_values={'medication': new_medication.name, 'medication_id': new_medication.id},
+                    metadata={'reason': reason, 'notes': notes},
+                    request=self.request,
+                )
+                print("✅ Audit log created")
+            except Exception as audit_error:
+                print(f"⚠️ Audit logging failed: {audit_error}")
+
+            # Refresh prescription from database to get updated medications
+            prescription.refresh_from_db()
+            print(f"🔄 After prescription refresh: medications count = {prescription.medications.count()}")
+            print(f"📋 After refresh medications:")
+            for med in prescription.medications.all():
+                print(f"   - {med.medication.name} (ID: {med.id}, MedID: {med.medication.id})")
+
+            # Return updated prescription
+            serializer = self.get_serializer(prescription)
+            response_data = serializer.data
+            print(f"📤 Response contains {len(response_data.get('medications', []))} medications")
+            for med in response_data.get('medications', []):
+                med_name = med.get('medication_name', med.get('name', 'Unknown'))
+                med_id = med.get('id', 'Unknown')
+                print(f"   - {med_name} (ID: {med_id})")
+
+            return Response(response_data)
+
+        except Exception as e:
+            print(f"❌ Substitution failed: {e}")
+            return Response(
+                {'error': f'Substitution failed: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    @action(detail=True, methods=['post'])
+    def complete_dispensing(self, request, pk=None):
+        """Manually mark a prescription as fully dispensed/completed."""
+        prescription = self.get_object()
+
+        # Mark all items as dispensed
+        for item in prescription.medications.all():
+            if not item.is_dispensed:
+                item.is_dispensed = True
+                item.save(update_fields=['is_dispensed'])
+
+        # Update prescription status
+        prescription.status = 'dispensed'
+        if not prescription.dispensed_at:
+            from django.utils import timezone
+            prescription.dispensed_at = timezone.now()
+        prescription.save()
+
+        # Log audit
+        AuditService.log_activity(
+            user=self.request.user,
+            action='complete_dispensing',
+            object_type='prescription',
+            object_id=str(prescription.id),
+            module='pharmacy',
+            object_repr=f'Prescription {prescription.prescription_id}',
+            description=f'Manually marked prescription {prescription.prescription_id} as fully dispensed',
+            request=self.request,
+        )
+
+        # Return updated prescription
+        serializer = self.get_serializer(prescription)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'])
+    def recalculate_status(self, request, pk=None):
+        """Recalculate and update prescription status."""
+        prescription = self.get_object()
+        old_status = prescription.status
+
+        prescription.recalculate_status()
+        new_status = prescription.status
+
+        # Log if status changed
+        if old_status != new_status:
+            AuditService.log_activity(
+                user=self.request.user,
+                action='recalculate_status',
+                object_type='prescription',
+                object_id=str(prescription.id),
+                module='pharmacy',
+                object_repr=f'Prescription {prescription.prescription_id}',
+                description=f'Status recalculated: {old_status} → {new_status}',
+                request=self.request,
+            )
+
+        serializer = self.get_serializer(prescription)
+        return Response(serializer.data)
 
 
 class DispenseViewSet(viewsets.ReadOnlyModelViewSet):

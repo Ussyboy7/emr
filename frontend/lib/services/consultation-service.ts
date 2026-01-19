@@ -36,6 +36,35 @@ export interface ConsultationStats {
   completed_today: number;
 }
 
+export interface ICD10Code {
+  id: number;
+  code: string;
+  description: string;
+  category: string;
+  is_active: boolean;
+}
+
+export interface Diagnosis {
+  id: number;
+  patient: number;
+  visit?: number;
+  session?: number;
+  icd10_code: number;
+  diagnosis_text: string;
+  status: 'confirmed' | 'suspected' | 'ruled_out';
+  certainty: 'confirmed' | 'probable' | 'possible';
+  diagnosed_by?: number;
+  diagnosed_at: string;
+  notes: string;
+  patient_name?: string;
+  diagnosed_by_name?: string;
+  icd10_code_details?: {
+    code: string;
+    description: string;
+    category: string;
+  };
+}
+
 export interface ConsultationSession {
   id: number;
   session_id: string;
@@ -43,11 +72,15 @@ export interface ConsultationSession {
   room_name?: string;
   patient: number;
   patient_name?: string;
+  patient_id?: string;
+  patient_age?: number;
+  patient_gender?: string;
   doctor?: number;
   doctor_name?: string;
   visit?: number;
+  clinic_name?: string;
   status: 'active' | 'completed' | 'cancelled';
-  chief_complaint?: string;
+  presentation_complaint?: string;
   history_of_presenting_illness?: string;
   physical_examination?: string;
   assessment?: string;
@@ -153,6 +186,62 @@ class ConsultationService {
   async callPatient(queueId: number): Promise<ConsultationQueueItem> {
     return apiFetch<ConsultationQueueItem>(`/consultation/queue/${queueId}/call/`, {
       method: 'POST',
+    });
+  }
+
+  /**
+   * Get ICD-10 codes
+   */
+  async getICD10Codes(params?: {
+    search?: string;
+    category?: string;
+    page?: number;
+    page_size?: number;
+  }): Promise<{ results: ICD10Code[]; count: number }> {
+    const query = buildQueryString(params || {});
+    return apiFetch<{ results: ICD10Code[]; count: number }>(`/consultation/icd10-codes/${query}`);
+  }
+
+  /**
+   * Get diagnoses
+   */
+  async getDiagnoses(params?: {
+    patient?: number;
+    visit?: number;
+    session?: number;
+    page?: number;
+    page_size?: number;
+  }): Promise<{ results: Diagnosis[]; count: number }> {
+    const query = buildQueryString(params || {});
+    return apiFetch<{ results: Diagnosis[]; count: number }>(`/consultation/diagnoses/${query}`);
+  }
+
+  /**
+   * Create a diagnosis
+   */
+  async createDiagnosis(data: Partial<Diagnosis>): Promise<Diagnosis> {
+    return apiFetch<Diagnosis>('/consultation/diagnoses/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  /**
+   * Update a diagnosis
+   */
+  async updateDiagnosis(id: number, data: Partial<Diagnosis>): Promise<Diagnosis> {
+    return apiFetch<Diagnosis>(`/consultation/diagnoses/${id}/`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  /**
+   * Delete a diagnosis
+   */
+  async deleteDiagnosis(id: number): Promise<void> {
+    await apiFetch(`/consultation/diagnoses/${id}/`, {
+      method: 'DELETE',
     });
   }
 }

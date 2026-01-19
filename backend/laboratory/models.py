@@ -10,11 +10,28 @@ class LabTemplate(models.Model):
     Laboratory test templates for common tests.
     """
     
+    CATEGORY_CHOICES = [
+        ('hematology', 'Hematology'),
+        ('chemistry', 'Chemistry'),
+        ('microbiology', 'Microbiology'),
+        ('immunology', 'Immunology'),
+        ('endocrinology', 'Endocrinology'),
+        ('toxicology', 'Toxicology'),
+        ('urinalysis', 'Urinalysis'),
+        ('parasitology', 'Parasitology'),
+        ('histopathology', 'Histopathology'),
+        ('serology', 'Serology'),
+        ('molecular', 'Molecular Biology'),
+        ('cytology', 'Cytology'),
+    ]
+
     name = models.CharField(max_length=200)
     code = models.CharField(max_length=50, unique=True, db_index=True)
+    category = models.CharField(max_length=50, choices=CATEGORY_CHOICES, default='chemistry')
     sample_type = models.CharField(max_length=50)  # Blood, Urine, Stool, etc.
     description = models.TextField(blank=True)
     normal_range = models.JSONField(default=dict, blank=True, help_text="Normal value ranges")
+    turnaround_time = models.CharField(max_length=50, blank=True, help_text="Expected turnaround time (e.g., '30 min', '2 hours', '1 day')")
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -42,6 +59,7 @@ class LabOrder(models.Model):
     patient = models.ForeignKey('patients.Patient', on_delete=models.CASCADE, related_name='lab_orders')
     doctor = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, related_name='ordered_labs')
     visit = models.ForeignKey('patients.Visit', on_delete=models.SET_NULL, null=True, blank=True, related_name='lab_orders')
+    consultation_session = models.ForeignKey('consultation.ConsultationSession', on_delete=models.SET_NULL, null=True, blank=True, related_name='lab_orders')
     
     priority = models.CharField(max_length=20, choices=PRIORITY_CHOICES, default='routine')
     clinic = models.CharField(max_length=100, blank=True)
@@ -106,6 +124,9 @@ class LabTest(models.Model):
     code = models.CharField(max_length=50)
     sample_type = models.CharField(max_length=50)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+
+    # Lab number for sample identification (format: BT-YY-XXXX)
+    lab_number = models.CharField(max_length=20, unique=True, blank=True, null=True, db_index=True)
     
     # Processing information
     processing_method = models.CharField(max_length=20, choices=PROCESSING_METHOD_CHOICES, blank=True, null=True)

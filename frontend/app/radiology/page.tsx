@@ -7,9 +7,9 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useRouter } from 'next/navigation';
 import { radiologyService } from '@/lib/services';
-import { 
+import {
   ScanLine, FileBarChart, Image as ImageIcon, Clock,
-  CheckCircle2, AlertTriangle, ArrowRight, Activity, ClipboardList, Loader2
+  CheckCircle2, AlertTriangle, ArrowRight, Activity, ClipboardList, Loader2, ShieldCheck, FileText
 } from 'lucide-react';
 
 export default function RadiologyDashboardPage() {
@@ -123,10 +123,14 @@ export default function RadiologyDashboardPage() {
           <div>
             <h1 className="text-3xl font-bold text-foreground flex items-center gap-3">
               <ScanLine className="h-8 w-8 text-cyan-500" />
-              Radiology
+              Radiology Dashboard
             </h1>
             <p className="text-muted-foreground mt-1">Medical imaging, study processing, and radiologist reporting</p>
           </div>
+          <Button variant="outline" onClick={loadDashboardData} className="gap-2">
+            <Activity className="h-4 w-4" />
+            Refresh
+          </Button>
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -160,21 +164,26 @@ export default function RadiologyDashboardPage() {
           )}
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <Button onClick={() => router.push('/radiology/studies')} className="h-auto py-4 flex flex-col items-center gap-2 bg-gradient-to-br from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 text-white">
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+          <Button onClick={() => router.push('/radiology/orders')} className="h-auto py-4 flex flex-col items-center gap-2 bg-gradient-to-br from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 text-white">
             <ClipboardList className="h-6 w-6" />
             <span>Orders Queue</span>
             <span className="text-xs opacity-80">Process incoming orders</span>
           </Button>
-          <Button onClick={() => router.push('/radiology/reports')} variant="outline" className="h-auto py-4 flex flex-col items-center gap-2 border-cyan-500/30 hover:bg-cyan-500/10">
+          <Button onClick={() => router.push('/radiology/verification')} variant="outline" className="h-auto py-4 flex flex-col items-center gap-2 border-amber-500/30 hover:bg-amber-500/10">
+            <ShieldCheck className="h-6 w-6 text-amber-500" />
+            <span>Verification</span>
+            <span className="text-xs text-muted-foreground">Verify radiology reports</span>
+          </Button>
+          <Button onClick={() => router.push('/radiology/completed')} variant="outline" className="h-auto py-4 flex flex-col items-center gap-2 border-cyan-500/30 hover:bg-cyan-500/10">
             <FileBarChart className="h-6 w-6 text-cyan-500" />
             <span>Reports</span>
-            <span className="text-xs text-muted-foreground">Create & verify reports</span>
+            <span className="text-xs text-muted-foreground">View completed reports</span>
           </Button>
-          <Button onClick={() => router.push('/radiology/viewer')} variant="outline" className="h-auto py-4 flex flex-col items-center gap-2 border-cyan-500/30 hover:bg-cyan-500/10">
-            <ImageIcon className="h-6 w-6 text-cyan-500" />
-            <span>Image Viewer</span>
-            <span className="text-xs text-muted-foreground">View DICOM images</span>
+          <Button onClick={() => router.push('/radiology/templates')} variant="outline" className="h-auto py-4 flex flex-col items-center gap-2 border-purple-500/30 hover:bg-purple-500/10">
+            <FileText className="h-6 w-6 text-purple-500" />
+            <span>Templates</span>
+            <span className="text-xs text-muted-foreground">Manage study templates</span>
           </Button>
         </div>
 
@@ -186,7 +195,7 @@ export default function RadiologyDashboardPage() {
                   <Clock className="h-5 w-5 text-amber-500" />
                   Pending Orders
                 </CardTitle>
-                <Button variant="ghost" size="sm" onClick={() => router.push('/radiology/studies')}>
+                <Button variant="ghost" size="sm" onClick={() => router.push('/radiology/orders')}>
                   View All<ArrowRight className="h-4 w-4 ml-1" />
                 </Button>
               </CardHeader>
@@ -241,12 +250,12 @@ export default function RadiologyDashboardPage() {
                         </Badge>
                         <p className="text-xs text-muted-foreground mt-1">{order.time}</p>
                       </div>
-                      <Button 
-                        size="sm" 
+                      <Button
+                        size="sm"
                         className="bg-cyan-500 hover:bg-cyan-600 text-white"
                         onClick={(e) => {
                           e.stopPropagation();
-                          router.push(`/radiology/studies?order=${order.id}`);
+                          router.push('/radiology/orders');
                         }}
                       >
                         Process
@@ -306,6 +315,26 @@ export default function RadiologyDashboardPage() {
           </Card>
         </div>
 
+        {/* Quick Actions */}
+        <div className="flex gap-4 justify-center flex-wrap">
+          <Button onClick={() => router.push('/radiology/orders')} className="gap-2">
+            <ClipboardList className="h-4 w-4" />
+            Orders Queue
+          </Button>
+          <Button variant="outline" onClick={() => router.push('/radiology/verification')} className="gap-2">
+            <ShieldCheck className="h-4 w-4" />
+            Report Verification
+          </Button>
+          <Button variant="outline" onClick={() => router.push('/radiology/completed')} className="gap-2">
+            <FileBarChart className="h-4 w-4" />
+            Completed Reports
+          </Button>
+          <Button variant="outline" onClick={() => router.push('/radiology/templates')} className="gap-2">
+            <FileText className="h-4 w-4" />
+            Study Templates
+          </Button>
+        </div>
+
         {/* Workflow Info */}
         <Card className="border-dashed">
           <CardContent className="p-4">
@@ -316,15 +345,15 @@ export default function RadiologyDashboardPage() {
             <div className="flex items-center gap-2 flex-wrap">
               <Badge variant="outline" className="bg-amber-50 dark:bg-amber-900/20">1. Receive Order</Badge>
               <ArrowRight className="h-4 w-4 text-muted-foreground" />
-              <Badge variant="outline" className="bg-cyan-50 dark:bg-cyan-900/20">2. Schedule</Badge>
+              <Badge variant="outline" className="bg-cyan-50 dark:bg-cyan-900/20">2. Process Studies</Badge>
               <ArrowRight className="h-4 w-4 text-muted-foreground" />
-              <Badge variant="outline" className="bg-blue-50 dark:bg-blue-900/20">3. Perform Study</Badge>
+              <Badge variant="outline" className="bg-blue-50 dark:bg-blue-900/20">3. Enter Results</Badge>
               <ArrowRight className="h-4 w-4 text-muted-foreground" />
-              <Badge variant="outline" className="bg-violet-50 dark:bg-violet-900/20">4. Upload Images</Badge>
+              <Badge variant="outline" className="bg-violet-50 dark:bg-violet-900/20">4. Create Report</Badge>
               <ArrowRight className="h-4 w-4 text-muted-foreground" />
-              <Badge variant="outline" className="bg-purple-50 dark:bg-purple-900/20">5. Create Report</Badge>
+              <Badge variant="outline" className="bg-purple-50 dark:bg-purple-900/20">5. Radiologist Review</Badge>
               <ArrowRight className="h-4 w-4 text-muted-foreground" />
-              <Badge variant="outline" className="bg-emerald-50 dark:bg-emerald-900/20">6. Verify & Send</Badge>
+              <Badge variant="outline" className="bg-emerald-50 dark:bg-emerald-900/20">6. Final Verification</Badge>
             </div>
           </CardContent>
         </Card>

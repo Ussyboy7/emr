@@ -13,13 +13,14 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { labService, type LabResult as ApiLabResult } from '@/lib/services';
 import { PatientAvatar } from "@/components/PatientAvatar";
-import { transformPriority } from '@/lib/services/transformers';
+import { transformPriority, transformToBackendPriority } from '@/lib/services/transformers';
 import {
   ShieldCheck, Search, Eye, Clock, CheckCircle2, AlertTriangle, XCircle,
-  Loader2, User, Calendar, FileText, Stethoscope, RefreshCw, Send
+  Loader2, User, Calendar, FileText, Stethoscope, RefreshCw, Send, Download
 } from 'lucide-react';
 
 interface TestResult {
@@ -39,6 +40,7 @@ interface LabResult {
   testName: string;
   testCode: string;
   results: TestResult[];
+  resultFile?: string; // PDF file URL
   overallStatus: 'Normal' | 'Abnormal' | 'Critical';
   priority: 'Routine' | 'Urgent' | 'STAT';
   status: 'Results Ready' | 'Verified' | 'Completed';
@@ -55,6 +57,10 @@ const transformResult = (apiResult: ApiLabResult): LabResult => {
   // Prioritize test_details over test (test might just be an ID)
   const test = (apiResult as any).test_details || apiResult.test;
   const results: TestResult[] = [];
+
+  // Get test details early to avoid temporal dead zone
+  const testDetails = (apiResult as any).test_details || (test && typeof test === 'object' ? test : null);
+  const testName = testDetails?.name || test?.name || '';
   
   // Debug: Log the structure to help identify issues
   if (process.env.NODE_ENV === 'development') {
@@ -104,20 +110,360 @@ const transformResult = (apiResult: ApiLabResult): LabResult => {
         return;
       }
       
-      // Try to determine status based on value (simplified)
-      let status: 'Normal' | 'Abnormal' | 'Critical' = 'Normal';
       const valueStr = String(value);
+      const valueNum = parseFloat(valueStr);
+
+      // Determine status based on parameter-specific normal ranges
+      let status: 'Normal' | 'Abnormal' | 'Critical' = 'Normal';
+      let normalRange = '';
+      let unit = '';
+
+      // Parameter-specific validation with normal ranges
+      if (key.toLowerCase().includes('glucose') || key.toLowerCase().includes('blood sugar') || key.toLowerCase().includes('fbs')) {
+        unit = 'mg/dL';
+        normalRange = '70-140';
+        if (!isNaN(valueNum)) {
+          if (valueNum < 40 || valueNum > 600) status = 'Critical';  // Critically low/high
+          else if (valueNum < 70 || valueNum > 200) status = 'Abnormal';  // Borderline
+          else status = 'Normal';
+        }
+      } else if (key.toLowerCase().includes('hemoglobin') || key.toLowerCase().includes('hb')) {
+        unit = 'g/dL';
+        normalRange = '12-16 (F), 14-18 (M)';
+        if (!isNaN(valueNum)) {
+          if (valueNum < 7 || valueNum > 20) status = 'Critical';
+          else if (valueNum < 11 || valueNum > 18) status = 'Abnormal';
+          else status = 'Normal';
+        }
+      } else if (key.toLowerCase().includes('wbc') || key.toLowerCase().includes('white blood cell')) {
+        unit = '×10³/μL';
+        normalRange = '4.0-11.0';
+        if (!isNaN(valueNum)) {
+          if (valueNum < 2.0 || valueNum > 30.0) status = 'Critical';
+          else if (valueNum < 4.0 || valueNum > 11.0) status = 'Abnormal';
+          else status = 'Normal';
+        }
+      } else if (key.toLowerCase().includes('platelet')) {
+        unit = '×10³/μL';
+        normalRange = '150-450';
+        if (!isNaN(valueNum)) {
+          if (valueNum < 20 || valueNum > 1000) status = 'Critical';
+          else if (valueNum < 150 || valueNum > 450) status = 'Abnormal';
+          else status = 'Normal';
+        }
+      } else if (key.toLowerCase().includes('creatinine')) {
+        unit = 'mg/dL';
+        normalRange = '0.6-1.2';
+        if (!isNaN(valueNum)) {
+          if (valueNum > 10.0) status = 'Critical';
+          else if (valueNum > 1.2) status = 'Abnormal';
+          else status = 'Normal';
+        }
+      } else if (key.toLowerCase().includes('cholesterol') || key.toLowerCase().includes('total cholesterol')) {
+        unit = 'mg/dL';
+        normalRange = '<200';
+        if (!isNaN(valueNum)) {
+          if (valueNum > 300) status = 'Critical';
+          else if (valueNum > 240) status = 'Abnormal';
+          else status = 'Normal';
+        }
+      } else if (key.toLowerCase().includes('hba1c') || key.toLowerCase().includes('glycated hemoglobin')) {
+        unit = '%';
+        normalRange = '<5.7';
+        if (!isNaN(valueNum)) {
+          if (valueNum > 10.0) status = 'Critical';
+          else if (valueNum > 6.5) status = 'Abnormal';
+          else status = 'Normal';
+        }
+      } else if (key.toLowerCase() === 'result' && testName && testName.toLowerCase().includes('24 hour') && testName.toLowerCase().includes('protein')) {
+        unit = 'mg/day';
+        normalRange = '<150';
+        if (!isNaN(valueNum)) {
+          if (valueNum > 1000) status = 'Critical';
+          else if (valueNum > 300) status = 'Abnormal';
+          else status = 'Normal';
+        }
+      } else if (key.toLowerCase().includes('esr')) {
+        unit = 'mm/hr';
+        normalRange = '0-30';
+        if (!isNaN(valueNum)) {
+          if (valueNum > 100) status = 'Critical';
+          else if (valueNum > 30) status = 'Abnormal';
+          else status = 'Normal';
+        }
+      } else if (key.toLowerCase().includes('reticulocyte')) {
+        if (key.toLowerCase().includes('absolute')) {
+          unit = '×10⁶/μL';
+          normalRange = '25-85';
+        } else {
+          unit = '%';
+          normalRange = '0.5-2.5';
+        }
+        if (!isNaN(valueNum)) {
+          if (key.toLowerCase().includes('absolute')) {
+            if (valueNum < 10 || valueNum > 150) status = 'Critical';
+            else if (valueNum < 25 || valueNum > 85) status = 'Abnormal';
+            else status = 'Normal';
+          } else {
+            if (valueNum < 0.1 || valueNum > 10) status = 'Critical';
+            else if (valueNum < 0.5 || valueNum > 2.5) status = 'Abnormal';
+            else status = 'Normal';
+          }
+        }
+      } else if (key.toLowerCase().includes('pt')) {
+        unit = 'seconds';
+        normalRange = '11-13';
+        if (!isNaN(valueNum)) {
+          if (valueNum > 50) status = 'Critical';
+          else if (valueNum < 11 || valueNum > 13) status = 'Abnormal';
+          else status = 'Normal';
+        }
+      } else if (key.toLowerCase().includes('inr')) {
+        unit = '';
+        normalRange = '0.8-1.1';
+        if (!isNaN(valueNum)) {
+          if (valueNum > 5.0) status = 'Critical';
+          else if (valueNum < 0.8 || valueNum > 1.1) status = 'Abnormal';
+          else status = 'Normal';
+        }
+      } else if (key.toLowerCase().includes('ptt') || key.toLowerCase().includes('aptt')) {
+        unit = 'seconds';
+        normalRange = '25-35';
+        if (!isNaN(valueNum)) {
+          if (valueNum > 100) status = 'Critical';
+          else if (valueNum < 25 || valueNum > 35) status = 'Abnormal';
+          else status = 'Normal';
+        }
+      } else if (key.toLowerCase().includes('fibrinogen')) {
+        unit = 'mg/dL';
+        normalRange = '200-400';
+        if (!isNaN(valueNum)) {
+          if (valueNum < 50 || valueNum > 700) status = 'Critical';
+          else if (valueNum < 200 || valueNum > 400) status = 'Abnormal';
+          else status = 'Normal';
+        }
+      } else if (key.toLowerCase().includes('bleeding time')) {
+        unit = 'minutes';
+        normalRange = '2-7';
+        if (!isNaN(valueNum)) {
+          if (valueNum > 15) status = 'Critical';
+          else if (valueNum < 2 || valueNum > 7) status = 'Abnormal';
+          else status = 'Normal';
+        }
+      } else if (key.toLowerCase().includes('clotting time')) {
+        unit = 'minutes';
+        normalRange = '5-15';
+        if (!isNaN(valueNum)) {
+          if (valueNum > 30) status = 'Critical';
+          else if (valueNum < 5 || valueNum > 15) status = 'Abnormal';
+          else status = 'Normal';
+        }
+      } else if (key.toLowerCase().includes('hba1c')) {
+        unit = '%';
+        normalRange = '<5.7';
+        if (!isNaN(valueNum)) {
+          if (valueNum > 10.0) status = 'Critical';
+          else if (valueNum > 6.5) status = 'Abnormal';
+          else status = 'Normal';
+        }
+      } else if (key.toLowerCase().includes('crp')) {
+        unit = 'mg/L';
+        normalRange = '<10';
+        if (!isNaN(valueNum)) {
+          if (valueNum > 100) status = 'Critical';
+          else if (valueNum > 10) status = 'Abnormal';
+          else status = 'Normal';
+        }
+      } else if (key.toLowerCase().includes('rheumatoid factor') || key.toLowerCase().includes('ra factor')) {
+        unit = 'IU/mL';
+        normalRange = '<15';
+        if (!isNaN(valueNum)) {
+          if (valueNum > 100) status = 'Critical';
+          else if (valueNum > 15) status = 'Abnormal';
+          else status = 'Normal';
+        }
+      } else if (key.toLowerCase().includes('tsh')) {
+        unit = 'μIU/mL';
+        normalRange = '0.4-4.0';
+        if (!isNaN(valueNum)) {
+          if (valueNum < 0.1 || valueNum > 10) status = 'Critical';
+          else if (valueNum < 0.4 || valueNum > 4.0) status = 'Abnormal';
+          else status = 'Normal';
+        }
+      } else if (key.toLowerCase().includes('t3') && !key.toLowerCase().includes('free')) {
+        unit = 'ng/dL';
+        normalRange = '60-181';
+        if (!isNaN(valueNum)) {
+          if (valueNum < 20 || valueNum > 300) status = 'Critical';
+          else if (valueNum < 60 || valueNum > 181) status = 'Abnormal';
+          else status = 'Normal';
+        }
+      } else if (key.toLowerCase().includes('t4') && !key.toLowerCase().includes('free')) {
+        unit = 'μg/dL';
+        normalRange = '4.5-11.2';
+        if (!isNaN(valueNum)) {
+          if (valueNum < 2 || valueNum > 20) status = 'Critical';
+          else if (valueNum < 4.5 || valueNum > 11.2) status = 'Abnormal';
+          else status = 'Normal';
+        }
+      } else if (key.toLowerCase().includes('free t3')) {
+        unit = 'pg/mL';
+        normalRange = '2.0-4.4';
+        if (!isNaN(valueNum)) {
+          if (valueNum < 0.5 || valueNum > 10) status = 'Critical';
+          else if (valueNum < 2.0 || valueNum > 4.4) status = 'Abnormal';
+          else status = 'Normal';
+        }
+      } else if (key.toLowerCase().includes('free t4')) {
+        unit = 'ng/dL';
+        normalRange = '0.93-1.7';
+        if (!isNaN(valueNum)) {
+          if (valueNum < 0.3 || valueNum > 3.0) status = 'Critical';
+          else if (valueNum < 0.93 || valueNum > 1.7) status = 'Abnormal';
+          else status = 'Normal';
+        }
+      } else if (key.toLowerCase().includes('psa')) {
+        unit = 'ng/mL';
+        normalRange = '<4.0';
+        if (!isNaN(valueNum)) {
+          if (valueNum > 100) status = 'Critical';
+          else if (valueNum > 4.0) status = 'Abnormal';
+          else status = 'Normal';
+        }
+      } else if (key.toLowerCase().includes('ca-125') || key.toLowerCase().includes('ca125')) {
+        unit = 'U/mL';
+        normalRange = '<35';
+        if (!isNaN(valueNum)) {
+          if (valueNum > 500) status = 'Critical';
+          else if (valueNum > 35) status = 'Abnormal';
+          else status = 'Normal';
+        }
+      } else if (key.toLowerCase().includes('cea')) {
+        unit = 'ng/mL';
+        normalRange = '<2.5';
+        if (!isNaN(valueNum)) {
+          if (valueNum > 100) status = 'Critical';
+          else if (valueNum > 2.5) status = 'Abnormal';
+          else status = 'Normal';
+        }
+      } else if (key.toLowerCase().includes('afp')) {
+        unit = 'ng/mL';
+        normalRange = '<10';
+        if (!isNaN(valueNum)) {
+          if (valueNum > 500) status = 'Critical';
+          else if (valueNum > 10) status = 'Abnormal';
+          else status = 'Normal';
+        }
+      } else if (key.toLowerCase().includes('vitamin d') || key.toLowerCase().includes('25-oh')) {
+        unit = 'ng/mL';
+        normalRange = '30-100';
+        if (!isNaN(valueNum)) {
+          if (valueNum < 10) status = 'Critical';
+          else if (valueNum < 20) status = 'Abnormal';
+          else status = 'Normal';
+        }
+      } else if (key.toLowerCase().includes('vitamin b12') || key.toLowerCase().includes('b12')) {
+        unit = 'pg/mL';
+        normalRange = '200-900';
+        if (!isNaN(valueNum)) {
+          if (valueNum < 100) status = 'Critical';
+          else if (valueNum < 200) status = 'Abnormal';
+          else status = 'Normal';
+        }
+      } else if (key.toLowerCase().includes('folic acid') || key.toLowerCase().includes('folate')) {
+        unit = 'ng/mL';
+        normalRange = '>4.0';
+        if (!isNaN(valueNum)) {
+          if (valueNum < 2.0) status = 'Critical';
+          else if (valueNum < 4.0) status = 'Abnormal';
+          else status = 'Normal';
+        }
+      } else if (key.toLowerCase().includes('ferritin')) {
+        unit = 'ng/mL';
+        normalRange = '30-300';
+        if (!isNaN(valueNum)) {
+          if (valueNum < 10) status = 'Critical';
+          else if (valueNum < 30 || valueNum > 300) status = 'Abnormal';
+          else status = 'Normal';
+        }
+      } else if (key.toLowerCase().includes('calcium')) {
+        unit = 'mg/dL';
+        normalRange = '8.5-10.5';
+        if (!isNaN(valueNum)) {
+          if (valueNum < 6.0 || valueNum > 12.0) status = 'Critical';
+          else if (valueNum < 8.5 || valueNum > 10.5) status = 'Abnormal';
+          else status = 'Normal';
+        }
+      } else if (key.toLowerCase().includes('magnesium')) {
+        unit = 'mg/dL';
+        normalRange = '1.7-2.2';
+        if (!isNaN(valueNum)) {
+          if (valueNum < 1.0 || valueNum > 3.0) status = 'Critical';
+          else if (valueNum < 1.7 || valueNum > 2.2) status = 'Abnormal';
+          else status = 'Normal';
+        }
+      } else if (key.toLowerCase().includes('phosphorus')) {
+        unit = 'mg/dL';
+        normalRange = '2.5-4.5';
+        if (!isNaN(valueNum)) {
+          if (valueNum < 1.0 || valueNum > 6.0) status = 'Critical';
+          else if (valueNum < 2.5 || valueNum > 4.5) status = 'Abnormal';
+          else status = 'Normal';
+        }
+      } else if (key.toLowerCase().includes('bilirubin') && key.toLowerCase().includes('total')) {
+        unit = 'mg/dL';
+        normalRange = '0.1-1.2';
+        if (!isNaN(valueNum)) {
+          if (valueNum > 5.0) status = 'Critical';
+          else if (valueNum > 1.2) status = 'Abnormal';
+          else status = 'Normal';
+        }
+      } else if (key.toLowerCase().includes('alt') || key.toLowerCase().includes('sgpt')) {
+        unit = 'U/L';
+        normalRange = '7-56';
+        if (!isNaN(valueNum)) {
+          if (valueNum > 1000) status = 'Critical';
+          else if (valueNum < 7 || valueNum > 56) status = 'Abnormal';
+          else status = 'Normal';
+        }
+      } else if (key.toLowerCase().includes('ast') || key.toLowerCase().includes('sgot')) {
+        unit = 'U/L';
+        normalRange = '10-40';
+        if (!isNaN(valueNum)) {
+          if (valueNum > 1000) status = 'Critical';
+          else if (valueNum < 10 || valueNum > 40) status = 'Abnormal';
+          else status = 'Normal';
+        }
+      } else if (key.toLowerCase().includes('alp') || key.toLowerCase().includes('alkaline phosphatase')) {
+        unit = 'U/L';
+        normalRange = '44-147';
+        if (!isNaN(valueNum)) {
+          if (valueNum > 1000) status = 'Critical';
+          else if (valueNum < 44 || valueNum > 147) status = 'Abnormal';
+          else status = 'Normal';
+        }
+      } else if (key.toLowerCase().includes('albumin')) {
+        unit = 'g/dL';
+        normalRange = '3.5-5.0';
+        if (!isNaN(valueNum)) {
+          if (valueNum < 2.0 || valueNum > 6.0) status = 'Critical';
+          else if (valueNum < 3.5 || valueNum > 5.0) status = 'Abnormal';
+          else status = 'Normal';
+        }
+      } else {
+        // For unknown parameters, try to detect from value string first
       if (valueStr.includes('Critical') || valueStr.includes('critical')) {
         status = 'Critical';
       } else if (valueStr.includes('Abnormal') || valueStr.includes('abnormal')) {
         status = 'Abnormal';
+        }
       }
       
       results.push({
         parameter: key,
         value: valueStr,
-        unit: '', // Would need to come from template
-        normalRange: '', // Would need to come from template
+        unit,
+        normalRange,
         status,
       });
     });
@@ -142,10 +488,30 @@ const transformResult = (apiResult: ApiLabResult): LabResult => {
   const patient = apiResult.patient || order?.patient || {};
   
   // Get test details - handle case where test might be just an ID
-  const testDetails = (apiResult as any).test_details || (test && typeof test === 'object' ? test : null);
   const testId = typeof test === 'number' ? test.toString() : (testDetails?.id?.toString() || test?.id?.toString() || apiResult.id.toString());
-  const testName = testDetails?.name || test?.name || '';
   const testCode = testDetails?.code || test?.code || '';
+  
+  // Extract result file URL if available
+  let resultFileUrl: string | undefined = undefined;
+  if (testDetails?.result_file) {
+    const fileField = testDetails.result_file;
+    if (typeof fileField === 'string') {
+      // If it's already a full URL, use it; otherwise construct it
+      resultFileUrl = fileField.startsWith('http') 
+        ? fileField 
+        : fileField.startsWith('/') 
+          ? `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'}${fileField}`
+          : `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'}/media/${fileField}`;
+    } else if (fileField) {
+      // If it's an object, try to get URL or name
+      resultFileUrl = fileField.url || fileField.name || undefined;
+      if (resultFileUrl && !resultFileUrl.startsWith('http')) {
+        resultFileUrl = resultFileUrl.startsWith('/')
+          ? `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'}${resultFileUrl}`
+          : `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'}/media/${resultFileUrl}`;
+      }
+    }
+  }
   
   return {
     id: apiResult.id.toString(),
@@ -165,20 +531,36 @@ const transformResult = (apiResult: ApiLabResult): LabResult => {
     testName: testName,
     testCode: testCode,
     results,
+    resultFile: resultFileUrl,
     overallStatus,
     priority: transformPriority(apiResult.priority || order?.priority || 'routine') as 'Routine' | 'Urgent' | 'STAT',
     status: 'Results Ready',
     submittedBy: testDetails?.processed_by_name || testDetails?.processed_by || test?.processed_by_name || test?.processed_by || 'Lab Tech',
     submittedAt: testDetails?.processed_at || testDetails?.created_at || test?.processed_at || test?.created_at || new Date().toISOString(),
     clinic: order?.clinic || '',
-    clinicalNotes: order?.clinical_notes || testDetails?.notes || test?.notes || '',
+    clinicalNotes: (() => {
+      // Get clinical notes, avoiding duplication
+      const notes = order?.clinical_notes || testDetails?.notes || test?.notes || '';
+      // If notes contain repeated content, clean it up
+      if (notes.includes('; ')) {
+        const parts = notes.split('; ')
+          .map((part: string) => part.trim()) // Trim whitespace
+          .filter((part: string) => part.length > 0) // Remove empty parts
+          .filter((part: string, index: number, arr: string[]) => arr.indexOf(part) === index); // Remove duplicates
+        return parts.join('; ');
+      }
+      return notes;
+    })(),
   };
 };
 
 export default function ResultsVerificationPage() {
   const [results, setResults] = useState<LabResult[]>([]);
+  const [verifiedResults, setVerifiedResults] = useState<LabResult[]>([]);
   const [loading, setLoading] = useState(true);
+  const [verifiedLoading, setVerifiedLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [verifiedError, setVerifiedError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [priorityFilter, setPriorityFilter] = useState('all');
@@ -187,8 +569,13 @@ export default function ResultsVerificationPage() {
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
+  const [verifiedCurrentPage, setVerifiedCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [totalCount, setTotalCount] = useState(0);
+  const [verifiedTotalCount, setVerifiedTotalCount] = useState(0);
+
+  // Tab state
+  const [activeTab, setActiveTab] = useState('pending');
 
   // Dialog states
   const [selectedResult, setSelectedResult] = useState<LabResult | null>(null);
@@ -241,9 +628,50 @@ export default function ResultsVerificationPage() {
   // The API handles pagination, but we still filter client-side for search
   const paginatedResults = filteredResults;
 
+  const filteredVerifiedResults = useMemo(() => verifiedResults.filter(result => {
+    const matchesSearch = result.patient.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      result.orderId.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      result.testName.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesStatus = statusFilter === 'all' || result.overallStatus.toLowerCase() === statusFilter;
+    const matchesPriority = priorityFilter === 'all' || result.priority === priorityFilter;
+    const matchesGender = genderFilter === 'all' || result.patient.gender.toLowerCase() === genderFilter.toLowerCase();
+
+    // Date filter (filter by verification date for verified results)
+    if (dateFilter !== 'all' && result.verifiedAt) {
+      const verifiedDate = new Date(result.verifiedAt);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      if (dateFilter === 'today' && verifiedDate.toDateString() !== today.toDateString()) return false;
+      if (dateFilter === 'week') {
+        const weekAgo = new Date(today);
+        weekAgo.setDate(weekAgo.getDate() - 7);
+        if (verifiedDate < weekAgo) return false;
+      }
+      if (dateFilter === 'month') {
+        const monthAgo = new Date(today);
+        monthAgo.setMonth(monthAgo.getMonth() - 1);
+        if (verifiedDate < monthAgo) return false;
+      }
+    }
+
+    return matchesSearch && matchesStatus && matchesPriority && matchesGender;
+  }), [verifiedResults, searchQuery, statusFilter, priorityFilter, dateFilter, genderFilter]);
+
+  // Paginated results for verified tab
+  const verifiedPaginatedResults = filteredVerifiedResults.slice(
+    (verifiedCurrentPage - 1) * itemsPerPage,
+    verifiedCurrentPage * itemsPerPage
+  );
+
   // Reset to page 1 when filters change or items per page changes
   useEffect(() => {
     setCurrentPage(1);
+  }, [searchQuery, statusFilter, priorityFilter, dateFilter, genderFilter, itemsPerPage]);
+
+  // Reset verified page to 1 when filters change or items per page changes
+  useEffect(() => {
+    setVerifiedCurrentPage(1);
   }, [searchQuery, statusFilter, priorityFilter, dateFilter, genderFilter, itemsPerPage]);
 
   // Load results function - memoized to prevent infinite loops
@@ -262,7 +690,7 @@ export default function ResultsVerificationPage() {
         params.overall_status = statusFilter;
       }
       if (priorityFilter !== 'all') {
-        params.priority = priorityFilter.toLowerCase();
+        params.priority = transformToBackendPriority(priorityFilter);
       }
       
       const response = await labService.getPendingVerifications(params);
@@ -278,16 +706,60 @@ export default function ResultsVerificationPage() {
     }
   }, [currentPage, itemsPerPage, statusFilter, priorityFilter, searchQuery, dateFilter, genderFilter]);
 
+  const loadVerifiedResults = useCallback(async () => {
+    try {
+      setVerifiedLoading(true);
+      setVerifiedError(null);
+      const hasActiveFilters = searchQuery || statusFilter !== 'all' || priorityFilter !== 'all' || dateFilter !== 'all' || genderFilter !== 'all';
+      const pageSize = hasActiveFilters ? 1000 : itemsPerPage;
+
+      const params: any = {
+        page: hasActiveFilters ? 1 : verifiedCurrentPage,
+        page_size: pageSize,
+      };
+      if (statusFilter !== 'all') {
+        params.overall_status = statusFilter;
+      }
+      if (priorityFilter !== 'all') {
+        params.priority = transformToBackendPriority(priorityFilter);
+      }
+
+      const response = await labService.getVerifiedResults(params);
+      setVerifiedTotalCount(response.count || response.results.length);
+      const transformedResults = response.results.map(transformResult);
+      setVerifiedResults(transformedResults);
+    } catch (err: any) {
+      setVerifiedError(err.message || 'Failed to load verified results');
+      console.error('Error loading verified results:', err);
+    } finally {
+      setVerifiedLoading(false);
+    }
+  }, [verifiedCurrentPage, itemsPerPage, statusFilter, priorityFilter, searchQuery, dateFilter, genderFilter]);
+
   // Load results from API when page or filters change
   useEffect(() => {
     loadResults();
   }, [loadResults]);
 
-  const stats = {
+  // Load verified results when tab changes or filters change
+  useEffect(() => {
+    if (activeTab === 'verified') {
+      loadVerifiedResults();
+    }
+  }, [activeTab, loadVerifiedResults]);
+
+  const pendingStats = {
     pending: pendingResults.length,
     critical: pendingResults.filter(r => r.overallStatus === 'Critical').length,
     abnormal: pendingResults.filter(r => r.overallStatus === 'Abnormal').length,
     normal: pendingResults.filter(r => r.overallStatus === 'Normal').length,
+  };
+
+  const verifiedStats = {
+    verified: verifiedResults.length,
+    critical: verifiedResults.filter(r => r.overallStatus === 'Critical').length,
+    abnormal: verifiedResults.filter(r => r.overallStatus === 'Abnormal').length,
+    normal: verifiedResults.filter(r => r.overallStatus === 'Normal').length,
   };
 
   const getOverallStatusBadge = (status: string) => {
@@ -427,6 +899,14 @@ export default function ResultsVerificationPage() {
     }
   };
 
+  const downloadResult = (result: LabResult) => {
+    toast.success(`Downloading result for ${result.patient.name}...`, {
+      description: `${result.testName} - ${result.overallStatus}`
+    });
+    // Placeholder for actual download logic (e.g., API call to generate PDF)
+    console.log('Initiating download for result:', result.id);
+  };
+
   const toggleSelection = (id: string) => {
     setSelectedIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
   };
@@ -456,137 +936,91 @@ export default function ResultsVerificationPage() {
           </Button>
         </div>
 
-        {/* Stats */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <Card className="border-l-4 border-l-amber-500">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Pending Review</p>
-                  <p className="text-3xl font-bold text-amber-600 dark:text-amber-400">{stats.pending}</p>
-                </div>
-                <Clock className="h-8 w-8 text-amber-400" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="border-l-4 border-l-rose-500">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Critical</p>
-                  <p className="text-3xl font-bold text-rose-600 dark:text-rose-400">{stats.critical}</p>
-                </div>
-                <AlertTriangle className="h-8 w-8 text-rose-400" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="border-l-4 border-l-amber-500">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Abnormal</p>
-                  <p className="text-3xl font-bold text-amber-600 dark:text-amber-400">{stats.abnormal}</p>
-                </div>
-                <AlertTriangle className="h-8 w-8 text-amber-400" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="border-l-4 border-l-emerald-500">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Normal</p>
-                  <p className="text-3xl font-bold text-emerald-600 dark:text-emerald-400">{stats.normal}</p>
-                </div>
-                <CheckCircle2 className="h-8 w-8 text-emerald-400" />
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Batch Actions */}
-        {selectedIds.length > 0 && (
-          <Card className="border-l-4 border-l-emerald-500 bg-emerald-50 dark:bg-emerald-950/20">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <CheckCircle2 className="h-5 w-5 text-emerald-600" />
-                  <div>
-                    <p className="font-semibold text-emerald-900 dark:text-emerald-100">{selectedIds.length} result(s) selected</p>
-                    <p className="text-sm text-emerald-700 dark:text-emerald-300">Ready for batch verification</p>
-                  </div>
-                </div>
-                <div className="flex gap-2">
-                  <Button variant="outline" size="sm" onClick={() => setSelectedIds([])}>Clear</Button>
-                  <Button size="sm" onClick={() => setIsBatchVerifyOpen(true)} className="bg-emerald-600 hover:bg-emerald-700">
-                    <CheckCircle2 className="h-4 w-4 mr-2" />Verify All
-                  </Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Filters */}
+        {/* Tabs & Filters */}
         <Card>
           <CardContent className="p-4">
             <div className="flex flex-col gap-4">
+              <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+                <TabsList>
+                  <TabsTrigger value="pending">Pending Review ({pendingStats.pending})</TabsTrigger>
+                  <TabsTrigger value="verified">Verified ({verifiedStats.verified})</TabsTrigger>
+                  <TabsTrigger value="all">All</TabsTrigger>
+                </TabsList>
+              </Tabs>
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input 
-                  placeholder="Search results..." 
-                  value={searchQuery} 
-                  onChange={(e) => setSearchQuery(e.target.value)} 
-                  className="pl-10" 
-                />
+                <Input placeholder="Search by patient, order ID, or test..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-10" />
               </div>
-              <div className="flex flex-wrap gap-2 items-center justify-between">
-                <div className="flex flex-wrap gap-2">
-                  <Select value={dateFilter} onValueChange={setDateFilter}>
-                    <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Time</SelectItem>
-                      <SelectItem value="today">Today</SelectItem>
-                      <SelectItem value="week">This Week</SelectItem>
-                      <SelectItem value="month">This Month</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Select value={statusFilter} onValueChange={setStatusFilter}>
-                    <SelectTrigger className="w-[140px]"><SelectValue placeholder="Status" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Status</SelectItem>
-                      <SelectItem value="critical">Critical</SelectItem>
-                      <SelectItem value="abnormal">Abnormal</SelectItem>
-                      <SelectItem value="normal">Normal</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Select value={priorityFilter} onValueChange={setPriorityFilter}>
-                    <SelectTrigger className="w-[130px]"><SelectValue placeholder="Priority" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Priority</SelectItem>
-                      <SelectItem value="STAT">STAT</SelectItem>
-                      <SelectItem value="Urgent">Urgent</SelectItem>
-                      <SelectItem value="Routine">Routine</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Select value={genderFilter} onValueChange={setGenderFilter}>
-                    <SelectTrigger className="w-[120px]"><SelectValue placeholder="Gender" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Gender</SelectItem>
-                      <SelectItem value="male">Male</SelectItem>
-                      <SelectItem value="female">Female</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <Button variant="outline" onClick={selectAllNormal} disabled={stats.normal === 0}>
-                  Select All Normal
-                </Button>
+              <div className="flex flex-wrap gap-2">
+                <Select value={dateFilter} onValueChange={setDateFilter}>
+                  <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Time</SelectItem>
+                    <SelectItem value="today">Today</SelectItem>
+                    <SelectItem value="week">This Week</SelectItem>
+                    <SelectItem value="month">This Month</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={statusFilter} onValueChange={setStatusFilter}>
+                  <SelectTrigger className="w-[140px]"><SelectValue placeholder="Status" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Status</SelectItem>
+                    <SelectItem value="normal">Normal</SelectItem>
+                    <SelectItem value="abnormal">Abnormal</SelectItem>
+                    <SelectItem value="critical">Critical</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={priorityFilter} onValueChange={setPriorityFilter}>
+                  <SelectTrigger className="w-[130px]"><SelectValue placeholder="Priority" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Priority</SelectItem>
+                    <SelectItem value="STAT">STAT</SelectItem>
+                    <SelectItem value="Urgent">Urgent</SelectItem>
+                    <SelectItem value="Routine">Routine</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={genderFilter} onValueChange={setGenderFilter}>
+                  <SelectTrigger className="w-[120px]"><SelectValue placeholder="Gender" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Gender</SelectItem>
+                    <SelectItem value="male">Male</SelectItem>
+                    <SelectItem value="female">Female</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
           </CardContent>
         </Card>
 
-        {/* Results List */}
+        {/* Tab Content */}
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+          {/* Pending Review Tab */}
+          <TabsContent value="pending" className="space-y-6">
+
+            {/* Batch Actions for Pending */}
+            {selectedIds.length > 0 && (
+              <Card className="border-l-4 border-l-emerald-500 bg-emerald-50 dark:bg-emerald-950/20">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+                      <div>
+                        <p className="font-semibold text-emerald-900 dark:text-emerald-100">{selectedIds.length} result(s) selected</p>
+                        <p className="text-sm text-emerald-700 dark:text-emerald-300">Ready for batch verification</p>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button variant="outline" size="sm" onClick={() => setSelectedIds([])}>Clear</Button>
+                      <Button size="sm" onClick={() => setIsBatchVerifyOpen(true)} className="bg-emerald-600 hover:bg-emerald-700">
+                        <CheckCircle2 className="h-4 w-4 mr-2" />Verify All
+                      </Button>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Pending Results List */}
         <div className="space-y-3">
           {loading ? (
             <Card><CardContent className="p-8 text-center text-muted-foreground">
@@ -676,7 +1110,7 @@ export default function ResultsVerificationPage() {
           )}
         </div>
 
-        {/* Pagination */}
+            {/* Pagination for Pending */}
         {filteredResults.length > 0 && (
           <Card className="p-4">
             <StandardPagination
@@ -685,12 +1119,120 @@ export default function ResultsVerificationPage() {
               itemsPerPage={itemsPerPage}
               onPageChange={setCurrentPage}
               onItemsPerPageChange={setItemsPerPage}
-              itemName="results"
             />
           </Card>
         )}
+          </TabsContent>
 
-        {/* View Dialog */}
+          {/* Verified Tab */}
+          <TabsContent value="verified" className="space-y-6">
+            <div className="space-y-3">
+              {verifiedLoading ? (
+                <Card><CardContent className="p-8 text-center text-muted-foreground">
+                  <Loader2 className="h-12 w-12 mx-auto mb-4 animate-spin opacity-50" />
+                  <p>Loading verified results...</p>
+                </CardContent></Card>
+              ) : verifiedError ? (
+                <Card><CardContent className="p-8 text-center text-muted-foreground">
+                  <AlertTriangle className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                  <p className="text-red-600 dark:text-red-400">{verifiedError}</p>
+                  <Button variant="outline" className="mt-4" onClick={loadVerifiedResults}>Retry</Button>
+                </CardContent></Card>
+              ) : filteredVerifiedResults.length === 0 ? (
+                <Card><CardContent className="p-8 text-center text-muted-foreground">
+                  <CheckCircle2 className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                  <p>No verified results found</p>
+                </CardContent></Card>
+              ) : (
+                verifiedPaginatedResults
+                  .sort((a, b) => {
+                    const statusOrder = { Critical: 0, Abnormal: 1, Normal: 2 };
+                    const priorityOrder = { STAT: 0, Urgent: 1, Routine: 2 };
+                    if (statusOrder[a.overallStatus] !== statusOrder[b.overallStatus]) {
+                      return statusOrder[a.overallStatus] - statusOrder[b.overallStatus];
+                    }
+                    return priorityOrder[a.priority] - priorityOrder[b.priority];
+                  })
+                  .map(result => (
+                    <Card key={result.id} className={`border-l-4 hover:shadow-md transition-shadow ${result.overallStatus === 'Critical' ? 'border-l-rose-500' : result.overallStatus === 'Abnormal' ? 'border-l-amber-500' : 'border-l-emerald-500'}`}>
+                      <CardContent className="py-3 px-4">
+                        <div className="flex items-center gap-3">
+                          {/* Avatar */}
+                          <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${
+                            result.overallStatus === 'Critical' ? 'bg-rose-100 dark:bg-rose-900/30' :
+                            result.overallStatus === 'Abnormal' ? 'bg-amber-100 dark:bg-amber-900/30' :
+                            'bg-emerald-100 dark:bg-emerald-900/30'
+                          }`}>
+                            <PatientAvatar name={result.patient.name} photoUrl={(result.patient as any).photoUrl || (result.patient as any).photo} size="sm" />
+                          </div>
+
+                          {/* Info */}
+                          <div className="flex-1 min-w-0">
+                            {/* Row 1: Name + Badges + Actions */}
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2 flex-wrap min-w-0">
+                                <span className="font-semibold text-foreground truncate">{result.patient.name}</span>
+                                <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${getOverallStatusBadge(result.overallStatus)}`}>
+                                  {result.overallStatus === 'Critical' && <AlertTriangle className="h-2 w-2 mr-0.5" />}{result.overallStatus}
+                                </Badge>
+                                <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${getPriorityBadge(result.priority)}`}>{result.priority}</Badge>
+                                <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{result.testCode}</Badge>
+                              </div>
+                              <div className="flex items-center gap-1 flex-shrink-0">
+                                <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openViewDialog(result)}>
+                                  <Eye className="h-4 w-4 text-muted-foreground hover:text-primary" />
+                                </Button>
+                                <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => downloadResult(result)}>
+                                  <Download className="h-4 w-4 text-muted-foreground hover:text-primary" />
+                                </Button>
+                              </div>
+                            </div>
+
+                            {/* Row 2: Details */}
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-wrap">
+                              <span>{result.testName}</span>
+                              <span>•</span>
+                              <span>{result.orderId}</span>
+                              <span>•</span>
+                              <span className="flex items-center gap-1"><Stethoscope className="h-3 w-3" />{result.doctor.name}</span>
+                              <span>•</span>
+                              <span>Verified by: {result.verifiedBy || 'Unknown'}</span>
+                              <span>•</span>
+                              <span className="flex items-center gap-1"><CheckCircle2 className="h-3 w-3" />{getTimeSince(result.verifiedAt || result.submittedAt)}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))
+              )}
+            </div>
+
+            {/* Pagination for Verified */}
+            {filteredVerifiedResults.length > 0 && (
+              <Card className="p-4">
+                <StandardPagination
+                  currentPage={verifiedCurrentPage}
+                  totalItems={filteredVerifiedResults.length}
+                  itemsPerPage={itemsPerPage}
+                  onPageChange={setVerifiedCurrentPage}
+                  onItemsPerPageChange={setItemsPerPage}
+                />
+              </Card>
+            )}
+          </TabsContent>
+
+          {/* All Tab */}
+          <TabsContent value="all" className="space-y-6">
+            <div className="text-center py-12 text-muted-foreground">
+              <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />
+              <p className="text-lg font-medium">All Results</p>
+              <p className="text-sm">Combined view of pending and verified results</p>
+            </div>
+          </TabsContent>
+        </Tabs>
+
+        {/* Dialogs */}
         <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
           <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
@@ -715,6 +1257,7 @@ export default function ResultsVerificationPage() {
                         <thead><tr className="border-b bg-muted/50">
                           <th className="text-left p-2">Parameter</th>
                           <th className="text-left p-2">Value</th>
+                          <th className="text-left p-2">Unit</th>
                           <th className="text-left p-2">Normal Range</th>
                           <th className="text-left p-2">Status</th>
                         </tr></thead>
@@ -722,13 +1265,43 @@ export default function ResultsVerificationPage() {
                           {selectedResult.results.map(r => (
                             <tr key={r.parameter} className="border-b">
                               <td className="p-2 font-medium">{r.parameter}</td>
-                              <td className={`p-2 ${getResultStatusColor(r.status)}`}>{r.value} {r.unit}</td>
+                              <td className={`p-2 ${getResultStatusColor(r.status)}`}>{r.value}</td>
+                              <td className="p-2 text-muted-foreground">{r.unit}</td>
                               <td className="p-2 text-muted-foreground">{r.normalRange}</td>
                               <td className="p-2"><Badge variant="outline" className={getOverallStatusBadge(r.status)}>{r.status}</Badge></td>
                             </tr>
                           ))}
                         </tbody>
                       </table>
+                    </div>
+                  ) : selectedResult.resultFile ? (
+                    <div className="p-4 rounded-lg bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <FileText className="h-5 w-5 text-indigo-600" />
+                          <div>
+                            <p className="text-sm font-medium text-indigo-900 dark:text-indigo-100">
+                              Result file available
+                            </p>
+                            <p className="text-xs text-indigo-700 dark:text-indigo-300">
+                              Results are provided as a PDF document
+                            </p>
+                          </div>
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            if (selectedResult.resultFile) {
+                              window.open(selectedResult.resultFile, '_blank');
+                            }
+                          }}
+                          className="border-indigo-300 text-indigo-700 hover:bg-indigo-100 dark:border-indigo-700 dark:text-indigo-300 dark:hover:bg-indigo-900/40"
+                        >
+                          <Download className="h-4 w-4 mr-2" />
+                          View PDF
+                        </Button>
+                      </div>
                     </div>
                   ) : (
                     <div className="p-4 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">

@@ -25,7 +25,6 @@ interface Visit {
   department: string;
   doctor: string;
   status: string;
-  chiefComplaint?: string;
   notes?: string;
 }
 
@@ -90,7 +89,6 @@ export function VisitDetailModal({ visit: visitProp, visitId: visitIdProp, isOpe
         department: rawVisitData.clinic || '',
         doctor: rawVisitData.doctor_name || 'Doctor',
         status: rawVisitData.status || 'scheduled',
-        chiefComplaint: rawVisitData.chief_complaint || '',
         notes: rawVisitData.clinical_notes || '',
       });
 
@@ -185,7 +183,7 @@ export function VisitDetailModal({ visit: visitProp, visitId: visitIdProp, isOpe
               id: 'consultation-started',
               step: step++,
               title: 'Consultation Started',
-              description: session.chief_complaint || 'Consultation in progress',
+              description: 'Consultation in progress',
               module: 'Consultation',
               location: session.room_name || (session as any).clinic || 'Consultation Room',
               status: session.status === 'completed' ? 'completed' : 'in_progress',
@@ -405,12 +403,6 @@ export function VisitDetailModal({ visit: visitProp, visitId: visitIdProp, isOpe
                     <span className="text-muted-foreground">Clinic:</span>
                     <span>{visit?.department || 'N/A'}</span>
                   </div>
-                  {visit?.chiefComplaint && (
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Chief Complaint:</span>
-                      <span className="text-right max-w-[60%]">{visit.chiefComplaint}</span>
-                    </div>
-                  )}
                   {visit?.notes && (
                     <div className="mt-3 pt-3 border-t">
                       <span className="text-muted-foreground block mb-2">Notes / Special Instructions:</span>

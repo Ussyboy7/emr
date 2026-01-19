@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
+import { Separator } from '@/components/ui/separator';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
@@ -18,11 +19,29 @@ import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { 
   Search, Plus, UsersRound, ChevronLeft, ChevronRight, Eye, Edit, Trash2, 
-  UserPlus, Link2, Save, User, Phone, Calendar, Heart, Users, Baby, FileText, Loader2, AlertTriangle
+  UserPlus, Link2, Save, User, Phone, Calendar, Heart, Users, Baby, FileText, Loader2, AlertTriangle,
+  Camera, Upload
 } from 'lucide-react';
 
 // Dependent types
 const dependentTypes = ['Employee Dependent', 'Retiree Dependent'];
+
+// Relationship types (matching backend expectations)
+const relationshipTypes = ['Spouse', 'Child', 'Parent', 'Sibling', 'Guardian', 'Other'];
+
+// Constants for form fields (matching patient registration)
+const titles = ['Mr', 'Mrs', 'Ms', 'Dr', 'Chief', 'Engr', 'Prof', 'Alhaji', 'Hajia'];
+const maritalStatuses = ['Single', 'Married', 'Divorced', 'Widowed'];
+const religions = ['Christianity', 'Islam', 'Traditional', 'Other', 'None'];
+const tribes = ['Hausa', 'Yoruba', 'Igbo', 'Fulani', 'Ibibio', 'Tiv', 'Kanuri', 'Ijaw', 'Nupe', 'Efik', 'Urhobo', 'Edo', 'Itsekiri', 'Other'];
+
+const NIGERIA_STATES = [
+  'Abia', 'Adamawa', 'Akwa Ibom', 'Anambra', 'Bauchi', 'Bayelsa', 'Benue', 'Borno',
+  'Cross River', 'Delta', 'Ebonyi', 'Edo', 'Ekiti', 'Enugu', 'FCT', 'Gombe', 'Imo',
+  'Jigawa', 'Kaduna', 'Kano', 'Katsina', 'Kebbi', 'Kogi', 'Kwara', 'Lagos', 'Nasarawa',
+  'Niger', 'Ogun', 'Ondo', 'Osun', 'Oyo', 'Plateau', 'Rivers', 'Sokoto', 'Taraba',
+  'Yobe', 'Zamfara'
+];
 
 // Entitlement rules
 const DEPENDENT_ENTITLEMENTS = {
@@ -36,7 +55,28 @@ const DEPENDENT_ENTITLEMENTS = {
   'Dependent': 0,
 };
 
-const relationshipTypes = ['Spouse', 'Child', 'Parent', 'Sibling', 'Guardian', 'Other'];
+// Helper function to construct full photo URL from relative path
+const getPhotoUrl = (photoPath: string | null | undefined): string => {
+  if (!photoPath) return '';
+
+  // If it's already a full URL, return as is
+  if (photoPath.startsWith('http://') || photoPath.startsWith('https://')) {
+    return photoPath;
+  }
+
+  // If it starts with /media/, construct full URL from API base URL
+  if (photoPath.startsWith('/media/')) {
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001/api';
+    // Remove /api from the end to get base URL, then append the media path
+    const baseUrl = apiUrl.replace(/\/api\/?$/, '');
+    return `${baseUrl}${photoPath}`;
+  }
+
+  // If it's a relative path without /media/, assume it's already relative to media
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001/api';
+  const baseUrl = apiUrl.replace(/\/api\/?$/, '');
+  return `${baseUrl}/media/${photoPath.startsWith('/') ? photoPath.slice(1) : photoPath}`;
+};
 
 export default function DependentsPage() {
   const router = useRouter();
@@ -59,9 +99,22 @@ export default function DependentsPage() {
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [selectedDependent, setSelectedDependent] = useState<typeof dependents[0] | null>(null);
+
+  // Photo upload states for edit modal
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const [editFormLoading, setEditFormLoading] = useState(false);
   
   const [newDependent, setNewDependent] = useState({ firstName: '', lastName: '', dob: '', gender: '', relationship: '', primaryPatientId: '', phone: '', email: '', dependentType: '' });
-  const [editForm, setEditForm] = useState({ firstName: '', lastName: '', dob: '', gender: '', relationship: '', primaryPatientId: '', phone: '', email: '', status: '', dependentType: '' });
+  const [editForm, setEditForm] = useState({
+    // Basic info
+    firstName: '', lastName: '', dob: '', gender: '', relationship: '',
+    primaryPatientId: '', phone: '', email: '', status: '', dependentType: '',
+    // Additional fields to match patient registration
+    title: '', middleName: '', maritalStatus: '', religion: '', tribe: '',
+    residentialAddress: '', permanentAddress: '', lga: '',
+    stateOfResidence: '', stateOfOrigin: '', occupation: ''
+  });
 
   // Load dependents and patients from API
   useEffect(() => {
@@ -105,7 +158,7 @@ export default function DependentsPage() {
                 age: dep.age || 0,
                 gender: dep.gender === 'male' ? 'Male' : 'Female',
                 relationship: dep.nok_relationship || 'Other',
-                primaryPatient: primaryPatient || { id: '', name: 'Unknown', category: '' },
+                primaryPatient: primaryPatient || { id: '', name: 'Unknown Principal', category: '' },
                 status: dep.is_active ? 'Active' : 'Inactive',
                 phone: dep.phone || '-',
                 email: dep.email || '-',
@@ -160,28 +213,9 @@ export default function DependentsPage() {
   const canAddDependent = (patientId: string) => {
     const patient = patients.find(p => (p.patient_id || String(p.id)) === patientId || String(p.id) === patientId);
     if (!patient) return { allowed: false, reason: 'Patient not found' };
-    
-    // Map backend category to frontend category
-    const categoryMap: Record<string, string> = {
-      'employee': 'employee',
-      'retiree': 'retiree',
-      'nonnpa': 'nonnpa',
-      'dependent': 'dependent',
-    };
-    const normalizedCategory = categoryMap[patient.category] || patient.category.toLowerCase();
-    
-    const entitlement = DEPENDENT_ENTITLEMENTS[normalizedCategory as keyof typeof DEPENDENT_ENTITLEMENTS] || 0;
-    const currentCount = getDependentCount(patientId);
-    
-    if (entitlement === 0) {
-      return { allowed: false, reason: `${patient.category} patients are not entitled to dependents` };
-    }
-    
-    if (currentCount >= entitlement) {
-      return { allowed: false, reason: `Maximum ${entitlement} dependent(s) allowed for ${patient.category}. Currently has ${currentCount}.` };
-    }
-    
-    return { allowed: true, remaining: entitlement - currentCount };
+
+    // No entitlement restrictions - all patients can have dependents
+    return { allowed: true };
   };
 
   // Get dependent type based on principal's category
@@ -191,12 +225,55 @@ export default function DependentsPage() {
     return (patient.category === 'retiree' || (patient.category as string) === 'Retiree') ? 'Retiree Dependent' : 'Employee Dependent';
   };
 
+  // Validate Principal Staff ID
+  const validatePrincipalStaffId = (staffId: string) => {
+    if (!staffId || !staffId.trim()) {
+      return { valid: false, message: 'Principal Staff ID is required' };
+    }
+
+    const trimmedId = staffId.trim();
+    // First, try to find by patient_id (like E-A2000 or R-A2000)
+    let patient = patients.find(p => p.patient_id === trimmedId);
+
+    // If not found by patient_id, try by personal_number (like A2000)
+    if (!patient) {
+      patient = patients.find(p => p.personal_number === trimmedId);
+    }
+
+    // If still not found, try by employee_id
+    if (!patient) {
+      patient = patients.find(p => p.employee_id === trimmedId);
+    }
+
+    // Finally, try by database ID as fallback
+    if (!patient) {
+      patient = patients.find(p => String(p.id) === trimmedId);
+    }
+
+    if (!patient) {
+      return { valid: false, message: `Staff ID "${trimmedId}" not found in the system` };
+    }
+
+    // Validate category
+    if (patient.category !== 'employee' && patient.category !== 'retiree') {
+      return { valid: false, message: `ID "${trimmedId}" belongs to a ${patient.category}, not a staff member or retiree` };
+    }
+
+    // No entitlement restrictions
+
+    return {
+      valid: true,
+      message: `Valid: ${patient.full_name || `${patient.first_name} ${patient.surname}`} (${patient.category})`,
+      patient
+    };
+  };
+
   const filteredDependents = useMemo(() => dependents.filter(dep => {
-    const matchesSearch = dep.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
+    const matchesSearch = dep.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       dep.primaryPatient.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       dep.id.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesRelationship = relationshipFilter === 'all' || dep.relationship.toLowerCase() === relationshipFilter.toLowerCase();
-    const matchesStatus = statusFilter === 'all' || dep.status.toLowerCase() === statusFilter.toLowerCase();
+    const matchesRelationship = relationshipFilter === 'all' || dep.relationship === relationshipFilter;
+    const matchesStatus = statusFilter === 'all' || dep.status === statusFilter;
     return matchesSearch && matchesRelationship && matchesStatus;
   }), [dependents, searchQuery, relationshipFilter, statusFilter]);
 
@@ -227,20 +304,63 @@ export default function DependentsPage() {
     return age;
   };
 
+  // Photo handling functions
+  const handlePhotoSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      if (file.size > 5 * 1024 * 1024) { // 5MB limit
+        toast.error('Photo size must be less than 5MB');
+        return;
+      }
+      setPhotoFile(file);
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        setPhotoPreview(e.target?.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleRemovePhoto = () => {
+    setPhotoFile(null);
+    setPhotoPreview(null);
+  };
+
   const handleAddDependent = async () => {
     try {
-      const primaryPatient = patients.find(p => 
-        (p.patient_id || String(p.id)) === newDependent.primaryPatientId || 
-        String(p.id) === newDependent.primaryPatientId
-      );
-      
+      const trimmedId = newDependent.primaryPatientId.trim();
+
+      // First, try to find by patient_id (like E-A2000 or R-A2000)
+      let primaryPatient = patients.find(p => p.patient_id === trimmedId);
+
+      // If not found by patient_id, try by personal_number (like A2000)
       if (!primaryPatient) {
-        toast.error('Primary patient not found');
+        primaryPatient = patients.find(p => p.personal_number === trimmedId);
+      }
+
+      // If still not found, try by employee_id
+      if (!primaryPatient) {
+        primaryPatient = patients.find(p => p.employee_id === trimmedId);
+      }
+
+      // Finally, try by database ID as fallback
+      if (!primaryPatient) {
+        primaryPatient = patients.find(p => String(p.id) === trimmedId);
+      }
+
+      if (!primaryPatient) {
+        toast.error(`Principal Staff ID "${trimmedId}" not found. Please enter a valid NPA staff or retiree ID.`);
+        return;
+      }
+
+      // Validate that the principal is actually an employee or retiree
+      if (primaryPatient.category !== 'employee' && primaryPatient.category !== 'retiree') {
+        toast.error(`Principal must be an NPA staff member or retiree. Selected patient is categorized as: ${primaryPatient.category}`);
         return;
       }
 
       // Check entitlement
-      const entitlementCheck = canAddDependent(newDependent.primaryPatientId);
+      const entitlementCheck = canAddDependent(primaryPatient.patient_id || String(primaryPatient.id));
       if (!entitlementCheck.allowed) {
         toast.error(entitlementCheck.reason);
         return;
@@ -342,18 +462,40 @@ export default function DependentsPage() {
         return;
       }
 
-      const primaryPatient = patients.find(p => 
-        (p.patient_id || String(p.id)) === editForm.primaryPatientId || 
-        String(p.id) === editForm.primaryPatientId
-      );
+      const trimmedId = editForm.primaryPatientId.trim();
+
+      // First, try to find by patient_id (like E-A2000 or R-A2000)
+      let primaryPatient = patients.find(p => p.patient_id === trimmedId);
+
+      // If not found by patient_id, try by personal_number (like A2000)
+      if (!primaryPatient) {
+        primaryPatient = patients.find(p => p.personal_number === trimmedId);
+      }
+
+      // If still not found, try by employee_id
+      if (!primaryPatient) {
+        primaryPatient = patients.find(p => p.employee_id === trimmedId);
+      }
+
+      // Finally, try by database ID as fallback
+      if (!primaryPatient) {
+        primaryPatient = patients.find(p => String(p.id) === trimmedId);
+      }
 
       if (!primaryPatient) {
-        toast.error('Primary patient not found');
+        toast.error(`Principal Staff ID "${trimmedId}" not found. Please enter a valid NPA staff or retiree ID.`);
         return;
       }
 
-      // Update dependent
+      // Validate that the principal is actually an employee or retiree
+      if (primaryPatient.category !== 'employee' && primaryPatient.category !== 'retiree') {
+        toast.error(`Principal must be an NPA staff member or retiree. Selected patient is categorized as: ${primaryPatient.category}`);
+        return;
+      }
+
+      // Prepare update data with all fields
       const updateData: any = {
+        // Basic fields
         surname: editForm.lastName,
         first_name: editForm.firstName,
         gender: editForm.gender.toLowerCase(),
@@ -363,7 +505,32 @@ export default function DependentsPage() {
         nok_relationship: editForm.relationship,
         is_active: editForm.status === 'Active',
         principal_staff: primaryPatient.id,
+
+        // Additional fields matching patient registration
+        title: editForm.title || '',
+        middle_name: editForm.middleName || '',
+        marital_status: editForm.maritalStatus || '',
+        religion: editForm.religion || '',
+        tribe: editForm.tribe || '',
+        residential_address: editForm.residentialAddress || '',
+        permanent_address: editForm.permanentAddress || '',
+        lga: editForm.lga || '',
+        state_of_residence: editForm.stateOfResidence || '',
+        state_of_origin: editForm.stateOfOrigin || '',
+        occupation: editForm.occupation || '',
       };
+
+      // Handle photo upload if a new photo was selected
+      if (photoFile) {
+        try {
+          const formData = new FormData();
+          formData.append('photo', photoFile);
+          await patientService.uploadPatientPhoto(dependentToUpdate.id, formData);
+        } catch (photoError) {
+          console.error('Failed to upload photo:', photoError);
+          toast.error('Patient updated but photo upload failed');
+        }
+      }
 
       await patientService.updatePatient(dependentToUpdate.id, updateData);
       
@@ -498,14 +665,62 @@ export default function DependentsPage() {
     }
   };
 
-  const openEditDialog = (dep: typeof dependents[0]) => {
+  const openEditDialog = async (dep: typeof dependents[0]) => {
     setSelectedDependent(dep);
+    setEditFormLoading(true);
+    setPhotoPreview(null);
+    setPhotoFile(null);
+
+    try {
+      // Load full dependent data from API to get additional fields
+      const dependentApiData = await patientService.getPatients({
+        category: 'dependent',
+        search: dep.id,
+      });
+
+      const dependentToEdit = dependentApiData.results.find(
+        (d: any) => (d.patient_id || String(d.id)) === dep.id
+      );
+
+      if (dependentToEdit) {
+        // Set photo preview if exists
+        if (dependentToEdit.photo) {
+          setPhotoPreview(getPhotoUrl(dependentToEdit.photo));
+        }
+
     setEditForm({
-      firstName: dep.firstName, lastName: dep.lastName, dob: dep.dob, gender: dep.gender,
-      relationship: dep.relationship, primaryPatientId: dep.primaryPatient.id,
-      phone: dep.phone === '-' ? '' : dep.phone, email: dep.email === '-' ? '' : dep.email, status: dep.status,
-      dependentType: dep.dependentType || 'dependent'
-    });
+          // Basic info
+          firstName: dependentToEdit.first_name || '',
+          lastName: dependentToEdit.surname || '',
+          dob: dependentToEdit.date_of_birth || '',
+          gender: dependentToEdit.gender === 'male' ? 'Male' : 'Female',
+          relationship: dependentToEdit.nok_relationship || '',
+          primaryPatientId: dep.primaryPatient.id,
+          phone: dependentToEdit.phone || '',
+          email: dependentToEdit.email || '',
+          status: dependentToEdit.is_active ? 'Active' : 'Inactive',
+          dependentType: dep.dependentType || 'dependent',
+          // Additional fields
+          title: dependentToEdit.title || '',
+          middleName: dependentToEdit.middle_name || '',
+          maritalStatus: dependentToEdit.marital_status || '',
+          religion: dependentToEdit.religion || '',
+          tribe: dependentToEdit.tribe || '',
+          residentialAddress: dependentToEdit.residential_address || '',
+          permanentAddress: dependentToEdit.permanent_address || '',
+          lga: dependentToEdit.lga || '',
+          stateOfResidence: dependentToEdit.state_of_residence || '',
+          stateOfOrigin: dependentToEdit.state_of_origin || '',
+          occupation: dependentToEdit.occupation || '',
+        });
+      }
+    } catch (error) {
+      console.error('Error loading dependent data:', error);
+      toast.error('Failed to load dependent data');
+    } finally {
+      setEditFormLoading(false);
+    }
+
     setIsEditDialogOpen(true);
   };
 
@@ -589,7 +804,7 @@ export default function DependentsPage() {
                     <SelectTrigger className="w-[150px]"><SelectValue placeholder="Relationship" /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All Types</SelectItem>
-                      {relationshipTypes.map(r => <SelectItem key={r} value={r.toLowerCase()}>{r}</SelectItem>)}
+                      {relationshipTypes.map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}
                     </SelectContent>
                   </Select>
                   <Select value={statusFilter} onValueChange={setStatusFilter}>
@@ -738,30 +953,6 @@ export default function DependentsPage() {
               </CardContent>
             </Card>
 
-            <Card className="border-violet-500/20 bg-violet-500/5">
-              <CardContent className="p-4">
-                <div className="flex items-start gap-3">
-                  <UsersRound className="h-5 w-5 text-violet-500 mt-0.5" />
-                  <div>
-                    <p className="font-medium text-violet-600 dark:text-violet-400">Dependent Entitlements</p>
-                    <div className="text-xs text-muted-foreground mt-2 space-y-1">
-                      <div className="flex items-center justify-between">
-                        <span>Employees:</span>
-                        <Badge variant="outline" className="text-xs">Up to 5 dependents</Badge>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span>Retirees:</span>
-                        <Badge variant="outline" className="text-xs">1 dependent only</Badge>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span>Non-NPA:</span>
-                        <Badge variant="outline" className="text-xs text-muted-foreground">Not entitled</Badge>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
           </div>
         </div>
 
@@ -784,55 +975,60 @@ export default function DependentsPage() {
                 </div>
               </div>
               <div className="space-y-2">
-                <Label>Principal (Staff/Retiree) *</Label>
-                <Select value={newDependent.primaryPatientId} onValueChange={(v) => setNewDependent(prev => ({ ...prev, primaryPatientId: v }))}>
-                  <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
-                  <SelectContent>
-                    {patients
-                      .filter(p => p.category === 'employee' || p.category === 'retiree')
-                      .map(p => {
-                        const patientId = p.patient_id || String(p.id);
-                        const check = canAddDependent(patientId);
-                        const currentCount = getDependentCount(patientId);
-                        const categoryMap: Record<string, string> = {
-                          'employee': 'employee',
-                          'retiree': 'retiree',
-                        };
-                        const normalizedCategory = categoryMap[p.category] || p.category.toLowerCase();
-                        const entitlement = DEPENDENT_ENTITLEMENTS[normalizedCategory as keyof typeof DEPENDENT_ENTITLEMENTS] || 0;
-                        const patientName = p.full_name || `${p.first_name} ${p.surname}`;
-                        return (
-                          <SelectItem key={p.id} value={patientId} disabled={!check.allowed}>
-                            <div className="flex items-center justify-between w-full gap-2">
-                              <span>{patientName}</span>
-                              <span className="text-xs text-muted-foreground">
-                                ({p.category} • {currentCount}/{entitlement})
-                              </span>
-                            </div>
-                          </SelectItem>
-                        );
-                      })}
-                  </SelectContent>
-                </Select>
+                <Label>Principal Staff ID *</Label>
+                <Input
+                  value={newDependent.primaryPatientId}
+                  onChange={(e) => {
+                    const newId = e.target.value;
+                    setNewDependent(prev => ({
+                      ...prev,
+                      primaryPatientId: newId,
+                      dependentType: newId ? getDependentType(newId) : ''
+                    }));
+                  }}
+                  placeholder="Enter NPA Staff ID (e.g., A2000)"
+                  className={(() => {
+                    if (!newDependent.primaryPatientId) return '';
+                    const validation = validatePrincipalStaffId(newDependent.primaryPatientId);
+                    return validation.valid ? 'border-green-500 focus:border-green-500' : 'border-red-500 focus:border-red-500';
+                  })()}
+                />
+                <p className="text-xs text-muted-foreground">Enter the NPA Staff ID of the employee or retiree this dependent belongs to</p>
                 {newDependent.primaryPatientId && (
-                  <p className="text-xs text-muted-foreground">
+                  <div className={`text-xs p-2 rounded-md border ${
+                    (() => {
+                      const validation = validatePrincipalStaffId(newDependent.primaryPatientId);
+                      return validation.valid ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700';
+                    })()
+                  }`}>
                     {(() => {
-                      const check = canAddDependent(newDependent.primaryPatientId);
-                      if (check.allowed && 'remaining' in check) {
-                        return `${check.remaining} dependent slot(s) remaining`;
+                      const validation = validatePrincipalStaffId(newDependent.primaryPatientId);
+                      if (validation.valid) {
+                        const check = canAddDependent(newDependent.primaryPatientId);
+                        if (check.allowed && 'remaining' in check) {
+                          return `✅ ${validation.message} • ${check.remaining} dependent slot(s) remaining`;
+                        }
+                        return `✅ ${validation.message}`;
                       }
-                      return check.reason;
+                      return `❌ ${validation.message}`;
                     })()}
-                  </p>
+                  </div>
                 )}
               </div>
               <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Dependent Type *</Label>
+                  <Input value={newDependent.dependentType} readOnly className="bg-muted" placeholder="Auto-filled based on principal" />
+                  <p className="text-xs text-muted-foreground">Automatically determined by principal staff type</p>
+                </div>
                 <div className="space-y-2"><Label>Relationship *</Label>
                   <Select value={newDependent.relationship} onValueChange={(v) => setNewDependent(prev => ({ ...prev, relationship: v }))}><SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger><SelectContent>{relationshipTypes.map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}</SelectContent></Select>
                 </div>
-                <div className="space-y-2"><Label>Phone</Label><Input value={newDependent.phone} onChange={(e) => setNewDependent(prev => ({ ...prev, phone: e.target.value }))} /></div>
               </div>
-              <div className="space-y-2"><Label>Email</Label><Input value={newDependent.email} onChange={(e) => setNewDependent(prev => ({ ...prev, email: e.target.value }))} /></div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2"><Label>Phone</Label><Input value={newDependent.phone} onChange={(e) => setNewDependent(prev => ({ ...prev, phone: e.target.value }))} /></div>
+                <div className="space-y-2"><Label>Email</Label><Input value={newDependent.email} onChange={(e) => setNewDependent(prev => ({ ...prev, email: e.target.value }))} /></div>
+              </div>
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>Cancel</Button>
@@ -872,53 +1068,295 @@ export default function DependentsPage() {
           </DialogContent>
         </Dialog>
 
-        {/* Edit Dialog */}
+        {/* Edit Dialog - Updated to match patient registration modal */}
         <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-          <DialogContent className="w-[95vw] sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
-            <DialogHeader><DialogTitle className="flex items-center gap-2"><Edit className="h-5 w-5" />Edit Dependent</DialogTitle></DialogHeader>
-            <div className="grid gap-4 py-4">
+          <DialogContent className="w-[95vw] sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Edit className="h-5 w-5 text-blue-500" />
+                Edit Dependent
+              </DialogTitle>
+              <DialogDescription>Update dependent registration information</DialogDescription>
+            </DialogHeader>
+            {selectedDependent && (
+              <div className="space-y-4 py-4" key={`edit-${selectedDependent.id}`}>
+                {editFormLoading ? (
+                  <div className="flex items-center justify-center py-12">
+                    <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                    <span className="ml-3 text-muted-foreground">Loading dependent data...</span>
+                  </div>
+                ) : (
+                  <>
+                    {/* Patient ID (Read-only) */}
+                    <div className="p-3 rounded-lg bg-muted/50">
+                      <p className="text-xs text-muted-foreground">Dependent ID (Cannot be changed)</p>
+                      <p className="font-medium">{selectedDependent.id}</p>
+                    </div>
+
+                    {/* Photo Upload */}
+                    <div className="space-y-2">
+                      <Label>Dependent Photo</Label>
+                      <div className="flex items-center gap-4">
+                        <div className="w-20 h-20 rounded-lg border-2 border-dashed border-border bg-muted/30 flex items-center justify-center overflow-hidden">
+                          {photoPreview ? (
+                            <img src={photoPreview} alt="Preview" className="w-full h-full object-cover" />
+                          ) : (
+                            <Camera className="h-6 w-6 text-muted-foreground" />
+                          )}
+                        </div>
+                        <div className="flex-1 space-y-2">
+                          <div className="flex gap-2">
+                            <input
+                              type="file"
+                              id="edit-photo-upload"
+                              accept="image/*"
+                              onChange={handlePhotoSelect}
+                              className="hidden"
+                            />
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              type="button"
+                              onClick={() => document.getElementById('edit-photo-upload')?.click()}
+                            >
+                              <Upload className="h-4 w-4 mr-2" />
+                              {photoPreview ? 'Change Photo' : 'Upload Photo'}
+                            </Button>
+                            {photoPreview && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                type="button"
+                                onClick={handleRemovePhoto}
+                              >
+                                <Trash2 className="h-4 w-4 mr-2" />
+                                Remove
+                              </Button>
+                            )}
+                          </div>
+                          <p className="text-xs text-muted-foreground">JPG, PNG. Max 5MB</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <Separator />
+
+                    {/* Personal Information */}
+                    <div className="space-y-4">
+                      <h3 className="text-sm font-semibold text-foreground">Personal Information</h3>
+                      <div className="grid grid-cols-4 gap-4">
+                        <div className="space-y-2">
+                          <Label>Title</Label>
+                          <Select value={editForm.title || undefined} onValueChange={(v) => setEditForm(prev => ({ ...prev, title: v === 'none' ? '' : v }))}>
+                            <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">None</SelectItem>
+                              {titles.map(title => <SelectItem key={title} value={title.toLowerCase()}>{title}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label>First Name *</Label>
+                          <Input value={editForm.firstName} onChange={(e) => setEditForm(prev => ({ ...prev, firstName: e.target.value }))} />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Middle Name</Label>
+                          <Input value={editForm.middleName} onChange={(e) => setEditForm(prev => ({ ...prev, middleName: e.target.value }))} />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Surname *</Label>
+                          <Input value={editForm.lastName} onChange={(e) => setEditForm(prev => ({ ...prev, lastName: e.target.value }))} />
+                        </div>
+                      </div>
               <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2"><Label>First Name</Label><Input value={editForm.firstName} onChange={(e) => setEditForm(prev => ({ ...prev, firstName: e.target.value }))} /></div>
-                <div className="space-y-2"><Label>Last Name</Label><Input value={editForm.lastName} onChange={(e) => setEditForm(prev => ({ ...prev, lastName: e.target.value }))} /></div>
+                        <div className="space-y-2">
+                          <Label>Date of Birth</Label>
+                          <Input type="date" value={editForm.dob} onChange={(e) => setEditForm(prev => ({ ...prev, dob: e.target.value }))} />
               </div>
+                        <div className="space-y-2">
+                          <Label>Marital Status</Label>
+                          <Select value={editForm.maritalStatus || undefined} onValueChange={(v) => setEditForm(prev => ({ ...prev, maritalStatus: v === 'not-specified' ? '' : v }))}>
+                            <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="not-specified">Not specified</SelectItem>
+                              {maritalStatuses.map(status => <SelectItem key={status} value={status.toLowerCase()}>{status}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-3 gap-4">
+                        <div className="space-y-2">
+                          <Label>Religion</Label>
+                          <Select value={editForm.religion || undefined} onValueChange={(v) => setEditForm(prev => ({ ...prev, religion: v === 'not-specified' ? '' : v }))}>
+                            <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="not-specified">Not specified</SelectItem>
+                              {religions.map(religion => <SelectItem key={religion} value={religion}>{religion}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Tribe</Label>
+                          <Select value={editForm.tribe || undefined} onValueChange={(v) => setEditForm(prev => ({ ...prev, tribe: v === 'not-specified' ? '' : v }))}>
+                            <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="not-specified">Not specified</SelectItem>
+                              {tribes.map(tribe => <SelectItem key={tribe} value={tribe}>{tribe}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Occupation</Label>
+                          <Input
+                            value={editForm.occupation}
+                            onChange={(e) => setEditForm(prev => ({ ...prev, occupation: e.target.value }))}
+                            placeholder="Enter occupation"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <Separator />
+
+                    {/* Contact Information */}
+                    <div className="space-y-4">
+                      <h3 className="text-sm font-semibold text-foreground">Contact Information</h3>
               <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2"><Label>Date of Birth</Label><Input type="date" value={editForm.dob} onChange={(e) => setEditForm(prev => ({ ...prev, dob: e.target.value }))} /></div>
-                <div className="space-y-2"><Label>Gender</Label>
-                  <Select value={editForm.gender} onValueChange={(v) => setEditForm(prev => ({ ...prev, gender: v }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="Male">Male</SelectItem><SelectItem value="Female">Female</SelectItem></SelectContent></Select>
+                        <div className="space-y-2">
+                          <Label>Phone *</Label>
+                          <Input value={editForm.phone} onChange={(e) => setEditForm(prev => ({ ...prev, phone: e.target.value }))} placeholder="+234..." />
+                </div>
+                        <div className="space-y-2">
+                          <Label>Email</Label>
+                          <Input type="email" value={editForm.email} onChange={(e) => setEditForm(prev => ({ ...prev, email: e.target.value }))} placeholder="email@example.com" />
+              </div>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Residential Address</Label>
+                        <Input value={editForm.residentialAddress} onChange={(e) => setEditForm(prev => ({ ...prev, residentialAddress: e.target.value }))} placeholder="Street address" />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Permanent Address</Label>
+                        <Input value={editForm.permanentAddress} onChange={(e) => setEditForm(prev => ({ ...prev, permanentAddress: e.target.value }))} placeholder="Permanent address (if different)" />
+                      </div>
+                      <div className="grid grid-cols-3 gap-4">
+                        <div className="space-y-2">
+                          <Label>LGA</Label>
+                          <Input value={editForm.lga} onChange={(e) => setEditForm(prev => ({ ...prev, lga: e.target.value }))} placeholder="Local Government Area" />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>State of Residence</Label>
+                          <Select value={editForm.stateOfResidence || undefined} onValueChange={(v) => setEditForm(prev => ({ ...prev, stateOfResidence: v === 'not-specified' ? '' : v }))}>
+                            <SelectTrigger><SelectValue placeholder="Select state" /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="not-specified">Not specified</SelectItem>
+                              {NIGERIA_STATES.map(state => <SelectItem key={state} value={state}>{state}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label>State of Origin</Label>
+                          <Select value={editForm.stateOfOrigin || undefined} onValueChange={(v) => setEditForm(prev => ({ ...prev, stateOfOrigin: v === 'not-specified' ? '' : v }))}>
+                            <SelectTrigger><SelectValue placeholder="Select state" /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="not-specified">Not specified</SelectItem>
+                              {NIGERIA_STATES.map(state => <SelectItem key={state} value={state}>{state}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                    </div>
+
+                    <Separator />
+
+                    {/* Dependent-specific fields */}
+                    <div className="space-y-4">
+                      <h3 className="text-sm font-semibold text-foreground">Dependent Information</h3>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label>Gender *</Label>
+                          <Select value={editForm.gender} onValueChange={(v) => setEditForm(prev => ({ ...prev, gender: v }))}>
+                            <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="Male">Male</SelectItem>
+                              <SelectItem value="Female">Female</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Relationship to Principal *</Label>
+                          <Select value={editForm.relationship} onValueChange={(v) => setEditForm(prev => ({ ...prev, relationship: v }))}>
+                            <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
+                            <SelectContent>
+                              {relationshipTypes.map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label>Principal Staff ID *</Label>
+                          <Input
+                            value={editForm.primaryPatientId}
+                            onChange={(e) => {
+                              const newId = e.target.value;
+                              setEditForm(prev => ({
+                                ...prev,
+                                primaryPatientId: newId,
+                                dependentType: newId ? getDependentType(newId) : prev.dependentType
+                              }));
+                            }}
+                            placeholder="Enter NPA Staff ID (e.g., A2000)"
+                            className={(() => {
+                              if (!editForm.primaryPatientId) return '';
+                              const validation = validatePrincipalStaffId(editForm.primaryPatientId);
+                              return validation.valid ? 'border-green-500 focus:border-green-500' : 'border-red-500 focus:border-red-500';
+                            })()}
+                          />
+                          <p className="text-xs text-muted-foreground">Enter the NPA Staff ID of the employee or retiree this dependent belongs to</p>
+                          {editForm.primaryPatientId && (
+                            <div className={`text-xs p-2 rounded-md border mt-1 ${
+                              (() => {
+                                const validation = validatePrincipalStaffId(editForm.primaryPatientId);
+                                return validation.valid ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700';
+                              })()
+                            }`}>
+                              {(() => {
+                                const validation = validatePrincipalStaffId(editForm.primaryPatientId);
+                                if (validation.valid) {
+                                  const check = canAddDependent(editForm.primaryPatientId);
+                                  if (check.allowed && 'remaining' in check) {
+                                    return `✅ ${validation.message} • ${check.remaining} dependent slot(s) remaining`;
+                                  }
+                                  return `✅ ${validation.message}`;
+                                }
+                                return `❌ ${validation.message}`;
+                              })()}
+                            </div>
+                          )}
+              </div>
+                        <div className="space-y-2">
+                          <Label>Status</Label>
+                          <Select value={editForm.status} onValueChange={(v) => setEditForm(prev => ({ ...prev, status: v }))}>
+                            <SelectTrigger><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="Active">Active</SelectItem>
+                              <SelectItem value="Inactive">Inactive</SelectItem>
+                            </SelectContent>
+                          </Select>
+                </div>
                 </div>
               </div>
-              <div className="space-y-2"><Label>Principal</Label>
-                <Select value={editForm.primaryPatientId} onValueChange={(v) => setEditForm(prev => ({ ...prev, primaryPatientId: v }))}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {patients
-                      .filter(p => p.category === 'employee' || p.category === 'retiree')
-                      .map(p => {
-                        const patientId = p.patient_id || String(p.id);
-                        const patientName = p.full_name || `${p.first_name} ${p.surname}`;
-                        return (
-                          <SelectItem key={p.id} value={patientId}>{patientName}</SelectItem>
-                        );
-                      })}
-                  </SelectContent>
-                </Select>
+                  </>
+                )}
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2"><Label>Relationship</Label>
-                  <Select value={editForm.relationship} onValueChange={(v) => setEditForm(prev => ({ ...prev, relationship: v }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{relationshipTypes.map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}</SelectContent></Select>
-                </div>
-                <div className="space-y-2"><Label>Status</Label>
-                  <Select value={editForm.status} onValueChange={(v) => setEditForm(prev => ({ ...prev, status: v }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="Active">Active</SelectItem><SelectItem value="Inactive">Inactive</SelectItem></SelectContent></Select>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2"><Label>Phone</Label><Input value={editForm.phone} onChange={(e) => setEditForm(prev => ({ ...prev, phone: e.target.value }))} /></div>
-                <div className="space-y-2"><Label>Email</Label><Input value={editForm.email} onChange={(e) => setEditForm(prev => ({ ...prev, email: e.target.value }))} /></div>
-              </div>
-            </div>
+            )}
             <DialogFooter>
               <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>Cancel</Button>
-              <Button onClick={handleEditDependent}><Save className="h-4 w-4 mr-2" />Save</Button>
+              <Button onClick={handleEditDependent} disabled={editFormLoading}>
+                <Save className="h-4 w-4 mr-2" />
+                Save Changes
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

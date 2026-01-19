@@ -5,7 +5,7 @@ from django.db import migrations
 
 def normalize_clinic_names_forward(apps, schema_editor):
     """
-    Normalize existing clinic names in Visit and LabOrder models.
+    Normalize existing clinic names in Visit, LabOrder, and RadiologyOrder models.
     This ensures all clinic names follow the standardized format.
     """
     Visit = apps.get_model('patients', 'Visit')
@@ -38,18 +38,22 @@ def normalize_clinic_names_forward(apps, schema_editor):
             order.save(update_fields=['clinic'])
             lab_order_count += 1
     
-    # Normalize RadiologyOrder clinic names
-    radiology_orders = apps.get_model('radiology', 'RadiologyOrder')
-    rad_orders = radiology_orders.objects.exclude(clinic__isnull=True).exclude(clinic='')
+    # Normalize RadiologyOrder clinic names (if radiology app is available)
     rad_order_count = 0
-    for order in rad_orders:
-        original_clinic = order.clinic
-        normalized_clinic = normalize_clinic_name(original_clinic)
-        
-        if original_clinic != normalized_clinic:
-            order.clinic = normalized_clinic
-            order.save(update_fields=['clinic'])
-            rad_order_count += 1
+    try:
+        RadiologyOrder = apps.get_model('radiology', 'RadiologyOrder')
+        rad_orders = RadiologyOrder.objects.exclude(clinic__isnull=True).exclude(clinic='')
+        for order in rad_orders:
+            original_clinic = order.clinic
+            normalized_clinic = normalize_clinic_name(original_clinic)
+            
+            if original_clinic != normalized_clinic:
+                order.clinic = normalized_clinic
+                order.save(update_fields=['clinic'])
+                rad_order_count += 1
+    except LookupError:
+        # Radiology app not available yet, skip
+        pass
     
     print(f"Normalized {visit_count} visit clinic names, {lab_order_count} lab order clinic names, and {rad_order_count} radiology order clinic names")
 
@@ -66,6 +70,7 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ('patients', '0004_add_religion_tribe_occupation'),
+        ('radiology', '0001_initial'),  # Ensure radiology app is migrated first
     ]
 
     operations = [

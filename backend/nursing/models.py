@@ -28,6 +28,7 @@ class NursingOrder(models.Model):
     patient = models.ForeignKey('patients.Patient', on_delete=models.CASCADE, related_name='nursing_orders')
     ordered_by = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, related_name='ordered_nursing_orders')
     visit = models.ForeignKey('patients.Visit', on_delete=models.SET_NULL, null=True, blank=True, related_name='nursing_orders')
+    consultation_session = models.ForeignKey('consultation.ConsultationSession', on_delete=models.SET_NULL, null=True, blank=True, related_name='nursing_orders')
     
     order_type = models.CharField(max_length=100, help_text="Medication, Procedure, Observation, etc.")
     description = models.TextField()
@@ -109,6 +110,7 @@ class Procedure(models.Model):
         ('wound_care', 'Wound Care'),
         ('catheterization', 'Catheterization'),
         ('iv_insertion', 'IV Insertion'),
+        ('ward_admission', 'Ward Admission'),
         ('other', 'Other'),
     ]
     

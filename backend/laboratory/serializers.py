@@ -16,12 +16,15 @@ class LabTemplateSerializer(serializers.ModelSerializer):
 
 class LabTestSerializer(serializers.ModelSerializer):
     """Serializer for LabTest model."""
-    
+
     template_name = serializers.CharField(source='template.name', read_only=True, allow_null=True)
+    template_category = serializers.CharField(source='template.category', read_only=True, allow_null=True)
+    template_sample_type = serializers.CharField(source='template.sample_type', read_only=True, allow_null=True)
     collected_by_name = serializers.SerializerMethodField()
     processed_by_name = serializers.SerializerMethodField()
     verified_by_name = serializers.SerializerMethodField()
     rejected_by_name = serializers.SerializerMethodField()
+    order_details = serializers.SerializerMethodField()
     
     def get_collected_by_name(self, obj):
         """Get collected by user full name."""
@@ -58,6 +61,54 @@ class LabTestSerializer(serializers.ModelSerializer):
             return obj.rejected_by.get_full_name()
         except (AttributeError, TypeError):
             return str(obj.rejected_by) if obj.rejected_by else None
+    
+    def get_order_details(self, obj):
+        """Get order details including patient and doctor information."""
+        if not obj.order:
+            return None
+        
+        order = obj.order
+        patient_details = None
+        doctor_details = None
+        patient_name = None
+        doctor_name = None
+        
+        # Get patient details
+        if order.patient:
+            try:
+                patient_name = order.patient.get_full_name()
+                patient_details = {
+                    'id': order.patient.id,
+                    'name': patient_name,
+                    'age': getattr(order.patient, 'age', None),
+                    'gender': getattr(order.patient, 'gender', ''),
+                }
+            except (AttributeError, TypeError):
+                patient_name = str(order.patient) if order.patient else None
+        
+        # Get doctor details
+        if order.doctor:
+            try:
+                doctor_name = order.doctor.get_full_name()
+                doctor_details = {
+                    'id': order.doctor.id,
+                    'name': doctor_name,
+                    'specialty': getattr(order.doctor, 'specialty', ''),
+                }
+            except (AttributeError, TypeError):
+                doctor_name = str(order.doctor) if order.doctor else None
+        
+        return {
+            'id': order.id,
+            'order_id': order.order_id,
+            'patient_name': patient_name,
+            'doctor_name': doctor_name,
+            'patient_details': patient_details,
+            'doctor_details': doctor_details,
+            'clinic': order.clinic or '',
+            'priority': order.priority,
+            'clinical_notes': order.clinical_notes or '',
+        }
     
     class Meta:
         model = LabTest
@@ -130,6 +181,8 @@ class LabOrderSerializer(serializers.ModelSerializer):
                 'name': obj.patient.get_full_name() if hasattr(obj.patient, 'get_full_name') else str(obj.patient),
                 'age': obj.patient.age,
                 'gender': obj.patient.gender,
+                'personal_number': obj.patient.personal_number,
+                'division': obj.patient.division,
             }
         except (AttributeError, TypeError):
             return {
@@ -137,6 +190,8 @@ class LabOrderSerializer(serializers.ModelSerializer):
                 'name': str(obj.patient) if obj.patient else None,
                 'age': None,
                 'gender': None,
+                'personal_number': None,
+                'division': None,
             }
     
     def to_representation(self, instance):

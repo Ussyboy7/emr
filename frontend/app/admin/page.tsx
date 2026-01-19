@@ -18,8 +18,6 @@ import {
   Activity,
   AlertTriangle,
   CheckCircle,
-  Clock,
-  TrendingUp,
   Server,
   Database,
   Wifi,
@@ -54,9 +52,7 @@ export default function AdminDashboardPage() {
   const [usersByRole, setUsersByRole] = useState<any[]>([]);
   const [recentAuditEvents, setRecentAuditEvents] = useState<any[]>([]);
   const [systemHealth, setSystemHealth] = useState<any[]>([]);
-  const [expiringLicenses, setExpiringLicenses] = useState<any[]>([]);
   const [clinicStatus, setClinicStatus] = useState<any[]>([]);
-  const [pendingApprovals, setPendingApprovals] = useState<any[]>([]);
 
   useEffect(() => {
     loadDashboardData();
@@ -83,10 +79,19 @@ export default function AdminDashboardPage() {
       });
       setUsersByRole(stats.usersByRole);
       setRecentAuditEvents(stats.recentAuditEvents);
-      setSystemHealth(stats.systemHealth);
-      setExpiringLicenses(stats.expiringLicenses);
+      // Map icon names to React components
+      const iconMap: Record<string, any> = {
+        'Server': Server,
+        'Database': Database,
+        'HardDrive': HardDrive,
+        'Wifi': Wifi,
+      };
+      const systemHealthWithIcons = stats.systemHealth.map(system => ({
+        ...system,
+        icon: iconMap[system.icon] || Server, // Default to Server if icon not found
+      }));
+      setSystemHealth(systemHealthWithIcons);
       setClinicStatus(stats.clinicStatus);
-      setPendingApprovals(stats.pendingApprovals);
     } catch (err: any) {
       setError(err.message || 'Failed to load dashboard data');
       toast.error('Failed to load dashboard. Please try again.');
@@ -146,9 +151,9 @@ export default function AdminDashboardPage() {
         </div>
 
         {/* Key Stats */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
           {loading ? (
-            Array.from({ length: 6 }).map((_, i) => (
+            Array.from({ length: 5 }).map((_, i) => (
               <Card key={i}>
                 <CardContent className="p-4">
                   <div className="flex items-center justify-between">
@@ -185,10 +190,6 @@ export default function AdminDashboardPage() {
                   <p className="text-2xl font-bold text-green-500">{systemStats.onlineNow}</p>
                 </div>
                 <Activity className="h-8 w-8 text-green-500/50" />
-              </div>
-              <div className="mt-2 flex items-center gap-1 text-xs text-muted-foreground">
-                <TrendingUp className="h-3 w-3 text-green-500" />
-                <span>12% up</span>
               </div>
             </CardContent>
           </Card>
@@ -231,20 +232,6 @@ export default function AdminDashboardPage() {
               </div>
               <div className="mt-2 text-xs">
                 <span className="text-green-500">{systemStats.availableRooms} available</span>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-gradient-to-br from-rose-500/10 to-rose-600/5 border-rose-500/20">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Pending</p>
-                  <p className="text-2xl font-bold text-rose-500">
-                    {pendingApprovals.reduce((sum, p) => sum + p.count, 0)}
-                  </p>
-                </div>
-                <Clock className="h-8 w-8 text-rose-500/50" />
               </div>
             </CardContent>
           </Card>
@@ -436,81 +423,6 @@ export default function AdminDashboardPage() {
                     })}
                   </div>
                 )}
-              </CardContent>
-            </Card>
-
-            {/* Pending Approvals */}
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-lg">Pending Approvals</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {loading ? (
-                  <div className="text-center py-8 text-muted-foreground">
-                    <Loader2 className="h-8 w-8 mx-auto mb-2 animate-spin" />
-                    <p>Loading...</p>
-                  </div>
-                ) : pendingApprovals.length === 0 ? (
-                  <div className="text-center py-8 text-muted-foreground">
-                    <CheckCircle className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                    <p>No pending approvals</p>
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {pendingApprovals.map((approval) => (
-                    <div key={approval.type} className="flex items-center justify-between p-2 rounded-lg hover:bg-muted/50">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm">{approval.type}</span>
-                        {getPriorityBadge(approval.priority)}
-                      </div>
-                      <Badge variant="secondary">{approval.count}</Badge>
-                    </div>
-                    ))}
-                  </div>
-                )}
-                {pendingApprovals.length > 0 && (
-                  <Button className="w-full mt-4" variant="outline" size="sm">Review All Pending</Button>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* Expiring Licenses */}
-            <Card className="border-yellow-500/20 bg-yellow-500/5">
-              <CardHeader className="pb-2">
-                <div className="flex items-center gap-2">
-                  <AlertTriangle className="h-5 w-5 text-yellow-500" />
-                  <CardTitle className="text-lg">Expiring Licenses</CardTitle>
-                </div>
-              </CardHeader>
-              <CardContent>
-                {loading ? (
-                  <div className="text-center py-8 text-muted-foreground">
-                    <Loader2 className="h-8 w-8 mx-auto mb-2 animate-spin" />
-                    <p>Loading...</p>
-                  </div>
-                ) : expiringLicenses.length === 0 ? (
-                  <div className="text-center py-8 text-muted-foreground">
-                    <CheckCircle className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                    <p>No expiring licenses</p>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {expiringLicenses.map((license) => (
-                    <div key={license.name} className="p-2 rounded-lg bg-background/50">
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm font-medium">{license.name}</span>
-                        <Badge className={license.daysLeft <= 20 ? "bg-red-500/10 text-red-500" : "bg-yellow-500/10 text-yellow-500"}>
-                          {license.daysLeft} days
-                        </Badge>
-                      </div>
-                      <p className="text-xs text-muted-foreground mt-1">{license.type} • Expires {license.expires}</p>
-                    </div>
-                    ))}
-                  </div>
-                )}
-                <Link href="/admin/users">
-                  <Button className="w-full mt-4" variant="outline" size="sm">Manage Staff Licenses</Button>
-                </Link>
               </CardContent>
             </Card>
 

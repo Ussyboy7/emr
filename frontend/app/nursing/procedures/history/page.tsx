@@ -9,9 +9,8 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import Link from 'next/link';
 import { 
-  Syringe, Bandage, Pill, Search, ArrowLeft, CheckCircle2, Eye, Calendar,
+  Syringe, Bandage, Pill, Search, CheckCircle2, Eye, Calendar,
   Activity, User, Clock, Stethoscope, FileText, Loader2, AlertTriangle
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api-client';
@@ -48,7 +47,6 @@ interface CompletedProcedure {
 }
 
 // Procedures history data will be loaded from API
-const demoHistory: CompletedProcedure[] = [];
 
 const getTypeConfig = (type: string) => {
   const configs: Record<string, { icon: any; color: string; bgColor: string; label: string }> = {
@@ -95,7 +93,7 @@ export default function ProceduresHistoryPage() {
         setError(null);
         
         // Fetch completed nursing procedures
-        const proceduresResult = await apiFetch<{ results: any[] }>('/nursing/procedures/?page_size=1000');
+        const proceduresResult = await apiFetch<{ results: any[] }>('/procedures/?page_size=1000');
         const procedures = proceduresResult.results || [];
         
         // Transform procedures to history format
@@ -279,24 +277,14 @@ export default function ProceduresHistoryPage() {
     <DashboardLayout>
       <div className="container mx-auto p-6 space-y-6">
         {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-3 mb-2">
-              <Link href="/nursing/procedures">
-                <Button variant="ghost" size="sm" className="gap-2">
-                  <ArrowLeft className="h-4 w-4" />
-                  Back to Queue
-                </Button>
-              </Link>
+        <div>
+          <h1 className="text-3xl font-bold text-foreground flex items-center gap-3">
+            <div className="p-2 rounded-xl bg-gradient-to-br from-slate-600 to-slate-700">
+              <FileText className="h-6 w-6 text-white" />
             </div>
-            <h1 className="text-3xl font-bold text-foreground flex items-center gap-3">
-              <div className="p-2 rounded-xl bg-gradient-to-br from-slate-600 to-slate-700">
-                <FileText className="h-6 w-6 text-white" />
-              </div>
-              Procedures History
-            </h1>
-            <p className="text-muted-foreground mt-1">View all completed nursing procedures</p>
-          </div>
+            Procedures History
+          </h1>
+          <p className="text-muted-foreground mt-1">View all completed nursing procedures</p>
         </div>
 
         {/* Stats */}

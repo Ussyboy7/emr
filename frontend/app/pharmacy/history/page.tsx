@@ -14,7 +14,7 @@ import { pharmacyService, type Dispense as ApiDispense } from '@/lib/services';
 import { PatientAvatar } from "@/components/PatientAvatar";
 import { 
   History, Search, Eye, Clock, CheckCircle2, Pill, Calendar, Package,
-  User, RefreshCw, TrendingUp, ArrowUpDown, Printer, Download, Loader2, AlertTriangle
+  User, TrendingUp, ArrowUpDown, Loader2, AlertTriangle
 } from 'lucide-react';
 
 // Type definitions
@@ -229,19 +229,6 @@ export default function DispenseHistoryPage() {
               Dispense History
             </h1>
             <p className="text-muted-foreground mt-1">Track all dispensed prescriptions and analytics</p>
-          </div>
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={loadHistory} disabled={loading}>
-              <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />Refresh
-            </Button>
-            <Button variant="outline">
-              <Download className="h-4 w-4 mr-2" />
-              Export
-            </Button>
-            <Button variant="outline">
-              <Printer className="h-4 w-4 mr-2" />
-              Print
-            </Button>
           </div>
         </div>
 
@@ -548,12 +535,8 @@ export default function DispenseHistoryPage() {
               </div>
             )}
             
-            <DialogFooter className="flex gap-2">
+            <DialogFooter>
               <Button variant="outline" onClick={() => setShowDetailModal(false)}>Close</Button>
-              <Button variant="outline">
-                <Printer className="h-4 w-4 mr-2" />
-                Print Receipt
-              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

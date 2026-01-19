@@ -117,6 +117,7 @@ class Prescription(models.Model):
     patient = models.ForeignKey('patients.Patient', on_delete=models.CASCADE, related_name='prescriptions')
     doctor = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, related_name='prescriptions')
     visit = models.ForeignKey('patients.Visit', on_delete=models.SET_NULL, null=True, blank=True, related_name='prescriptions')
+    consultation_session = models.ForeignKey('consultation.ConsultationSession', on_delete=models.SET_NULL, null=True, blank=True, related_name='prescriptions')
     
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     diagnosis = models.TextField(blank=True)
@@ -208,6 +209,7 @@ class PrescriptionItem(models.Model):
     
     quantity = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0)])
     unit = models.CharField(max_length=50)
+    dosage_form = models.CharField(max_length=100, blank=True, help_text="e.g., tablet, capsule, syrup")
     dosage = models.CharField(max_length=200, blank=True, help_text="e.g., 1 tablet twice daily")
     frequency = models.CharField(max_length=100, blank=True)
     duration = models.CharField(max_length=100, blank=True, help_text="e.g., 7 days")

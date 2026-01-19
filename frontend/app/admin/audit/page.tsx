@@ -3,19 +3,18 @@
 import { useState, useMemo, useEffect } from 'react';
 import { StandardPagination } from '@/components/StandardPagination';
 import { DashboardLayout } from '@/components/DashboardLayout';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { adminService, type AuditLog as ApiAuditLog } from "@/lib/services";
 import {
-  ClipboardList, Search, Eye, Download, Filter, User, Calendar, Clock,
-  Activity, FileText, Settings, Shield, Users, Database, LogIn, LogOut,
-  Edit, Trash2, Plus, CheckCircle, XCircle, AlertTriangle, RefreshCw, Loader2
+  ClipboardList, Search, Eye, Download, User, Calendar, Clock,
+  Activity, LogIn, LogOut, Edit, Trash2, Plus, CheckCircle, XCircle,
+  AlertTriangle, RefreshCw, Loader2
 } from 'lucide-react';
 
 interface AuditLog {
@@ -35,8 +34,7 @@ interface AuditLog {
   changes?: { field: string; oldValue: string; newValue: string }[];
 }
 
-const modules = ['All Modules', 'Authentication', 'Medical Records', 'Consultation', 'Nursing', 'Laboratory', 'Pharmacy', 'Radiology', 'Administration', 'Reports', 'System'];
-const actions = ['All Actions', 'CREATE', 'UPDATE', 'DELETE', 'VIEW', 'LOGIN', 'LOGOUT', 'EXPORT', 'IMPORT', 'APPROVE', 'REJECT'];
+const actions = ['All Actions', 'CREATE', 'UPDATE', 'DELETE', 'VIEW', 'LOGIN', 'LOGOUT', 'EXPORT', 'IMPORT', 'APPROVE', 'REJECT', 'VERIFY'];
 
 export default function AuditTrailPage() {
   const [logs, setLogs] = useState<AuditLog[]>([]);
@@ -48,6 +46,7 @@ export default function AuditTrailPage() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  const [modules, setModules] = useState<string[]>(['All Modules']);
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -58,22 +57,83 @@ export default function AuditTrailPage() {
   const [selectedLog, setSelectedLog] = useState<AuditLog | null>(null);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
 
+  // Load modules from API
+  useEffect(() => {
+    const loadModules = async () => {
+      try {
+        // Get unique modules from all logs (we'll need to fetch more to get all modules)
+        // For now, fetch a larger sample to get modules
+        const modulesResponse = await adminService.getAuditLogs({ page_size: 1000 });
+        const uniqueModules = new Set<string>(['All Modules']);
+        modulesResponse.results.forEach((log: ApiAuditLog) => {
+          if (log.module) {
+            // Convert module names to display format
+            const moduleName = log.module
+              .split('_')
+              .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+              .join(' ');
+            uniqueModules.add(moduleName);
+          }
+        });
+        setModules(Array.from(uniqueModules).sort());
+      } catch (err) {
+        console.error('Failed to load modules:', err);
+        // Fallback to default modules
+        setModules(['All Modules', 'Authentication', 'Medical Records', 'Consultation', 'Nursing', 'Laboratory', 'Pharmacy', 'Radiology', 'Administration', 'Reports', 'System']);
+      }
+    };
+    loadModules();
+  }, []);
+
   // Load audit logs from API
   useEffect(() => {
     loadLogs();
-  }, [currentPage, itemsPerPage]);
+  }, [currentPage, itemsPerPage, searchQuery, moduleFilter, actionFilter, statusFilter, dateFrom, dateTo]);
 
   const loadLogs = async () => {
     try {
       setLoading(true);
       setError(null);
-      const hasActiveFilters = searchQuery || moduleFilter !== 'all' || actionFilter !== 'all' || statusFilter !== 'all' || dateFrom || dateTo;
-      const pageSize = hasActiveFilters ? 1000 : itemsPerPage;
       
-      const response = await adminService.getAuditLogs({ 
-        page: hasActiveFilters ? 1 : currentPage,
-        page_size: pageSize,
-      });
+      // Build filter params
+      const params: any = {
+        page: currentPage,
+        page_size: itemsPerPage,
+      };
+      
+      if (searchQuery) {
+        params.search = searchQuery;
+      }
+      
+      // Convert module filter back to backend format (e.g., "Medical Records" -> "medical_records")
+      if (moduleFilter !== 'all') {
+        const backendModule = moduleFilter
+          .split(' ')
+          .map(word => word.toLowerCase())
+          .join('_');
+        params.module = backendModule;
+      }
+      
+      if (actionFilter !== 'all') {
+        params.action = actionFilter.toLowerCase();
+      }
+      
+      if (statusFilter !== 'all') {
+        params.result = statusFilter.toLowerCase();
+      }
+      
+      // Add date filters (server-side)
+      if (dateFrom) {
+        params.date_from = new Date(dateFrom).toISOString();
+      }
+      if (dateTo) {
+        // Include entire day
+        const toDate = new Date(dateTo);
+        toDate.setHours(23, 59, 59, 999);
+        params.date_to = toDate.toISOString();
+      }
+      
+      const response = await adminService.getAuditLogs(params);
       setTotalCount(response.count || response.results.length);
       
       // Transform API logs to frontend format
@@ -84,7 +144,9 @@ export default function AuditTrailPage() {
         userId: log.user?.toString() || '',
         role: '', // Would need to get from user
         action: log.action.toUpperCase() as AuditLog['action'],
-        module: log.module || 'System',
+        module: log.module 
+          ? log.module.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')
+          : 'System',
         resource: log.object_type || '',
         resourceId: log.object_id?.toString() || log.object_repr || '',
         details: log.description || '',
@@ -108,45 +170,25 @@ export default function AuditTrailPage() {
     }
   };
 
-  const filteredLogs = useMemo(() => {
-    return logs.filter(log => {
-      const matchesSearch = !searchQuery || 
-        log.user.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        log.details.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        log.resourceId.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        log.id.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesModule = moduleFilter === 'all' || log.module === moduleFilter;
-      const matchesAction = actionFilter === 'all' || log.action === actionFilter;
-      const matchesStatus = statusFilter === 'all' || log.status.toLowerCase() === statusFilter;
-      
-      let matchesDate = true;
-      if (dateFrom) {
-        matchesDate = matchesDate && new Date(log.timestamp) >= new Date(dateFrom);
-      }
-      if (dateTo) {
-        const toDate = new Date(dateTo);
-        toDate.setHours(23, 59, 59);
-        matchesDate = matchesDate && new Date(log.timestamp) <= toDate;
-      }
-      
-      return matchesSearch && matchesModule && matchesAction && matchesStatus && matchesDate;
-    });
-  }, [logs, searchQuery, moduleFilter, actionFilter, statusFilter, dateFrom, dateTo]);
-
-  // Use filtered logs directly (server-side pagination when no client-side filters)
-  const paginatedLogs = filteredLogs;
+  // Server-side filtering is now handled in loadLogs, so we use logs directly
+  const paginatedLogs = logs;
 
   // Reset to page 1 when filters change or items per page changes
   useEffect(() => {
-    setCurrentPage(1);
+    if (currentPage !== 1) {
+      setCurrentPage(1);
+    }
   }, [searchQuery, moduleFilter, actionFilter, statusFilter, dateFrom, dateTo, itemsPerPage]);
 
-  const stats = useMemo(() => ({
-    total: logs.length,
-    success: logs.filter(l => l.status === 'Success').length,
-    failed: logs.filter(l => l.status === 'Failed').length,
-    today: logs.filter(l => new Date(l.timestamp).toDateString() === new Date().toDateString()).length,
-  }), [logs]);
+  const stats = useMemo(() => {
+    const today = new Date().toDateString();
+    return {
+      total: totalCount,
+      success: logs.filter(l => l.status === 'Success').length,
+      failed: logs.filter(l => l.status === 'Failed').length,
+      today: logs.filter(l => new Date(l.timestamp).toDateString() === today).length,
+    };
+  }, [logs, totalCount]);
 
   const getActionIcon = (action: string) => {
     switch (action) {
@@ -215,7 +257,45 @@ export default function AuditTrailPage() {
   };
 
   const handleExport = () => {
-    toast.success('Audit log exported successfully');
+    try {
+      // Build CSV content
+      const headers = ['Timestamp', 'User', 'Action', 'Module', 'Resource', 'Resource ID', 'Details', 'Status', 'IP Address'];
+      const rows = logs.map(log => {
+        const ts = formatTimestamp(log.timestamp);
+        return [
+          `${ts.date} ${ts.time}`,
+          log.user,
+          log.action,
+          log.module,
+          log.resource,
+          log.resourceId,
+          log.details.replace(/"/g, '""'), // Escape quotes
+          log.status,
+          log.ipAddress,
+        ].map(field => `"${field}"`).join(',');
+      });
+      
+      const csvContent = [
+        headers.map(h => `"${h}"`).join(','),
+        ...rows
+      ].join('\n');
+      
+      // Create download link
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      link.setAttribute('href', url);
+      link.setAttribute('download', `audit_logs_${new Date().toISOString().split('T')[0]}.csv`);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      toast.success(`Exported ${logs.length} audit logs successfully`);
+    } catch (err: any) {
+      console.error('Export error:', err);
+      toast.error('Failed to export audit logs');
+    }
   };
 
   const handleRefresh = async () => {
@@ -346,7 +426,7 @@ export default function AuditTrailPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredLogs.length === 0 ? (
+                  {paginatedLogs.length === 0 ? (
                     <tr><td colSpan={7} className="p-8 text-center text-muted-foreground">No audit logs found</td></tr>
                   ) : (
                   paginatedLogs.map((log) => {
@@ -408,7 +488,7 @@ export default function AuditTrailPage() {
             <div className="p-4">
             <StandardPagination
               currentPage={currentPage}
-              totalItems={filteredLogs.length}
+              totalItems={totalCount}
               itemsPerPage={itemsPerPage}
               onPageChange={setCurrentPage}
               onItemsPerPageChange={setItemsPerPage}

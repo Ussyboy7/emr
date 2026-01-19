@@ -84,9 +84,8 @@ export default function VisitsPage() {
            visit.status === 'in_progress' ? 'In Progress' :
            visit.status === 'completed' ? 'Sent to Nursing' :
            visit.status === 'cancelled' ? 'Cancelled' : visit.status,
-    department: visit.clinic || 'General',
+    department: visit.clinic || 'GOPD',
     notes: visit.clinical_notes || '',
-    chiefComplaint: visit.chief_complaint || '',
     location: visit.location || '',
   });
 

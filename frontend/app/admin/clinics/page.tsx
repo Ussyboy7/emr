@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useEffect } from "react";
 import { DashboardLayout } from "@/components/DashboardLayout";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,9 +16,8 @@ import { toast } from "sonner";
 import { StandardPagination } from "@/components/StandardPagination";
 import { adminService, type Clinic as ApiClinic, type Department as ApiDepartment } from "@/lib/services";
 import {
-  Building2, Search, Plus, Edit, Trash2, Eye, Users, Clock, MapPin, Phone,
-  Mail, Stethoscope, Calendar, Settings, CheckCircle2, XCircle, AlertTriangle,
-  Activity, DoorOpen, Loader2
+  Building2, Search, Plus, Edit, Trash2, Eye, Users, MapPin,
+  Stethoscope, CheckCircle2, XCircle, AlertTriangle, Activity, DoorOpen, Loader2
 } from "lucide-react";
 
 interface Clinic {
@@ -29,13 +28,10 @@ interface Clinic {
   location: string;
   phone: string;
   email: string;
-  operatingHours: { day: string; open: string; close: string; isOpen: boolean }[];
-  services: string[];
   staffCount: number;
   roomCount: number;
   isActive: boolean;
   createdAt: string;
-  head?: string;
 }
 
 interface Department {
@@ -46,10 +42,9 @@ interface Department {
   head: string;
   staffCount: number;
   clinics: string[];
+  clinic: string;
   isActive: boolean;
 }
-
-const daysOfWeek = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
 export default function ClinicDepartmentPage() {
   const [activeTab, setActiveTab] = useState('clinics');
@@ -57,8 +52,6 @@ export default function ClinicDepartmentPage() {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [clinicRooms, setClinicRooms] = useState<any[]>([]);
-  const [clinicUsers, setClinicUsers] = useState<any[]>([]);
   const [deptUsers, setDeptUsers] = useState<any[]>([]);
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -76,7 +69,17 @@ export default function ClinicDepartmentPage() {
   // Load clinics and departments from API
   useEffect(() => {
     loadData();
+    loadUsers();
   }, [currentPage, itemsPerPage]);
+
+  const loadUsers = async () => {
+    try {
+      const usersResponse = await adminService.getUsers({ page_size: 1000 });
+      setAvailableUsers(usersResponse.results || []);
+    } catch (err: any) {
+      console.error('Error loading users:', err);
+    }
+  };
 
   const loadData = async () => {
     try {
@@ -106,13 +109,10 @@ export default function ClinicDepartmentPage() {
         location: clinic.location || '',
         phone: clinic.phone || '',
         email: clinic.email || '',
-        operatingHours: clinic.operating_hours || daysOfWeek.map(day => ({ day, open: '08:00', close: '17:00', isOpen: day !== 'Sunday' })),
-        services: clinic.services || [],
         staffCount: clinic.staff_count || 0,
         roomCount: clinic.room_count || 0,
         isActive: clinic.is_active,
         createdAt: clinic.created_at?.split('T')[0] || '',
-        head: clinic.head_name,
       }));
       
       // Transform departments
@@ -124,6 +124,7 @@ export default function ClinicDepartmentPage() {
         head: dept.head_name || '',
         staffCount: dept.staff_count || 0,
         clinics: dept.clinic_name ? [dept.clinic_name] : [],
+        clinic: dept.clinic?.toString() || '',
         isActive: dept.is_active,
       }));
       
@@ -141,11 +142,10 @@ export default function ClinicDepartmentPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [clinicForm, setClinicForm] = useState<Partial<Clinic>>({
-    code: '', name: '', description: '', location: '', phone: '', email: '', services: [], head: '',
-    operatingHours: daysOfWeek.map(day => ({ day, open: '08:00', close: '17:00', isOpen: day !== 'Sunday' })), isActive: true
+    code: '', name: '', description: '', location: '', phone: '', email: '', isActive: true
   });
-  const [deptForm, setDeptForm] = useState<Partial<Department>>({ code: '', name: '', description: '', head: '', clinics: [], isActive: true });
-  const [newService, setNewService] = useState('');
+  const [deptForm, setDeptForm] = useState<Partial<Department>>({ code: '', name: '', description: '', clinic: '', head: '', isActive: true });
+  const [availableUsers, setAvailableUsers] = useState<any[]>([]);
 
   const filteredClinics = useMemo(() => {
     return clinics.filter(c => {
@@ -178,10 +178,10 @@ export default function ClinicDepartmentPage() {
   }), [clinics, departments]);
 
   const resetClinicForm = () => {
-    setClinicForm({ code: '', name: '', description: '', location: '', phone: '', email: '', services: [], head: '', operatingHours: daysOfWeek.map(day => ({ day, open: '08:00', close: '17:00', isOpen: day !== 'Sunday' })), isActive: true });
+    setClinicForm({ code: '', name: '', description: '', location: '', phone: '', email: '', isActive: true });
   };
 
-  const resetDeptForm = () => { setDeptForm({ code: '', name: '', description: '', head: '', clinics: [], isActive: true }); };
+  const resetDeptForm = () => { setDeptForm({ code: '', name: '', description: '', clinic: '', head: '', isActive: true }); };
 
   const openCreateClinic = () => { resetClinicForm(); setIsCreateDialogOpen(true); };
   const openViewClinic = async (c: Clinic) => { 
@@ -194,12 +194,11 @@ export default function ClinicDepartmentPage() {
   const loadClinicDetails = async (clinicId: number) => {
     setLoadingDetails(true);
     try {
-      const [roomsResponse, usersResponse] = await Promise.all([
+      // Load clinic details (rooms and users) - data fetched but not currently displayed
+      await Promise.all([
         adminService.getRooms({ clinic: clinicId, page_size: 1000 }),
         adminService.getUsers({ clinic: clinicId, page_size: 1000 }),
       ]);
-      setClinicRooms(roomsResponse.results || []);
-      setClinicUsers(usersResponse.results || []);
     } catch (err: any) {
       console.error('Error loading clinic details:', err);
       toast.error('Failed to load clinic details');
@@ -208,7 +207,19 @@ export default function ClinicDepartmentPage() {
     }
   };
   
-  const openEditClinic = (c: Clinic) => { setSelectedClinic(c); setClinicForm(c); setIsEditDialogOpen(true); };
+  const openEditClinic = (c: Clinic) => { 
+    setSelectedClinic(c); 
+    setClinicForm({
+      code: c.code,
+      name: c.name,
+      description: c.description,
+      location: c.location,
+      phone: c.phone,
+      email: c.email,
+      isActive: c.isActive,
+    }); 
+    setIsEditDialogOpen(true); 
+  };
   const openDeleteClinic = (c: Clinic) => { setSelectedClinic(c); setIsDeleteDialogOpen(true); };
 
   const openCreateDept = () => { resetDeptForm(); setIsCreateDialogOpen(true); };
@@ -231,18 +242,20 @@ export default function ClinicDepartmentPage() {
       setLoadingDetails(false);
     }
   };
-  const openEditDept = (d: Department) => { setSelectedDepartment(d); setDeptForm(d); setIsEditDialogOpen(true); };
+  const openEditDept = (d: Department) => { 
+    setSelectedDepartment(d); 
+    setDeptForm({
+      code: d.code,
+      name: d.name,
+      description: d.description,
+      clinic: d.clinic || '',
+      head: d.head || '',
+      isActive: d.isActive,
+    }); 
+    setIsEditDialogOpen(true); 
+  };
   const openDeleteDept = (d: Department) => { setSelectedDepartment(d); setIsDeleteDialogOpen(true); };
 
-  const addService = () => { if (newService.trim()) { setClinicForm(prev => ({ ...prev, services: [...(prev.services || []), newService.trim()] })); setNewService(''); } };
-  const removeService = (index: number) => { setClinicForm(prev => ({ ...prev, services: prev.services?.filter((_, i) => i !== index) })); };
-
-  const updateOperatingHour = (day: string, field: string, value: string | boolean) => {
-    setClinicForm(prev => ({
-      ...prev,
-      operatingHours: prev.operatingHours?.map(h => h.day === day ? { ...h, [field]: value } : h)
-    }));
-  };
 
   const handleCreateClinic = async () => {
     if (!clinicForm.name || !clinicForm.code) {
@@ -260,8 +273,6 @@ export default function ClinicDepartmentPage() {
         phone: clinicForm.phone,
         email: clinicForm.email,
         is_active: clinicForm.isActive,
-        operating_hours: clinicForm.operatingHours,
-        services: clinicForm.services,
       });
       
       toast.success(`Clinic "${clinicForm.name}" created`);
@@ -290,8 +301,6 @@ export default function ClinicDepartmentPage() {
         phone: clinicForm.phone,
         email: clinicForm.email,
         is_active: clinicForm.isActive,
-        operating_hours: clinicForm.operatingHours,
-        services: clinicForm.services,
       });
       
       toast.success(`Clinic "${clinicForm.name}" updated`);
@@ -334,10 +343,16 @@ export default function ClinicDepartmentPage() {
     setIsSubmitting(true);
     
     try {
+      if (!deptForm.clinic) {
+        toast.error('Please select a clinic');
+        return;
+      }
       await adminService.createDepartment({
         code: deptForm.code,
         name: deptForm.name,
         description: deptForm.description,
+        clinic: parseInt(deptForm.clinic as string),
+        head: deptForm.head ? parseInt(deptForm.head as string) : undefined,
         is_active: deptForm.isActive,
       });
       
@@ -359,10 +374,16 @@ export default function ClinicDepartmentPage() {
     
     try {
       const deptId = parseInt(selectedDepartment.id);
+      if (!deptForm.clinic) {
+        toast.error('Please select a clinic');
+        return;
+      }
       await adminService.updateDepartment(deptId, {
         code: deptForm.code,
         name: deptForm.name,
         description: deptForm.description,
+        clinic: parseInt(deptForm.clinic as string),
+        head: deptForm.head ? parseInt(deptForm.head as string) : undefined,
         is_active: deptForm.isActive,
       });
       
@@ -398,10 +419,6 @@ export default function ClinicDepartmentPage() {
     }
   };
 
-  const toggleClinicStatus = (c: Clinic) => {
-    setClinics(prev => prev.map(clinic => clinic.id === c.id ? { ...clinic, isActive: !clinic.isActive } : clinic));
-    toast.success(`${c.name} is now ${c.isActive ? 'inactive' : 'active'}`);
-  };
 
   return (
     <DashboardLayout>
@@ -409,7 +426,7 @@ export default function ClinicDepartmentPage() {
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <h1 className="text-3xl font-bold text-foreground flex items-center gap-3"><Building2 className="h-8 w-8 text-teal-500" />Clinics & Departments</h1>
-            <p className="text-muted-foreground mt-1">Manage clinic schedules, services, and organizational structure</p>
+            <p className="text-muted-foreground mt-1">Manage clinics and organizational structure</p>
           </div>
           <Button onClick={activeTab === 'clinics' ? openCreateClinic : openCreateDept} className="bg-teal-600 hover:bg-teal-700 text-white">
             <Plus className="h-4 w-4 mr-2" />Add {activeTab === 'clinics' ? 'Clinic' : 'Department'}
@@ -473,22 +490,10 @@ export default function ClinicDepartmentPage() {
                           <span className="font-medium text-foreground">{clinic.description}</span>
                           <span>•</span>
                           <span className="flex items-center gap-1"><MapPin className="h-3 w-3" />{clinic.location}</span>
-                          {clinic.head && (
-                            <>
-                              <span>•</span>
-                              <span className="flex items-center gap-1"><Stethoscope className="h-3 w-3" />{clinic.head}</span>
-                            </>
-                          )}
                           <span>•</span>
                           <span className="flex items-center gap-1"><Users className="h-3 w-3" />{clinic.staffCount} staff</span>
                           <span>•</span>
                           <span className="flex items-center gap-1"><DoorOpen className="h-3 w-3" />{clinic.roomCount} rooms</span>
-                          {clinic.services.length > 0 && (
-                            <>
-                              <span>•</span>
-                              <span>{clinic.services.length} services</span>
-                            </>
-                          )}
                         </div>
                       </div>
                     </div>
@@ -602,29 +607,13 @@ export default function ClinicDepartmentPage() {
         <Dialog open={(isCreateDialogOpen || isEditDialogOpen) && activeTab === 'clinics'} onOpenChange={(open) => { if (!open) { setIsCreateDialogOpen(false); setIsEditDialogOpen(false); } }}>
           <DialogContent className="w-[95vw] sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
             <DialogHeader><DialogTitle className="flex items-center gap-2"><Building2 className="h-5 w-5 text-teal-500" />{isCreateDialogOpen ? 'Add Clinic' : 'Edit Clinic'}</DialogTitle></DialogHeader>
-            <Tabs defaultValue="info" className="mt-4">
-              <TabsList className="grid w-full grid-cols-3"><TabsTrigger value="info">Basic Info</TabsTrigger><TabsTrigger value="services">Services</TabsTrigger><TabsTrigger value="hours">Operating Hours</TabsTrigger></TabsList>
-              <TabsContent value="info" className="space-y-4 mt-4">
-                <div className="grid grid-cols-2 gap-4"><div className="space-y-2"><Label>Code *</Label><Input value={clinicForm.code || ''} onChange={(e) => setClinicForm(prev => ({ ...prev, code: e.target.value.toUpperCase() }))} placeholder="e.g., GEN" /></div><div className="space-y-2"><Label>Name *</Label><Input value={clinicForm.name || ''} onChange={(e) => setClinicForm(prev => ({ ...prev, name: e.target.value }))} placeholder="e.g., General Clinic" /></div></div>
-                <div className="space-y-2"><Label>Description</Label><Textarea value={clinicForm.description || ''} onChange={(e) => setClinicForm(prev => ({ ...prev, description: e.target.value }))} placeholder="Brief description" /></div>
-                <div className="space-y-2"><Label>Location</Label><Input value={clinicForm.location || ''} onChange={(e) => setClinicForm(prev => ({ ...prev, location: e.target.value }))} placeholder="Building and floor" /></div>
-                <div className="grid grid-cols-2 gap-4"><div className="space-y-2"><Label>Phone</Label><Input value={clinicForm.phone || ''} onChange={(e) => setClinicForm(prev => ({ ...prev, phone: e.target.value }))} /></div><div className="space-y-2"><Label>Email</Label><Input value={clinicForm.email || ''} onChange={(e) => setClinicForm(prev => ({ ...prev, email: e.target.value }))} /></div></div>
-                <div className="space-y-2"><Label>Head of Clinic</Label><Input value={clinicForm.head || ''} onChange={(e) => setClinicForm(prev => ({ ...prev, head: e.target.value }))} placeholder="Doctor name" /></div>
-                <div className="flex items-center gap-2"><Switch checked={clinicForm.isActive} onCheckedChange={(checked) => setClinicForm(prev => ({ ...prev, isActive: checked }))} /><Label>Active</Label></div>
-              </TabsContent>
-              <TabsContent value="services" className="mt-4">
-                <div className="flex gap-2 mb-4"><Input value={newService} onChange={(e) => setNewService(e.target.value)} placeholder="Add a service..." onKeyDown={(e) => e.key === 'Enter' && addService()} /><Button onClick={addService}><Plus className="h-4 w-4" /></Button></div>
-                <div className="flex flex-wrap gap-2">{clinicForm.services?.map((s, i) => (<Badge key={i} variant="secondary" className="flex items-center gap-1">{s}<button onClick={() => removeService(i)} className="ml-1 hover:text-rose-500">×</button></Badge>))}</div>
-              </TabsContent>
-              <TabsContent value="hours" className="mt-4">
-                <div className="space-y-3">{clinicForm.operatingHours?.map((h) => (
-                  <div key={h.day} className="flex items-center gap-4"><div className="w-24"><Label>{h.day}</Label></div><Switch checked={h.isOpen} onCheckedChange={(checked) => updateOperatingHour(h.day, 'isOpen', checked)} />
-                    {h.isOpen && (<><Input type="time" value={h.open} onChange={(e) => updateOperatingHour(h.day, 'open', e.target.value)} className="w-32" /><span>to</span><Input type="time" value={h.close} onChange={(e) => updateOperatingHour(h.day, 'close', e.target.value)} className="w-32" /></>)}
-                    {!h.isOpen && <span className="text-muted-foreground">Closed</span>}
-                  </div>
-                ))}</div>
-              </TabsContent>
-            </Tabs>
+            <div className="space-y-4 mt-4">
+              <div className="grid grid-cols-2 gap-4"><div className="space-y-2"><Label>Code *</Label><Input value={clinicForm.code || ''} onChange={(e) => setClinicForm(prev => ({ ...prev, code: e.target.value.toUpperCase() }))} placeholder="e.g., GEN" /></div><div className="space-y-2"><Label>Name *</Label><Input value={clinicForm.name || ''} onChange={(e) => setClinicForm(prev => ({ ...prev, name: e.target.value }))} placeholder="e.g., General Clinic" /></div></div>
+              <div className="space-y-2"><Label>Description</Label><Textarea value={clinicForm.description || ''} onChange={(e) => setClinicForm(prev => ({ ...prev, description: e.target.value }))} placeholder="Brief description" /></div>
+              <div className="space-y-2"><Label>Location</Label><Input value={clinicForm.location || ''} onChange={(e) => setClinicForm(prev => ({ ...prev, location: e.target.value }))} placeholder="Building and floor" /></div>
+              <div className="grid grid-cols-2 gap-4"><div className="space-y-2"><Label>Phone</Label><Input value={clinicForm.phone || ''} onChange={(e) => setClinicForm(prev => ({ ...prev, phone: e.target.value }))} /></div><div className="space-y-2"><Label>Email</Label><Input value={clinicForm.email || ''} onChange={(e) => setClinicForm(prev => ({ ...prev, email: e.target.value }))} /></div></div>
+              <div className="flex items-center gap-2"><Switch checked={clinicForm.isActive} onCheckedChange={(checked) => setClinicForm(prev => ({ ...prev, isActive: checked }))} /><Label>Active</Label></div>
+            </div>
             <DialogFooter className="mt-6"><Button variant="outline" onClick={() => { setIsCreateDialogOpen(false); setIsEditDialogOpen(false); }}>Cancel</Button><Button onClick={isCreateDialogOpen ? handleCreateClinic : handleUpdateClinic} disabled={isSubmitting || !clinicForm.name} className="bg-teal-600 hover:bg-teal-700">{isSubmitting ? 'Saving...' : isCreateDialogOpen ? 'Create Clinic' : 'Save Changes'}</Button></DialogFooter>
           </DialogContent>
         </Dialog>
@@ -634,9 +623,10 @@ export default function ClinicDepartmentPage() {
           <DialogContent className="w-[95vw] sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
             <DialogHeader><DialogTitle className="flex items-center gap-2"><Activity className="h-5 w-5 text-blue-500" />{isCreateDialogOpen ? 'Add Department' : 'Edit Department'}</DialogTitle></DialogHeader>
             <div className="space-y-4 mt-4">
+              <div className="space-y-2"><Label>Clinic *</Label><Select value={deptForm.clinic || ''} onValueChange={(value) => setDeptForm(prev => ({ ...prev, clinic: value }))}><SelectTrigger><SelectValue placeholder="Select a clinic" /></SelectTrigger><SelectContent>{clinics.filter(c => c.isActive).map(clinic => (<SelectItem key={clinic.id} value={clinic.id.toString()}>{clinic.name}</SelectItem>))}</SelectContent></Select></div>
               <div className="grid grid-cols-2 gap-4"><div className="space-y-2"><Label>Code *</Label><Input value={deptForm.code || ''} onChange={(e) => setDeptForm(prev => ({ ...prev, code: e.target.value.toUpperCase() }))} placeholder="e.g., MED" /></div><div className="space-y-2"><Label>Name *</Label><Input value={deptForm.name || ''} onChange={(e) => setDeptForm(prev => ({ ...prev, name: e.target.value }))} placeholder="e.g., Medical Services" /></div></div>
               <div className="space-y-2"><Label>Description</Label><Textarea value={deptForm.description || ''} onChange={(e) => setDeptForm(prev => ({ ...prev, description: e.target.value }))} /></div>
-              <div className="space-y-2"><Label>Department Head</Label><Input value={deptForm.head || ''} onChange={(e) => setDeptForm(prev => ({ ...prev, head: e.target.value }))} placeholder="Staff name" /></div>
+              <div className="space-y-2"><Label>Department Head</Label><Select value={deptForm.head || ''} onValueChange={(value) => setDeptForm(prev => ({ ...prev, head: value }))}><SelectTrigger><SelectValue placeholder="Select department head (optional)" /></SelectTrigger><SelectContent><SelectItem value="none">None</SelectItem>{availableUsers.filter(u => u.is_active).map(user => (<SelectItem key={user.id} value={user.id.toString()}>{user.first_name} {user.last_name} ({user.system_role || 'Staff'})</SelectItem>))}</SelectContent></Select></div>
               <div className="flex items-center gap-2"><Switch checked={deptForm.isActive} onCheckedChange={(checked) => setDeptForm(prev => ({ ...prev, isActive: checked }))} /><Label>Active</Label></div>
             </div>
             <DialogFooter className="mt-6"><Button variant="outline" onClick={() => { setIsCreateDialogOpen(false); setIsEditDialogOpen(false); }}>Cancel</Button><Button onClick={isCreateDialogOpen ? handleCreateDept : handleUpdateDept} disabled={isSubmitting || !deptForm.name} className="bg-blue-600 hover:bg-blue-700">{isSubmitting ? 'Saving...' : isCreateDialogOpen ? 'Create Department' : 'Save Changes'}</Button></DialogFooter>
@@ -651,14 +641,11 @@ export default function ClinicDepartmentPage() {
               <p className="text-muted-foreground">{selectedClinic.description}</p>
               <div className="grid grid-cols-2 gap-4 text-sm">
                 <div><p className="text-muted-foreground">Location</p><p className="font-medium flex items-center gap-1"><MapPin className="h-4 w-4" />{selectedClinic.location}</p></div>
-                {selectedClinic.head && <div><p className="text-muted-foreground">Head</p><p className="font-medium">{selectedClinic.head}</p></div>}
                 <div><p className="text-muted-foreground">Phone</p><p className="font-medium">{selectedClinic.phone}</p></div>
                 <div><p className="text-muted-foreground">Email</p><p className="font-medium">{selectedClinic.email}</p></div>
                 <div><p className="text-muted-foreground">Staff</p><p className="font-medium">{selectedClinic.staffCount}</p></div>
                 <div><p className="text-muted-foreground">Rooms</p><p className="font-medium">{selectedClinic.roomCount}</p></div>
               </div>
-              <div><p className="text-muted-foreground mb-2">Services</p><div className="flex flex-wrap gap-1">{selectedClinic.services.map(s => <Badge key={s} variant="secondary">{s}</Badge>)}</div></div>
-              <div><p className="text-muted-foreground mb-2">Operating Hours</p><div className="space-y-1 text-sm">{selectedClinic.operatingHours.map(h => (<div key={h.day} className="flex justify-between"><span>{h.day}</span><span>{h.isOpen ? `${h.open} - ${h.close}` : 'Closed'}</span></div>))}</div></div>
             </div>)}
             <DialogFooter><Button variant="outline" onClick={() => setIsViewDialogOpen(false)}>Close</Button><Button onClick={() => { setIsViewDialogOpen(false); if (selectedClinic) openEditClinic(selectedClinic); }}><Edit className="h-4 w-4 mr-2" />Edit</Button></DialogFooter>
           </DialogContent>

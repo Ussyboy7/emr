@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -118,6 +118,17 @@ export default function NewPatientPage() {
   const [hasDraft, setHasDraft] = useState(false);
   const [showCategorySwitchDialog, setShowCategorySwitchDialog] = useState(false);
   const [pendingCategory, setPendingCategory] = useState<'employee' | 'retiree' | 'nonnpa' | 'dependent' | null>(null);
+
+  // Principal Staff ID validation state
+  const [principalValidation, setPrincipalValidation] = useState<{
+    isValidating: boolean;
+    isValid: boolean | null;
+    message: string;
+    patient?: any;
+  }>({ isValidating: false, isValid: null, message: '' });
+
+  // Timeout ref for debouncing validation
+  const validationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const [formData, setFormData] = useState({
     // Personal Details
@@ -243,6 +254,81 @@ export default function NewPatientPage() {
     const phoneRegex = /^(\+234|0)[789][01]\d{8}$/;
     const cleaned = phone.replace(/\s|-/g, '');
     return phoneRegex.test(cleaned) || /^0\d{10}$/.test(cleaned);
+  };
+
+  // Validate Principal Staff ID
+  const validatePrincipalStaffId = async (staffId: string) => {
+    if (!staffId || !staffId.trim()) {
+      setPrincipalValidation({ isValidating: false, isValid: null, message: '' });
+      return;
+    }
+
+    const trimmedId = staffId.trim();
+    setPrincipalValidation({ isValidating: true, isValid: null, message: 'Validating...' });
+
+    try {
+      // First, try to find by patient_id (like E-A2000 or R-A2000)
+      let patient = await patientService.getPatients({ search: trimmedId }).then(
+        result => result.results.find(p => p.patient_id === trimmedId)
+      ).catch(() => null);
+
+      // If not found by patient_id, try by personal_number (like A2000)
+      if (!patient) {
+        const searchResult = await patientService.getPatients({ search: trimmedId });
+        patient = searchResult.results.find(p => p.personal_number === trimmedId);
+      }
+
+      // If still not found, try by employee_id
+      if (!patient) {
+        const searchResult = await patientService.getPatients({ search: trimmedId });
+        patient = searchResult.results.find(p => p.employee_id === trimmedId);
+      }
+
+      // Finally, try by database ID as fallback
+      if (!patient) {
+        const parsedId = parseInt(trimmedId, 10);
+        if (!isNaN(parsedId) && parsedId > 0) {
+          try {
+            patient = await patientService.getPatient(parsedId);
+          } catch (err) {
+            // Ignore error, patient not found
+          }
+        }
+      }
+
+      if (!patient) {
+        setPrincipalValidation({
+          isValidating: false,
+          isValid: false,
+          message: `Staff ID "${trimmedId}" not found in the system`
+        });
+        return;
+      }
+
+      // Validate that the principal is actually an employee or retiree
+      if (patient.category !== 'employee' && patient.category !== 'retiree') {
+        setPrincipalValidation({
+          isValidating: false,
+          isValid: false,
+          message: `ID "${trimmedId}" belongs to a ${patient.category}, not a staff member or retiree`
+        });
+        return;
+      }
+
+      setPrincipalValidation({
+        isValidating: false,
+        isValid: true,
+        message: `Valid: ${patient.full_name || `${patient.first_name} ${patient.surname}`} (${patient.category})`,
+        patient
+      });
+
+    } catch (error) {
+      setPrincipalValidation({
+        isValidating: false,
+        isValid: false,
+        message: 'Error validating staff ID'
+      });
+    }
   };
 
   const validateName = (name: string): boolean => {
@@ -379,27 +465,52 @@ export default function NewPatientPage() {
       }
       
       if (patientCategory === 'dependent') {
-        // Look up principal staff by patient_id (could be string like "E-A2962" or numeric ID)
+        // Enhanced principal staff validation (same as dependents management page)
         const principalIdStr = formData.principalStaffId.trim();
-        let principalStaffNumericId: number;
-        
-        const parsedId = parseInt(principalIdStr, 10);
-        if (!isNaN(parsedId) && parsedId > 0) {
-          // It's already a numeric ID
-          principalStaffNumericId = parsedId;
-        } else {
-          // It's a string patient_id (like "E-A2962") - search for it
+
+        // First, try to find by patient_id (like E-A2000 or R-A2000)
+        let matchedPrincipal = await patientService.getPatients({ search: principalIdStr }).then(
+          result => result.results.find(p => p.patient_id === principalIdStr)
+        ).catch(() => null);
+
+        // If not found by patient_id, try by personal_number (like A2000)
+        if (!matchedPrincipal) {
           const searchResult = await patientService.getPatients({ search: principalIdStr });
-          const matchedPrincipal = searchResult.results.find(
-            p => p.patient_id === principalIdStr || p.patient_id.toUpperCase() === principalIdStr.toUpperCase()
-          );
-          if (!matchedPrincipal) {
-            toast.error(`Principal staff with ID "${principalIdStr}" not found`);
-            setIsSubmitting(false);
-            return;
-          }
-          principalStaffNumericId = matchedPrincipal.id;
+          matchedPrincipal = searchResult.results.find(p => p.personal_number === principalIdStr);
         }
+
+        // If still not found, try by employee_id
+        if (!matchedPrincipal) {
+          const searchResult = await patientService.getPatients({ search: principalIdStr });
+          matchedPrincipal = searchResult.results.find(p => p.employee_id === principalIdStr);
+        }
+
+        // Finally, try by database ID as fallback
+        if (!matchedPrincipal) {
+          const parsedId = parseInt(principalIdStr, 10);
+          if (!isNaN(parsedId) && parsedId > 0) {
+            try {
+              matchedPrincipal = await patientService.getPatient(parsedId);
+            } catch (err) {
+              // Ignore error, principal not found
+            }
+          }
+        }
+
+        if (!matchedPrincipal) {
+          toast.error(`Principal Staff ID "${principalIdStr}" not found. Please enter a valid NPA staff or retiree ID.`);
+          setIsSubmitting(false);
+          return;
+        }
+
+        // Validate that the principal is actually an employee or retiree
+        if (matchedPrincipal.category !== 'employee' && matchedPrincipal.category !== 'retiree') {
+          toast.error(`Principal must be an NPA staff member or retiree. ID "${principalIdStr}" belongs to a ${matchedPrincipal.category}.`);
+          setIsSubmitting(false);
+          return;
+        }
+
+        const principalStaffNumericId = matchedPrincipal.id;
         
         payload.principal_staff = principalStaffNumericId;
         if (formData.dependentType) {
@@ -907,12 +1018,35 @@ export default function NewPatientPage() {
                         </div>
                         <div className="space-y-2">
                           <Label>Principal Staff ID *</Label>
-                          <Input 
-                            value={formData.principalStaffId} 
-                            onChange={(e) => handleInputChange('principalStaffId', e.target.value)} 
-                            placeholder="Enter principal staff/retiree ID" 
+                          <Input
+                            value={formData.principalStaffId}
+                            onChange={(e) => {
+                              handleInputChange('principalStaffId', e.target.value);
+                              // Clear previous timeout
+                              if (validationTimeoutRef.current) {
+                                clearTimeout(validationTimeoutRef.current);
+                              }
+                              // Debounce validation
+                              validationTimeoutRef.current = setTimeout(() => {
+                                validatePrincipalStaffId(e.target.value);
+                              }, 500);
+                            }}
+                            placeholder="Enter NPA Staff ID (e.g., A2000)"
+                            className={(() => {
+                              if (!formData.principalStaffId) return '';
+                              if (principalValidation.isValidating) return 'border-blue-500';
+                              return principalValidation.isValid ? 'border-green-500 focus:border-green-500' : 'border-red-500 focus:border-red-500';
+                            })()}
                           />
-                          <p className="text-xs text-muted-foreground">The NPA staff or retiree this dependent is linked to</p>
+                          <p className="text-xs text-muted-foreground">Enter the NPA Staff ID of the employee or retiree this dependent belongs to</p>
+                          {formData.principalStaffId && (
+                            <div className={`text-xs p-2 rounded-md border ${
+                              principalValidation.isValidating ? 'bg-blue-50 border-blue-200 text-blue-700' :
+                              principalValidation.isValid ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'
+                            }`}>
+                              {principalValidation.message || 'Enter a valid staff ID to validate'}
+                            </div>
+                          )}
                         </div>
                       </>
                     )}

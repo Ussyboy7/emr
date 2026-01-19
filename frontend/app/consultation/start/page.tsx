@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import { safeAsync } from '@/lib/utils/error-handling';
 import { useRouter } from "next/navigation";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import {
@@ -44,13 +45,20 @@ interface Patient {
   gender: string;
   mrn: string;
   allergies: string[];
-  chiefComplaint: string;
   consultationRoom?: string;
   waitTime: number;
   vitalsCompleted: boolean;
   priority: "Emergency" | "High" | "Medium" | "Low";
   visitDate: string;
   visitTime: string;
+  // Enhanced bio data fields
+  bloodGroup?: string;
+  genotype?: string;
+  division?: string;
+  employeeType?: string;
+  location?: string;
+  occupation?: string;
+  phone?: string;
 }
 
 interface ConsultationRoom {
@@ -67,7 +75,6 @@ interface ConsultationRoom {
 }
 
 // Consultation rooms and patient data will be loaded from API
-const demoPatients: Record<string, Patient> = {};
 
 const getStatusColor = (status: ConsultationRoom["status"]): string => {
   switch (status) {
@@ -132,8 +139,6 @@ const StartConsultation = () => {
         const queueResult = await apiFetch<{ results: any[] }>('/consultation/queue/?is_active=true&page_size=1000');
         const queueItems = queueResult.results || [];
         
-        console.log('Loaded queue items:', queueItems.length);
-        console.log('Queue items sample:', queueItems.slice(0, 3));
         
         // Group queue items by room
         const queueByRoom: Record<string, any[]> = {};
@@ -143,14 +148,7 @@ const StartConsultation = () => {
             queueByRoom[roomId] = [];
           }
           queueByRoom[roomId].push(item);
-          console.log(`Queue item ${item.id}: room=${roomId}, patient=${item.patient}, patient_name=${item.patient_name}`);
         });
-        
-        console.log('Queue by room:', Object.keys(queueByRoom).map(roomId => ({
-          roomId,
-          count: queueByRoom[roomId].length,
-          patients: queueByRoom[roomId].map((item: any) => ({ id: item.patient, name: item.patient_name }))
-        })));
         
         // Transform rooms with queue data
         const transformedRooms: ConsultationRoom[] = roomsResult.results.map((room: any) => {
@@ -321,30 +319,25 @@ const StartConsultation = () => {
           return;
         }
         
-        console.log('Successfully loaded patient:', patient);
+        console.log('Successfully loaded patient for ID:', numericPatientId);
         
         // Get visit details if available
         let visitDate = new Date().toISOString().split('T')[0];
         let visitTime = '';
-        let chiefComplaint = queueItem?.notes || '';
         let visitId: string | number | null = null;
         let priority: "Emergency" | "High" | "Medium" | "Low" = 'Medium';
         let waitTime = 0;
         
         if (queueItem) {
-          chiefComplaint = queueItem.notes || '';
-          
           if (queueItem.visit) {
             visitId = typeof queueItem.visit === 'number' ? queueItem.visit : parseInt(String(queueItem.visit));
             try {
               const visit = await apiFetch(`/visits/${visitId}/`) as {
                 date?: string;
                 time?: string;
-                chief_complaint?: string;
               };
               visitDate = visit.date || visitDate;
               visitTime = visit.time || visitTime;
-              chiefComplaint = visit.chief_complaint || chiefComplaint;
             } catch (visitErr) {
               console.warn('Could not load visit details:', visitErr);
             }
@@ -367,6 +360,15 @@ const StartConsultation = () => {
           }
         }
         
+        // Check if vitals exist for this visit
+        const vitalsCompleted = visitId
+          ? await safeAsync(
+              () => apiFetch<{ count: number }>(`/vitals/?visit=${visitId}&page_size=1`).then(result => result.count > 0),
+              false,
+              { operation: 'checkVitalsStatus', visitId: visitId ? String(visitId) : undefined, component: 'ConsultationStart' }
+            )
+          : false;
+
         setSelectedPatient({
           id: String(patient.id),
           visitId: visitId ? String(visitId) : '',
@@ -376,13 +378,20 @@ const StartConsultation = () => {
           gender: patient.gender || '',
           mrn: patient.patient_id || '',
           allergies: patient.allergies ? patient.allergies.split(/[,\n]/).map(a => a.trim()).filter(a => a) : [],
-          chiefComplaint,
           consultationRoom: selectedRoom,
           waitTime,
-          vitalsCompleted: false, // TODO: Check if vitals exist
+          vitalsCompleted,
           priority,
           visitDate,
           visitTime,
+          // Enhanced bio data fields
+          bloodGroup: patient.blood_group,
+          genotype: patient.genotype,
+          division: patient.division,
+          employeeType: patient.employee_type,
+          location: patient.location,
+          occupation: patient.occupation,
+          phone: patient.phone,
         });
       } catch (err: any) {
         console.error('Error loading patient:', err);
@@ -498,60 +507,119 @@ const StartConsultation = () => {
           )}
         </div>
 
-        {/* Stats Cards */}
-        <div className="grid gap-4 md:grid-cols-4 mb-6">
-          <Card className="border-l-4 border-l-emerald-500">
+        {/* Enhanced Stats Cards */}
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mb-6">
+          {/* Available Rooms */}
+          <Card className="border-l-4 border-l-emerald-500 bg-gradient-to-br from-emerald-50 to-emerald-100 dark:from-emerald-900/20 dark:to-emerald-800/20">
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-muted-foreground">Available Rooms</p>
-                  <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">
+                  <p className="text-sm text-muted-foreground font-medium">Available Rooms</p>
+                  <p className="text-3xl font-bold text-emerald-600 dark:text-emerald-400">
                     {availableRooms.length}
                   </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {availableRooms.length === 1 ? 'room ready' : 'rooms ready'}
+                  </p>
                 </div>
-                <CheckCircle className="h-8 w-8 text-emerald-500" />
+                <div className="w-12 h-12 bg-emerald-500 rounded-full flex items-center justify-center">
+                  <CheckCircle className="h-6 w-6 text-white" />
+                </div>
               </div>
             </CardContent>
           </Card>
-          <Card className="border-l-4 border-l-red-500">
+
+          {/* Occupied Rooms */}
+          <Card className="border-l-4 border-l-red-500 bg-gradient-to-br from-red-50 to-red-100 dark:from-red-900/20 dark:to-red-800/20">
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-muted-foreground">Occupied Rooms</p>
-                  <p className="text-2xl font-bold text-red-600 dark:text-red-400">
+                  <p className="text-sm text-muted-foreground font-medium">Active Sessions</p>
+                  <p className="text-3xl font-bold text-red-600 dark:text-red-400">
                     {consultationRooms.length - availableRooms.length}
                   </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    consultations in progress
+                  </p>
                 </div>
-                <Stethoscope className="h-8 w-8 text-red-500" />
+                <div className="w-12 h-12 bg-red-500 rounded-full flex items-center justify-center">
+                  <Stethoscope className="h-6 w-6 text-white" />
+                </div>
               </div>
             </CardContent>
           </Card>
-          <Card className="border-l-4 border-l-blue-500">
+
+          {/* Patients Waiting */}
+          <Card className="border-l-4 border-l-blue-500 bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-800/20">
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-muted-foreground">Patients Waiting</p>
-                  <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">
+                  <p className="text-sm text-muted-foreground font-medium">Patients Waiting</p>
+                  <p className="text-3xl font-bold text-blue-600 dark:text-blue-400">
                     {consultationRooms.reduce((acc, room) => acc + room.queue.length, 0)}
                   </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    across all rooms
+                  </p>
                 </div>
-                <Users className="h-8 w-8 text-blue-500" />
+                <div className="w-12 h-12 bg-blue-500 rounded-full flex items-center justify-center">
+                  <Users className="h-6 w-6 text-white" />
+                </div>
               </div>
             </CardContent>
           </Card>
-          <Card className="border-l-4 border-l-purple-500">
+
+          {/* Today's Activity */}
+          <Card className="border-l-4 border-l-purple-500 bg-gradient-to-br from-purple-50 to-purple-100 dark:from-purple-900/20 dark:to-purple-800/20">
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-muted-foreground">Today's Sessions</p>
-                  <p className="text-2xl font-bold text-purple-600 dark:text-purple-400">
+                  <p className="text-sm text-muted-foreground font-medium">Today's Sessions</p>
+                  <p className="text-3xl font-bold text-purple-600 dark:text-purple-400">
                     {consultationRooms.reduce((acc, room) => acc + room.totalConsultationsToday, 0)}
                   </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    completed today
+                  </p>
                 </div>
-                <UserCheck className="h-8 w-8 text-purple-500" />
+                <div className="w-12 h-12 bg-purple-500 rounded-full flex items-center justify-center">
+                  <UserCheck className="h-6 w-6 text-white" />
+                </div>
               </div>
             </CardContent>
           </Card>
+        </div>
+
+        {/* Room Filters */}
+        <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg p-4 mb-6">
+          <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                Filter Rooms:
+              </div>
+              <div className="flex gap-2">
+                <Badge
+                  className="cursor-pointer hover:bg-emerald-100 dark:hover:bg-emerald-900/30 bg-emerald-100 text-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-400"
+                >
+                  All ({consultationRooms.length})
+                </Badge>
+                <Badge
+                  className="cursor-pointer hover:bg-green-100 dark:hover:bg-green-900/30 bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400"
+                >
+                  Available ({availableRooms.length})
+                </Badge>
+                <Badge
+                  className="cursor-pointer hover:bg-red-100 dark:hover:bg-red-900/30 bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400"
+                >
+                  Occupied ({consultationRooms.length - availableRooms.length})
+                </Badge>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Users className="h-4 w-4" />
+              <span>{consultationRooms.reduce((acc, room) => acc + room.queue.length, 0)} patients waiting</span>
+            </div>
+          </div>
         </div>
 
         {/* Room Grid */}
@@ -585,13 +653,22 @@ const StartConsultation = () => {
               <CardContent className="pt-0 flex-1 flex flex-col">
                 <div className="flex-1 flex flex-col space-y-3">
                   {/* Doctor Info */}
-                  <div className="text-sm text-gray-700 dark:text-gray-300 font-medium">
-                    {room.doctor ? room.doctor : "No doctor assigned"}
-                    {room.specialtyFocus && (
-                      <span className="text-xs text-muted-foreground ml-2">
-                        ({room.specialtyFocus})
-                      </span>
-                    )}
+                  <div className="flex items-center gap-2">
+                    <div className={`w-2 h-2 rounded-full ${
+                      room.doctor ? "bg-green-500" : "bg-amber-500"
+                    }`} />
+                    <div className="text-sm font-medium">
+                      {room.doctor ? (
+                        <span className="text-green-700 dark:text-green-400">{room.doctor}</span>
+                      ) : (
+                        <span className="text-amber-700 dark:text-amber-400">Available for Assignment</span>
+                      )}
+                      {room.specialtyFocus && (
+                        <span className="text-xs text-muted-foreground ml-2">
+                          ({room.specialtyFocus})
+                        </span>
+                      )}
+                    </div>
                   </div>
 
                   {/* Current Patient */}
@@ -624,14 +701,38 @@ const StartConsultation = () => {
                   </div>
 
                   {/* Queue Count */}
-                  <div className="bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3 min-h-[50px] flex items-center">
-                    <div className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 w-full">
-                      <Users className="h-4 w-4 flex-shrink-0" />
-                      <span className="font-medium">
-                        {room.queue.length > 0
-                          ? `${room.queue.length} patient${room.queue.length !== 1 ? "s" : ""} in queue`
-                          : "No patients in queue"}
-                      </span>
+                  <div className={`border rounded-lg p-3 min-h-[50px] flex items-center ${
+                    room.queue.length > 0
+                      ? "bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800"
+                      : "bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700"
+                  }`}>
+                    <div className="flex items-center gap-2 text-sm w-full">
+                      <Users className={`h-4 w-4 flex-shrink-0 ${
+                        room.queue.length > 0 ? "text-amber-600" : "text-gray-500"
+                      }`} />
+                      <div className="flex-1">
+                        {room.queue.length > 0 ? (
+                          <div className="space-y-1">
+                            <div className="font-medium text-amber-800 dark:text-amber-300">
+                              {room.queue.length} patient{room.queue.length !== 1 ? "s" : ""} waiting
+                            </div>
+                            {room.queue.length > 0 && (
+                              <div className="text-xs text-amber-700 dark:text-amber-400">
+                                Next patient ready
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-gray-700 dark:text-gray-300 font-medium">
+                            No patients in queue
+                          </span>
+                        )}
+                      </div>
+                      {room.queue.length > 0 && (
+                        <Badge className="bg-amber-100 text-amber-800 text-xs ml-2">
+                          Waiting
+                        </Badge>
+                      )}
                     </div>
                   </div>
 
@@ -648,33 +749,63 @@ const StartConsultation = () => {
           ))}
         </div>
 
-        {/* Action Buttons */}
-        <div className="flex flex-col sm:flex-row justify-center gap-4">
-          <Button
-            onClick={handleStartConsultation}
-            disabled={!selectedRoom || isLoading || availableRooms.length === 0}
-            size="lg"
-            className="min-w-48 font-medium bg-emerald-600 hover:bg-emerald-700"
-          >
-            {isLoading ? (
-              <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-            ) : (
-              <Play className="mr-2 h-5 w-5" />
-            )}
-            {isLoading
-              ? "Starting..."
-              : selectedPatient
-                ? "Start Consultation"
-                : "Enter Room"}
-          </Button>
-          <Button
-            variant="outline"
-            size="lg"
-            className="font-medium"
-            onClick={() => router.push("/consultation/history")}
-          >
-            View Consultation History
-          </Button>
+        {/* Enhanced Action Buttons */}
+        <div className="bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-900/10 dark:to-teal-900/10 rounded-lg p-6 -mx-6 -mb-6 mt-6">
+          <div className="flex flex-col sm:flex-row justify-center gap-4">
+            <Button
+              onClick={handleStartConsultation}
+              disabled={!selectedRoom || isLoading || availableRooms.length === 0}
+              size="lg"
+              className="min-w-48 font-semibold bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 shadow-lg border-0 h-12"
+            >
+              {isLoading ? (
+                <Loader2 className="mr-3 h-5 w-5 animate-spin" />
+              ) : (
+                <Play className="mr-3 h-5 w-5" />
+              )}
+              <span className="text-base">
+                {isLoading
+                  ? "Starting..."
+                  : selectedPatient
+                    ? "Start Consultation"
+                    : "Enter Room"}
+              </span>
+            </Button>
+            <Button
+              variant="outline"
+              size="lg"
+              className="font-medium border-2 hover:bg-gray-50 dark:hover:bg-gray-800 h-12"
+              onClick={() => router.push("/consultation/history")}
+            >
+              <Clock className="mr-2 h-5 w-5" />
+              View History
+            </Button>
+          </div>
+
+          {/* Quick Status */}
+          {!selectedRoom && availableRooms.length > 0 && (
+            <div className="mt-4 text-center">
+              <p className="text-sm text-muted-foreground">
+                💡 Select a room above to get started
+              </p>
+            </div>
+          )}
+
+          {selectedRoom && !selectedPatient && selectedRoomData?.queue.length === 0 && (
+            <div className="mt-4 text-center">
+              <p className="text-sm text-emerald-600 dark:text-emerald-400">
+                ✅ Room ready - no patients currently waiting
+              </p>
+            </div>
+          )}
+
+          {selectedPatient && (
+            <div className="mt-4 text-center">
+              <p className="text-sm text-amber-600 dark:text-amber-400">
+                👤 Next patient ready: <span className="font-medium">{selectedPatient.name}</span>
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Selected Room Info */}
@@ -723,21 +854,89 @@ const StartConsultation = () => {
                       Are you sure you want to start a consultation in{" "}
                       <strong>{selectedRoomData?.name}</strong> with{" "}
                       <strong>{selectedPatient.name}</strong>?
-                      <div className="mt-4 p-4 bg-muted rounded-lg space-y-2">
-                        <div>
-                          <strong>Chief Complaint:</strong> {selectedPatient.chiefComplaint}
+                      <div className="mt-4 p-4 bg-muted rounded-lg space-y-3">
+                        {/* Primary Demographics */}
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <strong className="text-sm text-muted-foreground">Age/Gender</strong>
+                            <div className="font-medium">{selectedPatient.age} years, {selectedPatient.gender}</div>
+                          </div>
+                          <div>
+                            <strong className="text-sm text-muted-foreground">Patient ID</strong>
+                            <div className="font-mono text-sm">{selectedPatient.patientId}</div>
+                          </div>
                         </div>
-                        <div>
-                          <strong>Age/Gender:</strong> {selectedPatient.age} years,{" "}
-                          {selectedPatient.gender}
+
+                        {/* Priority and Wait Time */}
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <strong className="text-sm text-muted-foreground">Priority</strong>
+                            <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                              selectedPatient.priority === 'Emergency' ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300' :
+                              selectedPatient.priority === 'High' ? 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-300' :
+                              selectedPatient.priority === 'Medium' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300' :
+                              'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300'
+                            }`}>
+                              {selectedPatient.priority}
+                            </div>
+                          </div>
+                          <div>
+                            <strong className="text-sm text-muted-foreground">Wait Time</strong>
+                            <div className="font-medium">{selectedPatient.waitTime} minutes</div>
+                          </div>
                         </div>
-                        {selectedPatient.allergies.length > 0 && (
-                          <div className="text-red-600 dark:text-red-400">
-                            <strong>Allergies:</strong> {selectedPatient.allergies.join(", ")}
+
+                        {/* Clinical Information */}
+                        {(selectedPatient.allergies.length > 0) && (
+                          <div>
+                            <strong className="text-sm text-muted-foreground">Allergies</strong>
+                            <div className="text-red-600 dark:text-red-400 font-medium">
+                              {selectedPatient.allergies.join(", ")}
+                            </div>
                           </div>
                         )}
-                        <div>
-                          <strong>Wait Time:</strong> {selectedPatient.waitTime} minutes
+
+                        {/* Additional Patient Details - conditionally shown */}
+                        <div className="pt-2 border-t border-border/50">
+                          <div className="text-xs text-muted-foreground mb-2">Additional Information</div>
+                          <div className="grid grid-cols-2 gap-4 text-sm">
+                            {selectedPatient.bloodGroup && (
+                              <div>
+                                <span className="text-muted-foreground">Blood Group:</span>
+                                <span className="ml-1 font-medium text-red-600">{selectedPatient.bloodGroup}</span>
+                              </div>
+                            )}
+                            {selectedPatient.genotype && (
+                              <div>
+                                <span className="text-muted-foreground">Genotype:</span>
+                                <span className="ml-1 font-medium text-green-600">{selectedPatient.genotype}</span>
+                              </div>
+                            )}
+                            {selectedPatient.division && (
+                              <div>
+                                <span className="text-muted-foreground">Division:</span>
+                                <span className="ml-1 font-medium">{selectedPatient.division}</span>
+                              </div>
+                            )}
+                            {selectedPatient.employeeType && (
+                              <div>
+                                <span className="text-muted-foreground">Employee Type:</span>
+                                <span className="ml-1 font-medium">{selectedPatient.employeeType}</span>
+                              </div>
+                            )}
+                            {selectedPatient.location && (
+                              <div>
+                                <span className="text-muted-foreground">Location:</span>
+                                <span className="ml-1 font-medium">{selectedPatient.location}</span>
+                              </div>
+                            )}
+                            {selectedPatient.occupation && (
+                              <div>
+                                <span className="text-muted-foreground">Occupation:</span>
+                                <span className="ml-1 font-medium">{selectedPatient.occupation}</span>
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </>

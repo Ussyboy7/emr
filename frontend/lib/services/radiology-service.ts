@@ -11,11 +11,14 @@ export interface RadiologyOrder {
   doctor?: number;
   doctor_name?: string;
   visit?: number;
+  consultation_session?: number;
   priority: 'routine' | 'urgent' | 'stat';
   clinic?: string;
   clinical_notes?: string;
   studies: RadiologyStudy[];
   ordered_at: string;
+  // For creating orders with studies
+  studies_data?: any[];
 }
 
 export interface RadiologyStudy {
@@ -58,6 +61,27 @@ export interface RadiologyReport {
   created_at: string;
 }
 
+export interface RadiologyTemplate {
+  id: number;
+  name: string;
+  code: string;
+  category: 'xray' | 'ct' | 'mri' | 'ultrasound' | 'mammography' | 'fluoroscopy' | 'angiography' | 'nuclear' | 'dental' | 'interventional';
+  subcategory?: 'plain_film' | 'contrast_studies' | 'special_procedures' | 'doppler' | 'abdominal' | 'cardiac' | 'musculoskeletal' | 'neurological' | 'thoracic' | 'vascular' | 'oncological' | 'cytology';
+  description?: string;
+  body_part?: string;
+  modality?: string;
+  contrast_required?: boolean;
+  radiation_exposure?: 'none' | 'low' | 'moderate' | 'high';
+  preparation_required?: string;
+  indications?: string;
+  contraindications?: string;
+  turnaround_time?: string;
+  report_template?: any;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 class RadiologyService {
   /**
    * Get all radiology orders
@@ -69,6 +93,7 @@ class RadiologyService {
     search?: string;
     page?: number;
     page_size?: number;
+    consultation_session?: number;
   }): Promise<{ results: RadiologyOrder[]; count: number }> {
     const query = buildQueryString(params || {});
     return apiFetch<{ results: RadiologyOrder[]; count: number }>(`/radiology/orders/${query}`);
@@ -208,33 +233,65 @@ class RadiologyService {
     });
   }
 
+
   /**
-   * Get studies with images (for viewer)
-   * Note: Uses orders endpoint and filters for acquired/processed studies
+   * Get radiology templates
    */
-  async getStudiesWithImages(params?: {
-    patient?: string;
+  async getTemplates(params?: {
+    category?: string;
     modality?: string;
+    is_active?: boolean;
+    search?: string;
     page?: number;
-  }): Promise<{ results: RadiologyStudy[]; count: number }> {
-    // Use orders endpoint and filter for studies with images
-    const ordersResponse = await this.getOrders(params);
-    const allStudies: RadiologyStudy[] = [];
-    
-    ordersResponse.results.forEach(order => {
-      order.studies.forEach(study => {
-        // Only include studies that have been acquired (have images)
-        if (study.status === 'acquired' || study.status === 'processing' || 
-            study.status === 'reported' || study.status === 'verified') {
-          allStudies.push(study);
-        }
-      });
+    page_size?: number;
+  }): Promise<{ results: RadiologyTemplate[]; count: number }> {
+    const query = buildQueryString(params || {});
+    return apiFetch<{ results: RadiologyTemplate[]; count: number }>(`/radiology/templates/${query}`);
+  }
+
+  /**
+   * Get a single radiology template
+   */
+  async getTemplate(templateId: number): Promise<RadiologyTemplate> {
+    return apiFetch<RadiologyTemplate>(`/radiology/templates/${templateId}/`);
+  }
+
+  /**
+   * Create a radiology template
+   */
+  async createTemplate(data: Partial<RadiologyTemplate>): Promise<RadiologyTemplate> {
+    return apiFetch<RadiologyTemplate>('/radiology/templates/', {
+      method: 'POST',
+      body: JSON.stringify(data),
     });
-    
-    return {
-      results: allStudies,
-      count: allStudies.length,
-    };
+  }
+
+  /**
+   * Update a radiology template
+   */
+  async updateTemplate(templateId: number, data: Partial<RadiologyTemplate>): Promise<RadiologyTemplate> {
+    return apiFetch<RadiologyTemplate>(`/radiology/templates/${templateId}/`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  /**
+   * Delete a radiology template
+   */
+  async deleteTemplate(templateId: number): Promise<void> {
+    return apiFetch<void>(`/radiology/templates/${templateId}/`, {
+      method: 'DELETE',
+    });
+  }
+
+  /**
+   * Toggle template active status
+   */
+  async toggleTemplateStatus(templateId: number): Promise<RadiologyTemplate> {
+    return apiFetch<RadiologyTemplate>(`/radiology/templates/${templateId}/toggle_status/`, {
+      method: 'POST',
+    });
   }
 
   /**
@@ -246,32 +303,106 @@ class RadiologyService {
     awaitingReport: number;
     criticalFindings: number;
   }> {
-    // Get all orders and calculate stats
-    const ordersResponse = await this.getOrders({ page: 1 });
-    const allStudies = ordersResponse.results.flatMap(order => order.studies || []);
-    
-    const pendingOrders = ordersResponse.results.filter(order => 
-      order.studies.some(s => s.status === 'pending')
+    // Get all orders - use a larger page size to get more data for stats
+    const ordersResponse = await this.getOrders({ page: 1, page_size: 100 });
+    const allOrders = ordersResponse.results;
+
+    // Calculate stats based on studies within orders
+    const pendingOrders = allOrders.filter(order =>
+      order.studies && order.studies.some(s => s.status === 'pending')
     ).length;
-    
-    const inProgress = ordersResponse.results.filter(order => 
-      order.studies.some(s => s.status === 'scheduled' || s.status === 'acquired' || s.status === 'processing')
+
+    const inProgress = allOrders.filter(order =>
+      order.studies && order.studies.some(s => s.status === 'processing')
     ).length;
-    
-    const awaitingReport = ordersResponse.results.filter(order => 
-      order.studies.some(s => s.status === 'acquired' && !s.report)
+
+    const awaitingReport = allOrders.filter(order =>
+      order.studies && order.studies.some(s => s.status === 'reported')
     ).length;
-    
-    const criticalFindings = ordersResponse.results.filter(order => 
-      order.studies.some(s => (s as any).critical || s.status === 'verified' && (s as any).overall_status === 'critical')
+
+    const criticalFindings = allOrders.filter(order =>
+      order.studies && order.studies.some(s => (s as any).critical === true)
     ).length;
-    
+
     return {
       pendingOrders,
       inProgress,
       awaitingReport,
       criticalFindings,
     };
+  }
+
+  /**
+   * Update order status
+   */
+  async updateOrderStatus(orderId: number, status: string): Promise<RadiologyOrder> {
+    return apiFetch<RadiologyOrder>(`/radiology/orders/${orderId}/update_status/`, {
+      method: 'POST',
+      body: JSON.stringify({ status }),
+    });
+  }
+
+  /**
+   * Update order results
+   */
+  async updateOrderResults(orderId: number, data: {
+    findings: string;
+    impression: string;
+    critical: boolean;
+    reportFile?: File | null;
+    status: string;
+  }): Promise<RadiologyOrder> {
+    const formData = new FormData();
+    formData.append('findings', data.findings);
+    formData.append('impression', data.impression);
+    formData.append('critical', data.critical.toString());
+    formData.append('status', data.status);
+
+    if (data.reportFile) {
+      formData.append('report_file', data.reportFile);
+    }
+
+    return apiFetch<RadiologyOrder>(`/radiology/orders/${orderId}/update_results/`, {
+      method: 'POST',
+      body: formData,
+    });
+  }
+
+  /**
+   * Update study status (individual study processing like lab tests)
+   */
+  async updateStudyStatus(studyId: number, status: string, data?: { processing_method?: string; outsourced_lab?: string | null }): Promise<any> {
+    const requestData = { status, ...data };
+    return apiFetch<any>(`/radiology/studies/${studyId}/update_status/`, {
+      method: 'POST',
+      body: JSON.stringify(requestData),
+    });
+  }
+
+  /**
+   * Update study results (individual study results like lab tests)
+   */
+  async updateStudyResults(studyId: number, data: {
+    findings: string;
+    impression: string;
+    critical: boolean;
+    reportFile?: File | null;
+    status: string;
+  }): Promise<any> {
+    const formData = new FormData();
+    formData.append('findings', data.findings);
+    formData.append('impression', data.impression);
+    formData.append('critical', data.critical.toString());
+    formData.append('status', data.status);
+
+    if (data.reportFile) {
+      formData.append('report_file', data.reportFile);
+    }
+
+    return apiFetch<any>(`/radiology/studies/${studyId}/update_results/`, {
+      method: 'POST',
+      body: formData,
+    });
   }
 }
 

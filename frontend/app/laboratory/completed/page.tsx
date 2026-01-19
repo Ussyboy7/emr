@@ -11,7 +11,34 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { labService, type LabTest as ApiLabTest } from '@/lib/services';
+import { transformPriority } from '@/lib/services/transformers';
 import { PatientAvatar } from "@/components/PatientAvatar";
+
+// Import test templates from orders page
+const testTemplates: Record<string, { name: string; fields: { name: string; unit: string; normalRange: string; }[] }> = {
+  LFT: {
+    name: 'Liver Function Test',
+    fields: [
+      { name: 'ALT', unit: 'U/L', normalRange: '7-56' },
+      { name: 'AST', unit: 'U/L', normalRange: '10-40' },
+      { name: 'ALP', unit: 'U/L', normalRange: '44-147' },
+      { name: 'Bilirubin (Total)', unit: 'mg/dL', normalRange: '0.1-1.2' },
+      { name: 'Albumin', unit: 'g/dL', normalRange: '3.5-5.0' },
+    ]
+  },
+  FBS: {
+    name: 'Fasting Blood Sugar',
+    fields: [
+      { name: 'Glucose', unit: 'mg/dL', normalRange: '70-140' },
+    ]
+  },
+  '24HR_PROTEIN': {
+    name: '24 Hour Urinary Protein',
+    fields: [
+      { name: 'Result', unit: 'mg/day', normalRange: '<150' },
+    ]
+  },
+};
 import {
   CheckCircle2, Search, Eye, Clock, AlertTriangle, Calendar,
   User, FileText, Stethoscope, RefreshCw, Download, Printer, FlaskConical, Loader2
@@ -29,11 +56,12 @@ interface TestResult {
 interface CompletedTest {
   id: string;
   orderId: string;
-  patient: { id: string; name: string; age: number; gender: string; };
+  patient: { id: string; name: string; age: number | null; gender: string; };
   doctor: { id: string; name: string; specialty: string; };
   testName: string;
   testCode: string;
   results: TestResult[];
+  result_file?: string;
   overallStatus: 'Normal' | 'Abnormal' | 'Critical';
   priority: 'Routine' | 'Urgent' | 'STAT';
   orderedAt: string;
@@ -79,22 +107,26 @@ export default function CompletedTestsPage() {
       setTotalCount(response.count || response.results.length);
       // Transform API data to frontend format
       const transformed = await Promise.all(response.results.map(async (test: any) => {
-        // Extract patient data from test - LabTest has order, order has patient
-        const order = test.order || test.lab_order;
-        const patient = order?.patient || test.patient;
-        const patientName = patient?.name || test.patient_name || order?.patient_name || 'Unknown Patient';
-        const patientId = patient?.id?.toString() || test.patient_id || order?.patient?.id?.toString() || '';
-        const orderId = order?.order_id || test.order_id || '';
+        // Extract patient data from test.order_details (added to LabTestSerializer)
+        // The order_details field includes patient_details, doctor_details, order_id, etc.
+        const orderDetails = test.order_details || {};
         
-        // Extract doctor data
-        const doctor = order?.doctor;
-        const doctorName = doctor?.name || order?.doctor_name || test.ordered_by_name || '';
-        const doctorSpecialty = doctor?.specialty || order?.doctor?.specialty || '';
+        // Extract patient data directly from API response - no fallbacks
+        const patientDetails = orderDetails.patient_details;
+        const patientName = patientDetails?.name || orderDetails.patient_name || '';
+        const patientId = patientDetails?.id?.toString() || '';
+        const age = patientDetails?.age || null;
+        const gender = patientDetails?.gender || '';
+        
+        const orderId = orderDetails.order_id || '';
+        
+        // Extract doctor data directly from API response - no fallbacks
+        const doctorDetails = orderDetails.doctor_details;
+        const doctorName = doctorDetails?.name || orderDetails.doctor_name || '';
+        const doctorSpecialty = doctorDetails?.specialty || '';
         
         // Extract clinic and other order data
-        const clinic = order?.clinic || test.clinic || '';
-        const age = patient?.age || test.age || 0;
-        const gender = patient?.gender || test.gender || '';
+        const clinic = orderDetails.clinic || '';
         
         // Calculate turnaround time
         const orderedAt = test.collected_at || (test.lab_order?.order_date) || new Date().toISOString();
@@ -104,7 +136,96 @@ export default function CompletedTestsPage() {
         const turnaroundMins = Math.floor((turnaroundMs % 3600000) / 60000);
         const turnaroundTime = turnaroundHours > 0 ? `${turnaroundHours}h ${turnaroundMins}m` : `${turnaroundMins}m`;
         
-        // Determine overall status from results
+        // Process results first to determine individual statuses
+        console.log('Processing test results for test:', test.code, 'results:', test.results, 'result_file:', test.result_file);
+
+        // Process result_file URL if it exists
+        const resultFileUrl = test.result_file ? (
+          test.result_file.startsWith('http') ? test.result_file :
+          `${window.location.origin}${test.result_file}`
+        ) : null;
+        const processedResults = Object.entries(test.results || {}).map(([key, value]) => {
+          const valueStr = String(value);
+          const valueNum = parseFloat(valueStr);
+
+          // Get template data for this test code
+          const template = testTemplates[test.code];
+          const field = template?.fields?.find(f => f.name.toLowerCase() === key.toLowerCase());
+
+          let unit = field?.unit || '';
+          let normalRange = field?.normalRange || '';
+          let status: 'Normal' | 'Abnormal' | 'Critical' = 'Normal';
+
+          // Apply validation logic based on parameter and test type
+          if (!isNaN(valueNum) && valueStr.trim() !== '') {
+            // Liver Function Test validations
+            if (test.code === 'LFT') {
+              if (key.toLowerCase().includes('alt') || key.toLowerCase().includes('sgpt')) {
+                unit = 'U/L';
+                normalRange = '7-56';
+                if (valueNum > 1000) status = 'Critical';
+                else if (valueNum < 7 || valueNum > 56) status = 'Abnormal';
+                else status = 'Normal';
+              } else if (key.toLowerCase().includes('ast') || key.toLowerCase().includes('sgot')) {
+                unit = 'U/L';
+                normalRange = '10-40';
+                if (valueNum > 1000) status = 'Critical';
+                else if (valueNum < 10 || valueNum > 40) status = 'Abnormal';
+                else status = 'Normal';
+              } else if (key.toLowerCase().includes('alp') || key.toLowerCase().includes('alkaline phosphatase')) {
+                unit = 'U/L';
+                normalRange = '44-147';
+                if (valueNum > 1000) status = 'Critical';
+                else if (valueNum < 44 || valueNum > 147) status = 'Abnormal';
+                else status = 'Normal';
+              } else if (key.toLowerCase().includes('albumin')) {
+                unit = 'g/dL';
+                normalRange = '3.5-5.0';
+                if (valueNum < 2.0 || valueNum > 6.0) status = 'Critical';
+                else if (valueNum < 3.5 || valueNum > 5.0) status = 'Abnormal';
+                else status = 'Normal';
+              } else if (key.toLowerCase().includes('bilirubin') && key.toLowerCase().includes('total')) {
+                unit = 'mg/dL';
+                normalRange = '0.1-1.2';
+                if (valueNum > 5.0) status = 'Critical';
+                else if (valueNum > 1.2) status = 'Abnormal';
+                else status = 'Normal';
+              }
+            }
+            // Fasting Blood Sugar validations
+            else if (test.code === 'FBS') {
+              if (key.toLowerCase().includes('glucose')) {
+                unit = 'mg/dL';
+                normalRange = '70-140';
+                if (valueNum < 40 || valueNum > 600) status = 'Critical';
+                else if (valueNum < 70 || valueNum > 140) status = 'Abnormal';
+                else status = 'Normal';
+              }
+            }
+            // 24 Hour Protein validations
+            else if (test.code === '24HR_PROTEIN') {
+              if (key.toLowerCase() === 'result') {
+                unit = 'mg/day';
+                normalRange = '<150';
+                if (!isNaN(valueNum)) {
+                  if (valueNum > 1000) status = 'Critical';
+                  else if (valueNum > 300) status = 'Abnormal';
+                  else status = 'Normal';
+                }
+              }
+            }
+          }
+
+          return {
+            parameter: key,
+            value: valueStr,
+            unit,
+            normalRange,
+            status,
+          };
+        });
+
+        // Determine overall status from API first, then from results if not provided
         let overallStatus: 'Normal' | 'Abnormal' | 'Critical' = 'Normal';
         if (test.overall_status) {
           const statusMap: Record<string, 'Normal' | 'Abnormal' | 'Critical'> = {
@@ -113,24 +234,24 @@ export default function CompletedTestsPage() {
             'critical': 'Critical',
           };
           overallStatus = statusMap[test.overall_status.toLowerCase()] || 'Normal';
+        } else {
+          // Determine from individual results
+          if (processedResults.some(r => r.status === 'Critical')) overallStatus = 'Critical';
+          else if (processedResults.some(r => r.status === 'Abnormal')) overallStatus = 'Abnormal';
+          else overallStatus = 'Normal';
         }
         
-        // Determine priority
-        const priorityMap: Record<string, 'Routine' | 'Urgent' | 'STAT'> = {
-          'routine': 'Routine',
-          'urgent': 'Urgent',
-          'stat': 'STAT',
-        };
-        const priority = priorityMap[(test.lab_order?.priority || test.priority || 'routine').toLowerCase()] || 'Routine';
+        // Determine priority - use transformPriority for consistency
+        const priority = transformPriority(test.lab_order?.priority || test.priority || 'routine') as 'Routine' | 'Urgent' | 'STAT';
         
         return {
           id: test.id.toString(),
           orderId,
           patient: { 
-            id: patientId.toString(), 
+            id: patientId, 
             name: patientName, 
-            age: age || 0, 
-            gender: gender || 'Unknown' 
+            age: age ?? null, 
+            gender: gender 
           },
           doctor: { 
             id: (test.lab_order?.doctor?.id)?.toString() || '', 
@@ -139,13 +260,7 @@ export default function CompletedTestsPage() {
           },
           testName: test.name,
           testCode: test.code,
-          results: Object.entries(test.results || {}).map(([key, value]) => ({
-            parameter: key,
-            value: String(value),
-            unit: '', // Would need template data for units
-            normalRange: '', // Would need template data for normal ranges
-            status: 'Normal' as const, // Would need to calculate based on normal ranges
-          })),
+          results: processedResults,
           overallStatus,
           priority,
           orderedAt,
@@ -155,6 +270,7 @@ export default function CompletedTestsPage() {
           submittedBy: test.processed_by_name || test.processed_by || '',
           clinic,
           turnaroundTime,
+          result_file: resultFileUrl,
         };
       }));
       setTests(transformed);
@@ -442,7 +558,7 @@ export default function CompletedTestsPage() {
                         
                         {/* Row 2: Details */}
                         <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-wrap">
-                          <span>{test.patient.age}y {test.patient.gender}</span>
+                          <span>{test.patient.age !== null && test.patient.age !== undefined ? `${test.patient.age}y` : ''} {test.patient.gender}</span>
                           <span>•</span>
                           <span>{test.orderId}</span>
                           <span>•</span>
@@ -500,7 +616,7 @@ export default function CompletedTestsPage() {
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground">Age / Gender</p>
-                    <p className="font-medium">{selectedTest.patient.age} years / {selectedTest.patient.gender}</p>
+                    <p className="font-medium">{selectedTest.patient.age !== null && selectedTest.patient.age !== undefined ? `${selectedTest.patient.age} years` : ''} / {selectedTest.patient.gender}</p>
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground">Ordering Doctor</p>
@@ -525,36 +641,144 @@ export default function CompletedTestsPage() {
                   <h3 className="font-semibold mb-3 flex items-center gap-2">
                     <FlaskConical className="h-4 w-4 text-amber-500" />
                     Test Results
-                    <Badge variant="outline" className={getOverallStatusBadge(selectedTest.overallStatus)}>{selectedTest.overallStatus}</Badge>
+                    {/* Only show status badge when there are parsed results */}
+                    {selectedTest.results.length > 0 && (
+                      <Badge variant="outline" className={getOverallStatusBadge(selectedTest.overallStatus)}>{selectedTest.overallStatus}</Badge>
+                    )}
                   </h3>
-                  <div className="overflow-x-auto border rounded-lg">
-                    <table className="w-full text-sm">
-                      <thead><tr className="border-b bg-muted/50">
-                        <th className="text-left p-3 font-medium">Parameter</th>
-                        <th className="text-left p-3 font-medium">Result</th>
-                        <th className="text-left p-3 font-medium">Unit</th>
-                        <th className="text-left p-3 font-medium">Normal Range</th>
-                        <th className="text-left p-3 font-medium">Status</th>
-                      </tr></thead>
-                      <tbody>
-                        {selectedTest.results.map(r => (
-                          <tr key={r.parameter} className="border-b">
-                            <td className="p-3 font-medium">{r.parameter}</td>
-                            <td className={`p-3 ${getResultStatusColor(r.status)}`}>{r.value}</td>
-                            <td className="p-3 text-muted-foreground">{r.unit}</td>
-                            <td className="p-3 text-muted-foreground">{r.normalRange}</td>
-                            <td className="p-3">
-                              {r.status === 'Normal' ? (
-                                <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-                              ) : (
-                                <AlertTriangle className={`h-4 w-4 ${r.status === 'Critical' ? 'text-rose-500' : 'text-amber-500'}`} />
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+
+                  {selectedTest.results.length > 0 ? (
+                    // Show parsed results with table
+                    <>
+                      {/* Result File Info - Only show when there are also parsed results */}
+                      {selectedTest.result_file && (
+                        <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <FileText className="h-4 w-4 text-blue-600" />
+                              <span className="text-sm font-medium text-blue-800 dark:text-blue-200">Additional Result File Available</span>
+                            </div>
+                            <div className="flex gap-2">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => {
+                                  window.open(selectedTest.result_file, '_blank');
+                                }}
+                                className="text-blue-600 hover:text-blue-800"
+                              >
+                                <Download className="h-3 w-3 mr-1" />
+                                View
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => {
+                                  if (selectedTest.result_file) {
+                                    const link = document.createElement('a');
+                                    link.href = selectedTest.result_file;
+                                    link.download = `lab_result_${selectedTest.id}.pdf`;
+                                    document.body.appendChild(link);
+                                    link.click();
+                                    document.body.removeChild(link);
+                                  }
+                                }}
+                                className="text-blue-600 hover:text-blue-800"
+                              >
+                                <Download className="h-3 w-3 mr-1" />
+                                Download
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="overflow-x-auto border rounded-lg">
+                        <table className="w-full text-sm">
+                          <thead><tr className="border-b bg-muted/50">
+                            <th className="text-left p-3 font-medium">Parameter</th>
+                            <th className="text-left p-3 font-medium">Result</th>
+                            <th className="text-left p-3 font-medium">Unit</th>
+                            <th className="text-left p-3 font-medium">Normal Range</th>
+                            <th className="text-left p-3 font-medium">Status</th>
+                          </tr></thead>
+                          <tbody>
+                            {selectedTest.results.map(r => (
+                              <tr key={r.parameter} className="border-b">
+                                <td className="p-3 font-medium">{r.parameter}</td>
+                                <td className={`p-3 ${getResultStatusColor(r.status)}`}>{r.value || 'Pending'}</td>
+                                <td className="p-3 text-muted-foreground">{r.unit}</td>
+                                <td className="p-3 text-muted-foreground">{r.normalRange}</td>
+                                <td className="p-3">
+                                  {r.status === 'Normal' ? (
+                                    <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                                  ) : (
+                                    <AlertTriangle className={`h-4 w-4 ${r.status === 'Critical' ? 'text-rose-500' : 'text-amber-500'}`} />
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </>
+                  ) : selectedTest.result_file ? (
+                    // Show uploaded file as clean simple display when no parsed results
+                    <div className="space-y-4">
+                      <div className="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                        <div className="flex items-center gap-3 mb-2">
+                          <FileText className="h-5 w-5 text-blue-600" />
+                          <span className="font-medium text-blue-800 dark:text-blue-200">Result file available</span>
+                        </div>
+                        <p className="text-sm text-muted-foreground mb-4">
+                          Results are provided as a PDF document
+                        </p>
+                        <Button
+                          onClick={() => {
+                            window.open(selectedTest.result_file, '_blank');
+                          }}
+                          className="bg-blue-600 hover:bg-blue-700"
+                        >
+                          <Download className="h-4 w-4 mr-2" />
+                          View PDF
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    // No results at all
+                    <div className="p-8 text-center border rounded-lg">
+                      <div className="flex flex-col items-center gap-3">
+                        <FlaskConical className="h-8 w-8 text-amber-500" />
+                        <div>
+                          <p className="font-medium text-amber-800 dark:text-amber-200">No Results Available</p>
+                          <p className="text-sm text-muted-foreground mt-1">
+                            Test results have not been entered or uploaded yet.
+                          </p>
+                          <div className="flex gap-2 mt-3">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                // Navigate to orders page to re-enter results
+                                window.location.href = `/laboratory/orders?test=${selectedTest.id}`;
+                              }}
+                            >
+                              Re-enter Results
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                toast.info('Please contact laboratory staff to resolve this issue.');
+                              }}
+                            >
+                              Report Issue
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Timeline */}

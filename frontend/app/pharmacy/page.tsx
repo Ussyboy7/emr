@@ -348,13 +348,6 @@ export default function PharmacyDashboardPage() {
                   </div>
                   ))
                 )}
-                <Button 
-                  variant="outline" 
-                  className="w-full" 
-                  onClick={() => router.push('/pharmacy/history')}
-                >
-                  View History
-                </Button>
               </CardContent>
             </Card>
           </div>

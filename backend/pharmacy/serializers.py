@@ -34,7 +34,8 @@ class PrescriptionItemSerializer(serializers.ModelSerializer):
     medication_code = serializers.CharField(source='medication.code', read_only=True)
     medication_details = serializers.SerializerMethodField()
     prescription = serializers.PrimaryKeyRelatedField(read_only=True)  # Make prescription read-only for nested writes
-    
+
+
     def get_medication_details(self, obj):
         """Get medication details including current stock."""
         if not obj.medication:
@@ -68,17 +69,66 @@ class PrescriptionItemSerializer(serializers.ModelSerializer):
 
 class PrescriptionSerializer(serializers.ModelSerializer):
     """Serializer for Prescription model."""
-    
+
     patient_name = serializers.SerializerMethodField()
+    patient_details = serializers.SerializerMethodField()
+    visit_details = serializers.SerializerMethodField()
     doctor_name = serializers.SerializerMethodField()
     medications = PrescriptionItemSerializer(many=True, read_only=True)
     # Allow medications to be written during creation
     items = PrescriptionItemSerializer(many=True, write_only=True, required=False)
-    
+
     def get_patient_name(self, obj):
         """Get patient full name."""
-        return obj.patient.get_full_name() if obj.patient else None
-    
+        return obj.patient.get_full_name() if obj.patient else "Unknown Patient"
+
+    def get_patient_details(self, obj):
+        """Get detailed patient information."""
+        if not obj.patient:
+            return {
+                'id': None,
+                'name': 'Unknown Patient',
+                'patient_id': 'N/A',
+                'age': None,
+                'date_of_birth': None,
+                'gender': 'Unknown',
+                'phone': None,
+                'phone_number': None,
+                'allergies': []
+            }
+
+        patient = obj.patient
+
+        # Parse allergies from text field (comma or newline separated)
+        allergies_text = patient.allergies or ""
+        allergies_list = [a.strip() for a in allergies_text.replace('\n', ',').split(',') if a.strip()]
+
+        return {
+            'id': patient.id,
+            'name': patient.get_full_name(),
+            'patient_id': patient.patient_id,
+            'age': patient.age,
+            'date_of_birth': patient.date_of_birth,
+            'gender': patient.gender,
+            'phone': patient.phone,
+            'phone_number': patient.phone,  # Alias for compatibility
+            'allergies': allergies_list,
+        }
+
+    def get_visit_details(self, obj):
+        """Get visit details including clinic and location."""
+        if not obj.visit:
+            return None
+
+        visit = obj.visit
+        return {
+            'id': visit.id,
+            'visit_id': visit.visit_id,
+            'clinic': visit.clinic,
+            'location': visit.location,
+            'visit_date': visit.created_at.date() if visit.created_at else None,
+        }
+
     def get_doctor_name(self, obj):
         """Get doctor full name."""
         return obj.doctor.get_full_name() if obj.doctor else None

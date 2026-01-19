@@ -66,8 +66,9 @@ class PatientListSerializer(serializers.ModelSerializer):
 
 class VisitSerializer(serializers.ModelSerializer):
     """Serializer for Visit model."""
-    
+
     patient_name = serializers.CharField(source='patient.get_full_name', read_only=True)
+    patient_id = serializers.CharField(source='patient.patient_id', read_only=True)
     doctor_name = serializers.CharField(source='doctor.get_full_name', read_only=True, allow_null=True)
     vitals = serializers.SerializerMethodField()
     
@@ -84,6 +85,9 @@ class VisitSerializer(serializers.ModelSerializer):
                 'weight': str(vital.weight) if vital.weight else '',
                 'height': str(vital.height) if vital.height else '',
                 'bmi': str(vital.bmi) if vital.bmi else '',
+                'bloodPressureSystolic': str(vital.blood_pressure_systolic) if vital.blood_pressure_systolic else '',
+                'bloodPressureDiastolic': str(vital.blood_pressure_diastolic) if vital.blood_pressure_diastolic else '',
+                'recordedAt': vital.recorded_at.isoformat() if vital.recorded_at else '',
             }
         return {
             'bp': '', 'pulse': '', 'temp': '', 'respRate': '', 'spo2': '', 'weight': '', 'height': '', 'bmi': ''
@@ -99,9 +103,9 @@ class VisitSerializer(serializers.ModelSerializer):
     class Meta:
         model = Visit
         fields = [
-            'id', 'visit_id', 'patient', 'patient_name', 'visit_type', 'status',
+            'id', 'visit_id', 'patient', 'patient_id', 'patient_name', 'visit_type', 'status',
             'date', 'time', 'clinic', 'location', 'doctor', 'doctor_name',
-            'chief_complaint', 'clinical_notes', 'vitals',
+            'clinical_notes', 'vitals',
             'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'visit_id', 'created_at', 'updated_at', 'vitals']
@@ -109,14 +113,15 @@ class VisitSerializer(serializers.ModelSerializer):
 
 class VitalReadingSerializer(serializers.ModelSerializer):
     """Serializer for VitalReading model."""
-    
+
     patient_name = serializers.CharField(source='patient.get_full_name', read_only=True)
+    patient_id = serializers.CharField(source='patient.patient_id', read_only=True)
     recorded_by_name = serializers.CharField(source='recorded_by.get_full_name', read_only=True, allow_null=True)
     
     class Meta:
         model = VitalReading
         fields = [
-            'id', 'visit', 'patient', 'patient_name',
+            'id', 'visit', 'patient', 'patient_id', 'patient_name',
             'temperature', 'blood_pressure_systolic', 'blood_pressure_diastolic',
             'heart_rate', 'respiratory_rate', 'oxygen_saturation',
             'weight', 'height', 'bmi',

@@ -65,7 +65,7 @@ class ConsultationSession(models.Model):
     visit = models.ForeignKey('patients.Visit', on_delete=models.SET_NULL, null=True, blank=True, related_name='consultation_sessions')
     
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active')
-    chief_complaint = models.TextField(blank=True)
+    presentation_complaint = models.TextField(blank=True, help_text="Chief complaint or presenting symptoms")
     history_of_presenting_illness = models.TextField(blank=True)
     physical_examination = models.TextField(blank=True)
     assessment = models.TextField(blank=True)
@@ -223,4 +223,68 @@ class Referral(models.Model):
     
     def __str__(self):
         return f"{self.referral_id} - {self.patient.get_full_name()} to {self.specialty}"
+
+
+class ICD10Code(models.Model):
+    """
+    ICD-10 (International Classification of Diseases, 10th Revision) codes for medical diagnosis.
+    """
+
+    code = models.CharField(max_length=10, unique=True, db_index=True, help_text="ICD-10 code (e.g., A00.0, J00)")
+    description = models.TextField(help_text="Full description of the diagnosis")
+    category = models.CharField(max_length=100, blank=True, help_text="ICD-10 category/chapter")
+    is_active = models.BooleanField(default=True, help_text="Whether this code is currently active")
+
+    class Meta:
+        db_table = 'icd10_codes'
+        ordering = ['code']
+        indexes = [
+            models.Index(fields=['code']),
+            models.Index(fields=['category']),
+            models.Index(fields=['is_active']),
+        ]
+
+    def __str__(self):
+        return f"{self.code} - {self.description[:50]}"
+
+
+class Diagnosis(models.Model):
+    """
+    Patient diagnosis records linked to ICD-10 codes.
+    """
+
+    STATUS_CHOICES = [
+        ('confirmed', 'Confirmed'),
+        ('suspected', 'Suspected'),
+        ('ruled_out', 'Ruled Out'),
+    ]
+
+    CERTAINTY_CHOICES = [
+        ('confirmed', 'Confirmed'),
+        ('probable', 'Probable'),
+        ('possible', 'Possible'),
+    ]
+
+    patient = models.ForeignKey('patients.Patient', on_delete=models.CASCADE, related_name='diagnoses')
+    visit = models.ForeignKey('patients.Visit', on_delete=models.SET_NULL, null=True, blank=True, related_name='diagnoses')
+    session = models.ForeignKey(ConsultationSession, on_delete=models.SET_NULL, null=True, blank=True, related_name='diagnoses')
+
+    icd10_code = models.ForeignKey(ICD10Code, on_delete=models.PROTECT, related_name='diagnoses')
+    diagnosis_text = models.TextField(blank=True, help_text="Additional diagnosis details or free text")
+
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='confirmed')
+    certainty = models.CharField(max_length=20, choices=CERTAINTY_CHOICES, default='confirmed')
+
+    diagnosed_by = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, related_name='diagnoses_made')
+    diagnosed_at = models.DateTimeField(auto_now_add=True)
+
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        db_table = 'diagnoses'
+        ordering = ['-diagnosed_at']
+        unique_together = [['patient', 'visit', 'icd10_code']]
+
+    def __str__(self):
+        return f"{self.patient.get_full_name()} - {self.icd10_code.code}: {self.icd10_code.description[:50]}"
 

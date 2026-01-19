@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { SAVE_SIMULATION_DELAY } from '@/lib/constants/ui';
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -120,7 +121,7 @@ export default function SystemSettingsPage() {
 
   const handleSave = async () => {
     setIsSaving(true);
-    await new Promise(r => setTimeout(r, 1500));
+    await new Promise(r => setTimeout(r, SAVE_SIMULATION_DELAY));
     toast.success('Settings saved successfully');
     setIsSaving(false);
   };

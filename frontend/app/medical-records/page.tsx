@@ -6,14 +6,14 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import Link from 'next/link';
-import { patientService, visitService } from '@/lib/services';
+import { patientService, visitService, wardService } from '@/lib/services';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { 
-  FileText, 
-  Search, 
-  Plus, 
-  Users, 
+  FileText,
+  Search,
+  Plus,
+  Users,
   Calendar,
   ClipboardList,
   Activity,
@@ -22,7 +22,11 @@ import {
   ArrowRight,
   Clock,
   AlertCircle,
-  Loader2
+  Loader2,
+  Bed,
+  Hospital,
+  UserCheck,
+  UserX
 } from 'lucide-react';
 
 const quickActions = [
@@ -68,6 +72,10 @@ export default function MedicalRecordsPage() {
   const [pendingReports, setPendingReports] = useState<number>(0);
   const [admissions, setAdmissions] = useState<number>(0);
 
+  // Ward management state
+  const [wards, setWards] = useState<any[]>([]);
+  const [currentAdmissions, setCurrentAdmissions] = useState<any[]>([]);
+
   // Data state
   const [recentPatients, setRecentPatients] = useState<any[]>([]);
   const [activeVisits, setActiveVisits] = useState<any[]>([]);
@@ -79,9 +87,11 @@ export default function MedicalRecordsPage() {
         setError(null);
 
         // Load all data in parallel
-        const [patientsResult, visitsResult] = await Promise.allSettled([
+        const [patientsResult, visitsResult, wardsResult, admissionsResult] = await Promise.allSettled([
           patientService.getPatients({} as any), // Just get count
           visitService.getTodayVisits(),
+          wardService.getWards(),
+          wardService.getAdmissions({ status: 'admitted' }),
         ]);
 
         // Process patients count
@@ -117,7 +127,7 @@ export default function MedicalRecordsPage() {
             numericId: v.id, // Keep numeric ID for API calls
             patient: v.patient_name || `Patient ${v.patient}`,
             type: v.visit_type || 'Consultation',
-            department: v.clinic || 'General',
+            department: v.clinic || 'GOPD',
             time: v.time || '',
             status: v.status === 'in_progress' ? 'In Progress' : 
                    v.status === 'scheduled' ? 'Scheduled' : 
@@ -125,11 +135,27 @@ export default function MedicalRecordsPage() {
           })));
 
           // Count admissions (visits with status 'admitted' or similar)
-          const admitted = todayVisits.filter(v => 
-            v.status?.toLowerCase().includes('admit') || 
+          const admitted = todayVisits.filter(v =>
+            v.status?.toLowerCase().includes('admit') ||
             v.visit_type?.toLowerCase().includes('admission')
           ).length;
           setAdmissions(admitted);
+
+        // Process wards data
+        if (wardsResult.status === 'fulfilled') {
+          setWards(wardsResult.value.results || []);
+        } else {
+          console.debug('Failed to load wards:', wardsResult.reason);
+        }
+
+        // Process admissions data
+        if (admissionsResult.status === 'fulfilled') {
+          const admissionsData = admissionsResult.value.results || [];
+          setCurrentAdmissions(admissionsData);
+          setAdmissions(admissionsData.length); // Update admission count
+        } else {
+          console.debug('Failed to load admissions:', admissionsResult.reason);
+        }
         } else {
           if (isAuthenticationError(visitsResult.reason)) {
             setAuthError(visitsResult.reason);
@@ -159,8 +185,8 @@ export default function MedicalRecordsPage() {
   const stats = [
     { label: 'Total Patients', value: totalPatients.toLocaleString(), icon: Users, color: 'text-blue-500', bgColor: 'bg-blue-500/10' },
     { label: 'Active Visits Today', value: activeVisitsToday.toString(), icon: Activity, color: 'text-emerald-500', bgColor: 'bg-emerald-500/10' },
-    { label: 'Pending Reports', value: pendingReports.toString(), icon: FileText, color: 'text-amber-500', bgColor: 'bg-amber-500/10' },
-    { label: 'Admissions', value: admissions.toString(), icon: ClipboardList, color: 'text-violet-500', bgColor: 'bg-violet-500/10' },
+    { label: 'Current Admissions', value: admissions.toString(), icon: Hospital, color: 'text-rose-500', bgColor: 'bg-rose-500/10' },
+    { label: 'Ward Beds Available', value: wards.reduce((acc, ward) => acc + (ward.available_beds || 0), 0).toString(), icon: Bed, color: 'text-cyan-500', bgColor: 'bg-cyan-500/10' },
   ];
 
   return (
@@ -361,6 +387,122 @@ export default function MedicalRecordsPage() {
                 ))
               ) : (
                 <p className="text-sm text-muted-foreground text-center p-4">No recent patients</p>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Ward Management */}
+        <div className="grid gap-6 lg:grid-cols-2">
+          {/* Ward Overview */}
+          <Card className="border-border bg-card">
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle className="text-foreground flex items-center gap-2">
+                  <Hospital className="h-5 w-5 text-cyan-500" />
+                  Ward Overview
+                </CardTitle>
+                <CardDescription>Current bed occupancy and status</CardDescription>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {loading ? (
+                <div className="flex items-center justify-center p-8">
+                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                </div>
+              ) : wards.length > 0 ? (
+                wards.map((ward) => (
+                  <div key={ward.id} className="p-4 border border-border rounded-lg">
+                    <div className="flex items-center justify-between mb-2">
+                      <h4 className="font-medium text-foreground">{ward.name}</h4>
+                      <Badge variant="outline" className={`${
+                        ward.status === 'active' ? 'border-emerald-500/50 text-emerald-600 dark:text-emerald-400' :
+                        'border-amber-500/50 text-amber-600 dark:text-amber-400'
+                      }`}>
+                        {ward.status}
+                      </Badge>
+                    </div>
+                    <div className="grid grid-cols-3 gap-4 text-sm">
+                      <div className="text-center">
+                        <p className="text-lg font-bold text-blue-600 dark:text-blue-400">{ward.total_beds}</p>
+                        <p className="text-muted-foreground">Total</p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-lg font-bold text-emerald-600 dark:text-emerald-400">{ward.available_beds || 0}</p>
+                        <p className="text-muted-foreground">Available</p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-lg font-bold text-rose-600 dark:text-rose-400">{ward.occupied_beds || 0}</p>
+                        <p className="text-muted-foreground">Occupied</p>
+                      </div>
+                    </div>
+                    <div className="mt-3">
+                      <div className="flex justify-between text-xs text-muted-foreground mb-1">
+                        <span>Occupancy</span>
+                        <span>{ward.occupancy_rate || 0}%</span>
+                      </div>
+                      <div className="w-full bg-muted rounded-full h-2">
+                        <div
+                          className="bg-gradient-to-r from-emerald-500 to-blue-500 h-2 rounded-full"
+                          style={{ width: `${ward.occupancy_rate || 0}%` }}
+                        ></div>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <p className="text-sm text-muted-foreground text-center p-4">No ward data available</p>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Current Admissions */}
+          <Card className="border-border bg-card">
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle className="text-foreground flex items-center gap-2">
+                  <UserCheck className="h-5 w-5 text-rose-500" />
+                  Current Admissions
+                </CardTitle>
+                <CardDescription>Patients currently admitted to wards</CardDescription>
+              </div>
+              <Button variant="ghost" size="sm" className="text-rose-600 hover:text-rose-700">
+                Manage <ArrowRight className="h-4 w-4 ml-1" />
+              </Button>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {loading ? (
+                <div className="flex items-center justify-center p-8">
+                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                </div>
+              ) : currentAdmissions.length > 0 ? (
+                currentAdmissions.slice(0, 5).map((admission) => (
+                  <div key={admission.id} className="flex items-center justify-between p-3 rounded-lg border border-border hover:border-primary/50 transition-all">
+                    <div className="flex items-center gap-3">
+                      <div className={`w-3 h-3 rounded-full ${
+                        admission.status === 'admitted' ? 'bg-emerald-500' :
+                        admission.status === 'discharged' ? 'bg-blue-500' :
+                        'bg-amber-500'
+                      }`} />
+                      <div>
+                        <p className="font-medium text-foreground">{admission.patient_name}</p>
+                        <p className="text-xs text-muted-foreground">{admission.ward_name} • {admission.admission_type}</p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <Badge variant="outline" className={`${
+                        admission.status === 'admitted' ? 'border-emerald-500/50 text-emerald-600 dark:text-emerald-400' :
+                        admission.status === 'discharged' ? 'border-blue-500/50 text-blue-600 dark:text-blue-400' :
+                        'border-amber-500/50 text-amber-600 dark:text-amber-400'
+                      }`}>
+                        {admission.status}
+                      </Badge>
+                      <p className="text-xs text-muted-foreground mt-1">{admission.length_of_stay || 0} days</p>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <p className="text-sm text-muted-foreground text-center p-4">No current admissions</p>
               )}
             </CardContent>
           </Card>

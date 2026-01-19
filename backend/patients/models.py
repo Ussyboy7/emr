@@ -217,7 +217,11 @@ class Patient(models.Model):
                 if self.principal_staff_id and not self.principal_staff:
                     # Reload the principal_staff from database
                     self.principal_staff = Patient.objects.get(pk=self.principal_staff_id)
-                
+
+                # Validate that principal_staff is an employee or retiree
+                if self.principal_staff.category not in ['employee', 'retiree']:
+                    raise ValueError(f"Principal staff must be an employee or retiree. Found category: {self.principal_staff.category}")
+
                 # Ensure principal_staff has a patient_id
                 if not self.principal_staff.patient_id:
                     # If principal doesn't have an ID yet, save it first to generate one
@@ -289,11 +293,19 @@ class Visit(models.Model):
         ('completed', 'Completed'),
         ('cancelled', 'Cancelled'),
     ]
+
+    ADMISSION_STATUS_CHOICES = [
+        ('outpatient', 'Outpatient'),
+        ('observation', 'Observation/Short Stay'),
+        ('admitted', 'Ward Admission'),
+        ('day_case', 'Day Case'),
+    ]
     
     visit_id = models.CharField(max_length=50, unique=True, db_index=True, blank=True)
     patient = models.ForeignKey(Patient, on_delete=models.CASCADE, related_name='visits')
     visit_type = models.CharField(max_length=20, choices=VISIT_TYPE_CHOICES, default='consultation')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='scheduled')
+    admission_status = models.CharField(max_length=20, choices=ADMISSION_STATUS_CHOICES, default='outpatient')
     
     # Visit Details
     date = models.DateField()
@@ -307,7 +319,6 @@ class Visit(models.Model):
         related_name='patient_visits',
         limit_choices_to={'system_role': 'Medical Doctor'}
     )
-    chief_complaint = models.TextField(blank=True)
     clinical_notes = models.TextField(blank=True)
     
     # Metadata

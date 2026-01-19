@@ -21,9 +21,9 @@ const stats = [
 ];
 
 const patientQueue = [
-  { id: 1, patient: 'Adebayo Johnson', patientId: 'PAT-2024-001', visitType: 'Follow-up', waitTime: '15 min', clinic: 'General', priority: 1, patient_name: 'Adebayo Johnson', room_name: 'Room 1', room: 1 },
+  { id: 1, patient: 'Adebayo Johnson', patientId: 'PAT-2024-001', visitType: 'Follow-up', waitTime: '15 min', clinic: 'GOPD', priority: 1, patient_name: 'Adebayo Johnson', room_name: 'Room 1', room: 1 },
   { id: 2, patient: 'Fatima Mohammed', patientId: 'PAT-2024-002', visitType: 'Consultation', waitTime: '25 min', clinic: 'Eye', priority: 2, patient_name: 'Fatima Mohammed', room_name: 'Room 2', room: 2 },
-  { id: 3, patient: 'Chukwu Emeka', patientId: 'PAT-2024-003', visitType: 'Emergency', waitTime: '5 min', clinic: 'General', priority: 0, patient_name: 'Chukwu Emeka', room_name: 'Room 1', room: 1 },
+  { id: 3, patient: 'Chukwu Emeka', patientId: 'PAT-2024-003', visitType: 'Emergency', waitTime: '5 min', clinic: 'GOPD', priority: 0, patient_name: 'Chukwu Emeka', room_name: 'Room 1', room: 1 },
   { id: 4, patient: 'Grace Okonkwo', patientId: 'PAT-2024-004', visitType: 'Consultation', waitTime: '35 min', clinic: 'Physiotherapy', priority: 2, patient_name: 'Grace Okonkwo', room_name: 'Room 3', room: 3 },
 ];
 

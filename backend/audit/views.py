@@ -32,6 +32,38 @@ class ActivityLogViewSet(viewsets.ReadOnlyModelViewSet):
         if not self.request.user.is_superuser:
             queryset = queryset.filter(user=self.request.user)
         
+        # Date range filtering
+        date_from = self.request.query_params.get('date_from')
+        date_to = self.request.query_params.get('date_to')
+        
+        if date_from:
+            try:
+                from django.utils.dateparse import parse_datetime
+                from django.utils import timezone as tz
+                date_from_obj = parse_datetime(date_from)
+                if date_from_obj:
+                    # Make timezone-aware if not already
+                    if tz.is_naive(date_from_obj):
+                        date_from_obj = tz.make_aware(date_from_obj)
+                    queryset = queryset.filter(created_at__gte=date_from_obj)
+            except (ValueError, AttributeError, TypeError):
+                pass
+        
+        if date_to:
+            try:
+                from django.utils.dateparse import parse_datetime
+                from django.utils import timezone as tz
+                date_to_obj = parse_datetime(date_to)
+                if date_to_obj:
+                    # Make timezone-aware if not already
+                    if tz.is_naive(date_to_obj):
+                        date_to_obj = tz.make_aware(date_to_obj)
+                    # Include the entire day
+                    date_to_obj = date_to_obj.replace(hour=23, minute=59, second=59, microsecond=999999)
+                    queryset = queryset.filter(created_at__lte=date_to_obj)
+            except (ValueError, AttributeError, TypeError):
+                pass
+        
         return queryset
     
     @action(detail=False, methods=['get'])

@@ -68,7 +68,7 @@ export function TimelineTab({
         date: normalizeDate(visit.date),
         time: visit.time,
         title: `Visit: ${visit.type}`,
-        description: visit.chiefComplaint || visit.diagnosis || visit.notes,
+        description: visit.diagnosis || visit.notes,
         icon: Stethoscope,
         metadata: visit,
       });
@@ -83,7 +83,7 @@ export function TimelineTab({
         date: normalizeDate(consultationDate),
         time: session.time,
         title: 'Consultation Session',
-        description: session.chief_complaint || session.chiefComplaint || session.notes,
+        description: session.notes,
         icon: FileText,
         metadata: session,
       });

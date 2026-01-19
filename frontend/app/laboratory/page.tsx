@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { labService } from '@/lib/services';
+import { transformPriority } from '@/lib/services/transformers';
 import { 
   FlaskConical, TestTube, FileSearch, FilePlus, Clock,
   CheckCircle2, AlertTriangle, ArrowRight, Loader2
@@ -70,7 +71,7 @@ export default function LaboratoryDashboardPage() {
             id: order.order_id,
             patient: order.patient.name,
             tests: pendingTests.map(t => t.code || t.name),
-            priority: order.priority,
+            priority: transformPriority(order.priority),
             time,
           };
         });
@@ -89,7 +90,7 @@ export default function LaboratoryDashboardPage() {
         const result = overallStatus === 'normal' ? 'Normal' : overallStatus === 'abnormal' ? 'Abnormal' : 'Critical';
         
         return {
-          patient: test.patient_name || 'Unknown',
+          patient: test.order_details?.patient_name || test.patient_name || 'Unknown',
           test: test.name,
           result,
           time,
@@ -110,7 +111,7 @@ export default function LaboratoryDashboardPage() {
           <div>
             <h1 className="text-3xl font-bold text-foreground flex items-center gap-3">
               <FlaskConical className="h-8 w-8 text-amber-500" />
-              Laboratory
+              Laboratory Dashboard
             </h1>
             <p className="text-muted-foreground mt-1">Lab test ordering, specimen tracking, and results management</p>
           </div>
@@ -188,8 +189,8 @@ export default function LaboratoryDashboardPage() {
                   pendingOrders.map((order) => (
                   <div key={order.id} className="flex items-center justify-between p-3 rounded-lg border hover:bg-muted/50 transition-colors">
                     <div className="flex items-center gap-3">
-                      <div className={`p-2 rounded-full ${order.priority === 'stat' ? 'bg-rose-500/10' : order.priority === 'urgent' ? 'bg-amber-500/10' : 'bg-blue-500/10'}`}>
-                        <TestTube className={`h-4 w-4 ${order.priority === 'stat' ? 'text-rose-500' : order.priority === 'urgent' ? 'text-amber-500' : 'text-blue-500'}`} />
+                      <div className={`p-2 rounded-full ${order.priority === 'STAT' ? 'bg-rose-500/10' : order.priority === 'Urgent' ? 'bg-amber-500/10' : 'bg-blue-500/10'}`}>
+                        <TestTube className={`h-4 w-4 ${order.priority === 'STAT' ? 'text-rose-500' : order.priority === 'Urgent' ? 'text-amber-500' : 'text-blue-500'}`} />
                       </div>
                       <div>
                         <p className="font-medium text-foreground">{order.patient}</p>
@@ -198,8 +199,8 @@ export default function LaboratoryDashboardPage() {
                     </div>
                     <div className="flex items-center gap-3">
                       <div className="text-right">
-                        <Badge variant="outline" className={order.priority === 'stat' ? 'border-rose-500/50 text-rose-600' : order.priority === 'urgent' ? 'border-amber-500/50 text-amber-600' : ''}>
-                          {order.priority.toUpperCase()}
+                        <Badge variant="outline" className={order.priority === 'STAT' ? 'border-rose-500/50 text-rose-600' : order.priority === 'Urgent' ? 'border-amber-500/50 text-amber-600' : ''}>
+                          {order.priority}
                         </Badge>
                         <p className="text-xs text-muted-foreground mt-1">{order.time}</p>
                       </div>

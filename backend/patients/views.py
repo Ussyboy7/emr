@@ -157,7 +157,7 @@ class VisitViewSet(viewsets.ModelViewSet):
     serializer_class = VisitSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['patient', 'status', 'visit_type', 'clinic']
-    search_fields = ['visit_id', 'chief_complaint', 'clinical_notes']
+    search_fields = ['visit_id', 'clinical_notes']
     ordering_fields = ['date', 'time', 'created_at']
     ordering = ['-date', '-time']
     

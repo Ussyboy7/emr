@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from 'react';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -9,17 +9,15 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { toast } from "sonner";
 import { patientService, labService, pharmacyService, consultationService, radiologyService, type Patient as ApiPatient } from '@/lib/services';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import Link from 'next/link';
 import { VisitDetailModal } from '@/components/VisitDetailModal';
 import { PatientAvatar } from "@/components/PatientAvatar";
 import { MedicalHistoryTab } from '@/components/patient-overview/MedicalHistoryTab';
 import { TimelineTab } from '@/components/patient-overview/TimelineTab';
 import { CurrentCareTab } from '@/components/patient-overview/CurrentCareTab';
-import { 
-  User, Phone, Calendar, Heart, AlertCircle, FileText, Activity, Pill, TestTube, Plus, 
-  ChevronRight, AlertTriangle, Eye, Trash2, Stethoscope, Loader2, Mail, MapPin, Droplets,
-  Briefcase, X, RefreshCw, ClipboardList, History, ScanLine, ChevronLeft, Download, Clock
+import {
+  User, Phone, Calendar, AlertCircle, Activity, Pill, TestTube,
+  ChevronRight, AlertTriangle, Loader2, Mail, MapPin, Droplets,
+  X, RefreshCw, ClipboardList, History, ScanLine, ChevronLeft, Download, Clock
 } from 'lucide-react';
 
 interface Patient {
@@ -105,7 +103,6 @@ interface Visit {
   type: string;
   department: string;
   doctor: string;
-  chiefComplaint?: string;
   diagnosis?: string;
   notes?: string;
   status: string;
@@ -213,7 +210,6 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
           type: visit.visit_type || 'OPD',
           department: visit.department || '',
           doctor: visit.doctor_name || 'Unknown',
-          chiefComplaint: visit.chief_complaint || '',
           diagnosis: visit.diagnosis || '',
           status: visit.status || 'completed',
           clinic: visit.clinic?.name || '',
@@ -277,9 +273,8 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
         const transformedSessions = consultationsData.value.results.map((session: any) => ({
           id: session.id?.toString() || String(session.id),
           date: session.created_at ? new Date(session.created_at).toLocaleDateString() : session.date || '',
-          chiefComplaint: session.chief_complaint || '',
           doctor: session.doctor?.name || session.doctor_name || 'Unknown',
-          clinic: session.clinic || session.room?.name || 'General',
+          clinic: session.clinic || session.room?.name || 'GOPD',
           room: session.room?.name || '',
           status: session.status || 'completed',
           notes: session.notes || '',
@@ -567,7 +562,7 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
                               </CardTitle>
                               <Button variant="ghost" size="sm" onClick={() => {
                                 setActiveTab('medical-history');
-                                setHistorySubTab('visits-consultations');
+                                setHistorySubTab('consultations');
                               }}>
                                 View All<ChevronRight className="h-4 w-4 ml-1" />
                               </Button>
@@ -586,7 +581,7 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
                                       'bg-blue-500'
                                     }`} />
                                     <div>
-                                      <p className="font-medium">{visit.chiefComplaint || visit.type}</p>
+                                      <p className="font-medium">{visit.type}</p>
                                       <p className="text-xs text-muted-foreground">
                                         {visit.date} {visit.doctor && visit.doctor !== 'Unknown' && `• ${visit.doctor}`}
                                       </p>

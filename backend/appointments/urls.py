@@ -10,6 +10,6 @@ router.register(r'appointments', AppointmentViewSet, basename='appointment')
 router.register(r'slots', AppointmentSlotViewSet, basename='appointment-slot')
 
 urlpatterns = [
-    path('appointments/', include(router.urls)),
+    path('', include(router.urls)),
 ]
 

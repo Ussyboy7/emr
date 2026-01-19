@@ -243,16 +243,6 @@ const mapApiUserToUser = (user: any): User => {
   };
 };
 
-const mapApiDirectorate = (item: any): Directorate => ({
-  id: String(item.id),
-  name: item.name ?? 'Directorate',
-  code: item.code ?? `DIR-${String(item.id).slice(0, 6).toUpperCase()}`,
-  shortName: item.short_name ?? item.shortName ?? undefined,
-  description: item.description ?? '',
-  executiveDirectorId: normalizeId(item.executive_director ?? item.executive_director_id),
-  isActive: item.is_active ?? true,
-});
-
 const mapApiDivision = (item: any): Division => ({
   id: String(item.id),
   name: item.name ?? 'Division',
@@ -279,46 +269,33 @@ const mapApiDepartment = (item: any): Department => ({
   isActive: item.is_active ?? true,
 });
 
-const mapApiRole = (item: any): Role => ({
-  id: String(item.id),
-  name: item.name ?? 'Role',
-  description: item.description ?? '',
-  isActive: item.is_active ?? true,
-  permissions: item.permissions ?? {},
-  userCount: item.user_count ?? 0,
-  createdAt: item.created_at,
-  updatedAt: item.updated_at,
-});
+const mapApiRole = (item: any): Role => {
+  // Validate that we received role data, not patient data
+  if (!item || typeof item !== 'object') {
+    throw new Error('Invalid role data received from API');
+  }
 
-const mapApiOffice = (item: any): Office => ({
-  id: String(item.id),
-  name: item.name ?? 'Office',
-  code: item.code ?? `OFF-${String(item.id).slice(0, 6).toUpperCase()}`,
-  officeType: item.office_type ?? 'custom',
-  directorateId: normalizeId(item.directorate ?? item.directorate_id),
-  divisionId: normalizeId(item.division ?? item.division_id),
-  departmentId: normalizeId(item.department ?? item.department_id),
-  parentId: normalizeId(item.parent ?? item.parent_id),
-  description: item.description ?? '',
-  isActive: item.is_active ?? true,
-  allowExternalIntake: item.allow_external_intake ?? true,
-  allowLateralRouting: item.allow_lateral_routing ?? true,
-});
+  const isPatientData = (item as any)?.patientId || (item as any)?.patient_id || (item as any)?.age || (item as any)?.gender ||
+                       (item as any)?.first_name || (item as any)?.surname || (item as any)?.blood_group ||
+                       (item as any)?.allergies || (item as any)?.personal_number;
 
-const mapApiOfficeMembership = (item: any): OfficeMembership => ({
-  id: String(item.id),
-  officeId: normalizeId(item.office ?? item.office_id) ?? '',
-  officeName: item.office_name ?? item.office?.name ?? '',
-  userId: normalizeId(item.user ?? item.user_id) ?? '',
-  assignmentRole: item.assignment_role ?? 'staff',
-  isPrimary: item.is_primary ?? false,
-  canRegister: item.can_register ?? false,
-  canRoute: item.can_route ?? true,
-  canApprove: item.can_approve ?? false,
-  startsAt: item.starts_at ?? undefined,
-  endsAt: item.ends_at ?? undefined,
-  isActive: item.is_active ?? true,
-});
+  if (isPatientData) {
+    console.error('🚨 ERROR: mapApiRole received patient data instead of role data:', item);
+    console.error('Item keys:', Object.keys(item));
+    throw new Error('API returned patient data instead of role data');
+  }
+
+  return {
+    id: String(item.id),
+    name: item.name ?? 'Role',
+    description: item.description ?? '',
+    isActive: item.is_active ?? true,
+    permissions: item.permissions ?? {},
+    userCount: item.user_count ?? 0,
+    createdAt: item.created_at,
+    updatedAt: item.updated_at,
+  };
+};
 
 const cleanPayload = (payload: Record<string, unknown>) =>
   Object.fromEntries(
@@ -396,27 +373,6 @@ export const OrganizationProvider: React.FC<{ children: ReactNode }> = ({ childr
   const [hasSynced, setHasSynced] = useState(false);
   const { currentUser, hydrated } = useCurrentUser();
 
-  const applyDirectorateUpdate = useCallback(
-    (directorate: Directorate) => {
-      setDirectorates((prev) => {
-        const next = upsertById(prev, directorate, sortByName);
-        updateOrganizationCache();
-        return next;
-      });
-    },
-    []
-  );
-
-  const applyDivisionUpdate = useCallback(
-    (division: Division) => {
-      setDivisions((prev) => {
-        const next = upsertById(prev, division, sortByName);
-        updateOrganizationCache();
-        return next;
-      });
-    },
-    []
-  );
 
   const applyDepartmentUpdate = useCallback(
     (department: Department) => {
@@ -532,33 +488,6 @@ export const OrganizationProvider: React.FC<{ children: ReactNode }> = ({ childr
     }
   }, [currentUser?.id, hydrated]);
 
-  const buildDirectoratePayload = (input: Partial<CreateDirectorateInput>) =>
-    cleanPayload({
-      name: input.name,
-      code: input.code,
-      description: input.description,
-      executive_director:
-        input.executiveDirectorId === undefined
-          ? undefined
-          : input.executiveDirectorId
-          ? input.executiveDirectorId
-          : null,
-      is_active: input.isActive,
-    });
-
-  const buildDivisionPayload = (input: Partial<CreateDivisionInput>) =>
-    cleanPayload({
-      name: input.name,
-      code: input.code,
-      directorate: input.directorateId,
-      general_manager:
-        input.generalManagerId === undefined
-          ? undefined
-          : input.generalManagerId
-          ? input.generalManagerId
-          : null,
-      is_active: input.isActive,
-    });
 
   const buildDepartmentPayload = (input: Partial<CreateDepartmentInput>) =>
     cleanPayload({
@@ -744,7 +673,41 @@ export const OrganizationProvider: React.FC<{ children: ReactNode }> = ({ childr
         permissions: role.permissions ?? {},
       }),
     });
+
+    console.log('🔍 API response for role creation:', response);
+    console.log('🔍 Response type:', typeof response);
+    console.log('🔍 Response keys:', response ? Object.keys(response) : 'null/undefined');
+
+    // Validate API response before mapping
+    if (!response || typeof response !== 'object') {
+      throw new Error('Invalid API response for role creation');
+    }
+
+    // Check if response looks like patient data (should be role data)
+    const isPatientData = (response as any)?.patientId || (response as any)?.patient_id || (response as any)?.age || (response as any)?.gender ||
+                         (response as any)?.first_name || (response as any)?.surname || (response as any)?.blood_group ||
+                         (response as any)?.allergies || (response as any)?.personal_number;
+
+    if (isPatientData) {
+      console.error('🚨 ERROR: Role creation API returned patient data instead of role data:', response);
+      console.error('Response keys:', Object.keys(response));
+      throw new Error('API returned patient data instead of role data');
+    }
+
     const created = mapApiRole(response);
+
+    // Final validation: ensure the created object is a proper Role, not patient data
+    const isInvalidData = !created || typeof created !== 'object' ||
+                         (created as any)?.patientId || (created as any)?.patient_id || (created as any)?.age || (created as any)?.gender ||
+                         (created as any)?.first_name || (created as any)?.surname || (created as any)?.blood_group ||
+                         (created as any)?.allergies || (created as any)?.personal_number;
+
+    if (isInvalidData) {
+      console.error('🚨 CRITICAL ERROR: Role creation returned invalid data:', created);
+      console.error('Created object keys:', created ? Object.keys(created) : 'null/undefined');
+      throw new Error('Role creation returned patient data instead of role data');
+    }
+
     applyRoleUpdate(created);
     return created;
   };

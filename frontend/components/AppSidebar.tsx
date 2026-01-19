@@ -12,6 +12,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ArrowRight,
   BarChart3,
   UserCog,
   Activity,
@@ -23,6 +24,7 @@ import {
   Pill,
   ScanLine,
   Calendar,
+  CalendarDays,
   ClipboardList,
   UserPlus,
   TestTube,
@@ -94,6 +96,7 @@ const menuSections: MenuSection[] = [
       { label: "Manage Patients", href: "/medical-records/patients", icon: Users },
       { label: "Create Visit", href: "/medical-records/visits/new", icon: FilePlus },
       { label: "Manage Visits", href: "/medical-records/visits", icon: Calendar },
+      { label: "Appointments", href: "/medical-records/appointments", icon: CalendarDays },
       { label: "Manage Dependents", href: "/medical-records/dependents", icon: UsersRound },
       { label: "Reports", href: "/medical-records/reports", icon: FolderOpen },
     ],
@@ -111,6 +114,7 @@ const menuSections: MenuSection[] = [
       { label: "Patient Vitals", href: "/nursing/patient-vitals", icon: Activity },
       { label: "Procedures", href: "/nursing/procedures", icon: Syringe },
       { label: "Procedures History", href: "/nursing/procedures/history", icon: ClipboardList },
+      { label: "Ward Management", href: "/nursing/wards", icon: Building2 },
     ],
   },
   {
@@ -123,6 +127,8 @@ const menuSections: MenuSection[] = [
       { label: "My Dashboard", href: "/consultation/dashboard", icon: LayoutDashboard },
       { label: "Start Consultation", href: "/consultation/start", icon: Play },
       { label: "Consultation History", href: "/consultation/history", icon: History },
+      { label: "Ward Overview", href: "/consultation/wards", icon: Building2 },
+      { label: "Referrals", href: "/consultation/referrals", icon: ArrowRight },
     ],
   },
   {
@@ -160,10 +166,23 @@ const menuSections: MenuSection[] = [
     basePath: "/radiology",
     items: [
       { label: "Dashboard", href: "/radiology", icon: LayoutDashboard },
-      { label: "Orders Queue", href: "/radiology/studies", icon: ClipboardList },
-      { label: "Verification", href: "/radiology/verification", icon: ShieldCheck },
-      { label: "Completed Reports", href: "/radiology/reports", icon: FileBarChart },
-      { label: "Image Viewer", href: "/radiology/viewer", icon: ImageIcon },
+      { label: "Study Orders", href: "/radiology/orders", icon: ClipboardList },
+      { label: "Results Verification", href: "/radiology/verification", icon: ShieldCheck },
+      { label: "Completed Studies", href: "/radiology/completed", icon: FileBarChart },
+      { label: "Study Templates", href: "/radiology/templates", icon: FileText },
+
+    ],
+  },
+  {
+    label: "Physiotherapy",
+    icon: Activity,
+    color: "text-emerald-400",
+    activeColor: "data-[active=true]:bg-emerald-500/10 data-[active=true]:text-emerald-400",
+    basePath: "/physiotherapy",
+    items: [
+      { label: "Dashboard", href: "/physiotherapy", icon: LayoutDashboard },
+      { label: "Pool Queue", href: "/physiotherapy/pool-queue", icon: Users },
+      { label: "Completed Sessions", href: "/physiotherapy/completed", icon: CheckCircle },
     ],
   },
   {
@@ -232,9 +251,6 @@ export function AppSidebar() {
       return pathname === href || (pathname.startsWith(href + "/") && !pathname.includes("/new"));
     }
     if (href === "/medical-records/visits") {
-      return pathname === href || (pathname.startsWith(href + "/") && !pathname.includes("/new"));
-    }
-    if (href === "/radiology/studies") {
       return pathname === href || (pathname.startsWith(href + "/") && !pathname.includes("/new"));
     }
     if (href === "/nursing/procedures") {

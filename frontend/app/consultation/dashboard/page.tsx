@@ -10,9 +10,9 @@ import Link from "next/link";
 import {
   User, Calendar, Clock, Stethoscope, TrendingUp, Activity, CheckCircle2, Users,
   ArrowRight, History, Play, Award, Target, BarChart3, PieChart, Loader2,
-  Pill, FlaskConical, Syringe, FileText, CalendarDays, Timer
+  Pill, FlaskConical, Syringe, FileText, CalendarDays, Timer, Bed, Hospital
 } from "lucide-react";
-import { consultationService } from "@/lib/services";
+import { consultationService, wardService } from "@/lib/services";
 import { toast } from "sonner";
 import { useCurrentUser } from "@/hooks/use-current-user";
 
@@ -21,6 +21,8 @@ export default function DoctorDashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [stats, setStats] = useState<any>(null);
+  const [wards, setWards] = useState<any[]>([]);
+  const [currentAdmissions, setCurrentAdmissions] = useState<any[]>([]);
   
   // Dashboard data will be loaded from API
   useEffect(() => {
@@ -33,8 +35,34 @@ export default function DoctorDashboardPage() {
       setError(null);
       // Get current user's doctor ID if available
       const doctorId = user?.id ? Number(user.id) : undefined;
-      const statsData = await consultationService.getStats(doctorId);
-      setStats(statsData);
+
+      // Load all data in parallel
+      const [statsResult, wardsResult, admissionsResult] = await Promise.allSettled([
+        consultationService.getStats(doctorId),
+        wardService.getWards(),
+        wardService.getAdmissions({ status: 'admitted' }),
+      ]);
+
+      // Process stats
+      if (statsResult.status === 'fulfilled') {
+        setStats(statsResult.value);
+      } else {
+        console.error('Failed to load stats:', statsResult.reason);
+      }
+
+      // Process wards
+      if (wardsResult.status === 'fulfilled') {
+        setWards(wardsResult.value.results || []);
+      } else {
+        console.error('Failed to load wards:', wardsResult.reason);
+      }
+
+      // Process admissions
+      if (admissionsResult.status === 'fulfilled') {
+        setCurrentAdmissions(admissionsResult.value.results || []);
+      } else {
+        console.error('Failed to load admissions:', admissionsResult.reason);
+      }
     } catch (err: any) {
       console.error('Failed to load dashboard data:', err);
       setError(err.message || 'Failed to load dashboard data');
@@ -46,7 +74,7 @@ export default function DoctorDashboardPage() {
 
   const CURRENT_DOCTOR = {
     name: user?.name || user?.username || "Dr. Loading...",
-    specialty: user?.systemRole || "General Practice",
+    specialty: user?.systemRole || "GOPD Practice",
     location: "Main Clinic", // clinic_name not available in User type
     employeeId: user?.employeeId || "EMP001"
   };
@@ -270,6 +298,49 @@ export default function DoctorDashboardPage() {
               </Card>
             </div>
 
+            {/* Ward Overview */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Hospital className="h-5 w-5 text-cyan-500" />
+                  Ward Overview
+                </CardTitle>
+                <CardDescription>Current ward status and bed availability</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  {wards.length > 0 ? (
+                    wards.map((ward) => (
+                      <div key={ward.id} className="p-4 bg-gradient-to-br from-cyan-50 to-blue-50 dark:from-cyan-900/20 dark:to-blue-900/20 rounded-lg border border-cyan-200 dark:border-cyan-800">
+                        <div className="flex items-center gap-2 mb-2">
+                          <Bed className="h-4 w-4 text-cyan-500" />
+                          <span className="font-medium text-sm text-cyan-700 dark:text-cyan-300">{ward.name}</span>
+                        </div>
+                        <div className="space-y-1">
+                          <div className="flex justify-between text-xs">
+                            <span className="text-muted-foreground">Available</span>
+                            <span className="font-medium text-emerald-600 dark:text-emerald-400">{ward.available_beds || 0}</span>
+                          </div>
+                          <div className="flex justify-between text-xs">
+                            <span className="text-muted-foreground">Occupied</span>
+                            <span className="font-medium text-rose-600 dark:text-rose-400">{ward.occupied_beds || 0}</span>
+                          </div>
+                          <div className="flex justify-between text-xs">
+                            <span className="text-muted-foreground">Total</span>
+                            <span className="font-medium">{ward.total_beds}</span>
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="col-span-4 text-center py-4 text-muted-foreground text-sm">
+                      No ward data available
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+
             {/* Performance Metrics */}
             <Card>
               <CardHeader>
@@ -414,6 +485,40 @@ export default function DoctorDashboardPage() {
                     All Consultations
                   </Button>
                 </Link>
+              </CardContent>
+            </Card>
+
+            {/* Current Ward Admissions */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Bed className="h-4 w-4 text-rose-500" />
+                  Ward Admissions
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {currentAdmissions.length > 0 ? (
+                  currentAdmissions.slice(0, 3).map((admission) => (
+                    <div key={admission.id} className="flex items-center gap-3 p-3 bg-rose-50 dark:bg-rose-900/20 rounded-lg border border-rose-100 dark:border-rose-800">
+                      <div className="w-8 h-8 bg-rose-100 dark:bg-rose-800 rounded-full flex items-center justify-center">
+                        <User className="h-4 w-4 text-rose-600 dark:text-rose-400" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-sm truncate">{admission.patient_name}</p>
+                        <p className="text-xs text-muted-foreground">{admission.ward_name}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-xs font-medium text-rose-600 dark:text-rose-400">
+                          {admission.length_of_stay || 0}d
+                        </p>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-center py-4 text-muted-foreground text-sm">
+                    No current admissions
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>

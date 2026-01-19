@@ -11,7 +11,21 @@ const nextConfig = {
       },
     ],
   },
+  experimental: {
+    optimizeCss: true,
+  },
 };
 
-export default nextConfig;
+// Conditionally use bundle analyzer if available
+let finalConfig = nextConfig;
+if (process.env.ANALYZE === 'true') {
+  try {
+    const withBundleAnalyzer = require('@next/bundle-analyzer');
+    finalConfig = withBundleAnalyzer()(nextConfig);
+  } catch (error) {
+    console.warn('Bundle analyzer not available, continuing without it');
+  }
+}
+
+export default finalConfig;
 

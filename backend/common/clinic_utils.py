@@ -5,7 +5,7 @@ This ensures consistent clinic naming across the application.
 
 # Standardized clinic names (must match frontend constants)
 STANDARD_CLINICS = [
-    "General",
+    "GOPD",
     "Physiotherapy",
     "Eye Clinic",
     "Sickle Cell",
@@ -27,7 +27,7 @@ def normalize_clinic_name(clinic: str | None) -> str:
         or the input in title case if no match found.
     """
     if not clinic or not clinic.strip():
-        return "General"  # Default clinic
+        return "GOPD"  # Default clinic
     
     trimmed = clinic.strip()
     
@@ -51,8 +51,9 @@ def normalize_clinic_name(clinic: str | None) -> str:
         'diamond club clinic': 'Diamond',
         'physiotherapy': 'Physiotherapy',
         'physiotherapy clinic': 'Physiotherapy',
-        'general': 'General',
-        'general clinic': 'General',
+        'general': 'GOPD',
+        'general clinic': 'GOPD',
+        'gopd': 'GOPD',
     }
     
     lower = trimmed.lower()

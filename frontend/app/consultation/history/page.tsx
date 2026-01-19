@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, lazy, Suspense } from "react";
 import { StandardPagination } from "@/components/StandardPagination";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -15,8 +15,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { toast } from "sonner";
 import {
   Search, Eye, Edit, Clock, CheckCircle2, Activity, Calendar, User, FileText, Pill, TestTube,
-  Save, Loader2, Printer, Stethoscope, History, Filter, FlaskConical, Syringe, LayoutGrid, List,
-  Users, TrendingUp, ArrowRight
+  Save, Loader2, Stethoscope, History, Filter, FlaskConical, Syringe, LayoutGrid, List,
+  Users, TrendingUp, ArrowRight, AlertTriangle, RefreshCw, Plus, X
 } from "lucide-react";
 import Link from "next/link";
 import { apiFetch } from '@/lib/api-client';
@@ -26,44 +26,131 @@ import { isAuthenticationError } from '@/lib/auth-errors';
 import { useCurrentUser } from '@/hooks/use-current-user';
 import { CLINICS } from '@/lib/constants/clinics';
 import { clinicMatches } from '@/lib/utils/clinic-utils';
+import { ConsultationRecord } from '@/components/consultation/ConsultationDetailModal';
 
-// Types
-interface ConsultationRecord {
-  id: string;
-  patient: string;
-  patientId: string;
-  patientGender?: string; // Add gender for filtering
-  doctor: string;
-  doctorId: string;
-  date: string;
-  time: string;
-  clinic: string;
-  room: string;
-  diagnosis: string;
-  status: "Completed" | "In Progress";
-  priority: string;
-  sessionDuration: number;
-  chiefComplaint: string;
-  historyOfPresentIllness: string;
-  physicalExamination: string;
-  assessment: string;
-  plan: string;
-  vitals: { id: string; systolic: number; diastolic: number; heartRate: number; temperature: number; respiratoryRate: number; weight: number; height: number; oxygenSaturation: number; bloodSugar: number; painScale: number; comment: string; recordedBy: string; date: string }[];
-  prescriptions: { id: string; medication: string; strength: string; form: string; dosage: string; frequency: string; duration: string; instructions: string }[];
-  labOrders: { id: string; test: string; priority: string; instructions: string; status: string; orderedBy: string; createdAt: string }[];
-  nursingOrders: { id: string; type: string; instructions: string; status: string; priority: string; orderedBy: string; createdAt: string }[];
-  timeline: { time: string; event: string; description: string; type: string }[];
+const ConsultationDetailModal = lazy(() => import('@/components/consultation/ConsultationDetailModal').then(module => ({ default: module.ConsultationDetailModal })));
+
+// Simple doctor name resolution without fallbacks
+const resolveDoctorName = async (
+  doctorName: string | undefined,
+  doctorId: string | number | undefined
+): Promise<string> => {
+  // First try the provided doctor name
+  if (doctorName && doctorName !== 'Unknown' && doctorName.trim()) {
+    return doctorName;
+  }
+
+  // If no name but we have an ID, try to fetch the doctor
+  if (doctorId && !doctorName) {
+    try {
+      const doctor = await apiFetch(`/accounts/users/${doctorId}/`) as any;
+      const name = doctor.full_name || doctor.username;
+      if (name && name.trim()) {
+        return name;
+      }
+    } catch (err) {
+      console.warn(`Could not load doctor details for ID ${doctorId}:`, err);
+    }
+  }
+
+  return 'Unknown';
+};
+
+// ICD-10 Codes for diagnosis
+const icd10Codes = [
+  // Infectious diseases
+  { code: 'A09', name: 'Infectious gastroenteritis and colitis', category: 'Infectious' },
+  { code: 'A15.0', name: 'Tuberculosis of lung', category: 'Infectious' },
+  { code: 'B20', name: 'Human immunodeficiency virus [HIV] disease', category: 'Infectious' },
+  { code: 'B50.9', name: 'Plasmodium falciparum malaria, unspecified', category: 'Infectious' },
+  { code: 'B54', name: 'Unspecified malaria', category: 'Infectious' },
+  { code: 'J00', name: 'Acute nasopharyngitis [common cold]', category: 'Respiratory' },
+  { code: 'J06.9', name: 'Acute upper respiratory infection, unspecified', category: 'Respiratory' },
+  { code: 'J18.9', name: 'Pneumonia, unspecified', category: 'Respiratory' },
+
+  // Endocrine, nutritional and metabolic diseases
+  { code: 'E10.9', name: 'Type 1 diabetes mellitus without complications', category: 'Endocrine' },
+  { code: 'E11.9', name: 'Type 2 diabetes mellitus without complications', category: 'Endocrine' },
+  { code: 'E66.9', name: 'Obesity, unspecified', category: 'Endocrine' },
+  { code: 'E78.5', name: 'Hyperlipidemia, unspecified', category: 'Endocrine' },
+
+  // Diseases of the circulatory system
+  { code: 'I10', name: 'Essential (primary) hypertension', category: 'Cardiovascular' },
+  { code: 'I20.9', name: 'Angina pectoris, unspecified', category: 'Cardiovascular' },
+  { code: 'I25.10', name: 'Atherosclerotic heart disease of native coronary artery without angina pectoris', category: 'Cardiovascular' },
+  { code: 'I48.91', name: 'Unspecified atrial fibrillation', category: 'Cardiovascular' },
+
+  // Diseases of the respiratory system
+  { code: 'J45.909', name: 'Unspecified asthma, uncomplicated', category: 'Respiratory' },
+  { code: 'J44.9', name: 'Chronic obstructive pulmonary disease, unspecified', category: 'Respiratory' },
+
+  // Symptoms, signs and abnormal clinical findings
+  { code: 'R50.9', name: 'Fever, unspecified', category: 'Symptoms' },
+  { code: 'R51', name: 'Headache', category: 'Symptoms' },
+  { code: 'R10.9', name: 'Unspecified abdominal pain', category: 'Symptoms' },
+  { code: 'R05', name: 'Cough', category: 'Symptoms' },
+  { code: 'R11.0', name: 'Nausea', category: 'Symptoms' },
+  { code: 'M54.5', name: 'Low back pain', category: 'Musculoskeletal' },
+
+  // Injury, poisoning and certain other consequences
+  { code: 'S09.90XA', name: 'Unspecified injury of head, initial encounter', category: 'Injury' },
+  { code: 'T14.90XA', name: 'Injury, unspecified, initial encounter', category: 'Injury' },
+
+  // External causes
+  { code: 'V89.9XXA', name: 'Person injured in unspecified motor-vehicle accident, initial encounter', category: 'External' },
+  { code: 'W19.XXXA', name: 'Unspecified fall, initial encounter', category: 'External' }
+];
+
+// Helper function to clean garbage text from clinical notes
+const cleanClinicalText = (text: string): string => {
+  if (!text || text.trim().length < 3) return '';
+
+  // Remove common garbage patterns and normalize
+  let cleaned = text
+    .replace(/[a-zA-Z]{25,}/g, '') // Remove very long words (likely garbage)
+    .replace(/[^\w\s.,;:\-\n]/g, '') // Remove special characters except common punctuation
+    .replace(/\s+/g, ' ') // Normalize whitespace
+    .trim();
+
+  // Additional garbage detection patterns
+  const garbagePatterns = [
+    /^[^\w]*$/, // Only non-word characters
+    /lorem ipsum/i,
+    /test data/i,
+    /sample text/i,
+    /^[a-z]{1,2}(\s+[a-z]{1,2})*$/i, // Very short words repeated (like "a b c d")
+    /(.)\1{4,}/, // Same character repeated 5+ times
+    /([a-z])\1{2,}[a-z]*([a-z])\2{2,}/i, // Repeated letter patterns
+  ];
+
+  // Check for garbage patterns
+  for (const pattern of garbagePatterns) {
+    if (pattern.test(cleaned)) {
+      return '';
+    }
+  }
+
+  // If it's too short after cleaning, return empty
+  if (cleaned.length < 3) {
+    return '';
+  }
+
+  return cleaned;
+};
+
+// Extended type for local use (includes patientGender for filtering)
+interface ConsultationRecordWithGender extends ConsultationRecord {
+  patientGender?: string;
 }
 
 // Consultation history data will be loaded from API
 
+// Helper function for status badge styling
 const getPriorityColor = (priority: string) => {
-  switch (priority?.toLowerCase()) {
-    case "emergency": case "urgent": return "bg-red-100 text-red-800 border-red-200 dark:bg-red-900/30 dark:text-red-400";
-    case "high": return "bg-orange-100 text-orange-800 border-orange-200 dark:bg-orange-900/30 dark:text-orange-400";
-    case "medium": case "normal": return "bg-yellow-100 text-yellow-800 border-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-400";
-    case "low": return "bg-green-100 text-green-800 border-green-200 dark:bg-green-900/30 dark:text-green-400";
-    default: return "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300";
+  switch (priority) {
+    case 'STAT': return 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/50';
+    case 'Urgent': return 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/50';
+    default: return 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/50';
   }
 };
 
@@ -72,31 +159,7 @@ const getStatusBadge = (status: string) => {
   return "bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-900/30 dark:text-blue-400";
 };
 
-const getEventColor = (type: string) => {
-  switch (type) {
-    case "visit": return "bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400";
-    case "vitals": return "bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400";
-    case "consultation": return "bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400";
-    case "lab": return "bg-pink-100 text-pink-600 dark:bg-pink-900/30 dark:text-pink-400";
-    case "prescription": return "bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400";
-    case "nursing": return "bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400";
-    default: return "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400";
-  }
-};
-
-const getEventIcon = (type: string) => {
-  switch (type) {
-    case "visit": return <User className="h-4 w-4" />;
-    case "vitals": return <Activity className="h-4 w-4" />;
-    case "consultation": return <Stethoscope className="h-4 w-4" />;
-    case "lab": return <FlaskConical className="h-4 w-4" />;
-    case "prescription": return <Pill className="h-4 w-4" />;
-    case "nursing": return <Syringe className="h-4 w-4" />;
-    default: return <CheckCircle2 className="h-4 w-4" />;
-  }
-};
-
-// Generate timeline from session events
+// Helper function for timeline generation (still needed for data transformation)
 const generateTimeline = (
   session: any,
   vitals: ConsultationRecord['vitals'],
@@ -142,17 +205,17 @@ const generateTimeline = (
       time: new Date(l.createdAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
       event: 'Lab Order Added',
       description: `${l.test} - ${l.priority} priority`,
-      type: 'lab',
+      type: 'lab_order',
     });
   });
-  
+
   // Nursing orders added
   nursingOrders.forEach((n) => {
     timeline.push({
       time: new Date(n.createdAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
       event: 'Nursing Order Added',
       description: `${n.type} - ${n.instructions}`,
-      type: 'nursing',
+      type: 'nursing_order',
     });
   });
   
@@ -176,7 +239,7 @@ const generateTimeline = (
 
 export default function ConsultationHistoryPage() {
   const { currentUser } = useCurrentUser();
-  const [consultations, setConsultations] = useState<ConsultationRecord[]>([]);
+  const [consultations, setConsultations] = useState<ConsultationRecordWithGender[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [scopeFilter, setScopeFilter] = useState<"all" | "my">("all");
@@ -192,19 +255,43 @@ export default function ConsultationHistoryPage() {
   const [totalCount, setTotalCount] = useState(0);
   
   // Modal states
-  const [selectedConsultation, setSelectedConsultation] = useState<ConsultationRecord | null>(null);
+  const [selectedConsultation, setSelectedConsultation] = useState<ConsultationRecordWithGender | null>(null);
   const [showViewModal, setShowViewModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [showAddDiagnosisInEdit, setShowAddDiagnosisInEdit] = useState(false);
+  const [diagnosisSearch, setDiagnosisSearch] = useState('');
+  const [selectedDiagnosisType, setSelectedDiagnosisType] = useState<'Primary' | 'Secondary' | 'Differential'>('Primary');
+  const [diagnosisNotes, setDiagnosisNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [editForm, setEditForm] = useState<{ diagnosis: string; assessment: string; plan: string; status: "Completed" | "In Progress" }>({ 
-    diagnosis: "", 
-    assessment: "", 
-    plan: "", 
-    status: "In Progress" 
+  const [editForm, setEditForm] = useState<{
+    diagnosis: string;
+    presentationComplaint: string;
+    historyOfPresentIllness: string;
+    physicalExamination: string;
+    assessment: string;
+    plan: string;
+    status: "Completed" | "In Progress";
+    diagnosisCodes: { id: string; code: string; name: string; type: 'Primary' | 'Secondary' | 'Differential'; notes: string }[];
+  }>({
+    diagnosis: "",
+    presentationComplaint: "",
+    historyOfPresentIllness: "",
+    physicalExamination: "",
+    assessment: "",
+    plan: "",
+    status: "In Progress",
+    diagnosisCodes: []
   });
 
   const [authError, setAuthError] = useState<unknown | null>(null);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
   useAuthRedirect(authError);
+
+  // Function to refresh consultations
+  const refreshConsultations = () => {
+    setCurrentPage(1);
+    setRefreshTrigger(prev => prev + 1);
+  };
 
   useEffect(() => {
     const loadConsultations = async () => {
@@ -229,35 +316,84 @@ export default function ConsultationHistoryPage() {
             // Get visit details if available
             let visitDate = session.started_at ? new Date(session.started_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
             let visitTime = session.started_at ? new Date(session.started_at).toTimeString().slice(0, 5) : '';
-            let chiefComplaint = '';
             let diagnosis = '';
             let assessment = '';
             let plan = '';
-            
+            let diagnosisCodes: { code: string; description: string }[] = [];
+
             if (session.visit) {
               try {
                 const visit = await apiFetch(`/visits/${session.visit}/`) as {
                   date?: string;
                   time?: string;
-                  chief_complaint?: string;
                   clinical_notes?: string;
                 };
                 visitDate = visit.date || visitDate;
                 visitTime = visit.time || visitTime;
-                chiefComplaint = visit.chief_complaint || '';
               } catch (visitErr) {
                 console.warn('Could not load visit details:', visitErr);
               }
             }
             
             // Get consultation notes directly from session
-            // Note: diagnosis is typically part of assessment, but we'll extract it if available
-            // For now, we'll use assessment as diagnosis since the model doesn't have a separate diagnosis field
-            diagnosis = session.assessment || '';
-            assessment = session.assessment || '';
-            plan = session.plan || '';
+            // Extract diagnosis with improved logic
+            const extractDiagnosis = (text: string): string => {
+              if (!text || text.trim().length < 3) return '';
+
+              // First clean the text
+              const cleaned = cleanClinicalText(text);
+              if (!cleaned) return '';
+
+              // Try to extract diagnosis from common patterns
+              const diagnosisPatterns = [
+                /diagnosis:?\s*([^.]+)/i,
+                /dx:?\s*([^.]+)/i,
+                /impression:?\s*([^.]+)/i,
+                /primary:?\s*([^.]+)/i
+              ];
+
+              for (const pattern of diagnosisPatterns) {
+                const match = text.match(pattern);
+                if (match && match[1] && match[1].trim().length > 2) {
+                  const extracted = cleanClinicalText(match[1].trim());
+                  if (extracted) return extracted;
+                }
+              }
+
+              // If no specific pattern found, use the cleaned text but limit length
+              return cleaned.length > 100 ? cleaned.substring(0, 100) + '...' : cleaned;
+            };
+
+            diagnosis = extractDiagnosis(session.assessment || session.diagnosis || '');
+            assessment = cleanClinicalText(session.assessment || '');
+            plan = cleanClinicalText(session.plan || '');
             const historyOfPresentIllness = session.history_of_presenting_illness || '';
             const physicalExamination = session.physical_examination || '';
+
+            // Parse ICD-10 diagnosis codes from notes field
+            if (session.notes) {
+              try {
+                const notesData = JSON.parse(session.notes);
+                if (notesData.diagnosis_codes && Array.isArray(notesData.diagnosis_codes)) {
+                  diagnosisCodes = notesData.diagnosis_codes
+                    .map((dx: any) => ({
+                      code: dx.code || '',
+                      description: dx.description || ''
+                    }))
+                    .filter((dx: any) => dx.code && dx.description);
+                }
+              } catch (parseErr) {
+                // If notes is not JSON, try to parse old format or extract ICD-10 codes from text
+                const icd10Regex = /\b([A-Z]\d{2}(?:\.\d{1,3})?)\b/g;
+                const matches = session.notes.match(icd10Regex);
+                if (matches) {
+                  diagnosisCodes = matches.map((code: string) => ({
+                    code: code,
+                    description: 'Diagnosis code extracted from notes'
+                  }));
+                }
+              }
+            }
             
             // Calculate session duration
             let sessionDuration = 0;
@@ -272,7 +408,7 @@ export default function ConsultationHistoryPage() {
             
             if (session.visit) {
               try {
-                const prescriptionsResult = await apiFetch<{ results: any[] }>(`/prescriptions/?visit=${session.visit}&page_size=100`);
+                const prescriptionsResult = await apiFetch<{ results: any[] }>(`/pharmacy/prescriptions/?visit=${session.visit}&page_size=100`);
                 prescriptions = (prescriptionsResult.results || []).map((p: any) => ({
                   id: String(p.id),
                   medication: p.medication_name || p.medication || 'Unknown',
@@ -289,15 +425,31 @@ export default function ConsultationHistoryPage() {
               
               try {
                 const labOrdersResult = await apiFetch<{ results: any[] }>(`/laboratory/orders/?visit=${session.visit}&page_size=100`);
-                labOrders = (labOrdersResult.results || []).map((l: any) => ({
-                  id: String(l.id),
-                  test: l.test_name || l.test || 'Unknown',
-                  priority: l.priority === 0 ? 'Emergency' : l.priority === 1 ? 'High' : l.priority === 2 ? 'Medium' : 'Low',
-                  instructions: l.instructions || '',
-                  status: l.status || 'pending',
-                  orderedBy: l.ordered_by_name || 'Unknown',
-                  createdAt: l.created_at || new Date().toISOString(),
-                }));
+                // Flatten lab orders - each test in an order should be a separate entry
+                labOrders = (labOrdersResult.results || []).flatMap((l: any) => {
+                  // If order has tests array, create an entry for each test
+                  if (l.tests && Array.isArray(l.tests) && l.tests.length > 0) {
+                    return l.tests.map((test: any) => ({
+                      id: `LAB-${l.id}-${test.id}`,
+                      test: test.name || test.test_name || test.template?.name || 'Unknown Test',
+                      priority: l.priority === 'stat' ? 'STAT' : l.priority === 'urgent' ? 'Urgent' : l.priority === 'routine' ? 'Routine' : String(l.priority || 'Routine'),
+                      instructions: test.notes || l.clinical_notes || '',
+                      status: test.status || 'pending',
+                      orderedBy: l.doctor_name || l.created_by_name || 'Unknown',
+                      createdAt: test.created_at || l.ordered_at || new Date().toISOString(),
+                    }));
+                  }
+                  // Fallback: single test entry from order-level fields
+                  return [{
+                    id: String(l.id),
+                    test: l.test_name || l.test || 'Unknown Test',
+                    priority: l.priority === 'stat' ? 'STAT' : l.priority === 'urgent' ? 'Urgent' : l.priority === 'routine' ? 'Routine' : String(l.priority || 'Routine'),
+                    instructions: l.clinical_notes || '',
+                    status: l.status || 'pending',
+                    orderedBy: l.doctor_name || l.created_by_name || 'Unknown',
+                    createdAt: l.ordered_at || l.created_at || new Date().toISOString(),
+                  }];
+                });
               } catch (err) {
                 console.warn('Could not load lab orders:', err);
               }
@@ -309,7 +461,7 @@ export default function ConsultationHistoryPage() {
                   type: n.order_type || n.type || 'General',
                   instructions: n.instructions || '',
                   status: n.status || 'pending',
-                  priority: n.priority === 0 ? 'Emergency' : n.priority === 1 ? 'High' : n.priority === 2 ? 'Medium' : 'Low',
+                  priority: n.priority === 'urgent' ? 'Urgent' : n.priority === 'high' ? 'High' : n.priority === 'medium' ? 'Medium' : n.priority === 'low' ? 'Low' : String(n.priority || 'Medium'),
                   orderedBy: n.ordered_by_name || 'Unknown',
                   createdAt: n.created_at || new Date().toISOString(),
                 }));
@@ -324,6 +476,8 @@ export default function ConsultationHistoryPage() {
               const vitalsResult = await apiFetch<{ results: any[]; count?: number }>(`/vitals/?visit=${session.visit || ''}&page_size=10`);
               vitals = (vitalsResult.results || []).map((v: any) => ({
                 id: String(v.id),
+                date: v.recorded_at ? new Date(v.recorded_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+                time: v.recorded_at ? new Date(v.recorded_at).toISOString().split('T')[1].substring(0, 8) : '00:00:00',
                 systolic: v.blood_pressure_systolic || 0,
                 diastolic: v.blood_pressure_diastolic || 0,
                 heartRate: v.heart_rate || 0,
@@ -334,30 +488,43 @@ export default function ConsultationHistoryPage() {
                 oxygenSaturation: parseFloat(v.oxygen_saturation) || 0,
                 bloodSugar: 0, // Not in backend model
                 painScale: 0, // Not in backend model
-                comment: v.notes || '',
                 recordedBy: v.recorded_by_name || 'Unknown',
-                date: v.recorded_at || new Date().toISOString(),
+                notes: v.notes || '',
               }));
             } catch (err) {
               // Ignore
             }
             
+            // Get doctor information
+            const doctor = await resolveDoctorName(
+              session.doctor_name,
+              session.doctor
+            );
+            const doctorName = doctor;
+            const doctorId = String(session.doctor || '');
+
             return {
               id: String(session.id),
               patient: patient.full_name || `${patient.first_name} ${patient.surname}`,
               patientId: patient.patient_id || String(patient.id),
               patientGender: patient.gender || undefined, // Store gender for filtering
-              doctor: session.doctor_name || 'Unknown',
-              doctorId: String(session.doctor || ''),
+              doctor: doctorName,
+              doctorId: doctorId,
               date: visitDate,
               time: visitTime,
-              clinic: session.clinic || 'General',
+              clinic: session.clinic || 'GOPD',
               room: session.room_name || 'Unknown',
               diagnosis,
+              diagnosisCodes,
               status: session.status === 'completed' ? 'Completed' as const : 'In Progress' as const,
-              priority: session.priority === 0 ? 'Emergency' : session.priority === 1 ? 'High' : session.priority === 2 ? 'Medium' : 'Low',
+              priority: (() => {
+                const p = session.priority;
+                if (typeof p === 'number') {
+                  return p === 0 ? 'Emergency' : p === 1 ? 'High' : p === 2 ? 'Medium' : 'Low';
+                }
+                return String(p || 'Medium');
+              })(),
               sessionDuration,
-              chiefComplaint,
               historyOfPresentIllness,
               physicalExamination,
               assessment,
@@ -389,7 +556,7 @@ export default function ConsultationHistoryPage() {
     };
     
     loadConsultations();
-  }, [currentPage, itemsPerPage]);
+  }, [currentPage, itemsPerPage, refreshTrigger]);
 
   const filteredConsultations = useMemo(() => {
     const currentUserId = currentUser?.id ? String(currentUser.id) : '';
@@ -434,10 +601,25 @@ export default function ConsultationHistoryPage() {
   const stats = useMemo(() => {
     const currentUserId = currentUser?.id ? String(currentUser.id) : '';
     const filtered = scopeFilter === "my" ? consultations.filter(c => c.doctorId === currentUserId) : consultations;
-    const today = new Date().toISOString().split("T")[0];
+
+    // Fix today calculation with proper date comparison
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const todayCount = filtered.filter(c => {
+      try {
+        const consultationDate = new Date(c.date + 'T' + (c.time || '00:00:00'));
+        consultationDate.setHours(0, 0, 0, 0);
+        return consultationDate.getTime() === today.getTime();
+      } catch {
+        // Fallback to date-only comparison if time parsing fails
+        return c.date === today.toISOString().split('T')[0];
+      }
+    }).length;
+
     return {
       total: filtered.length,
-      today: filtered.filter(c => c.date === today).length,
+      today: todayCount,
       completed: filtered.filter(c => c.status === "Completed").length,
       inProgress: filtered.filter(c => c.status === "In Progress").length,
     };
@@ -448,9 +630,37 @@ export default function ConsultationHistoryPage() {
     setShowViewModal(true);
   };
 
+  const canEditConsultation = (consultation: ConsultationRecord): boolean => {
+    // Allow editing if within 48 hours of the consultation date/time
+    const consultationDateTime = new Date(consultation.date + 'T' + (consultation.time || '00:00:00'));
+    const now = new Date();
+    const hoursDifference = (now.getTime() - consultationDateTime.getTime()) / (1000 * 60 * 60);
+    return hoursDifference <= 48;
+  };
+
   const openEditModal = (consultation: ConsultationRecord) => {
+    if (!canEditConsultation(consultation)) {
+      toast.error('Consultation can only be edited within 48 hours of the session');
+      return;
+    }
+
     setSelectedConsultation(consultation);
-    setEditForm({ diagnosis: consultation.diagnosis, assessment: consultation.assessment, plan: consultation.plan, status: consultation.status });
+    setEditForm({
+      diagnosis: consultation.diagnosis,
+      presentationComplaint: consultation.presentationComplaint || '',
+      historyOfPresentIllness: consultation.historyOfPresentIllness || '',
+      physicalExamination: consultation.physicalExamination || '',
+      assessment: consultation.assessment,
+      plan: consultation.plan,
+      status: consultation.status,
+      diagnosisCodes: (consultation.diagnosisCodes || []).map((dx, index) => ({
+        id: `existing-${index}`,
+        code: dx.code,
+        name: dx.description,
+        type: 'Primary' as const,
+        notes: ''
+      }))
+    });
     setShowEditModal(true);
   };
 
@@ -467,10 +677,23 @@ export default function ConsultationHistoryPage() {
       }
       
       // Update consultation session notes directly
-      // Note: diagnosis is stored in assessment field in the backend
+      // Store diagnosis codes as JSON in notes field
+      const diagnosisData = editForm.diagnosisCodes.length > 0 ? JSON.stringify({
+        diagnosis_codes: editForm.diagnosisCodes.map(d => ({
+          code: d.code,
+          description: d.name,
+          type: d.type,
+          notes: d.notes || ''
+        }))
+      }) : '';
+
       const updateData: any = {
-        assessment: editForm.diagnosis || editForm.assessment,
+        presentation_complaint: editForm.presentationComplaint,
+        history_of_presenting_illness: editForm.historyOfPresentIllness,
+        physical_examination: editForm.physicalExamination,
+        assessment: editForm.assessment,
         plan: editForm.plan,
+        notes: diagnosisData, // Store structured diagnosis data as JSON
       };
       
       // Update session status if changed
@@ -484,9 +707,9 @@ export default function ConsultationHistoryPage() {
       await consultationService.updateSession(sessionId, updateData);
       
       // Update local state
-      setConsultations(prev => prev.map(c => 
-        c.id === selectedConsultation.id 
-          ? { ...c, diagnosis: editForm.diagnosis, assessment: editForm.assessment, plan: editForm.plan, status: editForm.status } 
+      setConsultations(prev => prev.map(c =>
+        c.id === selectedConsultation.id
+          ? { ...c, diagnosis: editForm.diagnosis, presentationComplaint: editForm.presentationComplaint, historyOfPresentIllness: editForm.historyOfPresentIllness, physicalExamination: editForm.physicalExamination, assessment: editForm.assessment, plan: editForm.plan, status: editForm.status, diagnosisCodes: editForm.diagnosisCodes.map(dx => ({ code: dx.code, description: dx.name, type: dx.type })) }
           : c
       ));
       
@@ -500,9 +723,6 @@ export default function ConsultationHistoryPage() {
     }
   };
 
-  const handlePrint = (consultation: ConsultationRecord) => {
-    toast.info(`Printing ${consultation.id}...`);
-  };
 
   const handleComplete = async (consultation: ConsultationRecord) => {
     setIsSubmitting(true);
@@ -559,6 +779,15 @@ export default function ConsultationHistoryPage() {
             <p className="text-muted-foreground mt-1">View and manage all consultation records</p>
           </div>
           <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={refreshConsultations}
+              disabled={loading}
+            >
+              <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+              Refresh
+            </Button>
             <Link href="/consultation/dashboard">
               <Button variant="outline" size="sm">
                 <TrendingUp className="h-4 w-4 mr-2" />
@@ -721,32 +950,131 @@ export default function ConsultationHistoryPage() {
                 </thead>
                 <tbody>
                   {filteredConsultations.length === 0 ? (
-                    <tr><td colSpan={8} className="p-8 text-center text-muted-foreground">No consultations found</td></tr>
+                    <tr>
+                      <td colSpan={8} className="p-8 text-center">
+                        <div className="flex flex-col items-center gap-3">
+                          <History className="h-12 w-12 text-muted-foreground/50" />
+                          <div>
+                            {searchQuery ? (
+                              <>
+                                <p className="text-muted-foreground font-medium">No consultations found for "{searchQuery}"</p>
+                                <p className="text-sm text-muted-foreground mt-1">Try adjusting your search terms or filters</p>
+                              </>
+                            ) : scopeFilter === "my" ? (
+                              <>
+                                <p className="text-muted-foreground font-medium">No consultations assigned to you</p>
+                                <p className="text-sm text-muted-foreground mt-1">Consultations you handle will appear here</p>
+                              </>
+                            ) : statusFilter !== "all" ? (
+                              <>
+                                <p className="text-muted-foreground font-medium">No {statusFilter.replace('-', ' ')} consultations</p>
+                                <p className="text-sm text-muted-foreground mt-1">Try selecting "All Status" to see all consultations</p>
+                              </>
+                            ) : dateFilter !== "all" ? (
+                              <>
+                                <p className="text-muted-foreground font-medium">No consultations for {dateFilter}</p>
+                                <p className="text-sm text-muted-foreground mt-1">Try selecting "All Time" to see all consultations</p>
+                              </>
+                            ) : (
+                              <>
+                                <p className="text-muted-foreground font-medium">No consultations found</p>
+                                <p className="text-sm text-muted-foreground mt-1">Consultations will appear here once patients are seen</p>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
                   ) : (
-                    paginatedConsultations.map((c) => (
-                      <tr key={c.id} className="border-b hover:bg-muted/30 transition-colors">
+                    paginatedConsultations.map((c) => {
+                      const isEditable = canEditConsultation(c);
+                      return (
+                        <tr key={c.id} className={`border-b hover:bg-muted/30 transition-colors ${isEditable ? 'bg-emerald-50/30 dark:bg-emerald-900/10 border-l-4 border-l-emerald-500' : ''}`}>
                         <td className="p-4 font-medium">{c.id}</td>
                         <td className="p-4">
                           <p className="font-medium">{c.patient}</p>
                           <p className="text-xs text-muted-foreground">{c.patientId}</p>
                         </td>
-                        <td className="p-4">{c.doctor}</td>
                         <td className="p-4">
-                          <p>{c.date}</p>
-                          <p className="text-xs text-muted-foreground">{c.time}</p>
+                          <div className="flex items-center gap-2">
+                            <span className={c.doctor === 'Unknown' ? 'text-amber-600' : ''}>
+                              {c.doctor}
+                            </span>
+                            {c.doctor === 'Unknown' && (
+                              <AlertTriangle className="h-3 w-3 text-amber-500 flex-shrink-0" />
+                            )}
+                          </div>
+                        </td>
+                        <td className="p-4">
+                          <p>{new Date(c.date + 'T' + c.time).toLocaleDateString()}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {new Date(c.date + 'T' + c.time).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}
+                          </p>
                         </td>
                         <td className="p-4"><Badge variant="outline">{c.clinic}</Badge></td>
-                        <td className="p-4 max-w-[200px] truncate">{c.diagnosis}</td>
+                        <td className="p-4 max-w-[200px]">
+                          <div className="flex flex-col gap-1">
+                            {c.diagnosisCodes && c.diagnosisCodes.length > 0 ? (
+                              <div className="flex flex-wrap gap-1">
+                                {c.diagnosisCodes.slice(0, 2).map((dx, idx) => (
+                                  <Badge key={idx} variant="outline" className="text-xs font-mono bg-blue-50 text-blue-700 border-blue-200">
+                                    {dx.code}
+                                  </Badge>
+                                ))}
+                                {c.diagnosisCodes.length > 2 && (
+                                  <Badge variant="outline" className="text-xs bg-gray-100">
+                                    +{c.diagnosisCodes.length - 2}
+                                  </Badge>
+                                )}
+                              </div>
+                            ) : c.diagnosis && c.diagnosis.trim() ? (
+                              <div className="flex items-center gap-2">
+                                <span className="truncate text-sm">
+                                  {c.diagnosis}
+                                </span>
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-2">
+                                <span className="truncate text-sm text-amber-600">
+                                  No diagnosis recorded
+                                </span>
+                                <AlertTriangle className="h-3 w-3 text-amber-500 flex-shrink-0" />
+                              </div>
+                            )}
+                          </div>
+                        </td>
                         <td className="p-4"><Badge className={getStatusBadge(c.status)}>{c.status}</Badge></td>
                         <td className="p-4">
-                          <div className="flex items-center gap-1">
-                            <Button variant="ghost" size="sm" onClick={() => openViewModal(c)} title="View"><Eye className="h-4 w-4" /></Button>
-                            <Button variant="ghost" size="sm" onClick={() => openEditModal(c)} title="Edit"><Edit className="h-4 w-4" /></Button>
-                            <Button variant="ghost" size="sm" onClick={() => handlePrint(c)} title="Print"><Printer className="h-4 w-4" /></Button>
+                          <div className="flex items-center gap-1 min-w-[100px]">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => openViewModal(c)}
+                              title="View consultation details"
+                              className="hover:bg-blue-50 hover:text-blue-600"
+                            >
+                              <Eye className="h-4 w-4" />
+                            </Button>
+                            <div className="flex items-center gap-1">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => openEditModal(c)}
+                                title={canEditConsultation(c) ? "Edit consultation notes" : "Consultation can only be edited within 48 hours"}
+                                className="hover:bg-amber-50 hover:text-amber-600"
+                                disabled={!canEditConsultation(c)}
+                              >
+                                <Edit className="h-4 w-4" />
+                              </Button>
+                              {canEditConsultation(c) && (
+                                <div className="w-2 h-2 bg-emerald-500 rounded-full" title="Editable (within 48 hours)" />
+                              )}
+                            </div>
                           </div>
                         </td>
                       </tr>
-                    ))
+                      );
+                    })
                   )}
                 </tbody>
               </table>
@@ -755,7 +1083,41 @@ export default function ConsultationHistoryPage() {
         ) : (
           <div className="space-y-4">
             {filteredConsultations.length === 0 ? (
-              <Card><CardContent className="p-8 text-center text-muted-foreground">No consultations found</CardContent></Card>
+              <Card>
+                <CardContent className="p-8 text-center">
+                  <div className="flex flex-col items-center gap-3">
+                    <History className="h-12 w-12 text-muted-foreground/50" />
+                    <div>
+                      {searchQuery ? (
+                        <>
+                          <p className="text-muted-foreground font-medium">No consultations found for "{searchQuery}"</p>
+                          <p className="text-sm text-muted-foreground mt-1">Try adjusting your search terms or filters</p>
+                        </>
+                      ) : scopeFilter === "my" ? (
+                        <>
+                          <p className="text-muted-foreground font-medium">No consultations assigned to you</p>
+                          <p className="text-sm text-muted-foreground mt-1">Consultations you handle will appear here</p>
+                        </>
+                      ) : statusFilter !== "all" ? (
+                        <>
+                          <p className="text-muted-foreground font-medium">No {statusFilter.replace('-', ' ')} consultations</p>
+                          <p className="text-sm text-muted-foreground mt-1">Try selecting "All Status" to see all consultations</p>
+                        </>
+                      ) : dateFilter !== "all" ? (
+                        <>
+                          <p className="text-muted-foreground font-medium">No consultations for {dateFilter}</p>
+                          <p className="text-sm text-muted-foreground mt-1">Try selecting "All Time" to see all consultations</p>
+                        </>
+                      ) : (
+                        <>
+                          <p className="text-muted-foreground font-medium">No consultations found</p>
+                          <p className="text-sm text-muted-foreground mt-1">Consultations will appear here once patients are seen</p>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
             ) : (
               paginatedConsultations.map((c) => (
                 <Card key={c.id} className={`hover:shadow-lg transition-shadow border-l-4 ${c.status === "Completed" ? "border-l-emerald-500" : "border-l-blue-500"}`}>
@@ -769,14 +1131,49 @@ export default function ConsultationHistoryPage() {
                           <Badge className={getStatusBadge(c.status)}>{c.status}</Badge>
                         </div>
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm text-muted-foreground mb-4">
-                          <span className="flex items-center gap-1"><Calendar className="h-4 w-4" />{c.date}</span>
-                          <span className="flex items-center gap-1"><Clock className="h-4 w-4" />{c.time} ({c.sessionDuration}min)</span>
-                          <span className="flex items-center gap-1"><Stethoscope className="h-4 w-4" />{c.doctor}</span>
+                          <span className="flex items-center gap-1">
+                            <Calendar className="h-4 w-4" />
+                            {new Date(c.date + 'T' + c.time).toLocaleDateString()}
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <Clock className="h-4 w-4" />
+                            {new Date(c.date + 'T' + c.time).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}
+                            {c.sessionDuration > 0 && ` (${c.sessionDuration}min)`}
+                          </span>
+                          <span className={`flex items-center gap-1 ${c.doctor === 'Unknown' ? 'text-amber-600' : ''}`}>
+                            <Stethoscope className="h-4 w-4" />
+                            {c.doctor}
+                            {c.doctor === 'Unknown' && <AlertTriangle className="h-3 w-3 text-amber-500 ml-1" />}
+                          </span>
                           <span className="flex items-center gap-1"><Activity className="h-4 w-4" />{c.clinic}</span>
                         </div>
-                        <div className="bg-muted/50 p-3 rounded-lg mb-3">
-                          <span className="font-medium text-sm">Diagnosis:</span>
-                          <span className="ml-2 text-sm">{c.diagnosis}</span>
+                        <div className={`p-3 rounded-lg mb-3 ${(!c.diagnosis && (!c.diagnosisCodes || c.diagnosisCodes.length === 0)) ? 'bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800' : 'bg-muted/50'}`}>
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium text-sm">Diagnosis:</span>
+                            <div className="flex-1">
+                              {c.diagnosisCodes && c.diagnosisCodes.length > 0 ? (
+                                <div className="flex flex-wrap gap-1 mt-1">
+                                  {c.diagnosisCodes.slice(0, 3).map((dx, idx) => (
+                                    <Badge key={idx} variant="outline" className="text-xs font-mono">
+                                      {dx.code}
+                                    </Badge>
+                                  ))}
+                                  {c.diagnosisCodes.length > 3 && (
+                                    <Badge variant="outline" className="text-xs">
+                                      +{c.diagnosisCodes.length - 3}
+                                    </Badge>
+                                  )}
+                                </div>
+                              ) : (
+                                <span className={`text-sm ${(!c.diagnosis || c.diagnosis.length < 3) ? 'text-amber-700 dark:text-amber-300' : ''}`}>
+                                  {c.diagnosis || 'No diagnosis recorded'}
+                                </span>
+                              )}
+                            </div>
+                            {(!c.diagnosis && (!c.diagnosisCodes || c.diagnosisCodes.length === 0)) && (
+                              <AlertTriangle className="h-3 w-3 text-amber-500" />
+                            )}
+                          </div>
                         </div>
                         <div className="flex gap-4 text-sm flex-wrap">
                           <span className="flex items-center gap-1 text-red-600 dark:text-red-400"><Activity className="h-4 w-4" />{c.vitals.length} Vitals</span>
@@ -810,157 +1207,24 @@ export default function ConsultationHistoryPage() {
           </Card>
         )}
 
-        {/* View Modal with Tabs */}
-        <Dialog open={showViewModal} onOpenChange={setShowViewModal}>
-          <DialogContent className="w-[95vw] sm:max-w-[1000px] max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2"><Stethoscope className="h-5 w-5 text-emerald-500" />Consultation Details</DialogTitle>
-              <DialogDescription>{selectedConsultation?.id} • {selectedConsultation?.patient} • {selectedConsultation?.date}</DialogDescription>
-            </DialogHeader>
-            {selectedConsultation && (
-              <Tabs defaultValue="overview" className="w-full">
-                <TabsList className="grid w-full grid-cols-6">
-                  <TabsTrigger value="overview">Overview</TabsTrigger>
-                  <TabsTrigger value="vitals">Vitals</TabsTrigger>
-                  <TabsTrigger value="notes">Notes</TabsTrigger>
-                  <TabsTrigger value="orders">Orders</TabsTrigger>
-                  <TabsTrigger value="rx">Prescriptions</TabsTrigger>
-                  <TabsTrigger value="timeline">Timeline</TabsTrigger>
-                </TabsList>
-
-                <TabsContent value="overview" className="space-y-4 mt-4">
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-muted/50 rounded-lg">
-                    <div><p className="text-xs text-muted-foreground">Patient</p><p className="font-medium">{selectedConsultation.patient}</p><p className="text-xs">{selectedConsultation.patientId}</p></div>
-                    <div><p className="text-xs text-muted-foreground">Doctor</p><p className="font-medium">{selectedConsultation.doctor}</p></div>
-                    <div><p className="text-xs text-muted-foreground">Date/Time</p><p className="font-medium">{selectedConsultation.date}</p><p className="text-xs">{selectedConsultation.time}</p></div>
-                    <div><p className="text-xs text-muted-foreground">Status</p><Badge className={getStatusBadge(selectedConsultation.status)}>{selectedConsultation.status}</Badge></div>
-                  </div>
-                  <div className="grid grid-cols-3 gap-4 text-center">
-                    <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg"><p className="text-2xl font-bold text-blue-600">{selectedConsultation.sessionDuration}</p><p className="text-xs text-muted-foreground">Minutes</p></div>
-                    <div className="p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg"><p className="text-2xl font-bold text-emerald-600">{selectedConsultation.prescriptions.length}</p><p className="text-xs text-muted-foreground">Prescriptions</p></div>
-                    <div className="p-3 bg-pink-50 dark:bg-pink-900/20 rounded-lg"><p className="text-2xl font-bold text-pink-600">{selectedConsultation.labOrders.length}</p><p className="text-xs text-muted-foreground">Lab Orders</p></div>
-                  </div>
-                  <div className="bg-purple-50 dark:bg-purple-900/20 p-4 rounded-lg border border-purple-200 dark:border-purple-800">
-                    <p className="font-semibold text-purple-900 dark:text-purple-300">Diagnosis</p>
-                    <p className="text-purple-700 dark:text-purple-400">{selectedConsultation.diagnosis}</p>
-                  </div>
-                </TabsContent>
-
-                <TabsContent value="vitals" className="space-y-4 mt-4">
-                  {selectedConsultation.vitals.length > 0 ? selectedConsultation.vitals.map((v) => (
-                    <Card key={v.id}>
-                      <CardHeader><CardTitle className="text-base">Recorded by {v.recordedBy}</CardTitle></CardHeader>
-                      <CardContent>
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                          <div className="bg-red-50 dark:bg-red-900/20 p-3 rounded-lg"><p className="text-xs text-muted-foreground">BP</p><p className="font-bold">{v.systolic}/{v.diastolic}</p></div>
-                          <div className="bg-orange-50 dark:bg-orange-900/20 p-3 rounded-lg"><p className="text-xs text-muted-foreground">Temp</p><p className="font-bold">{v.temperature}°C</p></div>
-                          <div className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-lg"><p className="text-xs text-muted-foreground">HR</p><p className="font-bold">{v.heartRate} bpm</p></div>
-                          <div className="bg-green-50 dark:bg-green-900/20 p-3 rounded-lg"><p className="text-xs text-muted-foreground">SpO2</p><p className="font-bold">{v.oxygenSaturation}%</p></div>
-                          <div className="bg-purple-50 dark:bg-purple-900/20 p-3 rounded-lg"><p className="text-xs text-muted-foreground">RR</p><p className="font-bold">{v.respiratoryRate}/min</p></div>
-                          <div className="bg-indigo-50 dark:bg-indigo-900/20 p-3 rounded-lg"><p className="text-xs text-muted-foreground">Weight</p><p className="font-bold">{v.weight} kg</p></div>
-                          <div className="bg-pink-50 dark:bg-pink-900/20 p-3 rounded-lg"><p className="text-xs text-muted-foreground">Height</p><p className="font-bold">{v.height} cm</p></div>
-                          <div className="bg-yellow-50 dark:bg-yellow-900/20 p-3 rounded-lg"><p className="text-xs text-muted-foreground">Pain</p><p className="font-bold">{v.painScale}/10</p></div>
-                        </div>
-                        {v.comment && <p className="mt-3 text-sm text-muted-foreground bg-muted p-2 rounded">{v.comment}</p>}
-                      </CardContent>
-                    </Card>
-                  )) : <Card><CardContent className="p-8 text-center text-muted-foreground">No vitals recorded</CardContent></Card>}
-                </TabsContent>
-
-                <TabsContent value="notes" className="space-y-4 mt-4">
-                  <div className="space-y-4">
-                    <div><Label className="text-sm font-semibold">Chief Complaint</Label><p className="mt-1 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-sm">{selectedConsultation.chiefComplaint}</p></div>
-                    <div><Label className="text-sm font-semibold">History of Present Illness</Label><p className="mt-1 p-3 bg-violet-50 dark:bg-violet-900/20 rounded-lg text-sm">{selectedConsultation.historyOfPresentIllness}</p></div>
-                    <div><Label className="text-sm font-semibold">Physical Examination</Label><p className="mt-1 p-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg text-sm">{selectedConsultation.physicalExamination}</p></div>
-                    <div className="grid md:grid-cols-2 gap-4">
-                      <div><Label className="text-sm font-semibold">Assessment</Label><p className="mt-1 p-3 bg-muted rounded-lg text-sm">{selectedConsultation.assessment}</p></div>
-                      <div><Label className="text-sm font-semibold">Plan</Label><p className="mt-1 p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg text-sm">{selectedConsultation.plan}</p></div>
-                    </div>
-                  </div>
-                </TabsContent>
-
-                <TabsContent value="orders" className="space-y-4 mt-4">
-                  <div className="grid md:grid-cols-2 gap-4">
-                    <div>
-                      <h4 className="font-semibold mb-2 flex items-center gap-2"><FlaskConical className="h-4 w-4 text-pink-500" />Lab Orders ({selectedConsultation.labOrders.length})</h4>
-                      {selectedConsultation.labOrders.length > 0 ? selectedConsultation.labOrders.map((l) => (
-                        <Card key={l.id} className="mb-2"><CardContent className="p-3">
-                          <div className="flex justify-between items-start">
-                            <div><p className="font-medium">{l.test}</p><p className="text-xs text-muted-foreground">{l.orderedBy}</p></div>
-                            <div className="flex gap-1"><Badge className={getPriorityColor(l.priority)} variant="outline">{l.priority}</Badge><Badge variant="outline">{l.status}</Badge></div>
-                          </div>
-                        </CardContent></Card>
-                      )) : <p className="text-sm text-muted-foreground">No lab orders</p>}
-                    </div>
-                    <div>
-                      <h4 className="font-semibold mb-2 flex items-center gap-2"><Syringe className="h-4 w-4 text-orange-500" />Nursing Orders ({selectedConsultation.nursingOrders.length})</h4>
-                      {selectedConsultation.nursingOrders.length > 0 ? selectedConsultation.nursingOrders.map((n) => (
-                        <Card key={n.id} className="mb-2"><CardContent className="p-3">
-                          <div className="flex justify-between items-start">
-                            <div><p className="font-medium">{n.type}</p><p className="text-xs text-muted-foreground">{n.instructions}</p></div>
-                            <Badge className={getPriorityColor(n.priority)} variant="outline">{n.priority}</Badge>
-                          </div>
-                        </CardContent></Card>
-                      )) : <p className="text-sm text-muted-foreground">No nursing orders</p>}
-                    </div>
-                  </div>
-                </TabsContent>
-
-                <TabsContent value="rx" className="space-y-4 mt-4">
-                  {selectedConsultation.prescriptions.length > 0 ? selectedConsultation.prescriptions.map((rx) => (
-                    <Card key={rx.id} className="border-l-4 border-l-blue-500">
-                      <CardContent className="p-4">
-                        <div className="font-semibold text-lg">{rx.medication} {rx.strength} ({rx.form})</div>
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-2 text-sm">
-                          <div><span className="text-muted-foreground">Dosage:</span> {rx.dosage}</div>
-                          <div><span className="text-muted-foreground">Frequency:</span> {rx.frequency}</div>
-                          <div><span className="text-muted-foreground">Duration:</span> {rx.duration}</div>
-                          {rx.instructions && <div className="md:col-span-4"><span className="text-muted-foreground">Instructions:</span> {rx.instructions}</div>}
-                        </div>
-                      </CardContent>
-                    </Card>
-                  )) : <Card><CardContent className="p-8 text-center text-muted-foreground">No prescriptions</CardContent></Card>}
-                </TabsContent>
-
-                <TabsContent value="timeline" className="mt-4">
-                  <Card>
-                    <CardHeader><CardTitle>Session Timeline</CardTitle></CardHeader>
-                    <CardContent>
-                      <div className="space-y-4">
-                        {selectedConsultation.timeline.map((event, idx) => (
-                          <div key={idx} className="flex gap-4">
-                            <div className="flex flex-col items-center">
-                              <div className={`w-8 h-8 rounded-full flex items-center justify-center ${getEventColor(event.type)}`}>{getEventIcon(event.type)}</div>
-                              {idx < selectedConsultation.timeline.length - 1 && <div className="w-0.5 h-full bg-border my-1"></div>}
-                            </div>
-                            <div className="flex-1 pb-4">
-                              <div className="flex items-center justify-between"><span className="font-semibold">{event.event}</span><span className="text-xs text-muted-foreground">{event.time}</span></div>
-                              <p className="text-sm text-muted-foreground">{event.description}</p>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </CardContent>
-                  </Card>
-                </TabsContent>
-              </Tabs>
-            )}
-            <DialogFooter className="gap-2">
-              <Button variant="outline" onClick={() => setShowViewModal(false)}>Close</Button>
-              <Button variant="outline" onClick={() => selectedConsultation && handlePrint(selectedConsultation)}><Printer className="h-4 w-4 mr-2" />Print</Button>
-              <Button variant="outline" onClick={() => { setShowViewModal(false); selectedConsultation && openEditModal(selectedConsultation); }}><Edit className="h-4 w-4 mr-2" />Edit</Button>
-              {selectedConsultation?.status === "In Progress" && (
-                <Button onClick={() => selectedConsultation && handleComplete(selectedConsultation)} disabled={isSubmitting} className="bg-emerald-600 hover:bg-emerald-700">
-                  {isSubmitting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <CheckCircle2 className="h-4 w-4 mr-2" />}Complete
-                </Button>
-              )}
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+        {/* Consultation Detail Modal */}
+        <Suspense fallback={<div className="flex items-center justify-center p-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div></div>}>
+          <ConsultationDetailModal
+            open={showViewModal}
+            onOpenChange={setShowViewModal}
+            consultation={selectedConsultation}
+            onEdit={(consultation) => {
+              setShowViewModal(false);
+              openEditModal(consultation);
+            }}
+            onComplete={handleComplete}
+            isSubmitting={isSubmitting}
+          />
+        </Suspense>
 
         {/* Edit Modal */}
         <Dialog open={showEditModal} onOpenChange={setShowEditModal}>
-          <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className="w-[95vw] sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2"><Edit className="h-5 w-5 text-emerald-500" />Edit Consultation</DialogTitle>
               <DialogDescription>Update consultation details for {selectedConsultation?.patient}</DialogDescription>
@@ -971,8 +1235,55 @@ export default function ConsultationHistoryPage() {
                   <span className="text-muted-foreground">ID:</span> <span className="font-medium">{selectedConsultation.id}</span>
                   <span className="ml-4 text-muted-foreground">Date:</span> <span className="font-medium">{selectedConsultation.date}</span>
                 </div>
-                <div><Label>Diagnosis</Label><Input value={editForm.diagnosis} onChange={(e) => setEditForm(prev => ({ ...prev, diagnosis: e.target.value }))} className="mt-1" /></div>
-                <div><Label>Assessment</Label><Textarea value={editForm.assessment} onChange={(e) => setEditForm(prev => ({ ...prev, assessment: e.target.value }))} rows={3} className="mt-1" /></div>
+
+                {/* ICD-10 Diagnosis Section */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-base font-semibold">Diagnosis (ICD-10)</Label>
+                    <Button variant="outline" size="sm" onClick={() => setShowAddDiagnosisInEdit(true)}>
+                      <Plus className="h-4 w-4 mr-1" />Add Diagnosis
+                    </Button>
+                  </div>
+
+                  {editForm.diagnosisCodes.length === 0 ? (
+                    <div className="p-4 rounded-lg border border-dashed text-center text-muted-foreground">
+                      <Stethoscope className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                      <p className="text-sm">No diagnoses added yet</p>
+                      <p className="text-xs">Click "Add Diagnosis" to add ICD-10 codes</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {editForm.diagnosisCodes.map((dx, index) => (
+                        <div key={dx.id} className={`p-3 rounded-lg border flex items-start justify-between gap-3 ${
+                          dx.type === 'Primary' ? 'bg-rose-50 dark:bg-rose-900/20 border-rose-200 dark:border-rose-800' :
+                          dx.type === 'Secondary' ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800' :
+                          'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800'
+                        }`}>
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-1">
+                              <Badge variant="outline" className={`text-xs ${
+                                dx.type === 'Primary' ? 'bg-rose-500/10 text-rose-600 border-rose-500/30' :
+                                dx.type === 'Secondary' ? 'bg-amber-500/10 text-amber-600 border-amber-500/30' :
+                                'bg-blue-500/10 text-blue-600 border-blue-500/30'
+                              }`}>{dx.type}</Badge>
+                              <span className="font-mono text-sm font-medium">{dx.code}</span>
+                            </div>
+                            <p className="text-sm font-medium">{dx.name}</p>
+                            {dx.notes && <p className="text-xs text-muted-foreground mt-1">{dx.notes}</p>}
+                          </div>
+                          <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setEditForm(prev => ({ ...prev, diagnosisCodes: prev.diagnosisCodes.filter(d => d.id !== dx.id) }))}>
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div><Label>Presentation Complaint</Label><Textarea value={editForm.presentationComplaint} onChange={(e) => setEditForm(prev => ({ ...prev, presentationComplaint: e.target.value }))} placeholder="Chief complaint or presenting symptoms..." rows={2} className="mt-1" /></div>
+                <div><Label>History of Present Illness</Label><Textarea value={editForm.historyOfPresentIllness} onChange={(e) => setEditForm(prev => ({ ...prev, historyOfPresentIllness: e.target.value }))} placeholder="Detailed history..." rows={3} className="mt-1" /></div>
+                <div><Label>Physical Examination</Label><Textarea value={editForm.physicalExamination} onChange={(e) => setEditForm(prev => ({ ...prev, physicalExamination: e.target.value }))} placeholder="Examination findings..." rows={3} className="mt-1" /></div>
+                <div><Label>Assessment</Label><Textarea value={editForm.assessment} onChange={(e) => setEditForm(prev => ({ ...prev, assessment: e.target.value }))} placeholder="Clinical assessment and reasoning..." rows={3} className="mt-1" /></div>
                 <div><Label>Plan</Label><Textarea value={editForm.plan} onChange={(e) => setEditForm(prev => ({ ...prev, plan: e.target.value }))} rows={3} className="mt-1" /></div>
                 <div><Label>Status</Label>
                   <Select value={editForm.status} onValueChange={(v) => setEditForm(prev => ({ ...prev, status: v as "Completed" | "In Progress" }))}>
@@ -990,6 +1301,119 @@ export default function ConsultationHistoryPage() {
               <Button onClick={handleSaveEdit} disabled={isSubmitting} className="bg-emerald-600 hover:bg-emerald-700">
                 {isSubmitting ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Saving...</> : <><Save className="h-4 w-4 mr-2" />Save</>}
               </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Add Diagnosis Dialog in Edit Modal */}
+        <Dialog open={showAddDiagnosisInEdit} onOpenChange={(open) => { setShowAddDiagnosisInEdit(open); if (!open) { setDiagnosisSearch(""); setDiagnosisNotes(""); } }}>
+          <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Stethoscope className="h-5 w-5 text-rose-500" />
+                Add Diagnosis
+              </DialogTitle>
+              <DialogDescription>
+                Search and add ICD-10 diagnosis codes to this consultation
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4 py-2">
+              {/* Diagnosis Type */}
+              <div className="space-y-2">
+                <Label>Diagnosis Type *</Label>
+                <Select value={selectedDiagnosisType} onValueChange={(v) => setSelectedDiagnosisType(v as 'Primary' | 'Secondary' | 'Differential')}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Primary">Primary</SelectItem>
+                    <SelectItem value="Secondary">Secondary</SelectItem>
+                    <SelectItem value="Differential">Differential</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* ICD-10 Search */}
+              <div className="space-y-2">
+                <Label>Search ICD-10 Code *</Label>
+                <div className="relative">
+                  <Input
+                    value={diagnosisSearch}
+                    onChange={(e) => {
+                      setDiagnosisSearch(e.target.value);
+                    }}
+                    placeholder="Search ICD-10 codes..."
+                  />
+                  {diagnosisSearch && (
+                    <div className="absolute top-full left-0 right-0 mt-1 bg-background border rounded-md shadow-lg max-h-60 overflow-y-auto z-50">
+                      {icd10Codes
+                        .filter(dx =>
+                          dx.code.toLowerCase().includes(diagnosisSearch.toLowerCase()) ||
+                          dx.name.toLowerCase().includes(diagnosisSearch.toLowerCase()) ||
+                          dx.category.toLowerCase().includes(diagnosisSearch.toLowerCase())
+                        )
+                        .slice(0, 10)
+                        .map((dx) => (
+                          <div
+                            key={dx.code}
+                            className="p-2 hover:bg-muted cursor-pointer border-b last:border-b-0"
+                            onClick={() => {
+                              const newDiagnosis = {
+                                id: `${dx.code}-${Date.now()}`,
+                                code: dx.code,
+                                name: dx.name,
+                                type: selectedDiagnosisType,
+                                notes: diagnosisNotes
+                              };
+                              setEditForm(prev => ({
+                                ...prev,
+                                diagnosisCodes: [...prev.diagnosisCodes, newDiagnosis]
+                              }));
+                              setShowAddDiagnosisInEdit(false);
+                              setDiagnosisSearch("");
+                              setDiagnosisNotes("");
+                              toast.success(`Added: ${dx.code} - ${dx.name}`);
+                            }}
+                          >
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <div className="font-mono text-sm font-medium">{dx.code}</div>
+                                <div className="text-sm text-muted-foreground">{dx.name}</div>
+                                <div className="text-xs text-muted-foreground">{dx.category}</div>
+                              </div>
+                              <Plus className="h-4 w-4 text-muted-foreground" />
+                            </div>
+                          </div>
+                        ))}
+                      {icd10Codes.filter(dx =>
+                        dx.code.toLowerCase().includes(diagnosisSearch.toLowerCase()) ||
+                        dx.name.toLowerCase().includes(diagnosisSearch.toLowerCase()) ||
+                        dx.category.toLowerCase().includes(diagnosisSearch.toLowerCase())
+                      ).length === 0 && diagnosisSearch && (
+                        <div className="p-4 text-center text-muted-foreground text-sm">
+                          No matching ICD-10 codes found
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Diagnosis Notes */}
+              <div className="space-y-2">
+                <Label>Additional Notes (Optional)</Label>
+                <Textarea
+                  value={diagnosisNotes}
+                  onChange={(e) => setDiagnosisNotes(e.target.value)}
+                  placeholder="Additional notes about this diagnosis..."
+                  rows={2}
+                />
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowAddDiagnosisInEdit(false)}>Cancel</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

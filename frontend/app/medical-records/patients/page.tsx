@@ -26,6 +26,33 @@ import { StandardPagination } from '@/components/StandardPagination';
 import { PatientOverviewModal } from '@/components/PatientOverviewModal';
 import { PatientAvatar } from "@/components/PatientAvatar";
 
+// ==========================================
+// UTILITY FUNCTIONS
+// ==========================================
+
+// Safe date formatting utility
+const formatDate = (dateString: string | undefined): string => {
+  if (!dateString) return 'N/A';
+  try {
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return 'Invalid Date';
+    return date.toLocaleDateString();
+  } catch {
+    return 'Invalid Date';
+  }
+};
+
+const formatTime = (dateString: string | undefined): string => {
+  if (!dateString) return 'N/A';
+  try {
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return 'Invalid Time';
+    return date.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+  } catch {
+    return 'Invalid Time';
+  }
+};
+
 // Constants for form fields
 const titles = ['Mr', 'Mrs', 'Ms', 'Dr', 'Chief', 'Engr', 'Prof', 'Alhaji', 'Hajia'];
 const maritalStatuses = ['Single', 'Married', 'Divorced', 'Widowed'];

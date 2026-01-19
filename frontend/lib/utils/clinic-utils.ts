@@ -14,7 +14,7 @@ import { CLINICS } from '@/lib/constants/clinics';
  */
 export const normalizeClinicName = (clinic: string | null | undefined): string => {
   if (!clinic || !clinic.trim()) {
-    return 'General'; // Default clinic
+    return 'GOPD'; // Default clinic
   }
 
   const trimmed = clinic.trim();
@@ -44,8 +44,9 @@ export const normalizeClinicName = (clinic: string | null | undefined): string =
     'diamond club clinic': 'Diamond',
     'physiotherapy': 'Physiotherapy',
     'physiotherapy clinic': 'Physiotherapy',
-    'general': 'General',
-    'general clinic': 'General',
+    'general': 'GOPD',
+    'general clinic': 'GOPD',
+    'gopd': 'GOPD',
   };
   
   const lower = trimmed.toLowerCase();

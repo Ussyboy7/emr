@@ -15,8 +15,8 @@ import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
 import { pharmacyService, type MedicationInventory as ApiMedicationInventory, type Medication as ApiMedication } from '@/lib/services';
 import { 
-  Database, Search, Plus, Pill, Package, AlertTriangle, Eye, Edit, 
-  RefreshCw, Layers, Calendar, CheckCircle2, XCircle, TrendingUp, 
+  Database, Search, Plus, Pill, Package, AlertTriangle, Eye, Edit,
+  Layers, Calendar, CheckCircle2, XCircle, TrendingUp,
   TrendingDown, Upload, Hash, Minus, ArrowUpDown, Clock, Beaker, Loader2
 } from 'lucide-react';
 
@@ -448,9 +448,6 @@ export default function InventoryPage() {
             <p className="text-muted-foreground mt-1">Manage medication stock and track inventory levels</p>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" onClick={loadInventory} disabled={loading}>
-              <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />Refresh
-            </Button>
             <Button variant="outline">
               <Upload className="h-4 w-4 mr-2" />
               Bulk Upload

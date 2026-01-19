@@ -16,8 +16,8 @@ import { roomService, patientService } from '@/lib/services';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { 
-  DoorOpen, Search, RefreshCw, Users, Clock, CheckCircle2, AlertTriangle,
-  ArrowRight, Stethoscope, Activity, Loader2, Eye, MoveUp, MoveDown,
+  DoorOpen, Search, Users, Clock, CheckCircle2, AlertTriangle,
+  ArrowRight, Stethoscope, Activity, Loader2, Eye,
   ArrowLeftRight, User, Calendar, Heart, Thermometer, X
 } from 'lucide-react';
 
@@ -65,7 +65,6 @@ export default function RoomQueuePage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [roomFilter, setRoomFilter] = useState('all');
   const [priorityFilter, setPriorityFilter] = useState('all');
-  const [isRefreshing, setIsRefreshing] = useState(false);
   
   // Load rooms and queue from API
   useEffect(() => {
@@ -301,117 +300,6 @@ export default function RoomQueuePage() {
     roomsWithPatients: new Set(patients.map(p => p.roomId)).size,
   }), [patients]);
 
-  const handleRefresh = async () => {
-    setIsRefreshing(true);
-    try {
-      // Reload rooms to get updated room data
-      const roomsResult = await roomService.getRooms({ page_size: 1000 });
-      const roomsMap = new Map(roomsResult.results.map((room: any) => [String(room.id), room]));
-      
-      // Reload queue data
-      const queueResult = await apiFetch<{ results: any[] }>('/consultation/queue/?is_active=true&page_size=1000');
-      const queueItems = queueResult.results || [];
-      
-      const transformedPatients = await Promise.all(queueItems.map(async (item: any) => {
-        try {
-          // Extract patient ID from queue item
-          const patientId = typeof item.patient === 'number' ? item.patient : parseInt(String(item.patient || ''));
-          
-          if (isNaN(patientId) || patientId <= 0) {
-            console.warn(`Invalid patient ID in queue item ${item.id}:`, item.patient);
-            return null;
-          }
-          
-          // Fetch patient details
-          let patient;
-          try {
-            patient = await patientService.getPatient(patientId);
-          } catch (patientErr) {
-            console.error(`Error fetching patient ${patientId} for queue item ${item.id}:`, patientErr);
-            patient = null;
-          }
-          
-          const queuedAt = new Date(item.queued_at);
-          const waitTime = Math.floor((Date.now() - queuedAt.getTime()) / (1000 * 60));
-          
-          // Map backend priority (integer) to frontend priority
-          const getPriority = (priorityNum: number): QueuedPatient['priority'] => {
-            if (priorityNum === 0) return 'Emergency';
-            if (priorityNum === 1) return 'High';
-            if (priorityNum === 2) return 'Medium';
-            return 'Low';
-          };
-          
-          // Get visit type and vitals if available
-          let visitType = 'Consultation';
-          let vitals: QueuedPatient['vitals'] = undefined;
-          if (item.visit) {
-            try {
-              const visitId = typeof item.visit === 'number' ? item.visit : parseInt(String(item.visit));
-              const visit = await apiFetch(`/visits/${visitId}/`) as {
-                visit_type?: string;
-              };
-              visitType = visit.visit_type || 'Consultation';
-              
-              // Fetch vitals for this visit
-              try {
-                const vitalsResult = await apiFetch<{ results: any[] }>(`/vitals/?visit=${visitId}&page_size=1`);
-                const latestVitals = vitalsResult.results?.[0];
-                if (latestVitals) {
-                  vitals = {
-                    bp: latestVitals.blood_pressure_systolic && latestVitals.blood_pressure_diastolic
-                      ? `${latestVitals.blood_pressure_systolic}/${latestVitals.blood_pressure_diastolic}` 
-                      : 'N/A',
-                    pulse: latestVitals.heart_rate ? String(latestVitals.heart_rate) : 'N/A',
-                    temp: latestVitals.temperature ? `${latestVitals.temperature}°C` : 'N/A',
-                  };
-                }
-              } catch (vitalsErr) {
-                // Ignore vitals fetch errors
-              }
-            } catch (visitErr) {
-              // Ignore visit fetch errors
-            }
-          }
-          
-          // Get room specialty for clinic
-          const room = roomsMap.get(String(item.room));
-          const clinic = room?.specialty || '';
-          
-          return {
-            id: String(item.id),
-            name: patient 
-              ? (patient.full_name || `${patient.first_name} ${patient.surname}`)
-              : (item.patient_name || `Patient ${item.patient}`),
-            patientId: patient?.patient_id || String(patientId),
-            personalNumber: patient?.personal_number || '',
-            priority: getPriority(typeof item.priority === 'number' ? item.priority : parseInt(item.priority) || 2),
-            waitTime: waitTime > 0 ? waitTime : 0,
-            sentAt: item.queued_at,
-            sentBy: 'Nursing',
-            clinic,
-            visitType,
-            roomId: String(item.room),
-            age: patient?.age,
-            gender: patient?.gender,
-            vitals,
-          } as QueuedPatient;
-        } catch (err) {
-          console.error(`Error transforming queue item ${item.id}:`, err);
-          return null;
-        }
-      }));
-      
-      const validPatients = transformedPatients.filter((p): p is QueuedPatient => p !== null);
-      setPatients(validPatients);
-      toast.success('Queue data refreshed');
-    } catch (err) {
-      console.error('Error refreshing queue:', err);
-      toast.error('Failed to refresh queue data');
-    } finally {
-      setIsRefreshing(false);
-    }
-  };
 
   const openReassignDialog = (patient: QueuedPatient) => {
     setSelectedPatient(patient);
@@ -442,14 +330,9 @@ export default function RoomQueuePage() {
         setIsSubmitting(false);
         return;
       }
-      
-      console.log('Reassigning patient:', {
-        queueItemId,
-        fromRoom: selectedPatient.roomId,
-        toRoom: selectedNewRoom,
-        newRoomId
-      });
-      
+
+      console.log('Reassigning patient from room', selectedPatient.roomId, 'to room', selectedNewRoom);
+
       // Update queue item to assign to new room
       const response = await apiFetch(`/consultation/queue/${queueItemId}/`, {
         method: 'PATCH',
@@ -470,8 +353,7 @@ export default function RoomQueuePage() {
       });
       setIsReassignDialogOpen(false);
       
-      // Refresh queue data
-      await handleRefresh();
+      // Data will refresh on next page load
     } catch (err: any) {
       console.error('Error reassigning patient:', err);
       
@@ -525,118 +407,6 @@ export default function RoomQueuePage() {
     }
   };
 
-  const movePatientInQueue = async (patientId: string, direction: 'up' | 'down') => {
-    const patient = patients.find(p => p.id === patientId);
-    if (!patient) {
-      toast.error('Patient not found');
-      return;
-    }
-
-    // Get all patients in the same room, sorted by current order (priority then waitTime)
-    const roomPatients = patients.filter(p => p.roomId === patient.roomId)
-      .sort((a, b) => {
-        const priorityOrder = { 'Emergency': 0, 'High': 1, 'Medium': 2, 'Low': 3 };
-        const prioDiff = priorityOrder[a.priority] - priorityOrder[b.priority];
-        if (prioDiff !== 0) return prioDiff;
-        return a.waitTime - b.waitTime;
-      });
-    
-    const index = roomPatients.findIndex(p => p.id === patientId);
-    
-    if (direction === 'up' && index === 0) {
-      toast.info('Patient is already at the top of the queue');
-      return;
-    }
-    if (direction === 'down' && index === roomPatients.length - 1) {
-      toast.info('Patient is already at the bottom of the queue');
-      return;
-    }
-
-    const swapIndex = direction === 'up' ? index - 1 : index + 1;
-    const swapPatient = roomPatients[swapIndex];
-    
-    const queueItemId = parseInt(patient.id);
-    const swapQueueItemId = parseInt(swapPatient.id);
-    
-    if (isNaN(queueItemId) || isNaN(swapQueueItemId)) {
-      toast.error('Invalid queue item IDs');
-      return;
-    }
-    
-    try {
-      // Fetch current queue items to get their actual data
-      const [currentItem, swapItem] = await Promise.all([
-        apiFetch(`/consultation/queue/${queueItemId}/`),
-        apiFetch(`/consultation/queue/${swapQueueItemId}/`),
-      ]) as [{ priority: number; queued_at: string; [key: string]: any }, { priority: number; queued_at: string; [key: string]: any }];
-      
-      console.log('Moving patient in queue:', {
-        direction,
-        currentPatient: patient.name,
-        swapPatient: swapPatient.name,
-        currentPriority: currentItem.priority,
-        swapPriority: swapItem.priority,
-        currentQueuedAt: currentItem.queued_at,
-        swapQueuedAt: swapItem.queued_at,
-      });
-      
-      const currentPriority = currentItem.priority;
-      const swapPriority = swapItem.priority;
-      const currentQueuedAt = new Date(currentItem.queued_at);
-      const swapQueuedAt = new Date(swapItem.queued_at);
-      
-      // Swap both priority and queued_at to ensure proper reordering
-      // If priorities are the same, swapping queued_at will change order
-      // If priorities are different, swapping priorities will change order
-      await Promise.all([
-        apiFetch(`/consultation/queue/${queueItemId}/`, {
-          method: 'PATCH',
-          body: JSON.stringify({ 
-            priority: swapPriority,
-            queued_at: swapQueuedAt.toISOString(),
-          }),
-        }),
-        apiFetch(`/consultation/queue/${swapQueueItemId}/`, {
-          method: 'PATCH',
-          body: JSON.stringify({ 
-            priority: currentPriority,
-            queued_at: currentQueuedAt.toISOString(),
-          }),
-        }),
-      ]);
-      
-      // Refresh queue data to show updated order
-      await handleRefresh();
-      
-      toast.success(`Patient ${direction === 'up' ? 'moved up' : 'moved down'} in queue`);
-    } catch (err: any) {
-      console.error('Error moving patient in queue:', err);
-      
-      // Extract error message
-      let errorMessage = 'Failed to update queue order. Please try again.';
-      if (err?.message) {
-        errorMessage = err.message;
-      } else if (typeof err === 'string') {
-        errorMessage = err;
-      } else if (err?.response?.data) {
-        const errorData = err.response.data;
-        if (typeof errorData === 'string') {
-          errorMessage = errorData;
-        } else if (errorData.detail) {
-          errorMessage = errorData.detail;
-        } else if (errorData.non_field_errors) {
-          errorMessage = errorData.non_field_errors[0];
-        } else {
-          const fieldErrors = Object.entries(errorData)
-            .map(([field, errors]: [string, any]) => `${field}: ${Array.isArray(errors) ? errors.join(', ') : errors}`)
-            .join('; ');
-          errorMessage = fieldErrors || errorMessage;
-        }
-      }
-      
-      toast.error(errorMessage);
-    }
-  };
 
   const getPriorityColor = (priority: string) => {
     switch (priority) {
@@ -700,16 +470,6 @@ export default function RoomQueuePage() {
               Consultation Room Queue
             </h1>
             <p className="text-muted-foreground mt-1">Monitor and reassign patients across consultation rooms</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <Badge variant="outline" className="text-muted-foreground">
-              <Clock className="h-3 w-3 mr-1" />
-              Real-time
-            </Badge>
-            <Button variant="outline" onClick={handleRefresh} disabled={isRefreshing}>
-              <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
-              Refresh
-            </Button>
           </div>
         </div>
 
@@ -841,26 +601,16 @@ export default function RoomQueuePage() {
                                 </p>
                               </div>
                             </div>
-                            <div className="flex flex-col gap-1">
-                              <div className="flex gap-1">
-                                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => movePatientInQueue(patient.id, 'up')} disabled={index === 0} title="Move up">
-                                  <MoveUp className="h-3 w-3" />
-                                </Button>
-                                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => movePatientInQueue(patient.id, 'down')} disabled={index === roomPatients.length - 1} title="Move down">
-                                  <MoveDown className="h-3 w-3" />
-                                </Button>
-                              </div>
-                              <div className="flex gap-1">
-                                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openPatientDetails(patient)} title="View details">
-                                  <Eye className="h-3 w-3" />
-                                </Button>
-                                <Button variant="ghost" size="icon" className="h-6 w-6 text-blue-500" onClick={() => openReassignDialog(patient)} title="Reassign to another room">
-                                  <ArrowLeftRight className="h-3 w-3" />
-                                </Button>
-                                <Button variant="ghost" size="icon" className="h-6 w-6 text-rose-500" onClick={() => handleRemoveFromQueue(patient)} title="Remove from queue">
-                                  <X className="h-3 w-3" />
-                                </Button>
-                              </div>
+                            <div className="flex gap-1">
+                              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openPatientDetails(patient)} title="View details">
+                                <Eye className="h-3 w-3" />
+                              </Button>
+                              <Button variant="ghost" size="icon" className="h-6 w-6 text-blue-500" onClick={() => openReassignDialog(patient)} title="Reassign to another room">
+                                <ArrowLeftRight className="h-3 w-3" />
+                              </Button>
+                              <Button variant="ghost" size="icon" className="h-6 w-6 text-rose-500" onClick={() => handleRemoveFromQueue(patient)} title="Remove from queue">
+                                <X className="h-3 w-3" />
+                              </Button>
                             </div>
                           </div>
                         </div>

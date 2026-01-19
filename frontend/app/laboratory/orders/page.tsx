@@ -12,10 +12,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "sonner";
 import { Checkbox } from "@/components/ui/checkbox";
 import { labService, type LabOrder as ApiLabOrder, type LabTest as ApiLabTest } from '@/lib/services';
-import { transformLabTestStatus, transformPriority, transformProcessingMethod, transformToBackendProcessingMethod } from '@/lib/services/transformers';
+import { transformLabTestStatus, transformPriority, transformToBackendPriority, transformProcessingMethod, transformToBackendProcessingMethod } from '@/lib/services/transformers';
 import { PatientAvatar } from "@/components/PatientAvatar";
 import {
   TestTube, Search, Eye, Clock, CheckCircle2, Activity, FlaskConical, Loader2,
@@ -23,15 +24,43 @@ import {
   ClipboardList, RefreshCw, Upload, Download, Building2, Truck, X, Droplets, Pipette, RotateCcw, XCircle
 } from 'lucide-react';
 
+// ==========================================
+// UTILITY FUNCTIONS
+// ==========================================
+
+// Safe date formatting utility
+const formatDate = (dateString: string | undefined): string => {
+  if (!dateString) return 'N/A';
+  try {
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return 'Invalid Date';
+    return date.toLocaleDateString();
+  } catch {
+    return 'Invalid Date';
+  }
+};
+
+const formatTime = (dateString: string | undefined): string => {
+  if (!dateString) return 'N/A';
+  try {
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return 'Invalid Time';
+    return date.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+  } catch {
+    return 'Invalid Time';
+  }
+};
+
 // Enhanced Test interface - each test is independent
 interface LabTest {
   id: string;
   name: string;
   code: string;
-  sampleType: 'Blood' | 'Urine' | 'Stool' | 'Sputum' | 'Swab' | 'CSF' | 'Other';
+  sampleType: 'Blood' | 'Urine' | 'Stool' | 'Sputum' | 'Swab' | 'CSF' | 'Serum' | 'Other';
   status: 'Pending' | 'Sample Collected' | 'Processing' | 'Results Ready' | 'Rejected' | 'Verified';
   processingMethod?: 'In-house' | 'Outsourced';
   outsourcedLab?: string;
+  lab_number?: string;
   collectedBy?: string;
   collectedAt?: string;
   processedBy?: string;
@@ -42,12 +71,21 @@ interface LabTest {
   rejectedBy?: string;
   rejectedAt?: string;
   verificationNotes?: string;
+  notes?: string;
 }
 
 interface LabOrder {
   id: string;
   orderId: string;
-  patient: { id: string; name: string; age: number; gender: string; photoUrl?: string; };
+  patient: {
+    id: string;
+    name: string;
+    age: number;
+    gender: string;
+    personal_number?: string;
+    division?: string;
+    photoUrl?: string;
+  };
   doctor: { id: string; name: string; specialty: string; };
   tests: LabTest[];
   priority: 'Routine' | 'Urgent' | 'STAT';
@@ -66,6 +104,8 @@ const transformOrder = (apiOrder: ApiLabOrder): LabOrder => {
       name: apiOrder.patient.name || 'Unknown',
       age: apiOrder.patient.age || 0,
       gender: apiOrder.patient.gender || 'Unknown',
+      personal_number: (apiOrder.patient as any).personal_number || undefined,
+      division: (apiOrder.patient as any).division || undefined,
       photoUrl: (apiOrder.patient as any).photo || undefined,
     },
     doctor: {
@@ -77,7 +117,19 @@ const transformOrder = (apiOrder: ApiLabOrder): LabOrder => {
     priority: transformPriority(apiOrder.priority) as 'Routine' | 'Urgent' | 'STAT',
     orderedAt: apiOrder.ordered_at,
     clinic: apiOrder.clinic || '',
-    clinicalNotes: apiOrder.clinical_notes,
+    clinicalNotes: (() => {
+      // Get clinical notes, avoiding duplication
+      const notes = apiOrder.clinical_notes || '';
+      // If notes contain repeated content, clean it up
+      if (notes.includes('; ')) {
+        const parts = notes.split('; ')
+          .map(part => part.trim()) // Trim whitespace
+          .filter(part => part.length > 0) // Remove empty parts
+          .filter((part, index, arr) => arr.indexOf(part) === index); // Remove duplicates
+        return parts.join('; ');
+      }
+      return notes;
+    })(),
   };
 };
 
@@ -105,6 +157,7 @@ const transformTest = (apiTest: ApiLabTest): LabTest => {
     rejectedBy: apiTest.rejected_by_name || apiTest.rejected_by?.toString(),
     rejectedAt: apiTest.rejected_at,
     verificationNotes: apiTest.verification_notes,
+    notes: apiTest.notes,
   };
 };
 
@@ -120,10 +173,63 @@ const testTemplates: Record<string, { name: string; fields: { name: string; unit
       { name: 'Platelets', unit: '×10³/μL', normalRange: '150-400' },
     ]
   },
+  ESR: {
+    name: 'Erythrocyte Sedimentation Rate',
+    fields: [
+      { name: 'ESR', unit: 'mm/hr', normalRange: '0-30' },
+    ]
+  },
+  RETIC: {
+    name: 'Reticulocyte Count',
+    fields: [
+      { name: 'Reticulocyte Count', unit: '%', normalRange: '0.5-2.5' },
+      { name: 'Absolute Reticulocyte Count', unit: '×10⁶/μL', normalRange: '25-85' },
+    ]
+  },
+  PLATELET: {
+    name: 'Platelet Count',
+    fields: [
+      { name: 'Platelets', unit: '×10³/μL', normalRange: '150-450' },
+    ]
+  },
+  COAG: {
+    name: 'Coagulation Profile',
+    fields: [
+      { name: 'PT', unit: 'seconds', normalRange: '11-13' },
+      { name: 'INR', unit: '', normalRange: '0.8-1.1' },
+      { name: 'PTT', unit: 'seconds', normalRange: '25-35' },
+      { name: 'Fibrinogen', unit: 'mg/dL', normalRange: '200-400' },
+    ]
+  },
+  BT_CT: {
+    name: 'Bleeding Time & Clotting Time',
+    fields: [
+      { name: 'Bleeding Time', unit: 'minutes', normalRange: '2-7' },
+      { name: 'Clotting Time', unit: 'minutes', normalRange: '5-15' },
+    ]
+  },
   FBS: {
     name: 'Fasting Blood Sugar',
     fields: [
       { name: 'Glucose', unit: 'mg/dL', normalRange: '70-100' },
+    ]
+  },
+  RBS: {
+    name: 'Random Blood Sugar',
+    fields: [
+      { name: 'Glucose', unit: 'mg/dL', normalRange: '70-140' },
+    ]
+  },
+  PPBS: {
+    name: 'Post Prandial Blood Sugar',
+    fields: [
+      { name: 'Glucose', unit: 'mg/dL', normalRange: '<140' },
+    ]
+  },
+  HBA1C: {
+    name: 'Glycosylated Hemoglobin (HbA1c)',
+    fields: [
+      { name: 'HbA1c', unit: '%', normalRange: '<5.7' },
     ]
   },
   LIP: {
@@ -145,6 +251,43 @@ const testTemplates: Record<string, { name: string; fields: { name: string; unit
       { name: 'Albumin', unit: 'g/dL', normalRange: '3.5-5.0' },
     ]
   },
+  CRP: {
+    name: 'C-Reactive Protein',
+    fields: [
+      { name: 'CRP', unit: 'mg/L', normalRange: '<10' },
+    ]
+  },
+  RA_FACTOR: {
+    name: 'Rheumatoid Factor',
+    fields: [
+      { name: 'Rheumatoid Factor', unit: 'IU/mL', normalRange: '<15' },
+    ]
+  },
+  TFT: {
+    name: 'Thyroid Function Test',
+    fields: [
+      { name: 'TSH', unit: 'μIU/mL', normalRange: '0.4-4.0' },
+      { name: 'T3', unit: 'ng/dL', normalRange: '60-181' },
+      { name: 'T4', unit: 'μg/dL', normalRange: '4.5-11.2' },
+      { name: 'Free T3', unit: 'pg/mL', normalRange: '2.0-4.4' },
+      { name: 'Free T4', unit: 'ng/dL', normalRange: '0.93-1.7' },
+    ]
+  },
+  TSH: {
+    name: 'Thyroid Stimulating Hormone',
+    fields: [
+      { name: 'TSH', unit: 'μIU/mL', normalRange: '0.4-4.0' },
+    ]
+  },
+  T3_T4: {
+    name: 'T3 & T4',
+    fields: [
+      { name: 'T3', unit: 'ng/dL', normalRange: '60-181' },
+      { name: 'T4', unit: 'μg/dL', normalRange: '4.5-11.2' },
+      { name: 'Free T3', unit: 'pg/mL', normalRange: '2.0-4.4' },
+      { name: 'Free T4', unit: 'ng/dL', normalRange: '0.93-1.7' },
+    ]
+  },
   RFT: {
     name: 'Renal Function Test',
     fields: [
@@ -162,12 +305,90 @@ const testTemplates: Record<string, { name: string; fields: { name: string; unit
       { name: 'Bicarbonate', unit: 'mmol/L', normalRange: '22-29' },
     ]
   },
+  PSA: {
+    name: 'Prostate Specific Antigen',
+    fields: [
+      { name: 'PSA', unit: 'ng/mL', normalRange: '<4.0' },
+    ]
+  },
+  CA125: {
+    name: 'CA-125 (Ovarian Cancer Marker)',
+    fields: [
+      { name: 'CA-125', unit: 'U/mL', normalRange: '<35' },
+    ]
+  },
+  CEA: {
+    name: 'Carcinoembryonic Antigen',
+    fields: [
+      { name: 'CEA', unit: 'ng/mL', normalRange: '<2.5' },
+    ]
+  },
+  AFP: {
+    name: 'Alpha Fetoprotein',
+    fields: [
+      { name: 'AFP', unit: 'ng/mL', normalRange: '<10' },
+    ]
+  },
   MP: {
     name: 'Malaria Parasite',
     fields: [
       { name: 'Result', unit: '', normalRange: 'Negative' },
       { name: 'Parasite Count', unit: '/μL', normalRange: '0' },
       { name: 'Species', unit: '', normalRange: 'N/A' },
+    ]
+  },
+  URINE_CS: {
+    name: 'Urine Culture & Sensitivity',
+    fields: [
+      { name: 'Organism', unit: '', normalRange: 'No growth' },
+      { name: 'Colony Count', unit: 'CFU/mL', normalRange: '<10,000' },
+    ]
+  },
+  BLOOD_CS: {
+    name: 'Blood Culture & Sensitivity',
+    fields: [
+      { name: 'Organism', unit: '', normalRange: 'No growth' },
+      { name: 'Time to Positivity', unit: 'hours', normalRange: 'N/A' },
+    ]
+  },
+  STOOL_CS: {
+    name: 'Stool Culture & Sensitivity',
+    fields: [
+      { name: 'Organism', unit: '', normalRange: 'No pathogen' },
+    ]
+  },
+  THROAT_SWAB: {
+    name: 'Throat Swab Culture',
+    fields: [
+      { name: 'Organism', unit: '', normalRange: 'Normal flora' },
+    ]
+  },
+  WOUND_SWAB: {
+    name: 'Wound Swab Culture',
+    fields: [
+      { name: 'Organism', unit: '', normalRange: 'No growth' },
+    ]
+  },
+  SPUTUM_AFB: {
+    name: 'Sputum Acid Fast Bacilli',
+    fields: [
+      { name: 'AFB', unit: '', normalRange: 'Negative' },
+      { name: 'ZN Stain', unit: '', normalRange: 'Negative' },
+    ]
+  },
+  STOOL_MICRO: {
+    name: 'Stool Microscopy',
+    fields: [
+      { name: 'Ova', unit: '', normalRange: 'Not seen' },
+      { name: 'Cysts', unit: '', normalRange: 'Not seen' },
+      { name: 'Trophozoites', unit: '', normalRange: 'Not seen' },
+    ]
+  },
+  BLOOD_FILM: {
+    name: 'Blood Film for Malaria Parasite',
+    fields: [
+      { name: 'Malaria Parasite', unit: '', normalRange: 'Not seen' },
+      { name: 'Parasitemia', unit: '%', normalRange: '0' },
     ]
   },
   UA: {
@@ -182,6 +403,217 @@ const testTemplates: Record<string, { name: string; fields: { name: string; unit
       { name: 'RBC', unit: '/hpf', normalRange: '0-2' },
     ]
   },
+  URINE_RE: {
+    name: 'Urine Routine Examination',
+    fields: [
+      { name: 'Color', unit: '', normalRange: 'Pale yellow' },
+      { name: 'Appearance', unit: '', normalRange: 'Clear' },
+      { name: 'pH', unit: '', normalRange: '4.5-8.0' },
+      { name: 'Specific Gravity', unit: '', normalRange: '1.005-1.030' },
+      { name: 'Protein', unit: '', normalRange: 'Negative' },
+      { name: 'Glucose', unit: '', normalRange: 'Negative' },
+      { name: 'Ketones', unit: '', normalRange: 'Negative' },
+      { name: 'Blood', unit: '', normalRange: 'Negative' },
+    ]
+  },
+  URINE_MICRO: {
+    name: 'Urine Microscopy',
+    fields: [
+      { name: 'WBC', unit: '/hpf', normalRange: '0-5' },
+      { name: 'RBC', unit: '/hpf', normalRange: '0-2' },
+      { name: 'Epithelial Cells', unit: '/hpf', normalRange: '0-5' },
+      { name: 'Casts', unit: '/hpf', normalRange: '0-2' },
+      { name: 'Crystals', unit: '', normalRange: 'None' },
+      { name: 'Bacteria', unit: '', normalRange: 'None' },
+    ]
+  },
+  '24HR_PROTEIN': {
+    name: '24 Hour Urinary Protein',
+    fields: [
+      { name: 'Result', unit: 'mg/day', normalRange: '<150' },
+    ]
+  },
+  HIV: {
+    name: 'HIV Antibody Test',
+    fields: [
+      { name: 'HIV Antibody', unit: '', normalRange: 'Negative' },
+    ]
+  },
+  VDRL: {
+    name: 'VDRL Test for Syphilis',
+    fields: [
+      { name: 'VDRL', unit: '', normalRange: 'Negative' },
+    ]
+  },
+  HBSAG: {
+    name: 'Hepatitis B Surface Antigen',
+    fields: [
+      { name: 'HBsAg', unit: '', normalRange: 'Negative' },
+    ]
+  },
+  ANTI_HCV: {
+    name: 'Anti-HCV (Hepatitis C)',
+    fields: [
+      { name: 'Anti-HCV', unit: '', normalRange: 'Negative' },
+    ]
+  },
+  WIDAL: {
+    name: 'Widal Test',
+    fields: [
+      { name: 'S. Typhi O', unit: '', normalRange: '<1:80' },
+      { name: 'S. Typhi H', unit: '', normalRange: '<1:160' },
+      { name: 'S. Paratyphi AH', unit: '', normalRange: '<1:80' },
+      { name: 'S. Paratyphi BH', unit: '', normalRange: '<1:80' },
+    ]
+  },
+  SEMEN_ANALYSIS: {
+    name: 'Semen Analysis',
+    fields: [
+      { name: 'Volume', unit: 'mL', normalRange: '2-5' },
+      { name: 'Count', unit: 'million/mL', normalRange: '15-200' },
+      { name: 'Motility', unit: '%', normalRange: '>50' },
+      { name: 'Morphology', unit: '%', normalRange: '>30' },
+      { name: 'pH', unit: '', normalRange: '7.2-8.0' },
+    ]
+  },
+  PAP_SMEAR: {
+    name: 'Pap Smear',
+    fields: [
+      { name: 'Result', unit: '', normalRange: 'Negative for malignancy' },
+    ]
+  },
+  BONE_MARROW: {
+    name: 'Bone Marrow Aspiration',
+    fields: [
+      { name: 'Cellularity', unit: '', normalRange: 'Normal' },
+      { name: 'Myeloid:Erythroid Ratio', unit: '', normalRange: '2-4:1' },
+      { name: 'Megakaryocytes', unit: '', normalRange: 'Present' },
+    ]
+  },
+  CSF_ANALYSIS: {
+    name: 'CSF Analysis',
+    fields: [
+      { name: 'Appearance', unit: '', normalRange: 'Clear' },
+      { name: 'Protein', unit: 'mg/dL', normalRange: '15-45' },
+      { name: 'Glucose', unit: 'mg/dL', normalRange: '40-80' },
+      { name: 'WBC', unit: '/μL', normalRange: '0-5' },
+    ]
+  },
+  PLEURAL_FLUID: {
+    name: 'Pleural Fluid Analysis',
+    fields: [
+      { name: 'Appearance', unit: '', normalRange: 'Clear' },
+      { name: 'Protein', unit: 'g/dL', normalRange: '<3.0' },
+      { name: 'Glucose', unit: 'mg/dL', normalRange: 'Similar to serum' },
+      { name: 'WBC', unit: '/μL', normalRange: '<1000' },
+    ]
+  },
+  ASCITIC_FLUID: {
+    name: 'Ascitic Fluid Analysis',
+    fields: [
+      { name: 'Appearance', unit: '', normalRange: 'Clear' },
+      { name: 'Protein', unit: 'g/dL', normalRange: '<2.5' },
+      { name: 'SAAG', unit: 'g/dL', normalRange: '>1.1' },
+      { name: 'WBC', unit: '/μL', normalRange: '<500' },
+    ]
+  },
+  SYNOVIAL_FLUID: {
+    name: 'Synovial Fluid Analysis',
+    fields: [
+      { name: 'Appearance', unit: '', normalRange: 'Clear' },
+      { name: 'WBC', unit: '/μL', normalRange: '<200' },
+      { name: 'PMN', unit: '%', normalRange: '<25' },
+      { name: 'Glucose', unit: 'mg/dL', normalRange: 'Similar to serum' },
+    ]
+  },
+  FSH_LH: {
+    name: 'FSH & LH',
+    fields: [
+      { name: 'FSH', unit: 'mIU/mL', normalRange: 'Follicular: 2.5-10.2' },
+      { name: 'LH', unit: 'mIU/mL', normalRange: 'Follicular: 1.9-12.5' },
+    ]
+  },
+  PROLACTIN: {
+    name: 'Prolactin',
+    fields: [
+      { name: 'Prolactin', unit: 'ng/mL', normalRange: '4.0-15.2' },
+    ]
+  },
+  TESTOSTERONE: {
+    name: 'Testosterone',
+    fields: [
+      { name: 'Testosterone', unit: 'ng/dL', normalRange: 'Male: 270-1070' },
+    ]
+  },
+  ESTRADIOL: {
+    name: 'Estradiol',
+    fields: [
+      { name: 'Estradiol', unit: 'pg/mL', normalRange: 'Follicular: 30-100' },
+    ]
+  },
+  PROGESTERONE: {
+    name: 'Progesterone',
+    fields: [
+      { name: 'Progesterone', unit: 'ng/mL', normalRange: 'Follicular: <1.5' },
+    ]
+  },
+  CORTISOL: {
+    name: 'Cortisol',
+    fields: [
+      { name: 'Cortisol (8 AM)', unit: 'μg/dL', normalRange: '5-25' },
+    ]
+  },
+  DHEA_S: {
+    name: 'DHEA-S',
+    fields: [
+      { name: 'DHEA-S', unit: 'μg/dL', normalRange: 'Male: 160-449' },
+    ]
+  },
+  VITAMIN_D: {
+    name: 'Vitamin D (25-OH)',
+    fields: [
+      { name: '25-OH Vitamin D', unit: 'ng/mL', normalRange: '30-100' },
+    ]
+  },
+  VITAMIN_B12: {
+    name: 'Vitamin B12',
+    fields: [
+      { name: 'Vitamin B12', unit: 'pg/mL', normalRange: '200-900' },
+    ]
+  },
+  FOLIC_ACID: {
+    name: 'Folic Acid',
+    fields: [
+      { name: 'Folic Acid', unit: 'ng/mL', normalRange: '>4.0' },
+    ]
+  },
+  IRON_PROFILE: {
+    name: 'Iron Profile',
+    fields: [
+      { name: 'Iron', unit: 'μg/dL', normalRange: 'Male: 65-175' },
+      { name: 'TIBC', unit: 'μg/dL', normalRange: '250-450' },
+      { name: 'Ferritin', unit: 'ng/mL', normalRange: '30-300' },
+      { name: 'Transferrin Saturation', unit: '%', normalRange: '20-50' },
+    ]
+  },
+  CALCIUM: {
+    name: 'Calcium',
+    fields: [
+      { name: 'Calcium', unit: 'mg/dL', normalRange: '8.5-10.5' },
+    ]
+  },
+  MAGNESIUM: {
+    name: 'Magnesium',
+    fields: [
+      { name: 'Magnesium', unit: 'mg/dL', normalRange: '1.7-2.2' },
+    ]
+  },
+  PHOSPHORUS: {
+    name: 'Phosphorus',
+    fields: [
+      { name: 'Phosphorus', unit: 'mg/dL', normalRange: '2.5-4.5' },
+    ]
+  },
 };
 
 // Collection methods by sample type
@@ -191,6 +623,11 @@ const collectionMethods: Record<string, { name: string; icon: string; descriptio
     { name: 'Finger Prick', icon: '👆', description: 'Capillary blood from fingertip' },
     { name: 'Heel Prick', icon: '🦶', description: 'For infants - capillary from heel' },
     { name: 'Arterial', icon: '🔴', description: 'Arterial blood gas collection' },
+  ],
+  'Serum': [
+    { name: 'Venipuncture', icon: '💉', description: 'Standard blood draw from vein' },
+    { name: 'Finger Prick', icon: '👆', description: 'Capillary blood from fingertip' },
+    { name: 'Heel Prick', icon: '🦶', description: 'For infants - capillary from heel' },
   ],
   'Urine': [
     { name: 'Mid-stream Clean Catch', icon: '🧪', description: 'Standard urine collection' },
@@ -262,15 +699,78 @@ export default function LabOrdersPage() {
 
   // Calculate order progress percentage
   const getOrderProgress = (tests: LabTest[]) => {
+    if (!tests || tests.length === 0) return 0;
+
     const statusWeights: Record<string, number> = {
       'Pending': 0,
       'Sample Collected': 25,
       'Processing': 50,
       'Results Ready': 90,
-      'Verified': 100
+      'Verified': 100,
+      'Rejected': 100  // Rejected tests are complete
     };
-    const total = tests.reduce((sum, t) => sum + statusWeights[t.status], 0);
+
+    const total = tests.reduce((sum, t) => {
+      const weight = statusWeights[t.status] || 0;
+      return sum + weight;
+    }, 0);
+
     return Math.round(total / tests.length);
+  };
+
+  // Get progress display text and value
+  const getOrderProgressDisplay = (tests: LabTest[]) => {
+    if (!tests || tests.length === 0) return { text: 'No tests', value: 0 };
+
+    const allPending = tests.every(test => test.status === 'Pending');
+    const allRejected = tests.every(test => test.status === 'Rejected');
+    const allVerified = tests.every(test => test.status === 'Verified');
+
+    if (allPending) {
+      return { text: 'Not Started', value: 0 };
+    } else if (allRejected) {
+      return { text: 'Rejected', value: 100 };
+    } else if (allVerified) {
+      return { text: 'Completed', value: 100 };
+    } else {
+      const progress = getOrderProgress(tests);
+      return { text: `${progress}%`, value: progress };
+    }
+  };
+
+  // Get status explanations and tooltips
+  const getStatusExplanation = (status: string) => {
+    const explanations = {
+      'Pending': 'Test order created, waiting for sample collection',
+      'Sample Collected': 'Sample has been collected and is ready for processing',
+      'Processing': 'Test is being processed in the laboratory',
+      'Results Ready': 'Test results are available and ready for verification',
+      'Verified': 'Results have been verified by a pathologist and are final',
+      'Rejected': 'Test was rejected and cannot be completed'
+    };
+    return explanations[status as keyof typeof explanations] || 'Unknown status';
+  };
+
+  const getOrderStatusExplanation = (tests: LabTest[]) => {
+    if (!tests || tests.length === 0) return 'No tests in this order';
+
+    const statusCounts = tests.reduce((acc, test) => {
+      acc[test.status] = (acc[test.status] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>);
+
+    const statusOrder = ['Pending', 'Sample Collected', 'Processing', 'Results Ready', 'Verified', 'Rejected'];
+    const currentStatus = statusOrder.find(status => statusCounts[status]) || 'Unknown';
+
+    if (tests.length === 1) {
+      return getStatusExplanation(currentStatus);
+    }
+
+    const explanations = Object.entries(statusCounts)
+      .map(([status, count]) => `${count} ${status.toLowerCase()}`)
+      .join(', ');
+
+    return `Order contains ${explanations}`;
   };
 
   // Get overall order status
@@ -341,7 +841,7 @@ export default function LabOrdersPage() {
         page_size: pageSize,
       };
       if (priorityFilter !== 'all') {
-        params.priority = priorityFilter.toLowerCase();
+        params.priority = transformToBackendPriority(priorityFilter);
       }
       if (searchQuery) {
         params.search = searchQuery;
@@ -352,8 +852,33 @@ export default function LabOrdersPage() {
       const transformedOrders = response.results.map(transformOrder);
       setOrders(transformedOrders);
     } catch (err: any) {
-      setError(err.message || 'Failed to load orders');
-      toast.error('Failed to load lab orders. Please try again.');
+      let errorMessage = 'Unable to load lab orders. Please check your connection and try again.';
+      let toastMessage = errorMessage;
+
+      if (err.name === 'NetworkError') {
+        errorMessage = 'Cannot connect to the laboratory system. Please ensure the server is running and try again.';
+        toastMessage = 'Connection failed. Please check your internet connection.';
+      } else if (err.message) {
+        if (err.message.includes('401') || err.message.includes('Authentication')) {
+          errorMessage = 'Your session has expired. Please log in again.';
+          toastMessage = 'Session expired. Please refresh the page.';
+        } else if (err.message.includes('403') || err.message.includes('permission')) {
+          errorMessage = 'You do not have permission to view lab orders.';
+          toastMessage = 'Access denied. Please contact your administrator.';
+        } else if (err.message.includes('500') || err.message.includes('server')) {
+          errorMessage = 'The laboratory system encountered an error. Please try again later.';
+          toastMessage = 'Server error. Please try again in a few moments.';
+        } else if (err.message.includes('timeout')) {
+          errorMessage = 'The request timed out. Please check your connection and try again.';
+          toastMessage = 'Request timed out. Please try again.';
+        } else {
+          errorMessage = `Failed to load lab orders: ${err.message}`;
+          toastMessage = 'Failed to load orders. Please try again.';
+        }
+      }
+
+      setError(errorMessage);
+      toast.error(toastMessage);
       console.error('Error loading orders:', err);
     } finally {
       setLoading(false);
@@ -443,18 +968,16 @@ export default function LabOrdersPage() {
     setIsSubmitting(true);
 
     try {
-      // Collect samples one by one (API accepts one test at a time)
-      for (const testId of selectedTestsForCollection) {
-        await labService.collectSample(
+      // Collect all samples at once (assigns sequential lab numbers)
+      await labService.collectSamples(
           parseInt(selectedOrder.id),
-          parseInt(testId),
+        selectedTestsForCollection.map(id => parseInt(id)),
           selectedMethod,
           collectionNotes
         );
-      }
 
       const count = selectedTestsForCollection.length;
-      toast.success(`${count} sample${count > 1 ? 's' : ''} collected via ${selectedMethod}`);
+      toast.success(`${count} sample${count > 1 ? 's' : ''} collected via ${selectedMethod} with shared lab number`);
       
       // Reload orders to get updated data
       await loadOrders();
@@ -470,8 +993,20 @@ export default function LabOrdersPage() {
       setSelectedMethod('');
       setCollectionNotes('');
     } catch (err: any) {
-      toast.error(err.message || 'Failed to collect sample');
-      console.error('Error collecting sample:', err);
+      let errorMessage = 'Failed to collect samples. Please try again.';
+      if (err.message) {
+        if (err.message.includes('already collected')) {
+          errorMessage = 'Sample has already been collected.';
+        } else if (err.message.includes('permission') || err.message.includes('403')) {
+          errorMessage = 'You do not have permission to collect samples.';
+        } else if (err.message.includes('not found')) {
+          errorMessage = 'Sample not found. Please refresh and try again.';
+        } else {
+          errorMessage = `Failed to collect samples: ${err.message}`;
+        }
+      }
+      toast.error(errorMessage);
+      console.error('Error collecting samples:', err);
     } finally {
       setIsSubmitting(false);
     }
@@ -509,7 +1044,19 @@ export default function LabOrdersPage() {
       setProcessingMethod('In-house');
       setSelectedOutsourcedLab('');
     } catch (err: any) {
-      toast.error(err.message || 'Failed to start processing');
+      let errorMessage = 'Failed to start processing. Please try again.';
+      if (err.message) {
+        if (err.message.includes('already processing')) {
+          errorMessage = 'Sample is already being processed.';
+        } else if (err.message.includes('not collected')) {
+          errorMessage = 'Sample must be collected before processing can begin.';
+        } else if (err.message.includes('permission') || err.message.includes('403')) {
+          errorMessage = 'You do not have permission to process samples.';
+        } else {
+          errorMessage = `Failed to start processing: ${err.message}`;
+        }
+      }
+      toast.error(errorMessage);
       console.error('Error starting processing:', err);
     } finally {
       setIsSubmitting(false);
@@ -527,6 +1074,31 @@ export default function LabOrdersPage() {
         if (!allFieldsFilled) {
           toast.error('Please fill in all result fields');
           return;
+        }
+
+        // Check for critical values that require confirmation
+        const criticalValues = template.fields.filter(field => {
+          const value = resultValues[field.name];
+          const numValue = parseFloat(value);
+          if (isNaN(numValue)) return false;
+
+          if (field.name.toLowerCase().includes('glucose') && selectedTest.code === 'FBS') {
+            return numValue < 40 || numValue > 600;
+          } else if (field.name.toLowerCase().includes('glucose') && selectedTest.code === 'RBS') {
+            return numValue < 40 || numValue > 600;
+          } else if (field.name.toLowerCase().includes('hemoglobin') || field.name.toLowerCase().includes('hb')) {
+            return numValue < 7 || numValue > 20;
+          }
+          return false;
+        });
+
+        if (criticalValues.length > 0) {
+          const confirmed = window.confirm(
+            `Warning: This result contains ${criticalValues.length} critical ${criticalValues.length === 1 ? 'value' : 'values'} that may indicate a life-threatening condition.\n\n` +
+            criticalValues.map(field => `${field.name}: ${resultValues[field.name]} ${field.unit}`).join('\n') +
+            '\n\nAre you sure you want to submit these results?'
+          );
+          if (!confirmed) return;
         }
       }
     } else if (!uploadedFile) {
@@ -560,7 +1132,21 @@ export default function LabOrdersPage() {
       setUploadedFile(null);
       setResultEntryMode('values');
     } catch (err: any) {
-      toast.error(err.message || 'Failed to submit results');
+      let errorMessage = 'Failed to submit results. Please try again.';
+      if (err.message) {
+        if (err.message.includes('validation') || err.message.includes('invalid')) {
+          errorMessage = 'Please check your results and ensure all required fields are filled correctly.';
+        } else if (err.message.includes('already submitted')) {
+          errorMessage = 'Results have already been submitted for this test.';
+        } else if (err.message.includes('permission') || err.message.includes('403')) {
+          errorMessage = 'You do not have permission to submit results.';
+        } else if (err.message.includes('critical') || err.message.includes('abnormal')) {
+          errorMessage = 'Critical values detected. Please confirm before submitting.';
+        } else {
+          errorMessage = `Failed to submit results: ${err.message}`;
+        }
+      }
+      toast.error(errorMessage);
       console.error('Error submitting results:', err);
     } finally {
       setIsSubmitting(false);
@@ -569,12 +1155,26 @@ export default function LabOrdersPage() {
 
   const openViewDialog = (order: LabOrder) => { setSelectedOrder(order); setIsViewDialogOpen(true); };
   
-  const openCollectDialog = (test: LabTest) => { 
+  const openCollectDialog = async (test: LabTest) => {
     setSelectedTest(test);
     // Pre-select the clicked test
     setSelectedTestsForCollection([test.id]);
     setSelectedMethod('');
     setCollectionNotes('');
+
+    try {
+      // Generate lab number when dialog opens
+      const updatedTest = await labService.generateLabNumber(parseInt(selectedOrder!.id), parseInt(test.id));
+      // Update the selected test with the generated lab number, preserving existing fields
+      setSelectedTest({
+        ...test,
+        lab_number: updatedTest.lab_number,
+      });
+    } catch (error) {
+      console.error('Failed to generate lab number:', error);
+      toast.error('Failed to generate lab number');
+    }
+
     setIsCollectDialogOpen(true); 
   };
   
@@ -616,7 +1216,7 @@ export default function LabOrdersPage() {
 
   // Simple Order Card - just basic info, click to view/manage
   const OrderCard = ({ order }: { order: LabOrder }) => {
-    const orderProgress = getOrderProgress(order.tests);
+    const orderProgressDisplay = getOrderProgressDisplay(order.tests);
     const orderStatus = getOrderStatus(order.tests);
     
     return (
@@ -638,7 +1238,14 @@ export default function LabOrdersPage() {
                   <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${getPriorityBadge(order.priority)}`}>
                     {order.priority === 'STAT' && <AlertTriangle className="h-2 w-2 mr-0.5" />}{order.priority}
                   </Badge>
-                  <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${getOrderStatusBadge(orderStatus)}`}>{orderStatus}</Badge>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${getOrderStatusBadge(orderStatus)} cursor-help`}>{orderStatus}</Badge>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p className="text-xs">{getOrderStatusExplanation(order.tests)}</p>
+                    </TooltipContent>
+                  </Tooltip>
                   {order.tests.map(test => (
                     <Badge key={test.id} variant="secondary" className="text-[10px] px-1.5 py-0">{test.code}</Badge>
                   ))}
@@ -650,8 +1257,6 @@ export default function LabOrdersPage() {
               
               {/* Row 2: Details */}
               <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-wrap">
-                <span>{order.orderId}</span>
-                <span>•</span>
                 <span>{order.patient.age}y {order.patient.gender}</span>
                 <span>•</span>
                 <span className="flex items-center gap-1"><Stethoscope className="h-3 w-3" />{order.doctor.name}</span>
@@ -660,7 +1265,14 @@ export default function LabOrdersPage() {
                 <span>•</span>
                 <span>{order.tests.length} test{order.tests.length > 1 ? 's' : ''}</span>
                 <span>•</span>
-                <span className="font-medium text-foreground">{orderProgress}%</span>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="font-medium text-foreground cursor-help">{orderProgressDisplay.text}</span>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p className="text-xs">Order progress: {orderProgressDisplay.value}% complete</p>
+                  </TooltipContent>
+                </Tooltip>
               </div>
             </div>
           </div>
@@ -670,6 +1282,7 @@ export default function LabOrdersPage() {
   };
 
   return (
+    <TooltipProvider>
     <DashboardLayout>
       <div className="container mx-auto p-6 space-y-6">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -687,6 +1300,8 @@ export default function LabOrdersPage() {
 
         {/* Stats */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <Tooltip>
+              <TooltipTrigger asChild>
           <Card className="border-l-4 border-l-gray-500 cursor-pointer hover:shadow-md" onClick={() => setActiveTab('pending')}>
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
@@ -698,6 +1313,13 @@ export default function LabOrdersPage() {
               </div>
             </CardContent>
           </Card>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p className="text-xs">Test orders waiting for sample collection</p>
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
           <Card className="border-l-4 border-l-blue-500 cursor-pointer hover:shadow-md" onClick={() => setActiveTab('processing')}>
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
@@ -709,6 +1331,13 @@ export default function LabOrdersPage() {
               </div>
             </CardContent>
           </Card>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p className="text-xs">Samples currently being processed in the lab</p>
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
           <Card className="border-l-4 border-l-amber-500 cursor-pointer hover:shadow-md" onClick={() => setActiveTab('results')}>
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
@@ -720,6 +1349,13 @@ export default function LabOrdersPage() {
               </div>
             </CardContent>
           </Card>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p className="text-xs">Test results ready for verification</p>
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
           <Card className="border-l-4 border-l-rose-500 cursor-pointer hover:shadow-md" onClick={() => setActiveTab('rejected')}>
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
@@ -731,6 +1367,11 @@ export default function LabOrdersPage() {
               </div>
             </CardContent>
           </Card>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p className="text-xs">Tests that were rejected and cannot be completed</p>
+              </TooltipContent>
+            </Tooltip>
           <Card className="border-l-4 border-l-rose-500">
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
@@ -862,13 +1503,23 @@ export default function LabOrdersPage() {
                 {/* Order Header */}
                 <div className="flex items-center gap-3">
                   <Badge variant="outline" className={getPriorityBadge(selectedOrder.priority)}>{selectedOrder.priority}</Badge>
-                  <span className="text-sm text-muted-foreground">{getOrderProgress(selectedOrder.tests)}% complete</span>
-                  <Progress value={getOrderProgress(selectedOrder.tests)} className="flex-1 h-2" />
+                  <span className="text-sm text-muted-foreground">{getOrderProgressDisplay(selectedOrder.tests).text} complete</span>
+                  <Progress value={getOrderProgressDisplay(selectedOrder.tests).value} className="flex-1 h-2" />
                 </div>
                 
                 {/* Patient & Doctor Info */}
                 <div className="grid grid-cols-2 gap-4 p-4 rounded-lg bg-muted/50">
-                  <div><p className="text-xs text-muted-foreground">Patient</p><p className="font-medium">{selectedOrder.patient.name}</p><p className="text-xs text-muted-foreground">{selectedOrder.patient.age}y {selectedOrder.patient.gender}</p></div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Patient</p>
+                    <p className="font-medium">{selectedOrder.patient.name}</p>
+                    <p className="text-xs text-muted-foreground">{selectedOrder.patient.age}y {selectedOrder.patient.gender}</p>
+                    {(selectedOrder.patient as any).personal_number && (
+                      <p className="text-xs text-muted-foreground">Personal #: {(selectedOrder.patient as any).personal_number}</p>
+                    )}
+                    {(selectedOrder.patient as any).division && (
+                      <p className="text-xs text-muted-foreground">Division: {(selectedOrder.patient as any).division}</p>
+                    )}
+                  </div>
                   <div><p className="text-xs text-muted-foreground">Ordering Doctor</p><p className="font-medium">{selectedOrder.doctor.name}</p><p className="text-xs text-muted-foreground">{selectedOrder.doctor.specialty}</p></div>
                 </div>
 
@@ -902,7 +1553,14 @@ export default function LabOrdersPage() {
                       {/* Test Details & Actions */}
                       <div className="flex items-center justify-between">
                         <div className="text-xs text-muted-foreground">
-                          {test.collectedBy && <span>Collected by {test.collectedBy} {test.collectedAt && `at ${formatTime(test.collectedAt)}`}</span>}
+                          {test.lab_number && <span className="font-mono text-blue-600 dark:text-blue-400">Lab #: {test.lab_number}</span>}
+                          {test.collectedBy && <span className={test.lab_number ? " ml-2" : ""}>Collected by {test.collectedBy} {test.collectedAt && `at ${formatTime(test.collectedAt)}`}</span>}
+                          {/* Extract collection method from notes if available */}
+                          {(() => {
+                            const notes = test.notes || '';
+                            const methodMatch = notes.match(/Method: ([^\n]+)/);
+                            return methodMatch ? <span className="ml-2">• {methodMatch[1]}</span> : null;
+                          })()}
                           {test.outsourcedLab && <span className="ml-2">• {test.outsourcedLab}</span>}
                           {test.status === 'Rejected' && test.rejectedBy && (
                             <span className="ml-2">• Rejected by {test.rejectedBy} {test.rejectedAt && `at ${formatTime(test.rejectedAt)}`}</span>
@@ -955,7 +1613,7 @@ export default function LabOrdersPage() {
                           </p>
                           {test.rejectedBy && test.rejectedAt && (
                             <p className="text-rose-500 dark:text-rose-400 mt-1 text-[10px]">
-                              Rejected by {test.rejectedBy} on {new Date(test.rejectedAt).toLocaleDateString()} at {formatTime(test.rejectedAt)}
+                              Rejected by {test.rejectedBy} on {formatDate(test.rejectedAt)} at {formatTime(test.rejectedAt)}
                             </p>
                           )}
                         </div>
@@ -1012,23 +1670,23 @@ export default function LabOrdersPage() {
         <Dialog open={isCollectDialogOpen} onOpenChange={setIsCollectDialogOpen}>
           <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle className="flex items-center gap-2"><Beaker className="h-5 w-5 text-violet-500" />Collect Sample</DialogTitle>
-              <DialogDescription>Collect {selectedTest?.sampleType?.toLowerCase()} sample for testing</DialogDescription>
+              <DialogTitle className="flex items-center gap-2"><Beaker className="h-5 w-5 text-violet-500" />Collect {selectedTest?.sampleType || 'Sample'}</DialogTitle>
+              <DialogDescription>Collect sample for laboratory testing</DialogDescription>
             </DialogHeader>
             {selectedOrder && selectedTest && (
               <div className="space-y-4 py-4">
                 {/* Sample Type Header */}
                 <div className={`p-4 rounded-lg flex items-center gap-4 ${
-                  selectedTest.sampleType === 'Blood' ? 'bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800' :
+                  (selectedTest.sampleType === 'Blood' || selectedTest.sampleType === 'Serum') ? 'bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800' :
                   selectedTest.sampleType === 'Urine' ? 'bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800' :
                   'bg-muted/50 border'
                 }`}>
                   <div className={`w-12 h-12 rounded-full flex items-center justify-center ${
-                    selectedTest.sampleType === 'Blood' ? 'bg-rose-100 dark:bg-rose-800' :
+                    (selectedTest.sampleType === 'Blood' || selectedTest.sampleType === 'Serum') ? 'bg-rose-100 dark:bg-rose-800' :
                     selectedTest.sampleType === 'Urine' ? 'bg-amber-100 dark:bg-amber-800' :
                     'bg-muted'
                   }`}>
-                    {selectedTest.sampleType === 'Blood' ? (
+                    {(selectedTest.sampleType === 'Blood' || selectedTest.sampleType === 'Serum') ? (
                       <Droplets className="h-6 w-6 text-rose-600" />
                     ) : selectedTest.sampleType === 'Urine' ? (
                       <Beaker className="h-6 w-6 text-amber-600" />
@@ -1036,13 +1694,47 @@ export default function LabOrdersPage() {
                       <Pipette className="h-6 w-6 text-gray-600" />
                     )}
                   </div>
-                  <div>
+                  <div className="flex-1">
                     <h3 className={`font-semibold text-lg ${
-                      selectedTest.sampleType === 'Blood' ? 'text-rose-700 dark:text-rose-400' :
+                      (selectedTest.sampleType === 'Blood' || selectedTest.sampleType === 'Serum') ? 'text-rose-700 dark:text-rose-400' :
                       selectedTest.sampleType === 'Urine' ? 'text-amber-700 dark:text-amber-400' :
                       'text-foreground'
                     }`}>{selectedTest.sampleType} Sample</h3>
-                    <p className="text-sm text-muted-foreground">Patient: {selectedOrder.patient.name}</p>
+
+                    {/* Enhanced Patient Bio Data */}
+                    <div className="mt-2 space-y-1">
+                      <div className="flex items-center gap-2">
+                        <User className="h-3 w-3 text-muted-foreground" />
+                        <span className="font-medium text-sm">{selectedOrder.patient.name}</span>
+                      </div>
+
+                      <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                        <span>Age: {selectedOrder.patient.age}</span>
+                        <span>Gender: {selectedOrder.patient.gender}</span>
+                      </div>
+
+                      {(selectedOrder.patient.personal_number || selectedOrder.patient.division) && (
+                        <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                          {selectedOrder.patient.personal_number && (
+                            <span>Personal #: {selectedOrder.patient.personal_number}</span>
+                          )}
+                          {selectedOrder.patient.division && (
+                            <span>Division: {selectedOrder.patient.division}</span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {selectedTest.lab_number && (
+                      <div className="mt-2 text-sm">
+                        <p className="font-mono text-blue-600 dark:text-blue-400">Lab #: {selectedTest.lab_number}</p>
+                        {selectedTestsForCollection.length > 1 && (
+                          <p className="text-xs text-muted-foreground mt-1">
+                            All {selectedTestsForCollection.length} tests will share this lab number
+                          </p>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -1056,10 +1748,10 @@ export default function LabOrdersPage() {
 
                 {/* Tests to Collect - Multi-select */}
                 <div className="space-y-2">
-                  <Label className="text-sm font-medium">Tests to Collect ({selectedTest.sampleType})</Label>
+                  <Label className="text-sm font-medium">Tests to Collect ({selectedTest.sampleType || 'Sample'})</Label>
                   <div className="space-y-2 p-3 rounded-lg border max-h-[150px] overflow-y-auto">
                     {selectedOrder.tests
-                      .filter(t => t.sampleType === selectedTest.sampleType && t.status === 'Pending')
+                      .filter(t => (!selectedTest.sampleType || t.sampleType === selectedTest.sampleType) && t.status === 'Pending')
                       .map(test => (
                         <div key={test.id} className="flex items-center gap-3 p-2 rounded hover:bg-muted/50">
                           <Checkbox
@@ -1087,26 +1779,22 @@ export default function LabOrdersPage() {
                 {/* Collection Method Selection */}
                 <div className="space-y-2">
                   <Label className="text-sm font-medium">Collection Method *</Label>
-                  <div className="grid grid-cols-2 gap-2">
+                  <Select value={selectedMethod} onValueChange={setSelectedMethod}>
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Select collection method" />
+                    </SelectTrigger>
+                    <SelectContent>
                     {(collectionMethods[selectedTest.sampleType] || []).map((method) => (
-                      <button
-                        key={method.name}
-                        type="button"
-                        onClick={() => setSelectedMethod(method.name)}
-                        className={`p-3 rounded-lg border-2 text-left transition-all ${
-                          selectedMethod === method.name 
-                            ? 'border-violet-500 bg-violet-50 dark:bg-violet-900/20' 
-                            : 'border-muted hover:border-violet-300'
-                        }`}
-                      >
+                        <SelectItem key={method.name} value={method.name}>
                         <div className="flex items-center gap-2">
-                          <span className="text-lg">{method.icon}</span>
-                          <span className="font-medium text-sm">{method.name}</span>
+                            <span>{method.icon}</span>
+                            <span>{method.name}</span>
+                            <span className="text-xs text-muted-foreground ml-2">- {method.description}</span>
                         </div>
-                        <p className="text-xs text-muted-foreground mt-1">{method.description}</p>
-                      </button>
+                        </SelectItem>
                     ))}
-                  </div>
+                    </SelectContent>
+                  </Select>
                 </div>
 
                 {/* Additional Notes */}
@@ -1227,16 +1915,31 @@ export default function LabOrdersPage() {
             {selectedOrder && selectedTest && (
               <div className="space-y-4 py-4">
                 {selectedTest.status === 'Rejected' && (
-                  <div className="p-3 rounded-lg bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800">
-                    <p className="text-sm text-rose-700 dark:text-rose-300 flex items-center gap-2">
-                      <XCircle className="h-4 w-4" />
-                      This test was rejected. Please correct the results below and resubmit.
+                  <div className="p-4 rounded-lg bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800">
+                    <div className="flex items-start gap-3">
+                      <XCircle className="h-5 w-5 text-rose-600 dark:text-rose-400 mt-0.5 flex-shrink-0" />
+                      <div className="flex-1">
+                        <p className="text-sm font-medium text-rose-800 dark:text-rose-200">
+                          Test Rejected - Requires Correction
+                        </p>
+                        <p className="text-sm text-rose-700 dark:text-rose-300 mt-1">
+                          This test result was rejected by the pathologist. Please review and correct the values below before resubmitting.
+                        </p>
                       {selectedTest.verificationNotes && (
-                        <span className="block mt-1 text-xs text-rose-600 dark:text-rose-400">
-                          Reason: {selectedTest.verificationNotes.replace('REJECTED: ', '')}
-                        </span>
-                      )}
+                          <div className="mt-3 p-2 rounded bg-rose-100 dark:bg-rose-900/40 border border-rose-300 dark:border-rose-700">
+                            <p className="text-xs font-medium text-rose-800 dark:text-rose-200 mb-1">Rejection Reason:</p>
+                            <p className="text-xs text-rose-700 dark:text-rose-300">
+                              {selectedTest.verificationNotes.replace('REJECTED: ', '').replace(/^Rejection: /i, '')}
+                            </p>
+                          </div>
+                        )}
+                        {selectedTest.rejectedBy && selectedTest.rejectedAt && (
+                          <p className="text-xs text-rose-600 dark:text-rose-400 mt-2">
+                            Rejected by {selectedTest.rejectedBy} on {formatDate(selectedTest.rejectedAt)} at {formatTime(selectedTest.rejectedAt)}
                     </p>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 )}
                 <div className="p-4 rounded-lg bg-muted/50 space-y-2">
@@ -1251,7 +1954,8 @@ export default function LabOrdersPage() {
                   </div>
                 </div>
 
-                {/* Entry Mode Toggle */}
+                {/* Entry Mode Toggle - Hidden for Outsourced tests */}
+                {selectedTest.processingMethod !== 'Outsourced' && (
                 <div className="space-y-2">
                   <Label>Result Entry Method</Label>
                   <div className="grid grid-cols-2 gap-3">
@@ -1281,6 +1985,24 @@ export default function LabOrdersPage() {
                     </button>
                   </div>
                 </div>
+                )}
+
+                {/* Outsourced Notice */}
+                {selectedTest.processingMethod === 'Outsourced' && (
+                  <div className="p-4 rounded-lg bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800">
+                    <div className="flex items-center gap-3">
+                      <Truck className="h-5 w-5 text-indigo-600" />
+                      <div>
+                        <p className="text-sm font-medium text-indigo-800 dark:text-indigo-200">
+                          Outsourced Test Results
+                        </p>
+                        <p className="text-sm text-indigo-700 dark:text-indigo-300">
+                          Results for outsourced tests must be uploaded as files. Manual value entry is not available.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {resultEntryMode === 'values' ? (
                   <Card>
@@ -1292,24 +2014,61 @@ export default function LabOrdersPage() {
                     </CardHeader>
                     <CardContent className="space-y-3">
                       {testTemplates[selectedTest.code] ? (
-                        testTemplates[selectedTest.code].fields.map(field => (
-                          <div key={field.name} className="grid grid-cols-3 gap-4 items-center">
+                        testTemplates[selectedTest.code].fields.map(field => {
+                          const value = resultValues[field.name] || '';
+                          const numValue = parseFloat(value);
+                          let validationStatus: 'normal' | 'warning' | 'critical' = 'normal';
+
+                          // Basic critical value validation
+                          if (!isNaN(numValue) && value.trim() !== '') {
+                            if (field.name.toLowerCase().includes('glucose') && selectedTest.code === 'FBS') {
+                              if (numValue < 40 || numValue > 600) validationStatus = 'critical';
+                              else if (numValue < 70 || numValue > 140) validationStatus = 'warning';
+                            } else if (field.name.toLowerCase().includes('glucose') && selectedTest.code === 'RBS') {
+                              if (numValue < 40 || numValue > 600) validationStatus = 'critical';
+                              else if (numValue < 70 || numValue > 200) validationStatus = 'warning';
+                            } else if (field.name.toLowerCase().includes('hemoglobin') || field.name.toLowerCase().includes('hb')) {
+                              if (numValue < 7 || numValue > 20) validationStatus = 'critical';
+                              else if (numValue < 12 || numValue > 16) validationStatus = 'warning';
+                            }
+                          }
+
+                          return (
+                            <div key={field.name} className="space-y-1">
+                              <div className="grid grid-cols-3 gap-4 items-center">
                             <Label className="text-sm">{field.name}</Label>
                             <div className="flex items-center gap-2">
                               <Input
-                                value={resultValues[field.name] || ''}
+                                    value={value}
                                 onChange={(e) => setResultValues(prev => ({
                                   ...prev,
                                   [field.name]: e.target.value
                                 }))}
                                 placeholder="Value"
-                                className="w-24"
+                                    className={`w-24 ${
+                                      validationStatus === 'critical' ? 'border-red-500 focus:border-red-500' :
+                                      validationStatus === 'warning' ? 'border-amber-500 focus:border-amber-500' : ''
+                                    }`}
                               />
                               <span className="text-sm text-muted-foreground">{field.unit}</span>
                             </div>
                             <span className="text-xs text-muted-foreground">Normal: {field.normalRange}</span>
                           </div>
-                        ))
+                              {validationStatus === 'critical' && (
+                                <div className="text-xs text-red-600 dark:text-red-400 flex items-center gap-1 ml-32">
+                                  <AlertTriangle className="h-3 w-3" />
+                                  Critical value! Please verify and confirm.
+                                </div>
+                              )}
+                              {validationStatus === 'warning' && (
+                                <div className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1 ml-32">
+                                  <AlertTriangle className="h-3 w-3" />
+                                  Abnormal value - outside normal range.
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })
                       ) : (
                         <div className="space-y-2">
                           <Label>Result Value</Label>
@@ -1366,5 +2125,6 @@ export default function LabOrdersPage() {
         </Dialog>
       </div>
     </DashboardLayout>
+    </TooltipProvider>
   );
 }

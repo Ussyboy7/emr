@@ -4,7 +4,7 @@
  */
 
 export const CLINICS = [
-  "General",
+  "GOPD",
   "Physiotherapy",
   "Eye Clinic",
   "Sickle Cell",
@@ -17,7 +17,7 @@ export type ClinicName = typeof CLINICS[number];
  * Clinic display labels (for UI where more descriptive names are needed)
  */
 export const CLINIC_LABELS: Record<ClinicName, string> = {
-  "General": "General Clinic",
+  "GOPD": "General Out-Patient Department",
   "Physiotherapy": "Physiotherapy Clinic",
   "Eye Clinic": "Eye Clinic",
   "Sickle Cell": "Sickle Cell Clinic",

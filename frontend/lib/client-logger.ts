@@ -10,6 +10,11 @@ const shouldPrint =
   process.env.NEXT_PUBLIC_DEBUG_LOGS === 'true' ||
   process.env.NODE_ENV !== 'production';
 
+// Disable client logging if explicitly set
+const CLIENT_LOGGING_DISABLED =
+  typeof process !== 'undefined' &&
+  process.env.NEXT_PUBLIC_CLIENT_LOGGING_DISABLED === 'true';
+
 const batch: ClientLogEntryPayload[] = [];
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 const MAX_BATCH_SIZE = 20;
@@ -39,7 +44,7 @@ const getBaseUrl = () => {
 };
 
 const flushLogs = async () => {
-  if (!isBrowser || batch.length === 0 || loggingDisabled) {
+  if (!isBrowser || batch.length === 0 || loggingDisabled || CLIENT_LOGGING_DISABLED) {
     return;
   }
 
@@ -124,7 +129,7 @@ export const logError = (...args: unknown[]) => log('error', args);
 
 if (isBrowser) {
   window.addEventListener('beforeunload', () => {
-    if (batch.length && !loggingDisabled) {
+    if (batch.length && !loggingDisabled && !CLIENT_LOGGING_DISABLED) {
       const body = JSON.stringify({ entries: batch.splice(0, batch.length) });
       const baseUrl = getBaseUrl();
       // Use fetch with keepalive for beforeunload (similar to sendBeacon but with auth)

@@ -8,13 +8,16 @@ from rest_framework.permissions import IsAuthenticated
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django.utils import timezone
+from laboratory.pagination import FlexiblePageNumberPagination
 
-from .models import ConsultationRoom, ConsultationSession, ConsultationQueue, Referral
+from .models import ConsultationRoom, ConsultationSession, ConsultationQueue, Referral, Diagnosis, ICD10Code
 from .serializers import (
     ConsultationRoomSerializer,
     ConsultationSessionSerializer,
     ConsultationQueueSerializer,
     ReferralSerializer,
+    DiagnosisSerializer,
+    ICD10CodeSerializer,
 )
 from audit.services import AuditService
 
@@ -49,7 +52,7 @@ class ConsultationSessionViewSet(viewsets.ModelViewSet):
     serializer_class = ConsultationSessionSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['room', 'patient', 'doctor', 'status']
-    search_fields = ['session_id', 'chief_complaint', 'notes']
+    search_fields = ['session_id', 'notes']
     ordering_fields = ['started_at']
     ordering = ['-started_at']
     
@@ -58,7 +61,35 @@ class ConsultationSessionViewSet(viewsets.ModelViewSet):
     
     def perform_create(self, serializer):
         """Create consultation session and log audit."""
-        session = serializer.save(created_by=self.request.user)
+        # Set the doctor field using multiple fallback strategies
+        data = serializer.validated_data.copy()
+        if 'doctor' not in data or data['doctor'] is None:
+            doctor = self._find_doctor_for_session(data)
+            if doctor:
+                data['doctor'] = doctor
+
+        session = serializer.save(created_by=self.request.user, **data)
+
+    def _find_doctor_for_session(self, data):
+        """Find appropriate doctor for consultation session using multiple strategies."""
+        from accounts.models import User
+
+        user = self.request.user
+
+        # Strategy 1: ALWAYS use the requesting user who performed the action
+        # This ensures the actual person who conducted the consultation is recorded
+        if user and user.is_active:
+            return user
+
+        # Strategy 2: Check if visit exists and has a doctor assigned (fallback)
+        if 'visit' in data and data['visit']:
+            visit = data['visit']
+            if hasattr(visit, 'doctor') and visit.doctor:
+                return visit.doctor
+
+        # Only use the requesting user who performed the consultation
+        # No fallback to other doctors - the actual performer is recorded
+        return None
         AuditService.log_activity(
             user=self.request.user,
             action='create',
@@ -287,6 +318,53 @@ class ReferralViewSet(viewsets.ModelViewSet):
             object_repr=f'Referral {referral.referral_id}',
             description=f'Created referral {referral.referral_id} to {referral.specialty} at {referral.facility}',
             new_values={'referral_id': referral.referral_id, 'specialty': referral.specialty, 'facility': referral.facility, 'urgency': referral.urgency},
+            request=self.request,
+        )
+
+
+class ICD10CodeViewSet(viewsets.ReadOnlyModelViewSet):
+    """ViewSet for ICD-10 codes (read-only reference data)."""
+
+    permission_classes = [IsAuthenticated]  # Keep authentication for consistency
+    serializer_class = ICD10CodeSerializer
+    pagination_class = FlexiblePageNumberPagination  # Allow large page sizes for ICD-10 codes
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['category', 'is_active']
+    search_fields = ['code', 'description', 'category']
+    ordering_fields = ['code', 'description']
+    ordering = ['code']
+    page_size = 5000  # Override default page size for this viewset
+
+    def get_queryset(self):
+        return ICD10Code.objects.filter(is_active=True)
+
+
+class DiagnosisViewSet(viewsets.ModelViewSet):
+    """ViewSet for managing patient diagnoses."""
+
+    permission_classes = [IsAuthenticated]
+    serializer_class = DiagnosisSerializer
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['patient', 'visit', 'session', 'icd10_code', 'status', 'certainty']
+    search_fields = ['diagnosis_text', 'icd10_code__code', 'icd10_code__description']
+    ordering_fields = ['diagnosed_at', 'status']
+    ordering = ['-diagnosed_at']
+
+    def get_queryset(self):
+        return Diagnosis.objects.all().select_related('patient', 'visit', 'session', 'icd10_code', 'diagnosed_by')
+
+    def perform_create(self, serializer):
+        """Create diagnosis and log audit."""
+        diagnosis = serializer.save(diagnosed_by=self.request.user)
+        AuditService.log_activity(
+            user=self.request.user,
+            action='create',
+            object_type='diagnosis',
+            object_id=str(diagnosis.id),
+            module='consultation',
+            object_repr=f'Diagnosis {diagnosis.icd10_code.code if diagnosis.icd10_code else "Unknown"}',
+            description=f'Created diagnosis {diagnosis.icd10_code.code if diagnosis.icd10_code else "Unknown"} for patient {diagnosis.patient.get_full_name()}',
+            new_values={'icd10_code': diagnosis.icd10_code.code if diagnosis.icd10_code else '', 'status': diagnosis.status, 'certainty': diagnosis.certainty},
             request=self.request,
         )
 

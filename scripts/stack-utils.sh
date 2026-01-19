@@ -54,8 +54,8 @@ stack_init_env() {
             STACK_ENV_FILE="${PROJECT_ROOT}/backend/env/prod.env"
             STACK_BACKEND_SERVICE="backend"
             STACK_POSTGRES_SERVICE="postgres"
-            STACK_HEALTH_URL="${STACK_HEALTH_URL_OVERRIDE:-https://emr.npa.gov.ng/api/health/}"
-            STACK_FRONTEND_URL="${STACK_FRONTEND_URL_OVERRIDE:-https://emr.npa.gov.ng}"
+            STACK_HEALTH_URL="${STACK_HEALTH_URL_OVERRIDE:-https://emr.nigerianports.gov.ng/api/health/}"
+            STACK_FRONTEND_URL="${STACK_FRONTEND_URL_OVERRIDE:-https://emr.nigerianports.gov.ng}"
             ;;
         *)
             echo "Unknown environment: ${requested_env}" >&2

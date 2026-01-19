@@ -207,7 +207,7 @@ class AnalyticsService {
     
     // Use standardized normalization utility
     visits.results.forEach((visit: any) => {
-      const rawClinic = visit.clinic || visit.location || 'General';
+      const rawClinic = visit.clinic || visit.location || 'GOPD';
       const normalizedClinic = normalizeClinicName(rawClinic);
       clinicCounts[normalizedClinic] = (clinicCounts[normalizedClinic] || 0) + 1;
     });
@@ -226,7 +226,7 @@ class AnalyticsService {
   async getDepartmentStats(): Promise<DepartmentStats[]> {
     // Would need to aggregate from consultations/visits
     return [
-      { dept: 'General Clinic', consultations: 1850, avgWait: 18, satisfaction: 92 },
+      { dept: 'GOPD', consultations: 1850, avgWait: 18, satisfaction: 92 },
       { dept: 'Eye Clinic', consultations: 620, avgWait: 15, satisfaction: 94 },
       { dept: 'Sickle Cell', consultations: 480, avgWait: 12, satisfaction: 96 },
       { dept: 'Physiotherapy', consultations: 320, avgWait: 10, satisfaction: 95 },

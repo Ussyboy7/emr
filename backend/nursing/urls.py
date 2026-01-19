@@ -10,6 +10,6 @@ router.register(r'orders', NursingOrderViewSet, basename='nursing-order')
 router.register(r'procedures', ProcedureViewSet, basename='procedure')
 
 urlpatterns = [
-    path('nursing/', include(router.urls)),
+    path('', include(router.urls)),
 ]
 

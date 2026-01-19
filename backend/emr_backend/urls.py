@@ -17,6 +17,7 @@ api_v1_patterns = [
     path('', include('laboratory.urls')),
     path('', include('pharmacy.urls')),
     path('', include('radiology.urls')),
+    path('', include('physiotherapy.urls')),
     path('', include('consultation.urls')),
     path('', include('nursing.urls')),
     path('', include('audit.urls')),
@@ -24,6 +25,7 @@ api_v1_patterns = [
     path('', include('permissions.urls')),
     path('', include('dashboard.urls')),
     path('', include('reports.urls')),
+    path('', include('wards.urls')),
     path('', include('appointments.urls')),
     path('', include('common.urls')),
 ]

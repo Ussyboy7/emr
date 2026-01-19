@@ -32,6 +32,7 @@ export interface LabTest {
   status: 'pending' | 'sample_collected' | 'processing' | 'results_ready' | 'verified' | 'rejected';
   processing_method?: 'in_house' | 'outsourced';
   outsourced_lab?: string;
+  lab_number?: string;
   collected_by?: string | number;
   collected_by_name?: string;
   collected_at?: string;
@@ -45,6 +46,7 @@ export interface LabTest {
   rejected_by_name?: string;
   rejected_at?: string;
   verification_notes?: string;
+  notes?: string;
 }
 
 export interface LabTemplate {
@@ -56,7 +58,6 @@ export interface LabTemplate {
   normal_range?: Record<string, any>; // JSON field storing parameter definitions
   category?: string; // May not exist in backend, but used in frontend
   turnaround_time?: string;
-  price?: number;
   is_active?: boolean;
   created_at?: string;
   updated_at?: string;
@@ -90,6 +91,7 @@ class LabService {
     search?: string;
     page?: number;
     page_size?: number;
+    consultation_session?: number;
   }): Promise<{ results: LabOrder[]; count: number; next?: string; previous?: string }> {
     const query = buildQueryString(params || {});
     return apiFetch<{ results: LabOrder[]; count: number; next?: string; previous?: string }>(
@@ -125,13 +127,25 @@ class LabService {
   }
 
   /**
-   * Collect sample for a test
+   * Generate lab number for a test (called when Collect Sample dialog opens)
    */
-  async collectSample(orderId: number, testId: number, collectionMethod?: string, notes?: string): Promise<LabTest> {
-    return apiFetch<LabTest>(`/laboratory/orders/${orderId}/collect_sample/`, {
+  async generateLabNumber(orderId: number, testId: number): Promise<LabTest> {
+    return apiFetch<LabTest>(`/laboratory/orders/${orderId}/generate_lab_number/`, {
       method: 'POST',
       body: JSON.stringify({ 
         test_id: testId,
+      }),
+    });
+  }
+
+  /**
+   * Collect samples for multiple tests (assigns sequential lab numbers)
+   */
+  async collectSamples(orderId: number, testIds: number[], collectionMethod?: string, notes?: string): Promise<LabTest[]> {
+    return apiFetch<LabTest[]>(`/laboratory/orders/${orderId}/collect_samples/`, {
+      method: 'POST',
+      body: JSON.stringify({
+        test_ids: testIds,
         collection_method: collectionMethod || '',
         notes: notes || '',
       }),
@@ -282,6 +296,21 @@ class LabService {
       method: 'PATCH',
       body: JSON.stringify(data),
     });
+  }
+
+  /**
+   * Get verified lab results (for verification history)
+   */
+  async getVerifiedResults(params?: {
+    patient?: string;
+    overall_status?: string;
+    priority?: string;
+    page?: number;
+    page_size?: number;
+  }): Promise<{ results: LabResult[]; count: number }> {
+    const queryParams = { ...params, status: 'verified' };
+    const query = buildQueryString(queryParams);
+    return apiFetch<{ results: LabResult[]; count: number }>(`/laboratory/verification/${query}`);
   }
 
   /**

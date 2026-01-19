@@ -162,7 +162,6 @@ function NewVisitPageContent() {
         date: formData.visitDate,
         time: formData.visitTime,
         clinical_notes: formData.notes || '',
-        chief_complaint: formData.notes || '',
         status: 'scheduled',
       };
 

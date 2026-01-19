@@ -14,18 +14,19 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { toast } from "sonner";
 import Link from 'next/link';
 import { apiFetch } from '@/lib/api-client';
-import { patientService } from '@/lib/services';
+import { patientService, wardService } from '@/lib/services';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
+import { useCurrentUser } from '@/hooks/use-current-user';
 import { isAuthenticationError } from '@/lib/auth-errors';
-import { 
-  Syringe, Bandage, Pill, Search, RefreshCw, Users, Clock, CheckCircle2, AlertTriangle,
-  Eye, Calendar, Loader2, Save, Activity, History, ArrowRight, User, Stethoscope
+import {
+  Syringe, Bandage, Pill, Search, Users, Clock, CheckCircle2, AlertTriangle,
+  Eye, Calendar, Loader2, Save, Activity, History, ArrowRight, User, Stethoscope, Building2, DoorOpen
 } from 'lucide-react';
 
 // ==================== TYPES ====================
 interface Procedure {
   id: string;
-  type: 'injection' | 'dressing' | 'medication';
+  type: 'injection' | 'dressing' | 'medication' | 'ward_admission';
   patientName: string;
   patientId: string;
   personalNumber: string;
@@ -36,6 +37,7 @@ interface Procedure {
   orderedBy: string;
   priority: 'Emergency' | 'High' | 'Medium' | 'Low';
   allergies: string[];
+  description?: string;
   // Type-specific details
   details: {
     // Injection
@@ -70,6 +72,7 @@ const getTypeConfig = (type: string) => {
     'injection': { icon: Syringe, color: 'text-emerald-500', bgColor: 'bg-emerald-500/10 border-emerald-500/30', label: 'Injection' },
     'dressing': { icon: Bandage, color: 'text-violet-500', bgColor: 'bg-violet-500/10 border-violet-500/30', label: 'Dressing' },
     'medication': { icon: Pill, color: 'text-blue-500', bgColor: 'bg-blue-500/10 border-blue-500/30', label: 'Medication' },
+    'ward_admission': { icon: DoorOpen, color: 'text-amber-500', bgColor: 'bg-amber-500/10 border-amber-500/30', label: 'Ward Admission' },
   };
   return configs[type] || configs['medication'];
 };
@@ -87,16 +90,18 @@ const getTimeSince = (dateString: string) => {
 // ==================== MAIN COMPONENT ====================
 export default function ProceduresQueuePage() {
   const [procedures, setProcedures] = useState<Procedure[]>([]);
+  const [wards, setWards] = useState<any[]>([]);
+  const [wardSearch, setWardSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [authError, setAuthError] = useState<unknown | null>(null);
   useAuthRedirect(authError);
+  const { currentUser } = useCurrentUser();
   const [searchQuery, setSearchQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
   const [priorityFilter, setPriorityFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('all');
   const [genderFilter, setGenderFilter] = useState('all');
-  const [isRefreshing, setIsRefreshing] = useState(false);
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -111,16 +116,33 @@ export default function ProceduresQueuePage() {
   const [injectionForm, setInjectionForm] = useState({ site: '', batchNumber: '', expiryDate: '', manufacturer: '', notes: '' });
   const [dressingForm, setDressingForm] = useState({ dressingType: '', woundCondition: '', woundSize: '', drainage: '', painLevel: '', skinCondition: '', observations: '' });
   const [medicationForm, setMedicationForm] = useState({ site: '', notes: '' });
+  const [wardAdmissionForm, setWardAdmissionForm] = useState({ notes: '' });
   
-  // Load nursing orders from API
+  // Load nursing orders and wards from API
   useEffect(() => {
-    const loadOrders = async () => {
+    const loadData = async () => {
       try {
         setLoading(true);
         setError(null);
+
+        // Load wards for admission procedures
+        try {
+          const wardsResponse = await wardService.getWards({ status: 'active' });
+          setWards(wardsResponse.results || []);
+        } catch (wardError) {
+          console.warn('Could not load wards, using fallback:', wardError);
+          // Fallback wards if API fails
+          setWards([
+            { id: 8, ward_code: 'FEMALE-MED', name: 'Female Medical Ward', total_beds: 5, available_beds: 3 },
+            { id: 9, ward_code: 'MALE-MED', name: 'Male Medical Ward', total_beds: 5, available_beds: 2 },
+            { id: 10, ward_code: 'SURGICAL', name: 'Surgical Ward', total_beds: 10, available_beds: 7 },
+            { id: 11, ward_code: 'PEDIATRIC', name: 'Pediatric Ward', total_beds: 8, available_beds: 5 },
+            { id: 12, ward_code: 'MATERNITY', name: 'Maternity Ward', total_beds: 6, available_beds: 3 },
+          ]);
+        }
         
         // Fetch pending nursing orders
-        const ordersResult = await apiFetch<{ results: any[] }>('/nursing/orders/?status=pending&page_size=1000');
+        const ordersResult = await apiFetch<{ results: any[] }>('/orders/?status=pending&page_size=1000');
         const orders = ordersResult.results || [];
         
         // Transform orders to procedures format
@@ -151,8 +173,9 @@ export default function ProceduresQueuePage() {
               'dressing': 'dressing',
               'wound_care': 'dressing',
               'medication': 'medication',
+              'ward admission': 'ward_admission',
             };
-            
+
             const procedureType = typeMap[order.order_type?.toLowerCase()] || 'medication';
             
             // Map backend priority to frontend priority
@@ -196,6 +219,13 @@ export default function ProceduresQueuePage() {
               details.instructions = instructions || description;
             }
             
+            // Extract ward name for ward admission orders
+            let wardName = '';
+            if (procedureType === 'ward_admission') {
+              const wardMatch = description.match(/Ward admission to ([^.]+)\./);
+              wardName = wardMatch ? wardMatch[1] : '';
+            }
+
             return {
               id: String(order.id),
               type: procedureType,
@@ -204,7 +234,7 @@ export default function ProceduresQueuePage() {
               personalNumber: patient.personal_number || '',
               age: patient.age || 0,
               gender: patient.gender || '',
-              ward: '',
+              ward: wardName,
               orderedAt: order.ordered_at,
               orderedBy: order.ordered_by_name || 'Unknown',
               priority: priorityMap[order.priority] || 'Medium',
@@ -241,6 +271,7 @@ export default function ProceduresQueuePage() {
     injections: procedures.filter(p => p.type === 'injection').length,
     dressings: procedures.filter(p => p.type === 'dressing').length,
     medications: procedures.filter(p => p.type === 'medication').length,
+    wardAdmissions: procedures.filter(p => p.type === 'ward_admission').length,
   }), [procedures]);
 
   // ==================== FILTERING & SORTING ====================
@@ -299,7 +330,7 @@ export default function ProceduresQueuePage() {
   // ==================== HANDLERS ====================
   const loadOrders = async () => {
     try {
-      const ordersResult = await apiFetch<{ results: any[] }>('/nursing/orders/?status=pending&page_size=1000');
+      const ordersResult = await apiFetch<{ results: any[] }>('/orders/?status=pending&page_size=1000');
       const orders = ordersResult.results || [];
       
           const transformedProcedures = await Promise.all(orders.map(async (order: any) => {
@@ -398,17 +429,6 @@ export default function ProceduresQueuePage() {
     }
   };
   
-  const handleRefresh = async () => {
-    setIsRefreshing(true);
-    try {
-      await loadOrders();
-      toast.success('Queue refreshed');
-    } catch (err) {
-      toast.error('Failed to refresh queue');
-    } finally {
-      setIsRefreshing(false);
-    }
-  };
 
   const openPerformDialog = (procedure: Procedure) => {
     setSelectedProcedure(procedure);
@@ -431,10 +451,16 @@ export default function ProceduresQueuePage() {
         'injection': 'injection',
         'dressing': 'dressing',
         'medication': 'other',
+        'ward_admission': 'ward_admission',
       };
       
-      // Get patient ID from procedure
-      const patientId = parseInt(selectedProcedure.patientId) || parseInt(selectedProcedure.id);
+      // Get the correct patient database ID (needed for all procedures)
+      const patientsResponse = await apiFetch<{ results: any[] }>(`/patients/?patient_id=${selectedProcedure.patientId}`);
+      const patients = patientsResponse.results || [];
+      if (patients.length === 0) {
+        throw new Error('Patient not found. Cannot complete procedure.');
+      }
+      const patientDbId = patients[0].id;
       
       // Create procedure record with all form data
       let description = '';
@@ -483,6 +509,69 @@ export default function ProceduresQueuePage() {
         ].filter(Boolean).join(' | ');
         
         notes = dressingNotes || dressingForm.observations || '';
+      } else if (selectedProcedure.type === 'ward_admission') {
+        // For ward admissions, create both procedure record and admission record
+        const wardName = selectedProcedure.ward || 'Female Medical Ward';
+        description = `Ward Admission: Admitted to ${wardName}`;
+        notes = wardAdmissionForm.notes || 'Patient admitted to ward';
+
+        // Get ward ID by ward code
+        const ward = wards.find(w => w.ward_code === wardName);
+        const wardId = ward ? ward.id : 8; // Default to Female Medical Ward ID
+
+        // Get patient's current visit (required for admission)
+
+        const visitsResponse = await apiFetch<{ results: any[] }>(`/visits/?patient=${patientDbId}&status=in_progress`);
+        const activeVisits = visitsResponse.results || [];
+        if (activeVisits.length === 0) {
+          throw new Error('Patient has no active visit. Cannot create admission.');
+        }
+        const visitId = activeVisits[0].id;
+
+        // Check if patient is already admitted before creating admission
+        try {
+          const existingAdmissions = await apiFetch<{ results: any[] }>(`/admissions/?patient=${patientDbId}&status=admitted`);
+          const admissions = existingAdmissions.results || [];
+          if (admissions.length > 0) {
+            throw new Error(`Patient is already admitted to ward. Please discharge first.`);
+          }
+        } catch (error: any) {
+          if (error.message.includes('already admitted')) {
+            throw error;
+          }
+          console.warn('Could not check existing admissions:', error);
+        }
+
+        // Create admission record
+        const admissionData = {
+          patient: patientDbId,
+          visit: visitId,
+          ward: wardId,
+          admission_type: 'elective', // Could be made configurable
+          admitting_doctor: null, // Will be set by doctor later when they see patient
+          admission_diagnosis: wardAdmissionForm.notes || `Ward admission ordered by ${selectedProcedure.orderedBy}`,
+          presenting_complaint: `Ward admission ordered by ${selectedProcedure.orderedBy}`,
+          admission_notes: `Admitted to ${wardName}. ${wardAdmissionForm.notes || ''}`.trim(),
+          created_by: currentUser?.id, // Nurse who performed the admission
+        };
+        console.log('Creating admission record with data:', admissionData);
+        try {
+          const admissionResponse = await apiFetch('/admissions/', {
+            method: 'POST',
+            body: JSON.stringify(admissionData),
+          });
+          console.log('Admission created:', admissionResponse);
+        } catch (admissionError: any) {
+          console.error('Admission creation failed:', admissionError);
+          // Try to get more details about the error
+          try {
+            const errorDetails = await admissionError.response?.text();
+            console.error('Admission error details:', errorDetails);
+          } catch (e) {
+            console.error('Could not get error details');
+          }
+          throw admissionError;
+        }
       } else {
         // Medication
         const medicationDetails = [
@@ -490,39 +579,57 @@ export default function ProceduresQueuePage() {
           selectedProcedure.details.route && `Route: ${selectedProcedure.details.route}`,
           selectedProcedure.details.scheduledTime && `Scheduled: ${selectedProcedure.details.scheduledTime}`,
         ].filter(Boolean).join(' • ');
-        
+
         description = `Medication: ${medicationDetails}`;
-        
+
         const medicationNotes = [
           medicationForm.site && `Site: ${medicationForm.site}`,
           medicationForm.notes && `Notes: ${medicationForm.notes}`,
         ].filter(Boolean).join(' | ');
-        
+
         notes = medicationNotes || medicationForm.notes || '';
       }
       
       const procedureData: any = {
-        patient: patientId,
+        patient: patientDbId,  // Use correct patient database ID
+        nursing_order: orderId,  // Link to the original nursing order
         procedure_type: typeMap[selectedProcedure.type] || 'other',
         description,
-        site: injectionForm.site || medicationForm.site || '',
+        site: selectedProcedure.type === 'ward_admission' ? '' : (injectionForm.site || medicationForm.site || ''),
         notes,
+        performed_by: currentUser?.id ? Number(currentUser.id) : null,  // Add the nurse who performed it
       };
       
       // Create procedure
-      await apiFetch('/nursing/procedures/', {
-        method: 'POST',
-        body: JSON.stringify(procedureData),
-      });
-      
+      console.log('Creating procedure with data:', procedureData);
+      try {
+        const procedureResponse = await apiFetch('/procedures/', {
+          method: 'POST',
+          body: JSON.stringify(procedureData),
+        });
+        console.log('Procedure created:', procedureResponse);
+      } catch (procedureError: any) {
+        console.error('Procedure creation failed:', procedureError);
+        try {
+          const errorDetails = await procedureError.response?.text();
+          console.error('Procedure error details:', errorDetails);
+        } catch (e) {
+          console.error('Could not get procedure error details');
+        }
+        throw procedureError;
+      }
+
       // Update order status to completed
-      await apiFetch(`/nursing/orders/${orderId}/`, {
+      console.log('Updating order status for orderId:', orderId);
+      const orderResponse = await apiFetch(`/orders/${orderId}/`, {
         method: 'PATCH',
         body: JSON.stringify({ status: 'completed' }),
       });
-      
+      console.log('Order updated:', orderResponse);
+
       // Remove from local state
       setProcedures(prev => prev.filter(p => p.id !== selectedProcedure.id));
+      console.log('Removed from local state, procedure ID:', selectedProcedure.id);
       
       const typeLabel = getTypeConfig(selectedProcedure.type).label;
       toast.success(`${typeLabel} completed for ${selectedProcedure.patientName}`, {
@@ -543,6 +650,7 @@ export default function ProceduresQueuePage() {
     setInjectionForm({ site: '', batchNumber: '', expiryDate: '', manufacturer: '', notes: '' });
     setDressingForm({ dressingType: '', woundCondition: '', woundSize: '', drainage: '', painLevel: '', skinCondition: '', observations: '' });
     setMedicationForm({ site: '', notes: '' });
+    setWardAdmissionForm({ notes: '' });
   };
 
   // ==================== RENDER ====================
@@ -560,22 +668,10 @@ export default function ProceduresQueuePage() {
             </h1>
             <p className="text-muted-foreground mt-1">All pending procedures ordered by doctors</p>
           </div>
-          <div className="flex items-center gap-2">
-            <Link href="/nursing/procedures/history">
-              <Button variant="outline">
-                <History className="h-4 w-4 mr-2" />
-                View History
-              </Button>
-            </Link>
-            <Button variant="outline" onClick={handleRefresh} disabled={isRefreshing}>
-              <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
-              Refresh
-            </Button>
-          </div>
         </div>
 
         {/* Stats Row */}
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
           <Card className={`${stats.total > 0 ? 'bg-gradient-to-br from-rose-500/10 to-pink-500/10 border-rose-500/20' : ''}`}>
             <CardContent className="p-4 text-center">
               <p className="text-xs text-muted-foreground uppercase tracking-wider">Pending</p>
@@ -615,6 +711,15 @@ export default function ProceduresQueuePage() {
               <div>
                 <p className="text-xs text-muted-foreground">Medications</p>
                 <p className="text-xl font-bold text-blue-500">{stats.medications}</p>
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-4 flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-cyan-500/10"><Building2 className="h-4 w-4 text-cyan-500" /></div>
+              <div>
+                <p className="text-xs text-muted-foreground">Ward Admits</p>
+                <p className="text-xl font-bold text-cyan-500">{stats.wardAdmissions}</p>
               </div>
             </CardContent>
           </Card>
@@ -731,7 +836,9 @@ export default function ProceduresQueuePage() {
                               }`}
                             >
                               <TypeIcon className="h-3 w-3 mr-1" />
-                              {procedure.type === 'injection' ? 'Give' : procedure.type === 'dressing' ? 'Do' : 'Give'}
+                              {procedure.type === 'injection' ? 'Give' :
+                               procedure.type === 'dressing' ? 'Do' :
+                               procedure.type === 'ward_admission' ? 'Admit' : 'Give'}
                             </Button>
                           </div>
                         </div>
@@ -815,6 +922,12 @@ export default function ProceduresQueuePage() {
                     <>
                       <p className="font-medium text-foreground">{selectedProcedure.details.medication}</p>
                       <p className="text-sm text-muted-foreground">{selectedProcedure.details.route} • Scheduled: {selectedProcedure.details.scheduledTime}</p>
+                    </>
+                  )}
+                  {selectedProcedure.type === 'ward_admission' && (
+                    <>
+                      <p className="font-medium text-foreground">Ward Admission</p>
+                      <p className="text-sm text-muted-foreground">{selectedProcedure.description}</p>
                     </>
                   )}
                 </div>
@@ -945,6 +1058,20 @@ export default function ProceduresQueuePage() {
                     <div className="space-y-2">
                       <Label>Notes</Label>
                       <Textarea value={medicationForm.notes} onChange={(e) => setMedicationForm(p => ({ ...p, notes: e.target.value }))} placeholder="Any observations..." rows={2} />
+                    </div>
+                  </div>
+                )}
+
+                {selectedProcedure.type === 'ward_admission' && (
+                  <div className="space-y-4">
+                    <div className="p-4 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
+                      <p className="text-sm text-amber-700 dark:text-amber-300">
+                        Admit patient to ward as ordered by doctor. This will create the admission record and assign a bed.
+                      </p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Admission Notes</Label>
+                      <Textarea value={wardAdmissionForm.notes} onChange={(e) => setWardAdmissionForm(p => ({ ...p, notes: e.target.value }))} placeholder="Admission notes (vitals, observations, bed assignment)..." rows={3} />
                     </div>
                   </div>
                 )}

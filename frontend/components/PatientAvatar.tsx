@@ -15,16 +15,17 @@ export function PatientAvatar({ name, photoUrl, size = 'md', className = '' }: P
     md: 'w-10 h-10 text-sm',
     lg: 'w-16 h-16 text-xl'
   };
-  
-  const initials = name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
+
+  const safeName = name || 'UP';
+  const initials = safeName.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
   const fullPhotoUrl = photoUrl ? getPhotoUrl(photoUrl) : null;
   
   if (fullPhotoUrl) {
     return (
       <div className={`${sizeClasses[size]} rounded-full overflow-hidden bg-muted flex-shrink-0 ${className}`}>
-        <img 
-          src={fullPhotoUrl} 
-          alt={name}
+        <img
+          src={fullPhotoUrl}
+          alt={safeName}
           className="w-full h-full object-cover"
           onError={(e) => {
             // Fallback to initials if image fails to load

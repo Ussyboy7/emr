@@ -135,10 +135,7 @@ class AdminService {
     if (data.clinic !== undefined) createData.clinic = data.clinic;
     if (data.department !== undefined) createData.department = data.department;
     if (data.is_active !== undefined) createData.is_active = data.is_active;
-    if ((data as any).specialty) createData.specialty = (data as any).specialty;
-    if ((data as any).license_number) createData.license_number = (data as any).license_number;
-    if ((data as any).license_expiry) createData.license_expiry = (data as any).license_expiry;
-    if ((data as any).qualification) createData.qualification = (data as any).qualification;
+    if ((data as any).employee_id) createData.employee_id = (data as any).employee_id;
     
     return apiFetch<User>('/accounts/users/', {
       method: 'POST',
@@ -161,10 +158,7 @@ class AdminService {
     if (data.department !== undefined) updateData.department = data.department;
     // Note: is_active may not be in UserUpdateSerializer - would need backend update
     if (data.is_active !== undefined) updateData.is_active = data.is_active;
-    if ((data as any).specialty !== undefined) updateData.specialty = (data as any).specialty;
-    if ((data as any).license_number !== undefined) updateData.license_number = (data as any).license_number;
-    if ((data as any).license_expiry !== undefined) updateData.license_expiry = (data as any).license_expiry;
-    if ((data as any).qualification !== undefined) updateData.qualification = (data as any).qualification;
+    if ((data as any).employee_id !== undefined) updateData.employee_id = (data as any).employee_id;
     
     return apiFetch<User>(`/accounts/users/${userId}/`, {
       method: 'PATCH',
@@ -267,21 +261,21 @@ class AdminService {
     page_size?: number;
   }): Promise<{ results: Clinic[]; count: number }> {
     const query = buildQueryString(params || {});
-    return apiFetch<{ results: Clinic[]; count: number }>(`/organization/organization/clinics/${query}`);
+    return apiFetch<{ results: Clinic[]; count: number }>(`/organization/clinics/${query}`);
   }
 
   /**
    * Get a single clinic
    */
   async getClinic(clinicId: number): Promise<Clinic> {
-    return apiFetch<Clinic>(`/organization/organization/clinics/${clinicId}/`);
+    return apiFetch<Clinic>(`/organization/clinics/${clinicId}/`);
   }
 
   /**
    * Create a new clinic
    */
   async createClinic(data: Partial<Clinic>): Promise<Clinic> {
-    return apiFetch<Clinic>('/organization/organization/clinics/', {
+    return apiFetch<Clinic>('/organization/clinics/', {
       method: 'POST',
       body: JSON.stringify(data),
     });
@@ -291,7 +285,7 @@ class AdminService {
    * Update a clinic
    */
   async updateClinic(clinicId: number, data: Partial<Clinic>): Promise<Clinic> {
-    return apiFetch<Clinic>(`/organization/organization/clinics/${clinicId}/`, {
+    return apiFetch<Clinic>(`/organization/clinics/${clinicId}/`, {
       method: 'PATCH',
       body: JSON.stringify(data),
     });
@@ -301,7 +295,7 @@ class AdminService {
    * Delete a clinic
    */
   async deleteClinic(clinicId: number): Promise<void> {
-    return apiFetch<void>(`/organization/organization/clinics/${clinicId}/`, {
+    return apiFetch<void>(`/organization/clinics/${clinicId}/`, {
       method: 'DELETE',
     });
   }
@@ -317,21 +311,21 @@ class AdminService {
     page_size?: number;
   }): Promise<{ results: Department[]; count: number }> {
     const query = buildQueryString(params || {});
-    return apiFetch<{ results: Department[]; count: number }>(`/organization/organization/departments/${query}`);
+    return apiFetch<{ results: Department[]; count: number }>(`/organization/departments/${query}`);
   }
 
   /**
    * Get a single department
    */
   async getDepartment(deptId: number): Promise<Department> {
-    return apiFetch<Department>(`/organization/organization/departments/${deptId}/`);
+    return apiFetch<Department>(`/organization/departments/${deptId}/`);
   }
 
   /**
    * Create a new department
    */
   async createDepartment(data: Partial<Department>): Promise<Department> {
-    return apiFetch<Department>('/organization/organization/departments/', {
+    return apiFetch<Department>('/organization/departments/', {
       method: 'POST',
       body: JSON.stringify(data),
     });
@@ -341,7 +335,7 @@ class AdminService {
    * Update a department
    */
   async updateDepartment(deptId: number, data: Partial<Department>): Promise<Department> {
-    return apiFetch<Department>(`/organization/organization/departments/${deptId}/`, {
+    return apiFetch<Department>(`/organization/departments/${deptId}/`, {
       method: 'PATCH',
       body: JSON.stringify(data),
     });
@@ -361,14 +355,14 @@ class AdminService {
     page_size?: number;
   }): Promise<{ results: any[]; count: number }> {
     const query = buildQueryString(params || {});
-    return apiFetch<{ results: any[]; count: number }>(`/organization/organization/rooms/${query}`);
+    return apiFetch<{ results: any[]; count: number }>(`/organization/rooms/${query}`);
   }
 
   /**
    * Delete a department
    */
   async deleteDepartment(deptId: number): Promise<void> {
-    return apiFetch<void>(`/organization/organization/departments/${deptId}/`, {
+    return apiFetch<void>(`/organization/departments/${deptId}/`, {
       method: 'DELETE',
     });
   }
@@ -384,6 +378,8 @@ class AdminService {
     result?: string;
     severity?: string;
     search?: string;
+    date_from?: string;
+    date_to?: string;
     page?: number;
     page_size?: number;
   }): Promise<{ results: AuditLog[]; count: number }> {

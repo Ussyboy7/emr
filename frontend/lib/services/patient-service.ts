@@ -3,6 +3,50 @@
  */
 import { apiFetch, buildQueryString } from '../api-client';
 
+/**
+ * Safely validates and sanitizes patient data for rendering
+ * Prevents "Objects are not valid as a React child" errors
+ */
+export function sanitizePatientForRendering(patient: any): any {
+  if (!patient || typeof patient !== 'object') {
+    console.error('Invalid patient object received:', patient);
+    throw new Error('Invalid patient data received from API');
+  }
+
+  // Ensure all required fields are proper types to prevent React rendering errors
+  return {
+    id: String(patient.id || ''),
+    visitId: String(patient.visitId || ''),
+    patientId: String(patient.patient_id || patient.patientId || ''),
+    name: String(patient.full_name || patient.name || `${patient.first_name || ''} ${patient.surname || ''}`.trim() || 'Unknown Patient'),
+    age: typeof patient.age === 'number' ? patient.age : parseInt(String(patient.age || '0')) || 0,
+    gender: String(patient.gender || ''),
+    mrn: String(patient.patient_id || patient.mrn || ''),
+    personalNumber: String(patient.personal_number || ''),
+    allergies: Array.isArray(patient.allergies)
+      ? patient.allergies.map((a: any) => String(a).trim()).filter((a: string) => a)
+      : (patient.allergies ? String(patient.allergies).split(/[,\n]/).map((a: string) => a.trim()).filter((a: string) => a) : []),
+    waitTime: typeof patient.waitTime === 'number' ? patient.waitTime : 0,
+    vitalsCompleted: Boolean(patient.vitalsCompleted),
+    priority: patient.priority || 'Normal',
+    visitDate: String(patient.visitDate || ''),
+    visitTime: String(patient.visitTime || ''),
+    queuePosition: typeof patient.queuePosition === 'number' ? patient.queuePosition : 0,
+    bloodGroup: patient.blood_group ? String(patient.blood_group) : undefined,
+    genotype: patient.genotype ? String(patient.genotype) : undefined,
+    employeeType: patient.employee_type ? String(patient.employee_type) : undefined,
+    division: patient.division ? String(patient.division) : undefined,
+    location: patient.location ? String(patient.location) : undefined,
+    phone: patient.phone ? String(patient.phone) : undefined,
+    email: patient.email ? String(patient.email) : undefined,
+    occupation: patient.occupation ? String(patient.occupation) : undefined,
+    religion: patient.religion ? String(patient.religion) : undefined,
+    tribe: patient.tribe ? String(patient.tribe) : undefined,
+    photo: patient.photo || null,
+    vitals: patient.vitals || undefined,
+  };
+}
+
 export interface Patient {
   id: number;
   patient_id: string;
@@ -21,6 +65,7 @@ export interface Patient {
   occupation?: string;
   photo?: string;
   personal_number?: string;
+  employee_id?: string;
   employee_type?: string;
   division?: string;
   location?: string;
@@ -61,7 +106,6 @@ export interface Visit {
   location?: string;
   doctor?: number;
   doctor_name?: string;
-  chief_complaint?: string;
   clinical_notes?: string;
 }
 
@@ -148,8 +192,16 @@ class PatientService {
   /**
    * Get patient vitals
    */
-  async getPatientVitals(patientId: number): Promise<VitalReading[]> {
-    return apiFetch<VitalReading[]>(`/patients/${patientId}/vitals/`);
+  async getPatientVitals(patientId: number, visitId?: number): Promise<VitalReading[]> {
+    const params = new URLSearchParams({
+      patient: patientId.toString(),
+      page_size: '100'
+    });
+    if (visitId) {
+      params.append('visit', visitId.toString());
+    }
+    const response = await apiFetch<{ results: VitalReading[]; count: number }>(`/vitals/?${params.toString()}`);
+    return response.results || [];
   }
 
   /**
@@ -166,6 +218,14 @@ class PatientService {
     return apiFetch<any>(`/patients/${patientId}/update_history/`, {
       method: 'PATCH',
       body: JSON.stringify(data),
+    });
+  }
+
+  async uploadPatientPhoto(patientId: number, formData: FormData): Promise<Patient> {
+    return apiFetch<Patient>(`/patients/patients/${patientId}/upload_photo/`, {
+      method: 'POST',
+      body: formData,
+      headers: {}, // Let browser set Content-Type for FormData
     });
   }
 }

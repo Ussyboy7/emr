@@ -8,6 +8,7 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 
 from .models import NursingOrder, Procedure
 from .serializers import NursingOrderSerializer, ProcedureSerializer
+from audit.services import AuditService
 
 
 class NursingOrderViewSet(viewsets.ModelViewSet):
@@ -16,16 +17,29 @@ class NursingOrderViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     serializer_class = NursingOrderSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['patient', 'ordered_by', 'status', 'priority', 'order_type']
+    filterset_fields = ['patient', 'ordered_by', 'status', 'priority', 'order_type', 'consultation_session', 'visit']
     search_fields = ['order_id', 'description']
     ordering_fields = ['ordered_at']
     ordering = ['-ordered_at']
     
     def get_queryset(self):
-        return NursingOrder.objects.all().select_related('patient', 'ordered_by', 'visit', 'created_by')
+        return NursingOrder.objects.all().select_related('patient', 'ordered_by', 'visit', 'consultation_session', 'created_by')
     
     def perform_create(self, serializer):
-        serializer.save(created_by=self.request.user)
+        order = serializer.save(created_by=self.request.user)
+        
+        # Log audit
+        AuditService.log_activity(
+            user=self.request.user,
+            action='create',
+            object_type='nursing_order',
+            object_id=str(order.id),
+            module='nursing',
+            object_repr=f'Nursing Order {order.order_id}',
+            description=f'Created nursing order {order.order_id} for patient {order.patient.get_full_name()}',
+            new_values={'order_id': order.order_id, 'order_type': order.order_type, 'priority': order.priority, 'patient_id': str(order.patient.id)},
+            request=self.request,
+        )
 
 
 class ProcedureViewSet(viewsets.ModelViewSet):
@@ -43,5 +57,18 @@ class ProcedureViewSet(viewsets.ModelViewSet):
         return Procedure.objects.all().select_related('patient', 'nursing_order', 'visit', 'performed_by')
     
     def perform_create(self, serializer):
-        serializer.save(performed_by=self.request.user)
+        procedure = serializer.save(performed_by=self.request.user)
+        
+        # Log audit
+        AuditService.log_activity(
+            user=self.request.user,
+            action='create',
+            object_type='procedure',
+            object_id=str(procedure.id),
+            module='nursing',
+            object_repr=f'Procedure {procedure.procedure_id}',
+            description=f'Created procedure {procedure.procedure_id} for patient {procedure.patient.get_full_name()}',
+            new_values={'procedure_id': procedure.procedure_id, 'procedure_type': procedure.procedure_type, 'patient_id': str(procedure.patient.id)},
+            request=self.request,
+        )
 

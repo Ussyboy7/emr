@@ -2,16 +2,36 @@
 Serializers for the Radiology app.
 """
 from rest_framework import serializers
-from .models import RadiologyOrder, RadiologyStudy, RadiologyReport
+from .models import RadiologyTemplate, RadiologyOrder, RadiologyStudy, RadiologyReport
+
+
+class RadiologyTemplateSerializer(serializers.ModelSerializer):
+    """Serializer for RadiologyTemplate model."""
+
+    class Meta:
+        model = RadiologyTemplate
+        fields = '__all__'
+        read_only_fields = ['created_at', 'updated_at']
 
 
 class RadiologyStudySerializer(serializers.ModelSerializer):
     """Serializer for RadiologyStudy model."""
-    
+
+    template_details = RadiologyTemplateSerializer(source='template', read_only=True)
     scheduled_by_name = serializers.CharField(source='scheduled_by.get_full_name', read_only=True, allow_null=True)
     acquired_by_name = serializers.CharField(source='acquired_by.get_full_name', read_only=True, allow_null=True)
     reported_by_name = serializers.CharField(source='reported_by.get_full_name', read_only=True, allow_null=True)
+    rejected_by_name = serializers.CharField(source='rejected_by.get_full_name', read_only=True, allow_null=True)
     verified_by_name = serializers.CharField(source='verified_by.get_full_name', read_only=True, allow_null=True)
+    report_file_url = serializers.SerializerMethodField()
+
+    def get_report_file_url(self, obj):
+        """Get the URL for the uploaded report file."""
+        if obj.report_file:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.report_file.url)
+        return None
     
     class Meta:
         model = RadiologyStudy
@@ -21,12 +41,20 @@ class RadiologyStudySerializer(serializers.ModelSerializer):
 
 class RadiologyOrderSerializer(serializers.ModelSerializer):
     """Serializer for RadiologyOrder model."""
-    
+
     patient_name = serializers.CharField(source='patient.get_full_name', read_only=True)
     patient_details = serializers.SerializerMethodField()
     doctor_name = serializers.CharField(source='doctor.get_full_name', read_only=True, allow_null=True)
     doctor_details = serializers.SerializerMethodField()
     studies = RadiologyStudySerializer(many=True, read_only=True)
+
+    # Allow writing studies during creation
+    studies_data = serializers.ListField(
+        child=serializers.DictField(),
+        write_only=True,
+        required=False,
+        help_text="List of studies to create with the order"
+    )
     
     def get_patient_details(self, obj):
         """Get patient details including age and gender."""
@@ -55,6 +83,28 @@ class RadiologyOrderSerializer(serializers.ModelSerializer):
             from common.clinic_utils import normalize_clinic_name
             return normalize_clinic_name(value)
         return value
+
+    def create(self, validated_data):
+        """Create radiology order with associated studies."""
+        studies_data = validated_data.pop('studies_data', [])
+
+        # If no doctor is specified, try to get it from consultation session
+        if not validated_data.get('doctor') and validated_data.get('consultation_session'):
+            consultation_session = validated_data['consultation_session']
+            if consultation_session.doctor:
+                validated_data['doctor'] = consultation_session.doctor
+
+        order = RadiologyOrder.objects.create(**validated_data)
+
+        # Create studies if provided
+        for study_data in studies_data:
+            RadiologyStudy.objects.create(
+                order=order,
+                images_count=0,  # Default value for required field
+                **study_data
+            )
+
+        return order
     
     class Meta:
         model = RadiologyOrder
@@ -64,7 +114,7 @@ class RadiologyOrderSerializer(serializers.ModelSerializer):
 
 class RadiologyReportSerializer(serializers.ModelSerializer):
     """Serializer for RadiologyReport model."""
-    
+
     study_details = RadiologyStudySerializer(source='study', read_only=True)
     patient_name = serializers.CharField(source='patient.get_full_name', read_only=True)
     patient_details = serializers.SerializerMethodField()
