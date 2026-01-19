@@ -65,7 +65,7 @@ export default function PatientVitalsPage() {
   useAuthRedirect(authError);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [dateFilter, setDateFilter] = useState('all');
+  const [dateFilter, setDateFilter] = useState('today');
   const [genderFilter, setGenderFilter] = useState('all');
   
   // Load patients with vitals from API

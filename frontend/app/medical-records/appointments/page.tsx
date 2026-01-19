@@ -39,7 +39,7 @@ export default function AppointmentsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
-  const [dateFilter, setDateFilter] = useState<Date | undefined>(undefined);
+  const [dateFilter, setDateFilter] = useState<Date | undefined>(new Date());
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [pageSize] = useState(10);

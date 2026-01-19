@@ -72,7 +72,7 @@ export default function ProceduresHistoryPage() {
   const [authError, setAuthError] = useState<unknown | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
-  const [dateFilter, setDateFilter] = useState('all');
+  const [dateFilter, setDateFilter] = useState('today');
   const [genderFilter, setGenderFilter] = useState('all');
   
   // Pagination state

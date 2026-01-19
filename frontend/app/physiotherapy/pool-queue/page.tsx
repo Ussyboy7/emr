@@ -65,7 +65,7 @@ export default function PhysioPoolQueuePage() {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState('pending');
-  const [dateFilter, setDateFilter] = useState('all');
+  const [dateFilter, setDateFilter] = useState('today');
 
   // Pagination
   const [currentPage, setCurrentPage] = useState(1);

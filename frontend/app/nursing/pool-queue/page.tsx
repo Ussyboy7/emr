@@ -93,7 +93,7 @@ export default function NursingPoolQueuePage() {
   useAuthRedirect(authError);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [dateFilter, setDateFilter] = useState('all');
+  const [dateFilter, setDateFilter] = useState('today');
   const [typeFilter, setTypeFilter] = useState('all');
   const [clinicFilter, setClinicFilter] = useState('all');
 

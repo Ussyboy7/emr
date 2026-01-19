@@ -244,7 +244,7 @@ export default function ConsultationHistoryPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [scopeFilter, setScopeFilter] = useState<"all" | "my">("all");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [dateFilter, setDateFilter] = useState("all");
+  const [dateFilter, setDateFilter] = useState("today");
   const [clinicFilter, setClinicFilter] = useState("all");
   const [genderFilter, setGenderFilter] = useState("all");
   const [viewMode, setViewMode] = useState<"table" | "cards">("table");

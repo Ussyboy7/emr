@@ -33,7 +33,7 @@ export default function PhysioCompletedPage() {
   useAuthRedirect(authError);
 
   const [searchQuery, setSearchQuery] = useState('');
-  const [dateFilter, setDateFilter] = useState('all');
+  const [dateFilter, setDateFilter] = useState('today');
   const [physiotherapistFilter, setPhysiotherapistFilter] = useState('all');
 
   // Pagination

@@ -42,7 +42,7 @@ export default function ReferralsManagementPage() {
   const [facilityFilter, setFacilityFilter] = useState<string>('all');
   const [urgencyFilter, setUrgencyFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [dateFilter, setDateFilter] = useState<string>('all');
+  const [dateFilter, setDateFilter] = useState<string>('today');
 
   const statusOptions = [
     { value: 'draft', label: 'Draft', color: 'bg-gray-100 text-gray-800' },

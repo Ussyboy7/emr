@@ -48,7 +48,7 @@ export default function CompletedReportsPage() {
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [dateFilter, setDateFilter] = useState('all');
+  const [dateFilter, setDateFilter] = useState('today');
   const [clinicFilter, setClinicFilter] = useState('all');
   const [genderFilter, setGenderFilter] = useState('all');
 

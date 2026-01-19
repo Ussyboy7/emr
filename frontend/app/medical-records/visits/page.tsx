@@ -52,7 +52,7 @@ export default function VisitsPage() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState('all');
   const [clinicFilter, setClinicFilter] = useState('all');
-  const [dateFilter, setDateFilter] = useState('all'); // Default to all time
+  const [dateFilter, setDateFilter] = useState('today'); // Default to today
   
   // Modal states
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
