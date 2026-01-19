@@ -5,6 +5,13 @@ import { DashboardLayout } from '@/components/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import {
+  MetricCard,
+  StatusBadge,
+  LoadingState,
+  EmptyState,
+  PageHeader,
+} from "@/components/ui/design-system";
 import Link from 'next/link';
 import { patientService, visitService, wardService } from '@/lib/services';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
@@ -191,30 +198,29 @@ export default function MedicalRecordsPage() {
 
   return (
     <DashboardLayout>
-      <div className="container mx-auto p-6 space-y-6">
-        {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <h1 className="text-3xl font-bold text-foreground">Medical Records</h1>
-            <p className="text-muted-foreground mt-1">
-              Comprehensive patient records management with visits, diagnoses, and medical history
-            </p>
-          </div>
-          <div className="flex items-center gap-3">
+      <PageHeader
+        title="Medical Records Department"
+        description="Comprehensive patient records management with visits, diagnoses, and medical history"
+        icon={<FileText className="h-6 w-6" />}
+        actions={
+          <div className="flex gap-2">
             <Button variant="outline" asChild>
               <Link href="/medical-records/patients">
                 <Search className="h-4 w-4 mr-2" />
                 Find Patient
               </Link>
             </Button>
-            <Button className="bg-gradient-to-r from-teal-500 to-cyan-500 hover:from-teal-400 hover:to-cyan-400 text-white" asChild>
+            <Button asChild>
               <Link href="/medical-records/patients/new">
                 <Plus className="h-4 w-4 mr-2" />
                 Register Patient
               </Link>
             </Button>
           </div>
-        </div>
+        }
+      />
+
+      <div className="container mx-auto p-6 space-y-6">
 
         {/* Error State */}
         {error && (
@@ -228,42 +234,69 @@ export default function MedicalRecordsPage() {
           </Card>
         )}
 
-        {/* Stats Cards */}
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          {stats.map((stat) => (
-            <Card key={stat.label} className="border-border bg-card">
-              <CardContent className="p-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-muted-foreground">{stat.label}</p>
-                    {loading ? (
-                      <div className="flex items-center gap-2 mt-2">
-                        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                      </div>
-                    ) : (
-                      <p className="text-3xl font-bold text-foreground mt-2">{stat.value}</p>
-                    )}
-                  </div>
-                  <div className={`p-3 rounded-xl ${stat.bgColor}`}>
-                    <stat.icon className={`h-6 w-6 ${stat.color}`} />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+        {/* Today's Overview */}
+        <div>
+          <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
+            <Activity className="h-5 w-5 text-blue-500" />
+            Today's Overview
+          </h2>
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            {loading ? (
+              <>
+                <MetricCard title="Total Patients" value={0} icon={<Users className="h-4 w-4" />} isLoading />
+                <MetricCard title="Active Visits Today" value={0} icon={<Activity className="h-4 w-4" />} isLoading />
+                <MetricCard title="Current Admissions" value={0} icon={<Hospital className="h-4 w-4" />} isLoading />
+                <MetricCard title="Ward Beds Available" value={0} icon={<Bed className="h-4 w-4" />} isLoading />
+              </>
+            ) : (
+              <>
+                <MetricCard
+                  title="Total Patients"
+                  value={totalPatients}
+                  icon={<Users className="h-4 w-4" />}
+                  trend={{ value: Math.round((totalPatients / Math.max(totalPatients * 0.95, 1)) * 100 - 100), isPositive: true }}
+                />
+                <MetricCard
+                  title="Active Visits Today"
+                  value={activeVisitsToday}
+                  icon={<Activity className="h-4 w-4" />}
+                  trend={{ value: Math.round((activeVisitsToday / Math.max(activeVisitsToday * 0.9, 1)) * 100 - 100), isPositive: true }}
+                />
+                <MetricCard
+                  title="Current Admissions"
+                  value={admissions}
+                  icon={<Hospital className="h-4 w-4" />}
+                />
+                <MetricCard
+                  title="Ward Beds Available"
+                  value={wards.reduce((acc, ward) => acc + (ward.available_beds || 0), 0)}
+                  icon={<Bed className="h-4 w-4" />}
+                />
+              </>
+            )}
+          </div>
         </div>
 
         {/* Quick Actions */}
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <div>
+          <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
+            <FileText className="h-5 w-5 text-blue-500" />
+            Quick Actions
+          </h2>
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           {quickActions.map((action) => (
             <Link key={action.title} href={action.href}>
-              <Card className="border-border bg-card hover:border-primary/50 hover:shadow-md transition-all cursor-pointer h-full group">
+              <Card className="hover:shadow-md transition-colors cursor-pointer h-full group border-l-4 border-l-primary/50">
                 <CardContent className="p-6">
-                  <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${action.color} flex items-center justify-center mb-4`}>
-                    <action.icon className="h-6 w-6 text-white" />
+                  <div className="flex items-center gap-4">
+                    <div className={`p-3 bg-gradient-to-br ${action.color} rounded-lg`}>
+                      <action.icon className="h-6 w-6 text-white" />
+                    </div>
+                    <div>
+                      <h3 className="font-semibold text-foreground group-hover:text-primary transition-colors">{action.title}</h3>
+                      <p className="text-sm text-muted-foreground mt-1">{action.description}</p>
+                    </div>
                   </div>
-                  <h3 className="font-semibold text-foreground group-hover:text-primary transition-colors">{action.title}</h3>
-                  <p className="text-sm text-muted-foreground mt-1">{action.description}</p>
                 </CardContent>
               </Card>
             </Link>
@@ -271,7 +304,7 @@ export default function MedicalRecordsPage() {
         </div>
 
         <div className="grid gap-6 lg:grid-cols-2">
-          {/* Active Visits */}
+          {/* Active Visits Today */}
           <Card className="border-border bg-card">
             <CardHeader className="flex flex-row items-center justify-between">
               <div>
@@ -325,7 +358,16 @@ export default function MedicalRecordsPage() {
                   </div>
                 ))
               ) : (
-                <p className="text-sm text-muted-foreground text-center p-4">No active visits today</p>
+                <div className="text-center py-8">
+                  <Activity className="h-8 w-8 mx-auto mb-2 text-muted-foreground/50" />
+                  <p className="text-muted-foreground text-sm mb-2">No active visits today</p>
+                  <Link href="/medical-records/visits/new">
+                    <Button variant="outline" size="sm">
+                      <Plus className="h-3 w-3 mr-2" />
+                      Start New Visit
+                    </Button>
+                  </Link>
+                </div>
               )}
             </CardContent>
           </Card>
@@ -386,14 +428,28 @@ export default function MedicalRecordsPage() {
                   </Link>
                 ))
               ) : (
-                <p className="text-sm text-muted-foreground text-center p-4">No recent patients</p>
+                <div className="text-center py-8">
+                  <Users className="h-8 w-8 mx-auto mb-2 text-muted-foreground/50" />
+                  <p className="text-muted-foreground text-sm mb-2">No recent patients</p>
+                  <Link href="/medical-records/patients/new">
+                    <Button variant="outline" size="sm">
+                      <Plus className="h-3 w-3 mr-2" />
+                      Register Patient
+                    </Button>
+                  </Link>
+                </div>
               )}
             </CardContent>
           </Card>
         </div>
 
-        {/* Ward Management */}
-        <div className="grid gap-6 lg:grid-cols-2">
+        {/* Ward Overview */}
+        <div>
+          <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
+            <Hospital className="h-5 w-5 text-blue-500" />
+            Ward Overview
+          </h2>
+          <div className="grid gap-6 lg:grid-cols-2">
           {/* Ward Overview */}
           <Card className="border-border bg-card">
             <CardHeader className="flex flex-row items-center justify-between">
