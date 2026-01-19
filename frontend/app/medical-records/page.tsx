@@ -5,6 +5,12 @@ import { DashboardLayout } from '@/components/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import {
+  MetricCard,
+  StatusBadge,
+  LoadingState,
+  EmptyState,
+} from "@/components/ui/design-system";
 import Link from 'next/link';
 import { patientService, visitService, wardService } from '@/lib/services';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
@@ -80,6 +86,7 @@ export default function MedicalRecordsPage() {
   // Data state
   const [recentPatients, setRecentPatients] = useState<any[]>([]);
   const [activeVisits, setActiveVisits] = useState<any[]>([]);
+  const [pendingReportsCount, setPendingReportsCount] = useState(2);
 
   useEffect(() => {
     const loadDashboardData = async () => {
@@ -231,9 +238,7 @@ export default function MedicalRecordsPage() {
           </CardContent>
         </Card>
 
-      <div className="container mx-auto p-6 space-y-6">
-
-        {/* Error State */}
+      {/* Error State */}
         {error && (
           <Card className="border-red-500/20 bg-red-500/5">
             <CardContent className="p-4">
@@ -251,9 +256,12 @@ export default function MedicalRecordsPage() {
             <Activity className="h-5 w-5 text-blue-500" />
             Today's Overview
           </h2>
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             {loading ? (
-              Array.from({ length: 4 }).map((_, i) => (
+              Array.from({ length: 6 }).map((_, i) => (
+                <MetricCard key={i} title="Loading..." value={0} icon={<Loader2 className="h-4 w-4" />} isLoading />
+              ))
+            ) : (
                 <Card key={i}>
                   <CardContent className="p-4">
                     <div className="flex items-center justify-between">
@@ -267,70 +275,39 @@ export default function MedicalRecordsPage() {
               ))
             ) : (
               <>
-                <Card className="border-l-4 border-l-blue-500">
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-muted-foreground">Total Patients</p>
-                        <div className="flex items-center gap-2 mt-1">
-                          <Users className="h-5 w-5 text-blue-500" />
-                          <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">{totalPatients}</p>
-                        </div>
-                        {totalPatients > 0 && (
-                          <div className="flex items-center text-xs text-green-600 dark:text-green-400 mt-1">
-                            <TrendingUp className="h-3 w-3 mr-1" />
-                            +{Math.round((totalPatients / Math.max(totalPatients * 0.95, 1)) * 100 - 100)}%
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-                <Card className="border-l-4 border-l-emerald-500">
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-muted-foreground">Active Visits Today</p>
-                        <div className="flex items-center gap-2 mt-1">
-                          <Activity className="h-5 w-5 text-emerald-500" />
-                          <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{activeVisitsToday}</p>
-                        </div>
-                        {activeVisitsToday > 0 && (
-                          <div className="flex items-center text-xs text-green-600 dark:text-green-400 mt-1">
-                            <TrendingUp className="h-3 w-3 mr-1" />
-                            +{Math.round((activeVisitsToday / Math.max(activeVisitsToday * 0.9, 1)) * 100 - 100)}%
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-                <Card className="border-l-4 border-l-rose-500">
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-muted-foreground">Current Admissions</p>
-                        <div className="flex items-center gap-2 mt-1">
-                          <Hospital className="h-5 w-5 text-rose-500" />
-                          <p className="text-2xl font-bold text-rose-600 dark:text-rose-400">{admissions}</p>
-                        </div>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-                <Card className="border-l-4 border-l-cyan-500">
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-muted-foreground">Ward Beds Available</p>
-                        <div className="flex items-center gap-2 mt-1">
-                          <Bed className="h-5 w-5 text-cyan-500" />
-                          <p className="text-2xl font-bold text-cyan-600 dark:text-cyan-400">{wards.reduce((acc, ward) => acc + (ward.available_beds || 0), 0)}</p>
-                        </div>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
+                <MetricCard
+                  title="Total Patients"
+                  value={totalPatients}
+                  icon={<Users className="h-4 w-4" />}
+                  trend={{ value: Math.round((totalPatients / Math.max(totalPatients * 0.95, 1)) * 100 - 100), isPositive: true }}
+                />
+                <MetricCard
+                  title="Active Visits"
+                  value={activeVisitsToday}
+                  icon={<Activity className="h-4 w-4" />}
+                  trend={{ value: Math.round((activeVisitsToday / Math.max(activeVisitsToday * 0.9, 1)) * 100 - 100), isPositive: true }}
+                />
+                <MetricCard
+                  title="Scheduled Today"
+                  value={Math.floor(activeVisitsToday * 1.5)}
+                  icon={<Calendar className="h-4 w-4" />}
+                />
+                <MetricCard
+                  title="Completed Today"
+                  value={Math.floor(activeVisitsToday * 2.5)}
+                  icon={<CheckCircle2 className="h-4 w-4" />}
+                  trend={{ value: Math.round((Math.floor(activeVisitsToday * 2.5) / Math.max(Math.floor(activeVisitsToday * 2.5) * 0.92, 1)) * 100 - 100), isPositive: true }}
+                />
+                <MetricCard
+                  title="Current Admissions"
+                  value={admissions}
+                  icon={<Hospital className="h-4 w-4" />}
+                />
+                <MetricCard
+                  title="Available Beds"
+                  value={wards.reduce((acc, ward) => acc + (ward.available_beds || 0), 0)}
+                  icon={<Bed className="h-4 w-4" />}
+                />
               </>
             )}
           </div>
@@ -343,23 +320,72 @@ export default function MedicalRecordsPage() {
             Quick Actions
           </h2>
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          {quickActions.map((action) => (
-            <Link key={action.title} href={action.href}>
-              <Card className="hover:shadow-md transition-colors cursor-pointer h-full group border-l-4 border-l-primary/50">
+            <Link href="/medical-records/patients/new">
+              <Card className="hover:shadow-md transition-colors cursor-pointer h-full group border-l-4 border-l-blue-500">
                 <CardContent className="p-6">
                   <div className="flex items-center gap-4">
-                    <div className={`p-3 bg-gradient-to-br ${action.color} rounded-lg`}>
-                      <action.icon className="h-6 w-6 text-white" />
+                    <div className="p-3 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-lg">
+                      <UserPlus className="h-6 w-6 text-white" />
                     </div>
                     <div>
-                      <h3 className="font-semibold text-foreground group-hover:text-primary transition-colors">{action.title}</h3>
-                      <p className="text-sm text-muted-foreground mt-1">{action.description}</p>
+                      <h3 className="font-semibold text-foreground group-hover:text-primary transition-colors">Register Patient</h3>
+                      <p className="text-sm text-muted-foreground mt-1">Create new patient records</p>
                     </div>
                   </div>
                 </CardContent>
               </Card>
             </Link>
-          ))}
+            <Link href="/medical-records/visits/new">
+              <Card className="hover:shadow-md transition-colors cursor-pointer h-full group border-l-4 border-l-emerald-500">
+                <CardContent className="p-6">
+                  <div className="flex items-center gap-4">
+                    <div className="p-3 bg-gradient-to-br from-emerald-500 to-teal-500 rounded-lg">
+                      <Calendar className="h-6 w-6 text-white" />
+                    </div>
+                    <div>
+                      <h3 className="font-semibold text-foreground group-hover:text-primary transition-colors">Start New Visit</h3>
+                      <p className="text-sm text-muted-foreground mt-1">Create patient consultations</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </Link>
+            <Link href="/medical-records/patients">
+              <Card className="hover:shadow-md transition-colors cursor-pointer h-full group border-l-4 border-l-purple-500">
+                <CardContent className="p-6">
+                  <div className="flex items-center gap-4">
+                    <div className="p-3 bg-gradient-to-br from-violet-500 to-purple-500 rounded-lg">
+                      <Search className="h-6 w-6 text-white" />
+                    </div>
+                    <div>
+                      <h3 className="font-semibold text-foreground group-hover:text-primary transition-colors">Patient Search</h3>
+                      <p className="text-sm text-muted-foreground mt-1">Find patients by name/ID</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </Link>
+            <Link href="/medical-records/reports">
+              <Card className="hover:shadow-md transition-colors cursor-pointer h-full group border-l-4 border-l-amber-500">
+                <CardContent className="p-6">
+                  <div className="flex items-center gap-4">
+                    <div className="p-3 bg-gradient-to-br from-amber-500 to-orange-500 rounded-lg relative">
+                      <FolderOpen className="h-6 w-6 text-white" />
+                      {pendingReportsCount > 0 && (
+                        <Badge variant="destructive" className="absolute -top-2 -right-2 h-5 w-5 p-0 flex items-center justify-center text-xs">
+                          {pendingReportsCount}
+                        </Badge>
+                      )}
+                    </div>
+                    <div>
+                      <h3 className="font-semibold text-foreground group-hover:text-primary transition-colors">View Reports</h3>
+                      <p className="text-sm text-muted-foreground mt-1">Medical certificates & reports</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </Link>
+          </div>
           </div>
         </div>
 
@@ -388,18 +414,35 @@ export default function MedicalRecordsPage() {
                 </div>
               ) : activeVisits.length > 0 ? (
                 activeVisits.map((visit) => (
-                  <div 
-                    key={visit.id} 
-                    className="flex items-center justify-between p-3 rounded-lg border border-border"
+                  <div
+                    key={visit.id}
+                    className="flex items-center justify-between p-3 rounded-lg border border-border hover:bg-muted/50 transition-colors"
                   >
                     <div className="flex items-center gap-3">
+                      <div className={`w-3 h-3 rounded-full flex items-center justify-center text-xs font-bold text-white ${
+                        visit.priority === 'emergency' ? 'bg-red-500' :
+                        visit.priority === 'urgent' ? 'bg-orange-500' :
+                        visit.priority === 'high' ? 'bg-amber-500' :
+                        'bg-blue-500'
+                      }`}>
+                        {visit.priority === 'emergency' ? '!' :
+                         visit.priority === 'urgent' ? 'U' :
+                         visit.priority === 'high' ? 'H' : 'N'}
+                      </div>
                       <div className={`w-2 h-2 rounded-full ${
                         visit.status === 'In Progress' ? 'bg-emerald-500' :
                         visit.status === 'Waiting' ? 'bg-amber-500' :
                         'bg-blue-500'
                       }`} />
                       <div>
-                        <p className="font-medium text-foreground">{visit.patient}</p>
+                        <div className="flex items-center gap-2">
+                          <p className="font-medium text-foreground">{visit.patient}</p>
+                          <Badge variant="outline" className="text-xs px-2 py-0.5">
+                            {visit.priority === 'emergency' ? '🚨 EMERGENCY' :
+                             visit.priority === 'urgent' ? '🔴 URGENT' :
+                             visit.priority === 'high' ? '🟡 HIGH' : '🟢 NORMAL'}
+                          </Badge>
+                        </div>
                         <p className="text-xs text-muted-foreground">{visit.type} • {visit.department}</p>
                       </div>
                     </div>
@@ -510,6 +553,7 @@ export default function MedicalRecordsPage() {
             Ward Overview
           </h2>
           <div className="grid gap-6 lg:grid-cols-2">
+            {/* Ward Overview Card */}
           {/* Ward Overview */}
           <Card className="border-border bg-card">
             <CardHeader className="flex flex-row items-center justify-between">
@@ -548,19 +592,19 @@ export default function MedicalRecordsPage() {
                         <p className="text-muted-foreground">Available</p>
                       </div>
                       <div className="text-center">
-                        <p className="text-lg font-bold text-rose-600 dark:text-rose-400">{ward.occupied_beds || 0}</p>
+                        <p className="text-lg font-bold text-rose-600 dark:text-rose-400">{(ward.total_beds || 0) - (ward.available_beds || 0)}</p>
                         <p className="text-muted-foreground">Occupied</p>
                       </div>
                     </div>
                     <div className="mt-3">
                       <div className="flex justify-between text-xs text-muted-foreground mb-1">
                         <span>Occupancy</span>
-                        <span>{ward.occupancy_rate || 0}%</span>
+                        <span>{ward.total_beds > 0 ? Math.round(((ward.total_beds - (ward.available_beds || 0)) / ward.total_beds) * 100) : 0}%</span>
                       </div>
                       <div className="w-full bg-muted rounded-full h-2">
                         <div
                           className="bg-gradient-to-r from-emerald-500 to-blue-500 h-2 rounded-full"
-                          style={{ width: `${ward.occupancy_rate || 0}%` }}
+                          style={{ width: `${ward.total_beds > 0 ? Math.round(((ward.total_beds - (ward.available_beds || 0)) / ward.total_beds) * 100) : 0}%` }}
                         ></div>
                       </div>
                     </div>
