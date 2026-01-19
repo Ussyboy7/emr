@@ -10,7 +10,7 @@ import Link from "next/link";
 import {
   User, Calendar, Clock, Stethoscope, TrendingUp, Activity, CheckCircle2, Users,
   ArrowRight, History, Play, BarChart3, PieChart, Loader2,
-  Pill, FlaskConical, Syringe, FileText, Timer, Bed, Hospital, AlertTriangle
+  Pill, FlaskConical, Syringe, FileText, Timer, Bed, Hospital
 } from "lucide-react";
 import { consultationService, wardService } from "@/lib/services";
 import { toast } from "sonner";
@@ -118,14 +118,6 @@ export default function DoctorDashboardPage() {
     recent_sessions: stats.recent_sessions || [],
   };
 
-  // Data quality warnings (remove in production)
-  const dataQualityIssues = [];
-  if (safeStats.month.prescriptions > safeStats.month.sessions * 3) {
-    dataQualityIssues.push("Prescription count seems unusually high compared to sessions");
-  }
-  if (safeStats.today.sessions === 0 && safeStats.week.sessions > 0) {
-    dataQualityIssues.push("Today's sessions show 0 but weekly data exists");
-  }
   
   // Safely calculate total clinic sessions with null checks
   const totalClinicSessions = safeStats.clinic_breakdown.reduce((acc: number, c: { clinic: string; count: number }) => acc + c.count, 0);
@@ -185,25 +177,6 @@ export default function DoctorDashboardPage() {
             </div>
           </CardContent>
         </Card>
-
-        {/* Data Quality Warning (Development Only) */}
-        {dataQualityIssues.length > 0 && (
-          <Card className="border-amber-200 bg-amber-50 dark:bg-amber-900/10">
-            <CardContent className="p-4">
-              <div className="flex items-center gap-2">
-                <AlertTriangle className="h-4 w-4 text-amber-600" />
-                <div>
-                  <p className="text-sm font-medium text-amber-800 dark:text-amber-200">Data Quality Notice</p>
-                  <ul className="text-xs text-amber-700 dark:text-amber-300 mt-1">
-                    {dataQualityIssues.map((issue, i) => (
-                      <li key={i}>• {issue}</li>
-                    ))}
-                  </ul>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        )}
 
         {/* Quick Stats - Today */}
         <div>
