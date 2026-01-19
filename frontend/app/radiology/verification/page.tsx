@@ -13,13 +13,15 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { radiologyService, type RadiologyReport as ApiRadiologyReport } from '@/lib/services';
+import { RADIOLOGY_VERIFICATION_POLL_INTERVAL } from '@/lib/constants/ui';
 import { PatientAvatar } from "@/components/PatientAvatar";
 import { transformPriority } from '@/lib/services/transformers';
 import {
   ShieldCheck, Search, Eye, Clock, CheckCircle2, AlertTriangle, XCircle,
-  Loader2, User, Calendar, FileText, Stethoscope, RefreshCw, ScanLine, Download
+  Loader2, User, Calendar, FileText, Stethoscope, ScanLine, Download, RefreshCw
 } from 'lucide-react';
 
 interface ImagingStudy {
@@ -102,15 +104,26 @@ const transformReport = (apiReport: any): RadiologyReport => {
       category: studyObj.modality || 'X-Ray',
       bodyPart: studyObj.body_part || '',
       contrastRequired: studyObj.procedure?.toLowerCase().includes('contrast') || false,
-      status: studyObj.status ? (studyObj.status === 'reported' ? 'Reported' : 'Verified') : 'Reported',
+      status: studyObj.status ? (
+        studyObj.status === 'reported' || studyObj.status === 'results_ready' ? 'Reported' :
+        studyObj.status === 'verified' ? 'Verified' : 'Reported'
+      ) : 'Reported',
       processingMethod: studyObj.processing_method ? (studyObj.processing_method === 'in_house' ? 'In-house' : 'Outsourced') : undefined,
       outsourcedFacility: studyObj.outsourced_facility,
       imagesCount: studyObj.images_count ? Number(studyObj.images_count) : undefined,
       findings: studyObj.findings,
       impression: studyObj.impression,
       critical: apiReport.overall_status === 'critical' || studyObj.critical || false,
+      reportFile: studyObj.report_file_url ? {
+        name: String(studyObj.report_file ? studyObj.report_file.split('/').pop() : 'Report File'),
+        type: 'application/pdf', // Assume PDF for now
+        uploadedAt: String(studyObj.reported_at || new Date().toISOString()),
+        url: String(studyObj.report_file_url)
+      } as any : undefined,
       reportedBy: studyObj.reported_by_name || (studyObj.reported_by ? String(studyObj.reported_by) : undefined),
       reportedAt: studyObj.reported_at ? String(studyObj.reported_at) : undefined,
+      verifiedBy: studyObj.verified_by_name || (studyObj.verified_by ? String(studyObj.verified_by) : undefined),
+      verifiedAt: studyObj.verified_at ? String(studyObj.verified_at) : undefined,
     },
     priority: transformPriority(apiReport.priority || 'routine') as 'Routine' | 'Urgent' | 'STAT',
     clinic,
@@ -121,18 +134,26 @@ const transformReport = (apiReport: any): RadiologyReport => {
 
 export default function RadiologyVerificationPage() {
   const [reports, setReports] = useState<RadiologyReport[]>([]);
+  const [verifiedReports, setVerifiedReports] = useState<RadiologyReport[]>([]);
   const [loading, setLoading] = useState(true);
+  const [verifiedLoading, setVerifiedLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [verifiedError, setVerifiedError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [priorityFilter, setPriorityFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('all');
   const [genderFilter, setGenderFilter] = useState('all');
-  
+
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
+  const [verifiedCurrentPage, setVerifiedCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [totalCount, setTotalCount] = useState(0);
+  const [verifiedTotalCount, setVerifiedTotalCount] = useState(0);
+
+  // Tab state
+  const [activeTab, setActiveTab] = useState('pending');
 
   // Dialog states
   const [selectedReport, setSelectedReport] = useState<RadiologyReport | null>(null);
@@ -145,11 +166,12 @@ export default function RadiologyVerificationPage() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isBatchVerifyOpen, setIsBatchVerifyOpen] = useState(false);
 
+
   // Form states
   const [verificationNotes, setVerificationNotes] = useState('');
   const [rejectionReason, setRejectionReason] = useState('');
 
-  const pendingReports = reports.filter(r => r.study.status === 'Reported');
+  const pendingReports = reports.filter(r => (r.study.status as any) === 'Reported' || (r.study.status as any) === 'Results Ready');
   
   const filteredReports = useMemo(() => pendingReports.filter(report => {
     const matchesSearch = report.patient.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -184,14 +206,73 @@ export default function RadiologyVerificationPage() {
   // Use filtered reports directly (server-side pagination when no client-side filters)
   const paginatedReports = filteredReports;
 
+  const filteredVerifiedReports = useMemo(() => verifiedReports.filter(report => {
+    const matchesSearch = report.patient.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      report.orderId.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      report.study.procedure.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesCategory = categoryFilter === 'all' || report.study.category.toLowerCase().includes(categoryFilter.toLowerCase());
+    const matchesPriority = priorityFilter === 'all' || report.priority === priorityFilter;
+    const matchesGender = genderFilter === 'all' || report.patient.gender.toLowerCase() === genderFilter.toLowerCase();
+
+    // Date filtering for verified reports
+    let matchesDate = true;
+    if (dateFilter !== 'all') {
+      const reportDate = new Date(report.study.reportedAt || '');
+      const today = new Date();
+
+      switch (dateFilter) {
+        case 'today':
+          matchesDate = reportDate.toDateString() === today.toDateString();
+          break;
+        case 'week':
+          const weekAgo = new Date(today);
+          weekAgo.setDate(weekAgo.getDate() - 7);
+          matchesDate = reportDate >= weekAgo;
+          break;
+        case 'month':
+          const monthAgo = new Date(today);
+          monthAgo.setMonth(monthAgo.getMonth() - 1);
+          matchesDate = reportDate >= monthAgo;
+          break;
+      }
+    }
+
+    return matchesSearch && matchesCategory && matchesPriority && matchesGender && matchesDate;
+  }), [verifiedReports, searchQuery, categoryFilter, priorityFilter, dateFilter, genderFilter]);
+
+  const verifiedPaginatedReports = filteredVerifiedReports.slice(
+    (verifiedCurrentPage - 1) * itemsPerPage,
+    verifiedCurrentPage * itemsPerPage
+  );
+
   // Load reports from API
   useEffect(() => {
     loadReports();
   }, [currentPage, itemsPerPage]);
 
+  // Load verified reports when verified tab is active
+  useEffect(() => {
+    if (activeTab === 'verified') {
+      loadVerifiedReports();
+    }
+  }, [activeTab, verifiedCurrentPage, itemsPerPage]);
+
+  // Auto-refresh every 45 seconds to show new reports for verification
+  useEffect(() => {
+    const interval = setInterval(() => {
+      loadReports();
+      if (activeTab === 'verified') {
+        loadVerifiedReports();
+      }
+    }, RADIOLOGY_VERIFICATION_POLL_INTERVAL); // Auto-refresh every 45 seconds
+
+    return () => clearInterval(interval);
+  }, [currentPage, itemsPerPage, activeTab, verifiedCurrentPage]);
+
   // Reset to page 1 when filters change or items per page changes
   useEffect(() => {
     setCurrentPage(1);
+    setVerifiedCurrentPage(1);
   }, [searchQuery, categoryFilter, priorityFilter, dateFilter, genderFilter, itemsPerPage]);
 
   const loadReports = async () => {
@@ -200,7 +281,7 @@ export default function RadiologyVerificationPage() {
       setError(null);
       const hasActiveFilters = searchQuery || categoryFilter !== 'all' || priorityFilter !== 'all' || dateFilter !== 'all' || genderFilter !== 'all';
       const pageSize = hasActiveFilters ? 1000 : itemsPerPage;
-      
+
       const params: any = {
         page: hasActiveFilters ? 1 : currentPage,
         page_size: pageSize,
@@ -208,7 +289,7 @@ export default function RadiologyVerificationPage() {
       if (priorityFilter !== 'all') {
         params.priority = priorityFilter.toLowerCase();
       }
-      
+
       const response = await radiologyService.getPendingVerifications(params);
       setTotalCount(response.count || response.results.length);
       const transformedReports = response.results.map(transformReport);
@@ -222,11 +303,47 @@ export default function RadiologyVerificationPage() {
     }
   };
 
+  const loadVerifiedReports = async () => {
+    try {
+      setVerifiedLoading(true);
+      setVerifiedError(null);
+      const hasActiveFilters = searchQuery || categoryFilter !== 'all' || priorityFilter !== 'all' || dateFilter !== 'all' || genderFilter !== 'all';
+      const pageSize = hasActiveFilters ? 1000 : itemsPerPage;
+
+      const params: any = {
+        status: 'verified',
+        page: hasActiveFilters ? 1 : verifiedCurrentPage,
+        page_size: pageSize,
+      };
+      if (priorityFilter !== 'all') {
+        params.priority = priorityFilter.toLowerCase();
+      }
+
+      const response = await radiologyService.getPendingVerifications(params);
+      setVerifiedTotalCount(response.count || response.results.length);
+      const transformedReports = response.results.map(transformReport);
+      setVerifiedReports(transformedReports);
+    } catch (err: any) {
+      setVerifiedError(err.message || 'Failed to load verified reports');
+      toast.error('Failed to load verified reports. Please try again.');
+      console.error('Error loading verified reports:', err);
+    } finally {
+      setVerifiedLoading(false);
+    }
+  };
+
   const stats = {
     pending: pendingReports.length,
     critical: pendingReports.filter(r => r.study.critical).length,
     urgent: pendingReports.filter(r => r.priority === 'Urgent' || r.priority === 'STAT').length,
     routine: pendingReports.filter(r => r.priority === 'Routine').length,
+  };
+
+  const verifiedStats = {
+    verified: verifiedReports.length,
+    xray: verifiedReports.filter(r => r.study.category === 'X-Ray').length,
+    ctmri: verifiedReports.filter(r => ['CT Scan', 'MRI'].includes(r.study.category)).length,
+    critical: verifiedReports.filter(r => r.study.critical).length,
   };
 
   const getCategoryBadge = (category: string) => {
@@ -248,7 +365,12 @@ export default function RadiologyVerificationPage() {
     }
   };
 
-  const formatTime = (isoString: string) => new Date(isoString).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+  const formatTime = (isoString: string) => {
+    if (!isoString) return 'Unknown time';
+    const date = new Date(isoString);
+    if (isNaN(date.getTime())) return 'Invalid date';
+    return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+  };
   const getTimeSince = (isoString: string) => {
     const diff = Date.now() - new Date(isoString).getTime();
     const mins = Math.floor(diff / 60000);
@@ -366,10 +488,7 @@ export default function RadiologyVerificationPage() {
     setSelectedIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
   };
 
-  const selectAllRoutine = () => {
-    const routineIds = filteredReports.filter(r => r.priority === 'Routine' && !r.study.critical).map(r => r.id);
-    setSelectedIds(routineIds);
-  };
+
 
   const openViewDialog = (report: RadiologyReport) => { setSelectedReport(report); setIsViewDialogOpen(true); };
   const openVerifyDialog = (report: RadiologyReport) => { setSelectedReport(report); setVerificationNotes(''); setIsVerifyDialogOpen(true); };
@@ -378,66 +497,81 @@ export default function RadiologyVerificationPage() {
   return (
     <DashboardLayout>
       <div className="container mx-auto p-6 space-y-6">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold text-foreground flex items-center gap-3">
               <ShieldCheck className="h-8 w-8 text-amber-500" />
-              Report Verification
+              Results Verification
             </h1>
-            <p className="text-muted-foreground mt-1">Senior Radiologist - Verify radiology reports before finalization</p>
+            <p className="text-muted-foreground mt-1">Senior Admin / Radiologist - Verify radiology reports before completion</p>
           </div>
           <Button variant="outline" onClick={loadReports} disabled={loading}>
             <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />Refresh
           </Button>
         </div>
 
-        {/* Stats */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <Card className="border-l-4 border-l-amber-500">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Pending Review</p>
-                  <p className="text-3xl font-bold text-amber-600 dark:text-amber-400">{stats.pending}</p>
-                </div>
-                <Clock className="h-8 w-8 text-amber-400" />
+        {/* Tabs & Filters */}
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex flex-col gap-4">
+              <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+                <TabsList>
+                  <TabsTrigger value="pending">Pending Review ({stats.pending})</TabsTrigger>
+                  <TabsTrigger value="verified">Verified ({verifiedStats.verified})</TabsTrigger>
+                  <TabsTrigger value="all">All</TabsTrigger>
+                </TabsList>
+              </Tabs>
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input placeholder="Search reports..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-10" />
               </div>
-            </CardContent>
-          </Card>
-          <Card className="border-l-4 border-l-rose-500">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Critical</p>
-                  <p className="text-3xl font-bold text-rose-600 dark:text-rose-400">{stats.critical}</p>
-                </div>
-                <AlertTriangle className="h-8 w-8 text-rose-400" />
+              <div className="flex flex-wrap gap-2">
+                <Select value={dateFilter} onValueChange={setDateFilter}>
+                  <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Time</SelectItem>
+                    <SelectItem value="today">Today</SelectItem>
+                    <SelectItem value="week">This Week</SelectItem>
+                    <SelectItem value="month">This Month</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                  <SelectTrigger className="w-[140px]"><SelectValue placeholder="Category" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Categories</SelectItem>
+                    <SelectItem value="X-Ray">X-Ray</SelectItem>
+                    <SelectItem value="CT Scan">CT Scan</SelectItem>
+                    <SelectItem value="MRI">MRI</SelectItem>
+                    <SelectItem value="Ultrasound">Ultrasound</SelectItem>
+                    <SelectItem value="Mammography">Mammography</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={priorityFilter} onValueChange={setPriorityFilter}>
+                  <SelectTrigger className="w-[130px]"><SelectValue placeholder="Priority" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Priority</SelectItem>
+                    <SelectItem value="STAT">STAT</SelectItem>
+                    <SelectItem value="Urgent">Urgent</SelectItem>
+                    <SelectItem value="Routine">Routine</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={genderFilter} onValueChange={setGenderFilter}>
+                  <SelectTrigger className="w-[120px]"><SelectValue placeholder="Gender" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Gender</SelectItem>
+                    <SelectItem value="male">Male</SelectItem>
+                    <SelectItem value="female">Female</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
-            </CardContent>
-          </Card>
-          <Card className="border-l-4 border-l-amber-500">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Urgent/STAT</p>
-                  <p className="text-3xl font-bold text-amber-600 dark:text-amber-400">{stats.urgent}</p>
-                </div>
-                <AlertTriangle className="h-8 w-8 text-amber-400" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="border-l-4 border-l-emerald-500">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Routine</p>
-                  <p className="text-3xl font-bold text-emerald-600 dark:text-emerald-400">{stats.routine}</p>
-                </div>
-                <CheckCircle2 className="h-8 w-8 text-emerald-400" />
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Tab Content */}
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+          {/* Pending Review Tab */}
+          <TabsContent value="pending" className="space-y-6">
 
         {/* Batch Actions */}
         {selectedIds.length > 0 && (
@@ -462,61 +596,6 @@ export default function RadiologyVerificationPage() {
           </Card>
         )}
 
-        {/* Filters */}
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex flex-col gap-4">
-              <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input placeholder="Search reports..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-10" />
-              </div>
-              <div className="flex flex-wrap gap-2 items-center justify-between">
-                <div className="flex flex-wrap gap-2">
-                  <Select value={dateFilter} onValueChange={setDateFilter}>
-                    <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Time</SelectItem>
-                      <SelectItem value="today">Today</SelectItem>
-                      <SelectItem value="week">This Week</SelectItem>
-                      <SelectItem value="month">This Month</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-                    <SelectTrigger className="w-[140px]"><SelectValue placeholder="Category" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Categories</SelectItem>
-                      <SelectItem value="X-Ray">X-Ray</SelectItem>
-                      <SelectItem value="CT Scan">CT Scan</SelectItem>
-                      <SelectItem value="MRI">MRI</SelectItem>
-                      <SelectItem value="Ultrasound">Ultrasound</SelectItem>
-                      <SelectItem value="Mammography">Mammography</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Select value={priorityFilter} onValueChange={setPriorityFilter}>
-                    <SelectTrigger className="w-[130px]"><SelectValue placeholder="Priority" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Priority</SelectItem>
-                      <SelectItem value="STAT">STAT</SelectItem>
-                      <SelectItem value="Urgent">Urgent</SelectItem>
-                      <SelectItem value="Routine">Routine</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Select value={genderFilter} onValueChange={setGenderFilter}>
-                    <SelectTrigger className="w-[120px]"><SelectValue placeholder="Gender" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Gender</SelectItem>
-                      <SelectItem value="male">Male</SelectItem>
-                      <SelectItem value="female">Female</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <Button variant="outline" onClick={selectAllRoutine} disabled={stats.routine === 0}>
-                Select All Routine
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
 
         {/* Reports List */}
         <div className="space-y-3">
@@ -636,6 +715,194 @@ export default function RadiologyVerificationPage() {
           </Card>
         )}
 
+          </TabsContent>
+
+          {/* Verified Tab */}
+          <TabsContent value="verified" className="space-y-6">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+              <div>
+                <h1 className="text-3xl font-bold text-foreground flex items-center gap-3">
+                  <CheckCircle2 className="h-8 w-8 text-emerald-500" />
+                  Completed Reports
+                </h1>
+                <p className="text-muted-foreground mt-1">History of verified and completed radiology reports</p>
+              </div>
+              <Button variant="outline" onClick={loadVerifiedReports} disabled={verifiedLoading}>
+                <RefreshCw className={`h-4 w-4 mr-2 ${verifiedLoading ? 'animate-spin' : ''}`} />Refresh
+              </Button>
+            </div>
+
+            {/* Stats */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <Card className="border-l-4 border-l-blue-500">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-muted-foreground">Total Completed</p>
+                      <p className="text-3xl font-bold text-blue-600 dark:text-blue-400">{verifiedStats.verified}</p>
+                    </div>
+                    <Stethoscope className="h-8 w-8 text-blue-400" />
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className="border-l-4 border-l-emerald-500">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-muted-foreground">X-Ray</p>
+                      <p className="text-3xl font-bold text-emerald-600 dark:text-emerald-400">{verifiedStats.xray}</p>
+                    </div>
+                    <CheckCircle2 className="h-8 w-8 text-emerald-400" />
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className="border-l-4 border-l-amber-500">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-muted-foreground">CT/MRI</p>
+                      <p className="text-3xl font-bold text-amber-600 dark:text-amber-400">{verifiedStats.ctmri}</p>
+                    </div>
+                    <AlertTriangle className="h-8 w-8 text-amber-400" />
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className="border-l-4 border-l-rose-500">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-muted-foreground">Critical</p>
+                      <p className="text-3xl font-bold text-rose-600 dark:text-rose-400">{verifiedStats.critical}</p>
+                    </div>
+                    <AlertTriangle className="h-8 w-8 text-rose-400" />
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
+
+            {/* Verified Reports List */}
+            <div className="space-y-3">
+              {verifiedLoading ? (
+                <Card><CardContent className="p-8 text-center text-muted-foreground">
+                  <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" />
+                  <p>Loading completed reports...</p>
+                </CardContent></Card>
+              ) : verifiedError ? (
+                <Card><CardContent className="p-8 text-center text-muted-foreground">
+                  <AlertTriangle className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                  <h3 className="text-lg font-semibold mb-2">Error Loading Reports</h3>
+                  <p className="mb-4">{verifiedError}</p>
+                  <Button variant="outline" onClick={loadVerifiedReports}>Retry</Button>
+                </CardContent></Card>
+              ) : filteredVerifiedReports.length === 0 ? (
+                <Card><CardContent className="p-8 text-center text-muted-foreground">
+                  <CheckCircle2 className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                  <h3 className="text-lg font-semibold mb-2">No completed reports found</h3>
+                  <p>Reports will appear here after verification in Orders Queue</p>
+                </CardContent></Card>
+              ) : (
+                <>
+                  {verifiedPaginatedReports.map((report) => {
+                    const verified = {
+                      date: report.study.verifiedAt ? new Date(report.study.verifiedAt).toLocaleDateString('en-US', {
+                        month: 'short',
+                        day: 'numeric'
+                      }) : 'Unknown',
+                      time: report.study.verifiedAt ? formatTime(report.study.verifiedAt) : 'Unknown'
+                    };
+
+                    return (
+                      <Card key={report.id} className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => openViewDialog(report)}>
+                        <CardContent className="p-4">
+                          <div className="flex items-center justify-between">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2">
+                                {/* Row 1: Patient Name + Badges + Actions */}
+                                <div className="flex items-center justify-between gap-2 flex-1">
+                                  <div className="flex items-center gap-2 flex-wrap min-w-0">
+                                    <PatientAvatar name={report.patient.name} size="sm" />
+                                    <span className="font-semibold text-foreground truncate">{report.patient.name}</span>
+                                    {report.study.critical && (
+                                      <Badge className="text-[10px] px-1.5 py-0 bg-rose-500 text-white">
+                                        <AlertTriangle className="h-2 w-2 mr-0.5" />Critical
+                                      </Badge>
+                                    )}
+                                    <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${getCategoryBadge(report.study.category)}`}>
+                                      <ScanLine className="h-2 w-2 mr-0.5" />{report.study.category}
+                                    </Badge>
+                                  </div>
+                                  <div className="flex items-center gap-1 flex-shrink-0">
+                                    <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openViewDialog(report)}>
+                                      <Eye className="h-4 w-4 text-muted-foreground hover:text-primary" />
+                                    </Button>
+                                    {report.study.reportFile && (
+                                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={(e) => {
+                                        e.stopPropagation();
+                                        if ((report.study.reportFile as any)?.url) {
+                                          const link = document.createElement('a');
+                                          link.href = (report.study.reportFile as any).url;
+                                          link.target = '_blank';
+                                          link.rel = 'noopener noreferrer';
+                                          document.body.appendChild(link);
+                                          link.click();
+                                          document.body.removeChild(link);
+                                        }
+                                      }}>
+                                        <Eye className="h-4 w-4 text-muted-foreground hover:text-emerald-500" />
+                                      </Button>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Row 2: Details */}
+                              <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-wrap">
+                                <span>{report.patient.age}y {report.patient.gender}</span>
+                                <span>•</span>
+                                <span>{report.orderId}</span>
+                                <span>•</span>
+                                <span>{report.study.procedure}</span>
+                                <span>•</span>
+                                <span>{verified.date} {verified.time}</span>
+                                <span>•</span>
+                                <span className="flex items-center gap-1"><Clock className="h-3 w-3" />0m</span>
+                              </div>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
+
+                  {/* Pagination for Verified */}
+                  {filteredVerifiedReports.length > 0 && (
+                    <Card className="p-4">
+                      <StandardPagination
+                        currentPage={verifiedCurrentPage}
+                        totalItems={filteredVerifiedReports.length}
+                        itemsPerPage={itemsPerPage}
+                        onPageChange={setVerifiedCurrentPage}
+                        onItemsPerPageChange={setItemsPerPage}
+                        itemName="reports"
+                      />
+                    </Card>
+                  )}
+                </>
+              )}
+            </div>
+          </TabsContent>
+
+          {/* All Tab */}
+          <TabsContent value="all" className="space-y-6">
+            <div className="text-center py-12 text-muted-foreground">
+              <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />
+              <p className="text-lg font-medium">All Reports</p>
+              <p className="text-sm">Combined view of pending and verified reports</p>
+            </div>
+          </TabsContent>
+        </Tabs>
+
         {/* View Dialog */}
         <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
           <DialogContent className="w-[95vw] sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
@@ -686,16 +953,25 @@ export default function RadiologyVerificationPage() {
                       <FileText className="h-5 w-5 text-indigo-600" />
                       <span className="text-sm">{selectedReport.study.reportFile.name}</span>
                     </div>
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
+                    <Button
+                      variant="ghost"
+                      size="sm"
                       className="text-indigo-600"
                       onClick={() => {
-                        // Note: File view/download requires backend file storage and URL
-                        toast.info('File view requires file storage integration');
+                        if ((selectedReport?.study.reportFile as any)?.url) {
+                          const link = document.createElement('a');
+                          link.href = (selectedReport.study.reportFile as any).url;
+                          link.target = '_blank';
+                          link.rel = 'noopener noreferrer';
+                          document.body.appendChild(link);
+                          link.click();
+                          document.body.removeChild(link);
+                        } else {
+                          toast.error('File URL not available');
+                        }
                       }}
                     >
-                      <Download className="h-4 w-4 mr-1" />View
+                      <Eye className="h-4 w-4 mr-1" />View
                     </Button>
                   </div>
                 )}

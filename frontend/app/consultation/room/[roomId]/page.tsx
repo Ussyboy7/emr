@@ -15,15 +15,198 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Separator } from "@/components/ui/separator";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Activity, AlertTriangle, ArrowLeft, CheckCircle, Clock, FileText, History, Loader2, MapPin, Pill, Plus, Save, Stethoscope, Syringe, TestTube, User, Users, X, Send, ScanLine, TrendingUp, TrendingDown, Minus, Building2, UserPlus, Calendar, Phone, Mail, Heart, Download, Eye, Printer, FileDown, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, ClipboardList, RefreshCw, Thermometer, CheckSquare, Square, Edit } from "lucide-react";
+import { Activity, AlertTriangle, ArrowLeft, CheckCircle, Clock, FileText, History, Loader2, MapPin, Pill, Plus, Save, Stethoscope, Syringe, TestTube, User, Users, X, Send, ScanLine, TrendingUp, TrendingDown, Minus, Building2, UserPlus, Calendar, Phone, Mail, Heart, Download, Eye, Printer, ChevronLeft, ChevronRight, ClipboardList, RefreshCw, Thermometer, Edit, DoorOpen, UserX, Wind, Zap, Scale, Search, Lightbulb, Target } from "lucide-react";
 import { toast } from "sonner";
-import { roomService, patientService, pharmacyService, labService, radiologyService, referralService, consultationService, appointmentService, type ConsultationSession } from '@/lib/services';
+import { roomService, patientService, pharmacyService, labService, radiologyService, physioService, referralService, consultationService, appointmentService, wardService, type ConsultationSession, type ICD10Code, type Diagnosis, type RadiologyReport as ServiceRadiologyReport, type VitalReading, type Prescription, type LabTemplate as ServiceLabTemplate, type Medication, type PhysioSession } from '@/lib/services';
+import { sanitizePatientForRendering } from '@/lib/services/patient-service';
+
+// Extended interface for local usage
+interface ExtendedConsultationSession extends ConsultationSession {
+  date?: string;
+  time?: string;
+  clinic?: string;
+  name?: string;
+  patientId?: string;
+  age?: number;
+  gender?: string;
+  doctorSpecialty?: string;
+  duration?: number;
+  vitals?: any[];
+  diagnoses?: any[];
+  prescriptions?: any[];
+  labOrders?: any[];
+  radiologyOrders?: any[];
+  nursingOrders?: any[];
+  followUp?: any;
+  outcome?: string;
+}
 import { apiFetch } from '@/lib/api-client';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { getPriorityLabel, getPriorityColor } from '@/lib/utils/priority';
 import { PatientAvatar } from '@/components/PatientAvatar';
 import { VitalsDetailModal } from '@/components/VitalsDetailModal';
+import { useCurrentUser } from '@/hooks/use-current-user';
+import { NPA_BRAND_NAME } from '@/lib/branding';
+import {
+  ADMINISTRATION_ROUTES,
+  INJECTION_ROUTES,
+  WOUND_TYPES,
+  DRESSING_SUPPLIES,
+  IV_FLUIDS,
+  RADIOLOGY_PROCEDURES,
+  REFERRAL_SPECIALTIES,
+  REFERRAL_FACILITIES,
+  REFERRAL_REASONS
+} from '@/lib/constants/medical-data';
+import { getOrganizationHeader, getOrganizationLabHeader, getOrganizationServicesHeader } from '@/lib/constants/organization';
+import { LARGE_PAGE_SIZE } from '@/lib/constants/ui';
+import { safeAsync, logError } from '@/lib/utils/error-handling';
+
+// ==========================================
+// UTILITY FUNCTIONS
+// ==========================================
+
+// Helper to safely access extended session properties
+const getSessionProperty = (session: ExtendedConsultationSession | null, property: keyof ExtendedConsultationSession): any[] => {
+  if (!session) return [];
+  const value = session[property];
+  return Array.isArray(value) ? value : [];
+};
+
+// Safe date formatting utility
+const formatDate = (dateString: string | undefined): string => {
+  if (!dateString) return 'N/A';
+  try {
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return 'Invalid Date';
+    return date.toLocaleDateString();
+  } catch {
+    return 'Invalid Date';
+  }
+};
+
+const formatTime = (dateString: string | undefined): string => {
+  if (!dateString) return 'N/A';
+  try {
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return 'Invalid Time';
+    return date.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+  } catch {
+    return 'Invalid Time';
+  }
+};
+
+// ==========================================
+// TYPE DEFINITIONS
+// ==========================================
+
+interface MedicationConfig {
+  id: number;
+  name: string;
+  strength: string;
+  form: string;
+  route: string;
+  dosage: string;
+  frequency: string;
+  duration: string;
+  instructions: string;
+  unit?: string;
+  durationDays?: number;
+  quantity?: number;
+  generic_name?: string;
+  genericName?: string;
+  category?: string;
+  dosageForm?: string;
+  priority?: string;
+}
+
+interface LabTemplate {
+  id: number;
+  name: string;
+  code?: string;
+  sample_type?: string;
+  description?: string;
+  tests: Array<{
+    id: number;
+    name: string;
+    unit?: string;
+    reference_range?: string;
+  }>;
+}
+
+interface WardAdmission {
+  id: number;
+  admission_id: string;
+  ward_name: string;
+  bed_number?: string;
+  admission_date: string;
+  admission_type: string;
+  status: string;
+  admission_diagnosis?: string;
+  length_of_stay?: number;
+}
+
+interface VitalsData {
+  id: string;
+  date: string;
+  time: string;
+  systolic: number;
+  diastolic: number;
+  heartRate: number;
+  temperature: number;
+  respiratoryRate: number;
+  oxygenSaturation: number;
+  weight?: number;
+  height?: number;
+  bmi?: number;
+  painScale?: number;
+  bloodSugar?: number;
+  recordedBy?: string;
+  recordedAt?: string;
+  bloodPressure?: string;
+  notes?: string;
+}
+
+interface LabTestResult {
+  id: number;
+  test_name?: string;
+  result?: string;
+  unit?: string;
+  reference_range?: string;
+  status?: string;
+  completed_at?: string;
+  rejectedBy?: string;
+  rejectedAt?: string;
+  criticalValue?: boolean;
+  date?: string;
+  category?: string;
+  test?: string;
+  specimenType?: string;
+  orderedBy?: string;
+  collectedAt?: string;
+  reportedAt?: string;
+  performedBy?: string;
+  verifiedBy?: string;
+  parameters?: any[];
+  interpretation?: string;
+  clinicalNotes?: string;
+  resultFile?: {
+    name: string;
+    url: string;
+    type: string;
+  } | null;
+  hasManualResults?: boolean;
+  hasUploadedFile?: boolean;
+}
+
+interface RadiologyReport {
+  id: number;
+  study: string;
+  result?: string;
+  status?: string;
+  reported_at?: string;
+}
 
 // Types
 interface Patient {
@@ -87,511 +270,73 @@ const frequencyToDailyDoses: Record<string, number> = {
   'STAT (Single dose)': 0, // Special case
 };
 
-const routes = ['Oral', 'Sublingual', 'Topical', 'Inhalation', 'Intramuscular (IM)', 'Intravenous (IV)', 'Subcutaneous (SC)', 'Rectal', 'Ophthalmic', 'Otic'];
-
-
-const injectionRoutes = ['Intramuscular (IM)', 'Intravenous (IV)', 'Subcutaneous (SC)', 'Intradermal (ID)'];
-
-const woundTypes = ['Laceration', 'Abrasion', 'Surgical Wound', 'Ulcer', 'Burn', 'Puncture', 'Pressure Sore', 'Diabetic Wound', 'Infected Wound', 'Post-operative'];
-
-const dressingSupplies = ['Gauze', 'Bandage', 'Adhesive Tape', 'Normal Saline', 'Povidone Iodine', 'Hydrogen Peroxide', 'Antibiotic Ointment', 'Wound Closure Strips', 'Transparent Film', 'Hydrocolloid Dressing', 'Alginate Dressing', 'Foam Dressing'];
-
-const ivFluids = [
-  { name: 'Normal Saline (0.9% NaCl)', category: 'Crystalloid' },
-  { name: 'Dextrose 5% in Water (D5W)', category: 'Dextrose' },
-  { name: 'Dextrose Saline', category: 'Dextrose' },
-  { name: 'Ringer\'s Lactate', category: 'Crystalloid' },
-  { name: 'Dextrose 10% in Water', category: 'Dextrose' },
-  { name: 'Half-Normal Saline (0.45% NaCl)', category: 'Crystalloid' },
-];
+// Medical constants are now imported from @/lib/constants/medical-data
+const injectionRoutes = INJECTION_ROUTES;
+const woundTypes = WOUND_TYPES;
+const dressingSupplies = DRESSING_SUPPLIES;
+const ivFluids = IV_FLUIDS;
 
 // Referral data
-const referralSpecialties = [
-  'Cardiology', 'Orthopedics', 'Neurology', 'Dermatology', 'ENT (Otolaryngology)',
-  'Ophthalmology', 'Psychiatry', 'Urology', 'Gastroenterology', 'Pulmonology',
-  'Nephrology', 'Endocrinology', 'Rheumatology', 'Oncology', 'Hematology',
-  'Obstetrics & Gynecology', 'Pediatrics', 'General Surgery', 'Plastic Surgery',
-  'Physiotherapy', 'Dental', 'Nutrition/Dietetics'
-];
+const referralSpecialties = REFERRAL_SPECIALTIES;
+const referralFacilities = REFERRAL_FACILITIES;
+const referralReasons = REFERRAL_REASONS;
 
-const referralFacilities = [
-  { name: 'NPA Medical Centre - Lagos', type: 'Internal' },
-  { name: 'NPA Medical Centre - Port Harcourt', type: 'Internal' },
-  { name: 'NPA Medical Centre - Calabar', type: 'Internal' },
-  { name: 'Lagos University Teaching Hospital (LUTH)', type: 'External' },
-  { name: 'Lagos State University Teaching Hospital (LASUTH)', type: 'External' },
-  { name: 'National Hospital Abuja', type: 'External' },
-  { name: 'University of Port Harcourt Teaching Hospital', type: 'External' },
-  { name: 'University College Hospital (UCH) Ibadan', type: 'External' },
-  { name: 'St. Nicholas Hospital Lagos', type: 'External' },
-  { name: 'Reddington Hospital', type: 'External' },
-  { name: 'Lagoon Hospital', type: 'External' },
-];
-
-const referralReasons = [
-  'Specialist consultation required',
-  'Advanced diagnostic workup',
-  'Surgical intervention needed',
-  'Second opinion requested',
-  'Specialized treatment/therapy',
-  'Emergency/Urgent care',
-  'Follow-up care',
-  'Rehabilitation services',
-];
-
-// ICD-10 Codes for diagnosis
-const icd10Codes = [
-  // Infectious diseases
-  { code: 'A09', name: 'Infectious gastroenteritis and colitis', category: 'Infectious' },
-  { code: 'A15.0', name: 'Tuberculosis of lung', category: 'Infectious' },
-  { code: 'B20', name: 'Human immunodeficiency virus [HIV] disease', category: 'Infectious' },
-  { code: 'B50.9', name: 'Plasmodium falciparum malaria, unspecified', category: 'Infectious' },
-  { code: 'B51.9', name: 'Plasmodium vivax malaria', category: 'Infectious' },
-  { code: 'B54', name: 'Unspecified malaria', category: 'Infectious' },
-  { code: 'J06.8', name: 'Acute upper respiratory infection, other specified', category: 'Infectious' },
-  { code: 'J18.9', name: 'Pneumonia, unspecified organism', category: 'Infectious' },
-  // Metabolic/Endocrine
-  { code: 'E10.9', name: 'Type 1 diabetes mellitus without complications', category: 'Endocrine' },
-  { code: 'E11.9', name: 'Type 2 diabetes mellitus without complications', category: 'Endocrine' },
-  { code: 'E11.65', name: 'Type 2 diabetes mellitus with hyperglycemia', category: 'Endocrine' },
-  { code: 'E03.9', name: 'Hypothyroidism, unspecified', category: 'Endocrine' },
-  { code: 'E05.90', name: 'Thyrotoxicosis, unspecified', category: 'Endocrine' },
-  { code: 'E78.0', name: 'Pure hypercholesterolemia', category: 'Endocrine' },
-  { code: 'E78.5', name: 'Hyperlipidemia, unspecified', category: 'Endocrine' },
-  // Cardiovascular
-  { code: 'I10', name: 'Essential (primary) hypertension', category: 'Cardiovascular' },
-  { code: 'I11.9', name: 'Hypertensive heart disease without heart failure', category: 'Cardiovascular' },
-  { code: 'I20.9', name: 'Angina pectoris, unspecified', category: 'Cardiovascular' },
-  { code: 'I21.9', name: 'Acute myocardial infarction, unspecified', category: 'Cardiovascular' },
-  { code: 'I25.10', name: 'Atherosclerotic heart disease', category: 'Cardiovascular' },
-  { code: 'I48.91', name: 'Atrial fibrillation, unspecified', category: 'Cardiovascular' },
-  { code: 'I50.9', name: 'Heart failure, unspecified', category: 'Cardiovascular' },
-  { code: 'I63.9', name: 'Cerebral infarction, unspecified', category: 'Cardiovascular' },
-  // Respiratory
-  { code: 'J02.9', name: 'Acute pharyngitis, unspecified', category: 'Respiratory' },
-  { code: 'J03.90', name: 'Acute tonsillitis, unspecified', category: 'Respiratory' },
-  { code: 'J06.9', name: 'Acute upper respiratory infection', category: 'Respiratory' },
-  { code: 'J20.9', name: 'Acute bronchitis, unspecified', category: 'Respiratory' },
-  { code: 'J45.909', name: 'Unspecified asthma, uncomplicated', category: 'Respiratory' },
-  { code: 'J44.9', name: 'Chronic obstructive pulmonary disease', category: 'Respiratory' },
-  // Gastrointestinal
-  { code: 'K21.0', name: 'Gastro-esophageal reflux disease with esophagitis', category: 'GI' },
-  { code: 'K25.9', name: 'Gastric ulcer, unspecified', category: 'GI' },
-  { code: 'K29.70', name: 'Gastritis, unspecified', category: 'GI' },
-  { code: 'K30', name: 'Functional dyspepsia', category: 'GI' },
-  { code: 'K52.9', name: 'Noninfective gastroenteritis and colitis', category: 'GI' },
-  { code: 'K59.00', name: 'Constipation, unspecified', category: 'GI' },
-  { code: 'K76.0', name: 'Fatty liver, not elsewhere classified', category: 'GI' },
-  // Musculoskeletal
-  { code: 'M54.5', name: 'Low back pain', category: 'Musculoskeletal' },
-  { code: 'M54.2', name: 'Cervicalgia (neck pain)', category: 'Musculoskeletal' },
-  { code: 'M25.50', name: 'Pain in unspecified joint', category: 'Musculoskeletal' },
-  { code: 'M79.3', name: 'Panniculitis, unspecified', category: 'Musculoskeletal' },
-  { code: 'M17.9', name: 'Osteoarthritis of knee', category: 'Musculoskeletal' },
-  { code: 'M10.9', name: 'Gout, unspecified', category: 'Musculoskeletal' },
-  { code: 'M94.0', name: 'Costochondritis', category: 'Musculoskeletal' },
-  // Neurological
-  { code: 'G43.909', name: 'Migraine, unspecified', category: 'Neurological' },
-  { code: 'G44.1', name: 'Vascular headache, not elsewhere classified', category: 'Neurological' },
-  { code: 'R51', name: 'Headache', category: 'Neurological' },
-  { code: 'G40.909', name: 'Epilepsy, unspecified', category: 'Neurological' },
-  { code: 'G20', name: 'Parkinson disease', category: 'Neurological' },
-  // Genitourinary
-  { code: 'N39.0', name: 'Urinary tract infection, site not specified', category: 'Genitourinary' },
-  { code: 'N40.0', name: 'Benign prostatic hyperplasia', category: 'Genitourinary' },
-  { code: 'N18.9', name: 'Chronic kidney disease, unspecified', category: 'Genitourinary' },
-  // Mental/Behavioral
-  { code: 'F32.9', name: 'Major depressive disorder, single episode', category: 'Mental' },
-  { code: 'F41.1', name: 'Generalized anxiety disorder', category: 'Mental' },
-  { code: 'F41.9', name: 'Anxiety disorder, unspecified', category: 'Mental' },
-  { code: 'G47.00', name: 'Insomnia, unspecified', category: 'Mental' },
-  // Eye
-  { code: 'H52.4', name: 'Presbyopia', category: 'Eye' },
-  { code: 'H10.9', name: 'Conjunctivitis, unspecified', category: 'Eye' },
-  { code: 'H40.9', name: 'Glaucoma, unspecified', category: 'Eye' },
-  { code: 'H25.9', name: 'Senile cataract, unspecified', category: 'Eye' },
-  // Blood
-  { code: 'D50.9', name: 'Iron deficiency anemia, unspecified', category: 'Blood' },
-  { code: 'D57.1', name: 'Sickle-cell disease without crisis', category: 'Blood' },
-  { code: 'D57.00', name: 'Sickle-cell disease with crisis', category: 'Blood' },
-  // Skin
-  { code: 'L30.9', name: 'Dermatitis, unspecified', category: 'Skin' },
-  { code: 'B35.9', name: 'Dermatophytosis, unspecified', category: 'Skin' },
-  { code: 'L50.9', name: 'Urticaria, unspecified', category: 'Skin' },
-  // Symptoms/Signs
-  { code: 'R50.9', name: 'Fever, unspecified', category: 'Symptoms' },
-  { code: 'R05', name: 'Cough', category: 'Symptoms' },
-  { code: 'R06.02', name: 'Shortness of breath', category: 'Symptoms' },
-  { code: 'R07.9', name: 'Chest pain, unspecified', category: 'Symptoms' },
-  { code: 'R10.9', name: 'Abdominal pain, unspecified', category: 'Symptoms' },
-  { code: 'R11.2', name: 'Nausea with vomiting', category: 'Symptoms' },
-  { code: 'R42', name: 'Dizziness and giddiness', category: 'Symptoms' },
-  { code: 'R53.83', name: 'Fatigue', category: 'Symptoms' },
-  // Injury
-  { code: 'S00.93', name: 'Contusion of unspecified part of head', category: 'Injury' },
-  { code: 'S61.419A', name: 'Laceration of hand', category: 'Injury' },
-  { code: 'S93.40', name: 'Sprain of ankle', category: 'Injury' },
-  // Pregnancy
-  { code: 'Z34.00', name: 'Supervision of normal first pregnancy', category: 'Pregnancy' },
-  { code: 'O09.90', name: 'Supervision of pregnancy, unspecified', category: 'Pregnancy' },
-];
+// ICD-10 Codes are now loaded from API
 
 // Radiology data
-const radiologyProcedures = [
-  { name: 'Chest X-ray (PA)', category: 'X-Ray', bodyPart: 'Chest' },
-  { name: 'Chest X-ray (Lateral)', category: 'X-Ray', bodyPart: 'Chest' },
-  { name: 'Abdominal X-ray', category: 'X-Ray', bodyPart: 'Abdomen' },
-  { name: 'Skull X-ray', category: 'X-Ray', bodyPart: 'Head' },
-  { name: 'Spine X-ray (Cervical)', category: 'X-Ray', bodyPart: 'Spine' },
-  { name: 'Spine X-ray (Lumbar)', category: 'X-Ray', bodyPart: 'Spine' },
-  { name: 'Pelvis X-ray', category: 'X-Ray', bodyPart: 'Pelvis' },
-  { name: 'Extremity X-ray', category: 'X-Ray', bodyPart: 'Limbs' },
-  { name: 'Abdominal Ultrasound', category: 'Ultrasound', bodyPart: 'Abdomen' },
-  { name: 'Pelvic Ultrasound', category: 'Ultrasound', bodyPart: 'Pelvis' },
-  { name: 'Obstetric Ultrasound', category: 'Ultrasound', bodyPart: 'Pelvis' },
-  { name: 'Thyroid Ultrasound', category: 'Ultrasound', bodyPart: 'Neck' },
-  { name: 'Breast Ultrasound', category: 'Ultrasound', bodyPart: 'Chest' },
-  { name: 'Echocardiogram (Echo)', category: 'Ultrasound', bodyPart: 'Heart' },
-  { name: 'Doppler Ultrasound (Vascular)', category: 'Ultrasound', bodyPart: 'Vessels' },
-  { name: 'CT Scan - Head', category: 'CT Scan', bodyPart: 'Head' },
-  { name: 'CT Scan - Chest', category: 'CT Scan', bodyPart: 'Chest' },
-  { name: 'CT Scan - Abdomen/Pelvis', category: 'CT Scan', bodyPart: 'Abdomen' },
-  { name: 'CT Scan - Spine', category: 'CT Scan', bodyPart: 'Spine' },
-  { name: 'MRI - Brain', category: 'MRI', bodyPart: 'Head' },
-  { name: 'MRI - Spine', category: 'MRI', bodyPart: 'Spine' },
-  { name: 'MRI - Knee', category: 'MRI', bodyPart: 'Limbs' },
-  { name: 'MRI - Shoulder', category: 'MRI', bodyPart: 'Limbs' },
-  { name: 'Mammography', category: 'Mammography', bodyPart: 'Chest' },
-  { name: 'Fluoroscopy - Barium Swallow', category: 'Fluoroscopy', bodyPart: 'GI Tract' },
-  { name: 'Fluoroscopy - Barium Enema', category: 'Fluoroscopy', bodyPart: 'GI Tract' },
-];
+const radiologyProcedures = RADIOLOGY_PROCEDURES;
 
 
-// Patient medical history will be loaded from API
-const demoPatientHistory: any = {
-  previousVisits: [
-    { id: 'V-001', date: '2024-11-15', type: 'Follow-up', clinic: 'General', doctor: 'Dr. Adebayo', diagnosis: 'Essential Hypertension (Controlled)', outcome: 'Medications refilled, follow-up in 1 month' },
-    { id: 'V-002', date: '2024-10-22', type: 'Consultation', clinic: 'General', doctor: 'Dr. Okonkwo', diagnosis: 'Costochondritis', outcome: 'Prescribed NSAIDs, symptoms resolved' },
-    { id: 'V-003', date: '2024-09-18', type: 'Emergency', clinic: 'General', doctor: 'Dr. Eze', diagnosis: 'Malaria (Plasmodium falciparum)', outcome: 'Treated with Artemether-Lumefantrine, recovered' },
-    { id: 'V-004', date: '2024-08-05', type: 'Consultation', clinic: 'Eye', doctor: 'Dr. Adamu', diagnosis: 'Presbyopia', outcome: 'Prescribed reading glasses' },
-    { id: 'V-005', date: '2024-07-12', type: 'Follow-up', clinic: 'General', doctor: 'Dr. Adebayo', diagnosis: 'Mild hypertension', outcome: 'Started on Amlodipine 5mg' },
-    { id: 'V-006', date: '2024-05-20', type: 'Consultation', clinic: 'Physiotherapy', doctor: 'Dr. Bello', diagnosis: 'Lumbar strain', outcome: 'Physiotherapy sessions, improved' },
-  ],
-  diagnoses: [
-    { code: 'I10', name: 'Essential Hypertension', status: 'Active', diagnosedDate: '2024-07-12', treatingDoctor: 'Dr. Adebayo' },
-    { code: 'H52.4', name: 'Presbyopia', status: 'Active', diagnosedDate: '2024-08-05', treatingDoctor: 'Dr. Adamu' },
-    { code: 'M54.5', name: 'Low Back Pain', status: 'Resolved', diagnosedDate: '2024-05-20', treatingDoctor: 'Dr. Bello' },
-    { code: 'B50.9', name: 'Malaria (P. falciparum)', status: 'Resolved', diagnosedDate: '2024-09-18', treatingDoctor: 'Dr. Eze' },
-  ],
-  medications: [
-    { name: 'Amlodipine 5mg', dosage: '1 tablet', frequency: 'Once daily', startDate: '2024-07-12', status: 'Active', prescribedBy: 'Dr. Adebayo' },
-    { name: 'Lisinopril 10mg', dosage: '1 tablet', frequency: 'Once daily', startDate: '2024-11-15', status: 'Active', prescribedBy: 'Dr. Adebayo' },
-    { name: 'Artemether-Lumefantrine', dosage: '4 tablets', frequency: 'Twice daily x 3 days', startDate: '2024-09-18', endDate: '2024-09-21', status: 'Completed', prescribedBy: 'Dr. Eze' },
-    { name: 'Ibuprofen 400mg', dosage: '1 tablet', frequency: 'Three times daily', startDate: '2024-10-22', endDate: '2024-10-29', status: 'Completed', prescribedBy: 'Dr. Okonkwo' },
-    { name: 'Diclofenac Gel', dosage: 'Apply to affected area', frequency: 'Twice daily', startDate: '2024-05-20', endDate: '2024-06-20', status: 'Completed', prescribedBy: 'Dr. Bello' },
-  ],
-  prescriptions: [
-    { id: 'RX-2024-001', date: '2024-11-15', prescriptionId: 'RX-001', doctor: 'Dr. Adebayo', status: 'dispensed', diagnosis: 'Essential Hypertension', medications: ['Amlodipine 5mg', 'Lisinopril 10mg'], notes: 'Continue current medications' },
-    { id: 'RX-2024-002', date: '2024-10-22', prescriptionId: 'RX-002', doctor: 'Dr. Okonkwo', status: 'dispensed', diagnosis: 'Costochondritis', medications: ['Ibuprofen 400mg'], notes: 'Take with food' },
-    { id: 'RX-2024-003', date: '2024-09-18', prescriptionId: 'RX-003', doctor: 'Dr. Eze', status: 'dispensed', diagnosis: 'Malaria', medications: ['Artemether-Lumefantrine', 'Paracetamol 1g'], notes: 'Complete full course' },
-    { id: 'RX-2024-004', date: '2024-08-05', prescriptionId: 'RX-004', doctor: 'Dr. Adamu', status: 'dispensed', diagnosis: 'Presbyopia', medications: ['Reading Glasses'], notes: 'Use for reading only' },
-    { id: 'RX-2024-005', date: '2024-07-12', prescriptionId: 'RX-005', doctor: 'Dr. Adebayo', status: 'dispensed', diagnosis: 'Mild Hypertension', medications: ['Amlodipine 5mg'], notes: 'Start medication' },
-    { id: 'RX-2024-006', date: '2024-05-20', prescriptionId: 'RX-006', doctor: 'Dr. Bello', status: 'dispensed', diagnosis: 'Lumbar Strain', medications: ['Diclofenac Gel'], notes: 'Apply to affected area' },
-  ],
-  labResults: [
-    { 
-      id: 'LAB-2024-001',
-      date: '2024-11-15', 
-      test: 'Lipid Profile', 
-      category: 'Chemistry',
-      result: 'Total Cholesterol: 195 mg/dL, LDL: 120, HDL: 48, Triglycerides: 135', 
-      status: 'Normal', 
-      orderedBy: 'Dr. Adebayo',
-      performedBy: 'Lab Tech Amaka',
-      verifiedBy: 'Dr. Okoro (Pathologist)',
-      specimenType: 'Blood (Serum)',
-      collectedAt: '2024-11-15 08:30',
-      reportedAt: '2024-11-15 14:00',
-      parameters: [
-        { name: 'Total Cholesterol', value: '195', unit: 'mg/dL', normalRange: '<200', status: 'Normal' },
-        { name: 'LDL Cholesterol', value: '120', unit: 'mg/dL', normalRange: '<100', status: 'Borderline' },
-        { name: 'HDL Cholesterol', value: '48', unit: 'mg/dL', normalRange: '>40', status: 'Normal' },
-        { name: 'Triglycerides', value: '135', unit: 'mg/dL', normalRange: '<150', status: 'Normal' },
-        { name: 'VLDL', value: '27', unit: 'mg/dL', normalRange: '<30', status: 'Normal' },
-      ],
-      interpretation: 'Lipid profile within acceptable limits. LDL slightly elevated but below intervention threshold. Continue lifestyle modifications.',
-      clinicalNotes: 'Patient fasted for 12 hours prior to test.',
-      pdfUrl: '/documents/lab-LAB-2024-001.pdf'
-    },
-    { 
-      id: 'LAB-2024-002',
-      date: '2024-11-15', 
-      test: 'Renal Function Test', 
-      category: 'Chemistry',
-      result: 'Creatinine: 1.0 mg/dL, BUN: 15 mg/dL, eGFR: 85', 
-      status: 'Normal', 
-      orderedBy: 'Dr. Adebayo',
-      performedBy: 'Lab Tech Amaka',
-      verifiedBy: 'Dr. Okoro (Pathologist)',
-      specimenType: 'Blood (Serum)',
-      collectedAt: '2024-11-15 08:30',
-      reportedAt: '2024-11-15 14:00',
-      parameters: [
-        { name: 'Creatinine', value: '1.0', unit: 'mg/dL', normalRange: '0.7-1.3', status: 'Normal' },
-        { name: 'Blood Urea Nitrogen (BUN)', value: '15', unit: 'mg/dL', normalRange: '7-20', status: 'Normal' },
-        { name: 'eGFR', value: '85', unit: 'mL/min/1.73m²', normalRange: '>60', status: 'Normal' },
-        { name: 'BUN/Creatinine Ratio', value: '15', unit: '', normalRange: '10-20', status: 'Normal' },
-      ],
-      interpretation: 'Renal function is normal. No evidence of kidney impairment.',
-      clinicalNotes: 'Baseline for hypertension monitoring.',
-      pdfUrl: '/documents/lab-LAB-2024-002.pdf'
-    },
-    { 
-      id: 'LAB-2024-003',
-      date: '2024-09-18', 
-      test: 'Malaria Parasite', 
-      category: 'Microbiology',
-      result: 'Positive - P. falciparum ++', 
-      status: 'Abnormal', 
-      orderedBy: 'Dr. Eze',
-      performedBy: 'Lab Tech Chidi',
-      verifiedBy: 'Dr. Nwosu (Microbiologist)',
-      specimenType: 'Blood (EDTA)',
-      collectedAt: '2024-09-18 09:15',
-      reportedAt: '2024-09-18 10:00',
-      parameters: [
-        { name: 'Malaria Parasite (Thick Film)', value: 'Positive', unit: '', normalRange: 'Negative', status: 'Abnormal' },
-        { name: 'Malaria Parasite (Thin Film)', value: 'P. falciparum', unit: '', normalRange: 'Negative', status: 'Abnormal' },
-        { name: 'Parasite Density', value: '++', unit: '', normalRange: 'Negative', status: 'Abnormal' },
-        { name: 'mRDT', value: 'Positive', unit: '', normalRange: 'Negative', status: 'Abnormal' },
-      ],
-      interpretation: 'POSITIVE for Plasmodium falciparum malaria. Moderate parasitemia. Recommend ACT treatment.',
-      clinicalNotes: 'Patient presented with fever and chills. Recent travel to endemic area.',
-      pdfUrl: '/documents/lab-LAB-2024-003.pdf',
-      criticalValue: true
-    },
-    { 
-      id: 'LAB-2024-004',
-      date: '2024-09-18', 
-      test: 'Complete Blood Count', 
-      category: 'Hematology',
-      result: 'Hb: 12.5 g/dL, WBC: 9,500, Platelets: 180,000', 
-      status: 'Normal', 
-      orderedBy: 'Dr. Eze',
-      performedBy: 'Lab Tech Chidi',
-      verifiedBy: 'Dr. Okoro (Pathologist)',
-      specimenType: 'Blood (EDTA)',
-      collectedAt: '2024-09-18 09:15',
-      reportedAt: '2024-09-18 11:00',
-      parameters: [
-        { name: 'Hemoglobin', value: '12.5', unit: 'g/dL', normalRange: '12-16', status: 'Normal' },
-        { name: 'Hematocrit', value: '38', unit: '%', normalRange: '36-48', status: 'Normal' },
-        { name: 'WBC', value: '9,500', unit: '/µL', normalRange: '4,000-11,000', status: 'Normal' },
-        { name: 'Neutrophils', value: '65', unit: '%', normalRange: '40-70', status: 'Normal' },
-        { name: 'Lymphocytes', value: '28', unit: '%', normalRange: '20-40', status: 'Normal' },
-        { name: 'Monocytes', value: '5', unit: '%', normalRange: '2-8', status: 'Normal' },
-        { name: 'Eosinophils', value: '1', unit: '%', normalRange: '1-4', status: 'Normal' },
-        { name: 'Basophils', value: '1', unit: '%', normalRange: '0-1', status: 'Normal' },
-        { name: 'Platelets', value: '180,000', unit: '/µL', normalRange: '150,000-400,000', status: 'Normal' },
-        { name: 'RBC', value: '4.5', unit: 'million/µL', normalRange: '4.0-5.5', status: 'Normal' },
-        { name: 'MCV', value: '84', unit: 'fL', normalRange: '80-100', status: 'Normal' },
-        { name: 'MCH', value: '28', unit: 'pg', normalRange: '27-33', status: 'Normal' },
-        { name: 'MCHC', value: '33', unit: 'g/dL', normalRange: '32-36', status: 'Normal' },
-      ],
-      interpretation: 'Complete blood count is within normal limits. No evidence of anemia or infection.',
-      clinicalNotes: 'Ordered alongside malaria parasite test.',
-      pdfUrl: '/documents/lab-LAB-2024-004.pdf'
-    },
-    { 
-      id: 'LAB-2024-005',
-      date: '2024-07-12', 
-      test: 'Fasting Blood Sugar', 
-      category: 'Chemistry',
-      result: '95 mg/dL', 
-      status: 'Normal', 
-      orderedBy: 'Dr. Adebayo',
-      performedBy: 'Lab Tech Amaka',
-      verifiedBy: 'Dr. Okoro (Pathologist)',
-      specimenType: 'Blood (Fluoride)',
-      collectedAt: '2024-07-12 07:45',
-      reportedAt: '2024-07-12 09:00',
-      parameters: [
-        { name: 'Fasting Blood Glucose', value: '95', unit: 'mg/dL', normalRange: '70-100', status: 'Normal' },
-      ],
-      interpretation: 'Fasting blood glucose is normal. No evidence of diabetes.',
-      clinicalNotes: 'Patient fasted for 10 hours.',
-      pdfUrl: '/documents/lab-LAB-2024-005.pdf'
-    },
-    { 
-      id: 'LAB-2024-006',
-      date: '2024-07-12', 
-      test: 'HbA1c', 
-      category: 'Chemistry',
-      result: '5.4%', 
-      status: 'Normal', 
-      orderedBy: 'Dr. Adebayo',
-      performedBy: 'Lab Tech Amaka',
-      verifiedBy: 'Dr. Okoro (Pathologist)',
-      specimenType: 'Blood (EDTA)',
-      collectedAt: '2024-07-12 07:45',
-      reportedAt: '2024-07-12 14:00',
-      parameters: [
-        { name: 'Glycated Hemoglobin (HbA1c)', value: '5.4', unit: '%', normalRange: '<5.7', status: 'Normal' },
-        { name: 'Estimated Average Glucose', value: '108', unit: 'mg/dL', normalRange: '', status: 'Normal' },
-      ],
-      interpretation: 'HbA1c is normal, indicating good glycemic control over the past 3 months.',
-      clinicalNotes: 'Baseline for new patient.',
-      pdfUrl: '/documents/lab-LAB-2024-006.pdf'
-    },
-  ],
-  imagingResults: [
-    { date: '2024-10-22', procedure: 'Chest X-ray (PA)', finding: 'No active lung disease. Heart size normal.', status: 'Normal', performedAt: 'NPA Medical Centre Lagos' },
-    { date: '2024-05-20', procedure: 'Lumbar Spine X-ray', finding: 'Mild degenerative changes at L4-L5. No fracture or dislocation.', status: 'Abnormal', performedAt: 'NPA Medical Centre Lagos' },
-  ],
-  allergies: ['Penicillin'],
-  surgicalHistory: [
-    { procedure: 'Appendectomy', date: '2015-03-15', hospital: 'Lagos University Teaching Hospital' },
-  ],
-  familyHistory: [
-    { relation: 'Father', condition: 'Hypertension, Type 2 Diabetes' },
-    { relation: 'Mother', condition: 'Breast Cancer (survived)' },
-    { relation: 'Sibling', condition: 'Asthma' },
-  ],
-  socialHistory: {
-    smoking: 'Never',
-    alcohol: 'Occasional (social)',
-    exercise: '2-3 times per week',
-    occupation: 'Senior Engineer - NPA',
-  },
-};
 
-// Past consultation sessions will be loaded from API
-const demoConsultationSessions: any[] = [
-  {
-    id: 'CS-2024-001',
-    date: '2024-11-15',
-    time: '10:30 - 11:15',
-    duration: '45 min',
-    clinic: 'General',
-    room: 'Consultation Room 1',
-    doctor: 'Dr. Adebayo Ogundimu',
-    doctorSpecialty: 'Internal Medicine',
-    patient: { name: 'Oluwaseun Adeyemi', patientId: 'NPA-2024-001', age: 45, gender: 'Male' },
-    vitals: { temperature: '37.2°C', bloodPressure: '135/88', heartRate: '82 bpm', respiratoryRate: '18/min', oxygenSaturation: '97%', weight: '82.5 kg' },
-    medicalNotes: {
-      historyOfPresentIllness: 'Patient returns for routine hypertension follow-up. Reports occasional mild headaches in the morning. No chest pain, shortness of breath, or palpitations. Compliant with medications.',
-      physicalExamination: 'General: Alert, oriented, no acute distress. CV: Regular rhythm, no murmurs. Lungs: Clear bilateral. Extremities: No edema.',
-      diagnosis: 'Essential Hypertension (I10) - Controlled',
-      assessment: 'Blood pressure slightly elevated today. Patient reports stress at work. Overall control acceptable.',
-      plan: '1. Continue Amlodipine 5mg OD\n2. Add Lisinopril 10mg OD\n3. Lifestyle modifications discussed\n4. Follow-up in 1 month\n5. Repeat lipid profile'
-    },
-    prescriptions: [
-      { medication: 'Amlodipine 5mg', dosage: '1 tablet', frequency: 'Once daily', duration: '30 days', quantity: 30 },
-      { medication: 'Lisinopril 10mg', dosage: '1 tablet', frequency: 'Once daily', duration: '30 days', quantity: 30 }
-    ],
-    labOrders: [
-      { test: 'Lipid Profile', priority: 'Routine', status: 'Completed' },
-      { test: 'Renal Function Test', priority: 'Routine', status: 'Completed' }
-    ],
-    nursingOrders: [],
-    referrals: [],
-    radiologyOrders: [],
-    followUp: { date: '2024-12-15', reason: 'BP review and lab results' },
-    outcome: 'Stable, medications adjusted',
-    pdfGenerated: true,
-    pdfUrl: '/documents/consultation-CS-2024-001.pdf'
-  },
-  {
-    id: 'CS-2024-002',
-    date: '2024-10-22',
-    time: '14:45 - 15:30',
-    duration: '45 min',
-    clinic: 'General',
-    room: 'Consultation Room 2',
-    doctor: 'Dr. Chukwuma Okonkwo',
-    doctorSpecialty: 'General Practice',
-    patient: { name: 'Oluwaseun Adeyemi', patientId: 'NPA-2024-001', age: 45, gender: 'Male' },
-    vitals: { temperature: '36.5°C', bloodPressure: '128/82', heartRate: '75 bpm', respiratoryRate: '16/min', oxygenSaturation: '99%', weight: '83 kg' },
-    medicalNotes: {
-      historyOfPresentIllness: 'Patient presents with left-sided chest discomfort for 2 days. Pain is sharp, localized, worsens with movement and deep breathing. No radiation. No SOB, palpitations, or diaphoresis. Started after moving heavy boxes at home.',
-      physicalExamination: 'General: Comfortable at rest. CV: Regular rhythm, normal S1S2, no murmurs. Chest: Tenderness over left costochondral junction, reproducible with palpation. Lungs: Clear.',
-      diagnosis: 'Costochondritis (M94.0)',
-      assessment: 'Musculoskeletal chest pain, likely costochondritis from recent physical activity. No cardiac etiology suspected.',
-      plan: '1. Ibuprofen 400mg TDS for 7 days\n2. Local heat application\n3. Avoid heavy lifting\n4. Chest X-ray to rule out other causes\n5. Return if symptoms worsen or persist'
-    },
-    prescriptions: [
-      { medication: 'Ibuprofen 400mg', dosage: '1 tablet', frequency: 'Three times daily', duration: '7 days', quantity: 21 }
-    ],
-    labOrders: [],
-    nursingOrders: [],
-    referrals: [],
-    radiologyOrders: [
-      { procedure: 'Chest X-ray (PA)', priority: 'Routine', status: 'Completed', finding: 'Normal' }
-    ],
-    followUp: { date: '2024-10-29', reason: 'Review if symptoms persist' },
-    outcome: 'Resolved with treatment',
-    pdfGenerated: true,
-    pdfUrl: '/documents/consultation-CS-2024-002.pdf'
-  },
-  {
-    id: 'CS-2024-003',
-    date: '2024-09-18',
-    time: '09:00 - 10:00',
-    duration: '60 min',
-    clinic: 'General',
-    room: 'Emergency Room 1',
-    doctor: 'Dr. Emeka Eze',
-    doctorSpecialty: 'Emergency Medicine',
-    patient: { name: 'Oluwaseun Adeyemi', patientId: 'NPA-2024-001', age: 45, gender: 'Male' },
-    vitals: { temperature: '38.1°C', bloodPressure: '140/92', heartRate: '92 bpm', respiratoryRate: '20/min', oxygenSaturation: '96%', weight: '81 kg' },
-    medicalNotes: {
-      historyOfPresentIllness: 'Patient presents to ER with high-grade fever (38.5°C at home), severe headache, generalized body aches, and chills for 1 day. Reports recent travel to malaria-endemic area. No cough, vomiting, or diarrhea.',
-      physicalExamination: 'General: Ill-looking, febrile, mild dehydration. HEENT: No jaundice, no neck stiffness. Chest: Clear. Abdomen: Soft, mild hepatosplenomegaly. Skin: No rash.',
-      diagnosis: 'Malaria - Plasmodium falciparum (B50.9)',
-      assessment: 'Uncomplicated P. falciparum malaria confirmed by rapid test. No features of severe malaria.',
-      plan: '1. Artemether-Lumefantrine (Coartem) 4 tabs BD x 3 days\n2. Paracetamol 1g QDS for fever\n3. ORS for hydration\n4. Blood for MP and CBC\n5. Review in 48 hours'
-    },
-    prescriptions: [
-      { medication: 'Artemether-Lumefantrine', dosage: '4 tablets', frequency: 'Twice daily', duration: '3 days', quantity: 24 },
-      { medication: 'Paracetamol 1g', dosage: '1 tablet', frequency: 'Four times daily', duration: '3 days', quantity: 12 }
-    ],
-    labOrders: [
-      { test: 'Malaria Parasite', priority: 'Urgent', status: 'Completed', result: 'Positive - P. falciparum ++' },
-      { test: 'Complete Blood Count', priority: 'Urgent', status: 'Completed', result: 'Normal' }
-    ],
-    nursingOrders: [
-      { type: 'IV Infusion', instructions: 'Normal Saline 1L over 4 hours' }
-    ],
-    referrals: [],
-    radiologyOrders: [],
-    followUp: { date: '2024-09-20', reason: 'Review response to treatment' },
-    outcome: 'Recovered after treatment',
-    pdfGenerated: true,
-    pdfUrl: '/documents/consultation-CS-2024-003.pdf'
-  }
-];
 
 // Medical timeline for patient
-const demoMedicalTimeline = [
-  { date: '2024-11-28', time: '09:15', event: 'Visit Started', type: 'visit', description: 'Current consultation - Recurring headaches' },
-  { date: '2024-11-15', time: '10:30', event: 'Follow-up Visit', type: 'visit', description: 'Hypertension follow-up, medications adjusted' },
-  { date: '2024-11-15', time: '11:00', event: 'Lab Results', type: 'lab', description: 'Lipid Profile & RFT - All normal' },
-  { date: '2024-10-22', time: '14:45', event: 'Consultation', type: 'visit', description: 'Chest discomfort - Costochondritis diagnosed' },
-  { date: '2024-10-22', time: '15:30', event: 'Imaging', type: 'imaging', description: 'Chest X-ray - Normal findings' },
-  { date: '2024-09-18', time: '09:00', event: 'Emergency Visit', type: 'emergency', description: 'Fever & malaise - Malaria diagnosed and treated' },
-  { date: '2024-09-18', time: '09:30', event: 'Lab Results', type: 'lab', description: 'Malaria Parasite Positive, CBC normal' },
-  { date: '2024-08-05', time: '11:20', event: 'Eye Clinic', type: 'visit', description: 'Presbyopia diagnosed, reading glasses prescribed' },
-  { date: '2024-07-12', time: '08:45', event: 'Annual Checkup', type: 'visit', description: 'Mild hypertension detected, started on Amlodipine' },
-  { date: '2024-05-20', time: '10:00', event: 'Physiotherapy', type: 'visit', description: 'Lower back pain, physiotherapy started' },
-  { date: '2024-05-20', time: '10:30', event: 'Imaging', type: 'imaging', description: 'Lumbar X-ray - Mild degenerative changes' },
-];
 
 // Priority utility functions are now imported from @/lib/utils/priority
+
+// Helper function to process vitals consistently
+const processVitals = (vitalsData: any) => {
+  if (!vitalsData) return undefined;
+
+  // Debug: Log raw vitals data
+  console.log('🩺 Processing vitals data:', {
+    temperature: vitalsData.temperature,
+    blood_pressure_systolic: vitalsData.blood_pressure_systolic,
+    blood_pressure_diastolic: vitalsData.blood_pressure_diastolic,
+    heart_rate: vitalsData.heart_rate,
+    respiratory_rate: vitalsData.respiratory_rate,
+    oxygen_saturation: vitalsData.oxygen_saturation,
+    weight: vitalsData.weight,
+    height: vitalsData.height,
+  });
+
+  // Simplified blood pressure processing to match other vitals
+  const bloodPressure = (() => {
+    const systolic = vitalsData.blood_pressure_systolic?.toString() || '';
+    const diastolic = vitalsData.blood_pressure_diastolic?.toString() || '';
+    return systolic && diastolic ? `${systolic}/${diastolic}` : '';
+  })();
+
+  const processedVitals = {
+    temperature: vitalsData.temperature?.toString() || '',
+    bloodPressure,
+    heartRate: vitalsData.heart_rate?.toString() || '',
+    respiratoryRate: vitalsData.respiratory_rate?.toString() || '',
+    oxygenSaturation: vitalsData.oxygen_saturation?.toString() || '',
+    weight: vitalsData.weight?.toString() || '',
+    height: vitalsData.height?.toString() || '',
+    recordedAt: vitalsData.recorded_at || new Date().toISOString(),
+  };
+
+  console.log('✅ Processed vitals result:', processedVitals);
+  return processedVitals;
+};
 
 export default function RoomPage({ params }: { params: Promise<{ roomId: string }> }) {
   const router = useRouter();
   const resolvedParams = use(params);
   const roomId = resolvedParams.roomId;
+  const { currentUser } = useCurrentUser();
+
 
   const [room, setRoom] = useState<ConsultationRoom | null>(null);
   const [patients, setPatients] = useState<Patient[]>([]);
@@ -607,12 +352,18 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   const [activeTab, setActiveTab] = useState("notes");
   const [showEndDialog, setShowEndDialog] = useState(false);
   const [showRoomQueueDialog, setShowRoomQueueDialog] = useState(false);
+  const [showWardAdmissionDetail, setShowWardAdmissionDetail] = useState(false);
+  const [selectedWardAdmission, setSelectedWardAdmission] = useState<WardAdmission | null>(null);
   const [isEnding, setIsEnding] = useState(false);
   const [followUpRequired, setFollowUpRequired] = useState(false);
   const [followUpDate, setFollowUpDate] = useState("");
   const [followUpReason, setFollowUpReason] = useState("");
-  const [medicalNotes, setMedicalNotes] = useState({ historyOfPresentIllness: "", physicalExamination: "", assessment: "", plan: "" });
-  const [diagnoses, setDiagnoses] = useState<{ id: string; code: string; name: string; type: 'Primary' | 'Secondary' | 'Differential'; notes: string }[]>([]);
+  const [medicalNotes, setMedicalNotes] = useState({ presentationComplaint: "", historyOfPresentIllness: "", physicalExamination: "", assessment: "", plan: "" });
+  const [diagnoses, setDiagnoses] = useState<Diagnosis[]>([]);
+  const [icd10Codes, setIcd10Codes] = useState<ICD10Code[]>([]);
+  const [icd10SearchResults, setIcd10SearchResults] = useState<ICD10Code[]>([]);
+  const [isSearchingICD10, setIsSearchingICD10] = useState(false);
+  const [searchTimeout, setSearchTimeout] = useState<NodeJS.Timeout | null>(null);
   const [medicalHistory, setMedicalHistory] = useState({
     allergies: [] as string[],
     diagnoses: [] as Array<{ code?: string; name: string; status: string; diagnosedDate?: string; treatingDoctor?: string }>,
@@ -658,23 +409,15 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     quantity: 0,
     route: "Oral",
     instructions: "",
-    priority: "Routine"
+    priority: "Routine",
+    notes: ""
   });
   const [medicationSearch, setMedicationSearch] = useState("");
   const [showMedicationDropdown, setShowMedicationDropdown] = useState(false);
   const [selectedMedications, setSelectedMedications] = useState<Set<number>>(new Set()); // Track selected medication IDs for multi-select
-  const [medicationConfigs, setMedicationConfigs] = useState<Map<number, {
-    dosage: string;
-    frequency: string;
-    duration: string;
-    durationDays: number;
-    quantity: number;
-    route: string;
-    instructions: string;
-    priority: string;
-  }>>(new Map()); // Store individual configuration for each selected medication
+  const [medicationConfigs, setMedicationConfigs] = useState<Map<number, MedicationConfig>>(new Map()); // Store medication configurations
   const [prescriptionsSentToPharmacy, setPrescriptionsSentToPharmacy] = useState(false);
-  const [medications, setMedications] = useState<any[]>([]); // Store real medications from API
+  const [medications, setMedications] = useState<Medication[]>([]); // Store real medications from API
   const [loadingMedications, setLoadingMedications] = useState(false);
   const [labOrders, setLabOrders] = useState<{ 
     id: string;
@@ -688,14 +431,17 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   }[]>([]);
   const [showAddLabOrder, setShowAddLabOrder] = useState(false);
   const [newLabOrder, setNewLabOrder] = useState({ test: "", priority: "Routine", notes: "" });
-  const [labTemplates, setLabTemplates] = useState<any[]>([]);
+  const [labTemplates, setLabTemplates] = useState<ServiceLabTemplate[]>([]);
   const [loadingLabTemplates, setLoadingLabTemplates] = useState(false);
   const [labTemplateSearch, setLabTemplateSearch] = useState("");
   const [showLabTemplateDropdown, setShowLabTemplateDropdown] = useState(false);
   const [selectedLabTemplates, setSelectedLabTemplates] = useState<Set<number>>(new Set());
+
+  // Radiology templates
+  const [selectedRadiologyTemplates, setSelectedRadiologyTemplates] = useState<Set<number>>(new Set());
   const [nursingOrders, setNursingOrders] = useState<{
     id: string;
-    type: 'Injection' | 'Dressing';
+    type: 'Injection' | 'Dressing' | 'Ward Admission';
     medication?: string;
     dosage?: string;
     route?: string;
@@ -705,8 +451,24 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     instructions: string;
     priority: 'Routine' | 'Urgent' | 'STAT';
     status: 'Draft' | 'Sent to Nursing' | 'In Progress' | 'Completed';
+    // Ward admission fields
+    ward?: string;
+    admissionType?: string;
+    admissionDiagnosis?: string;
+    presentingComplaint?: string;
   }[]>([]);
+  const [wardAdmissions, setWardAdmissions] = useState<WardAdmission[]>([]);
+  const [wards, setWards] = useState<any[]>([]);
+  const [wardSearch, setWardSearch] = useState('');
   const [showAddNursingOrder, setShowAddNursingOrder] = useState(false);
+  const [showDischargeDialog, setShowDischargeDialog] = useState(false);
+  const [dischargeData, setDischargeData] = useState({
+    discharge_type: 'regular',
+    discharge_diagnosis: '',
+    discharge_notes: '',
+    discharge_summary: '',
+    follow_up_instructions: ''
+  });
   const [newNursingOrder, setNewNursingOrder] = useState({
     type: "" as string,
     medication: "",
@@ -716,10 +478,32 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     woundType: "",
     supplies: "",
     instructions: "",
-    priority: "Routine"
+    priority: "Routine",
+    ward: "",
+    admissionType: "",
+    admissionDiagnosis: "",
+    presentingComplaint: ""
   });
   const [injectionMedications, setInjectionMedications] = useState<Array<{ id: number; name: string; category?: string; strength?: string; generic_name?: string }>>([]);
   const [loadingInjectionMedications, setLoadingInjectionMedications] = useState(false);
+
+  // Function to open physio order dialog and load sessions
+  const openPhysioOrderDialog = async (order: any) => {
+    setSelectedPhysioOrder(order);
+    setIsPhysioOrderDialogOpen(true);
+    setLoadingPhysioSessions(true);
+
+    try {
+      const sessionsResponse = await physioService.getSessions({ order: order.id });
+      setPhysioOrderSessions(sessionsResponse.results || []);
+    } catch (err: any) {
+      console.error('Failed to load physio sessions:', err);
+      toast.error('Failed to load session details');
+      setPhysioOrderSessions([]);
+    } finally {
+      setLoadingPhysioSessions(false);
+    }
+  };
 
   // Load injection medications from API
   useEffect(() => {
@@ -792,7 +576,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         // Set medications from API (empty array if none found)
         setInjectionMedications(allMedications);
         if (allMedications.length > 0) {
-          console.log(`[Nursing Orders] Loaded ${allMedications.length} injection medications from API`);
         } else {
           console.warn('[Nursing Orders] No injection medications found in API');
         }
@@ -827,7 +610,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     facility: "",
     facilityType: "",
     reason: "",
-    urgency: "Routine",
+    priority: "Routine",
     clinicalSummary: "",
     contactPerson: "",
     contactPhone: ""
@@ -855,14 +638,42 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     contrastRequired: false,
     specialInstructions: ""
   });
+  const [radiologyTemplates, setRadiologyTemplates] = useState<any[]>([]);
+  const [loadingRadiologyTemplates, setLoadingRadiologyTemplates] = useState(false);
+  const [radiologyTemplateSearch, setRadiologyTemplateSearch] = useState("");
+  const [showRadiologyTemplateDropdown, setShowRadiologyTemplateDropdown] = useState(false);
+
+  // Physiotherapy state
+  const [physioOrders, setPhysioOrders] = useState<{
+    id: string;
+    diagnosis: string;
+    chiefComplaint: string;
+    treatmentGoal: string;
+    specialInstructions?: string;
+    priority: 'routine' | 'urgent' | 'stat';
+    status: 'Draft' | 'Sent to Physiotherapy' | 'Scheduled' | 'In Progress' | 'Completed';
+    totalSessions?: number;
+  }[]>([]);
+  const [showAddPhysio, setShowAddPhysio] = useState(false);
+  const [editingPhysioIndex, setEditingPhysioIndex] = useState<number | null>(null);
+  const [newPhysio, setNewPhysio] = useState({
+    diagnosis: "",
+    chiefComplaint: "",
+    treatmentGoal: "",
+    specialInstructions: "",
+    priority: "routine" as 'routine' | 'urgent' | 'stat',
+    totalSessions: 5
+  });
+  const [physioTemplates, setPhysioTemplates] = useState<any[]>([]);
+  const [loadingPhysioTemplates, setLoadingPhysioTemplates] = useState(false);
 
   // Consultation session viewer state
-  const [selectedSession, setSelectedSession] = useState<any | null>(null);
+  const [selectedSession, setSelectedSession] = useState<ExtendedConsultationSession | null>(null);
   const [showSessionViewer, setShowSessionViewer] = useState(false);
   const [expandedSessions, setExpandedSessions] = useState<string[]>([]);
 
   // Lab result viewer state
-  const [selectedLabResult, setSelectedLabResult] = useState<any | null>(null);
+  const [selectedLabResult, setSelectedLabResult] = useState<LabTestResult | null>(null);
   const [showLabResultViewer, setShowLabResultViewer] = useState(false);
   const [expandedLabResults, setExpandedLabResults] = useState<string[]>([]);
 
@@ -870,15 +681,258 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   const [showPrescriptionViewer, setShowPrescriptionViewer] = useState(false);
   
   // Vitals detail modal state
-  const [selectedVital, setSelectedVital] = useState<any | null>(null);
+  const [selectedVital, setSelectedVital] = useState<VitalsData | null>(null);
   const [isVitalsDetailModalOpen, setIsVitalsDetailModalOpen] = useState(false);
-  const [vitalsHistory, setVitalsHistory] = useState<any[]>([]);
+  const [vitalsHistory, setVitalsHistory] = useState<VitalsData[]>([]);
   const [loadingVitals, setLoadingVitals] = useState(false);
+
+
+  // Real patient history data (instead of demo data)
+  const [consultationHistory, setConsultationHistory] = useState<any[]>([]);
+  const [labHistory, setLabHistory] = useState<LabTestResult[]>([]);
+  const [imagingHistory, setImagingHistory] = useState<ServiceRadiologyReport[]>([]);
+  const [prescriptionHistory, setPrescriptionHistory] = useState<any[]>([]);
+  const [physioHistory, setPhysioHistory] = useState<any[]>([]);
+  const [loadingPatientHistory, setLoadingPatientHistory] = useState(false);
+
+  // Raw data storage (before transformation)
+  const [rawConsultations, setRawConsultations] = useState<any[]>([]);
+  const [rawPrescriptions, setRawPrescriptions] = useState<Prescription[]>([]);
+  const [rawVitals, setRawVitals] = useState<VitalReading[]>([]);
+  const [rawLabResults, setRawLabResults] = useState<LabTestResult[]>([]);
+  const [rawImagingResults, setRawImagingResults] = useState<ServiceRadiologyReport[]>([]);
+  const [rawPhysioResults, setRawPhysioResults] = useState<any[]>([]);
   
   // View vitals details
   const viewVitalsDetails = (vital: any) => {
     setSelectedVital(vital);
     setIsVitalsDetailModalOpen(true);
+  };
+
+  // Transform consultations with actual user who performed the action
+  const transformConsultations = (consultations: any[]) => {
+    return consultations.map((session: any) => ({
+      id: session.id?.toString() || '',
+      date: formatDate(session.started_at),
+      doctor: session.doctor_name || currentUser?.name || 'Unknown Doctor',
+      clinic: session.room_name || room?.name || 'Consulting Room',
+      sessionId: session.session_id || '',
+      status: session.status || 'completed',
+      started_at: session.started_at,
+      ended_at: session.ended_at,
+      notes: session.notes || '',
+      presentation_complaint: session.presentation_complaint || '',
+      assessment: session.assessment || '',
+      plan: session.plan || ''
+    }));
+  };
+
+  // Transform prescriptions with actual user who prescribed
+  const transformPrescriptions = (prescriptions: any[]) => {
+    return prescriptions.map((rx: any) => {
+      // Handle date parsing - API might return different formats
+      let formattedDate = '';
+      const dateField = rx.prescribed_at || rx.created_at;
+      if (dateField) {
+        try {
+          const date = new Date(dateField);
+          if (!isNaN(date.getTime())) {
+            formattedDate = date.toLocaleDateString();
+          }
+        } catch (e) {
+          formattedDate = dateField.toString();
+        }
+      }
+
+      return {
+        id: rx.id?.toString() || '',
+        date: formattedDate,
+        prescriptionId: rx.id?.toString() || '',
+        doctor: rx.doctor_name || currentUser?.name || '',
+        diagnosis: rx.diagnosis || rx.notes || '',
+        medications: (rx.medications || []).map((med: any) => ({
+          medication_name: med.medication_name || med.medication || 'Unknown',
+          dosage: med.dosage || '',
+          frequency: med.frequency || '',
+          route: med.route || ''
+        })),
+        status: rx.status || 'pending'
+      };
+    });
+  };
+
+  // Transform vitals with actual user who recorded them
+  const transformVitals = (vitals: any[]): VitalsData[] => {
+    return vitals.map((v: any) => ({
+      id: v.id?.toString() || '',
+      date: formatDate(v.recorded_at),
+      time: formatTime(v.recorded_at),
+      systolic: v.blood_pressure_systolic || 0,
+      diastolic: v.blood_pressure_diastolic || 0,
+      heartRate: v.heart_rate || 0,
+      temperature: parseFloat(v.temperature) || 0,
+      respiratoryRate: v.respiratory_rate || 0,
+      oxygenSaturation: parseFloat(v.oxygen_saturation) || 0,
+      weight: v.weight ? parseFloat(v.weight) : undefined,
+      height: v.height ? parseFloat(v.height) : undefined,
+      bmi: v.bmi ? parseFloat(v.bmi) : undefined,
+      painScale: 0, // Not in backend model
+      bloodSugar: 0, // Not in backend model
+      recordedBy: v.recorded_by_name || currentUser?.name || '',
+      recordedAt: v.recorded_at || '',
+      bloodPressure: v.blood_pressure_systolic && v.blood_pressure_diastolic
+        ? `${v.blood_pressure_systolic}/${v.blood_pressure_diastolic}`
+        : '',
+      notes: v.notes || '',
+    }));
+  };
+
+  // Transform lab results with actual users who processed/verified them
+  const transformLabResults = (labResults: any[]) => {
+    return labResults.map((test: any) => {
+      // Check if this test has manual results or uploaded file
+      const hasManualResults = test.results && Object.keys(test.results).length > 0;
+      const hasUploadedFile = test.result_file && test.result_file.name;
+
+      return {
+        id: test.id || 0,
+        test_name: test.name || 'Unknown Test',
+        result: test.results ? Object.values(test.results).join(', ') : '',
+        unit: '',
+        reference_range: '',
+        status: test.status === 'verified' ? 'Normal' : test.status || 'pending',
+        completed_at: test.verified_at || test.processed_at,
+        rejectedBy: test.rejected_by_name || '',
+        rejectedAt: test.rejected_at ? formatDate(test.rejected_at) : '',
+        criticalValue: false,
+        date: formatDate(test.verified_at || test.processed_at),
+        category: test.template_category || 'Unknown',
+        test: test.name || 'Unknown Test',
+        specimenType: test.sample_type || test.template_sample_type || 'Unknown',
+        orderedBy: test.order?.doctor_name || 'Unknown',
+        collectedAt: test.collected_at ? formatDate(test.collected_at) : 'N/A',
+        reportedAt: test.processed_at ? formatDate(test.processed_at) : 'N/A',
+        performedBy: test.processed_by_name || 'Unknown',
+        verifiedBy: test.verified_by_name || 'Unknown',
+        resultFile: test.result_file ? {
+          name: test.result_file.name,
+          url: test.result_file.url || `/media/${test.result_file.name}`,
+          type: test.result_file.type || 'application/pdf'
+        } : null,
+        hasManualResults,
+        hasUploadedFile,
+        parameters: test.results ? Object.entries(test.results).map(([key, value]: [string, any]) => ({
+          name: key,
+          value: value,
+          unit: '',
+          referenceRange: '',
+          status: 'Normal'
+        })) : [],
+      };
+    });
+  };
+
+  // Transform imaging results with actual users who reported/verified them
+  const transformImagingResults = (imagingResults: any[]) => {
+    return imagingResults.map((report: any) => ({
+      id: parseInt(report.id) || 0,
+      study: parseInt(report.study) || 0,
+      order: parseInt(report.order) || 0,
+      patient: parseInt(report.patient) || 0,
+      created_at: report.created_at || report.reported_at || new Date().toISOString(),
+      overall_status: report.overall_status || report.status || 'normal',
+      priority: report.priority || 'medium',
+      study_details: report.study_details || undefined,
+      order_id: report.order_id || '',
+      patient_name: report.patient_name || '',
+    }));
+  };
+
+  // Update transformations when currentUser changes
+  useEffect(() => {
+    if (rawConsultations.length > 0) {
+      setConsultationHistory(transformConsultations(rawConsultations));
+    }
+    if (rawPrescriptions.length > 0) {
+      setPrescriptionHistory(transformPrescriptions(rawPrescriptions));
+    }
+    if (rawVitals.length > 0) {
+      setVitalsHistory(transformVitals(rawVitals));
+    }
+    if (rawLabResults.length > 0) {
+      setLabHistory(transformLabResults(rawLabResults));
+    }
+    if (rawImagingResults.length > 0) {
+      setImagingHistory(transformImagingResults(rawImagingResults));
+    }
+    // Transform physio results - they come in the right format from API
+    setPhysioHistory(rawPhysioResults);
+  }, [currentUser, rawConsultations, rawPrescriptions, rawVitals, rawLabResults, rawImagingResults, rawPhysioResults]);
+
+  // Load real patient history data
+  const loadPatientHistory = async (patientId: number) => {
+    if (!patientId) return;
+
+    setLoadingPatientHistory(true);
+    try {
+      // Load consultations history
+      const consultationsResponse = await consultationService.getSessions({ patient: patientId });
+      const consultations = consultationsResponse.results || [];
+      setRawConsultations(consultations || []);
+
+      // Load lab results history
+      const labResults = await labService.getCompletedTests({ patient: patientId.toString() });
+      setRawLabResults(labResults?.results || []);
+
+      // Load imaging history
+      const imagingResults = await radiologyService.getVerifiedReports({ patient: patientId.toString() });
+      setRawImagingResults(imagingResults?.results || []);
+
+      // Load prescription history
+      const prescriptions = await pharmacyService.getPrescriptions({ patient: patientId.toString() });
+      setRawPrescriptions(prescriptions?.results || []);
+
+      // Load vitals history for the History tab
+      const vitals = await patientService.getPatientVitals(patientId);
+      setRawVitals(vitals);
+
+      // Load physiotherapy history for the History tab
+      try {
+        const physioOrders = await physioService.getOrders({ patient: patientId.toString() });
+        setRawPhysioResults(physioOrders?.results || []);
+      } catch (physioErr) {
+        console.warn('Could not load physio history:', physioErr);
+        setRawPhysioResults([]);
+      }
+
+      // Load ward admissions history
+      const admissions = await wardService.getAdmissions({ patient: patientId });
+      setWardAdmissions(admissions?.results || []);
+
+      // Set the most recent vitals on the current patient for display
+      if (vitals.length > 0) {
+        const latestVitals = vitals[0];
+        setCurrentPatient((prevPatient: Patient | null) => {
+          if (!prevPatient) return prevPatient;
+          return {
+            ...prevPatient,
+            vitals: processVitals(latestVitals),
+          };
+        });
+      }
+
+    } catch (error) {
+      console.error('Error loading patient history:', error);
+      // Set empty arrays on error
+      setConsultationHistory([]);
+      setLabHistory([]);
+      setImagingHistory([]);
+      setPrescriptionHistory([]);
+      setVitalsHistory([]);
+      setPhysioHistory([]);
+    } finally {
+      setLoadingPatientHistory(false);
+    }
   };
 
   // History tab filters
@@ -890,6 +944,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   const [vitalsDateFilter, setVitalsDateFilter] = useState<string>('all');
   const [prescriptionsDateFilter, setPrescriptionsDateFilter] = useState<string>('all');
   const [prescriptionsStatusFilter, setPrescriptionsStatusFilter] = useState<string>('all');
+  const [physioSearchQuery, setPhysioSearchQuery] = useState<string>('');
+  const [physioDateFilter, setPhysioDateFilter] = useState<string>('all');
+  const [physioStatusFilter, setPhysioStatusFilter] = useState<string>('all');
   
   // Pagination state
   const [consultationsPage, setConsultationsPage] = useState(1);
@@ -902,9 +959,35 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   const [imagingPerPage, setImagingPerPage] = useState(10);
   const [vitalsPerPage, setVitalsPerPage] = useState(10);
   const [prescriptionsPerPage, setPrescriptionsPerPage] = useState(10);
+  const [physioPage, setPhysioPage] = useState(1);
+  const [physioPerPage, setPhysioPerPage] = useState(10);
+
+  // Physio dialog state
+  const [selectedPhysioOrder, setSelectedPhysioOrder] = useState<any>(null);
+  const [isPhysioOrderDialogOpen, setIsPhysioOrderDialogOpen] = useState(false);
+  const [physioOrderSessions, setPhysioOrderSessions] = useState<PhysioSession[]>([]);
+  const [loadingPhysioSessions, setLoadingPhysioSessions] = useState(false);
 
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isRefreshingQueue, setIsRefreshingQueue] = useState(false);
+  
+  // Function to load wards for nursing order form
+  const loadWards = async () => {
+    try {
+      const wardsResponse = await wardService.getWards({ status: 'active' });
+      setWards(wardsResponse.results || []);
+    } catch (error) {
+      console.error('Failed to load wards:', error);
+      // Fallback to hardcoded wards if API fails
+      setWards([
+        { id: 8, ward_code: 'FEMALE-MED', name: 'Female Medical Ward', total_beds: 5, available_beds: 3 },
+        { id: 9, ward_code: 'MALE-MED', name: 'Male Medical Ward', total_beds: 5, available_beds: 2 },
+        { id: 10, ward_code: 'SURGICAL', name: 'Surgical Ward', total_beds: 10, available_beds: 7 },
+        { id: 11, ward_code: 'PEDIATRIC', name: 'Pediatric Ward', total_beds: 8, available_beds: 5 },
+        { id: 12, ward_code: 'MATERNITY', name: 'Maternity Ward', total_beds: 6, available_beds: 3 },
+      ]);
+    }
+  };
   
   // Function to refresh only the queue data (for modal refresh)
   const refreshQueueData = async () => {
@@ -922,10 +1005,10 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         queueItems = Array.isArray(roomQueueResult) ? roomQueueResult : [];
       } catch (err) {
         try {
-          const queueResult = await apiFetch<{ results: any[] }>(`/consultation/queue/?room=${numericRoomId}&is_active=true&page_size=1000`);
+          const queueResult = await apiFetch<{ results: any[] }>(`/consultation/queue/?room=${numericRoomId}&is_active=true&page_size=${LARGE_PAGE_SIZE}`);
           queueItems = queueResult.results || [];
         } catch (filterErr) {
-          const allQueueResult = await apiFetch<{ results: any[] }>(`/consultation/queue/?is_active=true&page_size=1000`);
+          const allQueueResult = await apiFetch<{ results: any[] }>(`/consultation/queue/?is_active=true&page_size=${LARGE_PAGE_SIZE}`);
           const allItems = allQueueResult.results || [];
           queueItems = allItems.filter((item: any) => {
             const itemRoomId = typeof item.room === 'number' ? item.room : parseInt(item.room);
@@ -962,15 +1045,12 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
               }
             }
             
-            let vitalsData = null;
-            if (item.visit) {
-              try {
-                const vitalsResult = await apiFetch<{ results: any[] }>(`/vitals/?visit=${item.visit}&ordering=-recorded_at`);
-                vitalsData = vitalsResult.results?.[0] || null;
-              } catch (err) {
-                console.warn('Could not load vitals:', err);
-              }
-            }
+            // Get latest vitals for the patient (not just for this visit)
+            const vitalsData = await safeAsync(
+              () => apiFetch<{ results: any[] }>(`/vitals/?patient=${item.patient}&ordering=-recorded_at&page_size=1`).then(result => result.results?.[0] || null),
+              null,
+              { operation: 'refreshPatientVitals', patientId: item.patient, component: 'ConsultationRoom' }
+            );
             
             const queuedAt = new Date(item.queued_at);
             const waitTime = Math.floor((Date.now() - queuedAt.getTime()) / (1000 * 60));
@@ -979,44 +1059,43 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
               return getPriorityLabel(priorityNum);
             };
             
-            return {
+            // Create the patient object with proper typing
+            const patientData = {
               id: String(item.patient),
               visitId: item.visit ? String(item.visit) : '',
+              patient_id: patient.patient_id,
               patientId: patient.patient_id || String(patient.id),
-              name: patient.full_name || `${patient.first_name} ${patient.surname}`,
+              full_name: patient.full_name,
+              first_name: patient.first_name,
+              surname: patient.surname,
+              name: patient.full_name || `${patient.first_name || ''} ${patient.surname || ''}`.trim(),
               age: patient.age || 0,
               gender: patient.gender || '',
               mrn: patient.patient_id || '',
-              personalNumber: patient.personal_number || '',
-              allergies: [],
+              personal_number: patient.personal_number || '',
+              allergies: patient.allergies ? patient.allergies.split(/[,\n]/).map(a => a.trim()).filter(a => a) : [],
             waitTime: waitTime > 0 ? waitTime : 0,
             vitalsCompleted: !!vitalsData,
             priority: getPriority(typeof item.priority === 'number' ? item.priority : parseInt(item.priority) || 0),
             visitDate,
             visitTime,
             queuePosition: index + 1,
-            bloodGroup: patient.blood_group || undefined,
-            genotype: patient.genotype || undefined,
-            employeeType: (patient as any).employee_type || undefined,
-            division: (patient as any).division || undefined,
-            location: (patient as any).location || undefined,
-            phone: (patient as any).phone || undefined,
-            email: (patient as any).email || undefined,
-            occupation: (patient as any).occupation || undefined,
-            religion: (patient as any).religion || undefined,
-            tribe: (patient as any).tribe || undefined,
+              blood_group: patient.blood_group,
+              genotype: patient.genotype,
+              employee_type: (patient as any).employee_type,
+              division: (patient as any).division,
+              location: (patient as any).location,
+              phone: (patient as any).phone,
+              email: (patient as any).email,
+              occupation: (patient as any).occupation,
+              religion: (patient as any).religion,
+              tribe: (patient as any).tribe,
             photo: (patient as any).photo || null,
-            vitals: vitalsData ? {
-              temperature: vitalsData.temperature?.toString() || '',
-              bloodPressure: `${vitalsData.blood_pressure_systolic || ''}/${vitalsData.blood_pressure_diastolic || ''}`,
-              heartRate: vitalsData.heart_rate?.toString() || '',
-              respiratoryRate: vitalsData.respiratory_rate?.toString() || '',
-              oxygenSaturation: vitalsData.oxygen_saturation?.toString() || '',
-              weight: vitalsData.weight?.toString() || '',
-              height: vitalsData.height?.toString() || '',
-              recordedAt: vitalsData.recorded_at || new Date().toISOString(),
-            } : undefined,
-          } as Patient;
+              vitals: processVitals(vitalsData),
+            };
+
+            // Sanitize to ensure all fields are proper types for React rendering
+            return sanitizePatientForRendering(patientData);
         } catch (err) {
           console.error(`Error loading patient ${item.patient}:`, err);
           return null;
@@ -1024,7 +1103,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       }));
       
       // Filter out any null results
-      const validPatients = transformedPatients.filter((p): p is Patient => p !== null);
+      const validPatients = transformedPatients.filter((p) => p !== null) as Patient[];
       setPatients(validPatients);
     } catch (err: any) {
       console.error('Error refreshing queue:', err);
@@ -1055,37 +1134,30 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       let queueItems: any[] = [];
       try {
         // Try the room-specific queue endpoint: /consultation/rooms/{id}/queue/
-        console.log(`Attempting to load queue from /consultation/rooms/${numericRoomId}/queue/`);
         const roomQueueResult = await apiFetch<any[]>(`/consultation/rooms/${numericRoomId}/queue/`);
         queueItems = Array.isArray(roomQueueResult) ? roomQueueResult : [];
-        console.log(`Room-specific endpoint returned ${queueItems.length} items:`, roomQueueResult);
       } catch (err) {
         console.warn('Room-specific queue endpoint failed, trying filtered endpoint:', err);
         // Fallback: Use filtered queue endpoint
         try {
-          const queueResult = await apiFetch<{ results: any[] }>(`/consultation/queue/?room=${numericRoomId}&is_active=true&page_size=1000`);
+          const queueResult = await apiFetch<{ results: any[] }>(`/consultation/queue/?room=${numericRoomId}&is_active=true&page_size=${LARGE_PAGE_SIZE}`);
           queueItems = queueResult.results || [];
-          console.log(`Filtered endpoint returned ${queueItems.length} items:`, queueResult);
         } catch (filterErr) {
           console.warn('Filtered queue endpoint failed, loading all queue items:', filterErr);
           // Last resort: Load all and filter client-side
-          const allQueueResult = await apiFetch<{ results: any[] }>(`/consultation/queue/?is_active=true&page_size=1000`);
+          const allQueueResult = await apiFetch<{ results: any[] }>(`/consultation/queue/?is_active=true&page_size=${LARGE_PAGE_SIZE}`);
           const allItems = allQueueResult.results || [];
-          console.log(`Loaded ${allItems.length} total active queue items, filtering for room ${numericRoomId}`);
           // Filter by room client-side
           queueItems = allItems.filter((item: any) => {
             const itemRoomId = typeof item.room === 'number' ? item.room : parseInt(item.room);
             const matches = itemRoomId === numericRoomId;
             if (!matches && allItems.length > 0) {
-              console.log(`Queue item ${item.id} has room ${itemRoomId} (expected ${numericRoomId})`);
             }
             return matches;
           });
-          console.log(`After filtering, found ${queueItems.length} items for room ${numericRoomId}`);
         }
       }
       
-      console.log(`Final: Loaded ${queueItems.length} queue items for room ${numericRoomId}`, queueItems);
         
         // Sort queue by priority (lower number = higher priority), then by queued_at
         const sortedQueue = queueItems.sort((a, b) => {
@@ -1118,20 +1190,19 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
               }
             }
             
-            // Get vitals if available
-            let vitalsData = null;
-            if (item.visit) {
-              try {
-                const vitalsResult = await apiFetch<{ results: any[] }>(`/vitals/?visit=${item.visit}&ordering=-recorded_at`);
-                vitalsData = vitalsResult.results?.[0] || null;
-              } catch (err) {
-                console.warn('Could not load vitals:', err);
-              }
-            }
+            // Get latest vitals for the patient (not just for this visit)
+            const vitalsData = await safeAsync(
+              () => apiFetch<{ results: any[] }>(`/vitals/?patient=${item.patient}&ordering=-recorded_at&page_size=1`).then(result => result.results?.[0] || null),
+              null,
+              { operation: 'loadPatientVitals', patientId: item.patient, component: 'ConsultationRoom' }
+            );
             
-            // Calculate wait time
+            // Calculate wait time with better error handling
             const queuedAt = new Date(item.queued_at);
-            const waitTime = Math.floor((Date.now() - queuedAt.getTime()) / (1000 * 60));
+            const now = Date.now();
+            const waitTimeMs = now - queuedAt.getTime();
+            // Ensure wait time is not negative and handle invalid dates
+            const waitTime = (!isNaN(waitTimeMs) && waitTimeMs >= 0) ? Math.floor(waitTimeMs / (1000 * 60)) : 0;
             
             // Map priority (integer) to string using centralized utility
             // NOTE: Priority comes from ConsultationQueue model and was automatically set based on visit_type
@@ -1140,15 +1211,20 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
               return getPriorityLabel(priorityNum);
             };
             
-            return {
+            // Create the patient object with proper typing
+            const patientData = {
               id: String(item.patient), // Use patient ID from queue, not queue item ID
               visitId: item.visit ? String(item.visit) : '',
+              patient_id: patient.patient_id,
               patientId: patient.patient_id || String(patient.id), // Display ID (e.g., "PAT-2024-001")
-              name: patient.full_name || `${patient.first_name} ${patient.surname}`,
+              full_name: patient.full_name,
+              first_name: patient.first_name,
+              surname: patient.surname,
+              name: patient.full_name || `${patient.first_name || ''} ${patient.surname || ''}`.trim(),
               age: patient.age || 0,
               gender: patient.gender || '',
               mrn: patient.patient_id || '',
-              personalNumber: patient.personal_number || '',
+              personal_number: patient.personal_number || '',
               allergies: patient.allergies ? patient.allergies.split(/[,\n]/).map(a => a.trim()).filter(a => a) : [],
               waitTime: waitTime > 0 ? waitTime : 0,
               vitalsCompleted: !!vitalsData,
@@ -1156,34 +1232,67 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
               visitDate,
               visitTime,
               queuePosition: index + 1,
-              bloodGroup: patient.blood_group || undefined,
-              genotype: patient.genotype || undefined,
-              employeeType: (patient as any).employee_type || undefined,
-              division: (patient as any).division || undefined,
-              location: (patient as any).location || undefined,
-              phone: (patient as any).phone || undefined,
-              email: (patient as any).email || undefined,
-              occupation: (patient as any).occupation || undefined,
-              religion: (patient as any).religion || undefined,
-              tribe: (patient as any).tribe || undefined,
-              vitals: vitalsData ? {
-                temperature: vitalsData.temperature?.toString() || '',
-                bloodPressure: `${vitalsData.blood_pressure_systolic || ''}/${vitalsData.blood_pressure_diastolic || ''}`,
-                heartRate: vitalsData.heart_rate?.toString() || '',
-                respiratoryRate: vitalsData.respiratory_rate?.toString() || '',
-                oxygenSaturation: vitalsData.oxygen_saturation?.toString() || '',
-                weight: vitalsData.weight?.toString() || '',
-                height: vitalsData.height?.toString() || '',
-                recordedAt: vitalsData.recorded_at || new Date().toISOString(),
-              } : undefined,
-            } as Patient;
+              blood_group: patient.blood_group,
+              genotype: patient.genotype,
+              employee_type: (patient as any).employee_type,
+              division: (patient as any).division,
+              location: (patient as any).location,
+              phone: (patient as any).phone,
+              email: (patient as any).email,
+              occupation: (patient as any).occupation,
+              religion: (patient as any).religion,
+              tribe: (patient as any).tribe,
+              vitals: processVitals(vitalsData),
+            };
+
+            // Sanitize to ensure all fields are proper types for React rendering
+            return sanitizePatientForRendering(patientData);
           } catch (err) {
             console.error(`Error loading patient ${item.patient}:`, err);
             return null;
           }
         }));
         
-        const validPatients = transformedPatients.filter((p): p is Patient => p !== null);
+        // Filter out any null results
+        const validPatients = transformedPatients.filter((p) => p !== null) as Patient[];
+        
+        // Calculate today's statistics from completed sessions
+        let totalConsultationsToday = 0;
+        let averageConsultationTime = 0;
+
+        const sessionStats = await safeAsync(
+          async () => {
+            const today = new Date();
+            const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate()).toISOString();
+            const endOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59).toISOString();
+
+            const sessionsResult = await apiFetch<{ results: any[] }>(
+              `/consultation/sessions/?room=${numericRoomId}&status=completed&started_at__gte=${startOfDay}&started_at__lte=${endOfDay}&page_size=${LARGE_PAGE_SIZE}`
+            );
+
+            const todaySessions = sessionsResult.results || [];
+            const consultationsCount = todaySessions.length;
+            let avgTime = 0;
+
+            if (todaySessions.length > 0) {
+              const totalDuration = todaySessions.reduce((sum, session) => {
+                if (session.started_at && session.ended_at) {
+                  const duration = Math.round((new Date(session.ended_at).getTime() - new Date(session.started_at).getTime()) / (1000 * 60));
+                  return sum + Math.max(0, duration); // Ensure non-negative duration
+                }
+                return sum;
+              }, 0);
+              avgTime = Math.round(totalDuration / todaySessions.length);
+            }
+
+            return { consultationsCount, avgTime };
+          },
+          { consultationsCount: 0, avgTime: 0 },
+          { operation: 'loadSessionStatistics', component: 'ConsultationRoom' }
+        );
+
+        totalConsultationsToday = sessionStats.consultationsCount;
+        averageConsultationTime = sessionStats.avgTime;
         
         // Transform room data
         const transformedRoom: ConsultationRoom = {
@@ -1194,8 +1303,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           startTime: undefined,
           doctor: (roomData as any).assigned_doctor || undefined,
           specialtyFocus: roomData.specialty || 'General Practice',
-          totalConsultationsToday: 0, // TODO: Calculate from visits
-          averageConsultationTime: 0, // TODO: Calculate from sessions
+          totalConsultationsToday,
+          averageConsultationTime,
           queue: sortedQueue.map((item: any, index: number) => ({
             patient_id: String(item.patient),
             position: index + 1,
@@ -1204,11 +1313,11 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         
         setRoom(transformedRoom);
         setPatients(validPatients);
+
         
         // Check for active session and restore it
         const activeSession = (roomData as any).active_session;
         if (activeSession && activeSession.id) {
-          console.log('Found active session, restoring...', activeSession);
           await restoreActiveSession(activeSession.id);
         }
       } catch (err) {
@@ -1234,7 +1343,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       
       // Load patient data
       const patient = await patientService.getPatient(session.patient);
-      console.log('Loaded patient data:', patient);
+      console.log('Loaded patient data for ID:', session.patient);
       
       // Load visit data if available
       let visitData: any = null;
@@ -1244,30 +1353,39 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         try {
           visitData = await apiFetch(`/visits/${visitId}/`);
           console.log('Loaded visit data:', visitData);
+
+          // Populate session medical notes from visit data if not already set
+          if (visitData.clinical_notes && !session.presentation_complaint) {
+            session.presentation_complaint = visitData.clinical_notes;
+          }
         } catch (visitErr) {
           console.warn('Could not load visit data:', visitErr);
         }
       }
       
-      // Restore patient state
-      const restoredPatient: Patient = {
+      // Restore patient state - create sanitized patient object
+      const patientData = {
         id: String(patient.id),
         visitId: visitId ? String(visitId) : '',
+        patient_id: patient.patient_id,
         patientId: patient.patient_id || String(patient.id),
-        name: patient.full_name || `${patient.first_name} ${patient.surname}`,
+        full_name: patient.full_name,
+        first_name: patient.first_name,
+        surname: patient.surname,
+        name: patient.full_name || `${patient.first_name || ''} ${patient.surname || ''}`.trim(),
         age: patient.age || 0,
         gender: patient.gender || '',
         mrn: patient.patient_id || '',
-        personalNumber: (patient as any).personal_number,
-        allergies: patient.allergies ? patient.allergies.split(/[,\n]/).map(a => a.trim()).filter(a => a) : [],
+        personal_number: (patient as any).personal_number,
+        allergies: patient.allergies ? String(patient.allergies).split(/[,\n]/).map(a => a.trim()).filter(a => a) : [],
         waitTime: 0,
         vitalsCompleted: false,
         priority: 'Medium' as const,
         visitDate: visitData?.date || new Date().toISOString().split('T')[0],
         visitTime: visitData?.time || '',
-        bloodGroup: (patient as any).blood_group,
+        blood_group: (patient as any).blood_group,
         genotype: (patient as any).genotype,
-        employeeType: (patient as any).employee_type,
+        employee_type: (patient as any).employee_type,
         division: (patient as any).division,
         location: (patient as any).location,
         phone: (patient as any).phone,
@@ -1278,29 +1396,18 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         photo: (patient as any).photo || null,
       };
       
-      // Load vitals if available
-      if (visitId) {
-        try {
-          const vitalsResult = await apiFetch<{ results: any[] }>(`/vitals/?visit=${visitId}&page_size=100`);
-          const latestVitals = vitalsResult.results?.[0];
-          if (latestVitals) {
-            restoredPatient.vitals = {
-              temperature: latestVitals.temperature || '',
-              bloodPressure: latestVitals.systolic_bp && latestVitals.diastolic_bp 
-                ? `${latestVitals.systolic_bp}/${latestVitals.diastolic_bp}` 
-                : '',
-              heartRate: latestVitals.heart_rate || '',
-              respiratoryRate: latestVitals.respiratory_rate || '',
-              oxygenSaturation: latestVitals.oxygen_saturation || '',
-              weight: latestVitals.weight || '',
-              height: latestVitals.height || '',
-              recordedAt: latestVitals.recorded_at || '',
-            };
+      const restoredPatient = sanitizePatientForRendering(patientData) as Patient;
+      
+      // Load vitals if available (use patient-wide vitals like other functions)
+      const vitalsData = await safeAsync(
+        () => apiFetch<{ results: any[] }>(`/vitals/?patient=${patient.id}&ordering=-recorded_at&page_size=1`).then(result => result.results?.[0] || null),
+        null,
+        { operation: 'restorePatientVitals', patientId: patient.id.toString(), component: 'ConsultationRoom' }
+      );
+
+      if (vitalsData) {
+        restoredPatient.vitals = processVitals(vitalsData);
             restoredPatient.vitalsCompleted = true;
-          }
-        } catch (vitalsErr) {
-          console.warn('Could not load vitals:', vitalsErr);
-        }
       }
       
       // Restore session state
@@ -1315,8 +1422,128 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       const minutes = Math.floor((now.getTime() - startTime.getTime()) / (1000 * 60));
       setSessionDuration(minutes);
       
+      // Enrich session with related data
+      const enrichedSession: any = { ...session };
+
+      // Load prescriptions for this visit
+      if (visitId) {
+        try {
+          const prescriptionsResult = await apiFetch<{ results: any[] }>(`/pharmacy/prescriptions/?visit=${visitId}&page_size=100`);
+          enrichedSession.prescriptions = (prescriptionsResult.results || []).map((p: any) => ({
+            id: String(p.id),
+            medication: p.medication_name || p.medication || 'Unknown',
+            dosage: p.dosage || '',
+            frequency: p.frequency || '',
+            duration: p.duration || '',
+            quantity: p.quantity || 0,
+          }));
+        } catch (err) {
+          console.warn('Could not load prescriptions for session:', err);
+          enrichedSession.prescriptions = [];
+        }
+
+        // Load lab orders for this visit
+        try {
+          const labOrdersResult = await apiFetch<{ results: any[] }>(`/laboratory/orders/?visit=${visitId}&page_size=100`);
+          enrichedSession.labOrders = (labOrdersResult.results || []).flatMap((order: any) =>
+            (order.tests || []).map((test: any) => ({
+              id: `LAB-${order.id}-${test.id}`,
+              test: test.name || test.test_name || 'Unknown Test',
+              status: test.status || 'pending',
+              priority: order.priority === 'stat' ? 'STAT' : order.priority === 'urgent' ? 'Urgent' : 'Routine',
+              orderedBy: order.doctor_name || 'Unknown',
+              createdAt: test.created_at || order.ordered_at || new Date().toISOString(),
+            }))
+          );
+        } catch (err) {
+          console.warn('Could not load lab orders for session:', err);
+          enrichedSession.labOrders = [];
+        }
+
+        // Load radiology orders for this visit
+        try {
+          const radiologyOrdersResult = await apiFetch<{ results: any[] }>(`/radiology/orders/?visit=${visitId}&page_size=100`);
+          enrichedSession.radiologyOrders = (radiologyOrdersResult.results || []).map((order: any) => ({
+            id: String(order.id),
+            procedure: order.procedure || 'Unknown Procedure',
+            priority: order.priority === 'stat' ? 'STAT' : order.priority === 'urgent' ? 'Urgent' : 'Routine',
+            status: order.status || 'pending',
+            finding: order.finding || '',
+            orderedBy: order.doctor_name || 'Unknown',
+            createdAt: order.ordered_at || new Date().toISOString(),
+          }));
+        } catch (err) {
+          console.warn('Could not load radiology orders for session:', err);
+          enrichedSession.radiologyOrders = [];
+        }
+
+        // Load nursing orders for this visit
+        try {
+          const nursingOrdersResult = await apiFetch<{ results: any[] }>(`/orders/?visit=${visitId}&page_size=100`);
+          enrichedSession.nursingOrders = (nursingOrdersResult.results || []).map((order: any) => ({
+            id: String(order.id),
+            type: order.order_type || order.type || 'General',
+            instructions: order.instructions || '',
+            status: order.status || 'pending',
+            priority: order.priority === 'urgent' ? 'Urgent' : order.priority === 'high' ? 'High' : 'Medium',
+            orderedBy: order.ordered_by_name || 'Unknown',
+            createdAt: order.created_at || new Date().toISOString(),
+          }));
+        } catch (err) {
+          console.warn('Could not load nursing orders for session:', err);
+          enrichedSession.nursingOrders = [];
+        }
+      } else {
+        // No visit ID, set empty arrays
+        enrichedSession.prescriptions = [];
+        enrichedSession.labOrders = [];
+        enrichedSession.radiologyOrders = [];
+        enrichedSession.nursingOrders = [];
+      }
+
+      // Load vitals for the session viewer
+      if (visitId) {
+        try {
+          const vitalsResult = await apiFetch<{ results: any[] }>(`/vitals/?visit=${visitId}&page_size=10`);
+          enrichedSession.vitals = (vitalsResult.results || []).reduce((acc: any, v: any) => {
+            acc.temperature = v.temperature || '';
+            acc.bloodPressure = v.blood_pressure_systolic && v.blood_pressure_diastolic
+              ? `${v.blood_pressure_systolic}/${v.blood_pressure_diastolic}`
+              : '';
+            acc.heartRate = v.heart_rate || '';
+            acc.respiratoryRate = v.respiratory_rate || '';
+            acc.oxygenSaturation = v.oxygen_saturation || '';
+            acc.weight = v.weight || '';
+            acc.height = v.height || '';
+            acc.recordedAt = v.recorded_at || '';
+            return acc;
+          }, {});
+        } catch (err) {
+          console.warn('Could not load vitals for session:', err);
+          enrichedSession.vitals = {};
+        }
+      } else {
+        enrichedSession.vitals = {};
+      }
+
+      // Load diagnoses for this session
+      try {
+        const diagnosesResult = await consultationService.getDiagnoses({
+          session: session.id,
+          page_size: 100
+        });
+        setDiagnoses(diagnosesResult.results || []);
+      } catch (err) {
+        console.warn('Could not load diagnoses for session:', err);
+        setDiagnoses([]);
+      }
+
+      // Set the enriched session
+      setSelectedSession(enrichedSession);
+
       // Restore medical notes
       setMedicalNotes({
+        presentationComplaint: session.presentation_complaint || '',
         historyOfPresentIllness: session.history_of_presenting_illness || '',
         physicalExamination: session.physical_examination || '',
         assessment: session.assessment || '',
@@ -1358,17 +1585,20 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           const transformedPrescriptions = prescriptionsResult.results?.flatMap((rx: any) => 
             (rx.medications || []).map((item: any) => ({
               id: `RX-${rx.id}-${item.id}`,
-              medication: item.medication?.name || 'Unknown',
-              medicationId: item.medication?.id,
-              genericName: item.medication?.generic_name || '',
-              dosage: item.dosage || '',
-              frequency: item.frequency || '',
-              duration: item.duration || '',
-              quantity: item.quantity || 0,
-              route: item.route || 'Oral',
-              instructions: item.instructions || '',
-              priority: item.priority || 'Routine',
-              status: rx.status === 'dispensed' ? 'Dispensed' : rx.status === 'partially_dispensed' ? 'Partially Dispensed' : 'Draft',
+              medication: item.medication?.name || item.medication_name || 'Unknown',
+              medicationId: item.medication?.id || item.medication_id,
+              genericName: item.medication?.generic_name || item.generic_name || '',
+                  dosage: item.dosage || '',
+                  frequency: item.frequency || '',
+                  duration: item.duration || '',
+                  quantity: item.quantity || 0,
+                  route: item.route || 'Oral',
+                  instructions: item.instructions || '',
+                  priority: item.priority || 'Routine',
+              status: rx.status === 'dispensed' ? 'Dispensed' :
+                      rx.status === 'partially_dispensed' ? 'Partially Dispensed' :
+                      rx.status === 'pending' ? 'Sent to Pharmacy' :
+                      'Draft',
             })) || []
           ) || [];
           setPrescriptions(transformedPrescriptions);
@@ -1402,11 +1632,11 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         } catch (labErr) {
           console.warn('Could not load lab orders:', labErr);
         }
-      }
+        }
       
       // Load radiology orders if visit exists
       if (visitId) {
-        try {
+      try {
           const radiologyOrdersResult = await apiFetch<{ results: any[] }>(`/radiology/orders/?visit=${visitId}&page_size=100`);
           // Transform radiology orders - each order has multiple studies
           const transformedRadiologyOrders: typeof radiologyOrders = [];
@@ -1431,7 +1661,37 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           console.warn('Could not load radiology orders:', radiologyErr);
         }
       }
-      
+
+      // Load nursing orders if visit exists
+      if (visitId) {
+        try {
+          const nursingOrdersResult = await apiFetch<{ results: any[] }>(`/orders/?visit=${visitId}&page_size=100`);
+          // Transform nursing orders
+          const transformedNursingOrders: typeof nursingOrders = [];
+          nursingOrdersResult.results?.forEach((order: any) => {
+            transformedNursingOrders.push({
+              id: order.id.toString(),
+              type: order.order_type || 'Injection',
+              medication: order.description?.split(' - ')[1] || '',
+              dosage: order.frequency || '',
+              route: 'As ordered',
+              woundLocation: order.description?.includes('wound') ? order.description : '',
+              woundType: order.description?.includes('wound') ? 'Unknown' : '',
+              supplies: order.description?.includes('supplies') ? order.description : '',
+              instructions: order.description || '',
+              priority: order.priority === 'medium' ? 'Routine' : order.priority === 'high' ? 'Urgent' : 'STAT',
+              status: 'Sent to Nursing' as const, // Already sent if loaded from API
+            });
+          });
+          setNursingOrders(transformedNursingOrders);
+        } catch (nursingErr) {
+          console.warn('Could not load nursing orders:', nursingErr);
+        }
+      }
+
+      // Load patient history data for the History tab
+      loadPatientHistory(session.patient);
+
       toast.success(`Restored active session with ${restoredPatient.name}`);
       console.log('Session restored successfully');
     } catch (err: any) {
@@ -1440,12 +1700,35 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       // Don't throw - allow the page to load normally
     }
   };
-  
+
   useEffect(() => {
     loadRoomData();
   }, [roomId]);
 
-  // Load medications from API when component mounts
+  // Search ICD-10 codes from API
+  const searchICD10Codes = async (searchTerm: string) => {
+    if (!searchTerm.trim()) {
+      setIcd10SearchResults([]);
+      return;
+    }
+
+    try {
+      setIsSearchingICD10(true);
+      const response = await consultationService.getICD10Codes({
+        search: searchTerm,
+        page_size: 20  // Limit results for performance
+      });
+      setIcd10SearchResults(response.results || []);
+      console.log(`[ICD-10 API Search] "${searchTerm}" found ${response.results?.length || 0} matches`);
+    } catch (err: any) {
+      console.error('Failed to search ICD-10 codes:', err);
+      setIcd10SearchResults([]);
+    } finally {
+      setIsSearchingICD10(false);
+    }
+  };
+
+  // Load medications and ICD-10 codes from API when component mounts
   useEffect(() => {
     const loadMedications = async () => {
       try {
@@ -1467,7 +1750,45 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         setLoadingMedications(false);
       }
     };
+
+    const loadICD10Codes = async () => {
+      try {
+        // Add a small delay to ensure authentication is ready
+        await new Promise(resolve => setTimeout(resolve, 100));
+        console.log('[Consultation] Loading ICD-10 codes...');
+        const response = await consultationService.getICD10Codes({ page_size: 1000 });
+        console.log('[Consultation] API Response:', response);
+        const loadedCodes = response.results || [];
+        console.log(`[Consultation] Loaded ${loadedCodes.length} ICD-10 codes from API`);
+
+        // Check for specific codes
+        const malariaCodes = loadedCodes.filter((code: any) => code.code?.startsWith('B5'));
+        const headacheCodes = loadedCodes.filter((code: any) => code.code === 'R51' || code.description?.toLowerCase().includes('headache'));
+
+        console.log(`[Consultation] Malaria codes found: ${malariaCodes.length}`, malariaCodes.slice(0, 3));
+        console.log(`[Consultation] Headache codes found: ${headacheCodes.length}`, headacheCodes.slice(0, 3));
+
+        setIcd10Codes(loadedCodes);
+      } catch (err: any) {
+        console.error('Failed to load ICD-10 codes:', err);
+        // Check if it's an authentication error
+        if (err.message?.includes('401') || err.message?.includes('Authentication')) {
+          console.warn('ICD-10 codes failed to load due to authentication - will retry later');
+          // Try again after a longer delay
+          setTimeout(() => {
+            loadICD10Codes().catch(e => {
+              console.warn('Retry also failed for ICD-10 codes:', e);
+            });
+          }, 2000);
+        } else {
+          console.warn('ICD-10 codes failed to load - diagnosis search may not work');
+        }
+        // Keep ICD-10 codes as empty array if loading fails
+      }
+    };
+
     loadMedications();
+    loadICD10Codes();
   }, []);
 
   // Load lab templates from API when component mounts
@@ -1480,7 +1801,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         console.log(`[Consultation] Loaded ${templates.length} lab templates from API`);
       } catch (err) {
         console.error('Failed to load lab templates:', err);
-        toast.error('Failed to load lab templates. Some tests may not be available.');
+          toast.error('Failed to load lab templates. Some tests may not be available.');
       } finally {
         setLoadingLabTemplates(false);
       }
@@ -1489,12 +1810,42 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     loadLabTemplates();
   }, []);
 
+  // Load radiology templates from API when component mounts
+  useEffect(() => {
+    const loadRadiologyTemplates = async () => {
+      try {
+        setLoadingRadiologyTemplates(true);
+        const templates = await radiologyService.getTemplates();
+        setRadiologyTemplates(templates.results || []);
+        console.log(`[Consultation] Loaded ${templates.results?.length || 0} radiology templates from API`);
+      } catch (err: any) {
+        console.error('Failed to load radiology templates:', err);
+        // Show error toast to inform user
+        toast.error('Failed to load radiology templates. Some imaging studies may not be available.');
+        // Fall back to empty array
+        setRadiologyTemplates([]);
+      } finally {
+        setLoadingRadiologyTemplates(false);
+      }
+    };
+
+    // Only load if radiologyService.getTemplates is available
+    if (typeof radiologyService.getTemplates === 'function') {
+      loadRadiologyTemplates();
+    } else {
+      setLoadingRadiologyTemplates(false);
+    }
+  }, []);
+
   // Close lab template dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as HTMLElement;
       if (showLabTemplateDropdown && !target.closest('[data-lab-template-dropdown]')) {
         setShowLabTemplateDropdown(false);
+      }
+      if (showRadiologyTemplateDropdown && !target.closest('[data-radiology-template-dropdown]')) {
+        setShowRadiologyTemplateDropdown(false);
       }
     };
     
@@ -1586,7 +1937,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       
       if (isNaN(numericRoomId) || isNaN(numericPatientId)) {
         toast.error('Invalid room or patient ID');
-        console.error('Room ID:', numericRoomId, 'Patient ID:', numericPatientId, 'Patient object:', patient);
+        console.error('Room ID:', numericRoomId, 'Patient ID:', numericPatientId);
         return;
       }
       
@@ -1606,9 +1957,15 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       setSessionId(sessionData.id);
       setSessionStartTime(new Date());
       setSessionDuration(0);
+
+      // Load real patient history data
+      const patientHistoryId = parseInt(patient.id);
+      if (!isNaN(patientHistoryId)) {
+        loadPatientHistory(patientHistoryId);
+      }
       
       // Reset form states for new session
-      setMedicalNotes({ historyOfPresentIllness: "", physicalExamination: "", assessment: "", plan: "" });
+      setMedicalNotes({ presentationComplaint: "", historyOfPresentIllness: "", physicalExamination: "", assessment: "", plan: "" });
       setDiagnoses([]);
       setPrescriptions([]);
       setLabOrders([]); // Reset lab orders when starting new session
@@ -1645,41 +2002,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         });
       }
       
-      // Load vitals history
-      try {
-        setLoadingVitals(true);
-        const vitals = await patientService.getPatientVitals(numericPatientId);
-        // Transform vitals to match the format expected by the UI
-        const transformedVitals = vitals.map((v: any) => ({
-          id: v.id?.toString() || '',
-          date: v.recorded_at ? new Date(v.recorded_at).toLocaleDateString() : '',
-          time: v.recorded_at ? new Date(v.recorded_at).toLocaleTimeString() : '',
-          temperature: v.temperature?.toString() || '',
-          bloodPressure: v.blood_pressure_systolic && v.blood_pressure_diastolic 
-            ? `${v.blood_pressure_systolic}/${v.blood_pressure_diastolic}` 
-            : '',
-          heartRate: v.heart_rate?.toString() || '',
-          respiratoryRate: v.respiratory_rate?.toString() || '',
-          oxygenSaturation: v.oxygen_saturation?.toString() || '',
-          weight: v.weight?.toString() || '',
-          height: v.height?.toString() || '',
-          recordedBy: v.recorded_by_name || 'Unknown',
-          // For VitalsDetailModal
-          recordedAt: v.recorded_at || '',
-          bloodPressureSystolic: v.blood_pressure_systolic?.toString() || '',
-          bloodPressureDiastolic: v.blood_pressure_diastolic?.toString() || '',
-          pulse: v.heart_rate?.toString() || '',
-          bmi: v.bmi?.toString() || '',
-          notes: v.notes || '',
-        }));
-        setVitalsHistory(transformedVitals);
-      } catch (vitalsErr) {
-        console.warn('Could not load vitals:', vitalsErr);
-        setVitalsHistory([]);
-      } finally {
-        setLoadingVitals(false);
-      }
-      
       toast.success(`Session started with ${patient.name}`);
     } catch (err: any) {
       console.error('Error starting session:', err);
@@ -1688,18 +2010,21 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   };
 
   // Generate consultation session PDF
-  const generateSessionPDF = () => {
-    if (!currentPatient) return null;
+  const generateSessionPDF = async () => {
+    if (!currentPatient || !sessionId) return null;
     
-    const sessionId = `CS-${new Date().getFullYear()}-${Date.now().toString().slice(-6)}`;
+    try {
+      // Load fresh session data from database to ensure we have latest info
+      const freshSession = await consultationService.getSession(sessionId);
+
     const sessionData = {
-      id: sessionId,
-      date: new Date().toISOString().split('T')[0],
-      time: sessionStartTime ? `${new Date(sessionStartTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })} - ${new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}` : '',
-      duration: `${sessionDuration} min`,
-      clinic: 'General', // This would come from context
-      room: room?.name || 'Unknown',
-      doctor: 'Dr. Current User', // This would come from auth context
+      id: freshSession.session_id || sessionId,
+      date: freshSession.started_at ? new Date(freshSession.started_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+      time: freshSession.started_at ? `${formatTime(freshSession.started_at)} - ${freshSession.ended_at ? formatTime(freshSession.ended_at) : formatTime(new Date().toISOString())}` : '',
+      duration: freshSession.started_at && freshSession.ended_at ? `${Math.round((new Date(freshSession.ended_at).getTime() - new Date(freshSession.started_at).getTime()) / (1000 * 60))} min` : `${sessionDuration} min`,
+      clinic: 'GOPD', // This would come from context
+      room: freshSession.room_name || room?.name || 'Unknown',
+      doctor: freshSession.doctor_name || 'Unknown Doctor',
       doctorSpecialty: room?.specialtyFocus || 'General Practice',
       patient: {
         name: currentPatient.name,
@@ -1723,11 +2048,195 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     // For now, we'll simulate PDF generation
     console.log('Generating PDF for session:', sessionData);
     return sessionData;
+    } catch (error) {
+      console.error('Error generating session PDF:', error);
+      // Fallback to basic session data if API call fails
+      const fallbackSessionData = {
+        id: sessionId,
+        date: new Date().toISOString().split('T')[0],
+        time: sessionStartTime ? `${formatTime(sessionStartTime.toISOString())} - ${formatTime(new Date().toISOString())}` : '',
+        duration: `${sessionDuration} min`,
+        clinic: 'GOPD',
+        room: room?.name || 'Unknown',
+        doctor: currentUser?.name || 'Unknown Doctor',
+        doctorSpecialty: room?.specialtyFocus || 'General Practice',
+        patient: {
+          name: currentPatient.name,
+          patientId: currentPatient.patientId,
+          age: currentPatient.age,
+          gender: currentPatient.gender
+        },
+        vitals: currentPatient.vitals,
+        medicalNotes: medicalNotes,
+        prescriptions: prescriptions,
+        labOrders: labOrders,
+        nursingOrders: nursingOrders,
+        referrals: referrals,
+        radiologyOrders: radiologyOrders,
+        followUp: followUpRequired ? { date: followUpDate, reason: followUpReason } : null,
+        pdfGenerated: true,
+        pdfUrl: `/documents/consultation-${sessionId}.pdf`
+      };
+      return fallbackSessionData;
+    }
   };
 
   // View session details
-  const viewSessionDetails = (session: any) => {
-    setSelectedSession(session);
+  const viewSessionDetails = async (session: any) => {
+    // Load full session data from API first
+    const fullSession = await consultationService.getSession(session.id);
+
+    // Enrich session with related data for display
+    const enrichedSession: any = { ...fullSession };
+
+    // Ensure patient information is included (session should already have patient_name from serializer)
+    if (!enrichedSession.patient_name && currentPatient) {
+      enrichedSession.patient_name = currentPatient.name;
+    }
+
+    // Load diagnoses for this session
+    try {
+      const diagnosesResult = await consultationService.getDiagnoses({
+        session: fullSession.id,
+        page_size: 100
+      });
+      enrichedSession.diagnoses = (diagnosesResult.results || []).map((d: any) => ({
+        id: String(d.id),
+        code: d.icd10_code_details?.code || 'Unknown',
+        name: d.icd10_code_details?.description || d.diagnosis_text || 'Unknown diagnosis',
+        type: d.certainty === 'confirmed' ? 'Primary' : d.certainty === 'probable' ? 'Secondary' : 'Differential',
+        notes: d.notes || d.diagnosis_text || '',
+        status: d.status,
+        certainty: d.certainty,
+        diagnosed_at: d.diagnosed_at,
+      }));
+    } catch (err) {
+      console.warn('Could not load diagnoses for session:', err);
+      enrichedSession.diagnoses = [];
+    }
+
+    // Load related data for this session
+    try {
+    // Load prescriptions for this session
+    const prescriptionsResult = await pharmacyService.getPrescriptions({
+      consultation_session: fullSession.id,
+      page_size: 100
+    });
+    // Flatten prescription medications into individual prescription items
+    enrichedSession.prescriptions = (prescriptionsResult.results || []).flatMap((p: any) =>
+      (p.medications || []).map((med: any) => ({
+        id: String(p.id) + '-' + String(med.id),
+        medication: med.medication_name || 'Unknown',
+        dosage: med.dosage || '',
+        frequency: med.frequency || '',
+        duration: med.duration || '',
+        quantity: med.quantity || 0,
+      }))
+    );
+    } catch (err) {
+      console.warn('Could not load prescriptions for session:', err);
+      enrichedSession.prescriptions = [];
+    }
+
+    // Load lab orders for this session
+    try {
+      const labOrdersResult = await labService.getOrders({
+        consultation_session: fullSession.id,
+        page_size: 100
+      });
+      enrichedSession.labOrders = (labOrdersResult.results || []).flatMap((order: any) =>
+        (order.tests || []).map((test: any) => ({
+          id: `LAB-${order.id}-${test.id}`,
+          test: test.name || test.test_name || 'Unknown Test',
+          status: test.status || 'pending',
+          priority: order.priority === 'stat' ? 'STAT' : order.priority === 'urgent' ? 'Urgent' : 'Routine',
+          orderedBy: order.doctor_name || 'Unknown',
+          createdAt: test.created_at || order.ordered_at || new Date().toISOString(),
+        }))
+      );
+    } catch (err) {
+      console.warn('Could not load lab orders for session:', err);
+      enrichedSession.labOrders = [];
+    }
+
+    // Load radiology orders for this session
+    try {
+      const radiologyOrdersResult = await radiologyService.getOrders({
+        consultation_session: fullSession.id,
+        page_size: 100
+      });
+
+      // Flatten radiology studies into individual order items
+      enrichedSession.radiologyOrders = (radiologyOrdersResult.results || []).flatMap((order: any) =>
+        (order.studies || []).map((study: any) => ({
+          id: `RAD-${order.id}-${study.id}`,
+          procedure: study.procedure || 'Unknown Procedure',
+          priority: order.priority === 'stat' ? 'STAT' : order.priority === 'urgent' ? 'Urgent' : 'Routine',
+          status: study.status || 'pending',
+          finding: study.finding || '',
+          orderedBy: order.doctor_name || 'Unknown',
+          createdAt: study.created_at || order.ordered_at || new Date().toISOString(),
+        }))
+      );
+    } catch (err) {
+      console.warn('Could not load radiology orders for session:', err);
+      enrichedSession.radiologyOrders = [];
+    }
+
+    // Load nursing orders for this session (using direct API call since no service method)
+    try {
+      const nursingOrdersResult = await apiFetch<{ results: any[] }>(`/orders/?consultation_session=${fullSession.id}&page_size=100`);
+      enrichedSession.nursingOrders = (nursingOrdersResult.results || []).map((order: any) => ({
+        id: String(order.id),
+        type: order.order_type || order.type || 'General',
+        instructions: order.instructions || '',
+        status: order.status || 'pending',
+        priority: order.priority === 'urgent' ? 'Urgent' : order.priority === 'high' ? 'High' : 'Medium',
+        orderedBy: order.ordered_by_name || 'Unknown',
+        createdAt: order.created_at || new Date().toISOString(),
+      }));
+    } catch (err) {
+      console.warn('Could not load nursing orders for session:', err);
+      enrichedSession.nursingOrders = [];
+    }
+
+    // Load vitals for the session (by visit if available, otherwise by patient)
+    try {
+      const visitId = fullSession.visit; // Now fullSession has the visit ID from API
+      const vitalsResult = await patientService.getPatientVitals(fullSession.patient, visitId);
+
+      // Use the most recent complete vitals record
+      const sortedVitals = (vitalsResult || []).sort((a, b) =>
+        new Date(b.recorded_at || 0).getTime() - new Date(a.recorded_at || 0).getTime()
+      );
+
+      // Find the most recent vitals with complete BP data
+      const latestCompleteVitals = sortedVitals.find(v =>
+        v.blood_pressure_systolic && v.blood_pressure_diastolic
+      ) || sortedVitals[0]; // Fallback to most recent even if BP incomplete
+
+      if (latestCompleteVitals) {
+        enrichedSession.vitals = {
+          temperature: latestCompleteVitals.temperature || '',
+          bloodPressure: latestCompleteVitals.blood_pressure_systolic && latestCompleteVitals.blood_pressure_diastolic
+            ? `${latestCompleteVitals.blood_pressure_systolic}/${latestCompleteVitals.blood_pressure_diastolic}`
+            : '',
+          heartRate: latestCompleteVitals.heart_rate || '',
+          respiratoryRate: latestCompleteVitals.respiratory_rate || '',
+          oxygenSaturation: latestCompleteVitals.oxygen_saturation || '',
+          weight: latestCompleteVitals.weight || '',
+          height: latestCompleteVitals.height || '',
+          recordedAt: latestCompleteVitals.recorded_at || '',
+        };
+      } else {
+        enrichedSession.vitals = {};
+      }
+    } catch (err) {
+      console.warn('Could not load vitals for session:', err);
+      enrichedSession.vitals = {};
+    }
+
+    setSelectedSession(enrichedSession);
     setShowSessionViewer(true);
   };
 
@@ -1740,12 +2249,341 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     );
   };
 
-  // Download session PDF
-  const downloadSessionPDF = (session: any) => {
-    // In a real implementation, this would download the actual PDF
-    toast.success(`Downloading consultation report: ${session.id}`, {
-      description: `Session from ${session.date}`
-    });
+  // Download consultation report as PDF
+  const downloadConsultationReport = async (session: any) => {
+    try {
+      toast.loading('Generating PDF report...', { id: 'pdf-generation' });
+
+      // Create a new window with the report for PDF generation
+      const printWindow = window.open('', '_blank');
+      if (!printWindow) {
+        toast.error('Unable to open report window. Please allow popups for this site.', { id: 'pdf-generation' });
+        return;
+      }
+
+      // Generate HTML content with PDF-specific styling
+      const reportHTML = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Consultation Report - Session ${session.id}</title>
+          <style>
+            @media print {
+              @page {
+                size: A4;
+                margin: 20mm;
+              }
+              body { print-color-adjust: exact; }
+            }
+            body {
+              font-family: 'Times New Roman', serif;
+              margin: 0;
+              padding: 20px;
+              font-size: 12pt;
+              line-height: 1.4;
+              color: #000;
+              background: white;
+            }
+            .header {
+              text-align: center;
+              border-bottom: 2px solid #000;
+              padding-bottom: 15px;
+              margin-bottom: 25px;
+            }
+            .header h1 { margin: 0; font-size: 18pt; font-weight: bold; }
+            .header h2 { margin: 5px 0; font-size: 14pt; }
+            .header h3 { margin: 5px 0; font-size: 12pt; }
+            .section {
+              margin-bottom: 20px;
+              page-break-inside: avoid;
+            }
+            .section h3 {
+              color: #000;
+              border-bottom: 1px solid #000;
+              padding-bottom: 5px;
+              margin-bottom: 10px;
+              font-size: 14pt;
+              font-weight: bold;
+            }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-bottom: 15px;
+              font-size: 11pt;
+            }
+            th, td {
+              border: 1px solid #000;
+              padding: 6px;
+              text-align: left;
+              vertical-align: top;
+            }
+            th {
+              background-color: #f0f0f0;
+              font-weight: bold;
+            }
+            .vitals-grid {
+              display: grid;
+              grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+              gap: 8px;
+              margin-bottom: 15px;
+            }
+            .vital-item {
+              padding: 8px;
+              border: 1px solid #000;
+              text-align: center;
+              font-size: 11pt;
+            }
+            .footer {
+              margin-top: 30px;
+              text-align: center;
+              font-size: 10pt;
+              color: #666;
+              border-top: 1px solid #ccc;
+              padding-top: 10px;
+            }
+            .no-break { page-break-inside: avoid; }
+          </style>
+        </head>
+        <body>
+          ${generateConsultationReportHTML(session).replace('<html>', '').replace('</html>', '').replace('<head>', '').replace('</head>', '').replace('<body>', '').replace('</body>', '').replace(/<title>.*?<\/title>/, '')}
+        </body>
+        </html>
+      `;
+
+      printWindow.document.write(reportHTML);
+      printWindow.document.close();
+
+      // Wait for content to load, then trigger PDF download
+      printWindow.onload = () => {
+        setTimeout(() => {
+          printWindow.print();
+          printWindow.close();
+          toast.success('PDF report generated and sent to printer', { id: 'pdf-generation' });
+        }, 500);
+      };
+
+    } catch (error) {
+      console.error('Error generating PDF:', error);
+      toast.error('Failed to generate PDF report', { id: 'pdf-generation' });
+    }
+  };
+
+  // Print consultation report
+  const printConsultationReport = (session: any) => {
+    // Generate HTML content for the consultation report
+    const reportHTML = generateConsultationReportHTML(session);
+
+    // Create a new window with the report
+    const printWindow = window.open('', '_blank');
+    if (printWindow) {
+      printWindow.document.write(reportHTML);
+      printWindow.document.close();
+
+      // Wait for content to load, then print
+      printWindow.onload = () => {
+        printWindow.print();
+        printWindow.close();
+      };
+
+      toast.success('Consultation report opened for printing');
+    } else {
+      toast.error('Unable to open report window. Please allow popups for this site.');
+    }
+  };
+
+  // Generate HTML for consultation report
+  const generateConsultationReportHTML = (session: any) => {
+    const vitals = getSessionProperty(session, 'vitals');
+    const prescriptions = getSessionProperty(session, 'prescriptions');
+    const labOrders = getSessionProperty(session, 'labOrders');
+    const radiologyOrders = getSessionProperty(session, 'radiologyOrders');
+    const nursingOrders = getSessionProperty(session, 'nursingOrders');
+
+    return `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Consultation Report - Session ${session.id}</title>
+        <style>
+          body { font-family: Arial, sans-serif; margin: 20px; }
+          .header { text-align: center; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; }
+          .section { margin-bottom: 20px; }
+          .section h3 { color: #333; border-bottom: 1px solid #ccc; padding-bottom: 5px; }
+          table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+          th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+          th { background-color: #f5f5f5; }
+          .vitals-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+          .vital-item { padding: 10px; border: 1px solid #ddd; text-align: center; }
+          .footer { margin-top: 30px; text-align: center; font-size: 12px; color: #666; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <h1>Nigerian Ports Authority</h1>
+          <h2>Medical Services Department</h2>
+          <h3>Consultation Report</h3>
+          <p>Session ID: ${session.id}</p>
+        </div>
+
+        <div class="section">
+          <h3>Patient Information</h3>
+          <p><strong>Name:</strong> ${session.patient_name || 'Unknown'}</p>
+          <p><strong>Patient ID:</strong> ${session.patient_id || 'N/A'}</p>
+          <p><strong>Age:</strong> ${session.patient_age || 'N/A'} years</p>
+          <p><strong>Gender:</strong> ${session.patient_gender || 'N/A'}</p>
+        </div>
+
+        <div class="section">
+          <h3>Consultation Details</h3>
+          <p><strong>Doctor:</strong> ${session.doctor_name || 'Unknown'}</p>
+          <p><strong>Clinic:</strong> ${session.clinic_name || 'Unknown'}</p>
+          <p><strong>Room:</strong> ${session.room_name || 'Unknown'}</p>
+          <p><strong>Date & Time:</strong> ${formatDate(session.started_at)} ${formatTime(session.started_at)}</p>
+          <p><strong>Duration:</strong> ${session.ended_at ? Math.round((new Date(session.ended_at).getTime() - new Date(session.started_at).getTime()) / (1000 * 60)) + ' minutes' : 'Ongoing'}</p>
+        </div>
+
+        ${vitals.length > 0 ? `
+        <div class="section">
+          <h3>Vital Signs</h3>
+          <div class="vitals-grid">
+            ${Object.entries(vitals[0] || {}).map(([key, value]: [string, any]) => {
+              if (key === 'recordedAt') return '';
+              const displayKey = key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
+              return `<div class="vital-item"><strong>${displayKey}</strong><br>${value || 'N/A'}</div>`;
+            }).join('')}
+          </div>
+        </div>
+        ` : ''}
+
+        <div class="section">
+          <h3>Clinical Notes</h3>
+          ${session.presentation_complaint ? `<p><strong>Presentation:</strong> ${session.presentation_complaint}</p>` : ''}
+          ${session.history_of_presenting_illness ? `<p><strong>History:</strong> ${session.history_of_presenting_illness.replace(/\n/g, '<br>')}</p>` : ''}
+          ${session.physical_examination ? `<p><strong>Physical Exam:</strong> ${session.physical_examination.replace(/\n/g, '<br>')}</p>` : ''}
+          ${session.assessment ? `<p><strong>Assessment:</strong> ${session.assessment}</p>` : ''}
+          ${session.plan ? `<p><strong>Treatment Plan:</strong> ${session.plan}</p>` : ''}
+        </div>
+
+        ${session.diagnoses && session.diagnoses.length > 0 ? `
+        <div class="section">
+          <h3>Diagnoses</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>ICD-10 Code</th>
+                <th>Diagnosis</th>
+                <th>Diagnosis Type</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${session.diagnoses.map((dx: any) => `
+                <tr>
+                  <td>${dx.code || 'N/A'}</td>
+                  <td>${dx.name || 'Unknown'}</td>
+                  <td>${dx.type || 'Unknown'}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+        ` : ''}
+
+        ${prescriptions.length > 0 ? `
+        <div class="section">
+          <h3>Prescriptions</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Medication</th>
+                <th>Dosage</th>
+                <th>Frequency</th>
+                <th>Duration</th>
+                <th>Quantity</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${prescriptions.map((rx: any) => `
+                <tr>
+                  <td>${rx.medication || 'Unknown'}</td>
+                  <td>${rx.dosage || 'N/A'}</td>
+                  <td>${rx.frequency || 'N/A'}</td>
+                  <td>${rx.duration || 'N/A'}</td>
+                  <td>${rx.quantity || 'N/A'}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+        ` : ''}
+
+        ${labOrders.length > 0 ? `
+        <div class="section">
+          <h3>Laboratory Orders</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Test</th>
+                <th>Priority</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${labOrders.map((lab: any) => `
+                <tr>
+                  <td>${lab.test || 'Unknown'}</td>
+                  <td>${lab.priority || 'Routine'}</td>
+                  <td>${lab.status || 'Pending'}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+        ` : ''}
+
+        ${radiologyOrders.length > 0 ? `
+        <div class="section">
+          <h3>Radiology Orders</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Procedure</th>
+                <th>Priority</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${radiologyOrders.map((rad: any) => `
+                <tr>
+                  <td>${rad.procedure || 'Unknown'}</td>
+                  <td>${rad.priority || 'Routine'}</td>
+                  <td>${rad.status || 'Pending'}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+        ` : ''}
+
+        ${nursingOrders.length > 0 ? `
+        <div class="section">
+          <h3>Nursing Orders</h3>
+          <ul>
+            ${nursingOrders.map((order: any) => `<li>${order.type}: ${order.instructions}</li>`).join('')}
+          </ul>
+        </div>
+        ` : ''}
+
+        <div class="section">
+          <h3>Session Outcome</h3>
+          <p><strong>Status:</strong> ${session.status === 'completed' ? 'Completed' : 'In Progress'}</p>
+        </div>
+
+        <div class="footer">
+          <p>Generated: ${new Date().toLocaleString()} | Document ID: ${session.id}</p>
+        </div>
+      </body>
+      </html>
+    `;
   };
 
   // Print session
@@ -1814,21 +2652,10 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         physical_examination: medicalNotes.physicalExamination || '',
         assessment: medicalNotes.assessment || '',
         plan: medicalNotes.plan || '',
-        notes: '', // Will be populated with diagnosis and follow-up info below
+        notes: '',
       };
 
-      // Add diagnosis summary to notes if available
-      if (diagnoses.length > 0) {
-        const diagnosisSummary = diagnoses
-          .filter(d => d.type === 'Primary')
-          .map(d => `${d.code}: ${d.name}`)
-          .join('; ');
-        if (diagnosisSummary) {
-          sessionUpdateData.notes = sessionUpdateData.notes 
-            ? `${sessionUpdateData.notes}\n\nDiagnosis: ${diagnosisSummary}`
-            : `Diagnosis: ${diagnosisSummary}`;
-        }
-      }
+      // Diagnoses are now saved separately to the Diagnosis model
 
       // Add follow-up information to notes if scheduled
       if (followUpRequired && followUpDate && followUpReason) {
@@ -1842,11 +2669,12 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           try {
             const patientId = typeof currentPatient.id === 'string' ? parseInt(currentPatient.id, 10) : currentPatient.id;
             const doctorId = undefined; // Doctor ID can be set later or obtained from room/context
+
             await appointmentService.createAppointment({
               patient: patientId,
               doctor: doctorId,
               clinic: undefined, // Clinic can be obtained from room context if needed
-              room: typeof room?.id === 'number' ? room.id : (typeof roomId === 'string' ? parseInt(roomId, 10) : undefined),
+              // Don't specify room for follow-up appointments to avoid validation issues
               appointment_type: 'follow_up',
               appointment_date: followUpDate,
               appointment_time: '09:00', // Default time, can be made configurable
@@ -1854,8 +2682,11 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
               reason: followUpReason,
               notes: `Follow-up from consultation session ${sessionId}. ${sessionUpdateData.notes || ''}`,
             });
-          } catch (apptError) {
-            console.warn('Failed to create follow-up appointment:', apptError);
+
+            toast.success('Follow-up appointment created successfully');
+          } catch (apptError: any) {
+            console.error('Failed to create follow-up appointment:', apptError);
+            toast.error('Failed to create follow-up appointment: ' + (apptError.message || 'Unknown error'));
             // Continue - follow-up info is still saved in session notes as fallback
           }
         }
@@ -1907,7 +2738,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       }
       
       // Generate PDF for the session
-      const sessionPDF = generateSessionPDF();
+      const sessionPDF = await generateSessionPDF();
       if (sessionPDF) {
         toast.success("Consultation report generated", {
           description: `Session ${sessionPDF.id} saved to patient history`,
@@ -1928,7 +2759,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       setSessionId(null);
       setSessionStartTime(null);
       setSessionDuration(0);
-      setMedicalNotes({ historyOfPresentIllness: "", physicalExamination: "", assessment: "", plan: "" });
+      setMedicalNotes({ presentationComplaint: "", historyOfPresentIllness: "", physicalExamination: "", assessment: "", plan: "" });
       setDiagnoses([]);
       setPrescriptions([]);
       setLabOrders([]); // Reset lab orders when starting new session
@@ -1947,44 +2778,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     }
   };
 
-  const addPrescription = () => { 
-    // Validate required fields
-    if (!newPrescription.medication || !newPrescription.dosage || !newPrescription.frequency) {
-      toast.error("Please fill in all required fields (medication, dosage, frequency)");
-      return;
-    }
-
-    // CRITICAL: Ensure medicationId is present and is a valid number
-    if (!newPrescription.medicationId || isNaN(Number(newPrescription.medicationId))) {
-      toast.error("Please select a valid medication from the list. Medication ID is missing or invalid.");
-      return;
-    }
-
-    const rxId = `RX-${Date.now()}`;
-    const dailyDoses = frequencyToDailyDoses[newPrescription.frequency] || 1;
-    const calculatedQty = newPrescription.frequency === 'STAT (Single dose)' 
-      ? 1 
-      : Math.ceil(dailyDoses * newPrescription.durationDays);
-    
-    setPrescriptions([...prescriptions, {
-      id: rxId,
-      medication: newPrescription.medication,
-      medicationId: Number(newPrescription.medicationId), // Ensure it's a number
-      genericName: newPrescription.genericName,
-      dosage: newPrescription.dosage,
-      frequency: newPrescription.frequency,
-      duration: newPrescription.duration,
-      quantity: calculatedQty || newPrescription.quantity,
-      route: newPrescription.route,
-      instructions: newPrescription.instructions,
-      priority: newPrescription.priority,
-      status: 'Draft'
-    }]); 
-    setNewPrescription({ medication: "", medicationId: undefined, genericName: "", dosage: "", frequency: "", duration: "", durationDays: 0, quantity: 0, route: "Oral", instructions: "", priority: "Routine" }); 
-    setMedicationSearch("");
-    setShowAddPrescription(false); 
-    toast.success("Prescription added to order"); 
-  };
 
   const sendPrescriptionsToPharmacy = async () => {
     if (prescriptions.length === 0) {
@@ -2073,8 +2866,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         await pharmacyService.createPrescription({
           patient: numericPatientId,
           visit: numericVisitId || undefined,
+          consultation_session: sessionId,
           doctor: sessionId ? undefined : undefined, // Will be set from request user in backend
-          diagnosis: diagnoses.length > 0 ? diagnoses.filter(d => d.type === 'Primary').map(d => `${d.code}: ${d.name}`).join('; ') : undefined,
+          diagnosis: '', // Diagnoses are now saved separately
           notes: medicalNotes.assessment || undefined,
           items: prescriptionItems, // Send ALL items in ONE prescription
         } as any);
@@ -2100,6 +2894,68 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     }
   };
 
+  const editPrescription = (index: number) => {
+    const prescriptionToEdit = prescriptions[index];
+    if (!prescriptionToEdit) return;
+
+    // Reset modal state first
+    setSelectedMedications(new Set());
+    setMedicationConfigs(new Map());
+    setMedicationSearch("");
+    setShowMedicationDropdown(false);
+    setNewPrescription({
+      medication: "",
+      medicationId: undefined,
+      genericName: "",
+      dosage: "",
+      frequency: "",
+      duration: "",
+      durationDays: 0,
+      quantity: 0,
+      route: "Oral",
+      instructions: "",
+      priority: "Routine",
+      notes: ""
+    });
+
+    // Pre-populate the modal with existing prescription data
+    const medicationId = prescriptionToEdit.medicationId;
+
+    if (!medicationId) {
+      toast.error('Cannot edit prescription: medication ID not found');
+      return;
+    }
+
+    // Select the medication
+    setSelectedMedications(new Set([medicationId]));
+
+    // Pre-populate the configuration
+    const config: any = {
+      dosage: prescriptionToEdit.dosage === 'As directed' ? '' : prescriptionToEdit.dosage,
+      frequency: prescriptionToEdit.frequency,
+      durationDays: prescriptionToEdit.duration.includes('days')
+        ? parseInt(prescriptionToEdit.duration.split(' ')[0]) || 0
+        : 0,
+      route: prescriptionToEdit.route,
+      instructions: prescriptionToEdit.instructions || ''
+    };
+    setMedicationConfigs(new Map([[medicationId, config]]));
+
+    // Pre-populate clinical indication (use instructions if available, otherwise empty)
+    const clinicalIndication = prescriptionToEdit.instructions && prescriptionToEdit.instructions !== prescriptionToEdit.medication ? prescriptionToEdit.instructions : '';
+    setNewPrescription(prev => ({
+      ...prev,
+      notes: clinicalIndication,
+      priority: prescriptionToEdit.priority || 'Routine'
+    }));
+
+    // Remove the old prescription and open modal
+    setPrescriptions(prescriptions.filter((_, i) => i !== index));
+    setShowAddPrescription(true);
+
+    toast.info(`Editing prescription for ${prescriptionToEdit.medication}`);
+  };
+
   const toggleMedicationSelection = (med: any) => {
     // CRITICAL: Ensure medication ID is a valid number
     let medicationId: number | undefined;
@@ -2121,7 +2977,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     // Check for allergies when selecting
     const isAllergyRisk = currentPatient?.allergies.some(allergy => 
       med.name.toLowerCase().includes(allergy.toLowerCase()) || 
-      (med.generic_name || med.genericName || '').toLowerCase().includes(allergy.toLowerCase())
+      (med.generic_name || '').toLowerCase().includes(allergy.toLowerCase())
     );
     
     if (isAllergyRisk && medicationId !== undefined && !selectedMedications.has(medicationId)) {
@@ -2162,14 +3018,23 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
             : 'Oral';
           
           newConfigs.set(medicationId!, {
+            id: med.id || 0,
+            name: med.name || '',
+            strength: med.strength || '',
+            form: med.form || med.dosageForm || 'tablet',
+            route: defaultRoute,
             dosage: defaultDosage,
             frequency: 'Once daily (OD)',
             duration: '',
             durationDays: 0,
             quantity: 0,
-            route: defaultRoute,
             instructions: '',
             priority: 'Routine',
+            unit: med.unit,
+            generic_name: med.generic_name,
+            genericName: med.generic_name || '',
+            category: '', // Not available in Medication interface
+            dosageForm: med.form || med.dosageForm,
           });
           return newConfigs;
         });
@@ -2186,16 +3051,11 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   const updateMedicationConfig = (medicationId: number, field: string, value: any) => {
     setMedicationConfigs(prev => {
       const newConfigs = new Map(prev);
-      const currentConfig = newConfigs.get(medicationId) || {
-        dosage: '',
-        frequency: 'Once daily (OD)',
-        duration: '',
-        durationDays: 0,
-        quantity: 0,
-        route: 'Oral',
-        instructions: '',
-        priority: 'Routine',
-      };
+      const currentConfig = newConfigs.get(medicationId);
+      if (!currentConfig) {
+        // This shouldn't happen in an update operation
+        return newConfigs;
+      }
       
       const updatedConfig = { ...currentConfig, [field]: value };
       
@@ -2204,7 +3064,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         const dailyDoses = frequencyToDailyDoses[updatedConfig.frequency] || 1;
         updatedConfig.quantity = updatedConfig.frequency === 'STAT (Single dose)' 
           ? 1 
-          : Math.ceil(dailyDoses * updatedConfig.durationDays);
+          : Math.ceil(dailyDoses * (updatedConfig.durationDays || 0));
       }
       
       // Auto-update duration string when durationDays changes
@@ -2217,28 +3077,14 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     });
   };
 
-  const addSelectedMedicationsToPrescription = () => {
+  const addPrescription = () => {
     if (selectedMedications.size === 0) {
       toast.error("Please select at least one medication");
       return;
     }
     
-    // Validate all selected medications have required fields
-    const invalidMeds: string[] = [];
-    Array.from(selectedMedications).forEach(medId => {
-      const config = medicationConfigs.get(medId);
-      const med = medications.find((m: any) => {
-        const mId = typeof m.id === 'number' ? m.id : parseInt(m.id, 10);
-        return mId === medId;
-      });
-      
-      if (!config || !config.dosage || !config.frequency || (!config.durationDays && config.frequency !== 'STAT (Single dose)')) {
-        if (med) invalidMeds.push(med.name);
-      }
-    });
-    
-    if (invalidMeds.length > 0) {
-      toast.error(`Please fill in all required fields (dosage, frequency, duration) for: ${invalidMeds.join(', ')}`);
+    if (!newPrescription.notes) {
+      toast.error("Please provide clinical indication");
       return;
     }
     
@@ -2247,37 +3093,36 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       return selectedMedications.has(mId);
     });
     
-    // Add all selected medications to prescriptions list with their individual configs
-    const newPrescriptions: {
-      id: string;
-      medication: string;
-      medicationId?: number;
-      genericName: string;
-      dosage: string;
-      frequency: string;
-      duration: string;
-      quantity: number;
-      route: string;
-      instructions: string;
-      priority: string;
-      status: 'Draft' | 'Sent to Pharmacy' | 'Processing' | 'Dispensed';
-    }[] = selectedMeds.map((med: any) => {
+    // Add all selected medications to prescriptions list with configurations
+    const newPrescriptions = selectedMeds.map((med: any) => {
       const medicationId = typeof med.id === 'number' ? med.id : parseInt(med.id, 10);
-      const config = medicationConfigs.get(medicationId)!;
+      const config = medicationConfigs.get(medicationId) || {
+        dosage: '',
+        frequency: 'Once daily (OD)',
+        durationDays: 0,
+        route: 'Oral',
+        instructions: ''
+      };
+
+      const dailyDoses = frequencyToDailyDoses[config.frequency] || 1;
+      const calculatedQty = config.frequency === 'STAT (Single dose)'
+        ? 1
+        : Math.ceil(dailyDoses * (config.durationDays || 1));
+
       const rxId = `RX-${Date.now()}-${medicationId}`;
       
       return {
         id: rxId,
         medication: med.name,
         medicationId: medicationId,
-        genericName: med.generic_name || med.genericName || '',
-        dosage: config.dosage,
+        genericName: med.generic_name || '',
+        dosage: config.dosage || 'As directed',
         frequency: config.frequency,
-        duration: config.duration,
-        quantity: config.quantity,
+        duration: config.durationDays ? `${config.durationDays} days` : 'As directed',
+        quantity: calculatedQty,
         route: config.route,
-        instructions: config.instructions,
-        priority: config.priority,
+        instructions: config.instructions || newPrescription.notes,
+        priority: newPrescription.priority,
         status: 'Draft' as const
       };
     });
@@ -2287,7 +3132,20 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     // Reset form and selections
     setSelectedMedications(new Set());
     setMedicationConfigs(new Map());
-    setNewPrescription({ medication: "", medicationId: undefined, genericName: "", dosage: "", frequency: "", duration: "", durationDays: 0, quantity: 0, route: "Oral", instructions: "", priority: "Routine" });
+    setNewPrescription({
+      medication: "",
+      medicationId: undefined,
+      genericName: "",
+      dosage: "",
+      frequency: "",
+      duration: "",
+      durationDays: 0,
+      quantity: 0,
+      route: "Oral",
+      instructions: "",
+      priority: "Routine",
+      notes: ""
+    });
     setMedicationSearch("");
     setShowAddPrescription(false);
     
@@ -2309,8 +3167,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         if (!searchTerm) return true; // Show all if search is empty
         
         const name = (med.name || '').toLowerCase();
-        const genericName = ((med.generic_name || med.genericName || '')).toLowerCase();
-        const category = ((med.category || '')).toLowerCase();
+        const genericName = ((med.generic_name || '')).toLowerCase();
+        const category = ''; // Not available in Medication interface
         const form = ((med.form || med.dosageForm || '')).toLowerCase();
         const code = ((med.code || '')).toLowerCase();
         
@@ -2419,6 +3277,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       await labService.createOrder({
         patient: numericPatientId as any,
         visit: numericVisitId || undefined,
+        consultation_session: sessionId,
         priority: priorityMap[orderPriority] || 'routine',
         clinical_notes: combinedNotes,
         tests_data: testsData as any,
@@ -2436,6 +3295,37 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       console.error('Error creating lab order:', err);
       toast.error(err.message || 'Failed to send lab order');
     }
+  };
+
+  const editLabOrder = (index: number) => {
+    const orderToEdit = labOrders[index];
+    if (!orderToEdit) return;
+
+    // Reset modal state first
+    setSelectedLabTemplates(new Set());
+    setLabTemplateSearch("");
+    setShowLabTemplateDropdown(false);
+    setNewLabOrder({ test: "", priority: "Routine", notes: "" });
+
+    // Pre-populate the modal with existing order data
+    // For lab orders, we need to find the template ID from the test name
+    const template = labTemplates.find(t => t.name === orderToEdit.test);
+    if (template) {
+      setSelectedLabTemplates(new Set([template.id]));
+    }
+
+    // Pre-populate clinical indication and priority
+    setNewLabOrder({
+      test: "",
+      priority: orderToEdit.priority || "Routine",
+      notes: orderToEdit.notes || ""
+    });
+
+    // Remove the old order and open modal
+    setLabOrders(labOrders.filter((_, i) => i !== index));
+    setShowAddLabOrder(true);
+
+    toast.info(`Editing lab order for ${orderToEdit.test}`);
   };
 
   // Filter lab templates based on search
@@ -2466,13 +3356,36 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       toast.error('Please specify wound location for dressing');
       return;
     }
+    if (newNursingOrder.type === 'Ward Admission') {
+      if (!newNursingOrder.ward) {
+        toast.error('Please select a ward for admission');
+        return;
+      }
+      if (!newNursingOrder.admissionType) {
+        toast.error('Please select admission type');
+        return;
+      }
+      if (!newNursingOrder.admissionDiagnosis) {
+        toast.error('Please enter admission diagnosis');
+      return;
+      }
+
+      // Check if there's already a draft ward admission order
+      const existingWardAdmission = nursingOrders.find(order =>
+        order.type === 'Ward Admission' && order.status === 'Draft'
+      );
+      if (existingWardAdmission) {
+        toast.error('A ward admission order is already in draft. Please send it to nursing first or remove it.');
+        return;
+      }
+    }
     
     const orderId = `NO-${Date.now()}`;
     
     // Add to draft nursing orders (not sent yet)
     setNursingOrders([...nursingOrders, {
       id: orderId,
-      type: newNursingOrder.type as 'Injection' | 'Dressing',
+      type: newNursingOrder.type as 'Injection' | 'Dressing' | 'Ward Admission',
       medication: newNursingOrder.medication || undefined,
       dosage: newNursingOrder.dosage || undefined,
       route: newNursingOrder.route || undefined,
@@ -2481,10 +3394,15 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       supplies: newNursingOrder.supplies || undefined,
       instructions: newNursingOrder.instructions,
       priority: newNursingOrder.priority as 'Routine' | 'Urgent' | 'STAT',
-      status: 'Draft'
+      status: 'Draft',
+      // Ward admission fields
+      ward: newNursingOrder.ward || undefined,
+      admissionType: newNursingOrder.admissionType || undefined,
+      admissionDiagnosis: newNursingOrder.admissionDiagnosis || undefined,
+      presentingComplaint: newNursingOrder.presentingComplaint || undefined
     }]);
     
-    setNewNursingOrder({ type: "", medication: "", dosage: "", route: "Intramuscular (IM)", woundLocation: "", woundType: "", supplies: "", instructions: "", priority: "Routine" });
+    setNewNursingOrder({ type: "", medication: "", dosage: "", route: "Intramuscular (IM)", woundLocation: "", woundType: "", supplies: "", instructions: "", priority: "Routine", ward: "", admissionType: "", admissionDiagnosis: "", presentingComplaint: "" });
     setShowAddNursingOrder(false);
     toast.success("Nursing order added to draft");
   };
@@ -2521,6 +3439,44 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       
       // Send each draft order to backend
       const sendPromises = draftOrders.map(async (order) => {
+        // Handle ward admission orders differently
+        if (order.type === 'Ward Admission') {
+          // Check if patient is already admitted
+          try {
+            const existingAdmissions = await wardService.getAdmissions({
+              patient: numericPatientId,
+              status: 'admitted'
+            });
+
+            if (existingAdmissions.results && existingAdmissions.results.length > 0) {
+              throw new Error(`Patient is already admitted to ${existingAdmissions.results[0].ward_name}. Please discharge first or transfer.`);
+            }
+          } catch (error: any) {
+            if (error.message.includes('already admitted')) {
+              throw error;
+            }
+            // If it's a different error (like network), continue
+            console.warn('Could not check existing admissions:', error);
+          }
+
+          // Create nursing order only - nurse will do the actual admission
+          return apiFetch('/orders/', {
+            method: 'POST',
+            body: JSON.stringify({
+              patient: numericPatientId,
+              visit: numericVisitId || undefined,
+              consultation_session: sessionId,
+              ordered_by: currentUser?.id ? Number(currentUser.id) : undefined,
+              order_type: 'ward admission',
+              description: `Ward admission to ${order.ward}. Diagnosis: ${order.admissionDiagnosis}. ${order.instructions}`,
+              frequency: '',
+              duration: '',
+              status: 'pending',
+              priority: priorityMap[order.priority] || 'medium',
+            }),
+          });
+        } else {
+          // Regular nursing orders (Injection, Dressing, etc.)
         // Build description from order details
         let description = order.instructions;
         if (order.type === 'Injection' && order.medication) {
@@ -2529,11 +3485,13 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           description = `${order.woundType || 'Wound'} dressing at ${order.woundLocation || 'site'}. Supplies: ${order.supplies || 'Standard'}. ${order.instructions}`;
         }
         
-        return apiFetch('/nursing/orders/', {
+          return apiFetch('/orders/', {
           method: 'POST',
           body: JSON.stringify({
             patient: numericPatientId,
             visit: numericVisitId || undefined,
+              consultation_session: sessionId,
+              ordered_by: currentUser?.id ? Number(currentUser.id) : undefined,
             order_type: order.type,
             description: description,
             frequency: order.type === 'Injection' ? 'As ordered' : '',
@@ -2542,6 +3500,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
             priority: priorityMap[order.priority] || 'medium',
           }),
         });
+        }
       });
       
       await Promise.all(sendPromises);
@@ -2560,11 +3519,56 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     }
   };
 
+  const editNursingOrder = (orderId: string) => {
+    const orderToEdit = nursingOrders.find(o => o.id === orderId);
+    if (!orderToEdit) return;
+
+    // Reset modal state first
+    setNewNursingOrder({
+      type: "",
+      medication: "",
+      dosage: "",
+      route: "Intramuscular (IM)",
+      woundLocation: "",
+      woundType: "",
+      supplies: "",
+      instructions: "",
+      priority: "Routine",
+      ward: "",
+      admissionType: "",
+      admissionDiagnosis: "",
+      presentingComplaint: ""
+    });
+
+    // Pre-populate the modal with existing order data
+    setNewNursingOrder({
+      type: orderToEdit.type,
+      medication: orderToEdit.medication || "",
+      dosage: orderToEdit.dosage || "",
+      route: orderToEdit.route || "Intramuscular (IM)",
+      woundLocation: orderToEdit.woundLocation || "",
+      woundType: orderToEdit.woundType || "",
+      supplies: orderToEdit.supplies || "",
+      instructions: orderToEdit.instructions,
+      priority: orderToEdit.priority,
+      ward: orderToEdit.ward || "",
+      admissionType: orderToEdit.admissionType || "",
+      admissionDiagnosis: orderToEdit.admissionDiagnosis || "",
+      presentingComplaint: orderToEdit.presentingComplaint || ""
+    });
+
+    // Remove the old order and open modal
+    setNursingOrders(nursingOrders.filter(o => o.id !== orderId));
+    setShowAddNursingOrder(true);
+
+    toast.info(`Editing nursing order for ${orderToEdit.type}`);
+  };
+
   const getNursingOrderIcon = (type: string) => {
     switch (type) {
-      case 'Injection': return <Syringe className="h-4 w-4 text-rose-600" />;
-      case 'Dressing': return <Activity className="h-4 w-4 text-amber-600" />;
-      default: return <Syringe className="h-4 w-4 text-cyan-600" />;
+      case 'Injection': return <Syringe className="h-3.5 w-3.5 text-rose-600" />;
+      case 'Dressing': return <Activity className="h-3.5 w-3.5 text-amber-600" />;
+      default: return <Syringe className="h-3.5 w-3.5 text-cyan-600" />;
     }
   };
 
@@ -2612,7 +3616,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         facility_type: facilityTypeMap[newReferral.facilityType] || 'internal',
         reason: newReferral.reason,
         clinical_summary: newReferral.clinicalSummary || undefined,
-        urgency: urgencyMap[newReferral.urgency] || 'routine',
+        urgency: newReferral.priority === 'STAT' ? 'emergency' : newReferral.priority.toLowerCase() as 'urgent' | 'routine' | 'emergency',
         contact_person: newReferral.contactPerson || undefined,
         contact_phone: newReferral.contactPhone || undefined,
         status: 'sent',
@@ -2625,13 +3629,13 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         facility: newReferral.facility,
         facilityType: newReferral.facilityType,
         reason: newReferral.reason,
-        urgency: newReferral.urgency as 'Routine' | 'Urgent' | 'Emergency',
+        urgency: (newReferral.priority === 'STAT' ? 'Emergency' : newReferral.priority) as 'Routine' | 'Urgent' | 'Emergency',
         clinicalSummary: newReferral.clinicalSummary,
         contactPerson: newReferral.contactPerson || undefined,
         contactPhone: newReferral.contactPhone || undefined,
         status: 'Sent'
       }]);
-      setNewReferral({ specialty: "", facility: "", facilityType: "", reason: "", urgency: "Routine", clinicalSummary: "", contactPerson: "", contactPhone: "" });
+      setNewReferral({ specialty: "", facility: "", facilityType: "", reason: "", priority: "Routine", clinicalSummary: "", contactPerson: "", contactPhone: "" });
       setShowAddReferral(false);
       toast.success("Referral sent successfully");
     } catch (err: any) {
@@ -2662,30 +3666,38 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   // Radiology functions
   // Add radiology order to draft (like prescriptions and lab orders)
   const addRadiologyOrder = () => {
-    if (!newRadiology.procedure || !newRadiology.clinicalIndication) {
-      toast.error('Please fill in all required fields');
+    if (selectedRadiologyTemplates.size === 0 || !newRadiology.clinicalIndication) {
+      toast.error('Please select at least one imaging study and provide clinical indication');
       return;
     }
     
-    const selectedProcedure = radiologyProcedures.find(p => p.name === newRadiology.procedure);
-    const orderId = `RAD-${Date.now()}`;
-    
-    // Add to draft radiology orders (not sent yet)
-    setRadiologyOrders([...radiologyOrders, {
+    // Add each selected template as a separate order
+    const newOrders = Array.from(selectedRadiologyTemplates).map(templateId => {
+      const template = radiologyTemplates.find(t => t.id === templateId);
+      if (!template) return null;
+
+      const orderId = `RAD-${templateId}-${Date.now()}`;
+      return {
       id: orderId,
-      procedure: newRadiology.procedure,
-      category: selectedProcedure?.category || newRadiology.category,
-      bodyPart: selectedProcedure?.bodyPart || newRadiology.bodyPart,
+        procedure: template.name,
+        category: template.modality || template.category,
+        bodyPart: template.body_part || '',
       clinicalIndication: newRadiology.clinicalIndication,
       priority: newRadiology.priority as 'Routine' | 'Urgent' | 'STAT',
-      contrastRequired: newRadiology.contrastRequired,
+        contrastRequired: template.contrast_required || false,
       specialInstructions: newRadiology.specialInstructions || undefined,
-      status: 'Draft'
-    }]);
+        status: 'Draft' as const
+      };
+    }).filter((order): order is NonNullable<typeof order> => order !== null);
     
+    setRadiologyOrders([...radiologyOrders, ...newOrders]);
+
+    // Reset form
+    setSelectedRadiologyTemplates(new Set());
+    setRadiologyTemplateSearch('');
     setNewRadiology({ procedure: "", category: "", bodyPart: "", clinicalIndication: "", priority: "Routine", contrastRequired: false, specialInstructions: "" });
     setShowAddRadiology(false);
-    toast.success("Radiology order added to draft");
+    toast.success(`${newOrders.length} imaging study/studies added to draft`);
   };
 
   // Send all draft radiology orders to radiology (like sendPrescriptionsToPharmacy and sendLabOrdersToLab)
@@ -2732,23 +3744,32 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       
       // Create all studies for the order
       const studiesData = draftOrders.map(order => {
-        const selectedProcedure = radiologyProcedures.find(p => p.name === order.procedure);
-        return {
+        // Find the template that matches this order
+        const template = radiologyTemplates.find(t => t.name === order.procedure);
+        const studyData: any = {
           procedure: order.procedure,
-          body_part: selectedProcedure?.bodyPart || order.bodyPart || '',
-          modality: selectedProcedure?.category || order.category || 'X-Ray',
+          body_part: template?.body_part || order.bodyPart || '',
+          modality: template?.modality || order.category || 'X-Ray',
           status: 'pending',
           technical_notes: order.specialInstructions || undefined,
         };
+
+        // Include template if it exists
+        if (template?.id) {
+          studyData.template = template.id;
+        }
+
+        return studyData;
       });
       
       // Create radiology order in backend with all selected studies
       await radiologyService.createOrder({
         patient: numericPatientId,
         visit: numericVisitId || undefined,
+        consultation_session: sessionId,
         priority: priorityMap[orderPriority] || 'routine',
         clinical_notes: combinedClinicalNotes,
-        studies: studiesData as any,
+        studies_data: studiesData as any,
       });
       
       // Update status of sent orders
@@ -2763,6 +3784,168 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       console.error('Error creating radiology order:', err);
       toast.error(err.message || 'Failed to send radiology order');
     }
+  };
+
+  // Physiotherapy order functions
+  const addPhysioOrder = () => {
+    if (!newPhysio.diagnosis.trim()) {
+      toast.error('Diagnosis is required');
+      return;
+    }
+
+    if (editingPhysioIndex !== null) {
+      // Editing existing order
+      setPhysioOrders(prev => prev.map((order, i) => 
+        i === editingPhysioIndex 
+          ? {
+              ...order,
+              diagnosis: newPhysio.diagnosis.trim(),
+              chiefComplaint: newPhysio.chiefComplaint.trim(),
+              treatmentGoal: newPhysio.treatmentGoal.trim(),
+              specialInstructions: newPhysio.specialInstructions.trim() || undefined,
+              priority: newPhysio.priority,
+            }
+          : order
+      ));
+      toast.success('Physiotherapy order updated');
+    } else {
+      // Adding new order
+      const newOrder = {
+        id: `physio-${Date.now()}`,
+        diagnosis: newPhysio.diagnosis.trim(),
+        chiefComplaint: newPhysio.chiefComplaint.trim(),
+        treatmentGoal: newPhysio.treatmentGoal.trim(),
+        specialInstructions: newPhysio.specialInstructions.trim() || undefined,
+        priority: newPhysio.priority,
+        totalSessions: newPhysio.totalSessions,
+        status: 'Draft' as const
+      };
+      setPhysioOrders(prev => [...prev, newOrder]);
+      toast.success('Physiotherapy order added');
+    }
+
+    setNewPhysio({
+      diagnosis: "",
+      chiefComplaint: "",
+      treatmentGoal: "",
+      specialInstructions: "",
+      priority: "routine",
+      totalSessions: 5
+    });
+    setEditingPhysioIndex(null);
+    setShowAddPhysio(false);
+  };
+
+  const editPhysioOrder = (index: number) => {
+    const orderToEdit = physioOrders[index];
+    if (!orderToEdit) return;
+
+      setNewPhysio({
+        diagnosis: orderToEdit.diagnosis || "",
+        chiefComplaint: orderToEdit.chiefComplaint || "",
+        treatmentGoal: orderToEdit.treatmentGoal || "",
+        specialInstructions: orderToEdit.specialInstructions || "",
+        priority: orderToEdit.priority,
+        totalSessions: orderToEdit.totalSessions || 5
+      });
+    setEditingPhysioIndex(index);
+    setShowAddPhysio(true);
+  };
+
+  const sendPhysioOrders = async () => {
+    const draftOrders = physioOrders.filter(p => p.status === 'Draft');
+
+    if (draftOrders.length === 0) {
+      toast.info("No draft physiotherapy orders to send");
+      return;
+    }
+
+    if (!currentPatient || !sessionId) {
+      toast.error('No active session. Please start a consultation session first.');
+      return;
+    }
+
+    try {
+      const numericPatientId = parseInt(currentPatient.id);
+      const numericVisitId = currentPatient.visitId ? parseInt(currentPatient.visitId) : null;
+
+      if (isNaN(numericPatientId)) {
+        toast.error('Invalid patient ID');
+        return;
+      }
+
+      // Get the highest priority from draft orders
+      const priorityOrder: Record<string, number> = { 'stat': 0, 'urgent': 1, 'routine': 2 };
+      const orderPriority = draftOrders.reduce((highest, order) => {
+        const currentPriority = priorityOrder[order.priority] ?? 2;
+        const highestPriority = priorityOrder[highest] ?? 2;
+        return currentPriority < highestPriority ? order.priority : highest;
+      }, 'routine');
+
+      // Combine all clinical notes
+      const combinedClinicalNotes = draftOrders.map(order =>
+        `${order.diagnosis}${order.chiefComplaint ? ` - ${order.chiefComplaint}` : ''}${order.specialInstructions ? ` (${order.specialInstructions})` : ''}`
+      ).join('; ');
+
+      // Create separate physiotherapy orders for each draft order
+      for (const order of draftOrders) {
+        await physioService.createOrder({
+          patient: numericPatientId,
+          diagnosis: order.diagnosis,
+          chief_complaint: order.chiefComplaint,
+          treatment_goal: order.treatmentGoal,
+          special_instructions: order.specialInstructions || undefined,
+          priority: order.priority,
+          total_sessions: order.totalSessions || 1,
+          consultation_session: sessionId
+        } as any);
+      }
+
+      // Update status of sent orders
+      setPhysioOrders(prev => prev.map(order =>
+        draftOrders.some(draft => draft.id === order.id)
+          ? { ...order, status: 'Sent to Physiotherapy' as const }
+          : order
+      ));
+
+      toast.success(`${draftOrders.length} physiotherapy order(s) sent to Physiotherapy department`);
+    } catch (err: any) {
+      console.error('Error creating physiotherapy order:', err);
+      toast.error(err.message || 'Failed to send physiotherapy order');
+    }
+  };
+
+  const editRadiologyOrder = (orderId: string) => {
+    const orderToEdit = radiologyOrders.find(o => o.id === orderId);
+    if (!orderToEdit) return;
+
+    // Reset modal state first
+    setNewRadiology({
+      procedure: "",
+      category: "",
+      bodyPart: "",
+      clinicalIndication: "",
+      priority: "Routine",
+      contrastRequired: false,
+      specialInstructions: ""
+    });
+
+    // Pre-populate the modal with existing order data
+    setNewRadiology({
+      procedure: orderToEdit.procedure,
+      category: orderToEdit.category,
+      bodyPart: orderToEdit.bodyPart,
+      clinicalIndication: orderToEdit.clinicalIndication,
+      priority: orderToEdit.priority,
+      contrastRequired: orderToEdit.contrastRequired || false,
+      specialInstructions: orderToEdit.specialInstructions || ""
+    });
+
+    // Remove the old order and open modal
+    setRadiologyOrders(radiologyOrders.filter(o => o.id !== orderId));
+    setShowAddRadiology(true);
+
+    toast.info(`Editing radiology order for ${orderToEdit.procedure}`);
   };
 
   // Vitals trend helper
@@ -2797,7 +3980,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           <div className="text-center">
             <AlertTriangle className="h-12 w-12 text-destructive mx-auto mb-4" />
             <h2 className="text-2xl font-bold text-red-600 mb-2">Error Loading Room</h2>
-            <p className="text-muted-foreground mb-4">{error}</p>
+            <p className="text-muted-foreground mb-4">{error || 'Unknown error'}</p>
             <Button onClick={() => router.push("/consultation/start")}>
               <ArrowLeft className="mr-2 h-4 w-4" />Back to Room Selection
             </Button>
@@ -2826,6 +4009,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   if (!sessionActive || !currentPatient) {
     const emergencyPatients = patients.filter((p) => p.priority === "Emergency");
     const highPriorityPatients = patients.filter((p) => p.priority === "High");
+    const mediumPriorityPatients = patients.filter((p) => p.priority === "Medium");
+    const lowPriorityPatients = patients.filter((p) => p.priority === "Low");
     const avgWaitTime = patients.length > 0 ? Math.round(patients.reduce((sum, p) => sum + p.waitTime, 0) / patients.length) : 0;
 
     return (
@@ -2954,6 +4139,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         </div>
 
         {/* Patient Info Card */}
+        {currentPatient && (
         <Card>
           <CardHeader className="pb-4">
             <div className="flex items-start gap-6">
@@ -2972,9 +4158,28 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                       <span><strong>Gender:</strong> {currentPatient.gender}</span>
                     </div>
                   </div>
+                  <div className="flex items-center gap-2">
                   <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-400">
                     Session Active
                   </Badge>
+                    {wardAdmissions.some(admission => admission.status === 'admitted') && (
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/30 dark:text-blue-400">
+                          <Building2 className="h-3 w-3 mr-1" />
+                          Admitted
+                        </Badge>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="border-red-200 text-red-600 hover:bg-red-50 hover:border-red-300"
+                          onClick={() => setShowDischargeDialog(true)}
+                        >
+                          <UserX className="h-3 w-3 mr-1" />
+                          Discharge
+                        </Button>
+                      </div>
+                    )}
+                  </div>
                 </div>
                 <div className="space-y-3">
                   {/* Medical Information */}
@@ -3069,6 +4274,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
             </div>
           </CardHeader>
         </Card>
+        )}
 
         {/* Vitals Card */}
         {currentPatient.vitals && (
@@ -3116,7 +4322,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
         {/* Tabs Section */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="grid w-full grid-cols-7">
+          <TabsList className="grid w-full grid-cols-8">
             <TabsTrigger value="notes" className="flex items-center gap-1">
               <FileText className="h-4 w-4" />
               <span className="hidden lg:inline">Notes</span>
@@ -3132,6 +4338,10 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
             <TabsTrigger value="radiology" className="flex items-center gap-1">
               <ScanLine className="h-4 w-4" />
               <span className="hidden lg:inline">Radiology</span>
+            </TabsTrigger>
+            <TabsTrigger value="physiotherapy" className="flex items-center gap-1">
+              <Activity className="h-4 w-4" />
+              <span className="hidden lg:inline">Physio</span>
             </TabsTrigger>
             <TabsTrigger value="nursing" className="flex items-center gap-1">
               <Syringe className="h-4 w-4" />
@@ -3151,6 +4361,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
             <Card>
               <CardHeader><CardTitle>Medical Notes</CardTitle><CardDescription>Document the consultation findings and plan</CardDescription></CardHeader>
               <CardContent className="space-y-4">
+                <div className="space-y-2"><Label>Presentation Complaint</Label><Textarea value={medicalNotes.presentationComplaint} onChange={(e) => setMedicalNotes({ ...medicalNotes, presentationComplaint: e.target.value })} placeholder="Chief complaint or presenting symptoms..." rows={3} /></div>
                 <div className="space-y-2"><Label>History of Present Illness</Label><Textarea value={medicalNotes.historyOfPresentIllness} onChange={(e) => setMedicalNotes({ ...medicalNotes, historyOfPresentIllness: e.target.value })} placeholder="Detailed history..." rows={4} /></div>
                 <div className="space-y-2"><Label>Physical Examination</Label><Textarea value={medicalNotes.physicalExamination} onChange={(e) => setMedicalNotes({ ...medicalNotes, physicalExamination: e.target.value })} placeholder="Examination findings..." rows={4} /></div>
                 
@@ -3173,23 +4384,38 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                     <div className="space-y-2">
                       {diagnoses.map((dx, index) => (
                         <div key={dx.id} className={`p-3 rounded-lg border flex items-start justify-between gap-3 ${
-                          dx.type === 'Primary' ? 'bg-rose-50 dark:bg-rose-900/20 border-rose-200 dark:border-rose-800' :
-                          dx.type === 'Secondary' ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800' :
+                          dx.certainty === 'confirmed' ? 'bg-rose-50 dark:bg-rose-900/20 border-rose-200 dark:border-rose-800' :
+                          dx.certainty === 'probable' ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800' :
                           'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800'
                         }`}>
                           <div className="flex-1">
                             <div className="flex items-center gap-2 mb-1">
                               <Badge variant="outline" className={`text-xs ${
-                                dx.type === 'Primary' ? 'bg-rose-500/10 text-rose-600 border-rose-500/30' :
-                                dx.type === 'Secondary' ? 'bg-amber-500/10 text-amber-600 border-amber-500/30' :
-                                'bg-blue-500/10 text-blue-600 border-blue-500/30'
-                              }`}>{dx.type}</Badge>
-                              <span className="font-mono text-sm font-medium">{dx.code}</span>
+                                dx.status === 'confirmed' ? 'bg-green-500/10 text-green-600 border-green-500/30' :
+                                dx.status === 'suspected' ? 'bg-amber-500/10 text-amber-600 border-amber-500/30' :
+                                'bg-red-500/10 text-red-600 border-red-500/30'
+                              }`}>{dx.status}</Badge>
+                              <span className="font-mono text-sm font-medium">{dx.icd10_code_details?.code || 'Unknown'}</span>
                             </div>
-                            <p className="text-sm font-medium">{dx.name}</p>
+                            <p className="text-sm font-medium">{dx.icd10_code_details?.description || dx.diagnosis_text || 'Unknown diagnosis'}</p>
                             {dx.notes && <p className="text-xs text-muted-foreground mt-1">{dx.notes}</p>}
+                            {dx.diagnosis_text && <p className="text-xs text-muted-foreground mt-1">{dx.diagnosis_text}</p>}
                           </div>
-                          <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setDiagnoses(diagnoses.filter(d => d.id !== dx.id))}>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 w-7 p-0"
+                            onClick={async () => {
+                              try {
+                                await consultationService.deleteDiagnosis(dx.id);
+                                setDiagnoses(diagnoses.filter(d => d.id !== dx.id));
+                                toast.success('Diagnosis removed');
+                              } catch (err: any) {
+                                console.error('Error deleting diagnosis:', err);
+                                toast.error('Failed to remove diagnosis');
+                              }
+                            }}
+                          >
                             <X className="h-4 w-4" />
                           </Button>
                         </div>
@@ -3211,14 +4437,24 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                     try {
                       // Update the consultation session with medical notes
                       const sessionData = {
+                        presentation_complaint: medicalNotes.presentationComplaint || '',
                         history_of_presenting_illness: medicalNotes.historyOfPresentIllness || '',
                         physical_examination: medicalNotes.physicalExamination || '',
                         assessment: medicalNotes.assessment || '',
                         plan: medicalNotes.plan || '',
-                        notes: diagnoses.length > 0 ? diagnoses.filter(d => d.type === 'Primary').map(d => `${d.code}: ${d.name}`).join('; ') : '',
+                        notes: '',
                       };
                       
                       await consultationService.updateSession(sessionId, sessionData);
+
+                      // Reload the session data to update the selectedSession state
+                      try {
+                        const updatedSession = await consultationService.getSession(sessionId);
+                        setSelectedSession(updatedSession);
+                      } catch (reloadErr) {
+                        console.warn('Could not reload session data:', reloadErr);
+                      }
+
                       toast.success('Medical notes saved successfully');
                     } catch (err: any) {
                       console.error('Error saving medical notes:', err);
@@ -3289,41 +4525,53 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                       
                       return (
                         <Card key={rx.id} className={`border-l-4 ${rx.status === 'Draft' ? 'border-l-gray-400' : rx.status === 'Sent to Pharmacy' ? 'border-l-violet-500' : 'border-l-emerald-500'}`}>
-                          <CardContent className="p-4">
-                            <div className="flex items-start justify-between gap-4">
-                              <div className="flex items-start gap-3 flex-1">
-                                <div className={`p-2 rounded-full ${rx.status === 'Draft' ? 'bg-gray-100 dark:bg-gray-800' : 'bg-violet-100 dark:bg-violet-900/30'}`}>
-                                  <Pill className={`h-4 w-4 ${rx.status === 'Draft' ? 'text-gray-600' : 'text-violet-600'}`} />
+                          <CardContent className="p-3">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex items-start gap-2 flex-1">
+                                <div className={`p-1.5 rounded-full ${rx.status === 'Draft' ? 'bg-gray-100 dark:bg-gray-800' : 'bg-violet-100 dark:bg-violet-900/30'}`}>
+                                  <Pill className={`h-3.5 w-3.5 ${rx.status === 'Draft' ? 'text-gray-600' : 'text-violet-600'}`} />
                                 </div>
-                                <div className="flex-1">
-                                  <div className="flex items-center gap-2 flex-wrap mb-1">
-                                    <span className="font-semibold">{rx.medication}</span>
-                                    <Badge variant="outline" className={getStatusBadge(rx.status)}>{rx.status}</Badge>
-                                    <Badge variant="outline" className={getPriorityBadge(rx.priority)}>{rx.priority}</Badge>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2 flex-wrap mb-0.5">
+                                    <span className="font-semibold text-sm">{rx.medication}</span>
+                                    <Badge variant="outline" className={`text-xs px-1.5 py-0.5 ${getStatusBadge(rx.status)}`}>{rx.status}</Badge>
+                                    <Badge variant="outline" className={`text-xs px-1.5 py-0.5 ${getPriorityBadge(rx.priority)}`}>{rx.priority}</Badge>
                                   </div>
-                                  <div className="text-sm text-muted-foreground">
+                                  <div className="text-xs text-muted-foreground mb-0.5">
                                     <span className="font-medium">{rx.dosage}</span> • {rx.route} • {rx.frequency} • {rx.duration}
                                   </div>
-                                  <div className="flex items-center gap-4 mt-1 text-xs text-muted-foreground">
+                                  <div className="flex items-center gap-3 text-xs text-muted-foreground">
                                     <span><strong>Qty:</strong> {rx.quantity}</span>
                                     {rx.genericName && <span><strong>Generic:</strong> {rx.genericName}</span>}
                                   </div>
                                   {rx.instructions && (
-                                    <div className="text-sm text-muted-foreground mt-2 p-2 bg-muted/50 rounded">
+                                    <div className="text-xs text-muted-foreground mt-1 p-1.5 bg-muted/50 rounded">
                                       <strong>Instructions:</strong> {rx.instructions}
                                     </div>
                                   )}
                                 </div>
                               </div>
                               {rx.status === 'Draft' && (
+                                <div className="flex gap-1">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => editPrescription(index)}
+                                    className="text-blue-500 hover:text-blue-600"
+                                    title="Edit prescription"
+                                  >
+                                    <Edit className="h-4 w-4" />
+                                  </Button>
                                 <Button 
                                   variant="ghost" 
                                   size="sm" 
                                   onClick={() => setPrescriptions(prescriptions.filter((_, i) => i !== index))}
                                   className="text-red-500 hover:text-red-600"
+                                    title="Remove prescription"
                                 >
                                   <X className="h-4 w-4" />
                                 </Button>
+                                </div>
                               )}
                               {rx.status === 'Sent to Pharmacy' && (
                                 <Badge className="bg-violet-500 text-white">
@@ -3402,24 +4650,24 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                       };
                       return (
                         <Card key={order.id} className={`border-l-4 ${order.status === 'Draft' ? 'border-l-gray-400' : order.status === 'Sent to Lab' ? 'border-l-amber-500' : 'border-l-blue-500'} ${order.priority === 'STAT' ? 'bg-rose-50 dark:bg-rose-900/10' : ''}`}>
-                          <CardContent className="p-4">
-                            <div className="flex items-start justify-between gap-4">
-                              <div className="flex items-start gap-3 flex-1">
-                                <div className={`p-2 rounded-full ${order.priority === 'STAT' ? 'bg-rose-100 dark:bg-rose-900/30' : 'bg-amber-100 dark:bg-amber-900/30'}`}>
-                                  <TestTube className={`h-4 w-4 ${order.priority === 'STAT' ? 'text-rose-600' : 'text-amber-600'}`} />
+                          <CardContent className="p-3">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex items-start gap-2 flex-1">
+                                <div className={`p-1.5 rounded-full ${order.priority === 'STAT' ? 'bg-rose-100 dark:bg-rose-900/30' : 'bg-amber-100 dark:bg-amber-900/30'}`}>
+                                  <TestTube className={`h-3.5 w-3.5 ${order.priority === 'STAT' ? 'text-rose-600' : 'text-amber-600'}`} />
                                 </div>
-                                <div className="flex-1">
-                                  <div className="flex items-center gap-2 flex-wrap">
-                                    <span className="font-semibold">{order.test}</span>
-                                    <Badge variant={order.priority === "STAT" ? "destructive" : order.priority === "Urgent" ? "default" : "secondary"} className={order.priority === 'STAT' ? 'bg-rose-500' : order.priority === 'Urgent' ? 'bg-amber-500' : ''}>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2 flex-wrap mb-0.5">
+                                    <span className="font-semibold text-sm">{order.test}</span>
+                                    <Badge variant={order.priority === "STAT" ? "destructive" : order.priority === "Urgent" ? "default" : "secondary"} className={`text-xs px-1.5 py-0.5 ${order.priority === 'STAT' ? 'bg-rose-500' : order.priority === 'Urgent' ? 'bg-amber-500' : ''}`}>
                                       {order.priority === 'STAT' && <AlertTriangle className="h-3 w-3 mr-1" />}
                                       {order.priority}
                                     </Badge>
-                                    <Badge className={getLabStatusBadge(order.status)}>{order.status}</Badge>
+                                    <Badge className={`text-xs px-1.5 py-0.5 ${getLabStatusBadge(order.status)}`}>{order.status}</Badge>
                                   </div>
-                                  {order.notes && <p className="text-sm text-muted-foreground mt-1">{order.notes}</p>}
+                                  {order.notes && <p className="text-xs text-muted-foreground mb-0.5">{order.notes}</p>}
                                   {order.status === 'Sent to Lab' && (
-                                    <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
+                                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
                                       <Clock className="h-3 w-3" />
                                       <span>Sent to Lab Tech queue • Est. TAT: {order.priority === 'STAT' ? '30 min - 1 hour' : order.priority === 'Urgent' ? '1 - 2 hours' : '2 - 4 hours'}</span>
                                     </div>
@@ -3427,9 +4675,26 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                 </div>
                               </div>
                               {order.status === 'Draft' && (
-                                <Button variant="ghost" size="sm" onClick={() => setLabOrders(labOrders.filter((_, i) => i !== index))} className="text-rose-500 hover:text-rose-600">
+                                <div className="flex gap-1">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => editLabOrder(index)}
+                                    className="text-blue-500 hover:text-blue-600"
+                                    title="Edit lab order"
+                                  >
+                                    <Edit className="h-4 w-4" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => setLabOrders(labOrders.filter((_, i) => i !== index))}
+                                    className="text-rose-500 hover:text-rose-600"
+                                    title="Remove lab order"
+                                  >
                                   <X className="h-4 w-4" />
                                 </Button>
+                                </div>
                               )}
                               {order.status === 'Sent to Lab' && (
                                 <Badge className="bg-amber-500 text-white">
@@ -3476,6 +4741,128 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
             </Card>
           </TabsContent>
 
+          <TabsContent value="physiotherapy">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="flex items-center gap-2">
+                      <Activity className="h-5 w-5 text-emerald-500" />
+                      Physiotherapy Orders
+                    </CardTitle>
+                    <CardDescription>Order physiotherapy treatment sessions - will be sent to Physiotherapy pool queue</CardDescription>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button variant="outline" onClick={() => setShowAddPhysio(true)}>
+                      <Plus className="mr-2 h-4 w-4" />Add Physio Order
+                    </Button>
+                    {physioOrders.length > 0 && physioOrders.some(p => p.status === 'Draft') && (
+                      <Button onClick={sendPhysioOrders} className="bg-emerald-600 hover:bg-emerald-700">
+                        <Activity className="mr-2 h-4 w-4" />
+                        Send to Physio ({physioOrders.filter(p => p.status === 'Draft').length})
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {physioOrders.length > 0 ? (
+                  <div className="space-y-3">
+                    {physioOrders.map((order, index) => {
+                      const getStatusBadge = (status: string) => {
+                        switch (status) {
+                          case 'Draft': return 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300';
+                          case 'Sent to Physiotherapy': return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400';
+                          case 'Scheduled': return 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400';
+                          case 'In Progress': return 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400';
+                          case 'Completed': return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400';
+                          default: return 'bg-gray-100 text-gray-800';
+                        }
+                      };
+                      const getPriorityBadge = (priority: string) => {
+                        switch (priority) {
+                          case 'stat': return 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400';
+                          case 'urgent': return 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400';
+                          case 'routine': return 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400';
+                          default: return 'bg-gray-100 text-gray-800';
+                        }
+                      };
+
+                      return (
+                        <Card key={order.id || index} className={`border-l-4 ${order.status === 'Draft' ? 'border-l-gray-400' : order.status === 'Sent to Physiotherapy' ? 'border-l-emerald-500' : 'border-l-green-500'} ${order.priority === 'stat' ? 'bg-rose-50 dark:bg-rose-900/10' : ''}`}>
+                          <CardContent className="p-3">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex items-start gap-2 flex-1">
+                                <div className={`p-1.5 rounded-full ${order.priority === 'stat' ? 'bg-rose-100 dark:bg-rose-900/30' : 'bg-emerald-100 dark:bg-emerald-900/30'}`}>
+                                  <Activity className={`h-3.5 w-3.5 ${order.priority === 'stat' ? 'text-rose-600' : 'text-emerald-600'}`} />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2 flex-wrap mb-0.5">
+                                    <span className="font-semibold text-sm">{order.diagnosis || 'Physiotherapy Treatment'}</span>
+                                    <Badge variant={order.priority === "stat" ? "destructive" : order.priority === "urgent" ? "default" : "secondary"} className={`text-xs px-1.5 py-0.5 ${order.priority === 'stat' ? 'bg-rose-500' : order.priority === 'urgent' ? 'bg-amber-500' : ''}`}>
+                                      {order.priority === 'stat' && <AlertTriangle className="h-3 w-3 mr-1" />}
+                                      {order.priority}
+                                    </Badge>
+                                    <Badge className={`text-xs px-1.5 py-0.5 ${getStatusBadge(order.status)}`}>{order.status}</Badge>
+                                  </div>
+                                  {order.chiefComplaint && <p className="text-xs text-muted-foreground mb-0.5">{order.chiefComplaint}</p>}
+                                  {order.treatmentGoal && <p className="text-xs text-muted-foreground">{order.treatmentGoal}</p>}
+                                  {order.status === 'Sent to Physiotherapy' && (
+                                    <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
+                                      <Clock className="h-3 w-3" />
+                                      <span>Sent to Physio queue • Ready for scheduling</span>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                              {order.status === 'Draft' && (
+                                <div className="flex gap-1">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => editPhysioOrder(index)}
+                                    className="text-blue-500 hover:text-blue-600"
+                                    title="Edit physio order"
+                                  >
+                                    <Edit className="h-4 w-4" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => setPhysioOrders(physioOrders.filter((_, i) => i !== index))}
+                                    className="text-rose-500 hover:text-rose-600"
+                                    title="Remove physio order"
+                                  >
+                                    <X className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                              )}
+                              {order.status === 'Sent to Physiotherapy' && (
+                                <Badge className="bg-emerald-500 text-white">
+                                  <CheckCircle className="h-3 w-3 mr-1" />
+                                  Queued
+                                </Badge>
+                              )}
+                            </div>
+                          </CardContent>
+                        </Card>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="text-center py-12 bg-gradient-to-b from-emerald-50 to-emerald-100/50 dark:from-emerald-900/10 dark:to-emerald-900/5 rounded-lg border-2 border-dashed border-emerald-200 dark:border-emerald-800">
+                    <Activity className="h-12 w-12 mx-auto mb-3 text-emerald-500 opacity-60" />
+                    <p className="font-medium text-emerald-900 dark:text-emerald-100 mb-1">No physiotherapy orders yet</p>
+                    <p className="text-sm text-muted-foreground mb-4">Order treatments to be processed by physiotherapy</p>
+                    <Button variant="outline" size="sm" onClick={() => setShowAddPhysio(true)} className="border-emerald-300 text-emerald-700 hover:bg-emerald-100">
+                      <Plus className="h-4 w-4 mr-1" />Order First Treatment
+                    </Button>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
           <TabsContent value="nursing">
             <Card>
               <CardHeader>
@@ -3488,7 +4875,10 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                     <CardDescription>Request nursing procedures - will be sent to Nursing queue</CardDescription>
                   </div>
                   <div className="flex gap-2">
-                    <Button variant="outline" onClick={() => setShowAddNursingOrder(true)}>
+                    <Button variant="outline" onClick={() => {
+                      loadWards(); // Load wards when opening modal
+                      setShowAddNursingOrder(true);
+                    }}>
                       <Plus className="mr-2 h-4 w-4" />Add Procedure
                     </Button>
                     {nursingOrders.length > 0 && nursingOrders.some(order => order.status === 'Draft') && (
@@ -3540,17 +4930,17 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                       
                       return (
                         <Card key={order.id} className={`border-l-4 ${order.status === 'Draft' ? 'border-l-gray-400' : order.status === 'Sent to Nursing' ? 'border-l-cyan-500' : 'border-l-emerald-500'} ${order.priority === 'STAT' ? 'bg-red-50 dark:bg-red-900/10' : ''}`}>
-                          <CardContent className="p-4">
-                            <div className="flex items-start justify-between gap-4">
-                              <div className="flex items-start gap-3 flex-1">
-                                <div className={`p-2 rounded-full ${order.type === 'Injection' ? 'bg-rose-100 dark:bg-rose-900/30' : order.type === 'Dressing' ? 'bg-amber-100 dark:bg-amber-900/30' : 'bg-cyan-100 dark:bg-cyan-900/30'}`}>
+                          <CardContent className="p-3">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex items-start gap-2 flex-1">
+                                <div className={`p-1.5 rounded-full ${order.type === 'Injection' ? 'bg-rose-100 dark:bg-rose-900/30' : order.type === 'Dressing' ? 'bg-amber-100 dark:bg-amber-900/30' : 'bg-cyan-100 dark:bg-cyan-900/30'}`}>
                                   {getNursingOrderIcon(order.type)}
                                 </div>
-                                <div className="flex-1">
-                                  <div className="flex items-center gap-2 flex-wrap mb-1">
-                                    <Badge variant="outline" className={getTypeBadge(order.type)}>{order.type}</Badge>
-                                    <Badge variant="outline" className={getStatusBadge(order.status)}>{order.status}</Badge>
-                                    <Badge variant="outline" className={getPriorityBadge(order.priority)}>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2 flex-wrap mb-0.5">
+                                    <Badge variant="outline" className={`text-xs px-1.5 py-0.5 ${getTypeBadge(order.type)}`}>{order.type}</Badge>
+                                    <Badge variant="outline" className={`text-xs px-1.5 py-0.5 ${getStatusBadge(order.status)}`}>{order.status}</Badge>
+                                    <Badge variant="outline" className={`text-xs px-1.5 py-0.5 ${getPriorityBadge(order.priority)}`}>
                                       {order.priority === 'STAT' && <AlertTriangle className="h-3 w-3 mr-1" />}
                                       {order.priority}
                                     </Badge>
@@ -3558,31 +4948,43 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                   
                                   {/* Type-specific details */}
                                   {order.type === 'Injection' && order.medication && (
-                                    <div className="text-sm font-medium mb-1">
+                                    <div className="text-xs font-medium mb-0.5">
                                       {order.medication} • {order.dosage} • {order.route}
                                     </div>
                                   )}
                                   {order.type === 'Dressing' && order.woundLocation && (
-                                    <div className="text-sm font-medium mb-1">
+                                    <div className="text-xs font-medium mb-0.5">
                                       {order.woundType} - {order.woundLocation}
                                       {order.supplies && <span className="text-muted-foreground"> • Supplies: {order.supplies}</span>}
                                     </div>
                                   )}
                                   
-                                  <div className="text-sm text-muted-foreground">
+                                  <div className="text-xs text-muted-foreground">
                                     <strong>Instructions:</strong> {order.instructions}
                                   </div>
                                 </div>
                               </div>
                               {order.status === 'Draft' && (
+                                <div className="flex gap-1">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => editNursingOrder(order.id)}
+                                    className="text-blue-500 hover:text-blue-600"
+                                    title="Edit nursing order"
+                                  >
+                                    <Edit className="h-4 w-4" />
+                                  </Button>
                                 <Button 
                                   variant="ghost" 
                                   size="sm" 
                                   onClick={() => setNursingOrders(nursingOrders.filter(o => o.id !== order.id))}
                                   className="text-red-500 hover:text-red-600"
+                                    title="Remove nursing order"
                                 >
                                   <X className="h-4 w-4" />
                                 </Button>
+                                </div>
                               )}
                               {order.status === 'Sent to Nursing' && (
                                 <Badge className="bg-cyan-500 text-white">
@@ -3677,19 +5079,19 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                       
                       return (
                         <Card key={order.id} className={`border-l-4 ${order.status === 'Draft' ? 'border-l-gray-400' : order.status === 'Sent to Radiology' ? 'border-l-indigo-500' : 'border-l-emerald-500'} ${order.priority === 'STAT' ? 'bg-red-50 dark:bg-red-900/10' : ''}`}>
-                          <CardContent className="p-4">
-                            <div className="flex items-start justify-between gap-4">
-                              <div className="flex items-start gap-3 flex-1">
-                                <div className="p-2 rounded-full bg-indigo-100 dark:bg-indigo-900/30">
-                                  <ScanLine className="h-4 w-4 text-indigo-600" />
+                          <CardContent className="p-3">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex items-start gap-2 flex-1">
+                                <div className="p-1.5 rounded-full bg-indigo-100 dark:bg-indigo-900/30">
+                                  <ScanLine className="h-3.5 w-3.5 text-indigo-600" />
                                 </div>
-                                <div className="flex-1">
-                                  <div className="flex items-center gap-2 flex-wrap mb-1">
-                                    <span className="font-semibold">{order.procedure}</span>
-                                    <Badge variant="outline" className={getCategoryBadge(order.category)}>{order.category}</Badge>
-                                    <Badge variant="outline" className={getStatusBadge(order.status)}>{order.status}</Badge>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2 flex-wrap mb-0.5">
+                                    <span className="font-semibold text-sm">{order.procedure}</span>
+                                    <Badge variant="outline" className={`text-xs px-1.5 py-0.5 ${getCategoryBadge(order.category)}`}>{order.category}</Badge>
+                                    <Badge variant="outline" className={`text-xs px-1.5 py-0.5 ${getStatusBadge(order.status)}`}>{order.status}</Badge>
                                     {order.priority !== 'Routine' && (
-                                      <Badge variant="outline" className={order.priority === 'STAT' ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'}>
+                                      <Badge variant="outline" className={`text-xs px-1.5 py-0.5 ${order.priority === 'STAT' ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'}`}>
                                         {order.priority === 'STAT' && <AlertTriangle className="h-3 w-3 mr-1" />}
                                         {order.priority}
                                       </Badge>
@@ -3710,9 +5112,26 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                 </div>
                               </div>
                               {order.status === 'Draft' && (
-                                <Button variant="ghost" size="sm" onClick={() => setRadiologyOrders(radiologyOrders.filter(o => o.id !== order.id))} className="text-red-500 hover:text-red-600">
+                                <div className="flex gap-1">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => editRadiologyOrder(order.id)}
+                                    className="text-blue-500 hover:text-blue-600"
+                                    title="Edit radiology order"
+                                  >
+                                    <Edit className="h-4 w-4" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => setRadiologyOrders(radiologyOrders.filter(o => o.id !== order.id))}
+                                    className="text-red-500 hover:text-red-600"
+                                    title="Remove radiology order"
+                                  >
                                   <X className="h-4 w-4" />
                                 </Button>
+                                </div>
                               )}
                               {order.status === 'Sent to Radiology' && (
                                 <Badge className="bg-indigo-500 text-white">
@@ -3969,26 +5388,34 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
               <Card>
                 <CardHeader className="pb-0">
                   <Tabs defaultValue="consultations" className="w-full">
-                    <TabsList className="grid w-full grid-cols-6">
+                    <TabsList className="grid w-full grid-cols-7">
                       <TabsTrigger value="consultations" className="text-xs">
                         <ClipboardList className="h-3 w-3 mr-1" />
-                        Consultations ({demoConsultationSessions.length})
+                        Consultations ({consultationHistory.length})
                       </TabsTrigger>
                       <TabsTrigger value="labs" className="text-xs">
                         <TestTube className="h-3 w-3 mr-1" />
-                        Lab Results ({demoPatientHistory.labResults.length})
+                        Lab Results ({labHistory.length})
                       </TabsTrigger>
                       <TabsTrigger value="imaging" className="text-xs">
                         <ScanLine className="h-3 w-3 mr-1" />
-                        Imaging ({demoPatientHistory.imagingResults.length})
+                        Imaging ({imagingHistory.length})
                       </TabsTrigger>
                       <TabsTrigger value="prescriptions" className="text-xs">
                         <Pill className="h-3 w-3 mr-1" />
-                        Prescriptions ({demoPatientHistory.prescriptions.length})
+                        Prescriptions ({prescriptionHistory.length})
                       </TabsTrigger>
                       <TabsTrigger value="vitals" className="text-xs">
                         <Heart className="h-3 w-3 mr-1" />
                         Vitals ({vitalsHistory.length})
+                      </TabsTrigger>
+                      <TabsTrigger value="physio" className="text-xs">
+                        <Activity className="h-3 w-3 mr-1" />
+                        Physio ({physioHistory.length})
+                      </TabsTrigger>
+                      <TabsTrigger value="wards" className="text-xs">
+                        <Building2 className="h-3 w-3 mr-1" />
+                        Ward Admissions ({wardAdmissions.length})
                       </TabsTrigger>
                       <TabsTrigger value="background" className="text-xs">
                         <User className="h-3 w-3 mr-1" />
@@ -3999,9 +5426,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                     {/* Consultations Tab */}
                     <TabsContent value="consultations" className="mt-4">
                       {(() => {
-                        const totalConsultations = demoConsultationSessions.length;
+                        const totalConsultations = consultationHistory.length;
                         const totalConsultationPages = Math.ceil(totalConsultations / consultationsPerPage);
-                        const paginatedConsultations = demoConsultationSessions.slice(
+                        const paginatedConsultations = consultationHistory.slice(
                           (consultationsPage - 1) * consultationsPerPage, 
                           consultationsPage * consultationsPerPage
                         );
@@ -4102,7 +5529,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                     {/* Lab Results Tab */}
                     <TabsContent value="labs" className="mt-4">
                       {(() => {
-                        const filteredLabs = demoPatientHistory.labResults.filter((lab: { status: string }) => labStatusFilter === 'all' || lab.status === labStatusFilter);
+                        const filteredLabs = labHistory.filter((lab: LabTestResult) => labStatusFilter === 'all' || lab.status === labStatusFilter);
                         const totalLabs = filteredLabs.length;
                         const totalLabPages = Math.ceil(totalLabs / labResultsPerPage);
                         const paginatedLabs = filteredLabs.slice((labResultsPage - 1) * labResultsPerPage, labResultsPage * labResultsPerPage);
@@ -4137,20 +5564,19 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                   <tr>
                                     <th className="px-4 py-2 text-left font-medium">Date</th>
                                     <th className="px-4 py-2 text-left font-medium">Test</th>
-                                    <th className="px-4 py-2 text-left font-medium">Category</th>
+                                    <th className="px-4 py-2 text-left font-medium">Processed By</th>
+                                    <th className="px-4 py-2 text-left font-medium">Verified By</th>
                                     <th className="px-4 py-2 text-center font-medium">Status</th>
                                     <th className="px-4 py-2 text-center font-medium">Action</th>
                                   </tr>
                                 </thead>
                                 <tbody className="divide-y">
-                                  {paginatedLabs.map((lab: { id: string; date: string; test: string; category?: string; criticalValue?: boolean; status: string; result?: string }) => (
-                                    <tr key={lab.id} className={`hover:bg-muted/30 ${lab.criticalValue ? 'bg-red-50 dark:bg-red-900/10' : ''}`}>
-                                      <td className="px-4 py-3 text-muted-foreground">{lab.date}</td>
-                                      <td className="px-4 py-3 font-medium">
-                                        {lab.test}
-                                        {lab.criticalValue && <AlertTriangle className="h-3 w-3 text-red-500 inline ml-2" />}
-                                      </td>
-                                      <td className="px-4 py-3">{lab.category}</td>
+                                  {paginatedLabs.map((lab: LabTestResult) => (
+                                    <tr key={lab.id} className="hover:bg-muted/30">
+                                      <td className="px-4 py-3 text-muted-foreground">{lab.date || lab.completed_at || '—'}</td>
+                                      <td className="px-4 py-3 font-medium">{lab.test_name || 'Unknown Test'}</td>
+                                      <td className="px-4 py-3 text-muted-foreground">{lab.performedBy || '—'}</td>
+                                      <td className="px-4 py-3 text-muted-foreground">{lab.verifiedBy || '—'}</td>
                                       <td className="px-4 py-3 text-center">
                                         <Badge className={lab.status === 'Normal' ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}>
                                           {lab.status}
@@ -4221,7 +5647,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                     {/* Imaging Tab */}
                     <TabsContent value="imaging" className="mt-4">
                       {(() => {
-                        const filteredImaging = demoPatientHistory.imagingResults.filter((img: { status: string }) => imagingStatusFilter === 'all' || img.status === imagingStatusFilter);
+                        const filteredImaging = imagingHistory.filter((img: ServiceRadiologyReport) => imagingStatusFilter === 'all' || img.overall_status === imagingStatusFilter);
                         const totalImaging = filteredImaging.length;
                         const totalImagingPages = Math.ceil(totalImaging / imagingPerPage);
                         const paginatedImaging = filteredImaging.slice((imagingPage - 1) * imagingPerPage, imagingPage * imagingPerPage);
@@ -4256,24 +5682,26 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                   <tr>
                                     <th className="px-4 py-2 text-left font-medium">Date</th>
                                     <th className="px-4 py-2 text-left font-medium">Procedure</th>
-                                    <th className="px-4 py-2 text-left font-medium">Finding</th>
+                                    <th className="px-4 py-2 text-left font-medium">Reported By</th>
+                                    <th className="px-4 py-2 text-left font-medium">Verified By</th>
                                     <th className="px-4 py-2 text-center font-medium">Status</th>
                                     <th className="px-4 py-2 text-center font-medium">Action</th>
                                   </tr>
                                 </thead>
                                 <tbody className="divide-y">
-                                  {paginatedImaging.map((img: { date: string; study?: string; procedure: string; finding?: string; status: string; result?: string }, index: number) => (
+                                  {paginatedImaging.map((img: ServiceRadiologyReport, index: number) => (
                                     <tr key={index} className="hover:bg-muted/30">
-                                      <td className="px-4 py-3 text-muted-foreground">{img.date}</td>
-                                      <td className="px-4 py-3 font-medium">{img.procedure}</td>
-                                      <td className="px-4 py-3 text-muted-foreground truncate max-w-[200px]">{img.finding || ''}</td>
+                                      <td className="px-4 py-3 text-muted-foreground">{formatDate(img.created_at)}</td>
+                                      <td className="px-4 py-3 font-medium">{img.study_details?.procedure || `Study ${img.study}`}</td>
+                                      <td className="px-4 py-3 text-muted-foreground">{'—'}</td>
+                                      <td className="px-4 py-3 text-muted-foreground">{'—'}</td>
                                       <td className="px-4 py-3 text-center">
-                                        <Badge className={img.status === 'Normal' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}>
-                                          {img.status}
+                                        <Badge className={img.overall_status === 'normal' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}>
+                                          {img.overall_status || 'pending'}
                                         </Badge>
                                       </td>
                                       <td className="px-4 py-3 text-center">
-                                        <Button variant="ghost" size="sm" onClick={() => toast.info(`Viewing ${img.procedure}`)}>
+                                        <Button variant="ghost" size="sm" onClick={() => toast.info(`Viewing ${img.study_details?.procedure || `Study ${img.study}`}`)}>
                                           <Eye className="h-4 w-4 mr-1" /> View
                                         </Button>
                                       </td>
@@ -4338,7 +5766,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                     <TabsContent value="prescriptions" className="mt-4">
                       {(() => {
                         // Filter prescriptions based on date and status filters
-                        let filteredPrescriptions = [...demoPatientHistory.prescriptions];
+                        let filteredPrescriptions = [...prescriptionHistory];
                         
                         // Apply date filter
                         if (prescriptionsDateFilter !== 'all') {
@@ -4410,9 +5838,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                       <td className="px-4 py-3">{prescription.diagnosis}</td>
                                       <td className="px-4 py-3">
                                         <div className="flex flex-wrap gap-1">
-                                          {prescription.medications.map((med: string, idx: number) => (
+                                          {prescription.medications.map((med: any, idx: number) => (
                                             <Badge key={idx} variant="outline" className="text-xs">
-                                              {med}
+                                              {med.medication_name || med.medication?.name || med.name || 'Unknown'}
                                             </Badge>
                                           ))}
                                         </div>
@@ -4651,6 +6079,247 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                       })()}
                     </TabsContent>
 
+                    {/* Ward Admissions Tab */}
+                    <TabsContent value="physio" className="mt-4">
+                      {(() => {
+                        const filteredPhysio = physioHistory.filter(order => {
+                          const matchesSearch =
+                            order.patient_name?.toLowerCase().includes(physioSearchQuery.toLowerCase()) ||
+                            order.diagnosis?.toLowerCase().includes(physioSearchQuery.toLowerCase()) ||
+                            order.id?.toString().includes(physioSearchQuery);
+
+                          const matchesStatus = physioStatusFilter === 'all' || order.status === physioStatusFilter;
+
+                          let matchesDate = true;
+                          if (physioDateFilter !== 'all') {
+                            const orderDate = new Date(order.ordered_at);
+                            const now = new Date();
+                            const diffTime = now.getTime() - orderDate.getTime();
+                            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+                            const daysFilter = parseInt(physioDateFilter);
+                            matchesDate = diffDays <= daysFilter;
+                          }
+
+                          return matchesSearch && matchesStatus && matchesDate;
+                        });
+
+                        const totalPhysio = filteredPhysio.length;
+                        const totalPhysioPages = Math.ceil(totalPhysio / physioPerPage);
+                        const paginatedPhysio = filteredPhysio.slice(
+                          (physioPage - 1) * physioPerPage,
+                          physioPage * physioPerPage
+                        );
+
+                        return (
+                          <>
+                            <div className="flex items-center justify-between mb-3">
+                              <select
+                                value={physioDateFilter}
+                                onChange={(e) => { setPhysioDateFilter(e.target.value); setPhysioPage(1); }}
+                                className="text-sm border rounded-md px-3 py-1.5 bg-background"
+                              >
+                                <option value="all">All Time</option>
+                                <option value="30">Last 30 Days</option>
+                                <option value="90">Last 3 Months</option>
+                                <option value="365">Last Year</option>
+                              </select>
+                            </div>
+                            <div className="border rounded-lg overflow-hidden">
+                              <table className="w-full text-sm">
+                                <thead className="bg-muted/50">
+                                  <tr>
+                                    <th className="px-4 py-2 text-left font-medium">Date</th>
+                                    <th className="px-4 py-2 text-left font-medium">Diagnosis</th>
+                                    <th className="px-4 py-2 text-left font-medium">Status</th>
+                                    <th className="px-4 py-2 text-center font-medium">Action</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y">
+                                  {paginatedPhysio.map((order) => (
+                                    <tr key={order.id} className="hover:bg-muted/30">
+                                      <td className="px-4 py-3 text-muted-foreground">
+                                        {new Date(order.ordered_at).toLocaleDateString()}
+                                      </td>
+                                      <td className="px-4 py-3">
+                                        <div>
+                                          <div className="font-medium">{order.patient_name}</div>
+                                          <div className="text-sm text-muted-foreground">{order.diagnosis || 'N/A'}</div>
+                                        </div>
+                                      </td>
+                                      <td className="px-4 py-3">
+                                        <div className="flex items-center gap-2">
+                                          <Badge variant="outline" className={`text-xs ${
+                                            order.status === 'completed' ? 'bg-emerald-500/10 text-emerald-600' :
+                                            order.status === 'in_progress' ? 'bg-orange-500/10 text-orange-600' :
+                                            order.status === 'scheduled' ? 'bg-blue-500/10 text-blue-600' :
+                                            'bg-gray-500/10 text-gray-600'
+                                          }`}>
+                                            {order.status.replace('_', ' ')}
+                                          </Badge>
+                                          <span className="text-xs text-muted-foreground">
+                                            {order.sessions_completed}/{order.total_sessions}
+                                          </span>
+                                        </div>
+                                      </td>
+                                      <td className="px-4 py-3 text-center">
+                                        <Button variant="ghost" size="sm" onClick={() => openPhysioOrderDialog(order)}>
+                                          <Eye className="h-4 w-4 mr-1" /> View
+                                        </Button>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                            {/* Pagination */}
+                            <div className="flex flex-col gap-3 border-t border-border/60 pt-3 mt-3 md:flex-row md:items-center md:justify-between">
+                              <div className="flex items-center gap-4">
+                                <p className="text-sm text-muted-foreground">
+                                  Showing {totalPhysio === 0 ? 0 : `${(physioPage - 1) * physioPerPage + 1}-${Math.min(totalPhysio, physioPage * physioPerPage)}`} of {totalPhysio}
+                                </p>
+                                <div className="flex items-center gap-2">
+                                  <label className="text-sm text-muted-foreground">Per page:</label>
+                                  <Select value={String(physioPerPage)} onValueChange={(value) => { setPhysioPerPage(Number(value)); setPhysioPage(1); }}>
+                                    <SelectTrigger className="w-16 h-8">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="5">5</SelectItem>
+                                      <SelectItem value="10">10</SelectItem>
+                                      <SelectItem value="25">25</SelectItem>
+                                      <SelectItem value="50">50</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Button variant="outline" size="sm" disabled={physioPage === 1} onClick={() => setPhysioPage(p => p - 1)}>
+                                  <ChevronLeft className="h-4 w-4" />
+                                  Previous
+                                </Button>
+                                <div className="flex items-center gap-1">
+                                  {Array.from({ length: Math.min(5, totalPhysioPages) }, (_, i) => {
+                                    let pageNum: number;
+                                    const halfVisible = Math.floor(5 / 2);
+                                    if (totalPhysioPages <= 5) {
+                                      pageNum = i + 1;
+                                    } else if (physioPage <= halfVisible) {
+                                      pageNum = i + 1;
+                                    } else if (physioPage >= totalPhysioPages - halfVisible) {
+                                      pageNum = totalPhysioPages - 4 + i;
+                                    } else {
+                                      pageNum = physioPage - halfVisible + i;
+                                    }
+                                    return (
+                                      <Button
+                                        key={pageNum}
+                                        variant={physioPage === pageNum ? "default" : "outline"}
+                                        size="sm"
+                                        onClick={() => setPhysioPage(pageNum)}
+                                        className="w-8 h-8 p-0"
+                                      >
+                                        {pageNum}
+                                      </Button>
+                                    );
+                                  })}
+                                </div>
+                                <Button variant="outline" size="sm" disabled={physioPage === totalPhysioPages} onClick={() => setPhysioPage(p => p + 1)}>
+                                  Next
+                                  <ChevronRight className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </div>
+                          </>
+                        );
+                      })()}
+                    </TabsContent>
+
+                    <TabsContent value="wards" className="mt-4">
+                      {(() => {
+                        const totalAdmissions = wardAdmissions.length;
+                        const totalPages = Math.ceil(totalAdmissions / 10);
+                        const paginatedAdmissions = wardAdmissions.slice(0, 10); // Simple pagination
+
+                        return (
+                          <>
+                            <div className="flex items-center justify-between mb-3">
+                              <h3 className="text-sm font-medium">Ward Admission History</h3>
+                            </div>
+                            {totalAdmissions === 0 ? (
+                              <div className="text-center py-12 bg-gradient-to-b from-muted/30 to-background rounded-lg border-2 border-dashed border-muted">
+                                <Building2 className="h-12 w-12 mx-auto mb-3 text-muted-foreground opacity-50" />
+                                <p className="font-medium text-muted-foreground mb-1">No ward admissions found</p>
+                                <p className="text-sm text-muted-foreground">Ward admission history will appear here</p>
+                              </div>
+                            ) : (
+                              <div className="border rounded-lg overflow-hidden">
+                                <table className="w-full text-sm">
+                                  <thead className="bg-muted/50">
+                                    <tr>
+                                      <th className="px-4 py-2 text-left font-medium">Admission Date</th>
+                                      <th className="px-4 py-2 text-left font-medium">Ward</th>
+                                      <th className="px-4 py-2 text-left font-medium">Diagnosis</th>
+                                      <th className="px-4 py-2 text-left font-medium">Days</th>
+                                      <th className="px-4 py-2 text-left font-medium">Status</th>
+                                      <th className="px-4 py-2 text-center font-medium">Action</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y">
+                                    {paginatedAdmissions.map((admission) => (
+                                      <tr key={admission.id} className="hover:bg-muted/30">
+                                        <td className="px-4 py-3 text-muted-foreground">
+                                          <div className="font-medium">{formatDate(admission.admission_date)}</div>
+                                          <div className="text-xs text-muted-foreground">{formatTime(admission.admission_date)}</div>
+                                        </td>
+                                        <td className="px-4 py-3">
+                                          <div className="font-medium">{admission.ward_name}</div>
+                                          <div className="text-xs text-muted-foreground">{admission.admission_type}</div>
+                                        </td>
+                                        <td className="px-4 py-3">
+                                          <p className="text-sm max-w-[200px] truncate" title={admission.admission_diagnosis}>
+                                            {admission.admission_diagnosis}
+                                          </p>
+                                        </td>
+                                        <td className="px-4 py-3">{admission.length_of_stay} days</td>
+                                        <td className="px-4 py-3">
+                                          <Badge className={`${
+                                            admission.status === 'admitted' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' :
+                                            admission.status === 'discharged' ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' :
+                                            'bg-gray-100 text-gray-800'
+                                          }`}>
+                                            {admission.status}
+                                          </Badge>
+                                        </td>
+                                        <td className="px-4 py-3 text-center">
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={async () => {
+                                              try {
+                                                const admissionDetail = await wardService.getAdmission(admission.id);
+                                                setSelectedWardAdmission(admissionDetail);
+                                                setShowWardAdmissionDetail(true);
+                                              } catch (error) {
+                                                console.error('Failed to load ward admission details:', error);
+                                                toast.error('Failed to load admission details');
+                                              }
+                                            }}
+                                          >
+                                            <Eye className="h-4 w-4 mr-1" /> View
+                                          </Button>
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                            </div>
+                            )}
+                          </>
+                        );
+                      })()}
+                    </TabsContent>
+
                     {/* Background Tab */}
                     <TabsContent value="background" className="mt-4">
                       <div className="flex justify-end mb-4">
@@ -4820,38 +6489,104 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                   <Input 
                     value={diagnosisSearch} 
                     onChange={(e) => {
-                      setDiagnosisSearch(e.target.value);
+                      const value = e.target.value;
+                      setDiagnosisSearch(value);
                       setShowDiagnosisDropdown(true);
+
+                      // Clear previous timeout
+                      if (searchTimeout) {
+                        clearTimeout(searchTimeout);
+                      }
+
+                      // Set new timeout for debounced search
+                      const timeout = setTimeout(() => {
+                        if (value.trim()) {
+                          searchICD10Codes(value);
+                        } else {
+                          setIcd10SearchResults([]);
+                        }
+                      }, 300); // 300ms debounce
+
+                      setSearchTimeout(timeout);
                     }}
                     onFocus={() => setShowDiagnosisDropdown(true)}
                     placeholder="Search by code or condition name (e.g., I10 or Hypertension)..." 
                   />
-                  {showDiagnosisDropdown && diagnosisSearch && (
+                  {showDiagnosisDropdown && (
                     <div className="absolute z-50 w-full mt-1 bg-background border rounded-md shadow-lg max-h-[250px] overflow-y-auto">
-                      {icd10Codes
-                        .filter(dx => 
-                          dx.code.toLowerCase().includes(diagnosisSearch.toLowerCase()) ||
-                          dx.name.toLowerCase().includes(diagnosisSearch.toLowerCase()) ||
-                          dx.category.toLowerCase().includes(diagnosisSearch.toLowerCase())
-                        )
-                        .slice(0, 15)
-                        .map((dx, index) => (
+                      {/* Debug info */}
+                      <div className="p-2 text-xs text-muted-foreground border-b">
+                        Loaded: {icd10Codes.length} | Searching: {diagnosisSearch} | Results: {icd10SearchResults.length} {isSearchingICD10 && '(Searching...)'}
+                      </div>
+                      {(() => {
+                        let displayCodes;
+                        if (diagnosisSearch.trim()) {
+                          // Use API search results
+                          displayCodes = icd10SearchResults;
+                          console.log(`[ICD-10 Search] "${diagnosisSearch}" returned ${displayCodes.length} results from API`);
+                        } else {
+                          // Show first 20 codes when no search
+                          displayCodes = icd10Codes.slice(0, 20);
+                        }
+
+                        if (displayCodes.length === 0) {
+                          if (isSearchingICD10) {
+                            return (
+                              <div className="p-4 text-center text-muted-foreground text-sm">
+                                Searching...
+                              </div>
+                            );
+                          } else if (diagnosisSearch.trim()) {
+                            return (
+                              <div className="p-4 text-center text-muted-foreground text-sm">
+                                No matching ICD-10 codes found
+                              </div>
+                            );
+                          } else {
+                            return (
+                              <div className="p-4 text-center text-muted-foreground text-sm">
+                                Start typing to search ICD-10 codes
+                              </div>
+                            );
+                          }
+                        }
+
+                        return displayCodes.map((dx, index) => (
                           <div 
                             key={`${dx.code}-${index}`}
-                            onClick={() => {
-                              const newDx = {
-                                id: `dx-${Date.now()}`,
-                                code: dx.code,
-                                name: dx.name,
-                                type: selectedDiagnosisType,
-                                notes: diagnosisNotes
-                              };
-                              setDiagnoses([...diagnoses, newDx]);
+                            onClick={async () => {
+                              try {
+                                if (!currentPatient) {
+                                  toast.error('No patient selected');
+                                  return;
+                                }
+
+                                // Create diagnosis in database
+                                const diagnosisData: Partial<Diagnosis> = {
+                                  patient: Number(currentPatient.id),
+                                  visit: currentPatient.visitId ? Number(currentPatient.visitId) : undefined,
+                                  session: sessionId || undefined,
+                                  icd10_code: dx.id,
+                                  diagnosis_text: diagnosisNotes || '',
+                                  status: 'confirmed',
+                                  certainty: selectedDiagnosisType === 'Primary' ? 'confirmed' :
+                                            selectedDiagnosisType === 'Secondary' ? 'probable' : 'possible',
+                                  notes: diagnosisNotes || ''
+                                };
+
+                                console.log('Creating diagnosis with data:', diagnosisData);
+                                const newDiagnosis = await consultationService.createDiagnosis(diagnosisData);
+                                setDiagnoses([...diagnoses, newDiagnosis]);
+
                               setDiagnosisSearch("");
                               setShowDiagnosisDropdown(false);
                               setDiagnosisNotes("");
                               setShowAddDiagnosis(false);
-                              toast.success(`Added: ${dx.code} - ${dx.name}`);
+                                toast.success(`Added diagnosis: ${dx.code} - ${dx.description}`);
+                              } catch (err: any) {
+                                console.error('Error creating diagnosis:', err);
+                                toast.error('Failed to add diagnosis. Please try again.');
+                              }
                             }}
                             className="p-2 hover:bg-muted cursor-pointer"
                           >
@@ -4859,23 +6594,14 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                               <div>
                                 <div className="font-medium text-sm flex items-center gap-2">
                                   <span className="font-mono bg-muted px-1.5 py-0.5 rounded text-xs">{dx.code}</span>
-                                  {dx.name}
+                                  {dx.description}
                                 </div>
                               </div>
                               <Badge variant="outline" className="text-xs">{dx.category}</Badge>
                             </div>
                           </div>
-                        ))
-                      }
-                      {icd10Codes.filter(dx => 
-                        dx.code.toLowerCase().includes(diagnosisSearch.toLowerCase()) ||
-                        dx.name.toLowerCase().includes(diagnosisSearch.toLowerCase()) ||
-                        dx.category.toLowerCase().includes(diagnosisSearch.toLowerCase())
-                      ).length === 0 && (
-                        <div className="p-4 text-center text-muted-foreground text-sm">
-                          No matching ICD-10 codes found
-                        </div>
-                      )}
+                        ));
+                      })()}
                     </div>
                   )}
                 </div>
@@ -4908,14 +6634,14 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
             setShowMedicationDropdown(false); 
           }
         }}>
-          <DialogContent className="w-[95vw] sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className="w-[95vw] sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Pill className="h-5 w-5 text-violet-500" />
                 Add Prescription
               </DialogTitle>
               <DialogDescription>
-                Search and select medications, then configure dosage details for each individually. All selected medications will be sent as one prescription order to Pharmacy queue.
+                Search and select medications, then configure dosage details for each. All medications will be sent as one prescription order to Pharmacy queue.
               </DialogDescription>
             </DialogHeader>
             
@@ -4932,130 +6658,115 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
             <div className="space-y-4 py-2">
               {/* Medication Search */}
               <div className="space-y-2">
-                <Label>Medication *</Label>
-                <p className="text-xs text-muted-foreground mb-2">
-                  Search medications by name, generic name, or category. Select multiple medications to add to this prescription order.
-                </p>
+                <Label>Search and Select Medications *</Label>
                 <div className="relative">
                   <Input 
+                    placeholder="Search medications by name, generic name, or category..."
                     value={medicationSearch} 
                     onChange={(e) => {
-                      setMedicationSearch(e.target.value);
-                      // Only show dropdown when user types something
-                      if (e.target.value.trim().length > 0) {
+                      const searchValue = e.target.value;
+                      setMedicationSearch(searchValue);
+                      // Only show dropdown if user has typed something
+                      if (searchValue.trim()) {
                         setShowMedicationDropdown(true);
                       } else {
                         setShowMedicationDropdown(false);
                       }
                     }}
                     onFocus={() => {
-                      // Only show dropdown if user has already typed something
-                      if (medicationSearch.trim().length > 0) {
+                      // Only show dropdown if there's search text
+                      if (medicationSearch.trim()) {
                         setShowMedicationDropdown(true);
                       }
                     }}
-                    onBlur={() => {
-                      // Delay hiding dropdown to allow click on items
-                      setTimeout(() => setShowMedicationDropdown(false), 200);
-                    }}
-                    placeholder="Search by name, generic name, or category..." 
                   />
-                  {loadingMedications && (
-                    <div className="absolute z-50 w-full mt-1 bg-background border rounded-md shadow-lg p-4 text-center text-sm text-muted-foreground">
+                  {showMedicationDropdown && medicationSearch.trim() && (
+                    <div className="absolute z-50 w-full mt-1 bg-white dark:bg-gray-800 border rounded-md shadow-lg max-h-[300px] overflow-y-auto">
+                      {loadingMedications ? (
+                        <div className="p-4 text-center text-sm text-muted-foreground">
+                          <Loader2 className="h-4 w-4 animate-spin mx-auto mb-2" />
                       Loading medications...
                     </div>
-                  )}
-                  {!loadingMedications && showMedicationDropdown && filteredMedications.length > 0 && (
-                    <div className="absolute z-50 w-full mt-1 bg-background border rounded-md shadow-lg max-h-[300px] overflow-y-auto">
-                      {filteredMedications.length > 20 && (
-                        <div className="p-2 text-xs text-muted-foreground border-b">
-                          Showing {Math.min(20, filteredMedications.length)} of {filteredMedications.length} medications
+                      ) : filteredMedications.length === 0 ? (
+                        <div className="p-4 text-center text-sm text-muted-foreground">
+                          No medications found. Try a different search term.
                         </div>
-                      )}
-                      {filteredMedications.slice(0, 20).map((med) => {
-                        // Handle both API medications (generic_name, form) and demo medications (genericName, dosageForm)
-                        const genericName = med.generic_name || med.genericName || '';
-                        const form = med.form || med.dosageForm || '';
-                        const category = med.category || '';
-                        const medicationId = typeof med.id === 'number' ? med.id : parseInt(med.id, 10);
-                        const isSelected = selectedMedications.has(medicationId);
+                      ) : (
+                        filteredMedications.map((med) => {
+                          const isSelected = selectedMedications.has(typeof med.id === 'number' ? med.id : parseInt(med.id, 10));
                         const isAllergyRisk = currentPatient?.allergies.some(allergy => 
                           med.name?.toLowerCase().includes(allergy.toLowerCase()) || 
-                          genericName.toLowerCase().includes(allergy.toLowerCase())
+                            (med.generic_name || '').toLowerCase().includes(allergy.toLowerCase())
                         );
                         return (
                           <div 
                             key={med.id}
                             onClick={() => toggleMedicationSelection(med)}
-                            className={`p-2 hover:bg-muted cursor-pointer flex items-center justify-between ${isAllergyRisk ? 'bg-red-50 dark:bg-red-900/20' : ''} ${isSelected ? 'bg-primary/10 dark:bg-primary/20' : ''}`}
-                          >
-                            <div className="flex items-center gap-2 flex-1">
-                              <Checkbox 
-                                checked={isSelected}
-                                onCheckedChange={() => toggleMedicationSelection(med)}
-                                onClick={(e) => e.stopPropagation()}
-                                className="flex-shrink-0"
-                              />
-                              <div className="flex-1">
+                              className={`p-3 hover:bg-muted cursor-pointer border-b last:border-b-0 flex items-start gap-3 ${
+                                isSelected ? 'bg-violet-50 dark:bg-violet-900/20' : ''
+                              }`}
+                            >
+                              <Checkbox checked={isSelected} onCheckedChange={() => toggleMedicationSelection(med)} />
+                              <div className="flex-1 min-w-0">
                                 <div className="font-medium text-sm flex items-center gap-2">
                                   {med.name}
                                   {isAllergyRisk && <AlertTriangle className="h-3 w-3 text-red-500" />}
                                 </div>
-                                <div className="text-xs text-muted-foreground">
-                                  {genericName && `${genericName} • `}
-                                  {category && `${category} • `}
-                                  {form || 'N/A'}
+                                <div className="text-xs text-muted-foreground mt-1">
+                                  {(med.generic_name || '')} • {(med.form || 'N/A')}
                                 </div>
+                                {isAllergyRisk && (
+                                  <div className="text-xs text-red-600 dark:text-red-400 mt-1">
+                                    ⚠️ Patient allergy risk
                               </div>
-                            </div>
-                            {med.stockLevel !== undefined && (
-                              <Badge variant="outline" className={med.stockLevel === 0 ? 'bg-red-100 text-red-700' : med.stockLevel < 50 ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}>
-                                {med.stockLevel === 0 ? 'Out' : med.stockLevel}
-                              </Badge>
                             )}
                           </div>
-                        );
-                      })}
+                    </div>
+                          );
+                        })
+                  )}
                     </div>
                   )}
-                  {!loadingMedications && showMedicationDropdown && filteredMedications.length === 0 && medicationSearch && (
-                    <div className="absolute z-50 w-full mt-1 bg-background border rounded-md shadow-lg p-4 text-center text-sm text-muted-foreground">
-                      No medications found matching "{medicationSearch}"
                     </div>
-                  )}
-                  {!loadingMedications && showMedicationDropdown && filteredMedications.length === 0 && !medicationSearch && medications.length === 0 && (
-                    <div className="absolute z-50 w-full mt-1 bg-background border rounded-md shadow-lg p-4 text-center text-sm text-muted-foreground">
-                      No medications available. Please check if medications are loaded.
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-            
-            {/* Selected Medications List with Individual Configuration */}
             {selectedMedications.size > 0 && (
-              <div className="space-y-4 border-t pt-4 mt-4">
-                <div className="flex items-center justify-between mb-2">
-                  <div>
-                    <Label className="text-sm font-semibold">
-                      Selected Medications ({selectedMedications.size})
-                    </Label>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Configure dosage details for each medication below. All medications will be sent as one prescription order.
-                    </p>
+                  <div className="mt-2 space-y-2">
+                    <div className="text-sm font-medium">Selected Medications ({selectedMedications.size}):</div>
+                    <div className="flex flex-wrap gap-2">
+                      {medications
+                        .filter(m => selectedMedications.has(typeof m.id === 'number' ? m.id : parseInt(m.id, 10)))
+                        .map(med => (
+                          <Badge key={med.id} variant="secondary" className="flex items-center gap-1">
+                            {med.name}
+                            <X
+                              className="h-3 w-3 cursor-pointer"
+                              onClick={() => toggleMedicationSelection(med)}
+                            />
+                          </Badge>
+                        ))}
                   </div>
                   <Button
-                    variant="outline"
+                      variant="ghost"
                     size="sm"
-                    onClick={() => {
-                      setSelectedMedications(new Set());
-                      setMedicationConfigs(new Map());
-                    }}
+                      onClick={() => setSelectedMedications(new Set())}
+                      className="text-xs"
                   >
                     Clear All
                   </Button>
                 </div>
-                <div className="max-h-[400px] overflow-y-auto space-y-3">
+                )}
+              </div>
+
+              {/* Medication Configuration */}
+              {selectedMedications.size > 0 && (
+                <div className="space-y-4 border-t pt-4 mt-4">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-sm font-semibold">Configure Prescriptions</Label>
+                    <Badge variant="outline" className="text-xs">
+                      {selectedMedications.size} medication{selectedMedications.size > 1 ? 's' : ''} selected
+                    </Badge>
+                  </div>
+
+                  <div className="space-y-3">
                   {Array.from(selectedMedications).map((medId) => {
                     const med = medications.find((m: any) => {
                       const mId = typeof m.id === 'number' ? m.id : parseInt(m.id, 10);
@@ -5065,179 +6776,150 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                     const config = medicationConfigs.get(medId) || {
                       dosage: '',
                       frequency: 'Once daily (OD)',
-                      duration: '',
                       durationDays: 0,
-                      quantity: 0,
                       route: 'Oral',
-                      instructions: '',
-                      priority: 'Routine',
+                      instructions: ''
                     };
-                    const dailyDoses = frequencyToDailyDoses[config.frequency] || 1;
-                    const calculatedQty = config.frequency === 'STAT (Single dose)' 
-                      ? 1 
-                      : Math.ceil(dailyDoses * config.durationDays);
+
                     return (
-                      <div key={medId} className={`border rounded-lg p-3 space-y-3 ${
-                        (!config.dosage || !config.frequency || (!config.durationDays && config.frequency !== 'STAT (Single dose)')) 
-                          ? 'bg-amber-50 dark:bg-amber-900/10 border-amber-300 dark:border-amber-800' 
-                          : 'bg-muted/30'
-                      }`}>
-                        <div className="flex items-center justify-between">
-                          <div className="flex-1">
-                            <div className="font-medium text-sm flex items-center gap-2">
-                              {med.name}
-                              {(!config.dosage || !config.frequency || (!config.durationDays && config.frequency !== 'STAT (Single dose)')) && (
-                                <Badge variant="outline" className="bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400 text-xs">
-                                  Incomplete
-                                </Badge>
-                              )}
-                            </div>
+                        <Card key={medId} className="border-l-4 border-l-violet-500">
+                          <CardContent className="p-4">
+                            <div className="flex items-start justify-between mb-3">
+                              <div>
+                                <div className="font-medium text-sm">{med.name}</div>
                             <div className="text-xs text-muted-foreground">
-                              {med.generic_name || med.genericName || ''} • {med.form || med.dosageForm || 'N/A'}
+                                  {med.generic_name || ''} • {med.form || 'N/A'}
                             </div>
                           </div>
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => {
-                              setSelectedMedications(prev => {
-                                const newSet = new Set(prev);
-                                newSet.delete(medId);
-                                return newSet;
-                              });
-                              setMedicationConfigs(prev => {
-                                const newConfigs = new Map(prev);
-                                newConfigs.delete(medId);
-                                return newConfigs;
-                              });
-                            }}
-                            className="h-6 w-6 p-0"
+                                onClick={() => toggleMedicationSelection(med)}
+                                className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
                           >
                             <X className="h-3 w-3" />
                           </Button>
                         </div>
                         
-                        {/* Individual Configuration for each medication */}
-                        <div className="grid grid-cols-2 gap-2 text-xs">
+                            <div className="grid grid-cols-2 gap-3">
                           <div className="space-y-1">
-                            <Label className="text-xs">
-                              Dosage <span className="text-red-500">*</span>
-                            </Label>
+                                <Label className="text-xs">Dosage *</Label>
                             <Input
-                              value={config.dosage}
+                                  placeholder="e.g., 1 tablet, 5ml"
+                                  className="h-8 text-xs"
+                                  value={config.dosage || ''}
                               onChange={(e) => updateMedicationConfig(medId, 'dosage', e.target.value)}
-                              placeholder="e.g., 1 tablet"
-                              className={`h-8 text-xs ${!config.dosage ? 'border-amber-300 dark:border-amber-700' : ''}`}
                             />
                           </div>
                           <div className="space-y-1">
-                            <Label className="text-xs">
-                              Route <span className="text-red-500">*</span>
-                            </Label>
+                                <Label className="text-xs">Frequency *</Label>
                             <Select
-                              value={config.route}
-                              onValueChange={(v) => updateMedicationConfig(medId, 'route', v)}
-                            >
-                              <SelectTrigger className={`h-8 text-xs ${!config.route ? 'border-amber-300 dark:border-amber-700' : ''}`}>
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {routes.map(route => (
-                                  <SelectItem key={route} value={route} className="text-xs">{route}</SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          <div className="space-y-1">
-                            <Label className="text-xs">
-                              Frequency <span className="text-red-500">*</span>
-                            </Label>
-                            <Select
-                              value={config.frequency}
+                                  value={config.frequency || 'Once daily (OD)'}
                               onValueChange={(v) => updateMedicationConfig(medId, 'frequency', v)}
                             >
-                              <SelectTrigger className={`h-8 text-xs ${!config.frequency ? 'border-amber-300 dark:border-amber-700' : ''}`}>
+                                  <SelectTrigger className="h-8 text-xs">
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="Once daily (OD)" className="text-xs">Once daily (OD)</SelectItem>
-                                <SelectItem value="Twice daily (BD)" className="text-xs">Twice daily (BD)</SelectItem>
-                                <SelectItem value="Three times daily (TDS)" className="text-xs">Three times daily (TDS)</SelectItem>
-                                <SelectItem value="Four times daily (QDS)" className="text-xs">Four times daily (QDS)</SelectItem>
-                                <SelectItem value="Every 6 hours (Q6H)" className="text-xs">Every 6 hours (Q6H)</SelectItem>
-                                <SelectItem value="Every 8 hours (Q8H)" className="text-xs">Every 8 hours (Q8H)</SelectItem>
-                                <SelectItem value="Every 12 hours (Q12H)" className="text-xs">Every 12 hours (Q12H)</SelectItem>
-                                <SelectItem value="At bedtime (Nocte)" className="text-xs">At bedtime (Nocte)</SelectItem>
-                                <SelectItem value="As needed (PRN)" className="text-xs">As needed (PRN)</SelectItem>
-                                <SelectItem value="Weekly" className="text-xs">Weekly</SelectItem>
-                                <SelectItem value="STAT (Single dose)" className="text-xs">STAT (Single dose)</SelectItem>
+                                    <SelectItem value="Once daily (OD)">Once daily (OD)</SelectItem>
+                                    <SelectItem value="Twice daily (BD)">Twice daily (BD)</SelectItem>
+                                    <SelectItem value="Three times daily (TDS)">Three times daily (TDS)</SelectItem>
+                                    <SelectItem value="Four times daily (QDS)">Four times daily (QDS)</SelectItem>
+                                    <SelectItem value="As needed (PRN)">As needed (PRN)</SelectItem>
+                                    <SelectItem value="STAT (Single dose)">STAT (Single dose)</SelectItem>
                               </SelectContent>
                             </Select>
                           </div>
                           <div className="space-y-1">
-                            <Label className="text-xs">
-                              Duration (days) <span className="text-red-500">*</span>
-                              {config.frequency === 'STAT (Single dose)' && (
-                                <span className="text-muted-foreground ml-1">(Auto: 1)</span>
-                              )}
-                            </Label>
+                                <Label className="text-xs">Duration (days)</Label>
                             <Input
                               type="number"
                               min="1"
+                                  placeholder="e.g., 7"
+                                  className="h-8 text-xs"
                               value={config.durationDays || ''}
                               onChange={(e) => {
                                 const days = parseInt(e.target.value) || 0;
                                 updateMedicationConfig(medId, 'durationDays', days);
                               }}
-                              placeholder="e.g., 7"
-                              className={`h-8 text-xs ${!config.durationDays && config.frequency !== 'STAT (Single dose)' ? 'border-amber-300 dark:border-amber-700' : ''}`}
-                              disabled={config.frequency === 'STAT (Single dose)'}
                             />
                           </div>
                           <div className="space-y-1">
-                            <Label className="text-xs">Calculated Quantity</Label>
-                            <div className="h-8 px-2 border rounded-md text-xs bg-muted/50 flex items-center justify-between">
-                              <span className="font-medium">{calculatedQty || config.quantity || '—'}</span>
-                              {calculatedQty > 0 && (
-                                <span className="text-muted-foreground text-[10px]">
-                                  ({config.frequency} × {config.durationDays} days)
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                          <div className="space-y-1">
-                            <Label className="text-xs">Priority</Label>
+                                <Label className="text-xs">Route</Label>
                             <Select
-                              value={config.priority}
-                              onValueChange={(v) => updateMedicationConfig(medId, 'priority', v)}
+                                  value={config.route || 'Oral'}
+                                  onValueChange={(v) => updateMedicationConfig(medId, 'route', v)}
                             >
                               <SelectTrigger className="h-8 text-xs">
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="Routine" className="text-xs">Routine</SelectItem>
-                                <SelectItem value="Urgent" className="text-xs">Urgent</SelectItem>
-                                <SelectItem value="Emergency" className="text-xs">Emergency</SelectItem>
+                                    <SelectItem value="Oral">Oral</SelectItem>
+                                    <SelectItem value="IV">IV</SelectItem>
+                                    <SelectItem value="IM">IM</SelectItem>
+                                    <SelectItem value="Topical">Topical</SelectItem>
+                                    <SelectItem value="Inhalation">Inhalation</SelectItem>
                               </SelectContent>
                             </Select>
                           </div>
                         </div>
-                        <div className="space-y-1">
-                          <Label className="text-xs">Special Instructions</Label>
+
+                            <div className="mt-3 space-y-1">
+                              <Label className="text-xs">Instructions</Label>
                           <Textarea
-                            value={config.instructions}
-                            onChange={(e) => updateMedicationConfig(medId, 'instructions', e.target.value)}
-                            placeholder="e.g., Take after meals..."
+                                placeholder="Special instructions (optional)"
                             rows={2}
                             className="text-xs"
+                                value={config.instructions || ''}
+                                onChange={(e) => updateMedicationConfig(medId, 'instructions', e.target.value)}
                           />
                         </div>
-                      </div>
+                          </CardContent>
+                        </Card>
                     );
                   })}
                 </div>
               </div>
             )}
+
+              {/* Prescription Settings */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Priority</Label>
+                  <Select value={newPrescription.priority} onValueChange={(v) => setNewPrescription({ ...newPrescription, priority: v })}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Routine"><Badge className="bg-blue-100 text-blue-800">Routine</Badge></SelectItem>
+                      <SelectItem value="Urgent"><Badge className="bg-amber-100 text-amber-800">Urgent</Badge></SelectItem>
+                      <SelectItem value="STAT"><Badge className="bg-red-100 text-red-800">STAT</Badge></SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              {/* Clinical Indication */}
+              <div className="space-y-2">
+                <Label>Clinical Indication *</Label>
+                <Textarea
+                  value={newPrescription.notes}
+                  onChange={(e) => setNewPrescription({ ...newPrescription, notes: e.target.value })}
+                  placeholder="Reason for prescription, clinical context, and special instructions..."
+                  rows={3}
+                />
+              </div>
+
+              {newPrescription.priority === 'STAT' && (
+                <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
+                  <p className="text-sm text-red-700 dark:text-red-300 flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4" />
+                    STAT prescriptions require immediate attention from pharmacy.
+                  </p>
+                </div>
+              )}
+            </div>
+
 
             <DialogFooter>
               <Button 
@@ -5250,28 +6932,14 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
               >
                 Cancel
               </Button>
-              {selectedMedications.size > 0 ? (
                 <Button 
-                  onClick={addSelectedMedicationsToPrescription}
+                onClick={addPrescription}
+                disabled={selectedMedications.size === 0 || !newPrescription.notes}
                   className="bg-violet-600 hover:bg-violet-700"
-                  disabled={Array.from(selectedMedications).some(medId => {
-                    const config = medicationConfigs.get(medId);
-                    return !config || !config.dosage || !config.frequency || (!config.durationDays && config.frequency !== 'STAT (Single dose)');
-                  })}
                 >
                   <Pill className="h-4 w-4 mr-2" />
                   Add {selectedMedications.size} Medication{selectedMedications.size > 1 ? 's' : ''} to Order
                 </Button>
-              ) : (
-                <Button 
-                  onClick={addPrescription} 
-                  disabled={!newPrescription.medication || !newPrescription.dosage || !newPrescription.frequency}
-                  className="bg-violet-600 hover:bg-violet-700"
-                >
-                  <Pill className="h-4 w-4 mr-2" />
-                  Add to Prescription Order
-                </Button>
-              )}
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -5404,7 +7072,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                 </div>
               </div>
               <div className="space-y-2">
-                <Label>Clinical Notes / Indication</Label>
+                <Label>Clinical Indication *</Label>
                 <Textarea value={newLabOrder.notes} onChange={(e) => setNewLabOrder({ ...newLabOrder, notes: e.target.value })} placeholder="Reason for test, clinical context, specific instructions for lab..." rows={3} />
               </div>
               {newLabOrder.priority === 'STAT' && (
@@ -5431,14 +7099,14 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                 className="bg-amber-500 hover:bg-amber-600"
               >
                 <TestTube className="h-4 w-4 mr-2" />
-                Add {selectedLabTemplates.size > 0 ? `${selectedLabTemplates.size} Test(s)` : 'Test(s)'} to Order
+                Add to Order
               </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
 
         <Dialog open={showAddNursingOrder} onOpenChange={setShowAddNursingOrder}>
-          <DialogContent className="w-[95vw] sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className="w-[95vw] sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Syringe className="h-5 w-5 text-cyan-500" />
@@ -5465,7 +7133,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                 <Label>Procedure Type *</Label>
                 <Select 
                   value={newNursingOrder.type} 
-                  onValueChange={(v) => setNewNursingOrder({ ...newNursingOrder, type: v, medication: "", dosage: "", woundLocation: "", woundType: "", supplies: "" })}
+                  onValueChange={(v) => setNewNursingOrder({ ...newNursingOrder, type: v, medication: "", dosage: "", woundLocation: "", woundType: "", supplies: "", ward: "", admissionType: "", admissionDiagnosis: "", presentingComplaint: "" })}
                 >
                   <SelectTrigger><SelectValue placeholder="Select procedure type" /></SelectTrigger>
                   <SelectContent>
@@ -5481,9 +7149,112 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                         Wound Dressing
                       </div>
                     </SelectItem>
+                    <SelectItem value="Ward Admission">
+                      <div className="flex items-center gap-2">
+                        <DoorOpen className="h-4 w-4 text-blue-500" />
+                        Ward Admission
+                      </div>
+                    </SelectItem>
                   </SelectContent>
                 </Select>
               </div>
+
+              {/* Ward Admission-specific fields */}
+              {newNursingOrder.type === 'Ward Admission' && (
+                <>
+                  <div className="space-y-2">
+                    <Label>Ward *</Label>
+                    {/* Ward Search */}
+                    <Input
+                      placeholder="Search wards..."
+                      value={wardSearch}
+                      onChange={(e) => setWardSearch(e.target.value)}
+                      className="mb-2"
+                    />
+                    <Select
+                      value={newNursingOrder.ward || ''}
+                      onValueChange={(v) => setNewNursingOrder({ ...newNursingOrder, ward: v })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select ward for admission" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {/* Ward options - dynamically loaded from API */}
+                        {wards
+                          .filter(ward =>
+                            ward.available_beds > 0 && // Only show wards with available beds
+                            (ward.name.toLowerCase().includes(wardSearch.toLowerCase()) ||
+                             ward.ward_code.toLowerCase().includes(wardSearch.toLowerCase()))
+                          )
+                          .sort((a, b) => b.available_beds - a.available_beds) // Sort by availability
+                          .map((ward) => (
+                            <SelectItem key={ward.id} value={ward.ward_code}>
+                              <div className="flex items-center justify-between w-full">
+                                <span className="font-medium">{ward.name}</span>
+                                <span className={`text-xs px-2 py-1 rounded ${
+                                  ward.available_beds > ward.total_beds * 0.5 ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' :
+                                  ward.available_beds > ward.total_beds * 0.2 ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' :
+                                  'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400'
+                                }`}>
+                                  {ward.available_beds}/{ward.total_beds} beds
+                                </span>
+                              </div>
+                            </SelectItem>
+                          ))}
+                        {wards.filter(ward =>
+                          ward.available_beds > 0 &&
+                          (ward.name.toLowerCase().includes(wardSearch.toLowerCase()) ||
+                           ward.ward_code.toLowerCase().includes(wardSearch.toLowerCase()))
+                        ).length === 0 && wardSearch && (
+                          <div className="px-2 py-4 text-center text-sm text-muted-foreground">
+                            No wards found matching "{wardSearch}"
+                          </div>
+                        )}
+                        {wards.length === 0 && (
+                          <>
+                            <SelectItem value="FEMALE-MED">Female Medical Ward (5 beds available)</SelectItem>
+                            <SelectItem value="MALE-MED">Male Medical Ward (5 beds available)</SelectItem>
+                          </>
+                        )}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Admission Type *</Label>
+                    <Select
+                      value={newNursingOrder.admissionType || ''}
+                      onValueChange={(v) => setNewNursingOrder({ ...newNursingOrder, admissionType: v })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select admission type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="elective">Elective</SelectItem>
+                        <SelectItem value="emergency">Emergency</SelectItem>
+                        <SelectItem value="transfer">Transfer</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Admission Diagnosis *</Label>
+                    <Textarea
+                      value={newNursingOrder.admissionDiagnosis || ''}
+                      onChange={(e) => setNewNursingOrder({ ...newNursingOrder, admissionDiagnosis: e.target.value })}
+                      placeholder="Primary diagnosis for admission"
+                      rows={3}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Presenting Complaint</Label>
+                    <Textarea
+                      value={newNursingOrder.presentingComplaint || ''}
+                      onChange={(e) => setNewNursingOrder({ ...newNursingOrder, presentingComplaint: e.target.value })}
+                      placeholder="Patient's presenting complaint"
+                      rows={2}
+                    />
+                  </div>
+                </>
+              )}
 
               {/* Injection-specific fields */}
               {newNursingOrder.type === 'Injection' && (
@@ -5508,9 +7279,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                             <SelectItem key={med.id || med.name} value={displayName}>
                               <div className="flex items-center justify-between w-full">
                                 <span>{displayName}</span>
-                                {med.category && (
-                                  <span className="text-xs text-muted-foreground ml-2">{med.category}</span>
-                                )}
+                                {/* Category not available in Medication interface */}
                               </div>
                             </SelectItem>
                           );
@@ -5670,7 +7439,13 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
               <Button variant="outline" onClick={() => setShowAddNursingOrder(false)}>Cancel</Button>
               <Button 
                 onClick={addNursingOrder}
-                disabled={!newNursingOrder.type || !newNursingOrder.instructions || (newNursingOrder.type === 'Injection' && !newNursingOrder.medication) || (newNursingOrder.type === 'Dressing' && !newNursingOrder.woundLocation)}
+                disabled={
+                  !newNursingOrder.type ||
+                  !newNursingOrder.instructions ||
+                  (newNursingOrder.type === 'Injection' && !newNursingOrder.medication) ||
+                  (newNursingOrder.type === 'Dressing' && !newNursingOrder.woundLocation) ||
+                  (newNursingOrder.type === 'Ward Admission' && (!newNursingOrder.ward || !newNursingOrder.admissionType || !newNursingOrder.admissionDiagnosis))
+                }
                 className="bg-cyan-600 hover:bg-cyan-700"
               >
                 <Syringe className="h-4 w-4 mr-2" />
@@ -5682,61 +7457,163 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
         {/* Add Radiology Order Dialog */}
         <Dialog open={showAddRadiology} onOpenChange={setShowAddRadiology}>
-          <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className="w-[95vw] sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <ScanLine className="h-5 w-5 text-indigo-500" />
                 Order Imaging Study
               </DialogTitle>
               <DialogDescription>
-                Add imaging study to order - will be sent to Radiology queue
+                Search and select from radiology templates - orders will be sent to Radiology queue
               </DialogDescription>
             </DialogHeader>
             
             <div className="space-y-4 py-2">
-              {/* Procedure Selection */}
+              {/* Radiology Template Selection */}
               <div className="space-y-2">
-                <Label>Imaging Procedure *</Label>
-                <Select 
-                  value={newRadiology.procedure} 
-                  onValueChange={(v) => {
-                    const proc = radiologyProcedures.find(p => p.name === v);
-                    setNewRadiology({ 
-                      ...newRadiology, 
-                      procedure: v,
-                      category: proc?.category || "",
-                      bodyPart: proc?.bodyPart || ""
+                <Label>Search and Select Imaging Studies *</Label>
+                <div className="relative" data-radiology-template-dropdown>
+                  <Input
+                    placeholder="Search imaging studies by name, code, or modality..."
+                    value={radiologyTemplateSearch}
+                    onChange={(e) => {
+                      setRadiologyTemplateSearch(e.target.value);
+                      setShowRadiologyTemplateDropdown(true);
+                    }}
+                    onFocus={() => setShowRadiologyTemplateDropdown(true)}
+                  />
+                  {showRadiologyTemplateDropdown && (
+                    <div className="absolute top-full left-0 right-0 z-50 bg-background border rounded-md shadow-lg max-h-60 overflow-y-auto">
+                      {loadingRadiologyTemplates ? (
+                        <div className="p-4 text-center text-muted-foreground">
+                          <Loader2 className="h-4 w-4 mx-auto mb-2 animate-spin" />
+                          <p className="text-xs">Loading templates...</p>
+                        </div>
+                      ) : radiologyTemplates.length === 0 ? (
+                        <div className="p-4 text-center text-muted-foreground">
+                          <p className="text-xs">No templates found</p>
+                        </div>
+                      ) : (
+                        <div className="p-2">
+                          {/* Selected templates */}
+                          {selectedRadiologyTemplates.size > 0 && (
+                            <div className="mb-3 pb-2 border-b">
+                              <p className="text-xs font-medium text-muted-foreground mb-2">Selected ({selectedRadiologyTemplates.size})</p>
+                              <div className="flex flex-wrap gap-1">
+                                {Array.from(selectedRadiologyTemplates).map(templateId => {
+                                  const template = radiologyTemplates.find(t => t.id === templateId);
+                                  return template ? (
+                                    <Badge
+                                      key={templateId}
+                                      variant="default"
+                                      className="text-xs cursor-pointer hover:bg-destructive hover:text-destructive-foreground"
+                                      onClick={() => {
+                                        setSelectedRadiologyTemplates(prev => {
+                                          const newSet = new Set(prev);
+                                          newSet.delete(templateId);
+                                          return newSet;
                     });
                   }}
                 >
-                  <SelectTrigger><SelectValue placeholder="Select procedure..." /></SelectTrigger>
-                  <SelectContent className="max-h-[300px]">
-                    <SelectItem disabled value="xray-header" className="font-bold text-xs text-muted-foreground">── X-RAY ──</SelectItem>
-                    {radiologyProcedures.filter(p => p.category === 'X-Ray').map(proc => (
-                      <SelectItem key={proc.name} value={proc.name}>{proc.name}</SelectItem>
-                    ))}
-                    <SelectItem disabled value="us-header" className="font-bold text-xs text-muted-foreground">── ULTRASOUND ──</SelectItem>
-                    {radiologyProcedures.filter(p => p.category === 'Ultrasound').map(proc => (
-                      <SelectItem key={proc.name} value={proc.name}>{proc.name}</SelectItem>
-                    ))}
-                    <SelectItem disabled value="ct-header" className="font-bold text-xs text-muted-foreground">── CT SCAN ──</SelectItem>
-                    {radiologyProcedures.filter(p => p.category === 'CT Scan').map(proc => (
-                      <SelectItem key={proc.name} value={proc.name}>{proc.name}</SelectItem>
-                    ))}
-                    <SelectItem disabled value="mri-header" className="font-bold text-xs text-muted-foreground">── MRI ──</SelectItem>
-                    {radiologyProcedures.filter(p => p.category === 'MRI').map(proc => (
-                      <SelectItem key={proc.name} value={proc.name}>{proc.name}</SelectItem>
-                    ))}
-                    <SelectItem disabled value="other-header" className="font-bold text-xs text-muted-foreground">── OTHER ──</SelectItem>
-                    {radiologyProcedures.filter(p => !['X-Ray', 'Ultrasound', 'CT Scan', 'MRI'].includes(p.category)).map(proc => (
-                      <SelectItem key={proc.name} value={proc.name}>{proc.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {newRadiology.category && (
-                  <div className="flex gap-2 text-xs">
-                    <Badge variant="outline">{newRadiology.category}</Badge>
-                    <Badge variant="outline">{newRadiology.bodyPart}</Badge>
+                                      {template.code} - {template.name}
+                                      <X className="h-3 w-3 ml-1" />
+                                    </Badge>
+                                  ) : null;
+                                })}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Available templates */}
+                          <div className="space-y-1">
+                            {radiologyTemplates
+                              .filter(template =>
+                                !selectedRadiologyTemplates.has(template.id) &&
+                                (radiologyTemplateSearch === '' ||
+                                 template.name.toLowerCase().includes(radiologyTemplateSearch.toLowerCase()) ||
+                                 template.code.toLowerCase().includes(radiologyTemplateSearch.toLowerCase()) ||
+                                 (template.body_part && template.body_part.toLowerCase().includes(radiologyTemplateSearch.toLowerCase())) ||
+                                 (template.modality && template.modality.toLowerCase().includes(radiologyTemplateSearch.toLowerCase())))
+                              )
+                              .slice(0, 20) // Limit for performance
+                              .map(template => (
+                                <div
+                                  key={template.id}
+                                  className="flex items-center justify-between p-2 rounded hover:bg-muted cursor-pointer"
+                                  onClick={() => {
+                                    setSelectedRadiologyTemplates(prev => new Set([...prev, template.id]));
+                                    setRadiologyTemplateSearch('');
+                                    setShowRadiologyTemplateDropdown(false);
+                                  }}
+                                >
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2">
+                                      <span className="font-medium text-sm truncate">{template.name}</span>
+                                      <Badge variant="outline" className="text-[10px] px-1.5 py-0">{template.code}</Badge>
+                                    </div>
+                                    <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
+                                      <span>{template.category}</span>
+                                      <span>•</span>
+                                      <span>{template.body_part || 'N/A'}</span>
+                                      {template.contrast_required && (
+                                        <>
+                                          <span>•</span>
+                                          <Badge variant="destructive" className="text-[9px] px-1 py-0">Contrast</Badge>
+                                        </>
+                                      )}
+                                      {template.radiation_exposure === 'high' && (
+                                        <>
+                                          <span>•</span>
+                                          <Badge variant="outline" className="text-[9px] px-1 py-0 text-amber-600">High Rad</Badge>
+                                        </>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Selected Radiology Templates */}
+                {selectedRadiologyTemplates.size > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium">Selected Studies ({selectedRadiologyTemplates.size})</p>
+                    <div className="space-y-1 max-h-32 overflow-y-auto">
+                      {Array.from(selectedRadiologyTemplates).map(templateId => {
+                        const template = radiologyTemplates.find(t => t.id === templateId);
+                        return template ? (
+                          <div key={templateId} className="flex items-center justify-between p-2 bg-muted rounded text-sm">
+                            <div className="flex-1 min-w-0">
+                              <div className="font-medium truncate">{template.name}</div>
+                              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                <Badge variant="outline" className="text-[10px]">{template.code}</Badge>
+                                <span>{template.category}</span>
+                                <span>•</span>
+                                <span>{template.body_part}</span>
+                              </div>
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 w-6 p-0 text-destructive hover:text-destructive"
+                              onClick={() => {
+                                setSelectedRadiologyTemplates(prev => {
+                                  const newSet = new Set(prev);
+                                  newSet.delete(templateId);
+                                  return newSet;
+                                });
+                              }}
+                            >
+                              <X className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        ) : null;
+                      })}
+                    </div>
                   </div>
                 )}
               </div>
@@ -5771,7 +7648,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
               {/* Clinical Indication */}
               <div className="space-y-2">
-                <Label>Clinical Indication / Reason *</Label>
+                <Label>Clinical Indication *</Label>
                 <Textarea 
                   value={newRadiology.clinicalIndication}
                   onChange={(e) => setNewRadiology({ ...newRadiology, clinicalIndication: e.target.value })}
@@ -5805,11 +7682,134 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
               <Button variant="outline" onClick={() => setShowAddRadiology(false)}>Cancel</Button>
               <Button 
                 onClick={addRadiologyOrder}
-                disabled={!newRadiology.procedure || !newRadiology.clinicalIndication}
+                disabled={selectedRadiologyTemplates.size === 0 || !newRadiology.clinicalIndication}
                 className="bg-indigo-600 hover:bg-indigo-700"
               >
-                <ScanLine className="h-4 w-4 mr-2" />
-                Add to Order
+                <Plus className="h-4 w-4 mr-2" />
+                Add {selectedRadiologyTemplates.size > 0 ? `(${selectedRadiologyTemplates.size}) ` : ''}to Order
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Add/Edit Physiotherapy Order Dialog */}
+        <Dialog open={showAddPhysio} onOpenChange={(open) => {
+          setShowAddPhysio(open);
+          if (!open) {
+            setEditingPhysioIndex(null);
+            setNewPhysio({ diagnosis: "", chiefComplaint: "", treatmentGoal: "", specialInstructions: "", priority: "routine", totalSessions: 5 });
+          }
+        }}>
+          <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Activity className="h-5 w-5 text-emerald-500" />
+                {editingPhysioIndex !== null ? 'Edit Physiotherapy Order' : 'Order Physiotherapy'}
+              </DialogTitle>
+              <DialogDescription>
+                {editingPhysioIndex !== null 
+                  ? 'Update the physiotherapy treatment order details'
+                  : 'Create a physiotherapy treatment order - will be sent to Physiotherapy pool queue'}
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4 py-2">
+              {/* Diagnosis */}
+              <div className="space-y-2">
+                <Label>Diagnosis *</Label>
+                <Input
+                  value={newPhysio.diagnosis}
+                  onChange={(e) => setNewPhysio({ ...newPhysio, diagnosis: e.target.value })}
+                  placeholder="Primary diagnosis requiring physiotherapy"
+                />
+              </div>
+
+              {/* Chief Complaint */}
+              <div className="space-y-2">
+                <Label>Chief Complaint</Label>
+                <Textarea
+                  value={newPhysio.chiefComplaint}
+                  onChange={(e) => setNewPhysio({ ...newPhysio, chiefComplaint: e.target.value })}
+                  placeholder="Patient's main complaint and symptoms..."
+                  rows={2}
+                />
+              </div>
+
+              {/* Treatment Goal */}
+              <div className="space-y-2">
+                <Label>Treatment Goal</Label>
+                <Textarea
+                  value={newPhysio.treatmentGoal}
+                  onChange={(e) => setNewPhysio({ ...newPhysio, treatmentGoal: e.target.value })}
+                  placeholder="Expected outcomes and treatment objectives..."
+                  rows={2}
+                />
+              </div>
+
+              {/* Priority */}
+              <div className="space-y-2">
+                <Label>Priority</Label>
+                <Select value={newPhysio.priority} onValueChange={(v) => setNewPhysio({ ...newPhysio, priority: v as 'routine' | 'urgent' | 'stat' })}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="routine">Routine</SelectItem>
+                    <SelectItem value="urgent">Urgent</SelectItem>
+                    <SelectItem value="stat">STAT</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Total Sessions */}
+              <div className="space-y-2">
+                <Label>Total Sessions</Label>
+                <Select value={(newPhysio.totalSessions || 5).toString()} onValueChange={(v) => setNewPhysio({ ...newPhysio, totalSessions: parseInt(v) })}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="1">1 Session</SelectItem>
+                    <SelectItem value="3">3 Sessions</SelectItem>
+                    <SelectItem value="5">5 Sessions</SelectItem>
+                    <SelectItem value="7">7 Sessions</SelectItem>
+                    <SelectItem value="10">10 Sessions</SelectItem>
+                    <SelectItem value="12">12 Sessions</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">Number of physiotherapy sessions planned for this treatment course</p>
+              </div>
+
+              {/* Special Instructions */}
+              <div className="space-y-2">
+                <Label>Special Instructions</Label>
+                <Textarea
+                  value={newPhysio.specialInstructions}
+                  onChange={(e) => setNewPhysio({ ...newPhysio, specialInstructions: e.target.value })}
+                  placeholder="Any special requirements, contraindications, or notes for physiotherapist..."
+                  rows={2}
+                />
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowAddPhysio(false)}>Cancel</Button>
+              <Button
+                onClick={addPhysioOrder}
+                disabled={!newPhysio.diagnosis.trim()}
+                className="bg-emerald-600 hover:bg-emerald-700"
+              >
+                {editingPhysioIndex !== null ? (
+                  <>
+                    <CheckCircle className="h-4 w-4 mr-2" />
+                    Update Order
+                  </>
+                ) : (
+                  <>
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add Physiotherapy Order
+                  </>
+                )}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -5817,7 +7817,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
         {/* Add Referral Dialog */}
         <Dialog open={showAddReferral} onOpenChange={setShowAddReferral}>
-          <DialogContent className="w-[95vw] sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className="w-[95vw] sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Send className="h-5 w-5 text-teal-500" />
@@ -5843,13 +7843,13 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label>Urgency</Label>
-                  <Select value={newReferral.urgency} onValueChange={(v) => setNewReferral({ ...newReferral, urgency: v })}>
+                  <Label>Priority</Label>
+                  <Select value={newReferral.priority} onValueChange={(v) => setNewReferral({ ...newReferral, priority: v })}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="Routine"><Badge className="bg-blue-100 text-blue-800">Routine</Badge></SelectItem>
                       <SelectItem value="Urgent"><Badge className="bg-amber-100 text-amber-800">Urgent</Badge></SelectItem>
-                      <SelectItem value="Emergency"><Badge className="bg-red-100 text-red-800">Emergency</Badge></SelectItem>
+                      <SelectItem value="STAT"><Badge className="bg-red-100 text-red-800">STAT</Badge></SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -5897,9 +7897,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                 </Select>
               </div>
 
-              {/* Clinical Summary */}
+              {/* Clinical Indication */}
               <div className="space-y-2">
-                <Label>Clinical Summary</Label>
+                <Label>Clinical Indication *</Label>
                 <Textarea 
                   value={newReferral.clinicalSummary}
                   onChange={(e) => setNewReferral({ ...newReferral, clinicalSummary: e.target.value })}
@@ -5928,7 +7928,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                 </div>
               </div>
 
-              {newReferral.urgency === 'Emergency' && (
+              {newReferral.priority === 'STAT' && (
                 <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
                   <p className="text-sm text-red-700 dark:text-red-300 flex items-center gap-2">
                     <AlertTriangle className="h-4 w-4" />
@@ -5946,23 +7946,172 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                 className="bg-teal-600 hover:bg-teal-700"
               >
                 <Send className="h-4 w-4 mr-2" />
-                Add Referral
+                Add to Order
               </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
 
         <AlertDialog open={showEndDialog} onOpenChange={setShowEndDialog}>
-          <AlertDialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
-            <AlertDialogHeader><AlertDialogTitle>End Consultation Session?</AlertDialogTitle><AlertDialogDescription>Are you sure you want to end the consultation session with {currentPatient?.name}? The session data will be saved and you will return to the room queue.</AlertDialogDescription></AlertDialogHeader>
-            <div className="space-y-4 my-4">
+          <AlertDialogContent className="w-[95vw] sm:max-w-[650px] max-h-[90vh] overflow-y-auto">
+            <AlertDialogHeader>
+              <AlertDialogTitle className="flex items-center gap-2">
+                <Clock className="h-5 w-5 text-orange-500" />
+                End Consultation Session?
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                Are you sure you want to end the consultation session with <strong>{currentPatient?.name}</strong>?
+                The session data will be saved and you will return to the room queue.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+
+            <div className="space-y-6 my-6">
+              {/* Follow-up Section */}
               <div className="space-y-3">
-                <div className="flex items-center space-x-2"><input type="checkbox" id="followUp" checked={followUpRequired} onChange={(e) => setFollowUpRequired(e.target.checked)} className="rounded border-gray-300" /><label htmlFor="followUp" className="text-sm font-medium">Schedule follow-up appointment</label></div>
-                {followUpRequired && (<div className="grid gap-3 md:grid-cols-2"><div className="space-y-2"><label className="text-sm font-medium">Follow-up Date</label><Input type="date" value={followUpDate} onChange={(e) => setFollowUpDate(e.target.value)} min={new Date().toISOString().split("T")[0]} /></div><div className="space-y-2"><label className="text-sm font-medium">Reason</label><Input value={followUpReason} onChange={(e) => setFollowUpReason(e.target.value)} placeholder="e.g., Review lab results" /></div></div>)}
+                <div className="flex items-center space-x-3 p-3 bg-blue-50 dark:bg-blue-900/10 rounded-lg border border-blue-200 dark:border-blue-800">
+                  <input
+                    type="checkbox"
+                    id="followUp"
+                    checked={followUpRequired}
+                    onChange={(e) => setFollowUpRequired(e.target.checked)}
+                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <label htmlFor="followUp" className="text-sm font-medium text-blue-900 dark:text-blue-100 cursor-pointer">
+                    Schedule follow-up appointment
+                  </label>
               </div>
-              <div className="bg-muted/50 p-3 rounded-md"><h4 className="text-sm font-medium mb-2">Session Summary</h4><div className="text-xs text-muted-foreground space-y-1"><div>Patient: {currentPatient?.name}</div><div>Duration: {sessionDuration} min</div><div>Room: {room?.name}</div><div>Prescriptions: {prescriptions.length}</div><div>Lab Orders: {labOrders.length}</div><div>Radiology Orders: {radiologyOrders.length}</div><div>Nursing Orders: {nursingOrders.length}</div><div>Referrals: {referrals.length}</div>{followUpRequired && <div>Follow-up: {followUpDate} - {followUpReason}</div>}</div></div>
+
+                {followUpRequired && (
+                  <div className="ml-6 space-y-4">
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">Follow-up Date</label>
+                        <Input
+                          type="date"
+                          value={followUpDate}
+                          onChange={(e) => setFollowUpDate(e.target.value)}
+                          min={new Date().toISOString().split("T")[0]}
+                          className="w-full"
+                        />
             </div>
-            <AlertDialogFooter><AlertDialogCancel disabled={isEnding}>Cancel</AlertDialogCancel><AlertDialogAction onClick={confirmEndSession} disabled={isEnding}>{isEnding ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Ending Session...</> : "End Session & Return to Queue"}</AlertDialogAction></AlertDialogFooter>
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">Reason</label>
+                        <Input
+                          value={followUpReason}
+                          onChange={(e) => setFollowUpReason(e.target.value)}
+                          placeholder="e.g., Review lab results, follow-up consultation"
+                          className="w-full"
+                        />
+                      </div>
+                    </div>
+                    <div className="text-xs text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-900/20 p-2 rounded border border-blue-200 dark:border-blue-800">
+                      <strong>Note:</strong> Follow-up appointments will be created and can be managed through the Appointments section under Medical Records. They will also be saved in the consultation notes as a backup.
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Session Summary */}
+              <div className="bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-700 p-4 rounded-lg border">
+                <h4 className="text-sm font-semibold mb-3 flex items-center gap-2">
+                  <FileText className="h-4 w-4 text-gray-600" />
+                  Session Summary
+                </h4>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Left Column */}
+                  <div className="space-y-2">
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs text-muted-foreground">Patient:</span>
+                      <span className="text-sm font-medium">{currentPatient?.name}</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs text-muted-foreground">Duration:</span>
+                      <span className={`text-sm font-medium ${sessionDuration > 480 ? 'text-orange-600' : sessionDuration > 120 ? 'text-yellow-600' : 'text-green-600'}`}>
+                        {(() => {
+                          const hours = Math.floor(sessionDuration / 60);
+                          const mins = sessionDuration % 60;
+                          if (hours > 0) {
+                            return `${hours}h ${mins}m`;
+                          }
+                          return `${mins}m`;
+                        })()}
+                        {sessionDuration > 480 && <span className="ml-1 text-xs">(Long session)</span>}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs text-muted-foreground">Room:</span>
+                      <span className="text-sm">{room?.name || 'Unknown'}</span>
+                    </div>
+                  </div>
+
+                  {/* Right Column */}
+                  <div className="space-y-2">
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs text-muted-foreground">Prescriptions:</span>
+                      <Badge variant={prescriptions.length > 0 ? "default" : "secondary"} className="text-xs">
+                        {prescriptions.length}
+                      </Badge>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs text-muted-foreground">Lab Orders:</span>
+                      <Badge variant={labOrders.length > 0 ? "default" : "secondary"} className="text-xs">
+                        {labOrders.length}
+                      </Badge>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs text-muted-foreground">Radiology:</span>
+                      <Badge variant={radiologyOrders.length > 0 ? "default" : "secondary"} className="text-xs">
+                        {radiologyOrders.length}
+                      </Badge>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs text-muted-foreground">Nursing:</span>
+                      <Badge variant={nursingOrders.length > 0 ? "default" : "secondary"} className="text-xs">
+                        {nursingOrders.length}
+                      </Badge>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs text-muted-foreground">Referrals:</span>
+                      <Badge variant={referrals.length > 0 ? "default" : "secondary"} className="text-xs">
+                        {referrals.length}
+                      </Badge>
+                    </div>
+                  </div>
+                </div>
+
+                {followUpRequired && (
+                  <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-600">
+                    <div className="text-xs text-muted-foreground">
+                      <strong>Follow-up:</strong> {followUpDate} - {followUpReason}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <AlertDialogFooter className="gap-3">
+              <AlertDialogCancel disabled={isEnding} className="min-w-[100px]">
+                Cancel
+              </AlertDialogCancel>
+              <AlertDialogAction
+                onClick={confirmEndSession}
+                disabled={isEnding}
+                className="min-w-[180px] bg-orange-600 hover:bg-orange-700 focus:ring-orange-500"
+              >
+                {isEnding ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Ending Session...
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle className="mr-2 h-4 w-4" />
+                    End Session & Return to Queue
+                  </>
+                )}
+              </AlertDialogAction>
+            </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
 
@@ -5983,8 +8132,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
               {patients.length === 0 ? (
                 <div className="text-center py-12 text-muted-foreground">
                   <Users className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                  <p className="text-lg font-medium">No patients in queue</p>
-                  <p className="text-sm">The queue is currently empty for this room.</p>
+                  <p className="text-lg font-medium">Queue is empty</p>
+                  <p className="text-sm">No patients are currently waiting for this consultation room.</p>
+                  <p className="text-xs mt-2 opacity-75">Patients will appear here when added to the queue.</p>
                 </div>
               ) : (
                 <div className="space-y-3">
@@ -6039,30 +8189,63 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                 </div>
                                 <div>
                                   <span className="font-medium">Wait Time:</span>{' '}
-                                  <span className="text-amber-600 dark:text-amber-400 font-medium">
-                                    {patient.waitTime} min
+                                  <span className={`font-medium ${
+                                    patient.waitTime > 120 ? 'text-red-600 dark:text-red-400' :
+                                    patient.waitTime > 60 ? 'text-amber-600 dark:text-amber-400' :
+                                    'text-green-600 dark:text-green-400'
+                                  }`}>
+                                    {patient.waitTime >= 60
+                                      ? `${Math.floor(patient.waitTime / 60)}h ${patient.waitTime % 60}m`
+                                      : `${patient.waitTime} min`
+                                    }
                                   </span>
                                 </div>
                               </div>
                               {patient.vitals && (
-                                <div className="mt-2 flex items-center gap-4 text-xs text-muted-foreground">
+                                <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+                                  <div className="flex items-center gap-2">
                                   {patient.vitals.temperature && (
-                                    <span className="flex items-center gap-1">
+                                      <span className="flex items-center gap-1 text-blue-600 dark:text-blue-400">
                                       <Thermometer className="h-3 w-3" />
-                                      Temp: {patient.vitals.temperature}°C
+                                        {patient.vitals.temperature}°C
                                     </span>
                                   )}
                                   {patient.vitals.bloodPressure && (
-                                    <span className="flex items-center gap-1">
+                                      <span className="flex items-center gap-1 text-red-600 dark:text-red-400">
                                       <Heart className="h-3 w-3" />
-                                      BP: {patient.vitals.bloodPressure}
+                                        {patient.vitals.bloodPressure}
                                     </span>
                                   )}
+                                  </div>
+                                  <div className="flex items-center gap-2">
                                   {patient.vitals.heartRate && (
-                                    <span className="flex items-center gap-1">
+                                      <span className="flex items-center gap-1 text-pink-600 dark:text-pink-400">
                                       <Activity className="h-3 w-3" />
-                                      HR: {patient.vitals.heartRate} bpm
+                                        {patient.vitals.heartRate} bpm
+                                      </span>
+                                    )}
+                                    {patient.vitals.respiratoryRate && (
+                                      <span className="flex items-center gap-1 text-cyan-600 dark:text-cyan-400">
+                                        <Wind className="h-3 w-3" />
+                                        {patient.vitals.respiratoryRate}/min
                                     </span>
+                                  )}
+                                </div>
+                                  {(patient.vitals.oxygenSaturation || patient.vitals.weight) && (
+                                    <div className="flex items-center gap-2 col-span-2">
+                                      {patient.vitals.oxygenSaturation && (
+                                        <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
+                                          <Zap className="h-3 w-3" />
+                                          SpO2: {patient.vitals.oxygenSaturation}%
+                                        </span>
+                                      )}
+                                      {patient.vitals.weight && (
+                                        <span className="flex items-center gap-1 text-purple-600 dark:text-purple-400">
+                                          <Scale className="h-3 w-3" />
+                                          {patient.vitals.weight} kg
+                                        </span>
+                                      )}
+                                    </div>
                                   )}
                                 </div>
                               )}
@@ -6108,11 +8291,15 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                   e.preventDefault();
                   e.stopPropagation();
                   // Refresh only queue data, not the entire page
+                  setIsRefreshingQueue(true);
                   try {
                     await refreshQueueData();
-                    toast.success('Queue refreshed');
+                    toast.success(`Queue refreshed - ${patients.length} patient${patients.length !== 1 ? 's' : ''} in queue`);
                   } catch (error) {
-                    // Error already handled in refreshQueueData
+                    console.error('Failed to refresh queue:', error);
+                    toast.error('Failed to refresh queue. Please try again.');
+                  } finally {
+                    setIsRefreshingQueue(false);
                   }
                 }}
                 variant="default"
@@ -6121,6 +8308,124 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                 {isRefreshingQueue ? 'Refreshing...' : 'Refresh Queue'}
               </Button>
             </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Ward Admission Detail Dialog */}
+        <Dialog open={showWardAdmissionDetail} onOpenChange={setShowWardAdmissionDetail}>
+          <DialogContent className="w-[95vw] sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Building2 className="h-5 w-5 text-blue-500" />
+                Ward Admission Details
+              </DialogTitle>
+              <DialogDescription>
+                Detailed information about the patient's ward admission
+              </DialogDescription>
+            </DialogHeader>
+
+            {selectedWardAdmission && (
+              <div className="space-y-6">
+                {/* Basic Information */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <h4 className="font-medium text-sm text-muted-foreground mb-2">Admission Information</h4>
+                    <div className="space-y-2">
+                      <div className="flex justify-between">
+                        <span className="text-sm font-medium">Admission ID:</span>
+                        <span className="text-sm">{selectedWardAdmission.admission_id}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-sm font-medium">Admission Type:</span>
+                        <Badge variant="outline">{selectedWardAdmission.admission_type}</Badge>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-sm font-medium">Status:</span>
+                        <Badge className={
+                          selectedWardAdmission.status === 'admitted' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' :
+                          selectedWardAdmission.status === 'discharged' ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' :
+                          'bg-gray-100 text-gray-800'
+                        }>
+                          {selectedWardAdmission.status}
+                        </Badge>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <h4 className="font-medium text-sm text-muted-foreground mb-2">Timing Information</h4>
+                    <div className="space-y-2">
+                      <div className="flex justify-between">
+                        <span className="text-sm font-medium">Admission Date:</span>
+                        <span className="text-sm">{formatDate(selectedWardAdmission.admission_date)} {formatTime(selectedWardAdmission.admission_date)}</span>
+                      </div>
+                      {selectedWardAdmission.status === 'discharged' && (
+                        <div className="flex justify-between">
+                          <span className="text-sm font-medium">Status:</span>
+                          <span className="text-sm font-medium text-green-600">Discharged</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between">
+                        <span className="text-sm font-medium">Length of Stay:</span>
+                        <span className="text-sm font-medium text-blue-600">{selectedWardAdmission.length_of_stay} days</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Ward and Bed Information */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <h4 className="font-medium text-sm text-muted-foreground mb-2">Ward Information</h4>
+                    <div className="space-y-2">
+                      <div className="flex justify-between">
+                        <span className="text-sm font-medium">Ward:</span>
+                        <span className="text-sm">{selectedWardAdmission.ward_name}</span>
+                      </div>
+                      {selectedWardAdmission.bed_number && (
+                        <div className="flex justify-between">
+                          <span className="text-sm font-medium">Bed:</span>
+                          <span className="text-sm">{selectedWardAdmission.bed_number}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div>
+                    <h4 className="font-medium text-sm text-muted-foreground mb-2">Medical Information</h4>
+                    <div className="space-y-2">
+                      <div>
+                        <span className="text-sm font-medium">Ward Assignment:</span>
+                        <p className="text-sm mt-1 p-2 bg-blue-50 dark:bg-blue-900/20 rounded text-blue-700 dark:text-blue-300 font-medium">
+                          {selectedWardAdmission.admission_diagnosis?.includes('Admitted to ')
+                            ? selectedWardAdmission.admission_diagnosis.split('Admitted to ')[1]
+                            : selectedWardAdmission.ward_name}
+                        </p>
+                      </div>
+                      {/* Show medical diagnosis separately if it exists beyond ward assignment */}
+                      {selectedWardAdmission.admission_diagnosis && !selectedWardAdmission.admission_diagnosis.includes('Admitted to ') && (
+                        <div>
+                          <span className="text-sm font-medium">Medical Diagnosis:</span>
+                          <p className="text-sm mt-1 p-2 bg-muted rounded text-muted-foreground">
+                            {selectedWardAdmission.admission_diagnosis}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Discharge Information */}
+                {selectedWardAdmission.status === 'discharged' && (
+                  <div className="p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle className="h-4 w-4 text-green-600" />
+                      <span className="text-sm font-medium text-green-800 dark:text-green-200">Patient has been discharged</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </DialogContent>
         </Dialog>
 
@@ -6140,15 +8445,15 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                         </Badge>
                       </DialogTitle>
                       <DialogDescription>
-                        {selectedSession.date} • {selectedSession.time} • {selectedSession.clinic} Clinic
+                        {formatDate(selectedSession.started_at)} • {formatTime(selectedSession.started_at)} • {selectedSession.room_name || 'Consulting Room'}
                       </DialogDescription>
                     </div>
                     <div className="flex gap-2">
-                      <Button variant="outline" size="sm" onClick={() => downloadSessionPDF(selectedSession)}>
+                      <Button variant="outline" size="sm" onClick={() => downloadConsultationReport(selectedSession)}>
                         <Download className="h-4 w-4 mr-1" />
                         Download
                       </Button>
-                      <Button variant="outline" size="sm" onClick={() => printSession(selectedSession)}>
+                      <Button variant="outline" size="sm" onClick={() => printConsultationReport(selectedSession)}>
                         <Printer className="h-4 w-4 mr-1" />
                         Print
                       </Button>
@@ -6164,20 +8469,20 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                       <div className="space-y-1">
                         <div className="flex items-center gap-2">
                           <User className="h-4 w-4 text-muted-foreground" />
-                          <span className="font-medium">{selectedSession.patient.name}</span>
+                          <span className="font-medium">{selectedSession.patient_name || 'Unknown Patient'}</span>
                         </div>
                         <div className="text-sm text-muted-foreground">
-                          ID: {selectedSession.patient.patientId} • {selectedSession.patient.age}y • {selectedSession.patient.gender}
+                          Patient ID: {selectedSession.patient_id || 'N/A'} • Age: {selectedSession.patient_age || 'N/A'} • Gender: {selectedSession.patient_gender || 'N/A'}
                         </div>
                       </div>
                     </div>
                     <div>
                       <h4 className="text-sm font-semibold text-muted-foreground mb-2">CONSULTATION DETAILS</h4>
                       <div className="space-y-1 text-sm">
-                        <div><strong>Doctor:</strong> {selectedSession.doctor}</div>
-                        <div><strong>Specialty:</strong> {selectedSession.doctorSpecialty}</div>
-                        <div><strong>Duration:</strong> {selectedSession.duration}</div>
-                        <div><strong>Room:</strong> {selectedSession.room}</div>
+                        <div><strong>Doctor:</strong> {selectedSession.doctor_name || 'Unknown'}</div>
+                        <div><strong>Clinic:</strong> {selectedSession.clinic_name || 'Unknown Clinic'}</div>
+                        <div><strong>Duration:</strong> {selectedSession.ended_at ? Math.round((new Date(selectedSession.ended_at).getTime() - new Date(selectedSession.started_at).getTime()) / (1000 * 60)) + ' min' : 'Ongoing'}</div>
+                        <div><strong>Room:</strong> {selectedSession.room_name || 'Unknown Room'}</div>
                       </div>
                     </div>
                   </div>
@@ -6186,7 +8491,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                   <div>
                     <h4 className="text-sm font-semibold text-blue-600 mb-2">VITAL SIGNS</h4>
                     <div className="grid grid-cols-3 md:grid-cols-6 gap-3">
-                      {Object.entries(selectedSession.vitals).map(([key, value]: [string, unknown]) => (
+                      {Object.entries((selectedSession as ExtendedConsultationSession).vitals || {}).map(([key, value]: [string, unknown]) => (
                         <div key={key} className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-center border border-blue-200 dark:border-blue-800">
                           <div className="text-xs text-muted-foreground capitalize">{key.replace(/([A-Z])/g, ' $1')}</div>
                           <div className="font-medium">{String(value)}</div>
@@ -6200,40 +8505,82 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                     <h4 className="text-sm font-semibold text-amber-600">CLINICAL NOTES</h4>
                     
                     <div>
-                      <label className="text-xs font-medium text-muted-foreground">History of Present Illness</label>
-                      <p className="mt-1 p-3 bg-muted/30 rounded-lg text-sm">{selectedSession.medicalNotes.historyOfPresentIllness}</p>
+                      <label className="text-xs font-medium text-muted-foreground">Presentation Complaint</label>
+                      <p className="mt-1 p-3 bg-muted/30 rounded-lg text-sm">{selectedSession.presentation_complaint}</p>
                     </div>
-                    
+
+                    <div>
+                      <label className="text-xs font-medium text-muted-foreground">History of Present Illness</label>
+                      <p className="mt-1 p-3 bg-muted/30 rounded-lg text-sm">{selectedSession.history_of_presenting_illness}</p>
+                    </div>
+
                     <div>
                       <label className="text-xs font-medium text-muted-foreground">Physical Examination</label>
-                      <p className="mt-1 p-3 bg-muted/30 rounded-lg text-sm">{selectedSession.medicalNotes.physicalExamination}</p>
+                      <p className="mt-1 p-3 bg-muted/30 rounded-lg text-sm">{selectedSession.physical_examination}</p>
                     </div>
-                    
-                    <div className="grid md:grid-cols-2 gap-4">
-                      <div>
-                        <label className="text-xs font-medium text-muted-foreground">Diagnosis</label>
-                        <p className="mt-1 p-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg text-sm border border-amber-200 dark:border-amber-800 font-medium">
-                          {selectedSession.medicalNotes.diagnosis}
-                        </p>
-                      </div>
-                      <div>
-                        <label className="text-xs font-medium text-muted-foreground">Assessment</label>
-                        <p className="mt-1 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-sm border border-blue-200 dark:border-blue-800">
-                          {selectedSession.medicalNotes.assessment}
-                        </p>
-                      </div>
+
+                    <div>
+                      <label className="text-xs font-medium text-muted-foreground">Assessment</label>
+                      <p className="mt-1 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-sm border border-blue-200 dark:border-blue-800">
+                        {selectedSession.assessment}
+                      </p>
                     </div>
-                    
+
                     <div>
                       <label className="text-xs font-medium text-muted-foreground">Treatment Plan</label>
                       <p className="mt-1 p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg text-sm border border-emerald-200 dark:border-emerald-800 whitespace-pre-line">
-                        {selectedSession.medicalNotes.plan}
+                        {selectedSession.plan}
                       </p>
                     </div>
                   </div>
 
+                  {/* Diagnoses */}
+                  {selectedSession.diagnoses && selectedSession.diagnoses.length > 0 && (
+                    <div>
+                      <h4 className="text-sm font-semibold text-red-600 mb-2 flex items-center gap-2">
+                        <Stethoscope className="h-4 w-4" />
+                        DIAGNOSES
+                      </h4>
+                      <div className="border rounded-lg overflow-hidden">
+                        <table className="w-full text-sm">
+                          <thead className="bg-red-50 dark:bg-red-900/20">
+                            <tr>
+                              <th className="px-3 py-2 text-left font-medium">ICD-10 Code</th>
+                              <th className="px-3 py-2 text-left font-medium">Diagnosis</th>
+                              <th className="px-3 py-2 text-center font-medium">Diagnosis Type</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y">
+                            {((selectedSession as ExtendedConsultationSession).diagnoses || []).map((diagnosis: any, index: number) => (
+                              <tr key={diagnosis.id || index} className="hover:bg-muted/50">
+                                <td className="px-3 py-2 font-mono text-xs">{diagnosis.code}</td>
+                                <td className="px-3 py-2">
+                                  <div>
+                                    <div className="font-medium text-sm">{diagnosis.name}</div>
+                                    {diagnosis.notes && (
+                                      <div className="text-xs text-muted-foreground mt-1">{diagnosis.notes}</div>
+                                    )}
+                                  </div>
+                                </td>
+                                <td className="px-3 py-2 text-center">
+                                  <Badge variant="outline" className={`text-xs ${
+                                    diagnosis.type === 'Primary' ? 'bg-red-500/10 text-red-600 border-red-500/30' :
+                                    diagnosis.type === 'Secondary' ? 'bg-amber-500/10 text-amber-600 border-amber-500/30' :
+                                    'bg-blue-500/10 text-blue-600 border-blue-500/30'
+                                  }`}>
+                                    {diagnosis.type}
+                                  </Badge>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Prescriptions */}
-                  {selectedSession.prescriptions.length > 0 && (
+                  {getSessionProperty(selectedSession as ExtendedConsultationSession, 'prescriptions').length > 0 && (
                     <div>
                       <h4 className="text-sm font-semibold text-violet-600 mb-2 flex items-center gap-2">
                         <Pill className="h-4 w-4" />
@@ -6251,7 +8598,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                             </tr>
                           </thead>
                           <tbody className="divide-y">
-                            {selectedSession.prescriptions.map((rx: { medication: string; dosage: string; frequency: string; duration: string; quantity: number }, index: number) => (
+                            {getSessionProperty(selectedSession as ExtendedConsultationSession, 'prescriptions').map((rx: { medication: string; dosage: string; frequency: string; duration: string; quantity: number }, index: number) => (
                               <tr key={index}>
                                 <td className="px-3 py-2 font-medium">{rx.medication}</td>
                                 <td className="px-3 py-2">{rx.dosage}</td>
@@ -6267,7 +8614,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                   )}
 
                   {/* Lab Orders */}
-                  {selectedSession.labOrders.length > 0 && (
+                  {getSessionProperty(selectedSession as ExtendedConsultationSession, 'labOrders').length > 0 && (
                     <div>
                       <h4 className="text-sm font-semibold text-amber-600 mb-2 flex items-center gap-2">
                         <TestTube className="h-4 w-4" />
@@ -6284,7 +8631,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                             </tr>
                           </thead>
                           <tbody className="divide-y">
-                            {selectedSession.labOrders.map((lab: { test: string; status: string; priority?: string }, index: number) => (
+                            {getSessionProperty(selectedSession as ExtendedConsultationSession, 'labOrders').map((lab: { test: string; status: string; priority?: string }, index: number) => (
                               <tr key={index}>
                                 <td className="px-3 py-2 font-medium">{lab.test}</td>
                                 <td className="px-3 py-2">{lab.priority}</td>
@@ -6301,7 +8648,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                   )}
 
                   {/* Radiology Orders */}
-                  {selectedSession.radiologyOrders.length > 0 && (
+                  {getSessionProperty(selectedSession as ExtendedConsultationSession, 'radiologyOrders').length > 0 && (
                     <div>
                       <h4 className="text-sm font-semibold text-indigo-600 mb-2 flex items-center gap-2">
                         <ScanLine className="h-4 w-4" />
@@ -6318,7 +8665,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                             </tr>
                           </thead>
                           <tbody className="divide-y">
-                            {selectedSession.radiologyOrders.map((img: { procedure: string; priority?: string; status: string; finding?: string }, index: number) => (
+                            {getSessionProperty(selectedSession as ExtendedConsultationSession, 'radiologyOrders').map((img: { procedure: string; priority?: string; status: string; finding?: string }, index: number) => (
                               <tr key={index}>
                                 <td className="px-3 py-2 font-medium">{img.procedure}</td>
                                 <td className="px-3 py-2">{img.priority || '-'}</td>
@@ -6335,14 +8682,14 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                   )}
 
                   {/* Nursing Orders */}
-                  {selectedSession.nursingOrders.length > 0 && (
+                  {getSessionProperty(selectedSession as ExtendedConsultationSession, 'nursingOrders').length > 0 && (
                     <div>
                       <h4 className="text-sm font-semibold text-cyan-600 mb-2 flex items-center gap-2">
                         <Syringe className="h-4 w-4" />
                         NURSING ORDERS
                       </h4>
                       <div className="space-y-2">
-                        {selectedSession.nursingOrders.map((no: { type: string; instructions: string; status?: string }, index: number) => (
+                        {getSessionProperty(selectedSession as ExtendedConsultationSession, 'nursingOrders').map((no: { type: string; instructions: string; status?: string }, index: number) => (
                           <div key={index} className="p-3 bg-cyan-50 dark:bg-cyan-900/20 rounded-lg border border-cyan-200 dark:border-cyan-800">
                             <div className="font-medium">{no.type}</div>
                             <div className="text-sm text-muted-foreground">{no.instructions}</div>
@@ -6353,15 +8700,15 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                   )}
 
                   {/* Follow-up */}
-                  {selectedSession.followUp && (
+                  {((selectedSession as ExtendedConsultationSession).followUp) && (
                     <div>
                       <h4 className="text-sm font-semibold text-blue-600 mb-2 flex items-center gap-2">
                         <Calendar className="h-4 w-4" />
                         FOLLOW-UP APPOINTMENT
                       </h4>
                       <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
-                        <div className="font-medium">{selectedSession.followUp.date}</div>
-                        <div className="text-sm text-muted-foreground">{selectedSession.followUp.reason}</div>
+                        <div className="font-medium">{(selectedSession as ExtendedConsultationSession).followUp!.date}</div>
+                        <div className="text-sm text-muted-foreground">{(selectedSession as ExtendedConsultationSession).followUp!.reason}</div>
                       </div>
                     </div>
                   )}
@@ -6369,7 +8716,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                   {/* Outcome */}
                   <div className="p-4 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg border border-emerald-200 dark:border-emerald-800">
                     <h4 className="text-sm font-semibold text-emerald-600 mb-1">SESSION OUTCOME</h4>
-                    <p className="text-sm">{selectedSession.outcome}</p>
+                    <p className="text-sm">{(selectedSession as ExtendedConsultationSession).outcome || selectedSession.status}</p>
                   </div>
 
                   {/* Footer */}
@@ -6379,7 +8726,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                       <span>Document ID: {selectedSession.id}</span>
                     </div>
                     <div className="mt-2 text-center">
-                      <strong>Nigerian Ports Authority</strong> • Medical Services Department
+{getOrganizationHeader()}
                     </div>
                   </div>
                 </div>
@@ -6457,7 +8804,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                     </div>
                   </div>
 
-                  {/* Test Parameters */}
+                  {/* Test Results */}
+                  {selectedLabResult.hasManualResults ? (
                   <div>
                     <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
                       <Activity className="h-4 w-4" />
@@ -6475,7 +8823,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                           </tr>
                         </thead>
                         <tbody className="divide-y">
-                          {selectedLabResult.parameters.map((param: { name: string; value: string; unit: string; status: string; referenceRange?: string; normalRange?: string }, index: number) => (
+                            {(selectedLabResult.parameters || []).map((param: { name: string; value: string; unit: string; status: string; referenceRange?: string; normalRange?: string }, index: number) => (
                             <tr key={index} className={param.status !== 'Normal' ? 'bg-red-50/50 dark:bg-red-900/10' : ''}>
                               <td className="px-4 py-3 font-medium">{param.name}</td>
                               <td className={`px-4 py-3 text-center font-bold ${param.status === 'Abnormal' ? 'text-red-600' : param.status === 'Borderline' ? 'text-amber-600' : ''}`}>
@@ -6494,20 +8842,80 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                       </table>
                     </div>
                   </div>
+                  ) : selectedLabResult.hasUploadedFile ? (
+                    <div>
+                      <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
+                        <FileText className="h-4 w-4" />
+                        UPLOADED RESULT FILE
+                      </h4>
+                      <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                        <div className="flex items-center gap-3">
+                          <FileText className="h-8 w-8 text-blue-500" />
+                          <div className="flex-1">
+                            <p className="font-medium text-blue-900 dark:text-blue-100">
+                              {selectedLabResult.resultFile?.name || 'Lab Result File'}
+                            </p>
+                            <p className="text-sm text-blue-700 dark:text-blue-300">
+                              {selectedLabResult.resultFile?.type === 'application/pdf' ? 'PDF Document' : 'Lab Result File'}
+                            </p>
+                          </div>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              if (selectedLabResult.resultFile?.url) {
+                                window.open(selectedLabResult.resultFile.url, '_blank');
+                              }
+                            }}
+                            className="bg-blue-100 hover:bg-blue-200 text-blue-800 border-blue-300"
+                          >
+                            <Download className="h-4 w-4 mr-1" />
+                            View File
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
+                        <Activity className="h-4 w-4" />
+                        TEST RESULTS
+                      </h4>
+                      <div className="p-4 bg-gray-50 dark:bg-gray-900/20 rounded-lg border border-gray-200 dark:border-gray-800">
+                        <p className="text-center text-muted-foreground">
+                          No test results available
+                        </p>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Summary Result */}
+                  {selectedLabResult.hasManualResults && (
                   <div>
                     <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">SUMMARY</h4>
                     <p className="p-3 bg-muted/30 rounded-lg border text-sm font-medium">
-                      {selectedLabResult.result}
+                        {selectedLabResult.result || 'Results entered manually'}
                     </p>
                   </div>
+                  )}
+
+                  {selectedLabResult.hasUploadedFile && (
+                    <div>
+                      <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">NOTES</h4>
+                      <p className="p-3 bg-muted/30 rounded-lg border text-sm">
+                        Results uploaded as file. Please view the uploaded document for detailed findings.
+                      </p>
+                    </div>
+                  )}
 
                   {/* Interpretation */}
                   <div>
                     <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">INTERPRETATION</h4>
                     <p className={`p-4 rounded-lg border text-sm ${selectedLabResult.status === 'Abnormal' ? 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800' : 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800'}`}>
-                      {selectedLabResult.interpretation}
+                      {selectedLabResult.hasUploadedFile
+                        ? 'Please refer to the uploaded result file for interpretation and clinical correlation.'
+                        : selectedLabResult.interpretation || 'No interpretation available'
+                      }
                     </p>
                   </div>
 
@@ -6538,7 +8946,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                       </div>
                     </div>
                     <div className="mt-4 text-center text-xs text-muted-foreground">
-                      <strong>Nigerian Ports Authority</strong> • Medical Laboratory Services<br />
+{getOrganizationLabHeader()}<br />
                       Document ID: {selectedLabResult.id}
                     </div>
                   </div>
@@ -6625,11 +9033,11 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                           </tr>
                         </thead>
                         <tbody className="divide-y">
-                          {selectedPrescription.medications.map((med: string, index: number) => (
+                          {selectedPrescription.medications.map((med: any, index: number) => (
                             <tr key={index} className="hover:bg-muted/30">
                               <td className="px-4 py-3">
                                 <Badge variant="outline" className="text-sm">
-                                  {med}
+                                  {med.medication_name || med.medication?.name || med.name || 'Unknown'}
                                 </Badge>
                               </td>
                             </tr>
@@ -6652,7 +9060,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                   {/* Footer */}
                   <div className="border-t pt-4">
                     <div className="text-center text-xs text-muted-foreground">
-                      <strong>Nigerian Ports Authority</strong> • Medical Services<br />
+{getOrganizationServicesHeader()}<br />
                       Document ID: {selectedPrescription.id}
                     </div>
                   </div>
@@ -7172,10 +9580,597 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         <VitalsDetailModal
           isOpen={isVitalsDetailModalOpen}
           onClose={() => setIsVitalsDetailModalOpen(false)}
-          vitals={selectedVital}
+          vitals={selectedVital ? {
+            ...selectedVital,
+            temperature: selectedVital.temperature?.toString(),
+            bloodPressureSystolic: selectedVital.systolic?.toString(),
+            bloodPressureDiastolic: selectedVital.diastolic?.toString(),
+            pulse: selectedVital.heartRate?.toString(),
+            respiratoryRate: selectedVital.respiratoryRate?.toString(),
+            oxygenSaturation: selectedVital.oxygenSaturation?.toString(),
+            weight: selectedVital.weight?.toString(),
+            height: selectedVital.height?.toString(),
+            bmi: selectedVital.bmi?.toString(),
+            painScale: selectedVital.painScale?.toString(),
+            bloodSugar: selectedVital.bloodSugar?.toString(),
+          } : null}
           patientName={currentPatient?.name || 'Patient'}
         />
       </div>
+
+      {/* Discharge Dialog */}
+      <Dialog open={showDischargeDialog} onOpenChange={setShowDischargeDialog}>
+        <DialogContent className="sm:max-w-[600px]">
+          <DialogHeader>
+            <DialogTitle>Discharge Patient: {currentPatient?.name}</DialogTitle>
+            <DialogDescription>
+              Complete patient discharge from ward. This will end their hospital admission.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Discharge Type</Label>
+                <Select
+                  value={dischargeData.discharge_type}
+                  onValueChange={(value) => setDischargeData({...dischargeData, discharge_type: value})}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="regular">Regular Discharge</SelectItem>
+                    <SelectItem value="against_medical_advice">Against Medical Advice</SelectItem>
+                    <SelectItem value="transfer">Transfer to Another Facility</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Discharge Diagnosis</Label>
+                <Input
+                  value={dischargeData.discharge_diagnosis}
+                  onChange={(e) => setDischargeData({...dischargeData, discharge_diagnosis: e.target.value})}
+                  placeholder="Final diagnosis"
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Discharge Notes</Label>
+              <Textarea
+                value={dischargeData.discharge_notes}
+                onChange={(e) => setDischargeData({...dischargeData, discharge_notes: e.target.value})}
+                placeholder="Clinical notes for discharge"
+                rows={3}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Discharge Summary</Label>
+              <Textarea
+                value={dischargeData.discharge_summary}
+                onChange={(e) => setDischargeData({...dischargeData, discharge_summary: e.target.value})}
+                placeholder="Comprehensive discharge summary"
+                rows={4}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Follow-up Instructions</Label>
+              <Textarea
+                value={dischargeData.follow_up_instructions}
+                onChange={(e) => setDischargeData({...dischargeData, follow_up_instructions: e.target.value})}
+                placeholder="Instructions for follow-up care"
+                rows={3}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowDischargeDialog(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={async () => {
+                if (!currentPatient) return;
+
+                try {
+                  // Find the active admission
+                  const activeAdmission = wardAdmissions.find(admission => admission.status === 'admitted');
+                  if (!activeAdmission) {
+                    toast.error('No active admission found');
+                    return;
+                  }
+
+                  // Discharge the patient
+                  await apiFetch(`/admissions/${activeAdmission.id}/discharge/`, {
+                    method: 'POST',
+                    body: JSON.stringify({
+                      discharge_type: dischargeData.discharge_type,
+                      discharge_doctor: currentUser?.id ? Number(currentUser.id) : undefined,
+                      discharge_diagnosis: dischargeData.discharge_diagnosis,
+                      discharge_notes: dischargeData.discharge_notes,
+                      discharge_summary: dischargeData.discharge_summary,
+                      follow_up_instructions: dischargeData.follow_up_instructions,
+                    }),
+                  });
+
+                  toast.success('Patient discharged successfully');
+                  setShowDischargeDialog(false);
+                  setDischargeData({
+                    discharge_type: 'regular',
+                    discharge_diagnosis: '',
+                    discharge_notes: '',
+                    discharge_summary: '',
+                    follow_up_instructions: ''
+                  });
+
+                  // Refresh ward admissions data
+                  const updatedAdmissions = await wardService.getAdmissions({ patient: Number(currentPatient.id) });
+                  setWardAdmissions(updatedAdmissions?.results || []);
+
+                } catch (error: any) {
+                  console.error('Error discharging patient:', error);
+                  toast.error(error.message || 'Failed to discharge patient');
+                }
+              }}
+              className="bg-green-600 hover:bg-green-700"
+            >
+              <CheckCircle className="h-4 w-4 mr-2" />
+              Discharge Patient
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Physio Order View Dialog */}
+      <Dialog open={isPhysioOrderDialogOpen} onOpenChange={setIsPhysioOrderDialogOpen}>
+        <DialogContent className="w-[95vw] sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Activity className="h-5 w-5 text-teal-500" />
+              Physiotherapy Order Details
+            </DialogTitle>
+            <DialogDescription>
+              PHY-{selectedPhysioOrder?.id?.toString().padStart(6, '0')} • Ordered {selectedPhysioOrder?.ordered_at ? new Date(selectedPhysioOrder.ordered_at).toLocaleString() : 'N/A'}
+            </DialogDescription>
+          </DialogHeader>
+
+          {selectedPhysioOrder && (
+            <div className="space-y-4">
+              {/* Patient & Order Info */}
+              <div className="grid grid-cols-2 gap-4 p-4 rounded-lg bg-muted/50">
+                <div>
+                  <p className="text-xs text-muted-foreground mb-1">Patient</p>
+                  <p className="font-medium">{selectedPhysioOrder.patient_name}</p>
+                  <p className="text-sm text-muted-foreground font-mono">{selectedPhysioOrder.patient_id}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground mb-1">Order Status</p>
+                  <Badge variant="outline" className={`text-xs ${
+                    selectedPhysioOrder.status === 'completed' ? 'bg-emerald-500/10 text-emerald-600' :
+                    selectedPhysioOrder.status === 'in_progress' ? 'bg-orange-500/10 text-orange-600' :
+                    selectedPhysioOrder.status === 'scheduled' ? 'bg-blue-500/10 text-blue-600' :
+                    'bg-gray-500/10 text-gray-600'
+                  }`}>
+                    {selectedPhysioOrder.status.replace('_', ' ')}
+                  </Badge>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    {selectedPhysioOrder.sessions_completed}/{selectedPhysioOrder.total_sessions} sessions
+                  </p>
+                </div>
+              </div>
+
+              {/* Clinical Information */}
+              <div className="space-y-3">
+                <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
+                  <p className="text-xs text-muted-foreground mb-1">Diagnosis</p>
+                  <p className="text-sm font-medium">{selectedPhysioOrder.diagnosis || 'N/A'}</p>
+                </div>
+
+                {selectedPhysioOrder.chief_complaint && (
+                  <div className="p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
+                    <p className="text-xs text-muted-foreground mb-1">Chief Complaint</p>
+                    <p className="text-sm">{selectedPhysioOrder.chief_complaint}</p>
+                  </div>
+                )}
+
+                {selectedPhysioOrder.treatment_goal && (
+                  <div className="p-3 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800">
+                    <p className="text-xs text-muted-foreground mb-1">Treatment Goal</p>
+                    <p className="text-sm">{selectedPhysioOrder.treatment_goal}</p>
+                  </div>
+                )}
+
+                {selectedPhysioOrder.special_instructions && (
+                  <div className="p-3 rounded-lg bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800">
+                    <p className="text-xs text-muted-foreground mb-1">Special Instructions</p>
+                    <p className="text-sm">{selectedPhysioOrder.special_instructions}</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Order Timeline */}
+              <div className="p-3 rounded-lg border bg-card">
+                <p className="text-xs text-muted-foreground mb-2">Order Timeline</p>
+                <div className="flex items-center gap-4 text-xs">
+                  <div className="flex items-center gap-1">
+                    <div className="h-2 w-2 rounded-full bg-blue-500"></div>
+                    <span>Ordered: {selectedPhysioOrder.ordered_at ? new Date(selectedPhysioOrder.ordered_at).toLocaleString() : 'N/A'}</span>
+                  </div>
+                  {selectedPhysioOrder.scheduled_at && (
+                    <div className="flex items-center gap-1">
+                      <div className="h-2 w-2 rounded-full bg-amber-500"></div>
+                      <span>Scheduled: {new Date(selectedPhysioOrder.scheduled_at).toLocaleString()}</span>
+                    </div>
+                  )}
+                  {selectedPhysioOrder.completed_at && (
+                    <div className="flex items-center gap-1">
+                      <div className="h-2 w-2 rounded-full bg-green-500"></div>
+                      <span>Completed: {new Date(selectedPhysioOrder.completed_at).toLocaleString()}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Session Reports */}
+              <div className="space-y-4">
+                <h3 className="text-lg font-semibold text-teal-700 dark:text-teal-400 flex items-center gap-2">
+                  <FileText className="h-5 w-5" />
+                  Session Reports ({physioOrderSessions.length})
+                </h3>
+
+                {loadingPhysioSessions ? (
+                  <div className="flex items-center justify-center p-8">
+                    <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                    <span className="ml-2 text-muted-foreground">Loading session reports...</span>
+                  </div>
+                ) : physioOrderSessions.length === 0 ? (
+                  <div className="p-6 rounded-lg border border-dashed text-center text-muted-foreground">
+                    <FileText className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                    <p>No sessions completed yet</p>
+                    <p className="text-xs">Session reports will appear here once physiotherapy sessions are completed</p>
+                  </div>
+                ) : (
+                  physioOrderSessions.map((session, index) => (
+                    <Card key={session.id} className="border-l-4 border-l-teal-500">
+                      <CardHeader className="pb-2">
+                        <div className="flex items-center justify-between">
+                          <CardTitle className="text-base flex items-center gap-2">
+                            <Activity className="h-4 w-4 text-teal-500" />
+                            Session {session.session_number} - {session.physiotherapist_name}
+                          </CardTitle>
+                          <div className="flex items-center gap-2">
+                            <Badge variant="outline" className={`text-xs ${
+                              session.status === 'completed' ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/30' :
+                              session.status === 'in_progress' ? 'bg-orange-500/10 text-orange-600 border-orange-500/30' :
+                              'bg-blue-500/10 text-blue-600 border-blue-500/30'
+                            }`}>
+                              {session.status.replace('_', ' ')}
+                            </Badge>
+                            {session.completed_at && (
+                              <span className="text-xs text-muted-foreground">
+                                {new Date(session.completed_at).toLocaleString()}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        {session.duration_minutes && (
+                          <CardDescription>
+                            Duration: {session.duration_minutes} minutes
+                          </CardDescription>
+                        )}
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        {/* A. Patient Assessment */}
+                        {(session.presenting_complaint || session.pain_level_before !== undefined || session.pain_level_after !== undefined) && (
+                          <div className="space-y-2">
+                            <h4 className="text-sm font-semibold text-teal-700 dark:text-teal-400 flex items-center gap-2">
+                              <User className="h-4 w-4" />
+                              A. Patient Assessment
+                            </h4>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 ml-6">
+                              {session.presenting_complaint && (
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Presenting Complaint</Label>
+                                  <p className="text-sm bg-muted/50 p-2 rounded">{session.presenting_complaint}</p>
+                                </div>
+                              )}
+                              {(session.pain_level_before !== undefined || session.pain_level_after !== undefined) && (
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Pain Level (0-10)</Label>
+                                  <div className="flex gap-2">
+                                    {session.pain_level_before !== undefined && (
+                                      <Badge variant="outline" className="bg-red-50 dark:bg-red-900/20 text-red-600 border-red-200">
+                                        Before: {session.pain_level_before}
+                                      </Badge>
+                                    )}
+                                    {session.pain_level_after !== undefined && (
+                                      <Badge variant="outline" className="bg-green-50 dark:bg-green-900/20 text-green-600 border-green-200">
+                                        After: {session.pain_level_after}
+                                      </Badge>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* B. Medical & Social Background */}
+                        {(session.medical_history || session.surgical_history || session.medications || session.allergies || session.social_history || session.previous_treatments) && (
+                          <div className="space-y-2">
+                            <h4 className="text-sm font-semibold text-purple-700 dark:text-purple-400 flex items-center gap-2">
+                              <Heart className="h-4 w-4" />
+                              B. Medical & Social Background
+                            </h4>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 ml-6">
+                              {session.medical_history && (
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Medical History</Label>
+                                  <p className="text-sm bg-muted/50 p-2 rounded">{session.medical_history}</p>
+                                </div>
+                              )}
+                              {session.surgical_history && (
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Surgical History</Label>
+                                  <p className="text-sm bg-muted/50 p-2 rounded">{session.surgical_history}</p>
+                                </div>
+                              )}
+                              {session.medications && (
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Medications</Label>
+                                  <p className="text-sm bg-muted/50 p-2 rounded">{session.medications}</p>
+                                </div>
+                              )}
+                              {session.allergies && (
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Allergies</Label>
+                                  <p className="text-sm bg-muted/50 p-2 rounded">{session.allergies}</p>
+                                </div>
+                              )}
+                              {session.social_history && (
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Social History</Label>
+                                  <p className="text-sm bg-muted/50 p-2 rounded">{session.social_history}</p>
+                                </div>
+                              )}
+                              {session.previous_treatments && (
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Previous Treatments</Label>
+                                  <p className="text-sm bg-muted/50 p-2 rounded">{session.previous_treatments}</p>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* C. Physical Examination */}
+                        {(session.posture_gait || session.range_of_motion || session.muscle_strength || session.sensation || session.reflexes || session.special_tests || session.balance_coordination || session.assessment_findings) && (
+                          <div className="space-y-2">
+                            <h4 className="text-sm font-semibold text-orange-700 dark:text-orange-400 flex items-center gap-2">
+                              <Scale className="h-4 w-4" />
+                              C. Physical Examination
+                            </h4>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 ml-6">
+                              {session.posture_gait && (
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Posture & Gait</Label>
+                                  <p className="text-sm bg-muted/50 p-2 rounded">{session.posture_gait}</p>
+                                </div>
+                              )}
+                              {session.range_of_motion && (
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Range of Motion</Label>
+                                  <p className="text-sm bg-muted/50 p-2 rounded">{session.range_of_motion}</p>
+                                </div>
+                              )}
+                              {session.muscle_strength && (
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Muscle Strength</Label>
+                                  <p className="text-sm bg-muted/50 p-2 rounded">{session.muscle_strength}</p>
+                                </div>
+                              )}
+                              {session.sensation && (
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Sensation</Label>
+                                  <p className="text-sm bg-muted/50 p-2 rounded">{session.sensation}</p>
+                                </div>
+                              )}
+                              {session.reflexes && (
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Reflexes</Label>
+                                  <p className="text-sm bg-muted/50 p-2 rounded">{session.reflexes}</p>
+                                </div>
+                              )}
+                              {session.special_tests && (
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Special Tests</Label>
+                                  <p className="text-sm bg-muted/50 p-2 rounded">{session.special_tests}</p>
+                                </div>
+                              )}
+                              {session.balance_coordination && (
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Balance & Coordination</Label>
+                                  <p className="text-sm bg-muted/50 p-2 rounded">{session.balance_coordination}</p>
+                                </div>
+                              )}
+                              {session.assessment_findings && (
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Assessment Findings</Label>
+                                  <p className="text-sm bg-muted/50 p-2 rounded">{session.assessment_findings}</p>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* D. Functional Evaluation */}
+                        {(session.functional_assessment || session.functional_limitations || session.functional_goals || session.assistive_devices) && (
+                          <div className="space-y-2">
+                            <h4 className="text-sm font-semibold text-blue-700 dark:text-blue-400 flex items-center gap-2">
+                              <Target className="h-4 w-4" />
+                              D. Functional Evaluation
+                            </h4>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 ml-6">
+                              {session.functional_assessment && (
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Functional Assessment</Label>
+                                  <p className="text-sm bg-muted/50 p-2 rounded">{session.functional_assessment}</p>
+                                </div>
+                              )}
+                              {session.functional_limitations && (
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Functional Limitations</Label>
+                                  <p className="text-sm bg-muted/50 p-2 rounded">{session.functional_limitations}</p>
+                                </div>
+                              )}
+                              {session.functional_goals && (
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Functional Goals</Label>
+                                  <p className="text-sm bg-muted/50 p-2 rounded">{session.functional_goals}</p>
+                                </div>
+                              )}
+                              {session.assistive_devices && (
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Assistive Devices</Label>
+                                  <p className="text-sm bg-muted/50 p-2 rounded">{session.assistive_devices}</p>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* E. Clinical Reasoning */}
+                        {(session.diagnosis_impression || session.prognosis || session.clinical_reasoning) && (
+                          <div className="space-y-2">
+                            <h4 className="text-sm font-semibold text-yellow-700 dark:text-yellow-400 flex items-center gap-2">
+                              <Lightbulb className="h-4 w-4" />
+                              E. Clinical Reasoning
+                            </h4>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 ml-6">
+                              {session.diagnosis_impression && (
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Diagnosis/Impression</Label>
+                                  <p className="text-sm bg-muted/50 p-2 rounded">{session.diagnosis_impression}</p>
+                                </div>
+                              )}
+                              {session.prognosis && (
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Prognosis</Label>
+                                  <p className="text-sm bg-muted/50 p-2 rounded">{session.prognosis}</p>
+                                </div>
+                              )}
+                              {session.clinical_reasoning && (
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Clinical Reasoning</Label>
+                                  <p className="text-sm bg-muted/50 p-2 rounded">{session.clinical_reasoning}</p>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* F. Treatment Plan */}
+                        {(session.treatment_performed || session.exercises_prescribed?.length || session.equipment_used?.length || session.patient_education) && (
+                          <div className="space-y-2">
+                            <h4 className="text-sm font-semibold text-green-700 dark:text-green-400 flex items-center gap-2">
+                              <ClipboardList className="h-4 w-4" />
+                              F. Treatment Plan
+                            </h4>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 ml-6">
+                              {session.treatment_performed && (
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Treatment Performed</Label>
+                                  <p className="text-sm bg-muted/50 p-2 rounded">{session.treatment_performed}</p>
+                                </div>
+                              )}
+                              {session.exercises_prescribed && session.exercises_prescribed.length > 0 && (
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Exercises Prescribed</Label>
+                                  <ul className="text-sm bg-muted/50 p-2 rounded list-disc pl-5">
+                                    {session.exercises_prescribed.map((ex: any, idx: number) => (
+                                      <li key={idx}>{typeof ex === 'string' ? ex : ex.name || ex}</li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
+                              {session.equipment_used && session.equipment_used.length > 0 && (
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Equipment Used</Label>
+                                  <ul className="text-sm bg-muted/50 p-2 rounded list-disc pl-5">
+                                    {session.equipment_used.map((eq: any, idx: number) => (
+                                      <li key={idx}>{typeof eq === 'string' ? eq : eq.name || eq}</li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
+                              {session.patient_education && (
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Patient Education</Label>
+                                  <p className="text-sm bg-muted/50 p-2 rounded">{session.patient_education}</p>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* G. Session & Continuity */}
+                        {(session.session_notes || session.progress_notes || session.recommendations?.length || session.follow_up_instructions || session.next_session_plan) && (
+                          <div className="space-y-2">
+                            <h4 className="text-sm font-semibold text-indigo-700 dark:text-indigo-400 flex items-center gap-2">
+                              <Clock className="h-4 w-4" />
+                              G. Session & Continuity
+                            </h4>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 ml-6">
+                              {session.session_notes && (
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Session Notes</Label>
+                                  <p className="text-sm bg-muted/50 p-2 rounded">{session.session_notes}</p>
+                                </div>
+                              )}
+                              {session.progress_notes && (
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Progress Notes</Label>
+                                  <p className="text-sm bg-muted/50 p-2 rounded">{session.progress_notes}</p>
+                                </div>
+                              )}
+                              {session.recommendations && session.recommendations.length > 0 && (
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Recommendations</Label>
+                                  <ul className="text-sm bg-muted/50 p-2 rounded list-disc pl-5">
+                                    {session.recommendations.map((rec: any, idx: number) => (
+                                      <li key={idx}>{typeof rec === 'string' ? rec : rec.text || rec}</li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
+                              {session.follow_up_instructions && (
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Follow-up Instructions</Label>
+                                  <p className="text-sm bg-muted/50 p-2 rounded">{session.follow_up_instructions}</p>
+                                </div>
+                              )}
+                              {session.next_session_plan && (
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Next Session Plan</Label>
+                                  <p className="text-sm bg-muted/50 p-2 rounded">{session.next_session_plan}</p>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsPhysioOrderDialogOpen(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </DashboardLayout>
   );
 }

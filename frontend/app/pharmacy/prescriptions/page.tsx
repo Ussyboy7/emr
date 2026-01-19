@@ -10,15 +10,16 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
-import { pharmacyService, type Prescription as ApiPrescription } from '@/lib/services';
+import { pharmacyService, type Prescription as ApiPrescription, type PrescriptionItem } from '@/lib/services';
 import { PatientAvatar } from "@/components/PatientAvatar";
 import { 
-  ClipboardList, Search, Eye, Clock, CheckCircle2, Pill, Calendar,
-  AlertTriangle, Package, User, RefreshCw, Activity, Stethoscope,
+  ClipboardList, Search, Eye, Clock, CheckCircle2, CheckCircle, Pill, Calendar,
+  AlertTriangle, Package, User, Activity, Stethoscope,
   ArrowRight, XCircle, Printer, ShieldAlert, ArrowRightLeft, Info,
   FileText, Beaker, Hash, Loader2
 } from 'lucide-react';
@@ -35,32 +36,111 @@ const substitutionReasons = [
   { value: 'other', label: 'Other', icon: '📝', description: 'Other reason - specify in notes' },
 ];
 
-// Check for drug interactions - TODO: Connect to API
+// Check for drug interactions using pharmacy service
 const checkInteractions = async (medications: string[]): Promise<DrugInteraction[]> => {
-  // TODO: Implement API call for drug interaction checking
-  return [];
+  try {
+    // Extract medication IDs from the prescription medications
+    const medicationIds: number[] = [];
+
+    // For each medication name, try to find its ID
+    for (const medName of medications) {
+      try {
+        // Search for medication by name to get ID
+        const searchResults = await pharmacyService.getMedications({ search: medName, page_size: 1 });
+        if (searchResults.results.length > 0) {
+          medicationIds.push(searchResults.results[0].id);
+        }
+      } catch (err) {
+        console.warn(`Could not find medication ID for ${medName}:`, err);
+      }
+    }
+
+    if (medicationIds.length >= 2) {
+      return await pharmacyService.checkInteractions(medicationIds);
+    }
+
+    return [];
+  } catch (err) {
+    console.error('Error checking drug interactions:', err);
+    toast.error('Failed to check drug interactions');
+    return [];
+  }
 };
 
 // Get medication batches - uses pharmacyService
 
-// Get substitutes for medication - uses pharmacyService
+// Get substitutes for medication using pharmacy service API
 const getSubstitutesForMedication = async (medicationName: string): Promise<SubstituteOption[]> => {
   try {
-    // Search for medications with similar names (generic alternatives)
-    const response = await pharmacyService.getMedications({ search: medicationName, page: 1 });
-    return response.results.slice(0, 10).map((m: any) => ({
-      id: m.id.toString(),
-      name: m.name,
-      strength: m.strength || '',
-      type: m.generic_name ? 'generic' : 'brand',
-      stock: 0, // Would need to get from inventory
-      expiryDate: '',
-      daysToExpiry: 0,
-      unitPrice: 0,
-      isNearExpiry: false,
-    }));
+    // First find the medication ID by name
+    const searchResults = await pharmacyService.getMedications({ search: medicationName, page_size: 1 });
+    if (searchResults.results.length === 0) {
+      console.warn(`No medication found for name: ${medicationName}`);
+      return [];
+    }
+
+    const medicationId = searchResults.results[0].id;
+
+    // Get substitutes using the pharmacy service API
+    const substitutes = await pharmacyService.getSubstitutes(medicationId);
+
+    // Enhance substitutes with additional data from inventory
+    const enhancedSubstitutes: SubstituteOption[] = await Promise.all(
+      substitutes.map(async (substitute) => {
+        try {
+          // Get inventory data for stock levels
+          const inventory = await pharmacyService.getInventory({ medication: substitute.id });
+          const inventoryItem = inventory.results[0];
+
+          let stock = 0;
+          let expiryDate = '';
+          let daysToExpiry = 0;
+          let isNearExpiry = false;
+
+          if (inventoryItem) {
+            stock = inventoryItem.quantity;
+            // Calculate expiry data if available
+            if (inventoryItem.expiry_date) {
+              expiryDate = new Date(inventoryItem.expiry_date).toLocaleDateString();
+              const today = new Date();
+              const expiry = new Date(inventoryItem.expiry_date);
+              daysToExpiry = Math.ceil((expiry.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+              isNearExpiry = daysToExpiry <= 90; // Consider near expiry if <= 90 days
+            }
+          }
+
+          return {
+            id: substitute.id,
+            name: substitute.name,
+            strength: '', // Not available from API, leave empty
+            type: substitute.type === 'generic' ? 'generic' : substitute.type === 'brand' ? 'brand' : 'therapeutic',
+            stock,
+            expiryDate,
+            daysToExpiry,
+            unitPrice: substitute.unitPrice,
+            isNearExpiry,
+          };
+        } catch (err) {
+          console.warn(`Error enhancing substitute ${substitute.name}:`, err);
+          return {
+            id: substitute.id,
+            name: substitute.name,
+            strength: '',
+            type: substitute.type === 'generic' ? 'generic' : substitute.type === 'brand' ? 'brand' : 'therapeutic',
+            stock: substitute.stock,
+            expiryDate: substitute.expiryDate,
+            daysToExpiry: substitute.daysToExpiry,
+            unitPrice: substitute.unitPrice,
+            isNearExpiry: substitute.isNearExpiry,
+          };
+        }
+      })
+    );
+
+    return enhancedSubstitutes;
   } catch (err) {
     console.error('Error loading substitutes:', err);
+    toast.error('Failed to load medication substitutes');
     return [];
   }
 };
@@ -85,6 +165,62 @@ export default function PrescriptionsPage() {
     loadPrescriptions();
   }, [currentPage, itemsPerPage, statusFilter]);
 
+  // Transform medication data with status determination
+  const transformMedications = (medications: any[], prescriptionStatus: string) => {
+    return medications.map((med: any) => {
+      // Determine medication status - prioritize dispense status over stock availability
+      let status: 'Available' | 'Low Stock' | 'Out of Stock' | 'Pending' | 'Dispensed' | 'Partially Dispensed' | 'Over-dispensed' = 'Pending';
+
+      // Convert to numbers for proper comparison
+      const dispensedQty = Number(med.dispensed_quantity || 0);
+      const prescribedQty = Number(med.quantity || 0);
+
+      // Check if medication has been over-dispensed (dispensed > prescribed)
+      if (dispensedQty > prescribedQty) {
+        status = 'Over-dispensed';
+      }
+      // Check if medication is fully dispensed
+      else if (med.is_dispensed || Math.max(0, prescribedQty - dispensedQty) <= 0) {
+        status = 'Dispensed';
+      }
+      // Check if medication has been partially dispensed (dispensed > 0 but < prescribed)
+      else if (dispensedQty > 0) {
+        status = 'Partially Dispensed';
+      }
+      // For medications that haven't been dispensed, check stock availability
+      else if (med.medication_details?.current_stock !== undefined) {
+        const stock = med.medication_details.current_stock;
+        if (stock === 0) status = 'Out of Stock';
+        else if (stock < 50) status = 'Low Stock';
+        else status = 'Available';
+      }
+      // If no stock info available, check prescription status
+      else if (prescriptionStatus === 'dispensed' || prescriptionStatus === 'Dispensed') {
+        status = 'Dispensed';
+      } else {
+        status = 'Pending';
+      }
+
+      return {
+        id: med.id.toString(),
+        name: med.medication_name || med.medication_details?.name || '',
+        dosage: med.dosage || '',
+        frequency: med.frequency || med.frequency_display || '',
+        duration: med.duration || '',
+        quantity: Number(med.quantity || 0),
+        dispensed_quantity: Number(med.dispensed_quantity || 0),
+        remaining_quantity: Math.max(0, Number(med.quantity || 0) - Number(med.dispensed_quantity || 0)),
+        route: med.route || med.route_display || 'Oral',
+        instructions: med.instructions || '',
+        status,
+        stockLevel: med.medication_details?.current_stock || 0,
+        medication_details: med.medication_details,
+        substitution: med.substitution,
+        originalMedication: med.originalMedication
+      };
+    });
+  };
+
   const loadPrescriptions = async () => {
     try {
       setLoading(true);
@@ -105,9 +241,26 @@ export default function PrescriptionsPage() {
         const patientDetails = rx.patient_details || {};
         const visitDetails = rx.visit_details || {};
         const patientId = rx.patient?.toString() || patientDetails.id || '';
-        const patientName = rx.patient_name || patientDetails.name || 'Unknown';
-        const patientMRN = patientDetails.mrn || patientDetails.patient_id || '';
-        const patientAge = patientDetails.age || 0;
+        let patientName = rx.patient_name || patientDetails.name || 'Unknown Patient';
+        const patientIdentifier = patientDetails.patient_id || '';
+
+
+        // Handle patient age - use direct age field, or calculate from DOB if age is 0/null
+        let patientAge = patientDetails.age || 0;
+        if (patientAge === 0 && patientDetails.date_of_birth) {
+          try {
+            const birthDate = new Date(patientDetails.date_of_birth);
+            const today = new Date();
+            patientAge = today.getFullYear() - birthDate.getFullYear();
+            const monthDiff = today.getMonth() - birthDate.getMonth();
+            if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+              patientAge--;
+            }
+          } catch (error) {
+            patientAge = 0;
+          }
+        }
+
         const patientGender = patientDetails.gender || '';
         const patientPhone = patientDetails.phone_number || patientDetails.phone || '';
         const patientAllergies = patientDetails.allergies || [];
@@ -121,11 +274,32 @@ export default function PrescriptionsPage() {
         const doctorName = rx.doctor_name || '';
         const doctorId = rx.doctor?.toString() || '';
         
-        // Calculate wait time
-        const prescribedAt = new Date(rx.prescribed_at);
-        const now = new Date();
-        const waitTimeMs = now.getTime() - prescribedAt.getTime();
-        const waitTime = Math.floor(waitTimeMs / 60000); // minutes
+        // Calculate wait time with safeguards
+        let waitTime = 0;
+        try {
+          const prescribedAt = new Date(rx.prescribed_at);
+          const now = new Date();
+
+          // Validate the date is reasonable (not too old)
+          const daysDiff = (now.getTime() - prescribedAt.getTime()) / (1000 * 60 * 60 * 24);
+          if (daysDiff > 365) {
+            // If prescription is more than a year old, cap at 24 hours for demo purposes
+            waitTime = 1440; // 24 hours in minutes
+          } else if (daysDiff < 0) {
+            // If prescription date is in future, show 0
+            waitTime = 0;
+          } else {
+            waitTime = Math.floor((now.getTime() - prescribedAt.getTime()) / 60000); // minutes
+          }
+
+          // Cap at 48 hours for display purposes
+          if (waitTime > 2880) {
+            waitTime = 2880;
+          }
+        } catch (error) {
+          console.warn('Error calculating wait time for prescription:', rx.id, error);
+          waitTime = 0;
+        }
         
         // Determine priority (could be enhanced with API field)
         let priority: Priority = 'Medium';
@@ -140,45 +314,37 @@ export default function PrescriptionsPage() {
         }
         
         // Transform medications
-        const medications = (rx.medications || []).map((med: any) => {
-          // Determine medication status
-          let status: 'Available' | 'Low Stock' | 'Out of Stock' | 'Pending' | 'Dispensed' = 'Pending';
-          if (med.is_dispensed) {
-            status = 'Dispensed';
-          } else if (med.medication_details?.current_stock !== undefined) {
-            const stock = med.medication_details.current_stock;
-            if (stock === 0) status = 'Out of Stock';
-            else if (stock < 50) status = 'Low Stock';
-            else status = 'Available';
-          } else {
-            status = 'Pending';
-          }
-          
-          return {
-            id: med.id.toString(),
-            name: med.medication_name || med.medication_details?.name || '',
-            dosage: med.dosage || '',
-            frequency: med.frequency || med.frequency_display || '',
-            duration: med.duration || '',
-            quantity: Number(med.quantity),
-            route: med.route || med.route_display || 'Oral',
-            instructions: med.instructions || '',
-            status,
-            stockLevel: med.medication_details?.current_stock || 0,
-          };
-        });
+        const medications = transformMedications(rx.medications || [], rx.status);
         
+        const patientObj = {
+          name: patientName,
+          id: patientId,
+          mrn: patientIdentifier,
+          age: patientAge,
+          gender: patientGender,
+          allergies: patientAllergies,
+          phone: patientPhone
+        };
+
+        // Ensure patient object is never undefined
+        if (!patientObj.name) {
+          console.error('🚨 CRITICAL: Patient name is still undefined!', {
+            patientName,
+            patientObj,
+            rx_id: rx.id,
+            rx_patient_name: rx.patient_name,
+            patientDetails
+          });
+          patientObj.name = 'Unknown Patient';
+        }
+
         return {
           id: rx.id?.toString() || rx.prescription_id || '',
-          patient: { 
-            name: patientName, 
-            id: patientId, 
-            mrn: patientMRN, 
-            age: patientAge, 
-            gender: patientGender, 
-            allergies: patientAllergies, 
-            phone: patientPhone 
-          },
+          patient: patientObj,
+          // Preserve API fields for modal access
+          patient_details: patientDetails,
+          visit_details: visitDetails,
+          doctor_name: doctorName,
           medications,
           doctor: doctorName,
           clinic,
@@ -204,6 +370,8 @@ export default function PrescriptionsPage() {
   
   // Modal states
   const [selectedPrescription, setSelectedPrescription] = useState<Prescription | null>(null);
+  const [selectedPrescriptionMedications, setSelectedPrescriptionMedications] = useState<any[]>([]);
+
   const [showViewModal, setShowViewModal] = useState(false);
   const [showDispenseModal, setShowDispenseModal] = useState(false);
   const [selectedMedications, setSelectedMedications] = useState<string[]>([]);
@@ -211,15 +379,13 @@ export default function PrescriptionsPage() {
   const [dispenseNotes, setDispenseNotes] = useState('');
   const [selectedBatches, setSelectedBatches] = useState<Record<string, string>>({});
   const [medicationBatches, setMedicationBatches] = useState<Record<string, MedicationBatch[]>>({});
-  const [counselingChecklist, setCounselingChecklist] = useState<Record<string, boolean>>({
-    dosageExplained: false,
-    sideEffectsDiscussed: false,
-    storageInstructions: false,
-    interactionsWarned: false,
-    followUpAdvised: false,
-  });
   const [showSubstitutionModal, setShowSubstitutionModal] = useState(false);
   const [substitutionMed, setSubstitutionMed] = useState<MedicationItem | null>(null);
+  const [showDispenseConfirmDialog, setShowDispenseConfirmDialog] = useState(false);
+  const [pendingDispenseData, setPendingDispenseData] = useState<{
+    medications: Array<{name: string; quantity: number; unit: string}>;
+    onConfirm: () => void;
+  } | null>(null);
   const [detectedInteractions, setDetectedInteractions] = useState<DrugInteraction[]>([]);
   const [interactionAcknowledged, setInteractionAcknowledged] = useState(false);
   
@@ -230,18 +396,24 @@ export default function PrescriptionsPage() {
     notes: '',
   });
   const [availableSubstitutes, setAvailableSubstitutes] = useState<SubstituteOption[]>([]);
+  const [allAvailableMedications, setAllAvailableMedications] = useState<SubstituteOption[]>([]);
   const [substituteSearchQuery, setSubstituteSearchQuery] = useState('');
+
+  // Status update functionality
+
+  // Print functionality
+  const [printing, setPrinting] = useState(false);
 
   // Filter prescriptions
   const filteredPrescriptions = useMemo(() => {
     return prescriptions.filter(rx => {
-      const matchesSearch = 
-        rx.patient.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-        rx.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        rx.patient.mrn.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesStatus = statusFilter === 'all' || rx.status.toLowerCase() === statusFilter.toLowerCase();
-      const matchesPriority = priorityFilter === 'all' || rx.priority.toLowerCase() === priorityFilter.toLowerCase();
-      const matchesGender = genderFilter === 'all' || rx.patient.gender.toLowerCase() === genderFilter.toLowerCase();
+      const matchesSearch =
+        (rx.patient?.name?.toLowerCase() || '').includes(searchQuery.toLowerCase()) ||
+        (rx.id?.toLowerCase() || '').includes(searchQuery.toLowerCase()) ||
+        (rx.patient?.mrn?.toLowerCase() || '').includes(searchQuery.toLowerCase());
+      const matchesStatus = statusFilter === 'all' || (rx.status?.toLowerCase() || '') === statusFilter.toLowerCase();
+      const matchesPriority = priorityFilter === 'all' || (rx.priority?.toLowerCase() || '') === priorityFilter.toLowerCase();
+      const matchesGender = genderFilter === 'all' || (rx.patient?.gender?.toLowerCase() || '') === genderFilter.toLowerCase();
       
       // Date filter (filter by prescribed date)
       if (dateFilter !== 'all') {
@@ -314,41 +486,144 @@ export default function PrescriptionsPage() {
       case 'Available': return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400';
       case 'Low Stock': return 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400';
       case 'Out of Stock': return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400';
+      case 'Pending': return 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400';
       case 'Dispensed': return 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400';
+      case 'Partially Dispensed': return 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400';
+      case 'Over-dispensed': return 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400';
       default: return 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400';
     }
   };
 
-  const handleViewDetails = (prescription: Prescription) => {
-    setSelectedPrescription(prescription);
+  const handleViewDetails = async (prescription: Prescription) => {
+    // Always fetch fresh prescription data to ensure we have latest changes
+    console.log(`Fetching fresh prescription details for RX: ${prescription.id}`);
+    try {
+      const freshPrescription = await pharmacyService.getPrescription(Number(prescription.id));
+
+      // Apply the same transformation as the prescription list
+      const transformedMedications = transformMedications(freshPrescription.medications || [], freshPrescription.status);
+
+      // Store the prescription (using type assertion for compatibility)
+      setSelectedPrescription(freshPrescription as any);
+      setSelectedPrescriptionMedications(transformedMedications);
+    } catch (error) {
+      console.error('Error fetching prescription details:', error);
+      // Fallback to cached data
+      setSelectedPrescription(prescription);
+    }
     setShowViewModal(true);
+  };
+
+  const handleMarkAsCompleted = async (prescription: Prescription) => {
+    try {
+      await pharmacyService.markPrescriptionAsCompleted(prescription.id);
+      toast.success('Prescription marked as completed');
+      await loadPrescriptions(); // Reload to show updated status
+    } catch (error: any) {
+      console.error('Error marking prescription as completed:', error);
+      toast.error(`Failed to mark prescription as completed: ${error.message || 'Unknown error'}`);
+    }
   };
 
   const handleStartDispense = async (prescription: Prescription) => {
     setSelectedPrescription(prescription);
+    // Transform medications to include calculated properties
+    const transformedMedications = transformMedications(prescription.medications, prescription.status);
+    setSelectedPrescriptionMedications(transformedMedications);
+
     const initialQuantities: Record<string, number> = {};
     const initialSelection: string[] = [];
     const initialBatches: Record<string, string> = {};
     const loadedBatches: Record<string, MedicationBatch[]> = {};
-    
+
     // Load batches for each medication
-    const batchPromises = prescription.medications.map(async (med) => {
+    const batchPromises = transformedMedications.map(async (med) => {
       if (med.status === 'Available' || med.status === 'Low Stock') {
-        initialQuantities[med.id] = med.quantity;
+        // Use remaining quantity for partial dispensing, full quantity for new dispensing
+        initialQuantities[med.id] = med.remaining_quantity > 0 ? med.remaining_quantity : med.quantity;
         initialSelection.push(med.id);
         
         // Load batches for this medication
         try {
-          // Get medication ID from the prescription item
-          const prescriptionId = parseInt(prescription.id) || prescription.id;
-          const rxDetail = await pharmacyService.getPrescription(typeof prescriptionId === 'number' ? prescriptionId : parseInt(prescriptionId));
-          const rxMed = rxDetail.medications.find((m: any) => m.id.toString() === med.id);
-          if (rxMed && rxMed.medication) {
-            const batches = await pharmacyService.getMedicationBatches(rxMed.medication);
-            loadedBatches[med.id] = batches;
-            if (batches.length > 0) {
-              initialBatches[med.id] = batches[0].id; // Default to first batch
+          let medicationIdToUse: string | number;
+
+          // For substituted medications, we need to get the actual medication ID
+          if (med.substitution) {
+            console.log(`Loading batches for substituted medication: ${med.name}, original: ${med.originalMedication}`);
+            // This is a substituted medication - get the medication ID by searching
+            // Try exact match first
+            console.log(`🔍 Searching for substituted medication: "${med.name}"`);
+            let medSearch = await pharmacyService.getMedications({ search: med.name, page_size: 5 });
+            console.log(`📊 Exact search for "${med.name}" returned ${medSearch.results.length} results:`, medSearch.results.map(m => ({ id: m.id, name: m.name })));
+
+            // If no exact match, try searching for just the main drug name (remove dosage)
+            if (medSearch.results.length === 0) {
+              const drugNameOnly = med.name.replace(/\s+\d+(\.\d+)?\s*mg|\s+\d+(\.\d+)?\s*ml|\s+\d+\/\d+\s*ml/gi, '').trim();
+              console.log(`No exact match for "${med.name}", trying "${drugNameOnly}"`);
+              medSearch = await pharmacyService.getMedications({ search: drugNameOnly, page_size: 5 });
+              console.log(`Partial search for "${drugNameOnly}" returned ${medSearch.results.length} results:`, medSearch.results.map(m => m.name));
             }
+
+            // Find the best match
+            let bestMatch = null;
+            if (medSearch.results.length > 0) {
+              console.log(`Finding best match for "${med.name}" from results:`, medSearch.results.map(m => m.name));
+
+              // First try exact name match
+              bestMatch = medSearch.results.find(m => m.name.toLowerCase() === med.name.toLowerCase());
+              console.log(`Exact match result:`, bestMatch?.name || 'none');
+
+              if (!bestMatch) {
+                // Then try partial match
+                bestMatch = medSearch.results.find(m => m.name.toLowerCase().includes(med.name.toLowerCase().split(' ')[0]));
+                console.log(`Partial match result:`, bestMatch?.name || 'none');
+              }
+              if (!bestMatch) {
+                // Finally take the first result
+                bestMatch = medSearch.results[0];
+                console.log(`Fallback to first result:`, bestMatch.name);
+              }
+            }
+            console.log(`Medication search results for "${med.name}":`, medSearch);
+            if (bestMatch) {
+              medicationIdToUse = bestMatch.id;
+              console.log(`Found medication ID ${medicationIdToUse} for ${med.name} (matched: ${bestMatch.name})`);
+
+              // Now try to get inventory for this medication
+              try {
+                console.log(`Fetching inventory for medication ID: ${medicationIdToUse}`);
+                const inventory = await pharmacyService.getInventory({ medication: medicationIdToUse.toString() });
+                console.log(`✅ Inventory for medication ${medicationIdToUse} (${med.name}):`, inventory);
+                console.log(`Inventory results count: ${inventory.results?.length || 0}`);
+              } catch (invError) {
+                console.error(`❌ Error fetching inventory for medication ${medicationIdToUse} (${med.name}):`, invError);
+              }
+            } else {
+              console.warn(`Could not find medication ID for substituted medication: ${med.name}`);
+              console.log('Available medications:', medSearch.results);
+              return;
+            }
+          } else {
+            // Regular medication - get from prescription details
+            const prescriptionId = parseInt(prescription.id) || prescription.id;
+            const rxDetail = await pharmacyService.getPrescription(typeof prescriptionId === 'number' ? prescriptionId : parseInt(prescriptionId));
+            const rxMed = rxDetail.medications.find((m: any) => m.id.toString() === med.id);
+            if (rxMed && rxMed.medication) {
+              medicationIdToUse = rxMed.medication;
+            } else {
+              console.warn(`Could not find medication in prescription details for: ${med.name}`);
+              return;
+            }
+          }
+
+          const batches = await pharmacyService.getMedicationBatches(medicationIdToUse);
+          loadedBatches[med.id] = batches;
+          console.log(`Loaded ${batches.length} batches for medication ${med.name} (ID: ${med.id})`);
+          if (batches.length > 0) {
+            initialBatches[med.id] = batches[0].id; // Default to first batch
+            console.log(`Set default batch ${batches[0].id} for medication ${med.id}`);
+          } else {
+            console.warn(`No batches found for medication ${med.name}`);
           }
         } catch (err) {
           console.error(`Error loading batches for ${med.name}:`, err);
@@ -360,7 +635,7 @@ export default function PrescriptionsPage() {
     setMedicationBatches(loadedBatches);
     
     // Check for drug interactions
-    const medNames = prescription.medications.map(m => m.name);
+    const medNames = transformedMedications.map(m => m.name);
     const interactions = await checkInteractions(medNames);
     setDetectedInteractions(interactions);
     setInteractionAcknowledged(interactions.length === 0);
@@ -369,13 +644,6 @@ export default function PrescriptionsPage() {
     setSelectedMedications(initialSelection);
     setSelectedBatches(initialBatches);
     setDispenseNotes('');
-    setCounselingChecklist({
-      dosageExplained: false,
-      sideEffectsDiscussed: false,
-      storageInstructions: false,
-      interactionsWarned: false,
-      followUpAdvised: false,
-    });
     setShowDispenseModal(true);
   };
 
@@ -387,7 +655,7 @@ export default function PrescriptionsPage() {
       // Load batches for this medication when selected
       if (selectedPrescription) {
         try {
-          const med = selectedPrescription.medications.find(m => m.id === medId);
+          const med = selectedPrescriptionMedications.find(m => m.id === medId);
           if (med) {
             // Get prescription detail to find medication ID
             const prescriptionId = parseInt(selectedPrescription.id) || selectedPrescription.id;
@@ -426,21 +694,81 @@ export default function PrescriptionsPage() {
       return;
     }
 
+    // Validate batch selection for selected medications
+    const missingBatches = selectedMedications.filter(medId => {
+      const med = selectedPrescription!.medications.find(m => m.id === medId);
+      return med && med.status !== 'Out of Stock' && !selectedBatches[medId];
+    });
+
+    if (missingBatches.length > 0) {
+      toast.error('Please select a batch for all selected medications');
+      return;
+    }
+
+    // Check if quantities are valid
+    const invalidQuantities = selectedMedications.filter(medId => {
+      const med = selectedPrescriptionMedications.find(m => m.id === medId);
+      const quantity = dispenseQuantities[medId] || med?.remaining_quantity || 0;
+      const maxAllowed = Math.max(0, med?.remaining_quantity || 0);
+      return med && (quantity < 0 || quantity > maxAllowed || (maxAllowed === 0 && quantity > 0));
+    });
+
+    if (invalidQuantities.length > 0) {
+      const hasInvalidAmounts = selectedMedications.some(medId => {
+        const med = selectedPrescriptionMedications.find(m => m.id === medId);
+        const quantity = dispenseQuantities[medId] || med?.remaining_quantity || 0;
+        return med && quantity > Math.max(0, med.remaining_quantity);
+      });
+
+      if (hasInvalidAmounts) {
+        toast.error('Cannot dispense more than remaining prescribed amount');
+      } else {
+        toast.error('Please enter valid dispense quantities');
+      }
+      return;
+    }
+
+    // Show confirmation dialog
+    const medicationsToDispense = selectedMedications.map(medId => {
+      const med = selectedPrescriptionMedications.find(m => m.id === medId);
+      const quantity = dispenseQuantities[medId] || med?.remaining_quantity || 0;
+      return {
+        name: med?.name || 'Unknown Medication',
+        quantity,
+        unit: med?.unit || 'units'
+      };
+    });
+
+    setPendingDispenseData({
+      medications: medicationsToDispense,
+      onConfirm: async () => {
+        setShowDispenseConfirmDialog(false);
+        setPendingDispenseData(null);
+        await proceedWithDispense();
+      }
+    });
+    setShowDispenseConfirmDialog(true);
+    return;
+  };
+
+  const proceedWithDispense = async () => {
     try {
-      // Get prescription ID (may be prescription_id string or numeric id)
-      const prescriptionId = parseInt(selectedPrescription.id) || selectedPrescription.id;
-      
-      // Dispense each selected medication
-      const dispensePromises = selectedMedications.map(async (medId) => {
-        const med = selectedPrescription.medications.find(m => m.id === medId);
-        if (!med) return;
-        
+        const prescriptionId = parseInt(selectedPrescription!.id) || selectedPrescription!.id;
+        const numericPrescriptionId = typeof prescriptionId === 'number' ? prescriptionId : parseInt(prescriptionId);
+
+        // Dispense each selected medication
+        const dispensePromises = selectedMedications.map(async (medId) => {
+        const med = selectedPrescription!.medications.find(m => m.id === medId);
+        if (!med) {
+          throw new Error(`Medication ${medId} not found in prescription`);
+        }
+
         const quantity = dispenseQuantities[medId] || med.quantity;
         const inventoryId = selectedBatches[medId] ? parseInt(selectedBatches[medId]) : undefined;
-        
+
         try {
           await pharmacyService.dispense(
-            typeof prescriptionId === 'number' ? prescriptionId : parseInt(prescriptionId),
+            numericPrescriptionId,
             parseInt(medId),
             quantity,
             inventoryId,
@@ -448,31 +776,57 @@ export default function PrescriptionsPage() {
           );
         } catch (err: any) {
           console.error(`Error dispensing ${med.name}:`, err);
-          throw err;
+          // Provide more specific error messages
+          if (err.message?.includes('stock')) {
+            throw new Error(`Insufficient stock for ${med.name}`);
+          } else if (err.message?.includes('batch')) {
+            throw new Error(`Invalid batch selected for ${med.name}`);
+          } else {
+            throw new Error(`Failed to dispense ${med.name}: ${err.message || 'Unknown error'}`);
+          }
         }
       });
 
       await Promise.all(dispensePromises);
 
-      toast.success(`${selectedMedications.length} medication(s) dispensed successfully for ${selectedPrescription.patient.name}`);
+      toast.success(`${selectedMedications.length} medication(s) dispensed successfully for ${selectedPrescription?.patient?.name || 'patient'}`);
       setShowDispenseModal(false);
       setSelectedPrescription(null);
       setSelectedMedications([]);
       setDispenseQuantities({});
       setDispenseNotes('');
       setSelectedBatches({});
-      
+
       // Reload prescriptions to get updated status
+      console.log('Reloading prescriptions after dispense...');
       await loadPrescriptions();
+      console.log('Prescriptions reloaded successfully');
+
+      // Also force a status recalculation on the backend
+      try {
+        if (selectedPrescription?.id) {
+          await pharmacyService.recalculatePrescriptionStatus(selectedPrescription.id);
+        }
+        console.log('Prescription status recalculated on backend');
+        // Reload again to get the recalculated status
+        await loadPrescriptions();
+      } catch (recalcError) {
+        console.warn('Status recalculation failed:', recalcError);
+        // Continue anyway - the reload above should be sufficient
+      }
     } catch (err: any) {
-      toast.error(err.message || 'Failed to dispense medications');
+      const errorMessage = err.message || 'Failed to dispense medications';
+      toast.error(errorMessage);
       console.error('Error dispensing medications:', err);
+    } finally {
+      // Status update removed - automatic status management
     }
   };
 
   const handleQuickDispense = async (prescription: Prescription) => {
-    // Quick dispense all available medications
-    const availableMeds = prescription.medications.filter(m => m.status === 'Available' || m.status === 'Low Stock');
+    // Transform medications and quick dispense all available ones
+    const transformedMeds = transformMedications(prescription.medications, prescription.status);
+    const availableMeds = transformedMeds.filter(m => m.status === 'Available' || m.status === 'Low Stock');
     
     if (availableMeds.length === 0) {
       toast.error('No available medications to dispense');
@@ -535,11 +889,164 @@ export default function PrescriptionsPage() {
     }
   };
 
-  const handleUpdateStatus = (prescriptionId: string, newStatus: PrescriptionStatus) => {
-    setPrescriptions(prev => prev.map(rx => 
-      rx.id === prescriptionId ? { ...rx, status: newStatus } : rx
-    ));
-    toast.success(`Prescription status updated to ${newStatus}`);
+
+  const handlePrintPrescription = async (prescription: Prescription, type: 'label' | 'receipt' = 'label') => {
+    try {
+      setPrinting(true);
+
+      // Create printable content
+      const printContent = generatePrintablePrescription(prescription, type);
+
+      // Open print dialog
+      const printWindow = window.open('', '_blank', 'width=800,height=600');
+      if (!printWindow) {
+        toast.error('Please allow popups for printing');
+        return;
+      }
+
+      printWindow.document.write(printContent);
+      printWindow.document.close();
+      printWindow.focus();
+
+      // Wait for content to load then print
+      printWindow.onload = () => {
+        printWindow.print();
+        printWindow.close();
+      };
+
+      toast.success(`${type === 'label' ? 'Label' : 'Receipt'} sent to printer`);
+    } catch (err: any) {
+      console.error('Error printing prescription:', err);
+      toast.error('Failed to print prescription');
+    } finally {
+      setPrinting(false);
+    }
+  };
+
+  const generatePrintablePrescription = (prescription: Prescription, type: 'label' | 'receipt'): string => {
+    const isLabel = type === 'label';
+    const transformedMeds = transformMedications(prescription.medications, prescription.status);
+
+    return `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>${isLabel ? 'Prescription Label' : 'Prescription Receipt'} - ${prescription.patient.name}</title>
+          <style>
+            body {
+              font-family: 'Courier New', monospace;
+              font-size: ${isLabel ? '12px' : '14px'};
+              line-height: 1.4;
+              margin: 0;
+              padding: 20px;
+              max-width: ${isLabel ? '400px' : '600px'};
+            }
+            .header {
+              text-align: center;
+              border-bottom: 2px solid #000;
+              padding-bottom: 10px;
+              margin-bottom: 15px;
+            }
+            .hospital-name {
+              font-size: ${isLabel ? '16px' : '20px'};
+              font-weight: bold;
+              margin-bottom: 5px;
+            }
+            .prescription-info {
+              margin: 15px 0;
+            }
+            .patient-info, .medication {
+              margin: 10px 0;
+              padding: 8px;
+              border: 1px solid #ddd;
+              border-radius: 4px;
+            }
+            .medication-list {
+              margin: 15px 0;
+            }
+            .medication-item {
+              margin: 8px 0;
+              padding: 8px;
+              border-left: 3px solid #007bff;
+              background: #f8f9fa;
+            }
+            .footer {
+              margin-top: 20px;
+              text-align: center;
+              font-size: ${isLabel ? '10px' : '12px'};
+              color: #666;
+            }
+            .instructions {
+              background: #fff3cd;
+              border: 1px solid #ffeaa7;
+              padding: 10px;
+              margin: 10px 0;
+              border-radius: 4px;
+            }
+            @media print {
+              body { margin: 0; }
+              .no-print { display: none; }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div class="hospital-name">Medical Center Pharmacy</div>
+            <div>Prescription ${type.toUpperCase()}</div>
+          </div>
+
+          <div class="prescription-info">
+            <strong>Rx ID:</strong> ${prescription.id}<br>
+            <strong>Date:</strong> ${prescription.date} ${prescription.time}<br>
+            <strong>Doctor:</strong> ${prescription.doctor}<br>
+            <strong>Clinic:</strong> ${prescription.clinic || 'N/A'}
+          </div>
+
+          <div class="patient-info">
+            <strong>Patient:</strong> ${prescription.patient.name}<br>
+            <strong>Patient ID:</strong> ${prescription.patient.mrn}<br>
+            <strong>Diagnosis:</strong> ${prescription.specialInstructions || 'N/A'}
+            ${prescription.patient.allergies?.length > 0 ? `<br><strong>Allergies:</strong> ${prescription.patient.allergies.join(', ')}` : ''}
+          </div>
+
+          <div class="medication-list">
+            <strong>Medications:</strong>
+            ${transformedMeds.map(med => `
+              <div class="medication-item">
+                <strong>${med.name}</strong><br>
+                Dosage: ${med.dosage}<br>
+                Quantity: ${med.quantity}<br>
+                Route: ${med.route}<br>
+                Frequency: ${med.frequency}<br>
+                Duration: ${med.duration}<br>
+                ${med.instructions ? `Instructions: ${med.instructions}` : ''}
+              </div>
+            `).join('')}
+          </div>
+
+          ${prescription.specialInstructions ? `
+            <div class="instructions">
+              <strong>Special Instructions:</strong><br>
+              ${prescription.specialInstructions}
+            </div>
+          ` : ''}
+
+          ${prescription.clinicalNotes ? `
+            <div class="medication">
+              <strong>Clinical Notes:</strong><br>
+              ${prescription.clinicalNotes}
+            </div>
+          ` : ''}
+
+          <div class="footer">
+            <div>Priority: ${prescription.priority}</div>
+            <div>Status: ${prescription.status}</div>
+            <div>Printed: ${new Date().toLocaleString()}</div>
+            ${isLabel ? '<div>⚠️ Keep out of reach of children</div>' : ''}
+          </div>
+        </body>
+      </html>
+    `;
   };
 
   return (
@@ -554,10 +1061,6 @@ export default function PrescriptionsPage() {
             </h1>
             <p className="text-muted-foreground mt-1">Process and dispense prescriptions from doctors</p>
           </div>
-          <Button variant="outline" onClick={() => loadPrescriptions()}>
-            <RefreshCw className="h-4 w-4 mr-2" />
-            Refresh
-          </Button>
         </div>
 
         {/* Stats Cards */}
@@ -622,7 +1125,7 @@ export default function PrescriptionsPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Avg Wait</p>
-                  <p className="text-2xl font-bold text-violet-600">{stats.avgWaitTime}m</p>
+                  <p className="text-2xl font-bold text-violet-600">{stats.avgWaitTime >= 60 ? `${Math.floor(stats.avgWaitTime/60)}h ${stats.avgWaitTime%60}m` : `${stats.avgWaitTime}m`}</p>
                 </div>
                 <Clock className="h-5 w-5 text-violet-500" />
               </div>
@@ -637,7 +1140,7 @@ export default function PrescriptionsPage() {
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input 
-                  placeholder="Search by patient name, ID, or MRN..." 
+                  placeholder="Search by patient name or ID..." 
                   value={searchQuery} 
                   onChange={(e) => setSearchQuery(e.target.value)} 
                   className="pl-10" 
@@ -728,19 +1231,61 @@ export default function PrescriptionsPage() {
                           <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${getPriorityColor(rx.priority)}`}>{rx.priority}</Badge>
                           <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${getStatusColor(rx.status)}`}>{rx.status}</Badge>
                           {rx.medications.slice(0, 2).map((med) => (
-                            <Badge key={med.id} variant="secondary" className="text-[10px] px-1.5 py-0">
-                              {med.name.split(' ')[0]} ×{med.quantity}
+                            <Badge key={med.id} variant="secondary" className="text-[10px] px-1.5 py-0 flex items-center gap-1">
+                              <span>{med.name.split(' ')[0]} ×{med.quantity}</span>
+                              {/* Substitution indicator removed from list view for compatibility */}
                             </Badge>
                           ))}
                           {rx.medications.length > 2 && <span className="text-[10px] text-muted-foreground">+{rx.medications.length - 2}</span>}
                         </div>
                         <div className="flex items-center gap-1 flex-shrink-0">
+                          {/* View Details button for all prescriptions */}
                           <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => handleViewDetails(rx)}>
                             <Eye className="h-4 w-4 text-muted-foreground hover:text-primary" />
                           </Button>
+
+                          {/* Dispense/Complete buttons based on status */}
                           {(rx.status === 'Pending' || rx.status === 'Processing' || rx.status === 'Ready') && (
                             <Button size="sm" className="h-7 px-2 bg-violet-600 hover:bg-violet-700 text-white text-xs" onClick={() => handleStartDispense(rx)}>
                               <Package className="h-3 w-3 mr-1" />Dispense
+                            </Button>
+                          )}
+
+                          {/* Smart completion for partially dispensed prescriptions */}
+                          {rx.status === 'Partially Dispensed' && (
+                            <Button
+                              size="sm"
+                              className={`h-7 px-2 text-white text-xs ${
+                                rx.medications.every((med: any) => (med.quantity - (med.dispensed_quantity || 0)) <= 0)
+                                  ? 'bg-green-600 hover:bg-green-700'
+                                  : 'bg-blue-600 hover:bg-blue-700'
+                              }`}
+                              onClick={() => {
+                                if (rx.medications.every((med: any) => (med.quantity - (med.dispensed_quantity || 0)) <= 0)) {
+                                  // All items dispensed - mark as completed
+                                  handleMarkAsCompleted(rx);
+                                } else {
+                                  // Some items remaining - resume dispensing
+                                  handleStartDispense(rx);
+                                }
+                              }}
+                              title={
+                                rx.medications.every(med => (med.quantity - (med.dispensed_quantity || 0)) <= 0)
+                                  ? "Mark prescription as fully completed"
+                                  : "Resume dispensing remaining medications"
+                              }
+                            >
+                              {rx.medications.every(med => (med.quantity - (med.dispensed_quantity || 0)) <= 0) ? (
+                                <>
+                                  <CheckCircle className="h-3 w-3 mr-1" />
+                                  Mark Complete
+                                </>
+                              ) : (
+                                <>
+                                  <Package className="h-3 w-3 mr-1" />
+                                  Complete
+                                </>
+                              )}
                             </Button>
                           )}
                         </div>
@@ -752,12 +1297,12 @@ export default function PrescriptionsPage() {
                         <span>•</span>
                         <span>{rx.patient.mrn}</span>
                         <span>•</span>
-                        <span>{rx.patient.age}y {rx.patient.gender}</span>
+                        <span>{rx.patient.age > 0 ? `${rx.patient.age}y` : 'Age unknown'} {rx.patient.gender}</span>
                         <span>•</span>
                         <span className="flex items-center gap-1"><Stethoscope className="h-3 w-3" />{rx.doctor}</span>
                         <span>•</span>
-                        <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{rx.waitTime}m wait</span>
-                        {rx.patient.allergies.length > 0 && (
+                        <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{rx.waitTime >= 60 ? `${Math.floor(rx.waitTime/60)}h ${rx.waitTime%60}m` : `${rx.waitTime}m`} wait</span>
+                        {((rx as any).patient_details?.allergies?.length > 0) && (
                           <span className="text-red-600 dark:text-red-400 flex items-center gap-1">
                             <AlertTriangle className="h-3 w-3" />Allergies
                           </span>
@@ -818,37 +1363,39 @@ export default function PrescriptionsPage() {
             
             {selectedPrescription && (
               <div className="overflow-y-auto max-h-[65vh] space-y-4">
-                {/* Status Badges */}
-                <div className="flex gap-2">
-                  <Badge variant="outline" className={getPriorityColor(selectedPrescription.priority)}>
-                    {selectedPrescription.priority}
-                  </Badge>
-                  <Badge variant="outline" className={getStatusColor(selectedPrescription.status)}>
-                    {selectedPrescription.status}
-                  </Badge>
+                {/* Status Badges and Update */}
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex gap-2">
+                    <Badge variant="outline" className={getPriorityColor(selectedPrescription.priority)}>
+                      {selectedPrescription.priority}
+                    </Badge>
+                    <Badge variant="outline" className={getStatusColor(selectedPrescription.status)}>
+                      {selectedPrescription.status.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                    </Badge>
+                  </div>
+
                 </div>
 
                 {/* Patient Info */}
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4 bg-muted/50 rounded-lg p-4 text-sm">
-                  <div><span className="text-muted-foreground">MRN:</span> <span className="font-medium">{selectedPrescription.patient.mrn}</span></div>
-                  <div><span className="text-muted-foreground">Age/Gender:</span> <span className="font-medium">{selectedPrescription.patient.age} / {selectedPrescription.patient.gender}</span></div>
-                  <div><span className="text-muted-foreground">Phone:</span> <span className="font-medium">{selectedPrescription.patient.phone}</span></div>
-                  <div><span className="text-muted-foreground">Doctor:</span> <span className="font-medium">{selectedPrescription.doctor}</span></div>
-                  <div><span className="text-muted-foreground">Clinic:</span> <span className="font-medium">{selectedPrescription.clinic}</span></div>
-                  <div><span className="text-muted-foreground">Location:</span> <span className="font-medium">{selectedPrescription.location}</span></div>
+                  <div><span className="text-muted-foreground">Patient ID:</span> <span className="font-medium">{(selectedPrescription as any).patient_details?.patient_id || selectedPrescription.patient}</span></div>
+                  <div><span className="text-muted-foreground">Age/Gender:</span> <span className="font-medium">{(selectedPrescription as any).patient_details?.age || 'Unknown'} / {(selectedPrescription as any).patient_details?.gender || 'Unknown'}</span></div>
+                  <div><span className="text-muted-foreground">Phone:</span> <span className="font-medium">{(selectedPrescription as any).patient_details?.phone || 'Not provided'}</span></div>
+                  <div><span className="text-muted-foreground">Doctor:</span> <span className="font-medium">{(selectedPrescription as any).doctor_name || selectedPrescription.doctor}</span></div>
+                  <div><span className="text-muted-foreground">Clinic:</span> <span className="font-medium">{(selectedPrescription as any).visit_details?.clinic || selectedPrescription.clinic || 'Not specified'}</span></div>
                   <div><span className="text-muted-foreground">Date:</span> <span className="font-medium">{selectedPrescription.date} {selectedPrescription.time}</span></div>
                   <div><span className="text-muted-foreground">Wait Time:</span> <span className="font-medium text-orange-600">{selectedPrescription.waitTime} min</span></div>
                 </div>
 
                 {/* Allergies */}
-                {selectedPrescription.patient.allergies.length > 0 && (
+                {selectedPrescription.patient_details?.allergies && selectedPrescription.patient_details.allergies.length > 0 && (
                   <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3">
                     <div className="flex items-center gap-2 text-red-700 dark:text-red-400 font-medium mb-1">
                       <AlertTriangle className="h-4 w-4" />
                       Allergies
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      {selectedPrescription.patient.allergies.map((allergy, i) => (
+                      {(selectedPrescription as any).patient_details?.allergies?.map((allergy: string, i: number) => (
                         <Badge key={i} className="bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-400">
                           {allergy}
                         </Badge>
@@ -885,26 +1432,37 @@ export default function PrescriptionsPage() {
                 <div>
                   <h4 className="font-semibold mb-3 flex items-center gap-2">
                     <Pill className="h-4 w-4 text-violet-500" />
-                    Medications ({selectedPrescription.medications.length})
+                    Medications ({selectedPrescriptionMedications.length})
                   </h4>
                   <div className="space-y-3">
-                    {selectedPrescription.medications.map((med) => (
-                      <div key={med.id} className="border rounded-lg p-4">
-                        <div className="flex items-start justify-between mb-2">
-                          <div>
-                            <h5 className="font-medium">{med.name}</h5>
-                            <p className="text-sm text-muted-foreground">{med.route} • {med.frequency} • {med.duration}</p>
-                          </div>
-                          <Badge variant="outline" className={getMedicationStatusColor(med.status)}>
-                            {med.status}
+                    {selectedPrescriptionMedications.map((med) => (
+                        <div key={med.id} className="border rounded-lg p-4">
+                          <div className="flex items-start justify-between mb-2">
+                            <div>
+                              <h5 className="font-medium flex items-center gap-2">
+                                {med.name || med.medication_name || 'Unknown Medication'}
+                                {med.substitution && <span className="text-amber-600 text-sm">🔄 Substituted</span>}
+                              </h5>
+                              <p className="text-sm text-muted-foreground">{med.route || 'Oral'} • {med.frequency || 'As needed'} • {med.duration || 'As prescribed'}</p>
+                              {med.substitution && (
+                                <p className="text-xs text-amber-700 mt-1">Originally: {med.originalMedication}</p>
+                              )}
+                            </div>
+                          <Badge variant="outline" className={getMedicationStatusColor(med.status || 'Unknown')}>
+                            {med.status || 'Unknown'}
                           </Badge>
                         </div>
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
-                          <div><span className="text-muted-foreground">Dosage:</span> <span className="font-medium">{med.dosage}</span></div>
-                          <div><span className="text-muted-foreground">Quantity:</span> <span className="font-medium">{med.quantity}</span></div>
-                          <div><span className="text-muted-foreground">Stock:</span> <span className={`font-medium ${med.stockLevel < 50 ? 'text-red-600' : 'text-green-600'}`}>{med.stockLevel}</span></div>
-                          <div><span className="text-muted-foreground">Instructions:</span> <span className="font-medium">{med.instructions}</span></div>
+                          <div><span className="text-muted-foreground">Dosage:</span> <span className="font-medium">{med.dosage || 'As prescribed'}</span></div>
+                          <div><span className="text-muted-foreground">Quantity:</span> <span className="font-medium">{med.quantity || 'N/A'}</span></div>
+                          <div><span className="text-muted-foreground">Dispensed:</span> <span className="font-medium text-blue-600">{med.dispensed_quantity || med.dispensed || 0}</span></div>
+                          <div><span className="text-muted-foreground">Remaining:</span> <span className={`font-medium ${(med.quantity - (med.dispensed_quantity || med.dispensed || 0)) <= 0 ? 'text-green-600' : 'text-orange-600'}`}>{Math.max(0, (med.quantity - (med.dispensed_quantity || med.dispensed || 0)))}</span></div>
                         </div>
+                        {(med.instructions || med.medication_details?.instructions) && (
+                          <div className="mt-2 text-sm">
+                            <span className="text-muted-foreground">Instructions:</span> <span className="font-medium">{med.instructions || med.medication_details?.instructions}</span>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -914,8 +1472,16 @@ export default function PrescriptionsPage() {
 
             <DialogFooter className="flex gap-2">
               <Button variant="outline" onClick={() => setShowViewModal(false)}>Close</Button>
+              <Button
+                variant="outline"
+                onClick={() => selectedPrescription && handlePrintPrescription(selectedPrescription, 'receipt')}
+                disabled={printing}
+              >
+                <Printer className="h-4 w-4 mr-2" />
+                {printing ? 'Printing...' : 'Print Receipt'}
+              </Button>
               {selectedPrescription && (selectedPrescription.status === 'Pending' || selectedPrescription.status === 'Processing' || selectedPrescription.status === 'Ready') && (
-                <Button 
+                <Button
                   className="bg-violet-600 hover:bg-violet-700"
                   onClick={() => {
                     setShowViewModal(false);
@@ -949,20 +1515,69 @@ export default function PrescriptionsPage() {
                 <div className="bg-muted/50 rounded-lg p-3 text-sm">
                   <div className="flex items-center justify-between">
                     <div>
-                      <span className="font-medium">{selectedPrescription.patient.name}</span>
-                      <span className="text-muted-foreground"> • {selectedPrescription.patient.mrn} • {selectedPrescription.patient.age}y {selectedPrescription.patient.gender}</span>
+                      <span className="font-medium">{selectedPrescription.patient_details?.name || 'Unknown Patient'}</span>
+                      <span className="text-muted-foreground"> • ID: {selectedPrescription.patient_details?.patient_id || 'N/A'} • {selectedPrescription.patient_details?.age || 'N/A'}y {selectedPrescription.patient_details?.gender || 'N/A'}</span>
                     </div>
                     <Badge variant="outline" className={getPriorityColor(selectedPrescription.priority)}>
                       {selectedPrescription.priority}
                     </Badge>
                   </div>
-                  {selectedPrescription.patient.allergies.length > 0 && (
-                    <div className="flex items-center gap-1 text-red-600 dark:text-red-400 mt-2 text-xs p-2 bg-red-50 dark:bg-red-900/20 rounded">
-                      <AlertTriangle className="h-4 w-4" />
-                      <span className="font-medium">ALLERGIES:</span> {selectedPrescription.patient.allergies.join(', ')}
-                    </div>
-                  )}
+                  {(() => {
+                    const allergies = selectedPrescription.patient_details?.allergies ||
+                                    selectedPrescription.patient?.allergies || [];
+                    return allergies.length > 0 ? (
+                      <div className="flex items-center gap-1 text-red-600 dark:text-red-400 mt-2 text-xs p-2 bg-red-50 dark:bg-red-900/20 rounded">
+                        <AlertTriangle className="h-4 w-4" />
+                        <span className="font-medium">ALLERGIES:</span> {allergies.join(', ')}
+                      </div>
+                    ) : null;
+                  })()}
                 </div>
+
+                {/* Prescription Details */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 bg-muted/30 rounded-lg p-4 text-sm">
+                  <div><span className="text-muted-foreground">Patient ID:</span> <span className="font-medium">{selectedPrescription.patient_details?.patient_id || 'N/A'}</span></div>
+                  <div><span className="text-muted-foreground">Doctor:</span> <span className="font-medium">{selectedPrescription.doctor_name || 'N/A'}</span></div>
+                  <div><span className="text-muted-foreground">Clinic:</span> <span className="font-medium">{selectedPrescription.visit_details?.clinic || 'Not specified'}</span></div>
+                  <div><span className="text-muted-foreground">Date:</span> <span className="font-medium">{selectedPrescription.prescribed_at ? new Date(selectedPrescription.prescribed_at).toLocaleDateString() : 'N/A'}</span></div>
+                </div>
+
+                {/* Dispensing History */}
+                {selectedPrescriptionMedications.some(med => (med.dispensed_quantity || med.dispensed || 0) > 0) && (
+                  <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+                    <div className="flex items-center gap-2 text-blue-700 dark:text-blue-400 font-medium mb-3">
+                      <Package className="h-4 w-4" />
+                      Dispensing History
+                    </div>
+                    <div className="space-y-2">
+                      {selectedPrescriptionMedications
+                        .filter(med => (med.dispensed_quantity || med.dispensed || 0) > 0)
+                        .map(med => {
+                          const dispensed = med.dispensed_quantity || med.dispensed || 0;
+                          const quantity = med.quantity || 0;
+                          const remaining = Math.max(0, quantity - dispensed);
+                          return (
+                            <div key={med.id} className="flex items-center justify-between p-2 bg-white dark:bg-gray-800 rounded border">
+                              <div>
+                                <span className="font-medium text-sm">{med.name || med.medication_name}</span>
+                                {med.substitution && (
+                                  <div className="text-xs text-amber-600 dark:text-amber-400">
+                                    🔄 Substituted from {med.originalMedication}
+                                  </div>
+                                )}
+                                <div className="text-xs text-muted-foreground">
+                                  Dispensed: {dispensed} • Remaining: {remaining}
+                                </div>
+                              </div>
+                              <Badge variant="outline" className="text-xs bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-400">
+                                {remaining > 0 ? 'Partial' : 'Complete'}
+                              </Badge>
+                            </div>
+                          );
+                        })}
+                    </div>
+                  </div>
+                )}
 
                 {/* Drug Interactions Alert */}
                 {detectedInteractions.length > 0 && (
@@ -1011,13 +1626,18 @@ export default function PrescriptionsPage() {
                 <div>
                   <h4 className="font-medium mb-3 flex items-center gap-2">
                     <Pill className="h-4 w-4 text-violet-500" />
-                    Medications ({selectedPrescription.medications.length})
+                    Medications ({selectedPrescription.medications.filter((med: any) => med.status === 'Available' || med.status === 'Low Stock' || med.status === 'Out of Stock' || med.status === 'Partially Dispensed').length})
                   </h4>
                   <div className="space-y-3">
-                    {selectedPrescription.medications.map((med) => {
+                    {selectedPrescription.medications
+                      .filter((med: any) => med.status === 'Available' || med.status === 'Low Stock' || med.status === 'Out of Stock' || med.status === 'Partially Dispensed')
+                      .map((med) => {
                       const isSelected = selectedMedications.includes(med.id);
-                      const isAvailable = med.status === 'Available' || med.status === 'Low Stock';
-                      const batches = medicationBatches[med.id] || [];
+                      const isAvailable = (med as any).status === 'Available' || (med as any).status === 'Low Stock' || (med as any).status === 'Partially Dispensed';
+                                      const batches = medicationBatches[med.id] || [];
+                                      if ((med as any).substitution) {
+                                        console.log(`🔄 Substituted med ${med.name}: ${batches.length} batches available`);
+                                      }
                       const hasSubstitute = false;
                       
                       return (
@@ -1036,6 +1656,11 @@ export default function PrescriptionsPage() {
                               <div className="flex items-center justify-between mb-2">
                                 <div>
                                   <h5 className="font-medium">{med.name}</h5>
+                                  {(med as any).substitution && (
+                                    <p className="text-xs text-amber-600 dark:text-amber-400">
+                                      🔄 Substituted from {(med as any).originalMedication}
+                                    </p>
+                                  )}
                                   <p className="text-xs text-muted-foreground">{med.route} • {med.frequency} • {med.duration}</p>
                                 </div>
                                 <div className="flex items-center gap-2">
@@ -1048,8 +1673,74 @@ export default function PrescriptionsPage() {
                                     className="h-7 text-xs border-amber-300 text-amber-700 hover:bg-amber-50"
                                     onClick={async () => {
                                       setSubstitutionMed(med);
+
+                                      // Load suggested substitutes
                                       const substitutes = await getSubstitutesForMedication(med.name);
                                       setAvailableSubstitutes(substitutes);
+
+                                      // Load all available medications for search
+                                      try {
+                                        const allMeds = await pharmacyService.getMedications({ page_size: 100 });
+
+                                        // Enhance medications with inventory data
+                                        const enhancedMeds: SubstituteOption[] = await Promise.all(
+                                          allMeds.results.map(async (med) => {
+                                            try {
+                                              // Get inventory data for stock levels
+                                              const inventory = await pharmacyService.getInventory({ medication: med.id.toString() });
+                                              const inventoryItem = inventory.results[0];
+
+                                              let stock = 0;
+                                              let expiryDate = '';
+                                              let daysToExpiry = 0;
+                                              let isNearExpiry = false;
+
+                                              if (inventoryItem) {
+                                                stock = inventoryItem.quantity;
+                                                // Calculate expiry data if available
+                                                if (inventoryItem.expiry_date) {
+                                                  expiryDate = new Date(inventoryItem.expiry_date).toLocaleDateString();
+                                                  const today = new Date();
+                                                  const expiry = new Date(inventoryItem.expiry_date);
+                                                  daysToExpiry = Math.ceil((expiry.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+                                                  isNearExpiry = daysToExpiry <= 90; // Consider near expiry if <= 90 days
+                                                }
+                                              }
+
+                                              return {
+                                                id: med.id.toString(),
+                                                name: med.name,
+                                                strength: med.strength || '',
+                                                type: med.generic_name ? 'generic' : 'brand',
+                                                stock,
+                                                expiryDate,
+                                                daysToExpiry,
+                                                unitPrice: 0, // Not available from basic medication API
+                                                isNearExpiry,
+                                              };
+                                            } catch (err) {
+                                              console.warn(`Error enhancing medication ${med.name}:`, err);
+                                              return {
+                                                id: med.id.toString(),
+                                                name: med.name,
+                                                strength: med.strength || '',
+                                                type: med.generic_name ? 'generic' : 'brand',
+                                                stock: 0,
+                                                expiryDate: '',
+                                                daysToExpiry: 0,
+                                                unitPrice: 0,
+                                                isNearExpiry: false,
+                                              };
+                                            }
+                                          })
+                                        );
+
+                                        setAllAvailableMedications(enhancedMeds);
+                                      } catch (error) {
+                                        console.error('Failed to load medications:', error);
+                                        setAllAvailableMedications([]);
+                                      }
+
                                       setSubstitutionForm({ reason: '', selectedSubstitute: '', notes: '' });
                                       setSubstituteSearchQuery('');
                                       setShowSubstitutionModal(true);
@@ -1067,18 +1758,36 @@ export default function PrescriptionsPage() {
                                     {/* Quantity */}
                                     <div>
                                       <Label className="text-xs">Quantity to Dispense</Label>
-                                      <Input
-                                        type="number"
-                                        min="1"
-                                        max={med.quantity}
-                                        value={dispenseQuantities[med.id] || med.quantity}
-                                        onChange={(e) => setDispenseQuantities(prev => ({
-                                          ...prev,
-                                          [med.id]: Math.min(parseInt(e.target.value) || 0, med.quantity)
-                                        }))}
-                                        className="h-8 mt-1"
-                                      />
-                                      <p className="text-[10px] text-muted-foreground mt-1">Prescribed: {med.quantity}</p>
+                                      {(med as any).remaining_quantity <= 0 ? (
+                                        <div className="h-8 mt-1 flex items-center px-3 bg-muted text-muted-foreground text-sm rounded">
+                                          Fully dispensed
+                                        </div>
+                                      ) : (
+                                        <Input
+                                          type="number"
+                                          min="0"
+                                          max={Math.min((med as any).remaining_quantity, med.stockLevel > 0 ? med.stockLevel : (med as any).remaining_quantity)}
+                                          value={dispenseQuantities[med.id] || Math.max(0, (med as any).remaining_quantity)}
+                                          onChange={(e) => {
+                                            const inputValue = Math.max(0, parseInt(e.target.value) || 0);
+                                            const maxAllowed = Math.min((med as any).remaining_quantity, med.stockLevel > 0 ? med.stockLevel : (med as any).remaining_quantity);
+                                            setDispenseQuantities(prev => ({
+                                              ...prev,
+                                              [med.id]: Math.min(inputValue, maxAllowed)
+                                            }));
+                                          }}
+                                          className="h-8 mt-1"
+                                        />
+                                      )}
+                                      <div className="text-[10px] text-muted-foreground mt-1 space-y-1">
+                                        <div>Prescribed: {med.quantity} • Available: {med.stockLevel > 0 ? med.stockLevel : 'Unknown'}</div>
+                                        {(med as any).dispensed_quantity > 0 && (
+                                        <div className={(med as any).remaining_quantity < 0 ? "text-red-600 dark:text-red-400" : "text-blue-600 dark:text-blue-400"}>
+                                          Already dispensed: {(med as any).dispensed_quantity} • Remaining: {Math.max(0, (med as any).remaining_quantity)}
+                                          {(med as any).remaining_quantity < 0 && " (Over-dispensed)"}
+                                          </div>
+                                        )}
+                                      </div>
                                     </div>
                                     
                                     {/* Batch Selection */}
@@ -1102,7 +1811,7 @@ export default function PrescriptionsPage() {
                                               </SelectItem>
                                             ))
                                           ) : (
-                                            <SelectItem value="" disabled>No batches available</SelectItem>
+                                            <SelectItem value="no-batches" disabled>No batches available</SelectItem>
                                           )}
                                         </SelectContent>
                                       </Select>
@@ -1137,35 +1846,6 @@ export default function PrescriptionsPage() {
                   </div>
                 </div>
 
-                <Separator />
-
-                {/* Patient Counseling Checklist */}
-                <div>
-                  <h4 className="font-medium mb-3 flex items-center gap-2">
-                    <FileText className="h-4 w-4 text-emerald-500" />
-                    Patient Counseling Checklist
-                  </h4>
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                    {[
-                      { key: 'dosageExplained', label: 'Dosage & frequency explained' },
-                      { key: 'sideEffectsDiscussed', label: 'Side effects discussed' },
-                      { key: 'storageInstructions', label: 'Storage instructions given' },
-                      { key: 'interactionsWarned', label: 'Drug interactions warned' },
-                      { key: 'followUpAdvised', label: 'Follow-up advised' },
-                    ].map(item => (
-                      <label key={item.key} className="flex items-center gap-2 p-2 rounded border hover:bg-muted/50 cursor-pointer">
-                        <Checkbox
-                          checked={counselingChecklist[item.key as keyof typeof counselingChecklist]}
-                          onCheckedChange={(checked) => setCounselingChecklist(prev => ({
-                            ...prev,
-                            [item.key]: checked as boolean
-                          }))}
-                        />
-                        <span className="text-xs">{item.label}</span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
 
                 {/* Dispense Notes */}
                 <div>
@@ -1183,9 +1863,14 @@ export default function PrescriptionsPage() {
 
             <DialogFooter className="flex flex-col sm:flex-row gap-2">
               <Button variant="outline" onClick={() => setShowDispenseModal(false)}>Cancel</Button>
-              <Button variant="outline" className="gap-2">
+              <Button
+                variant="outline"
+                className="gap-2"
+                onClick={() => selectedPrescription && handlePrintPrescription(selectedPrescription, 'label')}
+                disabled={printing}
+              >
                 <Printer className="h-4 w-4" />
-                Print Label
+                {printing ? 'Printing...' : 'Print Label'}
               </Button>
               <Button 
                 onClick={handleDispense}
@@ -1253,84 +1938,132 @@ export default function PrescriptionsPage() {
 
                 {/* Search for Substitute */}
                 <div>
-                  <Label className="text-sm">Search & Select Substitute *</Label>
+                  <Label className="text-sm">Search & Select Any Substitute Medication *</Label>
                   <div className="relative mt-1">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <Input
                       value={substituteSearchQuery}
                       onChange={(e) => setSubstituteSearchQuery(e.target.value)}
-                      placeholder="Search medications..."
+                      placeholder="Search any medication in the system..."
                       className="pl-10"
                     />
                   </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Search for any medication in the system or select from suggested substitutes below
+                  </p>
                 </div>
 
                 {/* Available Substitutes */}
                 <div className="space-y-2 max-h-[180px] overflow-y-auto border rounded-lg p-2">
-                  {availableSubstitutes.length > 0 ? (
-                    availableSubstitutes
-                      .filter(sub => 
-                        substituteSearchQuery === '' || 
-                        sub.name.toLowerCase().includes(substituteSearchQuery.toLowerCase())
-                      )
-                      .sort((a, b) => {
-                        if (substitutionForm.reason === 'near_expiry') {
-                          return a.daysToExpiry - b.daysToExpiry;
-                        }
-                        return b.stock - a.stock;
-                      })
-                      .map((sub) => (
-                        <div
-                          key={sub.id}
-                          onClick={() => setSubstitutionForm({ ...substitutionForm, selectedSubstitute: sub.id })}
-                          className={`p-2.5 rounded-lg border cursor-pointer transition-all ${
-                            substitutionForm.selectedSubstitute === sub.id 
-                              ? 'border-amber-500 bg-amber-50 dark:bg-amber-900/20' 
-                              : 'border-transparent hover:border-amber-300 hover:bg-muted/50'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="font-medium text-sm">{sub.name}</span>
-                              <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${
-                                sub.type === 'generic' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' :
-                                sub.type === 'brand' ? 'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400' :
-                                'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
-                              }`}>
-                                {sub.type}
-                              </Badge>
-                              {sub.isNearExpiry && (
-                                <Badge className="text-[10px] px-1.5 py-0 bg-amber-500 text-white">
-                                  Near Expiry
+                  {(() => {
+                    // If searching, show search results from all medications
+                    if (substituteSearchQuery.trim()) {
+                      const searchResults = allAvailableMedications
+                        .filter(med =>
+                          med.name.toLowerCase().includes(substituteSearchQuery.toLowerCase())
+                        )
+                        .slice(0, 10); // Limit to 10 results for performance
+
+                      return searchResults.length > 0 ? (
+                        searchResults
+                          .sort((a, b) => b.stock - a.stock)
+                          .map(sub => (
+                            <div
+                              key={sub.id}
+                              onClick={() => setSubstitutionForm({ ...substitutionForm, selectedSubstitute: sub.id })}
+                              className={`p-2.5 rounded-lg border cursor-pointer transition-all ${
+                                substitutionForm.selectedSubstitute === sub.id
+                                  ? 'border-amber-500 bg-amber-50 dark:bg-amber-900/20'
+                                  : 'border-transparent hover:border-amber-300 hover:bg-muted/50'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="font-medium text-sm">{sub.name}</span>
+                                  <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${
+                                    sub.type === 'generic' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' :
+                                    sub.type === 'brand' ? 'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400' :
+                                    'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
+                                  }`}>
+                                    {sub.type}
+                                  </Badge>
+                                  {sub.isNearExpiry && (
+                                    <Badge className="text-[10px] px-1.5 py-0 bg-amber-500 text-white">
+                                      Near Expiry
+                                    </Badge>
+                                  )}
+                                </div>
+                                {substitutionForm.selectedSubstitute === sub.id && (
+                                  <CheckCircle2 className="h-4 w-4 text-amber-500 flex-shrink-0" />
+                                )}
+                              </div>
+                              <div className="flex items-center gap-3 text-xs text-muted-foreground mt-1">
+                                <span>Stock: <strong className={sub.stock < 50 ? 'text-red-600' : 'text-emerald-600'}>{sub.stock}</strong></span>
+                                <span>Exp: <strong className={sub.isNearExpiry ? 'text-amber-600' : ''}>{sub.expiryDate}</strong></span>
+                              </div>
+                            </div>
+                          ))
+                      ) : (
+                        <div className="p-4 text-center text-muted-foreground">
+                          <Search className="h-6 w-6 mx-auto mb-1" />
+                          <p className="text-sm">No medications found for "{substituteSearchQuery}"</p>
+                        </div>
+                      );
+                    }
+
+                    // If no search query, show suggested substitutes
+                    return availableSubstitutes.length > 0 ? (
+                      availableSubstitutes
+                        .sort((a, b) => {
+                          if (substitutionForm.reason === 'near_expiry') {
+                            return a.daysToExpiry - b.daysToExpiry;
+                          }
+                          return b.stock - a.stock;
+                        })
+                        .map(sub => (
+                          <div
+                            key={sub.id}
+                            onClick={() => setSubstitutionForm({ ...substitutionForm, selectedSubstitute: sub.id })}
+                            className={`p-2.5 rounded-lg border cursor-pointer transition-all ${
+                              substitutionForm.selectedSubstitute === sub.id
+                                ? 'border-amber-500 bg-amber-50 dark:bg-amber-900/20'
+                                : 'border-transparent hover:border-amber-300 hover:bg-muted/50'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-medium text-sm">{sub.name}</span>
+                                <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${
+                                  sub.type === 'generic' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' :
+                                  sub.type === 'brand' ? 'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400' :
+                                  'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
+                                }`}>
+                                  {sub.type}
                                 </Badge>
+                                {sub.isNearExpiry && (
+                                  <Badge className="text-[10px] px-1.5 py-0 bg-amber-500 text-white">
+                                    Near Expiry
+                                  </Badge>
+                                )}
+                              </div>
+                              {substitutionForm.selectedSubstitute === sub.id && (
+                                <CheckCircle2 className="h-4 w-4 text-amber-500 flex-shrink-0" />
                               )}
                             </div>
-                            {substitutionForm.selectedSubstitute === sub.id && (
-                              <CheckCircle2 className="h-4 w-4 text-amber-500 flex-shrink-0" />
-                            )}
+                            <div className="flex items-center gap-3 text-xs text-muted-foreground mt-1">
+                              <span>Stock: <strong className={sub.stock < 50 ? 'text-red-600' : 'text-emerald-600'}>{sub.stock}</strong></span>
+                              <span>Exp: <strong className={sub.isNearExpiry ? 'text-amber-600' : ''}>{sub.expiryDate}</strong></span>
+                            </div>
                           </div>
-                          <div className="flex items-center gap-3 text-xs text-muted-foreground mt-1">
-                            <span>Stock: <strong className={sub.stock < 50 ? 'text-red-600' : 'text-emerald-600'}>{sub.stock}</strong></span>
-                            <span>Exp: <strong className={sub.isNearExpiry ? 'text-amber-600' : ''}>{sub.expiryDate}</strong></span>
-                          </div>
-                        </div>
-                      ))
-                  ) : (
-                    <div className="p-4 text-center text-muted-foreground">
-                      <Package className="h-6 w-6 mx-auto mb-1" />
-                      <p className="text-sm">No substitutes available</p>
-                    </div>
-                  )}
-                  {availableSubstitutes.length > 0 && 
-                   availableSubstitutes.filter(sub => 
-                     substituteSearchQuery === '' || 
-                     sub.name.toLowerCase().includes(substituteSearchQuery.toLowerCase())
-                   ).length === 0 && (
-                    <div className="p-4 text-center text-muted-foreground">
-                      <Search className="h-6 w-6 mx-auto mb-1" />
-                      <p className="text-sm">No matches found for "{substituteSearchQuery}"</p>
-                    </div>
-                  )}
+                        ))
+                    ) : (
+                      <div className="p-4 text-center text-muted-foreground">
+                        <Package className="h-6 w-6 mx-auto mb-1" />
+                        <p className="text-sm">No suggested substitutes available</p>
+                        <p className="text-xs mt-1">Try searching for any medication above</p>
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 {/* Notes */}
@@ -1350,7 +2083,7 @@ export default function PrescriptionsPage() {
                     <div className="flex items-center gap-2 text-sm">
                       <CheckCircle2 className="h-4 w-4 text-emerald-600" />
                       <span className="text-emerald-700 dark:text-emerald-400">
-                        <strong>{substitutionMed.name}</strong> → <strong>{availableSubstitutes.find(s => s.id === substitutionForm.selectedSubstitute)?.name}</strong>
+                        <strong>{substitutionMed.name}</strong> → <strong>{(availableSubstitutes.find(s => s.id === substitutionForm.selectedSubstitute) || allAvailableMedications.find(s => s.id === substitutionForm.selectedSubstitute))?.name}</strong>
                       </span>
                     </div>
                     <p className="text-xs text-emerald-600 dark:text-emerald-500 mt-1">
@@ -1366,11 +2099,139 @@ export default function PrescriptionsPage() {
               <Button 
                 className="bg-amber-500 hover:bg-amber-600"
                 disabled={!substitutionForm.reason || !substitutionForm.selectedSubstitute}
-                onClick={() => {
-                  const selectedSub = availableSubstitutes.find(s => s.id === substitutionForm.selectedSubstitute);
-                  if (selectedSub) {
-                    toast.success(`Substituted ${substitutionMed?.name} with ${selectedSub.name}`);
-                    setShowSubstitutionModal(false);
+                onClick={async () => {
+                  if (!selectedPrescription) return;
+
+                  // Check both availableSubstitutes (suggested) and allAvailableMedications (searched)
+                  const selectedSub = availableSubstitutes.find(s => s.id === substitutionForm.selectedSubstitute) ||
+                                    allAvailableMedications.find(s => s.id === substitutionForm.selectedSubstitute);
+                  if (selectedSub && substitutionMed) {
+                    try {
+                      // Call API to persist the substitution
+                      console.log('🔄 Calling substitution API with:', {
+                        prescriptionId: selectedPrescription.id,
+                        itemId: substitutionMed.id,
+                        newMedicationId: selectedSub.id,
+                        reason: substitutionForm.reason,
+                        notes: substitutionForm.notes
+                      });
+
+                      console.log('📡 Making substitution API call with data:', {
+                        prescriptionId: selectedPrescription.id,
+                        itemId: substitutionMed.id,
+                        newMedicationId: selectedSub.id,
+                        reason: substitutionForm.reason,
+                        notes: substitutionForm.notes
+                      });
+
+                      console.log('🔍 Current prescription medications:', selectedPrescription.medications?.map(m => `${m.name || (m as any).medication_name} (ID: ${m.id})`));
+                      console.log('🎯 Substituting item:', substitutionMed.name, 'with ID:', substitutionMed.id);
+                      console.log('🔄 New medication:', selectedSub.name, 'with ID:', selectedSub.id);
+
+                      const updatedPrescription = await pharmacyService.substitutePrescriptionItem(
+                        selectedPrescription.id,
+                        substitutionMed.id, // prescription item ID
+                        selectedSub.id, // new medication ID
+                        substitutionForm.reason,
+                        substitutionForm.notes
+                      );
+
+                      console.log('✅ Substitution API SUCCESS:', updatedPrescription);
+                      console.log('📋 Response medications:', updatedPrescription.medications?.map((m: any) => `${m.name || m.medication_name} (ID: ${m.id})`));
+                      console.log('🔍 Full response structure:', Object.keys(updatedPrescription));
+
+                        if (!updatedPrescription.medications?.some((m: any) => (m.name || m.medication_name)?.includes(selectedSub.name))) {
+                          console.warn('⚠️ WARNING: Response does not contain substituted medication!');
+                          console.error(`Expected ${selectedSub.name} but got:`, updatedPrescription.medications?.map((m: any) => m.name || m.medication_name));
+                        } else {
+                          console.log(`✅ Substitution confirmed: ${selectedSub.name} found in response`);
+                        }
+
+                      // Test: Fetch the prescription again to verify persistence
+                      setTimeout(async () => {
+                        try {
+                          const verifyPrescription = await pharmacyService.getPrescription(updatedPrescription.id);
+                          console.log('🔍 Verification fetch - medications:', verifyPrescription.medications?.map((m: any) => `${m.name || m.medication_name} (${m.id})`));
+                            if (!verifyPrescription.medications?.some((m: any) => (m.name || m.medication_name)?.includes(selectedSub.name))) {
+                              console.error('❌ VERIFICATION FAILED: Substitution did not persist to database!');
+                            } else {
+                              console.log('✅ VERIFICATION SUCCESS: Substitution persisted correctly');
+                            }
+                        } catch (verifyError) {
+                          console.error('❌ Verification fetch failed:', verifyError);
+                        }
+                      }, 1000);
+
+                      // Update local state with the API response
+                      setSelectedPrescription(updatedPrescription as any);
+
+                      // Close the substitution modal first
+                      setShowSubstitutionModal(false);
+
+                      // Reload prescriptions list to reflect substitution in the UI
+                      console.log('Reloading prescriptions list after substitution...');
+                      await loadPrescriptions();
+                      console.log('Prescriptions list reloaded with substitution changes');
+
+                      // If prescription details modal is open, refresh it with updated data
+                      if (showViewModal && selectedPrescription?.id === String(updatedPrescription.id)) {
+                        console.log('Refreshing prescription details modal with updated data');
+                        setSelectedPrescription(updatedPrescription as any);
+                      }
+
+                      // Medication IDs stay the same for backend compatibility
+                      // Just reload batches for the substituted medication using the same prescription item ID
+                      try {
+                        const medicationId = selectedSub.id; // The actual medication ID from database
+                        console.log(`Loading fresh batches for substituted medication: ${selectedSub.name} (ID: ${medicationId})`);
+                        const inventory = await pharmacyService.getInventory({ medication: medicationId.toString() });
+                        console.log(`Inventory for substituted medication ${selectedSub.name}:`, inventory);
+
+                        const batches = inventory.results.map((item: any) => ({
+                          id: item.id.toString(),
+                          batchNumber: item.batch_number,
+                          quantity: Number(item.quantity),
+                          expiryDate: item.expiry_date,
+                          receivedDate: (item as any).created_at?.split('T')[0] || '',
+                          supplier: item.supplier || '',
+                          unitCost: Number((item as any).purchase_price) || 0,
+                        }));
+
+                        // Use the SAME prescription item ID as key (don't change it!)
+                        setMedicationBatches(prev => ({
+                          ...prev,
+                          [substitutionMed.id]: batches
+                        }));
+
+                        // Update selected batch if available
+                        if (batches.length > 0) {
+                          setSelectedBatches(prev => ({
+                            ...prev,
+                            [substitutionMed.id]: batches[0].id
+                          }));
+                        }
+
+                        console.log(`✅ Loaded ${batches.length} fresh batches for substituted medication ${selectedSub.name}`);
+                      } catch (batchError) {
+                        console.error(`❌ Failed to load batches for substituted medication ${selectedSub.name}:`, batchError);
+                        // If batch loading fails, set empty batches
+                        setMedicationBatches(prev => ({
+                          ...prev,
+                          [substitutionMed.id]: []
+                        }));
+                      }
+
+                      toast.success(`Successfully substituted ${substitutionMed.name} with ${selectedSub.name}`);
+                      setShowSubstitutionModal(false);
+
+                      // Reset form
+                      setSubstitutionForm({ reason: '', selectedSubstitute: '', notes: '' });
+                      setSubstituteSearchQuery('');
+
+                    } catch (error) {
+                      console.error('❌ Substitution failed:', error);
+                      toast.error(`Failed to substitute medication: ${(error as any).message || 'Unknown error'}`);
+                    }
                   }
                 }}
               >
@@ -1380,6 +2241,42 @@ export default function PrescriptionsPage() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        {/* Dispense Confirmation Dialog */}
+        <AlertDialog open={showDispenseConfirmDialog} onOpenChange={setShowDispenseConfirmDialog}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Confirm Medication Dispensing</AlertDialogTitle>
+              <AlertDialogDescription>
+                Are you sure you want to dispense the following medications? This action cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+
+            <div className="my-4">
+              <div className="space-y-2">
+                {pendingDispenseData?.medications.map((med, index) => (
+                  <div key={index} className="flex items-center justify-between p-3 bg-muted rounded-lg">
+                    <span className="font-medium">{med.name}</span>
+                    <Badge variant="outline">
+                      {med.quantity} {med.unit}
+                    </Badge>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={pendingDispenseData?.onConfirm}
+                className="bg-red-600 hover:bg-red-700"
+              >
+                <Package className="h-4 w-4 mr-2" />
+                Dispense Medications
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </DashboardLayout>
   );

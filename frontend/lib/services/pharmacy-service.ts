@@ -8,9 +8,14 @@ export interface Prescription {
   prescription_id: string;
   patient: number;
   patient_name?: string;
+  patient_details?: any; // Additional patient information (optional)
   doctor?: number;
   doctor_name?: string;
   visit?: number;
+  clinic?: string;
+  location?: string;
+  date?: string;
+  time?: string;
   status: 'pending' | 'dispensing' | 'partially_dispensed' | 'dispensed' | 'cancelled';
   diagnosis?: string;
   notes?: string;
@@ -25,13 +30,19 @@ export interface PrescriptionItem {
   medication: number;
   medication_name?: string;
   quantity: number;
-  unit: string;
+  unit?: string; // Made optional since transformMedications might not provide it
   dosage?: string;
   frequency?: string;
   duration?: string;
   instructions?: string;
   dispensed_quantity: number;
   is_dispensed: boolean;
+  // Frontend-calculated properties
+  remaining_quantity?: number;
+  substitution?: any;
+  originalMedication?: any;
+  stockLevel?: number;
+  medication_details?: any;
 }
 
 export interface Medication {
@@ -85,6 +96,7 @@ class PharmacyService {
     search?: string;
     page?: number;
     page_size?: number;
+    consultation_session?: number;
   }): Promise<{ results: Prescription[]; count: number }> {
     const query = buildQueryString(params || {});
     return apiFetch<{ results: Prescription[]; count: number }>(`/pharmacy/prescriptions/${query}`);
@@ -107,6 +119,17 @@ class PharmacyService {
     });
   }
 
+  async updatePrescription(prescriptionId: number, data: Partial<Prescription>): Promise<Prescription> {
+    return apiFetch<Prescription>(`/pharmacy/prescriptions/${prescriptionId}/`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updatePrescriptionStatus(prescriptionId: number, status: Prescription['status'], notes?: string): Promise<Prescription> {
+    return this.updatePrescription(prescriptionId, { status, notes });
+  }
+
   /**
    * Dispense medication from a prescription
    */
@@ -125,6 +148,36 @@ class PharmacyService {
         inventory_id: inventoryId,
         notes: notes || '',
       }),
+    });
+  }
+
+  async substitutePrescriptionItem(
+    prescriptionId: string | number,
+    itemId: string | number,
+    newMedicationId: string | number,
+    reason: string,
+    notes: string
+  ): Promise<Prescription> {
+    return apiFetch<Prescription>(`/pharmacy/prescriptions/${prescriptionId}/substitute-item/`, {
+      method: 'POST',
+      body: JSON.stringify({
+        item_id: itemId,
+        new_medication_id: newMedicationId,
+        reason: reason,
+        notes: notes
+      })
+    });
+  }
+
+  async markPrescriptionAsCompleted(prescriptionId: string | number): Promise<Prescription> {
+    return apiFetch<Prescription>(`/pharmacy/prescriptions/${prescriptionId}/complete_dispensing/`, {
+      method: 'POST'
+    });
+  }
+
+  async recalculatePrescriptionStatus(prescriptionId: string | number): Promise<Prescription> {
+    return apiFetch<Prescription>(`/pharmacy/prescriptions/${prescriptionId}/recalculate_status/`, {
+      method: 'POST'
     });
   }
 
@@ -162,12 +215,8 @@ class PharmacyService {
     page_size?: number;
   }): Promise<{ results: MedicationInventory[]; count: number }> {
     const query = buildQueryString(params || {});
-    // Try medication-inventory first, fallback to inventory
-    try {
-      return await apiFetch<{ results: MedicationInventory[]; count: number }>(`/pharmacy/medication-inventory/${query}`);
-    } catch {
-      return await apiFetch<{ results: MedicationInventory[]; count: number }>(`/pharmacy/inventory/${query}`);
-    }
+    // Use the correct inventory endpoint
+    return await apiFetch<{ results: MedicationInventory[]; count: number }>(`/pharmacy/inventory/${query}`);
   }
 
   /**

@@ -17,9 +17,9 @@ import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { apiFetch } from '@/lib/api-client';
 import { getPriorityFromVisitType } from '@/lib/utils/priority';
-import { 
-  Users, Search, Stethoscope, UserCheck, ArrowRight, Clock, AlertTriangle, 
-  RefreshCw, Eye, Edit, CheckCircle2, Calendar, Activity, Thermometer, 
+import {
+  Users, Search, Stethoscope, UserCheck, ArrowRight, Clock, AlertTriangle,
+  Eye, Edit, CheckCircle2, Calendar, Activity, Thermometer,
   Heart, Wind, Droplets, Scale, Loader2, Save, X
 } from 'lucide-react';
 import { getAllClinicsWithAll } from '@/lib/constants/clinics';
@@ -85,7 +85,7 @@ const emptyVitals: VitalsData = {
 };
 
 export default function NursingPoolQueuePage() {
-  const [patients, setPatients] = useState<Patient[]>([]);
+  const [patients, setPatients] = useState<NursingPatient[]>([]);
   const [rooms, setRooms] = useState<ConsultationRoom[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -96,7 +96,6 @@ export default function NursingPoolQueuePage() {
   const [dateFilter, setDateFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState('all');
   const [clinicFilter, setClinicFilter] = useState('all');
-  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Load visits and rooms from API
   useEffect(() => {
@@ -139,9 +138,18 @@ export default function NursingPoolQueuePage() {
         });
         const vitalsResults = await Promise.all(vitalsPromises);
         const vitalsMap = new Map(vitalsResults.map(r => [r.visitId, r.vitals]));
+
+        // Fetch consultation queue to check which patients have been sent to rooms
+        let queueMap = new Map();
+        try {
+          const queueResult = await apiFetch<{ results: any[] }>(`/consultation/queue/?is_active=true&page_size=1000`);
+          queueMap = new Map(queueResult.results.map((item: any) => [item.patient, true]));
+        } catch (err) {
+          console.error('Error fetching consultation queue:', err);
+        }
         
-        // Transform visits to Patient format
-        const transformedPatients: Patient[] = result.results.map((visit: Visit) => {
+        // Transform visits to NursingPatient format
+        const transformedPatients: NursingPatient[] = result.results.map((visit: Visit) => {
           // Calculate wait time (minutes since visit was created)
           const visitDateTime = new Date(`${visit.date}T${visit.time}`);
           const waitTime = Math.floor((Date.now() - visitDateTime.getTime()) / (1000 * 60));
@@ -149,10 +157,18 @@ export default function NursingPoolQueuePage() {
           // Get vitals for this visit
           const vitalsData = vitalsMap.get(visit.id);
           
+          // Check if patient has been sent to consultation room
+          const patientNumericId = visit.patient;
+          const isInConsultationQueue = queueMap.get(patientNumericId);
+
           // Determine nursing status based on visit data and vitals
           let nursingStatus: 'Pending' | 'Vitals Recorded' | 'Ready for Consultation' | 'Sent to Room' = 'Pending';
-          if (vitalsData) {
-            nursingStatus = 'Ready for Consultation';
+          if (isInConsultationQueue) {
+            nursingStatus = 'Sent to Room';
+          } else if (vitalsData) {
+            // Check if vitals are complete (have essential measurements)
+            const hasCompleteVitals = vitalsData.temperature && vitalsData.blood_pressure_systolic && vitalsData.heart_rate;
+            nursingStatus = hasCompleteVitals ? 'Ready for Consultation' : 'Vitals Recorded';
           }
           
           // Transform vitals data to frontend format
@@ -175,19 +191,19 @@ export default function NursingPoolQueuePage() {
           return {
             id: String(visit.id),
             name: visit.patient_name || `Patient ${visit.patient}`,
-            patientId: visit.visit_id || String(visit.id),
-            personalNumber: '', // Will be filled from patient data if needed
-            clinic: visit.clinic || 'General',
+            patientId: String(visit.patient), // Patient ID string
+            visitId: visit.visit_id || String(visit.id), // Visit ID string (VIS-...)
+            personalNumber: '', // Not used for search, keep empty
+            clinic: visit.clinic || 'GOPD',
             visitDate: visit.date,
             visitTime: visit.time,
-            visitType: visit.visit_type === 'emergency' ? 'Emergency' :
-                      visit.visit_type === 'consultation' ? 'Consultation' :
-                      visit.visit_type === 'follow_up' ? 'Follow-up' : 'Consultation',
+            visitType: visit.visit_type || 'consultation', // Keep lowercase for filtering
             nursingStatus,
             vitals,
             waitTime: waitTime > 0 ? waitTime : 0,
             patientNumericId: visit.patient, // Store the actual patient ID from backend
             visitNumericId: visit.id, // Store the actual visit ID from backend
+            visitNotes: visit.clinical_notes, // Clinical notes from the visit
           };
         });
         
@@ -211,7 +227,28 @@ export default function NursingPoolQueuePage() {
   const [isVitalsDialogOpen, setIsVitalsDialogOpen] = useState(false);
   const [isViewVitalsDialogOpen, setIsViewVitalsDialogOpen] = useState(false);
   const [isRoomPickerOpen, setIsRoomPickerOpen] = useState(false);
-  const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
+  // Custom interface for nursing patient objects (different from Patient interface)
+  interface NursingPatient {
+    id: string;
+    name: string;
+    patientId: string;
+    visitId: string;
+    personalNumber: string;
+    clinic: string;
+    visitDate: string;
+    visitTime: string;
+    visitType: string;
+    nursingStatus: 'Pending' | 'Vitals Recorded' | 'Ready for Consultation' | 'Sent to Room';
+    vitals?: any;
+    waitTime: number;
+    patientNumericId: number;
+    visitNumericId: number;
+    visitNotes?: string;
+    age?: number;
+    gender?: string;
+  }
+
+  const [selectedPatient, setSelectedPatient] = useState<NursingPatient | null>(null);
   const [vitalsForm, setVitalsForm] = useState<VitalsData>(emptyVitals);
   const [isSubmitting, setIsSubmitting] = useState(false);
   
@@ -246,9 +283,10 @@ export default function NursingPoolQueuePage() {
   // Filter patients
   const filteredPatients = patients.filter(p => {
     const searchLower = searchQuery.toLowerCase();
-    const matchesSearch = !searchQuery || 
-                         p.name.toLowerCase().includes(searchLower) || 
+    const matchesSearch = !searchQuery ||
+                         p.name.toLowerCase().includes(searchLower) ||
                          p.patientId.toLowerCase().includes(searchLower) ||
+                         (p.visitId && p.visitId.toLowerCase().includes(searchLower)) ||
                          (p.personalNumber && p.personalNumber.toLowerCase().includes(searchLower));
     const matchesStatus = statusFilter === 'all' || p.nursingStatus.toLowerCase().replace(' ', '-') === statusFilter;
     const matchesType = typeFilter === 'all' || p.visitType.toLowerCase() === typeFilter.toLowerCase();
@@ -273,9 +311,8 @@ export default function NursingPoolQueuePage() {
       }
     }
     
-    // Don't show patients already sent to rooms
-    const notSentToRoom = p.nursingStatus !== 'Sent to Room';
-    return matchesSearch && matchesStatus && matchesType && matchesClinic && notSentToRoom;
+    // Show all patients that have been to nursing (like Manage Visits)
+    return matchesSearch && matchesStatus && matchesType && matchesClinic;
   });
 
   // Sort by visit type (Emergency first) then by wait time
@@ -297,116 +334,27 @@ export default function NursingPoolQueuePage() {
     setCurrentPage(1);
   }, [searchQuery, statusFilter, dateFilter, typeFilter, clinicFilter]);
 
-  // Stats
+  // Stats - Show all patients that have been to nursing
   const stats = {
-    totalInPool: patients.filter(p => p.nursingStatus !== 'Sent to Room').length,
+    totalInPool: patients.length, // All patients that went through nursing
     pendingVitals: patients.filter(p => p.nursingStatus === 'Pending').length,
     readyForConsultation: patients.filter(p => p.nursingStatus === 'Ready for Consultation').length,
     sentToRooms: patients.filter(p => p.nursingStatus === 'Sent to Room').length,
   };
 
-  const handleRefresh = async () => {
-    setIsRefreshing(true);
-    try {
-      // Reload rooms
-      const roomsResult = await roomService.getRooms({ page_size: 1000 });
-      const transformedRooms: ConsultationRoom[] = roomsResult.results.map((room: any) => ({
-        id: String(room.id),
-        name: room.name,
-        status: room.status?.toLowerCase() === 'active' ? 'available' as const : 'occupied' as const,
-        doctor: room.assigned_doctor || undefined,
-        specialty: room.specialty || '',
-        queueCount: 0,
-        currentPatient: undefined,
-      }));
-      setRooms(transformedRooms);
-      
-      // Reload visits from API
-      const today = new Date().toISOString().split('T')[0];
-      const result = await visitService.getVisits({ 
-        status: 'completed',
-        date: today,
-        page_size: 500 
-      });
-      
-      // Fetch vitals for all visits in parallel
-      const vitalsPromises = result.results.map(async (visit: Visit) => {
-        try {
-          const vitalsResult = await apiFetch<{ results: any[] }>(`/vitals/?visit=${visit.id}&ordering=-recorded_at`);
-          return { visitId: visit.id, vitals: vitalsResult.results[0] || null };
-        } catch (err) {
-          console.error(`Error fetching vitals for visit ${visit.id}:`, err);
-          return { visitId: visit.id, vitals: null };
-        }
-      });
-      const vitalsResults = await Promise.all(vitalsPromises);
-      const vitalsMap = new Map(vitalsResults.map(r => [r.visitId, r.vitals]));
-      
-      const transformedPatients: Patient[] = result.results.map((visit: Visit) => {
-        const visitDateTime = new Date(`${visit.date}T${visit.time}`);
-        const waitTime = Math.floor((Date.now() - visitDateTime.getTime()) / (1000 * 60));
-        
-        const vitalsData = vitalsMap.get(visit.id);
-        const nursingStatus: 'Pending' | 'Vitals Recorded' | 'Ready for Consultation' | 'Sent to Room' = vitalsData ? 'Ready for Consultation' : 'Pending';
-        
-        const vitals: VitalsData | undefined = vitalsData ? {
-          temperature: vitalsData.temperature?.toString() || '',
-          pulse: vitalsData.heart_rate?.toString() || '',
-          bloodPressureSystolic: vitalsData.blood_pressure_systolic?.toString() || '',
-          bloodPressureDiastolic: vitalsData.blood_pressure_diastolic?.toString() || '',
-          respiratoryRate: vitalsData.respiratory_rate?.toString() || '',
-          oxygenSaturation: vitalsData.oxygen_saturation?.toString() || '',
-          weight: vitalsData.weight?.toString() || '',
-          height: vitalsData.height?.toString() || '',
-          painScale: '',
-          bloodSugar: '',
-          notes: vitalsData.notes || '',
-          recordedAt: vitalsData.recorded_at || new Date().toISOString(),
-          recordedBy: vitalsData.recorded_by_name || 'Unknown',
-        } : undefined;
-        
-          return {
-            id: String(visit.id),
-            name: visit.patient_name || `Patient ${visit.patient}`,
-            patientId: visit.visit_id || String(visit.id),
-            patientNumericId: visit.patient, // Store the actual patient ID from backend
-            visitNumericId: visit.id, // Store the actual visit ID from backend
-            personalNumber: '',
-            clinic: visit.clinic || 'General',
-            visitDate: visit.date,
-            visitTime: visit.time,
-            visitType: visit.visit_type === 'emergency' ? 'Emergency' :
-                      visit.visit_type === 'consultation' ? 'Consultation' :
-                      visit.visit_type === 'follow_up' ? 'Follow-up' : 'Consultation',
-            visitNotes: (visit as any).clinical_notes || undefined,
-            nursingStatus,
-            vitals,
-            waitTime: waitTime > 0 ? waitTime : 0,
-          };
-      });
-      
-      setPatients(transformedPatients);
-      toast.success('Queue refreshed');
-    } catch (err) {
-      console.error('Error refreshing queue:', err);
-      toast.error('Failed to refresh queue');
-    } finally {
-      setIsRefreshing(false);
-    }
-  };
 
-  const openRecordVitals = (patient: Patient) => {
+  const openRecordVitals = (patient: NursingPatient) => {
     setSelectedPatient(patient);
     setVitalsForm(patient.vitals || emptyVitals);
     setIsVitalsDialogOpen(true);
   };
 
-  const openViewVitals = (patient: Patient) => {
+  const openViewVitals = (patient: NursingPatient) => {
     setSelectedPatient(patient);
     setIsViewVitalsDialogOpen(true);
   };
 
-  const openRoomPicker = (patient: Patient) => {
+  const openRoomPicker = (patient: NursingPatient) => {
     setSelectedPatient(patient);
     setIsRoomPickerOpen(true);
   };
@@ -492,7 +440,7 @@ export default function NursingPoolQueuePage() {
       const vitalsMap = new Map(vitalsResults.map(r => [r.visitId, r.vitals]));
       
       // Transform and update patients
-      const transformedPatients: Patient[] = refreshedResult.results.map((v: Visit) => {
+      const transformedPatients: NursingPatient[] = refreshedResult.results.map((v: Visit) => {
         const visitDateTime = new Date(`${v.date}T${v.time}`);
         const waitTime = Math.floor((Date.now() - visitDateTime.getTime()) / (1000 * 60));
         const vitalsData = vitalsMap.get(v.id);
@@ -517,7 +465,8 @@ export default function NursingPoolQueuePage() {
         return {
           id: String(v.id),
           name: v.patient_name || `Patient ${v.patient}`,
-          patientId: v.visit_id || String(v.id),
+          patientId: String(v.patient),
+          visitId: v.visit_id || String(v.id),
           personalNumber: '',
           clinic: v.clinic || 'General',
           visitDate: v.date,
@@ -643,7 +592,7 @@ export default function NursingPoolQueuePage() {
           is_active: true,
         };
         
-        console.log('Sending patient to queue:', queuePayload);
+        console.log('Sending patient to queue for room:', room?.id || roomId);
         
         const queueResponse = await apiFetch('/consultation/queue/', {
           method: 'POST',
@@ -777,26 +726,16 @@ export default function NursingPoolQueuePage() {
           <div>
             <h1 className="text-3xl font-bold text-foreground flex items-center gap-2">
               <Users className="h-8 w-8 text-rose-500" />
-              Nursing Pool Queue
+              Nursing Patients
             </h1>
-            <p className="text-muted-foreground mt-1">Record vitals and send patients to consultation rooms</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <Badge variant="outline" className="text-muted-foreground">
-              <Clock className="h-3 w-3 mr-1" />
-              Real-time
-            </Badge>
-            <Button variant="outline" onClick={handleRefresh} disabled={isRefreshing}>
-              <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
-              {isRefreshing ? 'Refreshing...' : 'Refresh'}
-            </Button>
+            <p className="text-muted-foreground mt-1">View all patients processed by nursing - record vitals and send to consultation rooms</p>
           </div>
         </div>
 
         {/* Stats Cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[
-            { label: 'Total in Pool', value: stats.totalInPool, icon: Users, color: 'text-rose-500', bg: 'bg-rose-500/10' },
+            { label: 'Nursing Patients', value: stats.totalInPool, icon: Users, color: 'text-rose-500', bg: 'bg-rose-500/10' },
             { label: 'Pending Vitals', value: stats.pendingVitals, icon: Stethoscope, color: 'text-amber-500', bg: 'bg-amber-500/10' },
             { label: 'Ready for Consultation', value: stats.readyForConsultation, icon: UserCheck, color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
             { label: 'Sent to Rooms', value: stats.sentToRooms, icon: ArrowRight, color: 'text-violet-500', bg: 'bg-violet-500/10' },
@@ -818,16 +757,17 @@ export default function NursingPoolQueuePage() {
         </div>
 
         {/* Filters */}
+        {!loading && (
         <Card>
           <CardContent className="p-4">
             <div className="flex flex-col gap-4">
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input 
-                  placeholder="Search by name, patient ID, personal number..." 
-                  value={searchQuery} 
-                  onChange={(e) => setSearchQuery(e.target.value)} 
-                  className="pl-10" 
+                <Input
+                  placeholder="Search by patient name, visit ID, or patient ID..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-10"
                 />
               </div>
               <div className="flex flex-wrap gap-2">
@@ -850,7 +790,7 @@ export default function NursingPoolQueuePage() {
                   </SelectContent>
                 </Select>
                 <Select value={typeFilter} onValueChange={setTypeFilter}>
-                  <SelectTrigger className="w-[140px]"><SelectValue placeholder="Visit Type" /></SelectTrigger>
+                  <SelectTrigger className="w-[140px]"><SelectValue placeholder="Type" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Types</SelectItem>
                     <SelectItem value="emergency">Emergency</SelectItem>
@@ -868,11 +808,16 @@ export default function NursingPoolQueuePage() {
             </div>
           </CardContent>
         </Card>
+        )}
 
         {/* Results Count */}
-        <p className="text-sm text-muted-foreground px-1">
-          Showing <span className="font-medium text-foreground">{sortedPatients.length}</span> of {stats.totalInPool} patients
-        </p>
+        {!loading && (
+          <>
+            <div className="flex items-center justify-between px-1">
+              <p className="text-sm text-muted-foreground">
+                Showing <span className="font-medium text-foreground">{sortedPatients.length}</span> patients
+              </p>
+            </div>
 
         {/* Patient Queue */}
         <div className="space-y-3">
@@ -880,11 +825,11 @@ export default function NursingPoolQueuePage() {
             <Card>
               <CardContent className="flex flex-col items-center justify-center py-12">
                 <Users className="h-12 w-12 text-muted-foreground mb-4" />
-                <h3 className="text-lg font-semibold text-muted-foreground mb-2">No patients in queue</h3>
+                <h3 className="text-lg font-semibold text-muted-foreground mb-2">No nursing patients found</h3>
                 <p className="text-sm text-muted-foreground text-center">
                   {searchQuery || statusFilter !== 'all'
                     ? 'Try adjusting your search or filter criteria'
-                    : 'No patients in the nursing pool at the moment'}
+                    : 'No patients have been processed by nursing yet'}
                 </p>
               </CardContent>
             </Card>
@@ -933,14 +878,14 @@ export default function NursingPoolQueuePage() {
                       <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-wrap">
                         <span>{patient.patientId}</span>
                         <span>•</span>
-                        <span>{patient.personalNumber}</span>
+                        <span>{patient.visitId}</span>
                         <span>•</span>
                         <span>{patient.clinic}</span>
                         <span>•</span>
                         <span>{patient.visitType}</span>
                         <span>•</span>
                         <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{patient.waitTime}m</span>
-                        {patient.age && <><span>•</span><span>{patient.age}y {patient.gender}</span></>}
+                        {/* Age and gender not available in visit data */}
                       </div>
                       {/* Row 3: Visit Notes (if available) */}
                       {patient.visitNotes && (
@@ -968,6 +913,8 @@ export default function NursingPoolQueuePage() {
               itemName="patients"
             />
           </Card>
+        )}
+          </>
         )}
 
         {/* Record/Edit Vitals Dialog */}
@@ -1209,7 +1156,7 @@ export default function NursingPoolQueuePage() {
                       <div>
                         <h4 className="font-semibold">{room.name}</h4>
                         <p className="text-sm text-muted-foreground">
-                          {room.doctor ? `${room.doctor} • ` : ''}{room.specialty || 'General'}
+                          {room.doctor ? `${room.doctor} • ` : ''}{room.specialty || 'GOPD'}
                         </p>
                       </div>
                       <div className="text-right">

@@ -20,6 +20,7 @@ export interface MedicationItem {
   frequency: string;
   duration: string;
   quantity: number;
+  dispensed_quantity?: number;
   route: string;
   instructions: string;
   status: 'Available' | 'Low Stock' | 'Out of Stock' | 'Dispensed' | 'Pending';
@@ -31,16 +32,20 @@ export interface Prescription {
   patient: PatientInfo;
   medications: MedicationItem[];
   doctor: string;
+  doctor_name?: string;
   clinic: string;
   location: string;
   date: string;
   time: string;
+  prescribed_at?: string;
   status: PrescriptionStatus;
   priority: Priority;
   waitTime: number;
   clinicalNotes: string;
   specialInstructions: string;
   visitNotes?: string; // Notes / Special Instructions from visit
+  patient_details?: any; // Additional patient details
+  visit_details?: any; // Additional visit details
 }
 
 export interface DrugInteraction {
