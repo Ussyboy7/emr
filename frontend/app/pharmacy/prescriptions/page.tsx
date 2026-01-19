@@ -159,9 +159,11 @@ export default function PrescriptionsPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [totalCount, setTotalCount] = useState(0);
+  const [isLoadingPrescriptions, setIsLoadingPrescriptions] = useState(false);
 
   // Load prescriptions from API
   useEffect(() => {
+    console.log('Loading prescriptions due to dependency change:', { currentPage, itemsPerPage, statusFilter });
     loadPrescriptions();
   }, [currentPage, itemsPerPage, statusFilter]);
 
@@ -222,7 +224,14 @@ export default function PrescriptionsPage() {
   };
 
   const loadPrescriptions = async () => {
+    // Prevent concurrent calls
+    if (isLoadingPrescriptions) {
+      console.log('Skipping loadPrescriptions - already loading');
+      return;
+    }
+
     try {
+      setIsLoadingPrescriptions(true);
       setLoading(true);
       setError(null);
       const hasActiveFilters = searchQuery || statusFilter !== 'all' || priorityFilter !== 'all' || dateFilter !== 'all' || genderFilter !== 'all';
@@ -365,6 +374,7 @@ export default function PrescriptionsPage() {
       console.error('Error loading prescriptions:', err);
     } finally {
       setLoading(false);
+      setIsLoadingPrescriptions(false);
     }
   };
   
@@ -879,10 +889,20 @@ export default function PrescriptionsPage() {
 
       await Promise.all(dispensePromises);
 
+      console.log('✅ Dispensing completed successfully, reloading prescriptions...');
+
       toast.success(`${availableMeds.length} medication(s) dispensed successfully for ${prescription.patient.name}`);
-      
-      // Reload prescriptions to get updated status
-      await loadPrescriptions();
+
+      // Small delay to prevent UI freeze, then reload prescriptions
+      setTimeout(async () => {
+        console.log('🔄 Starting prescription reload after dispense...');
+        try {
+          await loadPrescriptions();
+          console.log('✅ Prescription reload completed');
+        } catch (err) {
+          console.error('❌ Error reloading prescriptions after dispense:', err);
+        }
+      }, 100);
     } catch (err: any) {
       toast.error(err.message || 'Failed to dispense medications');
       console.error('Error dispensing medications:', err);
@@ -1497,7 +1517,13 @@ export default function PrescriptionsPage() {
         </Dialog>
 
         {/* Enhanced Dispense Modal */}
-        <Dialog open={showDispenseModal} onOpenChange={setShowDispenseModal}>
+        <Dialog open={showDispenseModal} onOpenChange={(open) => {
+          console.log('Dispense modal onOpenChange:', open);
+          setShowDispenseModal(open);
+          if (!open) {
+            console.log('Modal closing, cleaning up state...');
+          }
+        }}>
           <DialogContent className="w-[95vw] sm:max-w-[1000px] max-h-[90vh] overflow-hidden flex flex-col">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
