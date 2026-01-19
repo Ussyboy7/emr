@@ -29,5 +29,7 @@ export * from './ward-service';
 export { wardService } from './ward-service';
 export * from './physio-service';
 export { physioService } from './physio-service';
+export * from './nursing-service';
+export { nursingService } from './nursing-service';
 
 

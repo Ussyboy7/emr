@@ -14,67 +14,91 @@ import {
   AlertTriangle, Zap, UserCheck, Pill, Stethoscope, MonitorSpeaker,
   Battery, Wifi, WifiOff, Loader2, TrendingUp
 } from 'lucide-react';
+import { nursingService } from '@/lib/services';
 
-// Mock data for demonstration - replace with real API calls
-const mockNursingData = {
-  stats: {
-    activePatients: 12,
-    pendingVitals: 8,
-    medicationsDue: 15,
-    assessmentsToday: 6,
-    pendingTasks: 4
-  },
-  criticalAlerts: [
-    { id: '1', patient: 'John Doe', room: '201', alert: 'Blood pressure critical: 180/110', time: '2 min ago', priority: 'high' },
-    { id: '2', patient: 'Jane Smith', room: '305', alert: 'Pain assessment overdue', time: '15 min ago', priority: 'medium' },
-    { id: '3', patient: 'Bob Johnson', room: '412', alert: 'Fever spike: 102.5°F', time: '8 min ago', priority: 'high' }
-  ],
-  recentActivities: [
-    { id: '1', type: 'vitals', patient: 'John Doe', action: 'Recorded vitals', time: '2 min ago', status: 'completed' },
-    { id: '2', type: 'medication', patient: 'Jane Smith', action: 'Administered medication', time: '5 min ago', status: 'completed' },
-    { id: '3', type: 'assessment', patient: 'Bob Johnson', action: 'Completed pain assessment', time: '10 min ago', status: 'completed' },
-    { id: '4', type: 'procedure', patient: 'Alice Brown', action: 'IV line maintenance', time: '15 min ago', status: 'completed' },
-    { id: '5', type: 'note', patient: 'Charlie Wilson', action: 'Added care note', time: '20 min ago', status: 'completed' }
-  ],
-  equipmentStatus: [
-    { id: '1', name: 'IV Pump A-201', status: 'online', battery: 85, location: 'Room 201' },
-    { id: '2', name: 'BP Monitor B-305', status: 'maintenance', battery: 45, location: 'Room 305' },
-    { id: '3', name: 'Infusion Pump C-412', status: 'online', battery: 92, location: 'Room 412' },
-    { id: '4', name: 'Ventilator D-108', status: 'offline', battery: 0, location: 'Room 108' }
-  ],
-  poolQueue: 3,
-  roomQueue: 2
+// Default empty state
+const defaultStats = {
+  activePatients: 0,
+  pendingVitals: 0,
+  medicationsDue: 0,
+  assessmentsToday: 0,
+  pendingTasks: 0
 };
 
 export default function NursingDashboardPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
-  const [stats, setStats] = useState(mockNursingData.stats);
-  const [criticalAlerts, setCriticalAlerts] = useState(mockNursingData.criticalAlerts);
-  const [recentActivities, setRecentActivities] = useState(mockNursingData.recentActivities);
-  const [equipmentStatus, setEquipmentStatus] = useState(mockNursingData.equipmentStatus);
-  const [poolQueueCount, setPoolQueueCount] = useState(mockNursingData.poolQueue);
-  const [roomQueueCount, setRoomQueueCount] = useState(mockNursingData.roomQueue);
+  const [stats, setStats] = useState(defaultStats);
+  const [criticalAlerts, setCriticalAlerts] = useState<any[]>([]);
+  const [recentActivities, setRecentActivities] = useState<any[]>([]);
+  const [equipmentStatus, setEquipmentStatus] = useState<any[]>([]);
+  const [poolQueueCount, setPoolQueueCount] = useState(0);
+  const [roomQueueCount, setRoomQueueCount] = useState(0);
 
   // Load nursing dashboard data
   useEffect(() => {
     const loadDashboardData = async () => {
       try {
         setLoading(true);
-        // Simulate API call delay
-        await new Promise(resolve => setTimeout(resolve, 1000));
 
-        // In real implementation, replace with actual API calls:
-        // const nursingData = await nursingService.getDashboardStats();
-        // const alerts = await nursingService.getCriticalAlerts();
-        // etc.
+        // Load data from multiple API endpoints in parallel
+        const [
+          statsResponse,
+          alertsResponse,
+          activitiesResponse,
+          equipmentResponse,
+          poolQueueResponse,
+          roomQueueResponse
+        ] = await Promise.allSettled([
+          nursingService.getStats(),
+          nursingService.getCriticalAlerts(),
+          nursingService.getRecentActivities({ limit: 5 }),
+          nursingService.getEquipmentStatus(),
+          nursingService.getPoolQueueCount(),
+          nursingService.getRoomQueueCount()
+        ]);
 
-        setStats(mockNursingData.stats);
-        setCriticalAlerts(mockNursingData.criticalAlerts);
-        setRecentActivities(mockNursingData.recentActivities);
-        setEquipmentStatus(mockNursingData.equipmentStatus);
-        setPoolQueueCount(mockNursingData.poolQueue);
-        setRoomQueueCount(mockNursingData.roomQueue);
+        // Process stats
+        if (statsResponse.status === 'fulfilled') {
+          setStats(statsResponse.value);
+        } else {
+          console.error('Failed to load nursing stats:', statsResponse.reason);
+          // Keep default stats on error
+        }
+
+        // Process critical alerts
+        if (alertsResponse.status === 'fulfilled') {
+          setCriticalAlerts(alertsResponse.value?.results || alertsResponse.value || []);
+        } else {
+          console.error('Failed to load critical alerts:', alertsResponse.reason);
+        }
+
+        // Process recent activities
+        if (activitiesResponse.status === 'fulfilled') {
+          setRecentActivities(activitiesResponse.value?.results || activitiesResponse.value || []);
+        } else {
+          console.error('Failed to load recent activities:', activitiesResponse.reason);
+        }
+
+        // Process equipment status
+        if (equipmentResponse.status === 'fulfilled') {
+          setEquipmentStatus(equipmentResponse.value?.results || equipmentResponse.value || []);
+        } else {
+          console.error('Failed to load equipment status:', equipmentResponse.reason);
+        }
+
+        // Process queue counts
+        if (poolQueueResponse.status === 'fulfilled') {
+          setPoolQueueCount(poolQueueResponse.value?.count || poolQueueResponse.value || 0);
+        } else {
+          console.error('Failed to load pool queue count:', poolQueueResponse.reason);
+        }
+
+        if (roomQueueResponse.status === 'fulfilled') {
+          setRoomQueueCount(roomQueueResponse.value?.count || roomQueueResponse.value || 0);
+        } else {
+          console.error('Failed to load room queue count:', roomQueueResponse.reason);
+        }
 
       } catch (error) {
         console.error('Error loading nursing dashboard data:', error);
@@ -87,13 +111,23 @@ export default function NursingDashboardPage() {
     loadDashboardData();
   }, []);
 
-  // Calculate trend data (mock implementation)
-  const trends = useMemo(() => ({
-    activePatients: { value: 8, isPositive: true },
-    pendingVitals: { value: -5, isPositive: false },
-    medicationsDue: { value: 12, isPositive: true },
-    assessmentsToday: { value: 3, isPositive: true }
-  }), []);
+  // Calculate trend data based on real data
+  const trends = useMemo(() => {
+    // In a real implementation, this would compare current data with historical data
+    // For now, we'll calculate simple trends based on the current values
+    const calculateTrend = (currentValue: number, baseline: number = 10) => {
+      if (currentValue === 0) return { value: 0, isPositive: true };
+      const change = Math.round(((currentValue - baseline) / Math.max(baseline, 1)) * 100);
+      return { value: Math.abs(change), isPositive: change >= 0 };
+    };
+
+    return {
+      activePatients: calculateTrend(stats.activePatients, 8),
+      pendingVitals: calculateTrend(stats.pendingVitals, 12), // Lower is better for pending items
+      medicationsDue: calculateTrend(stats.medicationsDue, 10),
+      assessmentsToday: calculateTrend(stats.assessmentsToday, 4)
+    };
+  }, [stats]);
 
   return (
     <DashboardLayout>
