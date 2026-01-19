@@ -38,6 +38,8 @@ interface StaffMember {
   clinic: string;
   clinicId?: number;
   employeeId?: string;
+  username?: string;
+  password?: string;
   dateJoined: string;
   status: 'Active' | 'Inactive';
   lastLogin?: string;
@@ -61,6 +63,7 @@ interface Department {
 // Empty staff object for form initialization
 const emptyStaff: Partial<StaffMember> = {
   firstName: '', lastName: '', email: '', phone: '', role: '', department: '', clinic: '',
+  username: '', password: '',
   dateJoined: new Date().toISOString().split('T')[0], status: 'Active', permissions: [], employeeId: ''
 };
 
@@ -125,6 +128,7 @@ export default function UserManagementPage() {
         lastName: user.last_name || '',
         email: user.email || '',
         phone: user.phone || '',
+        username: user.username || '',
         role: user.system_role || 'Staff',
         department: user.department_name || '',
         departmentId: user.department,
@@ -335,8 +339,13 @@ export default function UserManagementPage() {
   }, []);
 
   const handleCreate = async () => {
-    if (!formData.firstName || !formData.lastName || !formData.email) {
+    if (!formData.firstName || !formData.lastName || !formData.email || !(formData as any).username || !(formData as any).password) {
       toast.error('Please fill in all required fields');
+      return;
+    }
+
+    if ((formData as any).password.length < 8) {
+      toast.error('Password must be at least 8 characters long');
       return;
     }
     if (!formData.clinicId) {
@@ -381,6 +390,7 @@ export default function UserManagementPage() {
     try {
       const userId = parseInt(selectedStaff.id);
       await adminService.updateUser(userId, {
+        username: (formData as any).username,
         first_name: formData.firstName,
         last_name: formData.lastName,
         email: formData.email,
@@ -445,17 +455,34 @@ export default function UserManagementPage() {
     }
     
     setIsSubmitting(true);
-    
+
     try {
+      console.log('🔄 Attempting password reset for user:', selectedStaff.id);
       const userId = parseInt(selectedStaff.id);
       await adminService.resetPassword(userId, resetPasswordData.newPassword);
+      console.log('✅ Password reset successful');
       toast.success(`Password reset successfully for ${selectedStaff.firstName} ${selectedStaff.lastName}`);
       setIsResetPasswordDialogOpen(false);
       setResetPasswordData({ newPassword: '', confirmPassword: '' });
       setSelectedStaff(null);
     } catch (err: any) {
-      toast.error(err.message || 'Failed to reset password');
-      console.error('Error resetting password:', err);
+      console.error('❌ Password reset failed:', err);
+      let errorMessage = 'Failed to reset password';
+
+      if (err?.response?.data?.new_password) {
+        // Django validation errors come as array
+        if (Array.isArray(err.response.data.new_password)) {
+          errorMessage = err.response.data.new_password[0];
+        } else {
+          errorMessage = err.response.data.new_password;
+        }
+      } else if (err?.response?.data?.message) {
+        errorMessage = err.response.data.message;
+      } else if (err?.message) {
+        errorMessage = err.message;
+      }
+
+      toast.error(`Password reset failed: ${errorMessage}`);
     } finally {
       setIsSubmitting(false);
     }
@@ -783,6 +810,29 @@ export default function UserManagementPage() {
                     <Input value={formData.phone || ''} onChange={(e) => setFormData(prev => ({ ...prev, phone: e.target.value }))} />
                   </div>
                 </div>
+                {isCreateDialogOpen && (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>Username *</Label>
+                      <Input
+                        value={(formData as any).username || ''}
+                        onChange={(e) => setFormData(prev => ({ ...prev, username: e.target.value }))}
+                        placeholder="e.g., john.doe"
+                      />
+                      <p className="text-xs text-muted-foreground">Unique login identifier</p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Password *</Label>
+                      <Input
+                        type="password"
+                        value={(formData as any).password || ''}
+                        onChange={(e) => setFormData(prev => ({ ...prev, password: e.target.value }))}
+                        placeholder="Min 8 characters"
+                      />
+                      <p className="text-xs text-muted-foreground">Temporary password for user</p>
+                    </div>
+                  </div>
+                )}
                 <div className="space-y-2">
                   <Label>Status</Label>
                     <Select value={formData.status || 'Active'} onValueChange={(v) => setFormData(prev => ({ ...prev, status: v as StaffMember['status'] }))}>
@@ -998,14 +1048,17 @@ export default function UserManagementPage() {
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4 mt-4">
-              <div className="space-y-2">
-                <Label>New Password *</Label>
-                <Input 
-                  type="password" 
-                  value={resetPasswordData.newPassword} 
-                  onChange={(e) => setResetPasswordData(prev => ({ ...prev, newPassword: e.target.value }))}
-                  placeholder="Enter new password (min 8 characters)"
-                />
+                <div className="space-y-2">
+                  <Label>New Password *</Label>
+                  <Input
+                    type="password"
+                    value={resetPasswordData.newPassword}
+                    onChange={(e) => setResetPasswordData(prev => ({ ...prev, newPassword: e.target.value }))}
+                    placeholder="Enter new password (min 8 characters)"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Minimum 8 characters required
+                  </p>
         </div>
               <div className="space-y-2">
                 <Label>Confirm Password *</Label>

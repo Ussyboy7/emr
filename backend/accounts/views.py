@@ -189,15 +189,11 @@ class UserViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        # Validate password using Django's password validators
-        from django.contrib.auth.password_validation import validate_password
-        from django.core.exceptions import ValidationError
-        
-        try:
-            validate_password(new_password, user)
-        except ValidationError as e:
+        # For admin password resets, only do basic validation
+        # Skip Django's strict password validators to allow admin flexibility
+        if len(new_password) < 8:
             return Response(
-                {"new_password": list(e.messages)},
+                {"new_password": ["Password must be at least 8 characters long."]},
                 status=status.HTTP_400_BAD_REQUEST
             )
         

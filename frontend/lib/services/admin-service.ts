@@ -122,7 +122,7 @@ class AdminService {
   async createUser(data: Partial<User>): Promise<User> {
     // Map frontend fields to backend fields
     const createData: any = {
-      username: (data as any).email || `user_${Date.now()}`,
+      username: (data as any).username || (data as any).email || `user_${Date.now()}`,
       email: data.email,
       first_name: (data as any).first_name || (data as any).firstName,
       last_name: (data as any).last_name || (data as any).lastName,
@@ -149,6 +149,7 @@ class AdminService {
   async updateUser(userId: number, data: Partial<User>): Promise<User> {
     // Map frontend fields to backend fields
     const updateData: any = {};
+    if (data.username !== undefined) updateData.username = data.username;
     if (data.first_name !== undefined) updateData.first_name = data.first_name;
     if (data.last_name !== undefined) updateData.last_name = data.last_name;
     if (data.email !== undefined) updateData.email = data.email;
