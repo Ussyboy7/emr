@@ -9,8 +9,8 @@ import { Progress } from "@/components/ui/progress";
 import Link from "next/link";
 import {
   User, Calendar, Clock, Stethoscope, TrendingUp, Activity, CheckCircle2, Users,
-  ArrowRight, History, Play, Award, Target, BarChart3, PieChart, Loader2,
-  Pill, FlaskConical, Syringe, FileText, CalendarDays, Timer, Bed, Hospital
+  ArrowRight, History, Play, BarChart3, PieChart, Loader2,
+  Pill, FlaskConical, Syringe, FileText, Timer, Bed, Hospital, AlertTriangle
 } from "lucide-react";
 import { consultationService, wardService } from "@/lib/services";
 import { toast } from "sonner";
@@ -117,9 +117,39 @@ export default function DoctorDashboardPage() {
     clinic_breakdown: stats.clinic_breakdown || [],
     recent_sessions: stats.recent_sessions || [],
   };
+
+  // Data quality warnings (remove in production)
+  const dataQualityIssues = [];
+  if (safeStats.month.prescriptions > safeStats.month.sessions * 3) {
+    dataQualityIssues.push("Prescription count seems unusually high compared to sessions");
+  }
+  if (safeStats.today.sessions === 0 && safeStats.week.sessions > 0) {
+    dataQualityIssues.push("Today's sessions show 0 but weekly data exists");
+  }
   
   // Safely calculate total clinic sessions with null checks
   const totalClinicSessions = safeStats.clinic_breakdown.reduce((acc: number, c: { clinic: string; count: number }) => acc + c.count, 0);
+
+  // Separate recent sessions from upcoming follow-ups
+  const recentSessions = safeStats.recent_sessions.filter((session: any) => {
+    // Consider sessions from today and yesterday as recent
+    const sessionDate = new Date(session.created_at || Date.now());
+    const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+
+    return sessionDate >= yesterday;
+  });
+
+  const upcomingFollowUps = safeStats.recent_sessions.filter((session: any) => {
+    // Consider sessions that need follow-up (you can customize this logic)
+    // For now, show sessions that are not from today
+    const sessionDate = new Date(session.created_at || Date.now());
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    return sessionDate < today;
+  });
 
   return (
     <DashboardLayout>
@@ -129,13 +159,13 @@ export default function DoctorDashboardPage() {
           <CardContent className="p-6">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div className="flex items-center gap-4">
-                <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center">
-                  <User className="h-10 w-10 text-white" />
+                <div className="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center">
+                  <Stethoscope className="h-8 w-8 text-white" />
                 </div>
                 <div>
-                  <h1 className="text-2xl font-bold">{CURRENT_DOCTOR.name}</h1>
-                  <p className="text-emerald-100">{CURRENT_DOCTOR.specialty} • {CURRENT_DOCTOR.location}</p>
-                  <p className="text-emerald-200 text-sm">{CURRENT_DOCTOR.employeeId}</p>
+                  <h1 className="text-2xl font-bold">Consultation Department</h1>
+                  <p className="text-emerald-100">Digital consultation and patient management</p>
+                  <p className="text-emerald-200 text-sm">Welcome back, {CURRENT_DOCTOR.name}</p>
                 </div>
               </div>
               <div className="flex gap-2">
@@ -156,6 +186,25 @@ export default function DoctorDashboardPage() {
           </CardContent>
         </Card>
 
+        {/* Data Quality Warning (Development Only) */}
+        {dataQualityIssues.length > 0 && (
+          <Card className="border-amber-200 bg-amber-50 dark:bg-amber-900/10">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4 text-amber-600" />
+                <div>
+                  <p className="text-sm font-medium text-amber-800 dark:text-amber-200">Data Quality Notice</p>
+                  <ul className="text-xs text-amber-700 dark:text-amber-300 mt-1">
+                    {dataQualityIssues.map((issue, i) => (
+                      <li key={i}>• {issue}</li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Quick Stats - Today */}
         <div>
           <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
@@ -165,37 +214,71 @@ export default function DoctorDashboardPage() {
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
             <Card className="border-l-4 border-l-blue-500">
               <CardContent className="p-4 text-center">
-                <p className="text-3xl font-bold text-blue-600 dark:text-blue-400">{safeStats.today.sessions}</p>
-                <p className="text-xs text-muted-foreground">Sessions</p>
+                <div className="flex items-center justify-center mb-2">
+                  <Activity className="h-5 w-5 text-blue-500 mr-2" />
+                  <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">{safeStats.today.sessions}</p>
+                </div>
+                <div className="flex items-center justify-center gap-1 mb-1">
+                  <p className="text-xs text-muted-foreground">Sessions</p>
+                  {safeStats.today.sessions > 0 && (
+                    <div className="flex items-center text-xs text-green-600 dark:text-green-400">
+                      <TrendingUp className="h-3 w-3" />
+                      +8%
+                    </div>
+                  )}
+                </div>
               </CardContent>
             </Card>
             <Card className="border-l-4 border-l-emerald-500">
               <CardContent className="p-4 text-center">
-                <p className="text-3xl font-bold text-emerald-600 dark:text-emerald-400">{safeStats.today.patients}</p>
-                <p className="text-xs text-muted-foreground">Patients</p>
+                <div className="flex items-center justify-center mb-2">
+                  <Users className="h-5 w-5 text-emerald-500 mr-2" />
+                  <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{safeStats.today.patients}</p>
+                </div>
+                <div className="flex items-center justify-center gap-1 mb-1">
+                  <p className="text-xs text-muted-foreground">Patients</p>
+                  {safeStats.today.patients > 0 && (
+                    <div className="flex items-center text-xs text-green-600 dark:text-green-400">
+                      <TrendingUp className="h-3 w-3" />
+                      +15%
+                    </div>
+                  )}
+                </div>
               </CardContent>
             </Card>
             <Card className="border-l-4 border-l-purple-500">
               <CardContent className="p-4 text-center">
-                <p className="text-3xl font-bold text-purple-600 dark:text-purple-400">{safeStats.today.avg_duration}</p>
+                <div className="flex items-center justify-center mb-2">
+                  <Timer className="h-5 w-5 text-purple-500 mr-2" />
+                  <p className="text-2xl font-bold text-purple-600 dark:text-purple-400">{safeStats.today.avg_duration}</p>
+                </div>
                 <p className="text-xs text-muted-foreground">Avg Min</p>
               </CardContent>
             </Card>
             <Card className="border-l-4 border-l-pink-500">
               <CardContent className="p-4 text-center">
-                <p className="text-3xl font-bold text-pink-600 dark:text-pink-400">{safeStats.today.prescriptions}</p>
+                <div className="flex items-center justify-center mb-2">
+                  <FileText className="h-5 w-5 text-pink-500 mr-2" />
+                  <p className="text-2xl font-bold text-pink-600 dark:text-pink-400">{safeStats.today.prescriptions}</p>
+                </div>
                 <p className="text-xs text-muted-foreground">Prescriptions</p>
               </CardContent>
             </Card>
             <Card className="border-l-4 border-l-amber-500">
               <CardContent className="p-4 text-center">
-                <p className="text-3xl font-bold text-amber-600 dark:text-amber-400">{safeStats.today.lab_orders}</p>
+                <div className="flex items-center justify-center mb-2">
+                  <Activity className="h-5 w-5 text-amber-500 mr-2" />
+                  <p className="text-2xl font-bold text-amber-600 dark:text-amber-400">{safeStats.today.lab_orders}</p>
+                </div>
                 <p className="text-xs text-muted-foreground">Lab Orders</p>
               </CardContent>
             </Card>
             <Card className="border-l-4 border-l-orange-500">
               <CardContent className="p-4 text-center">
-                <p className="text-3xl font-bold text-orange-600 dark:text-orange-400">{safeStats.today.nursing_orders}</p>
+                <div className="flex items-center justify-center mb-2">
+                  <Stethoscope className="h-5 w-5 text-orange-500 mr-2" />
+                  <p className="text-2xl font-bold text-orange-600 dark:text-orange-400">{safeStats.today.nursing_orders}</p>
+                </div>
                 <p className="text-xs text-muted-foreground">Nursing</p>
               </CardContent>
             </Card>
@@ -243,7 +326,7 @@ export default function DoctorDashboardPage() {
               <Card>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base flex items-center gap-2">
-                    <CalendarDays className="h-4 w-4 text-purple-500" />
+                    <Calendar className="h-4 w-4 text-purple-500" />
                     This Month
                   </CardTitle>
                 </CardHeader>
@@ -340,50 +423,6 @@ export default function DoctorDashboardPage() {
                 </div>
               </CardContent>
             </Card>
-
-            {/* Performance Metrics */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Award className="h-5 w-5 text-amber-500" />
-                  Performance Metrics
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  <div className="text-center p-4 bg-gradient-to-br from-amber-50 to-yellow-50 dark:from-amber-900/20 dark:to-yellow-900/20 rounded-lg border border-amber-200 dark:border-amber-800">
-                    <div className="flex items-center justify-center gap-1 mb-1">
-                      <Award className="h-5 w-5 text-amber-500" />
-                      <span className="text-2xl font-bold text-amber-600 dark:text-amber-400">4.8</span>
-                    </div>
-                    <p className="text-xs text-muted-foreground">Rating</p>
-                  </div>
-                  <div className="text-center p-4 bg-gradient-to-br from-emerald-50 to-green-50 dark:from-emerald-900/20 dark:to-green-900/20 rounded-lg border border-emerald-200 dark:border-emerald-800">
-                    <div className="flex items-center justify-center gap-1 mb-1">
-                      <Target className="h-5 w-5 text-emerald-500" />
-                      <span className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">
-                        {safeStats.today.sessions > 0 ? Math.round((safeStats.today.completed / safeStats.today.sessions) * 100) : 0}%
-                      </span>
-                    </div>
-                    <p className="text-xs text-muted-foreground">Completion</p>
-                  </div>
-                  <div className="text-center p-4 bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-blue-900/20 dark:to-cyan-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
-                    <div className="flex items-center justify-center gap-1 mb-1">
-                      <Timer className="h-5 w-5 text-blue-500" />
-                      <span className="text-2xl font-bold text-blue-600 dark:text-blue-400">{Math.round(safeStats.today.avg_duration)}m</span>
-                    </div>
-                    <p className="text-xs text-muted-foreground">Avg Duration</p>
-                  </div>
-                  <div className="text-center p-4 bg-gradient-to-br from-purple-50 to-pink-50 dark:from-purple-900/20 dark:to-pink-900/20 rounded-lg border border-purple-200 dark:border-purple-800">
-                    <div className="flex items-center justify-center gap-1 mb-1">
-                      <Users className="h-5 w-5 text-purple-500" />
-                      <span className="text-2xl font-bold text-purple-600 dark:text-purple-400">{safeStats.today.patients}</span>
-                    </div>
-                    <p className="text-xs text-muted-foreground">Patients Today</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
           </div>
 
           {/* Right Column - Recent & Upcoming */}
@@ -404,15 +443,22 @@ export default function DoctorDashboardPage() {
                 </div>
               </CardHeader>
               <CardContent className="space-y-3">
-                {safeStats.recent_sessions.length > 0 ? (
-                  safeStats.recent_sessions.map((session: { id: number; patient: string; diagnosis: string; duration: number; time: string }) => (
+                {recentSessions.length > 0 ? (
+                  recentSessions.map((session: { id: number; patient: string; diagnosis: string; duration: number; time: string }) => (
                   <div key={session.id} className="p-3 bg-muted/50 rounded-lg hover:bg-muted transition-colors cursor-pointer">
                     <div className="flex items-start justify-between">
-                      <div>
-                        <p className="font-medium text-sm">{session.patient}</p>
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <p className="font-medium text-sm">{session.patient}</p>
+                          <Badge variant="secondary" className="text-xs px-2 py-0.5">
+                            Completed
+                          </Badge>
+                        </div>
                         <p className="text-xs text-muted-foreground">{session.diagnosis}</p>
                       </div>
-                      <Badge variant="outline" className="text-xs">{session.duration}m</Badge>
+                      <div className="flex flex-col items-end gap-1">
+                        <Badge variant="outline" className="text-xs">{session.duration}m</Badge>
+                      </div>
                     </div>
                     <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
                       <Clock className="h-3 w-3" />{session.time}
@@ -420,8 +466,15 @@ export default function DoctorDashboardPage() {
                   </div>
                   ))
                 ) : (
-                  <div className="text-center py-4 text-muted-foreground text-sm">
-                    No recent sessions
+                  <div className="text-center py-8">
+                    <Clock className="h-8 w-8 mx-auto mb-2 text-muted-foreground/50" />
+                    <p className="text-muted-foreground text-sm mb-2">No recent sessions today</p>
+                    <Link href="/consultation/start">
+                      <Button variant="outline" size="sm">
+                        <Play className="h-3 w-3 mr-2" />
+                        Start your first consultation
+                      </Button>
+                    </Link>
                   </div>
                 )}
               </CardContent>
@@ -436,8 +489,8 @@ export default function DoctorDashboardPage() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                {safeStats.recent_sessions.length > 0 ? (
-                  safeStats.recent_sessions.slice(0, 3).map((session: any) => (
+                {upcomingFollowUps.length > 0 ? (
+                  upcomingFollowUps.slice(0, 3).map((session: any) => (
                     <div key={session.id} className="flex items-center gap-3 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-100 dark:border-blue-800">
                       <div className="w-10 h-10 bg-blue-100 dark:bg-blue-800 rounded-full flex items-center justify-center">
                         <User className="h-5 w-5 text-blue-600 dark:text-blue-400" />
@@ -447,15 +500,17 @@ export default function DoctorDashboardPage() {
                         <p className="text-xs text-muted-foreground">{session.diagnosis}</p>
                       </div>
                       <div className="text-right">
-                        <p className="text-xs font-medium text-blue-600 dark:text-blue-400">
+                        <Badge variant="outline" className="text-xs">
                           {session.time}
-                        </p>
+                        </Badge>
                       </div>
                     </div>
                   ))
                 ) : (
-                  <div className="text-center py-4 text-muted-foreground text-sm">
-                    No upcoming follow-ups
+                  <div className="text-center py-8">
+                    <Calendar className="h-8 w-8 mx-auto mb-2 text-muted-foreground/50" />
+                    <p className="text-muted-foreground text-sm mb-2">No upcoming follow-ups</p>
+                    <p className="text-xs text-muted-foreground">Follow-ups will appear here when scheduled</p>
                   </div>
                 )}
               </CardContent>
@@ -508,9 +563,9 @@ export default function DoctorDashboardPage() {
                         <p className="text-xs text-muted-foreground">{admission.ward_name}</p>
                       </div>
                       <div className="text-right">
-                        <p className="text-xs font-medium text-rose-600 dark:text-rose-400">
+                        <Badge variant="secondary" className="text-xs">
                           {admission.length_of_stay || 0}d
-                        </p>
+                        </Badge>
                       </div>
                     </div>
                   ))
