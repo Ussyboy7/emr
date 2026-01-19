@@ -117,15 +117,28 @@ export default function NursingPoolQueuePage() {
         }));
         setRooms(transformedRooms);
 
-        // Fetch visits with status 'completed' (sent to nursing)
-        // Remove date filter to show all completed visits that need nursing
+        // Fetch visits that should go to nursing - try multiple statuses
+        // Some visits might be marked as 'completed' or 'in_progress' when sent to nursing
         const result = await visitService.getVisits({
-          status: 'completed',
           page_size: 500
         });
 
-        console.log('Nursing pool queue - loaded visits:', result.results.length);
-        console.log('Visit details:', result.results.map(v => ({
+        // Filter visits that should go to nursing (exclude cancelled visits)
+        const nursingVisits = result.results.filter(visit =>
+          visit.status !== 'cancelled' &&
+          (visit.status === 'completed' || visit.status === 'in_progress' ||
+           visit.status === 'scheduled') // Include all active visits
+        );
+
+        console.log('All visits loaded:', result.results.length);
+        console.log('Filtered nursing visits:', nursingVisits.length);
+        console.log('Visit statuses found:', [...new Set(result.results.map(v => v.status))]);
+
+        // Use filtered results
+        const filteredResult = { ...result, results: nursingVisits };
+
+        console.log('Nursing pool queue - loaded visits:', filteredResult.results.length);
+        console.log('Visit details:', filteredResult.results.map(v => ({
           id: v.id,
           patient: v.patient_name,
           status: v.status,
@@ -134,7 +147,7 @@ export default function NursingPoolQueuePage() {
         })));
         
         // Fetch vitals for all visits in parallel
-        const vitalsPromises = result.results.map(async (visit: Visit) => {
+        const vitalsPromises = filteredResult.results.map(async (visit: Visit) => {
           try {
             const vitalsResult = await apiFetch<{ results: any[] }>(`/vitals/?visit=${visit.id}&ordering=-recorded_at`);
             console.log(`Vitals for visit ${visit.id}:`, vitalsResult.results[0] || 'No vitals');
@@ -157,8 +170,8 @@ export default function NursingPoolQueuePage() {
         }
         
         // Transform visits to NursingPatient format
-        console.log('Starting transformation of', result.results.length, 'visits to nursing patients');
-        const transformedPatients: NursingPatient[] = result.results.map((visit: Visit) => {
+        console.log('Starting transformation of', filteredResult.results.length, 'visits to nursing patients');
+        const transformedPatients: NursingPatient[] = filteredResult.results.map((visit: Visit) => {
           // Calculate wait time (minutes since visit was created)
           const visitDateTime = new Date(`${visit.date}T${visit.time}`);
           const waitTime = Math.floor((Date.now() - visitDateTime.getTime()) / (1000 * 60));
