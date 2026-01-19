@@ -68,36 +68,41 @@ export default function NursingDashboardPage() {
 
         // Process critical alerts
         if (alertsResponse.status === 'fulfilled') {
-          setCriticalAlerts(alertsResponse.value?.results || alertsResponse.value || []);
+          setCriticalAlerts(alertsResponse.value?.results || []);
         } else {
           console.error('Failed to load critical alerts:', alertsResponse.reason);
+          setCriticalAlerts([]);
         }
 
         // Process recent activities
         if (activitiesResponse.status === 'fulfilled') {
-          setRecentActivities(activitiesResponse.value?.results || activitiesResponse.value || []);
+          setRecentActivities(activitiesResponse.value?.results || []);
         } else {
           console.error('Failed to load recent activities:', activitiesResponse.reason);
+          setRecentActivities([]);
         }
 
         // Process equipment status
         if (equipmentResponse.status === 'fulfilled') {
-          setEquipmentStatus(equipmentResponse.value?.results || equipmentResponse.value || []);
+          setEquipmentStatus(equipmentResponse.value?.results || []);
         } else {
           console.error('Failed to load equipment status:', equipmentResponse.reason);
+          setEquipmentStatus([]);
         }
 
         // Process queue counts
         if (poolQueueResponse.status === 'fulfilled') {
-          setPoolQueueCount(poolQueueResponse.value?.count || poolQueueResponse.value || 0);
+          setPoolQueueCount(poolQueueResponse.value?.count || 0);
         } else {
           console.error('Failed to load pool queue count:', poolQueueResponse.reason);
+          setPoolQueueCount(0);
         }
 
         if (roomQueueResponse.status === 'fulfilled') {
-          setRoomQueueCount(roomQueueResponse.value?.count || roomQueueResponse.value || 0);
+          setRoomQueueCount(roomQueueResponse.value?.count || 0);
         } else {
           console.error('Failed to load room queue count:', roomQueueResponse.reason);
+          setRoomQueueCount(0);
         }
 
       } catch (error) {
