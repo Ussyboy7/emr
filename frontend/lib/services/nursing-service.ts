@@ -29,13 +29,6 @@ export interface NursingActivity {
   status: 'completed' | 'pending' | 'in_progress';
 }
 
-export interface EquipmentStatus {
-  id: string;
-  name: string;
-  status: 'online' | 'offline' | 'maintenance';
-  battery: number;
-  location: string;
-}
 
 class NursingService {
   /**
@@ -153,37 +146,6 @@ class NursingService {
     }
   }
 
-  /**
-   * Get equipment status using ward data (simulated)
-   */
-  async getEquipmentStatus(): Promise<{ results: EquipmentStatus[] }> {
-    try {
-      // Simulate equipment status based on ward data
-      const wardData = await wardService.getWards();
-      const wards = wardData.results || [];
-
-      const equipment: EquipmentStatus[] = [];
-      wards.forEach((ward, wardIndex) => {
-        // Simulate 1-2 pieces of equipment per ward
-        const equipmentCount = Math.min(ward.total_beds || 4, 2);
-
-        for (let i = 0; i < equipmentCount; i++) {
-          equipment.push({
-            id: `equipment-${wardIndex}-${i}`,
-            name: `${['IV Pump', 'BP Monitor', 'Infusion Pump', 'Ventilator'][i % 4]} ${ward.name}-${i + 1}`,
-            status: ['online', 'online', 'maintenance', 'offline'][Math.floor(Math.random() * 4)] as any,
-            battery: Math.floor(Math.random() * 100),
-            location: ward.name
-          });
-        }
-      });
-
-      return { results: equipment };
-    } catch (error) {
-      console.error('Error getting equipment status:', error);
-      return { results: [] };
-    }
-  }
 
   /**
    * Get pool queue count using visit data

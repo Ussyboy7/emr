@@ -11,8 +11,8 @@ import { toast } from 'sonner';
 import {
   Heart, Thermometer, Syringe, ClipboardList, Users,
   Clock, CheckCircle2, Activity, ArrowRight, DoorOpen, FileCheck,
-  AlertTriangle, Zap, UserCheck, Pill, Stethoscope, MonitorSpeaker,
-  Battery, Wifi, WifiOff, Loader2, TrendingUp
+  AlertTriangle, Zap, UserCheck, Pill, Stethoscope,
+  Loader2, TrendingUp
 } from 'lucide-react';
 import { nursingService } from '@/lib/services';
 
@@ -31,7 +31,6 @@ export default function NursingDashboardPage() {
   const [stats, setStats] = useState(defaultStats);
   const [criticalAlerts, setCriticalAlerts] = useState<any[]>([]);
   const [recentActivities, setRecentActivities] = useState<any[]>([]);
-  const [equipmentStatus, setEquipmentStatus] = useState<any[]>([]);
   const [poolQueueCount, setPoolQueueCount] = useState(0);
   const [roomQueueCount, setRoomQueueCount] = useState(0);
 
@@ -46,14 +45,12 @@ export default function NursingDashboardPage() {
           statsResponse,
           alertsResponse,
           activitiesResponse,
-          equipmentResponse,
           poolQueueResponse,
           roomQueueResponse
         ] = await Promise.allSettled([
           nursingService.getStats(),
           nursingService.getCriticalAlerts(),
           nursingService.getRecentActivities({ limit: 5 }),
-          nursingService.getEquipmentStatus(),
           nursingService.getPoolQueueCount(),
           nursingService.getRoomQueueCount()
         ]);
@@ -80,14 +77,6 @@ export default function NursingDashboardPage() {
         } else {
           console.error('Failed to load recent activities:', activitiesResponse.reason);
           setRecentActivities([]);
-        }
-
-        // Process equipment status
-        if (equipmentResponse.status === 'fulfilled') {
-          setEquipmentStatus(equipmentResponse.value?.results || []);
-        } else {
-          console.error('Failed to load equipment status:', equipmentResponse.reason);
-          setEquipmentStatus([]);
         }
 
         // Process queue counts
@@ -438,65 +427,6 @@ export default function NursingDashboardPage() {
           </Card>
         </div>
 
-        {/* Equipment Status */}
-        <div>
-          <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
-            <MonitorSpeaker className="h-5 w-5 text-blue-500" />
-            Equipment Status
-          </h2>
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-            {loading ? (
-              Array.from({ length: 4 }).map((_, i) => (
-                <Card key={i}>
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-muted-foreground">Loading...</p>
-                        <div className="flex items-center gap-2 mt-1">
-                          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-                          <p className="text-xs text-muted-foreground">--</p>
-                        </div>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))
-            ) : (
-              equipmentStatus.map((equipment) => (
-                <Card key={equipment.id} className={`border-l-4 ${
-                  equipment.status === 'online' ? 'border-l-green-500' :
-                  equipment.status === 'maintenance' ? 'border-l-amber-500' :
-                  'border-l-red-500'
-                }`}>
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div className="flex-1">
-                        <p className="font-medium text-sm">{equipment.name}</p>
-                        <p className="text-xs text-muted-foreground">{equipment.location}</p>
-                        <div className="flex items-center gap-2 mt-2">
-                          <div className={`flex items-center gap-1 text-xs ${
-                            equipment.status === 'online' ? 'text-green-600' :
-                            equipment.status === 'maintenance' ? 'text-amber-600' :
-                            'text-red-600'
-                          }`}>
-                            {equipment.status === 'online' ? <Wifi className="h-3 w-3" /> :
-                             equipment.status === 'maintenance' ? <AlertTriangle className="h-3 w-3" /> :
-                             <WifiOff className="h-3 w-3" />}
-                            {equipment.status}
-                          </div>
-                          <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                            <Battery className="h-3 w-3" />
-                            {equipment.battery}%
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))
-            )}
-          </div>
-        </div>
       </div>
     </DashboardLayout>
   );
