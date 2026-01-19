@@ -48,10 +48,11 @@ class NursingService {
       const activeVisits = await visitService.getActiveVisits();
 
       // Get admissions for active patients
-      const admissions = await wardService.getAdmissions({ status: 'admitted' });
+      const admissionsData = await wardService.getAdmissions({ status: 'admitted' });
+      const admissions = admissionsData.results || [];
 
       // Calculate nursing-specific stats from existing data
-      const activePatients = admissions.results?.length || 0;
+      const activePatients = admissions.length;
       const pendingVitals = todayVisits.filter(v =>
         v.status === 'scheduled' || v.status === 'waiting'
       ).length;
@@ -86,7 +87,8 @@ class NursingService {
     try {
       // Get active visits that might need urgent attention
       const activeVisits = await visitService.getActiveVisits();
-      const admissions = await wardService.getAdmissions({ status: 'admitted' });
+      const admissionsData = await wardService.getAdmissions({ status: 'admitted' });
+      const admissions = admissionsData.results || [];
 
       // Create alerts from critical visit statuses and admissions
       const alerts: CriticalAlert[] = [];
@@ -106,7 +108,7 @@ class NursingService {
       });
 
       // Medium priority alerts from admissions
-      admissions.results?.slice(0, 2).forEach((admission, index) => {
+      admissions.slice(0, 2).forEach((admission, index) => {
         alerts.push({
           id: `admission-${admission.id}`,
           patient: admission.patient_name || `Patient ${admission.patient}`,
@@ -157,7 +159,8 @@ class NursingService {
   async getEquipmentStatus(): Promise<{ results: EquipmentStatus[] }> {
     try {
       // Simulate equipment status based on ward data
-      const wards = await wardService.getWards();
+      const wardData = await wardService.getWards();
+      const wards = wardData.results || [];
 
       const equipment: EquipmentStatus[] = [];
       wards.forEach((ward, wardIndex) => {
