@@ -9,6 +9,8 @@ export const CLINICS = [
   "Eye Clinic",
   "Sickle Cell",
   "Diamond",
+  "Healthron",
+  "Dental",
 ] as const;
 
 export type ClinicName = typeof CLINICS[number];
@@ -22,6 +24,8 @@ export const CLINIC_LABELS: Record<ClinicName, string> = {
   "Eye Clinic": "Eye Clinic",
   "Sickle Cell": "Sickle Cell Clinic",
   "Diamond": "Diamond Club Clinic",
+  "Healthron": "Healthron Clinic",
+  "Dental": "Dental Clinic",
 };
 
 /**
