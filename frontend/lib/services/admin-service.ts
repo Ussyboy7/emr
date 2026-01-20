@@ -97,9 +97,7 @@ class AdminService {
    * Get all users
    */
   async getUsers(params?: {
-    role?: string;
-    clinic?: number;
-    department?: number;
+    system_role?: string;
     is_active?: boolean;
     search?: string;
     page?: number;

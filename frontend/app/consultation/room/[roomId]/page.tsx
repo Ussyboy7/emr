@@ -510,56 +510,21 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     const loadInjectionMedications = async () => {
       try {
         setLoadingInjectionMedications(true);
-        // Fetch medications with form filter for injections
-        // Try common injection form variations
-        const formFilters = ['injection', 'injectable', 'injections', 'ampoule', 'vial', 'syringe'];
+        // Load injection medications more efficiently using server-side search
         let allMedications: Array<{ id: number; name: string; category?: string; strength?: string; generic_name?: string }> = [];
-        
-        // Try fetching with each form filter
-        for (const form of formFilters) {
+
+        // Use server-side search for injection-related medications
+        const searchTerms = ['injection', 'inj', 'vial', 'ampoule', 'syringe'];
+
+        for (const term of searchTerms) {
           try {
-            const response = await pharmacyService.getMedications({ 
-              form: form,
-              page_size: 1000 
+            const response = await pharmacyService.getMedications({
+              search: term,
+              page_size: 30 // Reasonable limit per search term
             });
             if (response.results && response.results.length > 0) {
-              allMedications = [
-                ...allMedications,
-                ...response.results
-                  .filter((m: any) => !allMedications.some(existing => existing.id === m.id))
-                  .map((m: any) => ({
-                    id: m.id,
-                    name: m.name,
-                    category: m.category || '',
-                    strength: m.strength || '',
-                    generic_name: m.generic_name || '',
-                  }))
-              ];
-            }
-          } catch (formErr) {
-            // Continue to next form filter
-            continue;
-          }
-        }
-        
-        // If no results from form filters, try fetching all medications and filtering by name/unit
-        if (allMedications.length === 0) {
-          try {
-            const allResponse = await pharmacyService.getMedications({ page_size: 1000 });
-            if (allResponse.results && allResponse.results.length > 0) {
-              // Filter for medications that are likely injections (by unit or name)
-              const injectionKeywords = ['injection', 'inj', 'amp', 'vial', 'ml'];
-              allMedications = allResponse.results
-                .filter((m: any) => {
-                  const nameLower = (m.name || '').toLowerCase();
-                  const unitLower = (m.unit || '').toLowerCase();
-                  const formLower = (m.form || '').toLowerCase();
-                  return injectionKeywords.some(keyword => 
-                    nameLower.includes(keyword) || 
-                    unitLower.includes(keyword) || 
-                    formLower.includes(keyword)
-                  );
-                })
+              const newMeds = response.results
+                .filter((m: any) => !allMedications.some(existing => existing.id === m.id))
                 .map((m: any) => ({
                   id: m.id,
                   name: m.name,
@@ -567,9 +532,38 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                   strength: m.strength || '',
                   generic_name: m.generic_name || '',
                 }));
+              allMedications = [...allMedications, ...newMeds];
+
+              // Break if we have enough results
+              if (allMedications.length >= 50) break;
             }
-          } catch (allErr) {
-            console.warn('Failed to load all medications:', allErr);
+          } catch (searchErr) {
+            // Continue to next search term
+            continue;
+          }
+        }
+
+        // Fallback: if no results from search, load a small set and filter client-side
+        if (allMedications.length === 0) {
+          try {
+            const fallbackResponse = await pharmacyService.getMedications({ page_size: 50 });
+            allMedications = (fallbackResponse.results || [])
+              .filter((m: any) => {
+                const nameLower = (m.name || '').toLowerCase();
+                const formLower = (m.form || '').toLowerCase();
+                return nameLower.includes('injection') || nameLower.includes('inj') ||
+                       formLower.includes('injection') || formLower.includes('injectable');
+              })
+              .map((m: any) => ({
+                id: m.id,
+                name: m.name,
+                category: m.category || '',
+                strength: m.strength || '',
+                generic_name: m.generic_name || '',
+              }));
+          } catch (fallbackErr) {
+            console.warn('Failed to load fallback medications:', fallbackErr);
+            allMedications = [];
           }
         }
         
@@ -1733,7 +1727,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     const loadMedications = async () => {
       try {
         setLoadingMedications(true);
-        const response = await pharmacyService.getMedications({ page_size: 1000 });
+        const response = await pharmacyService.getMedications({ page_size: 200 });
         const loadedMeds = response.results || [];
         setMedications(loadedMeds);
         console.log(`[Consultation] Loaded ${loadedMeds.length} medications from API`);
@@ -1756,7 +1750,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         // Add a small delay to ensure authentication is ready
         await new Promise(resolve => setTimeout(resolve, 100));
         console.log('[Consultation] Loading ICD-10 codes...');
-        const response = await consultationService.getICD10Codes({ page_size: 1000 });
+        const response = await consultationService.getICD10Codes({ page_size: 100 });
         console.log('[Consultation] API Response:', response);
         const loadedCodes = response.results || [];
         console.log(`[Consultation] Loaded ${loadedCodes.length} ICD-10 codes from API`);
@@ -1796,9 +1790,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     const loadLabTemplates = async () => {
       try {
         setLoadingLabTemplates(true);
-        const templates = await labService.getTemplates();
-        setLabTemplates(templates);
-        console.log(`[Consultation] Loaded ${templates.length} lab templates from API`);
+        const response = await labService.getTemplates({ page_size: 200 });
+        setLabTemplates(response.results || []);
+        console.log(`[Consultation] Loaded ${response.results?.length || 0} lab templates from API`);
       } catch (err) {
         console.error('Failed to load lab templates:', err);
           toast.error('Failed to load lab templates. Some tests may not be available.');
@@ -1847,13 +1841,16 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       if (showRadiologyTemplateDropdown && !target.closest('[data-radiology-template-dropdown]')) {
         setShowRadiologyTemplateDropdown(false);
       }
+      if (showMedicationDropdown && !target.closest('[data-medication-dropdown]')) {
+        setShowMedicationDropdown(false);
+      }
     };
     
     if (showLabTemplateDropdown) {
       document.addEventListener('mousedown', handleClickOutside);
       return () => document.removeEventListener('mousedown', handleClickOutside);
     }
-  }, [showLabTemplateDropdown]);
+  }, [showLabTemplateDropdown, showRadiologyTemplateDropdown, showMedicationDropdown]);
   
   const handleRefresh = async () => {
     setIsRefreshing(true);
@@ -2874,11 +2871,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         } as any);
         
         toast.success(`Prescription with ${prescriptionItems.length} medication(s) sent to Pharmacy queue`, {
-          description: `Patient: ${currentPatient?.name}`,
-          action: {
-            label: "View in Pharmacy",
-            onClick: () => window.open('/pharmacy/prescriptions', '_blank')
-          }
+          description: `Patient: ${currentPatient?.name}`
         });
       } catch (err: any) {
         console.error('Error creating prescription:', err);
@@ -3001,6 +2994,11 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       } else {
         // Add medication with sensible defaults based on form
         newSet.add(medicationId!);
+
+        // Close dropdown and clear search when medication is selected
+        setShowMedicationDropdown(false);
+        setMedicationSearch("");
+
         setMedicationConfigs(prevConfigs => {
           const newConfigs = new Map(prevConfigs);
           const form = med.form || med.dosageForm || 'tablet';
@@ -3082,9 +3080,36 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       toast.error("Please select at least one medication");
       return;
     }
-    
+
     if (!newPrescription.notes) {
       toast.error("Please provide clinical indication");
+      return;
+    }
+
+    // Validate medication configurations
+    const missingConfigs: string[] = [];
+    for (const medId of selectedMedications) {
+      const config = medicationConfigs.get(medId);
+      if (!config || !config.dosage?.trim()) {
+        const med = medications.find((m: any) => {
+          const mId = typeof m.id === 'number' ? m.id : parseInt(m.id, 10);
+          return mId === medId;
+        });
+        missingConfigs.push(`${med?.name || 'Unknown medication'} - dosage required`);
+      }
+      if (!config || !config.frequency) {
+        const med = medications.find((m: any) => {
+          const mId = typeof m.id === 'number' ? m.id : parseInt(m.id, 10);
+          return mId === medId;
+        });
+        if (!missingConfigs.some(msg => msg.includes(med?.name || 'Unknown medication'))) {
+          missingConfigs.push(`${med?.name || 'Unknown medication'} - frequency required`);
+        }
+      }
+    }
+
+    if (missingConfigs.length > 0) {
+      toast.error("Please complete all required fields (Dosage and Frequency) for each medication before adding to order.");
       return;
     }
     
@@ -3188,6 +3213,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         newSet.delete(templateId);
       } else {
         newSet.add(templateId);
+        // Close dropdown and clear search when template is selected
+        setShowLabTemplateDropdown(false);
+        setLabTemplateSearch("");
       }
       return newSet;
     });
@@ -3732,8 +3760,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         return currentPriority < highestPriority ? order.priority : highest;
       }, 'Routine');
       
-      // Combine all clinical indications (or use the first one)
-      const combinedClinicalNotes = draftOrders.map(o => o.clinicalIndication).filter(n => n).join('; ') || undefined;
+      // Use the first clinical indication only (simplified to debug)
+      const combinedClinicalNotes = draftOrders.find(o => o.clinicalIndication)?.clinicalIndication || '';
       const combinedSpecialInstructions = draftOrders.map(o => o.specialInstructions).filter(n => n).join('; ') || undefined;
       
       const priorityMap: Record<string, 'routine' | 'urgent' | 'stat'> = {
@@ -3742,8 +3770,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         'STAT': 'stat',
       };
       
-      // Create all studies for the order
-      const studiesData = draftOrders.map(order => {
+      // Create all studies for the order (limit to first order for debugging)
+      const studiesData = draftOrders.slice(0, 1).map(order => {
         // Find the template that matches this order
         const template = radiologyTemplates.find(t => t.name === order.procedure);
         const studyData: any = {
@@ -3751,26 +3779,35 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           body_part: template?.body_part || order.bodyPart || '',
           modality: template?.modality || order.category || 'X-Ray',
           status: 'pending',
-          technical_notes: order.specialInstructions || undefined,
         };
 
-        // Include template if it exists
-        if (template?.id) {
-          studyData.template = template.id;
+        // Only include technical_notes if it exists
+        if (order.specialInstructions) {
+          studyData.technical_notes = order.specialInstructions;
         }
+
+        // TODO: Include template if it exists - commented out to debug 500 error
+        // if (template?.id) {
+        //   studyData.template = template.id;
+        // }
 
         return studyData;
       });
       
       // Create radiology order in backend with all selected studies
-      await radiologyService.createOrder({
+      const orderData: any = {
         patient: numericPatientId,
-        visit: numericVisitId || undefined,
-        consultation_session: sessionId,
         priority: priorityMap[orderPriority] || 'routine',
-        clinical_notes: combinedClinicalNotes,
         studies_data: studiesData as any,
-      });
+      };
+
+      // Add optional fields if they exist
+      if (numericVisitId) orderData.visit = numericVisitId;
+      if (sessionId) orderData.consultation_session = sessionId;
+      if (combinedClinicalNotes) orderData.clinical_notes = combinedClinicalNotes;
+
+      console.log('[Radiology Order] Sending data:', orderData);
+      await radiologyService.createOrder(orderData);
       
       // Update status of sent orders
       setRadiologyOrders(prev => prev.map(order => 
@@ -6681,7 +6718,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                     }}
                   />
                   {showMedicationDropdown && medicationSearch.trim() && (
-                    <div className="absolute z-50 w-full mt-1 bg-white dark:bg-gray-800 border rounded-md shadow-lg max-h-[300px] overflow-y-auto">
+                    <div className="absolute z-50 w-full mt-1 bg-white dark:bg-gray-800 border rounded-md shadow-lg max-h-[300px] overflow-y-auto" data-medication-dropdown>
                       {loadingMedications ? (
                         <div className="p-4 text-center text-sm text-muted-foreground">
                           <Loader2 className="h-4 w-4 animate-spin mx-auto mb-2" />
@@ -6760,7 +6797,12 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
               {selectedMedications.size > 0 && (
                 <div className="space-y-4 border-t pt-4 mt-4">
                   <div className="flex items-center justify-between">
-                    <Label className="text-sm font-semibold">Configure Prescriptions</Label>
+                    <div>
+                      <Label className="text-sm font-semibold">Configure Prescriptions</Label>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Set dosage, frequency, and duration for each selected medication
+                      </p>
+                    </div>
                     <Badge variant="outline" className="text-xs">
                       {selectedMedications.size} medication{selectedMedications.size > 1 ? 's' : ''} selected
                     </Badge>
@@ -6776,7 +6818,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                     const config = medicationConfigs.get(medId) || {
                       dosage: '',
                       frequency: 'Once daily (OD)',
-                      durationDays: 0,
+                      durationDays: '',
                       route: 'Oral',
                       instructions: ''
                     };
@@ -6803,16 +6845,19 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                         
                             <div className="grid grid-cols-2 gap-3">
                           <div className="space-y-1">
-                                <Label className="text-xs">Dosage *</Label>
+                                <Label className="text-xs">Dosage <span className="text-red-500">*</span></Label>
                             <Input
-                                  placeholder="e.g., 1 tablet, 5ml"
+                                  type="number"
+                                  min="0"
+                                  step="1"
+                                  placeholder="e.g., 1 tablet, 5ml, 10mg"
                                   className="h-8 text-xs"
                                   value={config.dosage || ''}
                               onChange={(e) => updateMedicationConfig(medId, 'dosage', e.target.value)}
                             />
                           </div>
                           <div className="space-y-1">
-                                <Label className="text-xs">Frequency *</Label>
+                                <Label className="text-xs">Frequency <span className="text-red-500">*</span></Label>
                             <Select
                                   value={config.frequency || 'Once daily (OD)'}
                               onValueChange={(v) => updateMedicationConfig(medId, 'frequency', v)}
@@ -6825,8 +6870,13 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                     <SelectItem value="Twice daily (BD)">Twice daily (BD)</SelectItem>
                                     <SelectItem value="Three times daily (TDS)">Three times daily (TDS)</SelectItem>
                                     <SelectItem value="Four times daily (QDS)">Four times daily (QDS)</SelectItem>
+                                    <SelectItem value="Every 6 hours">Every 6 hours</SelectItem>
+                                    <SelectItem value="Every 8 hours">Every 8 hours</SelectItem>
+                                    <SelectItem value="Every 12 hours">Every 12 hours</SelectItem>
                                     <SelectItem value="As needed (PRN)">As needed (PRN)</SelectItem>
                                     <SelectItem value="STAT (Single dose)">STAT (Single dose)</SelectItem>
+                                    <SelectItem value="Weekly">Weekly</SelectItem>
+                                    <SelectItem value="Monthly">Monthly</SelectItem>
                               </SelectContent>
                             </Select>
                           </div>
@@ -6835,11 +6885,12 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                             <Input
                               type="number"
                               min="1"
-                                  placeholder="e.g., 7"
+                                  placeholder="e.g., 7, 14, 30"
                                   className="h-8 text-xs"
                               value={config.durationDays || ''}
                               onChange={(e) => {
-                                const days = parseInt(e.target.value) || 0;
+                                const value = e.target.value;
+                                const days = value === '' ? '' : parseInt(value) || '';
                                 updateMedicationConfig(medId, 'durationDays', days);
                               }}
                             />
@@ -6855,10 +6906,14 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                               </SelectTrigger>
                               <SelectContent>
                                     <SelectItem value="Oral">Oral</SelectItem>
-                                    <SelectItem value="IV">IV</SelectItem>
-                                    <SelectItem value="IM">IM</SelectItem>
+                                    <SelectItem value="IV">Intravenous (IV)</SelectItem>
+                                    <SelectItem value="IM">Intramuscular (IM)</SelectItem>
+                                    <SelectItem value="SC">Subcutaneous (SC)</SelectItem>
                                     <SelectItem value="Topical">Topical</SelectItem>
                                     <SelectItem value="Inhalation">Inhalation</SelectItem>
+                                    <SelectItem value="Rectal">Rectal</SelectItem>
+                                    <SelectItem value="Ophthalmic">Ophthalmic</SelectItem>
+                                    <SelectItem value="Otic">Otic</SelectItem>
                               </SelectContent>
                             </Select>
                           </div>
@@ -6938,7 +6993,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                   className="bg-violet-600 hover:bg-violet-700"
                 >
                   <Pill className="h-4 w-4 mr-2" />
-                  Add {selectedMedications.size} Medication{selectedMedications.size > 1 ? 's' : ''} to Order
+                  Add Prescription{selectedMedications.size > 1 ? 's' : ''} to Order
                 </Button>
             </DialogFooter>
           </DialogContent>

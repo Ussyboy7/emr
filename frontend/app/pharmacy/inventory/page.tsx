@@ -196,14 +196,11 @@ export default function InventoryPage() {
     try {
       setLoading(true);
       setError(null);
-      // If filters are active, load more items for client-side filtering
-      // Otherwise, use server-side pagination with itemsPerPage
-      const hasActiveFilters = searchQuery || categoryFilter !== 'All Categories' || stockFilter !== 'all';
-      const pageSize = hasActiveFilters ? 1000 : itemsPerPage;
-      
       const response = await pharmacyService.getInventory({
-        page: hasActiveFilters ? 1 : currentPage, // If filtering, load from page 1
-        page_size: pageSize,
+        page: currentPage,
+        page_size: itemsPerPage,
+        search: searchQuery || undefined,
+        // Note: categoryFilter, stockFilter not yet implemented in backend
       });
       setTotalCount(response.count || response.results.length);
       // Transform API data to frontend format

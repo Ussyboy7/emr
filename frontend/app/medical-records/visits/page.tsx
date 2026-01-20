@@ -96,13 +96,13 @@ export default function VisitsPage() {
         setLoading(true);
         setError(null);
 
-        // Use itemsPerPage for server-side pagination, or load more if filters are active
-        const hasActiveFilters = searchQuery || statusFilter !== 'all' || typeFilter !== 'all' || clinicFilter !== 'all' || dateFilter !== 'all';
-        const pageSize = hasActiveFilters ? 1000 : itemsPerPage;
-        
-        const result = await visitService.getVisits({ 
-          page: hasActiveFilters ? 1 : currentPage,
-          page_size: pageSize 
+        const result = await visitService.getVisits({
+          page: currentPage,
+          page_size: itemsPerPage,
+          search: searchQuery || undefined,
+          status: statusFilter !== 'all' ? statusFilter : undefined,
+          visit_type: typeFilter !== 'all' ? typeFilter : undefined,
+          // Note: clinicFilter, dateFilter not yet implemented in backend
         });
         setTotalCount(result.count || result.results.length);
         
@@ -122,45 +122,15 @@ export default function VisitsPage() {
     };
 
     loadVisits();
-  }, [currentPage, itemsPerPage, searchQuery, statusFilter, typeFilter, clinicFilter, dateFilter]);
+  }, [currentPage, itemsPerPage, searchQuery, statusFilter, typeFilter]);
 
-  const filteredVisits = useMemo(() => visits.filter(visit => {
-    const matchesSearch = visit.patient.toLowerCase().includes(searchQuery.toLowerCase()) || 
-      visit.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      visit.patientId.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesStatus = statusFilter === 'all' || visit.status.toLowerCase().replace(/ /g, '-') === statusFilter;
-    const matchesType = typeFilter === 'all' || visit.type === typeFilter; // visit.type is already lowercase from backend
-    const matchesClinic = clinicFilter === 'all' || clinicMatches(visit.clinic, clinicFilter);
-    
-    // Date filter
-    if (dateFilter !== 'all') {
-      const visitDate = new Date(visit.date);
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      
-      if (dateFilter === 'today' && visitDate.toDateString() !== today.toDateString()) return false;
-      if (dateFilter === 'week') {
-        const weekAgo = new Date(today);
-        weekAgo.setDate(weekAgo.getDate() - 7);
-        if (visitDate < weekAgo) return false;
-      }
-      if (dateFilter === 'month') {
-        const monthAgo = new Date(today);
-        monthAgo.setMonth(monthAgo.getMonth() - 1);
-        if (visitDate < monthAgo) return false;
-      }
-    }
-    
-    return matchesSearch && matchesStatus && matchesType && matchesClinic;
-  }), [visits, searchQuery, statusFilter, typeFilter, clinicFilter, dateFilter]);
-
-  // Use filtered visits directly (server-side pagination when no client-side filters)
-  const paginatedVisits = filteredVisits;
+  // With server-side pagination, visits array contains only current page results
+  const paginatedVisits = visits;
 
   // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, statusFilter, typeFilter, clinicFilter, dateFilter]);
+  }, [searchQuery, statusFilter, typeFilter]);
 
   // Stats - 4 cards with useful metrics
   const stats = useMemo(() => {
@@ -376,7 +346,7 @@ export default function VisitsPage() {
                 />
               </div>
               <div className="flex flex-wrap gap-2">
-                <Select value={dateFilter} onValueChange={setDateFilter}>
+                <Select value={dateFilter} onValueChange={setDateFilter} disabled>
                   <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Time</SelectItem>
@@ -403,7 +373,7 @@ export default function VisitsPage() {
                     <SelectItem value="routine">Routine Checkup</SelectItem>
                   </SelectContent>
                 </Select>
-                <Select value={clinicFilter} onValueChange={setClinicFilter}>
+                <Select value={clinicFilter} onValueChange={setClinicFilter} disabled>
                   <SelectTrigger className="w-[140px]"><SelectValue placeholder="Clinic" /></SelectTrigger>
                   <SelectContent>
                     {clinics.map(c => <SelectItem key={c} value={c === 'All Clinics' ? 'all' : c}>{c}</SelectItem>)}
@@ -420,7 +390,7 @@ export default function VisitsPage() {
           <>
             <div className="flex items-center justify-between px-1">
               <p className="text-sm text-muted-foreground">
-                Showing <span className="font-medium text-foreground">{filteredVisits.length}</span> visits
+                Showing <span className="font-medium text-foreground">{paginatedVisits.length}</span> visits
               </p>
             </div>
 
@@ -514,12 +484,10 @@ export default function VisitsPage() {
             </div>
 
             {/* Pagination */}
-            {filteredVisits.length > 0 && (
+            {paginatedVisits.length > 0 && (
               <StandardPagination
                 currentPage={currentPage}
-                totalItems={searchQuery || statusFilter !== 'all' || typeFilter !== 'all' || clinicFilter !== 'all' || dateFilter !== 'all'
-                  ? filteredVisits.length 
-                  : totalCount}
+              totalItems={totalCount}
                 itemsPerPage={itemsPerPage}
                 onPageChange={setCurrentPage}
                 onItemsPerPageChange={(newSize) => {

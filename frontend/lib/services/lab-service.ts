@@ -207,9 +207,16 @@ class LabService {
   /**
    * Get lab templates
    */
-  async getTemplates(): Promise<LabTemplate[]> {
-    const response = await apiFetch<{ results: LabTemplate[]; count: number }>('/laboratory/templates/?page_size=1000');
-    return response.results || [];
+  async getTemplates(params?: {
+    search?: string;
+    category?: string;
+    is_active?: boolean;
+    page?: number;
+    page_size?: number;
+  }): Promise<{ results: LabTemplate[]; count: number }> {
+    const query = params ? buildQueryString(params) : 'page_size=100';
+    const response = await apiFetch<{ results: LabTemplate[]; count: number }>(`/laboratory/templates/?${query}`);
+    return response;
   }
 
   /**

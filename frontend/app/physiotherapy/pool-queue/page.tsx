@@ -158,14 +158,11 @@ export default function PhysioPoolQueuePage() {
       setLoading(true);
       setError(null);
 
-      const hasActiveFilters = searchQuery || dateFilter !== 'all';
-      const pageSize = hasActiveFilters ? 1000 : itemsPerPage;
-      const pageToUse = hasActiveFilters ? 1 : currentPage;
-
       const params: any = {
-        page: pageToUse,
-        page_size: pageSize,
+        page: currentPage,
+        page_size: itemsPerPage,
       };
+      // Note: searchQuery, dateFilter not yet implemented in backend
 
       if (searchQuery) params.search = searchQuery;
 

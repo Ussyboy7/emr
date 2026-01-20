@@ -196,7 +196,7 @@ export default function RadiologyOrdersPage() {
   // Load orders from API
   useEffect(() => {
     loadOrders();
-  }, [currentPage, itemsPerPage, statusFilter]);
+  }, [currentPage, itemsPerPage, searchQuery, priorityFilter]);
 
 
   const loadOrders = async () => {
@@ -204,14 +204,12 @@ export default function RadiologyOrdersPage() {
       setLoading(true);
       setError(null);
 
-      const hasActiveFilters = searchQuery || statusFilter !== 'all' || priorityFilter !== 'all' || dateFilter !== 'all';
-      const pageSize = hasActiveFilters ? 1000 : itemsPerPage;
-
       const response = await radiologyService.getOrders({
-        page: hasActiveFilters ? 1 : currentPage,
-        page_size: pageSize,
+        page: currentPage,
+        page_size: itemsPerPage,
         search: searchQuery || undefined,
-        // Add status and priority filters if supported by API
+        priority: priorityFilter !== 'all' ? priorityFilter : undefined,
+        // Note: statusFilter, dateFilter not yet implemented in backend
       });
 
       setTotalCount(response.count || response.results.length);
@@ -240,58 +238,25 @@ export default function RadiologyOrdersPage() {
   };
 
   // Filter orders
+  // Client-side filtering only for tabs (server handles search, priority filters)
   const filteredOrders = useMemo(() => {
     return orders.filter(order => {
-      const matchesSearch =
-        order.patient_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        order.order_id?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        order.doctor_name?.toLowerCase().includes(searchQuery.toLowerCase());
-
-      // Filter by active tab (like lab orders)
-      let matchesTab = true;
-      if (activeTab === 'pending') matchesTab = (order.studies || []).some((s: any) => s.status === 'pending');
-      else if (activeTab === 'processing') matchesTab = (order.studies || []).some((s: any) => s.status === 'processing');
-      else if (activeTab === 'results') matchesTab = (order.studies || []).some((s: any) => s.status === 'reported');
-      else if (activeTab === 'rejected') matchesTab = (order.studies || []).some((s: any) => s.status === 'rejected');
-      // For 'all' tab, matchesTab remains true
-
-      // Additional filters (always applied)
-      const matchesPriority = priorityFilter === 'all' || order.priority === priorityFilter;
-
-      // Date filter
-      let matchesDate = true;
-      if (dateFilter !== 'all') {
-        const orderDate = new Date(order.ordered_at);
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-
-        if (dateFilter === 'today') matchesDate = orderDate.toDateString() === today.toDateString();
-        else if (dateFilter === 'week') {
-          const weekAgo = new Date(today);
-          weekAgo.setDate(weekAgo.getDate() - 7);
-          matchesDate = orderDate >= weekAgo;
-        }
-        else if (dateFilter === 'month') {
-          const monthAgo = new Date(today);
-          monthAgo.setMonth(monthAgo.getMonth() - 1);
-          matchesDate = orderDate >= monthAgo;
-        }
-      }
-
-      return matchesSearch && matchesTab && matchesPriority && matchesDate;
+      // Tab filtering (client-side for UX)
+      if (activeTab === 'pending') return (order.studies || []).some((s: any) => s.status === 'pending');
+      if (activeTab === 'processing') return (order.studies || []).some((s: any) => s.status === 'processing');
+      if (activeTab === 'results') return (order.studies || []).some((s: any) => s.status === 'reported');
+      if (activeTab === 'rejected') return (order.studies || []).some((s: any) => s.status === 'rejected');
+      return true; // All tab shows everything
     });
-  }, [orders, searchQuery, activeTab, priorityFilter, dateFilter]);
+  }, [orders, activeTab]);
 
-  // Paginated orders
-  const paginatedOrders = useMemo(() => {
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    return filteredOrders.slice(startIndex, startIndex + itemsPerPage);
-  }, [filteredOrders, currentPage, itemsPerPage]);
+  // With server-side pagination, orders array contains only current page results
+  const paginatedOrders = filteredOrders;
 
   // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, statusFilter, priorityFilter, dateFilter]);
+  }, [searchQuery, priorityFilter, activeTab]);
 
   // Calculate stats (simplified like lab)
   // Calculate stats like lab orders - based on individual studies, not orders
@@ -570,7 +535,7 @@ export default function RadiologyOrdersPage() {
                 />
               </div>
               <div className="flex flex-wrap gap-2">
-                <Select value={dateFilter} onValueChange={setDateFilter}>
+                <Select value={dateFilter} onValueChange={setDateFilter} disabled>
                   <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Time</SelectItem>
@@ -636,9 +601,7 @@ export default function RadiologyOrdersPage() {
           <Card className="p-4">
             <StandardPagination
               currentPage={currentPage}
-              totalItems={searchQuery || statusFilter !== 'all' || priorityFilter !== 'all' || dateFilter !== 'all'
-                ? filteredOrders.length
-                : totalCount}
+              totalItems={totalCount}
               itemsPerPage={itemsPerPage}
               onPageChange={setCurrentPage}
               onItemsPerPageChange={(newSize) => {
@@ -648,7 +611,7 @@ export default function RadiologyOrdersPage() {
               itemName="orders"
             />
             <p className="text-xs text-muted-foreground mt-2 text-center">
-              Showing {filteredOrders.length} order{filteredOrders.length !== 1 ? 's' : ''} (filtered from all orders)
+              Showing {filteredOrders.length} order{filteredOrders.length !== 1 ? 's' : ''} (page {currentPage} of {Math.ceil(totalCount / itemsPerPage)})
             </p>
           </Card>
         )}

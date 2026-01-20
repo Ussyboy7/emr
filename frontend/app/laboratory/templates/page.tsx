@@ -148,8 +148,8 @@ export default function TestTemplatesPage() {
     try {
       setLoading(true);
       setError(null);
-      const apiTemplates = await labService.getTemplates();
-      const transformed = apiTemplates.map(transformTemplate);
+      const response = await labService.getTemplates({ page_size: 500 });
+      const transformed = response.results.map(transformTemplate);
       setTemplates(transformed);
     } catch (err: any) {
       setError(err.message || 'Failed to load templates');

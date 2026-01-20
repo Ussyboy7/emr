@@ -111,17 +111,15 @@ export default function CompletedReportsPage() {
     try {
       setLoading(true);
       setError(null);
-      const hasActiveFilters = searchQuery || statusFilter !== 'all' || dateFilter !== 'all' || genderFilter !== 'all';
-      const pageSize = hasActiveFilters ? 1000 : itemsPerPage;
-
       const params: any = {
         status: 'verified',
-        page: hasActiveFilters ? 1 : currentPage,
-        page_size: pageSize,
+        page: currentPage,
+        page_size: itemsPerPage,
       };
       if (statusFilter !== 'all') {
         params.overall_status = statusFilter;
       }
+      // Note: searchQuery, dateFilter, genderFilter not yet implemented in backend
 
       const response = await radiologyService.getPendingVerifications(params);
       setTotalCount(response.count || response.results.length);

@@ -85,17 +85,19 @@ export default function ClinicDepartmentPage() {
     try {
       setLoading(true);
       setError(null);
-      const hasActiveFilters = searchQuery || statusFilter !== 'all';
-      const pageSize = hasActiveFilters ? 1000 : itemsPerPage;
-      
       const [clinicsResponse, deptsResponse] = await Promise.all([
-        adminService.getClinics({ 
-          page: hasActiveFilters ? 1 : currentPage,
-          page_size: pageSize,
+        adminService.getClinics({
+          page: currentPage,
+          page_size: itemsPerPage,
+          search: searchQuery || undefined,
+          is_active: statusFilter !== 'all' ? (statusFilter === 'Active') : undefined,
         }),
-        adminService.getDepartments({ 
-          page: hasActiveFilters ? 1 : currentPage,
-          page_size: pageSize,
+        adminService.getDepartments({
+          page: currentPage,
+          page_size: itemsPerPage,
+          search: searchQuery || undefined,
+          // Note: clinic filter not yet implemented in backend
+          is_active: statusFilter !== 'all' ? (statusFilter === 'Active') : undefined,
         }),
       ]);
       setTotalCount(clinicsResponse.count || clinicsResponse.results.length);
@@ -195,9 +197,10 @@ export default function ClinicDepartmentPage() {
     setLoadingDetails(true);
     try {
       // Load clinic details (rooms and users) - data fetched but not currently displayed
+      // Note: API doesn't support clinic filtering for users
       await Promise.all([
-        adminService.getRooms({ clinic: clinicId, page_size: 1000 }),
-        adminService.getUsers({ clinic: clinicId, page_size: 1000 }),
+        adminService.getRooms({ page_size: 1000 }), // Get all rooms, filter client-side if needed
+        adminService.getUsers({ page_size: 1000 }), // Get all users, filter client-side if needed
       ]);
     } catch (err: any) {
       console.error('Error loading clinic details:', err);
@@ -233,7 +236,8 @@ export default function ClinicDepartmentPage() {
   const loadDepartmentDetails = async (deptId: number) => {
     setLoadingDetails(true);
     try {
-      const usersResponse = await adminService.getUsers({ department: deptId, page_size: 1000 });
+      // Note: API doesn't support department filtering for users
+      const usersResponse = await adminService.getUsers({ page_size: 1000 }); // Get all users, filter client-side if needed
       setDeptUsers(usersResponse.results || []);
     } catch (err: any) {
       console.error('Error loading department details:', err);

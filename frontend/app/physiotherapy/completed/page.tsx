@@ -55,14 +55,10 @@ export default function PhysioCompletedPage() {
       setLoading(true);
       setError(null);
 
-      const hasActiveFilters = searchQuery || dateFilter !== 'all' || physiotherapistFilter !== 'all';
-      const pageSize = hasActiveFilters ? 1000 : itemsPerPage;
-      const pageToUse = hasActiveFilters ? 1 : currentPage;
-
       const params: any = {
         status: 'completed',
-        page: pageToUse,
-        page_size: pageSize,
+        page: currentPage,
+        page_size: itemsPerPage,
       };
 
       if (searchQuery) params.search = searchQuery;

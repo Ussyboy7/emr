@@ -97,12 +97,11 @@ export default function CompletedTestsPage() {
     try {
       setLoading(true);
       setError(null);
-      const hasActiveFilters = searchQuery || statusFilter !== 'all' || dateFilter !== 'all' || genderFilter !== 'all';
-      const pageSize = hasActiveFilters ? 1000 : itemsPerPage;
-      
       const response = await labService.getCompletedTests({
-        page: hasActiveFilters ? 1 : currentPage,
-        page_size: pageSize,
+        page: currentPage,
+        page_size: itemsPerPage,
+        status: statusFilter !== 'all' ? statusFilter : undefined,
+        // Note: searchQuery, dateFilter, genderFilter not yet implemented in backend
       });
       setTotalCount(response.count || response.results.length);
       // Transform API data to frontend format

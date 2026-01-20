@@ -188,12 +188,12 @@ export default function RolesPermissionsPage() {
     try {
       setLoading(true);
       setError(null);
-      const hasActiveFilters = searchQuery || typeFilter !== 'all' || statusFilter !== 'all';
-      const pageSize = hasActiveFilters ? 1000 : itemsPerPage;
-      
-      const response = await adminService.getRoles({ 
-        page: hasActiveFilters ? 1 : currentPage,
-        page_size: pageSize,
+      const response = await adminService.getRoles({
+        page: currentPage,
+        page_size: itemsPerPage,
+        search: searchQuery || undefined,
+        type: typeFilter !== 'all' ? typeFilter : undefined,
+        is_active: statusFilter !== 'all' ? (statusFilter === 'Active') : undefined,
       });
       setTotalCount(response.count || response.results.length);
       

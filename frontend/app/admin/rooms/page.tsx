@@ -77,12 +77,13 @@ export default function RoomManagementPage() {
       try {
         setLoading(true);
         setError(null);
-        const hasActiveFilters = searchQuery || statusFilter !== 'all' || typeFilter !== 'all' || locationFilter !== 'all';
-        const pageSize = hasActiveFilters ? 1000 : itemsPerPage;
-        
-        const result = await roomService.getRooms({ 
-          page: hasActiveFilters ? 1 : currentPage,
-          page_size: pageSize,
+        const result = await roomService.getRooms({
+          page: currentPage,
+          page_size: itemsPerPage,
+          search: searchQuery || undefined,
+          status: statusFilter !== 'all' ? statusFilter : undefined,
+          specialty: typeFilter !== 'all' ? typeFilter : undefined,
+          is_active: locationFilter !== 'all' ? (locationFilter === 'Active') : undefined,
         });
         setTotalCount(result.count || result.results.length);
         

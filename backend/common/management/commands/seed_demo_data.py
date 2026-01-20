@@ -66,6 +66,7 @@ class Command(BaseCommand):
         self.stdout.write("  Lab Tech: labtech / ChangeMe123!")
         self.stdout.write("  Pharmacist: pharmacist / ChangeMe123!")
         self.stdout.write("  Radiologist: radiologist / ChangeMe123!")
+        self.stdout.write("  Records: records / ChangeMe123!")
         self.stdout.write("  Physiotherapist: physio / ChangeMe123!")
 
     def _reset_data(self):

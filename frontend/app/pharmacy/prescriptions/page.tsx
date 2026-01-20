@@ -164,7 +164,7 @@ export default function PrescriptionsPage() {
   // Load prescriptions from API
   useEffect(() => {
     loadPrescriptions();
-  }, [currentPage, itemsPerPage, statusFilter]);
+  }, [currentPage, itemsPerPage, statusFilter, searchQuery]);
 
   // Transform medication data with status determination
   const transformMedications = (medications: any[], prescriptionStatus: string) => {
@@ -232,14 +232,12 @@ export default function PrescriptionsPage() {
       setIsLoadingPrescriptions(true);
       setLoading(true);
       setError(null);
-      const hasActiveFilters = searchQuery || statusFilter !== 'all' || priorityFilter !== 'all' || dateFilter !== 'all' || genderFilter !== 'all';
-      const pageSize = hasActiveFilters ? 1000 : itemsPerPage;
-      
       const response = await pharmacyService.getPrescriptions({
         status: statusFilter !== 'all' ? statusFilter : undefined,
-        page: hasActiveFilters ? 1 : currentPage,
-        page_size: pageSize,
+        page: currentPage,
+        page_size: itemsPerPage,
         search: searchQuery || undefined,
+        // Note: priorityFilter, dateFilter, genderFilter not yet implemented in backend
       });
       setTotalCount(response.count || response.results.length);
       // Transform API data - extract patient and visit details
@@ -413,49 +411,16 @@ export default function PrescriptionsPage() {
   const [printing, setPrinting] = useState(false);
 
   // Filter prescriptions
-  const filteredPrescriptions = useMemo(() => {
-    return prescriptions.filter(rx => {
-      const matchesSearch =
-        (rx.patient?.name?.toLowerCase() || '').includes(searchQuery.toLowerCase()) ||
-        (rx.id?.toLowerCase() || '').includes(searchQuery.toLowerCase()) ||
-        (rx.patient?.mrn?.toLowerCase() || '').includes(searchQuery.toLowerCase());
-      const matchesStatus = statusFilter === 'all' || (rx.status?.toLowerCase() || '') === statusFilter.toLowerCase();
-      const matchesPriority = priorityFilter === 'all' || (rx.priority?.toLowerCase() || '') === priorityFilter.toLowerCase();
-      const matchesGender = genderFilter === 'all' || (rx.patient?.gender?.toLowerCase() || '') === genderFilter.toLowerCase();
-      
-      // Date filter (filter by prescribed date)
-      if (dateFilter !== 'all') {
-        const prescribedDate = new Date(rx.date);
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        
-        if (dateFilter === 'today' && prescribedDate.toDateString() !== today.toDateString()) return false;
-        if (dateFilter === 'week') {
-          const weekAgo = new Date(today);
-          weekAgo.setDate(weekAgo.getDate() - 7);
-          if (prescribedDate < weekAgo) return false;
-        }
-        if (dateFilter === 'month') {
-          const monthAgo = new Date(today);
-          monthAgo.setMonth(monthAgo.getMonth() - 1);
-          if (prescribedDate < monthAgo) return false;
-        }
-      }
-      
-      return matchesSearch && matchesStatus && matchesPriority && matchesGender;
-    });
-  }, [prescriptions, searchQuery, statusFilter, priorityFilter, dateFilter, genderFilter]);
+  // With server-side pagination, prescriptions array contains only current page results
+  const paginatedPrescriptions = prescriptions;
 
-  // Paginated prescriptions
-  const paginatedPrescriptions = useMemo(() => {
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    return filteredPrescriptions.slice(startIndex, startIndex + itemsPerPage);
-  }, [filteredPrescriptions, currentPage, itemsPerPage]);
+  // For display consistency, use the same variable name
+  const filteredPrescriptions = paginatedPrescriptions;
 
   // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, statusFilter, priorityFilter, dateFilter, genderFilter]);
+  }, [searchQuery, statusFilter]);
 
   // Calculate stats
   const stats = useMemo(() => ({
@@ -1164,7 +1129,7 @@ export default function PrescriptionsPage() {
                 />
               </div>
               <div className="flex flex-wrap gap-2">
-                <Select value={dateFilter} onValueChange={setDateFilter}>
+                <Select value={dateFilter} onValueChange={setDateFilter} disabled>
                   <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Time</SelectItem>
@@ -1184,7 +1149,7 @@ export default function PrescriptionsPage() {
                     <SelectItem value="partially dispensed">Partial</SelectItem>
                   </SelectContent>
                 </Select>
-                <Select value={priorityFilter} onValueChange={setPriorityFilter}>
+                <Select value={priorityFilter} onValueChange={setPriorityFilter} disabled>
                   <SelectTrigger className="w-[150px]"><SelectValue placeholder="Priority" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Priority</SelectItem>
@@ -1194,7 +1159,7 @@ export default function PrescriptionsPage() {
                     <SelectItem value="low">Low</SelectItem>
                   </SelectContent>
                 </Select>
-                <Select value={genderFilter} onValueChange={setGenderFilter}>
+                <Select value={genderFilter} onValueChange={setGenderFilter} disabled>
                   <SelectTrigger className="w-[120px]"><SelectValue placeholder="Gender" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Gender</SelectItem>
@@ -1346,9 +1311,7 @@ export default function PrescriptionsPage() {
           <Card className="p-4">
             <StandardPagination
               currentPage={currentPage}
-              totalItems={searchQuery || statusFilter !== 'all' || priorityFilter !== 'all' || dateFilter !== 'all' || genderFilter !== 'all'
-                ? filteredPrescriptions.length 
-                : totalCount}
+              totalItems={totalCount}
               itemsPerPage={itemsPerPage}
               onPageChange={setCurrentPage}
               onItemsPerPageChange={(newSize) => {

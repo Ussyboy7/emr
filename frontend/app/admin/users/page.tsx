@@ -109,17 +109,17 @@ export default function UserManagementPage() {
     try {
       setLoading(true);
       setError(null);
-      const hasActiveFilters = searchQuery || roleFilter !== 'all' || departmentFilter !== 'all' || clinicFilter !== 'all' || statusFilter !== 'all';
-      const pageSize = hasActiveFilters ? 1000 : itemsPerPage;
-      // Always use page 1 when filters are active, otherwise use the ref value (avoids dependency on currentPage)
-      const pageToUse = hasActiveFilters ? 1 : currentPageRef.current;
-      
-      const response = await adminService.getUsers({ 
-        page: pageToUse,
-        page_size: pageSize,
+
+      const response = await adminService.getUsers({
+        page: currentPageRef.current,
+        page_size: itemsPerPage,
+        search: searchQuery || undefined,
+        system_role: roleFilter !== 'all' ? roleFilter : undefined,
+        // Note: department and clinic filtering not yet implemented in backend
+        is_active: statusFilter !== 'all' ? (statusFilter === 'Active') : undefined,
       });
       setTotalCount(response.count || response.results.length);
-      
+
       // Transform API users to frontend format
       const transformedStaff: StaffMember[] = response.results.map((user: ApiUser) => ({
         id: user.id.toString(),
@@ -140,7 +140,7 @@ export default function UserManagementPage() {
         lastLogin: user.last_login,
         permissions: [],
       }));
-      
+
       setStaff(transformedStaff);
     } catch (err: any) {
       setError(err.message || 'Failed to load staff');
@@ -149,7 +149,7 @@ export default function UserManagementPage() {
     } finally {
       setLoading(false);
     }
-  }, [searchQuery, roleFilter, departmentFilter, clinicFilter, statusFilter, itemsPerPage]);
+  }, [currentPage, itemsPerPage, searchQuery, roleFilter, departmentFilter, clinicFilter, statusFilter]);
 
   // Load clinics and departments from API
   useEffect(() => {
@@ -206,38 +206,22 @@ export default function UserManagementPage() {
     selectedStaffRef.current = selectedStaff;
   }, [selectedStaff]);
 
-  // Filter staff
-  const filteredStaff = useMemo(() => {
-    return staff.filter(s => {
-      const matchesSearch = 
-        s.firstName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        s.lastName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        s.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        s.staffId.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesRole = roleFilter === 'all' || s.role === roleFilter;
-      const matchesDepartment = departmentFilter === 'all' || s.department === departmentFilter;
-      const matchesClinic = clinicFilter === 'all' || s.clinic === clinicFilter;
-      const matchesStatus = statusFilter === 'all' || s.status === statusFilter;
-      return matchesSearch && matchesRole && matchesDepartment && matchesClinic && matchesStatus;
-    });
-  }, [staff, searchQuery, roleFilter, departmentFilter, clinicFilter, statusFilter]);
-
-  // Use filtered staff directly (server-side pagination when no client-side filters)
-  const paginatedStaff = filteredStaff;
+  // With server-side pagination and filtering, staff array contains only current page results
+  const paginatedStaff = staff;
 
 
-  // Stats
+  // Stats - with server-side pagination, only total count is accurate
   const stats = useMemo(() => ({
-    total: staff.length,
-    active: staff.filter(s => s.status === 'Active').length,
-    doctors: staff.filter(s => s.role === 'Medical Doctor').length,
-    nurses: staff.filter(s => s.role === 'Nursing Officer').length,
-    labScientists: staff.filter(s => s.role === 'Laboratory Scientist').length,
-    pharmacists: staff.filter(s => s.role === 'Pharmacist').length,
-    radiologists: staff.filter(s => s.role === 'Radiologist').length,
-    medicalRecords: staff.filter(s => s.role === 'Medical Records Officer').length,
-    systemAdmins: staff.filter(s => s.role === 'System Administrator').length,
-  }), [staff]);
+    total: totalCount,
+    active: '—', // Cannot calculate from paginated data
+    doctors: '—', // Cannot calculate from paginated data
+    nurses: '—', // Cannot calculate from paginated data
+    labScientists: '—', // Cannot calculate from paginated data
+    pharmacists: '—', // Cannot calculate from paginated data
+    radiologists: '—', // Cannot calculate from paginated data
+    medicalRecords: '—', // Cannot calculate from paginated data
+    systemAdmins: '—', // Cannot calculate from paginated data
+  }), [totalCount]);
 
   const getRoleIcon = (role: string) => {
     switch (role) {
@@ -360,6 +344,7 @@ export default function UserManagementPage() {
     
     try {
       const newUser = await adminService.createUser({
+        username: (formData as any).username,
         first_name: formData.firstName,
         last_name: formData.lastName,
         email: formData.email,
@@ -619,17 +604,17 @@ export default function UserManagementPage() {
                     {roles.map(r => <SelectItem key={r} value={r === 'All Roles' ? 'all' : r}>{r}</SelectItem>)}
                   </SelectContent>
                 </Select>
-                <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
+                <Select value={departmentFilter} onValueChange={setDepartmentFilter} disabled>
                   <SelectTrigger className="w-[170px]"><SelectValue placeholder="Department" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">All Departments</SelectItem>
+                    <SelectItem value="all">All Departments (Coming Soon)</SelectItem>
                     {departments.map(d => <SelectItem key={d.id} value={d.name}>{d.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
-                <Select value={clinicFilter} onValueChange={setClinicFilter}>
+                <Select value={clinicFilter} onValueChange={setClinicFilter} disabled>
                   <SelectTrigger className="w-[140px]"><SelectValue placeholder="Clinic" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">All Clinics</SelectItem>
+                    <SelectItem value="all">All Clinics (Coming Soon)</SelectItem>
                     {clinics.map(c => <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
@@ -696,7 +681,7 @@ export default function UserManagementPage() {
                         </td>
                         <td className="p-4">
                           <p className="text-foreground">{s.department}</p>
-                          <p className="text-xs text-muted-foreground">{s.clinic} Clinic</p>
+                          <p className="text-xs text-muted-foreground">{s.clinic}</p>
                         </td>
                         <td className="p-4">
                           <Badge variant="outline" className={getStatusBadge(s.status)}>{s.status}</Badge>
@@ -752,7 +737,7 @@ export default function UserManagementPage() {
             <div className="p-4">
             <StandardPagination
               currentPage={currentPage}
-              totalItems={filteredStaff.length}
+              totalItems={totalCount}
               itemsPerPage={itemsPerPage}
               onPageChange={setCurrentPage}
               onItemsPerPageChange={setItemsPerPage}

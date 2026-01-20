@@ -279,16 +279,14 @@ export default function RadiologyVerificationPage() {
     try {
       setLoading(true);
       setError(null);
-      const hasActiveFilters = searchQuery || categoryFilter !== 'all' || priorityFilter !== 'all' || dateFilter !== 'all' || genderFilter !== 'all';
-      const pageSize = hasActiveFilters ? 1000 : itemsPerPage;
-
       const params: any = {
-        page: hasActiveFilters ? 1 : currentPage,
-        page_size: pageSize,
+        page: currentPage,
+        page_size: itemsPerPage,
       };
       if (priorityFilter !== 'all') {
         params.priority = priorityFilter.toLowerCase();
       }
+      // Note: searchQuery, categoryFilter, dateFilter, genderFilter not yet implemented in backend
 
       const response = await radiologyService.getPendingVerifications(params);
       setTotalCount(response.count || response.results.length);
@@ -307,17 +305,15 @@ export default function RadiologyVerificationPage() {
     try {
       setVerifiedLoading(true);
       setVerifiedError(null);
-      const hasActiveFilters = searchQuery || categoryFilter !== 'all' || priorityFilter !== 'all' || dateFilter !== 'all' || genderFilter !== 'all';
-      const pageSize = hasActiveFilters ? 1000 : itemsPerPage;
-
       const params: any = {
         status: 'verified',
-        page: hasActiveFilters ? 1 : verifiedCurrentPage,
-        page_size: pageSize,
+        page: verifiedCurrentPage,
+        page_size: itemsPerPage,
       };
       if (priorityFilter !== 'all') {
         params.priority = priorityFilter.toLowerCase();
       }
+      // Note: searchQuery, categoryFilter, dateFilter, genderFilter not yet implemented in backend
 
       const response = await radiologyService.getPendingVerifications(params);
       setVerifiedTotalCount(response.count || response.results.length);

@@ -679,12 +679,9 @@ export default function ResultsVerificationPage() {
     try {
       setLoading(true);
       setError(null);
-      const hasActiveFilters = searchQuery || statusFilter !== 'all' || priorityFilter !== 'all' || dateFilter !== 'all' || genderFilter !== 'all';
-      const pageSize = hasActiveFilters ? 1000 : itemsPerPage;
-      
       const params: any = {
-        page: hasActiveFilters ? 1 : currentPage,
-        page_size: pageSize,
+        page: currentPage,
+        page_size: itemsPerPage,
       };
       if (statusFilter !== 'all') {
         params.overall_status = statusFilter;
@@ -692,6 +689,7 @@ export default function ResultsVerificationPage() {
       if (priorityFilter !== 'all') {
         params.priority = transformToBackendPriority(priorityFilter);
       }
+      // Note: searchQuery, dateFilter, genderFilter not yet implemented in backend
       
       const response = await labService.getPendingVerifications(params);
       setTotalCount(response.count || response.results.length);
@@ -710,12 +708,9 @@ export default function ResultsVerificationPage() {
     try {
       setVerifiedLoading(true);
       setVerifiedError(null);
-      const hasActiveFilters = searchQuery || statusFilter !== 'all' || priorityFilter !== 'all' || dateFilter !== 'all' || genderFilter !== 'all';
-      const pageSize = hasActiveFilters ? 1000 : itemsPerPage;
-
       const params: any = {
-        page: hasActiveFilters ? 1 : verifiedCurrentPage,
-        page_size: pageSize,
+        page: verifiedCurrentPage,
+        page_size: itemsPerPage,
       };
       if (statusFilter !== 'all') {
         params.overall_status = statusFilter;
@@ -723,6 +718,7 @@ export default function ResultsVerificationPage() {
       if (priorityFilter !== 'all') {
         params.priority = transformToBackendPriority(priorityFilter);
       }
+      // Note: searchQuery, dateFilter, genderFilter not yet implemented in backend
 
       const response = await labService.getVerifiedResults(params);
       setVerifiedTotalCount(response.count || response.results.length);

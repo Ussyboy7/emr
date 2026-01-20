@@ -781,64 +781,35 @@ export default function LabOrdersPage() {
     return 'Pending';
   };
 
-  const getFilteredOrders = () => {
+  // Client-side filtering only for tabs (server handles search, priority, date, gender filters)
+  const filteredOrders = useMemo(() => {
     return orders.filter(order => {
-      const matchesSearch = order.patient.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        order.orderId.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        order.doctor.name.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesPriority = priorityFilter === 'all' || order.priority === priorityFilter;
-      const matchesGender = genderFilter === 'all' || order.patient.gender.toLowerCase() === genderFilter.toLowerCase();
-      
-      // Date filter
-      if (dateFilter !== 'all') {
-        const orderedDate = new Date(order.orderedAt);
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        
-        if (dateFilter === 'today' && orderedDate.toDateString() !== today.toDateString()) return false;
-        if (dateFilter === 'week') {
-          const weekAgo = new Date(today);
-          weekAgo.setDate(weekAgo.getDate() - 7);
-          if (orderedDate < weekAgo) return false;
-        }
-        if (dateFilter === 'month') {
-          const monthAgo = new Date(today);
-          monthAgo.setMonth(monthAgo.getMonth() - 1);
-          if (orderedDate < monthAgo) return false;
-        }
-      }
-      
-      // Tab filtering
-      if (activeTab === 'pending') return matchesSearch && matchesPriority && matchesGender && order.tests.some(t => t.status === 'Pending');
-      if (activeTab === 'processing') return matchesSearch && matchesPriority && matchesGender && order.tests.some(t => t.status === 'Sample Collected' || t.status === 'Processing');
-      if (activeTab === 'results') return matchesSearch && matchesPriority && matchesGender && order.tests.some(t => t.status === 'Results Ready');
-      if (activeTab === 'rejected') return matchesSearch && matchesPriority && matchesGender && order.tests.some(t => t.status === 'Rejected');
-      return matchesSearch && matchesPriority && matchesGender;
+      // Tab filtering (client-side for UX)
+      if (activeTab === 'pending') return order.tests.some(t => t.status === 'Pending');
+      if (activeTab === 'processing') return order.tests.some(t => t.status === 'Sample Collected' || t.status === 'Processing');
+      if (activeTab === 'results') return order.tests.some(t => t.status === 'Results Ready');
+      if (activeTab === 'rejected') return order.tests.some(t => t.status === 'Rejected');
+      return true; // All tab shows everything
     });
-  };
+  }, [orders, activeTab]);
 
-  const filteredOrders = getFilteredOrders();
-  
-  // Note: Since we're using server-side pagination, we display all filtered orders
-  // The API handles pagination, but we still filter client-side for tabs
+  // With server-side pagination, orders array contains only current page results
   const paginatedOrders = filteredOrders;
 
   // Reset to page 1 when filters change or items per page changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, priorityFilter, dateFilter, genderFilter, activeTab, itemsPerPage]);
+  }, [searchQuery, priorityFilter, activeTab, itemsPerPage]);
 
   // Load orders function - memoized to prevent infinite loops
   const loadOrders = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
-      const hasActiveFilters = searchQuery || priorityFilter !== 'all' || dateFilter !== 'all' || genderFilter !== 'all';
-      const pageSize = hasActiveFilters ? 1000 : itemsPerPage;
-      
+
       const params: any = {
-        page: hasActiveFilters ? 1 : currentPage,
-        page_size: pageSize,
+        page: currentPage,
+        page_size: itemsPerPage,
       };
       if (priorityFilter !== 'all') {
         params.priority = transformToBackendPriority(priorityFilter);
@@ -846,7 +817,8 @@ export default function LabOrdersPage() {
       if (searchQuery) {
         params.search = searchQuery;
       }
-      
+      // Note: dateFilter and genderFilter not yet implemented in backend
+
       const response = await labService.getOrders(params);
       setTotalCount(response.count || response.results.length);
       const transformedOrders = response.results.map(transformOrder);
@@ -1409,7 +1381,7 @@ export default function LabOrdersPage() {
                   />
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <Select value={dateFilter} onValueChange={setDateFilter}>
+                  <Select value={dateFilter} onValueChange={setDateFilter} disabled>
                     <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All Time</SelectItem>
@@ -1427,7 +1399,7 @@ export default function LabOrdersPage() {
                       <SelectItem value="Routine">Routine</SelectItem>
                     </SelectContent>
                   </Select>
-                  <Select value={genderFilter} onValueChange={setGenderFilter}>
+                  <Select value={genderFilter} onValueChange={setGenderFilter} disabled>
                     <SelectTrigger className="w-[120px]"><SelectValue placeholder="Gender" /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All Gender</SelectItem>
@@ -1474,9 +1446,7 @@ export default function LabOrdersPage() {
           <Card className="p-4">
               <StandardPagination
               currentPage={currentPage}
-              totalItems={searchQuery || priorityFilter !== 'all' || dateFilter !== 'all' || genderFilter !== 'all'
-                ? filteredOrders.length 
-                : totalCount}
+              totalItems={totalCount}
               itemsPerPage={itemsPerPage}
               onPageChange={setCurrentPage}
               onItemsPerPageChange={(newSize) => {
@@ -1486,7 +1456,7 @@ export default function LabOrdersPage() {
               itemName="orders"
             />
             <p className="text-xs text-muted-foreground mt-2 text-center">
-              Showing {filteredOrders.length} order{filteredOrders.length !== 1 ? 's' : ''} (filtered from all orders)
+              Showing {filteredOrders.length} order{filteredOrders.length !== 1 ? 's' : ''} (page {currentPage} of {Math.ceil(totalCount / itemsPerPage)})
             </p>
           </Card>
         )}

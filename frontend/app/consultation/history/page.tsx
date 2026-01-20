@@ -299,11 +299,14 @@ export default function ConsultationHistoryPage() {
         setLoading(true);
         
         // Use itemsPerPage for server-side pagination, or load more if filters are active
-        const hasActiveFilters = searchQuery || statusFilter !== 'all' || clinicFilter !== 'all' || genderFilter !== 'all';
-        const pageSize = hasActiveFilters ? 1000 : itemsPerPage;
-        
         // Fetch consultation sessions from API
-        const sessionsResult = await apiFetch<{ results: any[]; count: number }>(`/consultation/sessions/?page=${hasActiveFilters ? 1 : currentPage}&page_size=${pageSize}`);
+        const sessionsResult = await consultationService.getSessions({
+          page: currentPage,
+          page_size: itemsPerPage,
+          search: searchQuery || undefined,
+          status: statusFilter !== 'all' ? statusFilter : undefined,
+          // Note: clinicFilter, genderFilter not yet implemented in backend
+        });
         setTotalCount(sessionsResult.count || sessionsResult.results.length);
         const sessions = sessionsResult.results || [];
         
@@ -558,44 +561,23 @@ export default function ConsultationHistoryPage() {
     loadConsultations();
   }, [currentPage, itemsPerPage, refreshTrigger]);
 
+  // Client-side filtering only for scope (my consultations)
   const filteredConsultations = useMemo(() => {
     const currentUserId = currentUser?.id ? String(currentUser.id) : '';
     return consultations.filter((c) => {
-      const matchesSearch = !searchQuery || c.patient.toLowerCase().includes(searchQuery.toLowerCase()) || c.id.toLowerCase().includes(searchQuery.toLowerCase()) || c.patientId.toLowerCase().includes(searchQuery.toLowerCase());
+      // Scope filtering (client-side for user-specific filtering)
       const matchesScope = scopeFilter === "all" || (scopeFilter === "my" && c.doctorId === currentUserId);
-      const matchesStatus = statusFilter === "all" || c.status.toLowerCase().replace(" ", "-") === statusFilter;
-      // Date filter
-      if (dateFilter !== 'all') {
-        const consultationDate = new Date(c.date);
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        
-        if (dateFilter === 'today' && consultationDate.toDateString() !== today.toDateString()) return false;
-        if (dateFilter === 'week') {
-          const weekAgo = new Date(today);
-          weekAgo.setDate(weekAgo.getDate() - 7);
-          if (consultationDate < weekAgo) return false;
-        }
-        if (dateFilter === 'month') {
-          const monthAgo = new Date(today);
-          monthAgo.setMonth(monthAgo.getMonth() - 1);
-          if (consultationDate < monthAgo) return false;
-        }
-      }
-      
-      const matchesClinic = clinicFilter === "all" || clinicMatches(c.clinic, clinicFilter);
-      const matchesGender = genderFilter === 'all' || !c.patientGender || c.patientGender.toLowerCase() === genderFilter.toLowerCase();
-      return matchesSearch && matchesScope && matchesStatus && matchesClinic && matchesGender;
+      return matchesScope;
     });
-  }, [consultations, searchQuery, scopeFilter, statusFilter, dateFilter, clinicFilter, genderFilter, currentUser]);
+  }, [consultations, scopeFilter, currentUser]);
 
-  // Use filtered consultations directly (server-side pagination when no client-side filters)
+  // With server-side pagination, consultations array contains only current page results
   const paginatedConsultations = filteredConsultations;
 
   // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, scopeFilter, statusFilter, dateFilter, clinicFilter, genderFilter, itemsPerPage]);
+  }, [currentPage, itemsPerPage, searchQuery, scopeFilter, statusFilter]);
 
   // Stats
   const stats = useMemo(() => {
@@ -892,7 +874,7 @@ export default function ConsultationHistoryPage() {
                 />
               </div>
               <div className="flex flex-wrap gap-2">
-                <Select value={dateFilter} onValueChange={setDateFilter}>
+                <Select value={dateFilter} onValueChange={setDateFilter} disabled>
                   <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Time</SelectItem>
@@ -909,7 +891,7 @@ export default function ConsultationHistoryPage() {
                     <SelectItem value="completed">Completed</SelectItem>
                   </SelectContent>
                 </Select>
-                <Select value={clinicFilter} onValueChange={setClinicFilter}>
+                <Select value={clinicFilter} onValueChange={setClinicFilter} disabled>
                   <SelectTrigger className="w-[140px]"><SelectValue placeholder="Clinic" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Clinics</SelectItem>
@@ -918,7 +900,7 @@ export default function ConsultationHistoryPage() {
                     ))}
                   </SelectContent>
                 </Select>
-                <Select value={genderFilter} onValueChange={setGenderFilter}>
+                <Select value={genderFilter} onValueChange={setGenderFilter} disabled>
                   <SelectTrigger className="w-[120px]"><SelectValue placeholder="Gender" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Gender</SelectItem>
@@ -1198,7 +1180,7 @@ export default function ConsultationHistoryPage() {
           <Card className="p-4">
             <StandardPagination
               currentPage={currentPage}
-              totalItems={filteredConsultations.length}
+              totalItems={totalCount}
               itemsPerPage={itemsPerPage}
               onPageChange={setCurrentPage}
               onItemsPerPageChange={setItemsPerPage}
