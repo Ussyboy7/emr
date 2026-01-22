@@ -1,3 +1,5 @@
+"use client";
+
 import Image from "next/image";
 import Link from "next/link";
 import { 
@@ -12,7 +14,8 @@ import {
   Shield,
   Clock,
   Activity,
-  Building2
+  Building2,
+  Dumbbell
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -22,56 +25,65 @@ const modules = [
   {
     title: "Medical Records",
     description:
-      "Comprehensive patient record management with complete medical histories, diagnoses, treatment plans, and secure document storage accessible across departments.",
+      "Centralized patient record management serving as the single source of truth for medical histories, diagnoses, treatment plans, and clinical documentation across all departments.",
     icon: FileText,
     color: "from-blue-500 to-blue-600",
-    bgColor: "bg-blue-500/10",
+    bgColor: "bg-blue-500/20",
     href: "/medical-records",
   },
   {
     title: "Nursing",
     description:
-      "Digital nursing documentation including vital signs monitoring, care plans, medication administration records, and real-time patient assessments.",
+      "Clinical nursing workflow management supporting vital signs documentation, care planning, medication administration tracking, and patient assessment coordination.",
     icon: Heart,
     color: "from-rose-500 to-rose-600",
-    bgColor: "bg-rose-500/10",
+    bgColor: "bg-red-500/20",
     href: "/nursing",
   },
   {
     title: "Consultation",
     description:
-      "Streamlined physician consultations with appointment scheduling, clinical notes, referral management, and inter-departmental communication.",
+      "Physician consultation management enabling appointment coordination, clinical decision support, referral workflows, and cross-departmental care coordination.",
     icon: Stethoscope,
     color: "from-emerald-500 to-emerald-600",
-    bgColor: "bg-emerald-500/10",
+    bgColor: "bg-green-500/20",
     href: "/consultation",
   },
   {
     title: "Laboratory",
     description:
-      "Complete lab workflow management from test ordering to results delivery, with specimen tracking, quality control, and automated reporting.",
+      "End-to-end laboratory operations management from test requisition to results verification, ensuring specimen traceability and quality assurance compliance.",
     icon: FlaskConical,
     color: "from-amber-500 to-amber-600",
-    bgColor: "bg-amber-500/10",
+    bgColor: "bg-yellow-500/20",
     href: "/laboratory",
   },
   {
     title: "Pharmacy",
     description:
-      "Integrated pharmacy operations with prescription management, drug dispensing, inventory control, and drug interaction alerts.",
+      "Pharmacy operations management supporting prescription processing, medication dispensing verification, inventory accountability, and clinical safety monitoring.",
     icon: Pill,
     color: "from-violet-500 to-violet-600",
-    bgColor: "bg-violet-500/10",
+    bgColor: "bg-purple-500/20",
     href: "/pharmacy",
   },
   {
     title: "Radiology",
     description:
-      "Digital imaging management with study scheduling, image viewing, radiologist reporting, and seamless PACS integration.",
+      "Radiology workflow management supporting imaging study coordination, diagnostic reporting, image archiving, and clinical collaboration across specialties.",
     icon: ScanLine,
     color: "from-cyan-500 to-cyan-600",
-    bgColor: "bg-cyan-500/10",
+    bgColor: "bg-cyan-500/20",
     href: "/radiology",
+  },
+  {
+    title: "Physiotherapy",
+    description:
+      "Rehabilitation and physiotherapy management supporting treatment planning, progress tracking, patient recovery coordination, and interdisciplinary care integration.",
+    icon: Activity,
+    color: "from-orange-500 to-orange-600",
+    bgColor: "bg-orange-500/20",
+    href: "/physiotherapy",
   },
 ];
 
@@ -79,7 +91,7 @@ const features = [
   {
     title: "Unified Patient Records",
     description:
-      "Single source of truth for all patient data across departments, ensuring continuity of care.",
+      "A single, authoritative patient record accessible across all clinical departments.",
     icon: Users,
   },
   {
@@ -89,9 +101,9 @@ const features = [
     icon: Activity,
   },
   {
-    title: "Enterprise Security",
+    title: "Enterprise Security & Access Control",
     description:
-      "HIPAA-compliant data protection with role-based access and complete audit trails.",
+      "Role-based access, audit trails, and secure data handling aligned with healthcare data protection standards.",
     icon: Shield,
   },
   {
@@ -103,9 +115,9 @@ const features = [
 ];
 
 const stats = [
-  { value: "6", label: "Integrated Clinical Modules" },
-  { value: "24/7", label: "System Availability" },
-  { value: "100%", label: "Digital Record Keeping" },
+  { value: "7", label: "Integrated Clinical Modules" },
+  { value: "24/7", label: "System Availability for Clinical Operations" },
+  { value: "100%", label: "Digital Patient Records Across Departments" },
 ];
 
 export default function LandingPage() {
@@ -182,22 +194,23 @@ export default function LandingPage() {
           <br />
           <span className="text-slate-200">Electronic Medical Records</span>
         </h1>
-        
+
         <p className="max-w-2xl text-lg text-slate-400 leading-relaxed">
-          A comprehensive digital healthcare platform unifying medical records, nursing care, 
-          consultations, laboratory, pharmacy, and radiology services for the Nigerian Ports Authority.
+          A unified, enterprise-grade healthcare system powering clinical operations across the Nigerian Ports Authority.
+          <br />
+          <span className="text-slate-300">Designed to ensure continuity of care, operational efficiency, and secure medical data management across all clinical departments.</span>
         </p>
         
         <div className="flex flex-col gap-4 sm:flex-row mt-4">
-          <Button asChild size="lg" className="bg-gradient-to-r from-teal-500 to-cyan-500 hover:from-teal-400 hover:to-cyan-400 text-slate-950 font-semibold gap-2 h-14 px-8 text-base">
-            <Link href="/login">
-              Launch EMR System
-              <ArrowRight className="h-5 w-5" />
-            </Link>
-          </Button>
-          <Button asChild size="lg" variant="outline" className="border-slate-700 bg-slate-900/50 text-slate-300 hover:bg-slate-800 hover:text-white h-14 px-8 text-base">
-            <Link href="#modules">Explore Modules</Link>
-          </Button>
+            <Button asChild size="lg" className="bg-gradient-to-r from-teal-500 to-cyan-500 hover:from-teal-400 hover:to-cyan-400 text-slate-950 font-semibold gap-2 h-14 px-8 text-base">
+              <Link href="/login">
+                Access EMR System
+                <ArrowRight className="h-5 w-5" />
+              </Link>
+            </Button>
+            <Button asChild size="lg" variant="outline" className="border-slate-700 bg-slate-900/50 text-slate-300 hover:bg-slate-800 hover:text-white h-14 px-8 text-base">
+              <Link href="#modules">View Clinical Modules</Link>
+            </Button>
         </div>
 
         {/* Stats */}
@@ -223,41 +236,36 @@ export default function LandingPage() {
             Clinical Modules
           </h2>
           <p className="mt-4 max-w-2xl mx-auto text-slate-400">
-            Six integrated modules designed to streamline healthcare operations and improve patient outcomes.
+            Seven integrated modules designed to streamline healthcare operations and improve patient outcomes.
           </p>
         </div>
         
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
           {modules.map((module) => (
-            <Link href={module.href} key={module.title}>
-              <Card className="group h-full border-slate-800 bg-slate-900/50 backdrop-blur transition-all duration-300 hover:border-slate-700 hover:bg-slate-900/80 hover:shadow-2xl hover:shadow-teal-500/5 hover:-translate-y-1">
-                <CardContent className="flex flex-col gap-4 p-6">
-                  <div className={`w-14 h-14 rounded-2xl ${module.bgColor} flex items-center justify-center ring-1 ring-white/10`}>
-                    <module.icon className={`h-7 w-7 bg-gradient-to-br ${module.color} bg-clip-text text-transparent`} style={{ stroke: 'url(#gradient)' }} />
-                    <svg width="0" height="0">
-                      <defs>
-                        <linearGradient id="gradient" x1="0%" y1="0%" x2="100%" y2="100%">
-                          <stop offset="0%" stopColor="currentColor" />
-                          <stop offset="100%" stopColor="currentColor" />
-                        </linearGradient>
-                      </defs>
-                    </svg>
-                  </div>
-                  <div>
-                    <h3 className="text-xl font-semibold text-white group-hover:text-teal-400 transition-colors">
-                      {module.title}
-                    </h3>
-                    <p className="mt-2 text-sm text-slate-500 leading-relaxed">
-                      {module.description}
-                    </p>
-                  </div>
-                  <div className="mt-auto pt-4 flex items-center text-sm font-medium text-teal-500 opacity-0 group-hover:opacity-100 transition-opacity">
-                    Access Module
-                    <ArrowRight className="ml-2 h-4 w-4" />
-                  </div>
-                </CardContent>
-              </Card>
-            </Link>
+            <Card key={module.title} className="h-full border-slate-800 bg-slate-900/50 backdrop-blur">
+              <CardContent className="flex flex-col gap-4 p-6">
+                <div className={`w-14 h-14 rounded-2xl ${module.bgColor} flex items-center justify-center ring-1 ring-white/10`}>
+                  <module.icon className={`h-7 w-7 ${
+                    module.title === 'Medical Records' ? 'text-blue-400 dark:text-blue-300' :
+                    module.title === 'Nursing' ? 'text-red-400 dark:text-red-300' :
+                    module.title === 'Consultation' ? 'text-green-400 dark:text-green-300' :
+                    module.title === 'Laboratory' ? 'text-yellow-400 dark:text-yellow-300' :
+                    module.title === 'Pharmacy' ? 'text-purple-400 dark:text-purple-300' :
+                    module.title === 'Radiology' ? 'text-cyan-400 dark:text-cyan-300' :
+                    module.title === 'Physiotherapy' ? 'text-orange-400 dark:text-orange-300' :
+                    'text-white'
+                  }`} />
+                </div>
+                <div>
+                  <h3 className="text-xl font-semibold text-white">
+                    {module.title}
+                  </h3>
+                  <p className="mt-2 text-sm text-slate-400 leading-relaxed">
+                    {module.description}
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
           ))}
         </div>
       </section>
@@ -265,14 +273,14 @@ export default function LandingPage() {
       {/* Features Section */}
       <section id="features" className="mx-auto mt-32 w-full max-w-7xl px-6">
         <div className="rounded-3xl border border-slate-800 bg-gradient-to-b from-slate-900/80 to-slate-950/80 p-12 backdrop-blur">
-          <div className="mb-12 text-center">
-            <h2 className="text-3xl font-bold tracking-tight text-white sm:text-4xl">
-              Enterprise Healthcare Platform
-            </h2>
-            <p className="mt-4 max-w-2xl mx-auto text-slate-400">
-              Built with security, reliability, and interoperability at its core.
-            </p>
-          </div>
+        <div className="mb-12 text-center">
+          <h2 className="text-3xl font-bold tracking-tight text-white sm:text-4xl">
+            Enterprise Healthcare Platform
+          </h2>
+          <p className="mt-4 max-w-2xl mx-auto text-slate-400">
+            Built for enterprise healthcare governance, security, and operational resilience.
+          </p>
+        </div>
           
           <div className="grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
             {features.map((feature) => (
@@ -295,10 +303,10 @@ export default function LandingPage() {
           <div className="relative">
             <Building2 className="mx-auto h-16 w-16 text-teal-400/50 mb-6" />
             <h2 className="text-3xl font-bold tracking-tight text-white sm:text-4xl">
-              Ready to Transform Healthcare Delivery?
+              Supporting Efficient, Secure, and Coordinated Healthcare Delivery
             </h2>
             <p className="mt-4 text-slate-400 max-w-xl mx-auto">
-              Access the NPA EMR system to manage patient records, streamline clinical workflows, 
+              Access the NPA EMR system to manage patient records, streamline clinical workflows,
               and deliver exceptional healthcare services.
             </p>
             <div className="mt-8 flex flex-col items-center justify-center gap-4 sm:flex-row">
@@ -319,17 +327,22 @@ export default function LandingPage() {
       {/* Footer */}
       <footer className="mt-32 border-t border-slate-800 bg-slate-950/80">
         <div className="mx-auto flex w-full max-w-7xl flex-col gap-4 px-6 py-10 text-center text-sm text-slate-500 sm:flex-row sm:items-center sm:justify-between sm:text-left">
-          <div className="flex items-center justify-center sm:justify-start gap-3">
-            <div className="relative h-8 w-8 overflow-hidden rounded-lg bg-white/10">
-              <Image
-                src={NPA_LOGO_URL}
-                alt={`${NPA_BRAND_NAME} crest`}
-                fill
-                className="object-contain p-1"
-                sizes="32px"
-              />
+          <div className="flex flex-col sm:flex-row items-center justify-center sm:justify-start gap-3">
+            <div className="flex items-center gap-3">
+              <div className="relative h-8 w-8 overflow-hidden rounded-lg bg-white/10">
+                <Image
+                  src={NPA_LOGO_URL}
+                  alt={`${NPA_BRAND_NAME} crest`}
+                  fill
+                  className="object-contain p-1"
+                  sizes="32px"
+                />
+              </div>
+              <span className="text-slate-400">© {new Date().getFullYear()} Nigerian Ports Authority. All rights reserved.</span>
             </div>
-            <span className="text-slate-400">© {new Date().getFullYear()} Nigerian Ports Authority. All rights reserved.</span>
+            <span className="text-slate-500 text-sm text-center sm:text-left">
+              An internal clinical information system of the Nigerian Ports Authority.
+            </span>
           </div>
           <div className="flex items-center justify-center gap-6 sm:justify-end">
             <Link href="#modules" className="hover:text-teal-400 transition-colors">

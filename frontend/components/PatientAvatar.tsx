@@ -16,7 +16,8 @@ export function PatientAvatar({ name, photoUrl, size = 'md', className = '' }: P
     lg: 'w-16 h-16 text-xl'
   };
 
-  const safeName = name || 'UP';
+  // Security: Sanitize name input to prevent XSS
+  const safeName = (name || 'UP').replace(/[<>'"&]/g, '').substring(0, 50);
   const initials = safeName.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
   const fullPhotoUrl = photoUrl ? getPhotoUrl(photoUrl) : null;
   
@@ -33,7 +34,11 @@ export function PatientAvatar({ name, photoUrl, size = 'md', className = '' }: P
             target.style.display = 'none';
             const parent = target.parentElement;
             if (parent) {
-              parent.innerHTML = `<div class="${sizeClasses[size]} rounded-full bg-gradient-to-br from-teal-500 to-cyan-500 flex items-center justify-center text-white font-medium">${initials}</div>`;
+              // Security: Use React-safe DOM manipulation instead of innerHTML
+              const fallbackDiv = document.createElement('div');
+              fallbackDiv.className = `${sizeClasses[size]} rounded-full bg-gradient-to-br from-teal-500 to-cyan-500 flex items-center justify-center text-white font-medium`;
+              fallbackDiv.textContent = initials;
+              parent.appendChild(fallbackDiv);
             }
           }}
         />

@@ -17,7 +17,7 @@ services:
       POSTGRES_INITDB_ARGS: "-E UTF8 --locale=en_US.UTF-8"
     volumes:
       - postgres_data_stag:/var/lib/postgresql/data
-      - ./backups:/backups
+      - backups_stag:/backups
     ports:
       - "5435:5432"  # Different from prod (5434) and npa-emr
     networks:
@@ -73,6 +73,10 @@ services:
              mkdir -p /app/logs &&
              echo 'Running migrations...' &&
              python manage.py migrate --noinput || (echo 'Migration failed!' && exit 1) &&
+             echo 'Checking for existing data...' &&
+             python manage.py shell -c \"from accounts.models import User; print(f'Existing users: {User.objects.count()}')\" &&
+             echo 'Backing up existing data...' &&
+             python manage.py backup_data --output-dir /backups || echo 'Backup failed, continuing...' &&
              echo 'Collecting static files...' &&
              python manage.py collectstatic --noinput || (echo 'Collectstatic failed!' && exit 1) &&
              echo 'Starting Gunicorn...' &&
@@ -234,6 +238,8 @@ volumes:
   static_files_stag:
     driver: local
   media_files_stag:
+    driver: local
+  backups_stag:
     driver: local
 
 networks:

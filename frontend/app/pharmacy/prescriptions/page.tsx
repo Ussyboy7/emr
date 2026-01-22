@@ -10,7 +10,6 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
@@ -152,7 +151,7 @@ export default function PrescriptionsPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [priorityFilter, setPriorityFilter] = useState('all');
-  const [dateFilter, setDateFilter] = useState('today');
+  const [dateFilter, setDateFilter] = useState('all');
   const [genderFilter, setGenderFilter] = useState('all');
   
   // Pagination state
@@ -387,11 +386,6 @@ export default function PrescriptionsPage() {
   const [medicationBatches, setMedicationBatches] = useState<Record<string, MedicationBatch[]>>({});
   const [showSubstitutionModal, setShowSubstitutionModal] = useState(false);
   const [substitutionMed, setSubstitutionMed] = useState<MedicationItem | null>(null);
-  const [showDispenseConfirmDialog, setShowDispenseConfirmDialog] = useState(false);
-  const [pendingDispenseData, setPendingDispenseData] = useState<{
-    medications: Array<{name: string; quantity: number; unit: string}>;
-    onConfirm: () => void;
-  } | null>(null);
   const [detectedInteractions, setDetectedInteractions] = useState<DrugInteraction[]>([]);
   const [interactionAcknowledged, setInteractionAcknowledged] = useState(false);
   
@@ -701,27 +695,8 @@ export default function PrescriptionsPage() {
       return;
     }
 
-    // Show confirmation dialog
-    const medicationsToDispense = selectedMedications.map(medId => {
-      const med = selectedPrescriptionMedications.find(m => m.id === medId);
-      const quantity = dispenseQuantities[medId] || med?.remaining_quantity || 0;
-      return {
-        name: med?.name || 'Unknown Medication',
-        quantity,
-        unit: med?.unit || 'units'
-      };
-    });
-
-    setPendingDispenseData({
-      medications: medicationsToDispense,
-      onConfirm: async () => {
-        setShowDispenseConfirmDialog(false);
-        setPendingDispenseData(null);
-        await proceedWithDispense();
-      }
-    });
-    setShowDispenseConfirmDialog(true);
-    return;
+    // Proceed directly with dispensing
+    await proceedWithDispense();
   };
 
   const proceedWithDispense = async () => {
@@ -2102,17 +2077,11 @@ export default function PrescriptionsPage() {
                         notes: substitutionForm.notes
                       });
 
-                      console.log('📡 Making substitution API call with data:', {
-                        prescriptionId: selectedPrescription.id,
-                        itemId: substitutionMed.id,
-                        newMedicationId: selectedSub.id,
-                        reason: substitutionForm.reason,
-                        notes: substitutionForm.notes
-                      });
+                      // Security: Removed console.log to prevent prescription data exposure
 
-                      console.log('🔍 Current prescription medications:', selectedPrescription.medications?.map(m => `${m.name || (m as any).medication_name} (ID: ${m.id})`));
+                      // Security: Removed console.log to prevent medication data exposure
                       console.log('🎯 Substituting item:', substitutionMed.name, 'with ID:', substitutionMed.id);
-                      console.log('🔄 New medication:', selectedSub.name, 'with ID:', selectedSub.id);
+                      // Security: Removed console.log to prevent medication data exposure
 
                       const updatedPrescription = await pharmacyService.substitutePrescriptionItem(
                         selectedPrescription.id,
@@ -2123,9 +2092,10 @@ export default function PrescriptionsPage() {
                       );
 
                       console.log('✅ Substitution API SUCCESS:', updatedPrescription);
-                      console.log('📋 Response medications:', updatedPrescription.medications?.map((m: any) => `${m.name || m.medication_name} (ID: ${m.id})`));
-                      console.log('🔍 Full response structure:', Object.keys(updatedPrescription));
+                      // Security: Removed console.log to prevent medication list exposure
+                      // Security: Removed console.log to prevent prescription data structure exposure
 
+                        // Security: Removed console.log to prevent medication data exposure
                         if (!updatedPrescription.medications?.some((m: any) => (m.name || m.medication_name)?.includes(selectedSub.name))) {
                           console.warn('⚠️ WARNING: Response does not contain substituted medication!');
                           console.error(`Expected ${selectedSub.name} but got:`, updatedPrescription.medications?.map((m: any) => m.name || m.medication_name));
@@ -2137,7 +2107,7 @@ export default function PrescriptionsPage() {
                       setTimeout(async () => {
                         try {
                           const verifyPrescription = await pharmacyService.getPrescription(updatedPrescription.id);
-                          console.log('🔍 Verification fetch - medications:', verifyPrescription.medications?.map((m: any) => `${m.name || m.medication_name} (${m.id})`));
+                          // Security: Removed console.log to prevent verification medication data exposure
                             if (!verifyPrescription.medications?.some((m: any) => (m.name || m.medication_name)?.includes(selectedSub.name))) {
                               console.error('❌ VERIFICATION FAILED: Substitution did not persist to database!');
                             } else {
@@ -2228,41 +2198,6 @@ export default function PrescriptionsPage() {
           </DialogContent>
         </Dialog>
 
-        {/* Dispense Confirmation Dialog */}
-        <AlertDialog open={showDispenseConfirmDialog} onOpenChange={setShowDispenseConfirmDialog}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Confirm Medication Dispensing</AlertDialogTitle>
-              <AlertDialogDescription>
-                Are you sure you want to dispense the following medications? This action cannot be undone.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-
-            <div className="my-4">
-              <div className="space-y-2">
-                {pendingDispenseData?.medications.map((med, index) => (
-                  <div key={index} className="flex items-center justify-between p-3 bg-muted rounded-lg">
-                    <span className="font-medium">{med.name}</span>
-                    <Badge variant="outline">
-                      {med.quantity} {med.unit}
-                    </Badge>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction
-                onClick={pendingDispenseData?.onConfirm}
-                className="bg-red-600 hover:bg-red-700"
-              >
-                <Package className="h-4 w-4 mr-2" />
-                Dispense Medications
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
       </div>
     </DashboardLayout>
   );

@@ -347,52 +347,7 @@ export default function RadiologyOrdersPage() {
       console.log('Calling updateOrderStatus for order:', order.id);
       console.log('Order ID type:', typeof order.id);
       console.log('Parsed order ID:', parseInt(order.id));
-      console.log('Full order object:', order);
-
-      // Test basic API connectivity first
-      console.log('Testing basic API connectivity...');
-      try {
-        const testResponse = await fetch('http://localhost:8001/api/health/', { method: 'GET' });
-        console.log('Health check response:', testResponse.status);
-      } catch (healthError) {
-        console.error('Health check failed:', healthError);
-      }
-
-      // Test radiology orders endpoint
-      console.log('Testing radiology orders endpoint...');
-      try {
-        const ordersResponse = await fetch('http://localhost:8001/api/radiology/orders/', {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('npa_ecm_access_token')}`,
-            'Content-Type': 'application/json'
-          }
-        });
-        console.log('Radiology orders response:', ordersResponse.status);
-      } catch (ordersError) {
-        console.error('Radiology orders check failed:', ordersError);
-      }
-
-      console.log('Calling radiologyService.updateOrderStatus...');
-
-      // Try calling the API directly to debug
-      const apiUrl = `/radiology/orders/${parseInt(order.id)}/update_status/`;
-      console.log('Direct API call to:', apiUrl);
-
-      try {
-        const directResponse = await fetch(apiUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${localStorage.getItem('npa_ecm_access_token')}`
-          },
-          body: JSON.stringify({ status: 'processing' })
-        });
-        console.log('Direct API response status:', directResponse.status);
-        console.log('Direct API response:', await directResponse.text());
-      } catch (directError) {
-        console.error('Direct API call failed:', directError);
-      }
+      // Security: Removed debug console logs and direct API calls
 
       await radiologyService.updateOrderStatus(parseInt(order.id), 'processing');
       toast.success('Order status updated to Processing');

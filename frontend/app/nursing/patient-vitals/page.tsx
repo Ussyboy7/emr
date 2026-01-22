@@ -118,7 +118,7 @@ export default function PatientVitalsPage() {
         
         // Get unique patient IDs
         const patientIds = Object.keys(vitalsByPatient);
-        console.log('[Patient Vitals] Found', patientIds.length, 'unique patients with vitals:', patientIds);
+        // Security: Removed console.log to prevent patient ID list exposure
         
         if (patientIds.length === 0) {
           console.log('[Patient Vitals] No patient IDs found in vitals - all vitals may be missing patient field');

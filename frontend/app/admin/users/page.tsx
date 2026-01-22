@@ -442,10 +442,8 @@ export default function UserManagementPage() {
     setIsSubmitting(true);
 
     try {
-      console.log('🔄 Attempting password reset for user:', selectedStaff.id);
       const userId = parseInt(selectedStaff.id);
       await adminService.resetPassword(userId, resetPasswordData.newPassword);
-      console.log('✅ Password reset successful');
       toast.success(`Password reset successfully for ${selectedStaff.firstName} ${selectedStaff.lastName}`);
       setIsResetPasswordDialogOpen(false);
       setResetPasswordData({ newPassword: '', confirmPassword: '' });

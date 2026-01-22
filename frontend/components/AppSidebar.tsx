@@ -125,7 +125,7 @@ const menuSections: MenuSection[] = [
     activeColor: "data-[active=true]:bg-emerald-500/10 data-[active=true]:text-emerald-400",
     basePath: "/consultation",
     items: [
-      { label: "My Dashboard", href: "/consultation/dashboard", icon: LayoutDashboard },
+      { label: "My Dashboard", href: "/consultation", icon: LayoutDashboard },
       { label: "Start Consultation", href: "/consultation/start", icon: Play },
       { label: "Consultation History", href: "/consultation/history", icon: History },
       { label: "Ward Overview", href: "/consultation/wards", icon: Building2 },
@@ -246,7 +246,7 @@ export function AppSidebar() {
     // Dashboard pages should be exact match only
     if (href === basePath || href === "/medical-records" || href === "/nursing" ||
         href === "/laboratory" || href === "/pharmacy" || href === "/radiology" ||
-        href === "/consultation/dashboard") {
+        href === "/consultation") {
       return pathname === href;
     }
     // Special handling for paths that shouldn't match sub-paths

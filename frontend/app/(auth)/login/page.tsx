@@ -5,10 +5,10 @@ import { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { 
-  ArrowLeft, 
-  ArrowRight, 
-  Eye, 
+import {
+  ArrowLeft,
+  ArrowRight,
+  Eye,
   EyeOff,
   Stethoscope,
   Heart,
@@ -17,7 +17,8 @@ import {
   ScanLine,
   FileText,
   ShieldCheck,
-  Activity
+  Activity,
+  Dumbbell
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -45,6 +46,7 @@ const modules = [
   { name: "Laboratory", icon: FlaskConical, color: "text-amber-400" },
   { name: "Pharmacy", icon: Pill, color: "text-violet-400" },
   { name: "Radiology", icon: ScanLine, color: "text-cyan-400" },
+  { name: "Physiotherapy", icon: Activity, color: "text-orange-400" },
 ];
 
 export default function LoginPage() {
@@ -132,25 +134,25 @@ export default function LoginPage() {
           {/* Main Content */}
           <div className="space-y-8">
             <div className="inline-flex items-center gap-2 rounded-full bg-teal-500/10 border border-teal-500/20 px-4 py-2">
-              <Activity className="h-4 w-4 text-teal-400" />
-              <span className="text-sm font-medium text-teal-400">Healthcare Digital Platform</span>
+              <ShieldCheck className="h-4 w-4 text-teal-400" />
+              <span className="text-sm font-medium text-teal-400">Enterprise Healthcare System</span>
             </div>
             
             <div className="space-y-4">
               <h2 className="text-4xl font-bold leading-tight text-white max-w-lg">
-                Unified Healthcare Management for{" "}
+                Enterprise Healthcare System for{" "}
                 <span className="text-transparent bg-clip-text bg-gradient-to-r from-teal-400 to-cyan-400">
-                  NPA Medical Services
+                  NPA Medical Operations
                 </span>
               </h2>
               <p className="text-lg text-slate-400 max-w-md leading-relaxed">
-                Access patient records, manage clinical workflows, and deliver quality healthcare 
-                through a single integrated platform.
+                Secure access to patient records, clinical workflows, and operational data through
+                the Nigerian Ports Authority's enterprise healthcare management platform.
               </p>
             </div>
 
             {/* Modules Preview */}
-            <div className="grid grid-cols-3 gap-3 max-w-md">
+            <div className="grid grid-cols-3 gap-3 max-w-lg">
               {modules.map((module) => (
                 <div 
                   key={module.name}
@@ -223,7 +225,7 @@ export default function LoginPage() {
                 Sign in to EMR
               </CardTitle>
               <CardDescription className="text-slate-400">
-                Enter your credentials to access the Electronic Medical Records system.
+                Enter your credentials to access the NPA Electronic Medical Records system.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -324,7 +326,7 @@ export default function LoginPage() {
           {/* Security Notice */}
           <div className="flex items-center justify-center gap-2 text-xs text-slate-600">
             <ShieldCheck className="h-4 w-4" />
-            <span>Secure connection • Patient data protected</span>
+            <span>Enterprise-grade security • Role-based access • Audit trails</span>
           </div>
         </div>
       </div>

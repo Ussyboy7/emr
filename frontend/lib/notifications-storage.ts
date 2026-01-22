@@ -99,7 +99,7 @@ export const getNotifications = async (params?: {
   console.log('[notifications-storage] Fetching notifications from:', url);
   try {
     const response = await apiFetch<any>(url);
-    console.log('[notifications-storage] Received response:', response, 'Type:', typeof response, 'IsArray:', Array.isArray(response));
+    // Security: Removed console.log to prevent notification response data exposure
     
     // Handle paginated response (DRF returns {count, next, previous, results: [...]})
     if (response && typeof response === 'object' && 'results' in response && Array.isArray(response.results)) {

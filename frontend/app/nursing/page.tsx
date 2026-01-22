@@ -162,8 +162,8 @@ export default function NursingDashboardPage() {
 
         {/* Today's Overview */}
         <div>
-          <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
-            <Clock className="h-5 w-5 text-blue-500" />
+          <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+            <Clock className="h-5 w-5 text-blue-500 dark:text-blue-400" />
             Today's Overview
           </h2>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -185,16 +185,18 @@ export default function NursingDashboardPage() {
               ))
             ) : (
               <>
-                <Card className="border-l-4 border-l-rose-500">
+                <Card className={`border-l-4 ${stats.activePatients > 0 ? 'border-l-rose-500' : 'border-l-green-500'}`}>
                   <CardContent className="p-4">
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-sm text-muted-foreground">Active Patients</p>
                         <div className="flex items-center gap-2 mt-1">
-                          <Users className="h-5 w-5 text-rose-500" />
-                          <p className="text-3xl font-bold text-rose-600 dark:text-rose-400">{stats.activePatients}</p>
+                          <Users className={`h-5 w-5 ${stats.activePatients > 0 ? 'text-rose-500 dark:text-rose-400' : 'text-green-500 dark:text-green-400'}`} />
+                          <p className={`text-3xl font-bold ${stats.activePatients > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-green-600 dark:text-green-400'}`}>{stats.activePatients}</p>
                         </div>
-                        {trends.activePatients.value !== 0 && (
+                        {stats.activePatients === 0 ? (
+                          <p className="text-xs text-green-600 dark:text-green-400 mt-1">All caught up!</p>
+                        ) : trends.activePatients.value !== 0 && (
                           <div className={`flex items-center text-xs mt-1 ${trends.activePatients.isPositive ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
                             <TrendingUp className={`h-3 w-3 mr-1 ${!trends.activePatients.isPositive ? 'rotate-180' : ''}`} />
                             {Math.abs(trends.activePatients.value)}%
@@ -204,18 +206,20 @@ export default function NursingDashboardPage() {
                     </div>
                   </CardContent>
                 </Card>
-                <Card className="border-l-4 border-l-amber-500">
+                <Card className={`border-l-4 ${stats.pendingVitals === 0 ? 'border-l-green-500' : 'border-l-amber-500'}`}>
                   <CardContent className="p-4">
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-sm text-muted-foreground">Vitals Pending</p>
                         <div className="flex items-center gap-2 mt-1">
-                          <Thermometer className="h-5 w-5 text-amber-500" />
-                          <p className="text-3xl font-bold text-amber-600 dark:text-amber-400">{stats.pendingVitals}</p>
+                          <Thermometer className={`h-5 w-5 ${stats.pendingVitals === 0 ? 'text-green-500 dark:text-green-400' : 'text-amber-500 dark:text-amber-400'}`} />
+                          <p className={`text-3xl font-bold ${stats.pendingVitals === 0 ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'}`}>{stats.pendingVitals}</p>
                         </div>
-                        {trends.pendingVitals.value !== 0 && (
-                          <div className={`flex items-center text-xs mt-1 ${trends.pendingVitals.isPositive ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                            <TrendingUp className={`h-3 w-3 mr-1 ${!trends.pendingVitals.isPositive ? 'rotate-180' : ''}`} />
+                        {stats.pendingVitals === 0 ? (
+                          <p className="text-xs text-green-600 dark:text-green-400 mt-1">All vitals recorded</p>
+                        ) : trends.pendingVitals.value !== 0 && (
+                          <div className={`flex items-center text-xs mt-1 ${trends.pendingVitals.isPositive ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>
+                            <TrendingUp className={`h-3 w-3 mr-1 ${trends.pendingVitals.isPositive ? '' : 'rotate-180'}`} />
                             {Math.abs(trends.pendingVitals.value)}%
                           </div>
                         )}
@@ -223,18 +227,20 @@ export default function NursingDashboardPage() {
                     </div>
                   </CardContent>
                 </Card>
-                <Card className="border-l-4 border-l-blue-500">
+                <Card className={`border-l-4 ${stats.medicationsDue === 0 ? 'border-l-green-500' : 'border-l-blue-500'}`}>
                   <CardContent className="p-4">
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-sm text-muted-foreground">Medications Due</p>
                         <div className="flex items-center gap-2 mt-1">
-                          <Syringe className="h-5 w-5 text-blue-500" />
-                          <p className="text-3xl font-bold text-blue-600 dark:text-blue-400">{stats.medicationsDue}</p>
+                          <Syringe className={`h-5 w-5 ${stats.medicationsDue === 0 ? 'text-green-500 dark:text-green-400' : 'text-blue-500 dark:text-blue-400'}`} />
+                          <p className={`text-3xl font-bold ${stats.medicationsDue === 0 ? 'text-green-600 dark:text-green-400' : 'text-blue-600 dark:text-blue-400'}`}>{stats.medicationsDue}</p>
                         </div>
-                        {trends.medicationsDue.value !== 0 && (
-                          <div className={`flex items-center text-xs mt-1 ${trends.medicationsDue.isPositive ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                            <TrendingUp className={`h-3 w-3 mr-1 ${!trends.medicationsDue.isPositive ? 'rotate-180' : ''}`} />
+                        {stats.medicationsDue === 0 ? (
+                          <p className="text-xs text-green-600 dark:text-green-400 mt-1">All medications administered</p>
+                        ) : trends.medicationsDue.value !== 0 && (
+                          <div className={`flex items-center text-xs mt-1 ${trends.medicationsDue.isPositive ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>
+                            <TrendingUp className={`h-3 w-3 mr-1 ${trends.medicationsDue.isPositive ? '' : 'rotate-180'}`} />
                             {Math.abs(trends.medicationsDue.value)}%
                           </div>
                         )}
@@ -242,18 +248,20 @@ export default function NursingDashboardPage() {
                     </div>
                   </CardContent>
                 </Card>
-                <Card className="border-l-4 border-l-emerald-500">
+                <Card className={`border-l-4 ${stats.assessmentsToday === 0 ? 'border-l-green-500' : 'border-l-emerald-500'}`}>
                   <CardContent className="p-4">
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-sm text-muted-foreground">Assessments Due</p>
                         <div className="flex items-center gap-2 mt-1">
-                          <ClipboardList className="h-5 w-5 text-emerald-500" />
-                          <p className="text-3xl font-bold text-emerald-600 dark:text-emerald-400">{stats.assessmentsToday}</p>
+                          <ClipboardList className={`h-5 w-5 ${stats.assessmentsToday === 0 ? 'text-green-500 dark:text-green-400' : 'text-emerald-500 dark:text-emerald-400'}`} />
+                          <p className={`text-3xl font-bold ${stats.assessmentsToday === 0 ? 'text-green-600 dark:text-green-400' : 'text-emerald-600 dark:text-emerald-400'}`}>{stats.assessmentsToday}</p>
                         </div>
-                        {trends.assessmentsToday.value !== 0 && (
-                          <div className={`flex items-center text-xs mt-1 ${trends.assessmentsToday.isPositive ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                            <TrendingUp className={`h-3 w-3 mr-1 ${!trends.assessmentsToday.isPositive ? 'rotate-180' : ''}`} />
+                        {stats.assessmentsToday === 0 ? (
+                          <p className="text-xs text-green-600 dark:text-green-400 mt-1">All assessments completed</p>
+                        ) : trends.assessmentsToday.value !== 0 && (
+                          <div className={`flex items-center text-xs mt-1 ${trends.assessmentsToday.isPositive ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>
+                            <TrendingUp className={`h-3 w-3 mr-1 ${trends.assessmentsToday.isPositive ? '' : 'rotate-180'}`} />
                             {Math.abs(trends.assessmentsToday.value)}%
                           </div>
                         )}
@@ -301,8 +309,8 @@ export default function NursingDashboardPage() {
 
         {/* Quick Actions */}
         <div>
-          <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
-            <Activity className="h-5 w-5 text-blue-500" />
+          <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+            <Activity className="h-5 w-5 text-blue-500 dark:text-blue-400" />
             Quick Actions
           </h2>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -319,18 +327,18 @@ export default function NursingDashboardPage() {
               <span className="text-xs opacity-90">Patient assignments</span>
             </Button>
             <Button onClick={() => router.push('/nursing/patient-vitals')} variant="outline" className="h-auto py-6 flex flex-col items-center gap-3 border-rose-500/30 hover:bg-rose-500/10 border-l-4 border-l-rose-500">
-              <Thermometer className="h-6 w-6 text-rose-500" />
+              <Thermometer className="h-6 w-6 text-rose-500 dark:text-rose-400" />
               <span className="text-sm font-medium">Record Vitals</span>
               <span className="text-xs text-muted-foreground">Patient monitoring</span>
             </Button>
             <Button onClick={() => router.push('/nursing/procedures')} variant="outline" className="h-auto py-6 flex flex-col items-center gap-3 border-rose-500/30 hover:bg-rose-500/10 border-l-4 border-l-blue-500">
-              <Syringe className="h-6 w-6 text-blue-500" />
+              <Syringe className="h-6 w-6 text-blue-500 dark:text-blue-400" />
               <span className="text-sm font-medium">Administer Meds</span>
               <span className="text-xs text-muted-foreground">Medication tasks</span>
             </Button>
             <Button onClick={() => router.push('/nursing/room-queue')} variant="outline" className="h-auto py-6 flex flex-col items-center gap-3 border-rose-500/30 hover:bg-rose-500/10 border-l-4 border-l-emerald-500">
               <div className="flex items-center gap-2">
-                <ClipboardList className="h-6 w-6 text-emerald-500" />
+                <ClipboardList className="h-6 w-6 text-emerald-500 dark:text-emerald-400" />
                 {roomQueueCount > 0 && (
                   <Badge variant="outline" className="text-xs px-2 py-0.5">
                     {roomQueueCount}
@@ -349,11 +357,11 @@ export default function NursingDashboardPage() {
             <Card>
               <CardHeader className="flex flex-row items-center justify-between pb-2">
                 <CardTitle className="text-lg flex items-center gap-2">
-                  <Clock className="h-5 w-5 text-amber-500" />
+                  <Clock className="h-5 w-5 text-amber-500 dark:text-amber-400" />
                   Pending Tasks
                 </CardTitle>
-                <Badge variant="outline" className="border-amber-500/50 text-amber-600 dark:text-amber-400">
-                  {stats.pendingTasks} tasks
+                <Badge variant={stats.pendingTasks === 0 ? "default" : "outline"} className={stats.pendingTasks === 0 ? "bg-green-500/10 text-green-700 border-green-500/20" : "border-amber-500/50 text-amber-600 dark:text-amber-400"}>
+                  {stats.pendingTasks === 0 ? "✓ All Complete" : `${stats.pendingTasks} pending`}
                 </Badge>
               </CardHeader>
               <CardContent className="space-y-3">
@@ -382,7 +390,7 @@ export default function NursingDashboardPage() {
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-lg flex items-center gap-2">
-                <Activity className="h-5 w-5 text-emerald-500" />
+                <Activity className="h-5 w-5 text-emerald-500 dark:text-emerald-400" />
                 Recent Activity
               </CardTitle>
             </CardHeader>
@@ -393,26 +401,26 @@ export default function NursingDashboardPage() {
                 </div>
               ) : recentActivities.length > 0 ? (
                 recentActivities.slice(0, 5).map((activity, i) => (
-                  <div key={i} className="flex items-start gap-3">
-                    <div className="p-2 rounded-full bg-emerald-500/10">
-                      {activity.type === 'vitals' && <Thermometer className="h-4 w-4 text-emerald-500" />}
-                      {activity.type === 'medication' && <Syringe className="h-4 w-4 text-emerald-500" />}
-                      {activity.type === 'assessment' && <ClipboardList className="h-4 w-4 text-emerald-500" />}
-                      {activity.type === 'procedure' && <Stethoscope className="h-4 w-4 text-emerald-500" />}
-                      {activity.type === 'note' && <FileText className="h-4 w-4 text-emerald-500" />}
+                  <div key={i} className="flex items-start gap-3 p-2 rounded-lg hover:bg-muted/50 transition-colors">
+                    <div className={`p-2 rounded-full ${activity.status === 'completed' ? 'bg-green-500/10' : 'bg-blue-500/10'}`}>
+                      {activity.type === 'vitals' && <Thermometer className={`h-4 w-4 ${activity.status === 'completed' ? 'text-green-500' : 'text-blue-500'}`} />}
+                      {activity.type === 'medication' && <Syringe className={`h-4 w-4 ${activity.status === 'completed' ? 'text-green-500' : 'text-blue-500'}`} />}
+                      {activity.type === 'assessment' && <ClipboardList className={`h-4 w-4 ${activity.status === 'completed' ? 'text-green-500' : 'text-blue-500'}`} />}
+                      {activity.type === 'procedure' && <Stethoscope className={`h-4 w-4 ${activity.status === 'completed' ? 'text-green-500' : 'text-blue-500'}`} />}
+                      {activity.type === 'note' && <FileText className={`h-4 w-4 ${activity.status === 'completed' ? 'text-green-500' : 'text-blue-500'}`} />}
                       {!['vitals', 'medication', 'assessment', 'procedure', 'note'].includes(activity.type) && (
-                        <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                        <CheckCircle2 className={`h-4 w-4 ${activity.status === 'completed' ? 'text-green-500' : 'text-blue-500'}`} />
                       )}
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <p className="font-medium text-foreground text-sm">{activity.patient}</p>
-                        <Badge variant="outline" className="text-xs px-2 py-0.5">
-                          {activity.status === 'completed' ? '✅' : '⏳'} {activity.status}
+                        <Badge variant={activity.status === 'completed' ? 'default' : 'secondary'} className={`text-xs px-2 py-0.5 ${activity.status === 'completed' ? 'bg-green-500/10 text-green-700 border-green-500/20' : ''}`}>
+                          {activity.status === 'completed' ? '✓ Completed' : '⏳ In Progress'}
                         </Badge>
                       </div>
-                      <p className="text-xs text-muted-foreground">{activity.action}</p>
-                      <p className="text-xs text-muted-foreground mt-1">{activity.time}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">{activity.action}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5 opacity-75">{activity.time}</p>
                     </div>
                   </div>
                 ))

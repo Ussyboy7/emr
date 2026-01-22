@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { StandardPagination } from '@/components/StandardPagination';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -93,7 +93,7 @@ export default function NursingPoolQueuePage() {
   useAuthRedirect(authError);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [dateFilter, setDateFilter] = useState('today');
+  const [dateFilter, setDateFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState('all');
   const [clinicFilter, setClinicFilter] = useState('all');
 
@@ -276,6 +276,17 @@ export default function NursingPoolQueuePage() {
   const [selectedPatient, setSelectedPatient] = useState<NursingPatient | null>(null);
   const [vitalsForm, setVitalsForm] = useState<VitalsData>(emptyVitals);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Calculate BMI when weight or height changes
+  const calculatedBMI = useMemo(() => {
+    const weight = parseFloat(vitalsForm.weight || '0');
+    const height = parseFloat(vitalsForm.height || '0');
+    if (weight > 0 && height > 0) {
+      const bmi = weight / Math.pow(height / 100, 2);
+      return bmi.toFixed(1);
+    }
+    return null;
+  }, [vitalsForm.weight, vitalsForm.height]);
   
   // Reload rooms when room picker opens
   useEffect(() => {
@@ -392,7 +403,12 @@ export default function NursingPoolQueuePage() {
 
   const openRecordVitals = (patient: NursingPatient) => {
     setSelectedPatient(patient);
-    setVitalsForm(patient.vitals || emptyVitals);
+    const vitalsData = patient.vitals || emptyVitals;
+    // Ensure painScale has a valid value for the Select component
+    if (!vitalsData.painScale || vitalsData.painScale === '') {
+      vitalsData.painScale = '';
+    }
+    setVitalsForm(vitalsData);
     setIsVitalsDialogOpen(true);
   };
 
@@ -1039,13 +1055,13 @@ export default function NursingPoolQueuePage() {
                 <div className="space-y-2">
                   <Label>BMI (auto)</Label>
                   <div className="h-10 px-3 py-2 rounded-md border bg-muted/50 text-sm flex items-center">
-                    {vitalsForm.weight && vitalsForm.height ? (
+                    {calculatedBMI ? (
                       <span className={`font-medium ${
-                        parseFloat(vitalsForm.weight) / Math.pow(parseFloat(vitalsForm.height) / 100, 2) < 18.5 ? 'text-blue-600' :
-                        parseFloat(vitalsForm.weight) / Math.pow(parseFloat(vitalsForm.height) / 100, 2) < 25 ? 'text-emerald-600' :
-                        parseFloat(vitalsForm.weight) / Math.pow(parseFloat(vitalsForm.height) / 100, 2) < 30 ? 'text-amber-600' : 'text-rose-600'
+                        parseFloat(calculatedBMI) < 18.5 ? 'text-blue-600' :
+                        parseFloat(calculatedBMI) < 25 ? 'text-emerald-600' :
+                        parseFloat(calculatedBMI) < 30 ? 'text-amber-600' : 'text-rose-600'
                       }`}>
-                        {(parseFloat(vitalsForm.weight) / Math.pow(parseFloat(vitalsForm.height) / 100, 2)).toFixed(1)} kg/m²
+                        {calculatedBMI} kg/m²
                       </span>
                     ) : (
                       <span className="text-muted-foreground">Enter weight & height</span>
@@ -1057,8 +1073,8 @@ export default function NursingPoolQueuePage() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Pain Scale (0-10)</Label>
-                  <Select value={vitalsForm.painScale} onValueChange={(v) => setVitalsForm(prev => ({ ...prev, painScale: v }))}>
-                    <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
+                  <Select value={vitalsForm.painScale || ''} onValueChange={(v) => setVitalsForm(prev => ({ ...prev, painScale: v }))}>
+                    <SelectTrigger><SelectValue placeholder="Select pain level" /></SelectTrigger>
                     <SelectContent>
                       {[...Array(11)].map((_, i) => (
                         <SelectItem key={i} value={String(i)}>{i} - {i === 0 ? 'No pain' : i <= 3 ? 'Mild' : i <= 6 ? 'Moderate' : 'Severe'}</SelectItem>

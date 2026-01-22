@@ -674,9 +674,10 @@ export const OrganizationProvider: React.FC<{ children: ReactNode }> = ({ childr
       }),
     });
 
-    console.log('🔍 API response for role creation:', response);
-    console.log('🔍 Response type:', typeof response);
-    console.log('🔍 Response keys:', response ? Object.keys(response) : 'null/undefined');
+    // Security: Removed console.log statements to prevent API response data leakage
+    // console.log('🔍 API response for role creation:', response);
+    // console.log('🔍 Response type:', typeof response);
+    // console.log('🔍 Response keys:', response ? Object.keys(response) : 'null/undefined');
 
     // Validate API response before mapping
     if (!response || typeof response !== 'object') {

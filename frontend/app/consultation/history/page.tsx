@@ -244,7 +244,7 @@ export default function ConsultationHistoryPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [scopeFilter, setScopeFilter] = useState<"all" | "my">("all");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [dateFilter, setDateFilter] = useState("today");
+  const [dateFilter, setDateFilter] = useState("all");
   const [clinicFilter, setClinicFilter] = useState("all");
   const [genderFilter, setGenderFilter] = useState("all");
   const [viewMode, setViewMode] = useState<"table" | "cards">("table");
@@ -770,7 +770,7 @@ export default function ConsultationHistoryPage() {
               <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
               Refresh
             </Button>
-            <Link href="/consultation/dashboard">
+            <Link href="/consultation">
               <Button variant="outline" size="sm">
                 <TrendingUp className="h-4 w-4 mr-2" />
                 My Dashboard

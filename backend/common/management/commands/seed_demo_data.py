@@ -35,6 +35,11 @@ class Command(BaseCommand):
             action="store_true",
             help="Delete existing demo data before seeding",
         )
+        parser.add_argument(
+            "--preserve-users",
+            action="store_true",
+            help="Preserve existing users when resetting (don't delete them)",
+        )
 
     def handle(self, *args, **options):
         self.stdout.write(self.style.MIGRATE_HEADING("Starting demo data seeding..."))
@@ -71,7 +76,13 @@ class Command(BaseCommand):
 
     def _reset_data(self):
         """Delete existing demo data."""
-        self.stdout.write("Deleting existing demo data...")
+        preserve_users = self.options.get("preserve_users", False)
+
+        if preserve_users:
+            self.stdout.write("Deleting existing demo data (preserving users)...")
+        else:
+            self.stdout.write("Deleting existing demo data...")
+
         NotificationPreferences.objects.all().delete()
         Notification.objects.all().delete()
         NursingOrder.objects.all().delete()
@@ -89,7 +100,12 @@ class Command(BaseCommand):
         LabTemplate.objects.all().delete()
         Room.objects.all().delete()  # Delete organization rooms
         Department.objects.all().delete()  # Delete departments
-        Clinic.objects.all().delete()  # Delete clinics (will cascade delete departments and rooms)
+
+        # Only delete clinics if not preserving users (clinics cascade to users)
+        if not preserve_users:
+            Clinic.objects.all().delete()  # Delete clinics (will cascade delete departments and rooms)
+        else:
+            self.stdout.write("Preserving existing clinics and users...")
         UserRole.objects.all().delete()  # Delete user-role relationships
         Role.objects.all().delete()  # Delete roles
         self.stdout.write(self.style.WARNING("Existing demo data removed."))

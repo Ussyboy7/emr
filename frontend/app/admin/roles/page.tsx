@@ -68,7 +68,7 @@ const allPagePermissions: PagePermission[] = [
   { id: '/nursing/wards', name: 'Ward Management', description: 'Manage ward operations', module: 'Nursing' },
 
   // Consultation
-  { id: '/consultation/dashboard', name: 'My Dashboard', description: 'Consultation Dashboard', module: 'Consultation' },
+  { id: '/consultation', name: 'My Dashboard', description: 'Consultation Dashboard', module: 'Consultation' },
   { id: '/consultation/start', name: 'Start Consultation', description: 'Start consultation sessions', module: 'Consultation' },
   { id: '/consultation/history', name: 'Consultation History', description: 'View consultation history', module: 'Consultation' },
   { id: '/consultation/wards', name: 'Ward Overview', description: 'View ward overview', module: 'Consultation' },

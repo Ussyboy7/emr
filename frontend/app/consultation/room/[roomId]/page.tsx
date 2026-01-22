@@ -646,7 +646,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     specialInstructions?: string;
     priority: 'routine' | 'urgent' | 'stat';
     status: 'Draft' | 'Sent to Physiotherapy' | 'Scheduled' | 'In Progress' | 'Completed';
-    totalSessions?: number;
   }[]>([]);
   const [showAddPhysio, setShowAddPhysio] = useState(false);
   const [editingPhysioIndex, setEditingPhysioIndex] = useState<number | null>(null);
@@ -655,8 +654,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     chiefComplaint: "",
     treatmentGoal: "",
     specialInstructions: "",
-    priority: "routine" as 'routine' | 'urgent' | 'stat',
-    totalSessions: 5
+    priority: "routine" as 'routine' | 'urgent' | 'stat'
   });
   const [physioTemplates, setPhysioTemplates] = useState<any[]>([]);
   const [loadingPhysioTemplates, setLoadingPhysioTemplates] = useState(false);
@@ -1329,15 +1327,15 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   // Function to restore active session
   const restoreActiveSession = async (sessionId: number) => {
     try {
-      console.log('Restoring active session:', sessionId);
+      // Security: Removed console.log to prevent session ID exposure
       
       // Load full session data
       const session: ConsultationSession = await consultationService.getSession(sessionId);
-      console.log('Loaded session data:', session);
-      
+      // Security: Removed console.log to prevent session data exposure
+
       // Load patient data
       const patient = await patientService.getPatient(session.patient);
-      console.log('Loaded patient data for ID:', session.patient);
+      // Security: Removed console.log to prevent patient ID exposure
       
       // Load visit data if available
       let visitData: any = null;
@@ -1346,7 +1344,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         visitId = session.visit;
         try {
           visitData = await apiFetch(`/visits/${visitId}/`);
-          console.log('Loaded visit data:', visitData);
+          // Security: Removed console.log to prevent visit data exposure
 
           // Populate session medical notes from visit data if not already set
           if (visitData.clinical_notes && !session.presentation_complaint) {
@@ -1751,7 +1749,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         await new Promise(resolve => setTimeout(resolve, 100));
         console.log('[Consultation] Loading ICD-10 codes...');
         const response = await consultationService.getICD10Codes({ page_size: 100 });
-        console.log('[Consultation] API Response:', response);
+        // Security: Removed console.log to prevent API response data leakage
+      // console.log('[Consultation] API Response:', response);
         const loadedCodes = response.results || [];
         console.log(`[Consultation] Loaded ${loadedCodes.length} ICD-10 codes from API`);
 
@@ -1809,13 +1808,37 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     const loadRadiologyTemplates = async () => {
       try {
         setLoadingRadiologyTemplates(true);
+        console.log('[Consultation] Loading radiology templates...');
+        console.log('[Consultation] About to call radiologyService.getTemplates()');
         const templates = await radiologyService.getTemplates();
-        setRadiologyTemplates(templates.results || []);
+        console.log('[Consultation] Radiology API full response:', templates);
         console.log(`[Consultation] Loaded ${templates.results?.length || 0} radiology templates from API`);
+        console.log('[Consultation] Response type:', typeof templates);
+        console.log('[Consultation] Response keys:', Object.keys(templates || {}));
+        if (templates && templates.results) {
+            console.log('[Consultation] First 3 templates:', templates.results.slice(0, 3));
+        } else {
+            console.warn('[Consultation] No results array in response');
+        }
+        setRadiologyTemplates(templates.results || []);
+        if (!templates.results || templates.results.length === 0) {
+          console.warn('[Consultation] No radiology templates found - this might be an authentication issue');
+        }
       } catch (err: any) {
         console.error('Failed to load radiology templates:', err);
-        // Show error toast to inform user
-        toast.error('Failed to load radiology templates. Some imaging studies may not be available.');
+        console.error('Error details:', err.message, err.status, err.response);
+
+        // Check for authentication errors
+        if (err.status === 401 || err.status === 403) {
+          console.error('[Consultation] Authentication error loading radiology templates');
+          toast.error('Authentication required. Please log in again.');
+        } else if (err.status === 500) {
+          console.error('[Consultation] Server error loading radiology templates');
+          toast.error('Server error. Please try again later.');
+        } else {
+          // Show error toast to inform user
+          toast.error('Failed to load radiology templates. Some imaging studies may not be available.');
+        }
         // Fall back to empty array
         setRadiologyTemplates([]);
       } finally {
@@ -3760,9 +3783,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         return currentPriority < highestPriority ? order.priority : highest;
       }, 'Routine');
       
-      // Use the first clinical indication only (simplified to debug)
+      // Use the first clinical indication only (simplified)
       const combinedClinicalNotes = draftOrders.find(o => o.clinicalIndication)?.clinicalIndication || '';
-      const combinedSpecialInstructions = draftOrders.map(o => o.specialInstructions).filter(n => n).join('; ') || undefined;
       
       const priorityMap: Record<string, 'routine' | 'urgent' | 'stat'> = {
         'Routine': 'routine',
@@ -3770,7 +3792,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         'STAT': 'stat',
       };
       
-      // Create all studies for the order (limit to first order for debugging)
+      // Create all studies for the order (limit to first order to prevent array issues)
       const studiesData = draftOrders.slice(0, 1).map(order => {
         // Find the template that matches this order
         const template = radiologyTemplates.find(t => t.name === order.procedure);
@@ -3781,7 +3803,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           status: 'pending',
         };
 
-        // Only include technical_notes if it exists
+        // Only include technical_notes if it exists (no || undefined)
         if (order.specialInstructions) {
           studyData.technical_notes = order.specialInstructions;
         }
@@ -3799,14 +3821,13 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         patient: numericPatientId,
         priority: priorityMap[orderPriority] || 'routine',
         studies_data: studiesData as any,
+        visit: numericVisitId,
+        consultation_session: sessionId,
+        clinical_notes: combinedClinicalNotes,
       };
 
-      // Add optional fields if they exist
-      if (numericVisitId) orderData.visit = numericVisitId;
-      if (sessionId) orderData.consultation_session = sessionId;
-      if (combinedClinicalNotes) orderData.clinical_notes = combinedClinicalNotes;
-
-      console.log('[Radiology Order] Sending data:', orderData);
+      // Security: Removed console.log to prevent data leakage in production
+      // console.log('[Radiology Order] Sending data:', orderData);
       await radiologyService.createOrder(orderData);
       
       // Update status of sent orders
@@ -3854,7 +3875,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         treatmentGoal: newPhysio.treatmentGoal.trim(),
         specialInstructions: newPhysio.specialInstructions.trim() || undefined,
         priority: newPhysio.priority,
-        totalSessions: newPhysio.totalSessions,
         status: 'Draft' as const
       };
       setPhysioOrders(prev => [...prev, newOrder]);
@@ -3866,8 +3886,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       chiefComplaint: "",
       treatmentGoal: "",
       specialInstructions: "",
-      priority: "routine",
-      totalSessions: 5
+      priority: "routine"
     });
     setEditingPhysioIndex(null);
     setShowAddPhysio(false);
@@ -3883,7 +3902,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         treatmentGoal: orderToEdit.treatmentGoal || "",
         specialInstructions: orderToEdit.specialInstructions || "",
         priority: orderToEdit.priority,
-        totalSessions: orderToEdit.totalSessions || 5
       });
     setEditingPhysioIndex(index);
     setShowAddPhysio(true);
@@ -3933,7 +3951,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           treatment_goal: order.treatmentGoal,
           special_instructions: order.specialInstructions || undefined,
           priority: order.priority,
-          total_sessions: order.totalSessions || 1,
           consultation_session: sessionId
         } as any);
       }
@@ -6611,7 +6628,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                   notes: diagnosisNotes || ''
                                 };
 
-                                console.log('Creating diagnosis with data:', diagnosisData);
+                                // Security: Removed console.log to prevent diagnosis data exposure
                                 const newDiagnosis = await consultationService.createDiagnosis(diagnosisData);
                                 setDiagnoses([...diagnoses, newDiagnosis]);
 
@@ -7537,7 +7554,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                     }}
                     onFocus={() => setShowRadiologyTemplateDropdown(true)}
                   />
-                  {showRadiologyTemplateDropdown && (
+                  {showRadiologyTemplateDropdown && radiologyTemplateSearch.trim() && (
                     <div className="absolute top-full left-0 right-0 z-50 bg-background border rounded-md shadow-lg max-h-60 overflow-y-auto">
                       {loadingRadiologyTemplates ? (
                         <div className="p-4 text-center text-muted-foreground">
@@ -7752,7 +7769,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           setShowAddPhysio(open);
           if (!open) {
             setEditingPhysioIndex(null);
-            setNewPhysio({ diagnosis: "", chiefComplaint: "", treatmentGoal: "", specialInstructions: "", priority: "routine", totalSessions: 5 });
+            setNewPhysio({ diagnosis: "", chiefComplaint: "", treatmentGoal: "", specialInstructions: "", priority: "routine" });
           }
         }}>
           <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
@@ -7814,25 +7831,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                     <SelectItem value="stat">STAT</SelectItem>
                   </SelectContent>
                 </Select>
-              </div>
-
-              {/* Total Sessions */}
-              <div className="space-y-2">
-                <Label>Total Sessions</Label>
-                <Select value={(newPhysio.totalSessions || 5).toString()} onValueChange={(v) => setNewPhysio({ ...newPhysio, totalSessions: parseInt(v) })}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="1">1 Session</SelectItem>
-                    <SelectItem value="3">3 Sessions</SelectItem>
-                    <SelectItem value="5">5 Sessions</SelectItem>
-                    <SelectItem value="7">7 Sessions</SelectItem>
-                    <SelectItem value="10">10 Sessions</SelectItem>
-                    <SelectItem value="12">12 Sessions</SelectItem>
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">Number of physiotherapy sessions planned for this treatment course</p>
               </div>
 
               {/* Special Instructions */}

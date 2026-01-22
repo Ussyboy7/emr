@@ -1,161 +1,53 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { DashboardLayout } from '@/components/DashboardLayout';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { useAuthRedirect } from '@/hooks/use-auth-redirect';
-import { isAuthenticationError } from '@/lib/auth-errors';
-import { physioService } from '@/lib/services';
-import { toast } from 'sonner';
+import { Loader2, Dumbbell, Calendar, Clock, CheckCircle2, Activity, ArrowRight, UserCheck, ClipboardList, TrendingUp, Plus } from 'lucide-react';
 import Link from 'next/link';
-import {
-  Activity, Users, Clock, CheckCircle2, Calendar, UserCheck,
-  TrendingUp, AlertCircle, Plus, Eye, Stethoscope, Loader2
-} from 'lucide-react';
-
-interface PhysioStats {
-  total_orders: number;
-  pending_orders: number;
-  completed_sessions: number;
-  active_sessions: number;
-  total_sessions: number;
-}
 
 export default function PhysiotherapyPage() {
-  const [stats, setStats] = useState<PhysioStats | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [authError, setAuthError] = useState<unknown | null>(null);
-  useAuthRedirect(authError);
 
   useEffect(() => {
-    const loadStats = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        const statsData = await physioService.getStats();
-        setStats(statsData);
-      } catch (err: any) {
-        console.error('Error loading physiotherapy stats:', err);
-        if (isAuthenticationError(err)) {
-          setAuthError(err);
-        } else {
-          setError('Failed to load statistics. Please try again.');
-          toast.error('Failed to load physiotherapy statistics');
-        }
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadStats();
+    // Simulate loading
+    const timer = setTimeout(() => setLoading(false), 1000);
+    return () => clearTimeout(timer);
   }, []);
-
-  const quickActions = [
-    {
-      title: 'View Pool Queue',
-      description: 'Manage pending physiotherapy orders',
-      href: '/physiotherapy/pool-queue',
-      icon: Users,
-      color: 'text-blue-500',
-      bg: 'bg-blue-500/10',
-      border: 'border-blue-500/20'
-    },
-    {
-      title: 'Completed Sessions',
-      description: 'View completed physiotherapy sessions',
-      href: '/physiotherapy/completed',
-      icon: CheckCircle2,
-      color: 'text-emerald-500',
-      bg: 'bg-emerald-500/10',
-      border: 'border-emerald-500/20'
-    },
-    {
-      title: 'Active Sessions',
-      description: 'Monitor ongoing physiotherapy sessions',
-      href: '/physiotherapy/pool-queue?filter=active',
-      icon: Activity,
-      color: 'text-orange-500',
-      bg: 'bg-orange-500/10',
-      border: 'border-orange-500/20'
-    }
-  ];
-
-  const workflowSteps = [
-    { step: 1, title: 'Order Received', description: 'Doctor creates physiotherapy order', icon: Stethoscope },
-    { step: 2, title: 'Assessment', description: 'Initial patient assessment', icon: UserCheck },
-    { step: 3, title: 'Treatment Plan', description: 'Develop individualized treatment plan', icon: Calendar },
-    { step: 4, title: 'Sessions', description: 'Conduct physiotherapy sessions', icon: Activity },
-    { step: 5, title: 'Progress Review', description: 'Monitor and adjust treatment', icon: TrendingUp },
-    { step: 6, title: 'Completion', description: 'Treatment completion and recommendations', icon: CheckCircle2 }
-  ];
-
-  if (loading) {
-    return (
-      <DashboardLayout>
-        <div className="container mx-auto p-6 space-y-6">
-          <div className="flex items-center justify-center py-12">
-            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-            <span className="ml-3 text-muted-foreground">Loading physiotherapy dashboard...</span>
-          </div>
-        </div>
-      </DashboardLayout>
-    );
-  }
-
-  if (error) {
-    return (
-      <DashboardLayout>
-        <div className="container mx-auto p-6 space-y-6">
-          <Card className="border-red-500/20 bg-red-500/5">
-            <CardContent className="p-6">
-              <div className="flex items-center gap-3">
-                <AlertCircle className="h-6 w-6 text-red-500" />
-                <div>
-                  <p className="text-red-600 dark:text-red-400 font-medium">Error Loading Dashboard</p>
-                  <p className="text-red-600 dark:text-red-400 text-sm mt-1">{error}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      </DashboardLayout>
-    );
-  }
 
   return (
     <DashboardLayout>
       <div className="container mx-auto p-6 space-y-6">
         {/* Header */}
-        <Card className="bg-gradient-to-r from-blue-500 to-indigo-600 text-white border-0">
+        <Card className="bg-gradient-to-r from-green-500 to-emerald-600 text-white border-0">
           <CardContent className="p-6">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div className="flex items-center gap-4">
                 <div className="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center">
-                  <Activity className="h-8 w-8 text-white" />
+                  <Dumbbell className="h-8 w-8 text-white" />
                 </div>
                 <div>
                   <h1 className="text-2xl font-bold">Physiotherapy Department</h1>
-                  <p className="text-blue-100">Physical rehabilitation and therapeutic services management</p>
+                  <p className="text-green-100">Rehabilitation services, therapy planning, and patient recovery tracking</p>
                 </div>
               </div>
               <div className="flex gap-2">
                 <Button
-                  className="bg-white text-blue-600 hover:bg-blue-50"
-                  onClick={() => window.location.href = '/physiotherapy/pool-queue'}
+                  className="bg-white text-green-600 hover:bg-green-50"
+                  onClick={() => window.location.href = '/physiotherapy/sessions'}
                 >
-                  <Users className="h-4 w-4 mr-2" />
-                  Patient Pool
+                  <Calendar className="h-4 w-4 mr-2" />
+                  Schedule Session
                 </Button>
                 <Button
                   variant="outline"
                   className="border-white text-white hover:bg-white/20"
-                  onClick={() => window.location.href = '/physiotherapy/completed'}
+                  onClick={() => window.location.href = '/physiotherapy/patients'}
                 >
-                  <CheckCircle2 className="h-4 w-4 mr-2" />
-                  Completed
+                  <UserCheck className="h-4 w-4 mr-2" />
+                  Patient List
                 </Button>
               </div>
             </div>
@@ -164,133 +56,185 @@ export default function PhysiotherapyPage() {
 
         {/* Today's Overview */}
         <div>
-          <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
-            <Clock className="h-5 w-5 text-blue-500" />
+          <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+            <Clock className="h-5 w-5 text-blue-500 dark:text-blue-400" />
             Today's Overview
           </h2>
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
-          <Card className="border-l-4 border-l-blue-500">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Total Orders</p>
-                  <p className="text-3xl font-bold text-blue-600 dark:text-blue-400">{stats?.total_orders || 0}</p>
-                </div>
-                <Users className="h-8 w-8 text-blue-500 opacity-50" />
-              </div>
-            </CardContent>
-          </Card>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {loading ? (
+              Array.from({ length: 4 }).map((_, i) => (
+                <Card key={i}>
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-muted-foreground">Loading...</p>
+                        <div className="flex items-center gap-2 mt-1">
+                          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                          <p className="text-3xl font-bold text-muted-foreground">--</p>
+                        </div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))
+            ) : (
+              <>
+                <Card className={`border-l-4 ${0 > 0 ? 'border-l-amber-500' : 'border-l-green-500'}`}>
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-muted-foreground">Pending Sessions</p>
+                        <div className="flex items-center gap-2 mt-1">
+                          <Clock className={`h-5 w-5 ${0 > 0 ? 'text-amber-500 dark:text-amber-400' : 'text-green-500 dark:text-green-400'}`} />
+                          <p className={`text-3xl font-bold ${0 > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-green-600 dark:text-green-400'}`}>{0}</p>
+                        </div>
+                        {0 === 0 ? (
+                          <p className="text-xs text-green-600 dark:text-green-400 mt-1">All caught up!</p>
+                        ) : null}
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
 
-          <Card className="border-l-4 border-l-orange-500">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Pending Orders</p>
-                  <p className="text-3xl font-bold text-orange-600 dark:text-orange-400">{stats?.pending_orders || 0}</p>
-                </div>
-                <Clock className="h-8 w-8 text-orange-500 opacity-50" />
-              </div>
-            </CardContent>
-          </Card>
+                <Card className={`border-l-4 ${0 === 0 ? 'border-l-green-500' : 'border-l-blue-500'}`}>
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-muted-foreground">Active Patients</p>
+                        <div className="flex items-center gap-2 mt-1">
+                          <UserCheck className={`h-5 w-5 ${0 === 0 ? 'text-green-500 dark:text-green-400' : 'text-blue-500 dark:text-blue-400'}`} />
+                          <p className={`text-3xl font-bold ${0 === 0 ? 'text-green-600 dark:text-green-400' : 'text-blue-600 dark:text-blue-400'}`}>{0}</p>
+                        </div>
+                        {0 === 0 ? (
+                          <p className="text-xs text-green-600 dark:text-green-400 mt-1">No active patients</p>
+                        ) : null}
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
 
-          <Card className="border-l-4 border-l-purple-500">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Active Sessions</p>
-                  <p className="text-3xl font-bold text-purple-600 dark:text-purple-400">{stats?.active_sessions || 0}</p>
-                </div>
-                <Activity className="h-8 w-8 text-purple-500 opacity-50" />
-              </div>
-            </CardContent>
-          </Card>
+                <Card className={`border-l-4 ${0 === 0 ? 'border-l-green-500' : 'border-l-emerald-500'}`}>
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-muted-foreground">Completed Today</p>
+                        <div className="flex items-center gap-2 mt-1">
+                          <CheckCircle2 className={`h-5 w-5 ${0 === 0 ? 'text-green-500 dark:text-green-400' : 'text-emerald-500 dark:text-emerald-400'}`} />
+                          <p className={`text-3xl font-bold ${0 === 0 ? 'text-green-600 dark:text-green-400' : 'text-emerald-600 dark:text-emerald-400'}`}>{0}</p>
+                        </div>
+                        {0 === 0 ? (
+                          <p className="text-xs text-green-600 dark:text-green-400 mt-1">No sessions completed</p>
+                        ) : null}
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
 
-          <Card className="border-l-4 border-l-emerald-500">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Completed Sessions</p>
-                  <p className="text-3xl font-bold text-emerald-600 dark:text-emerald-400">{stats?.completed_sessions || 0}</p>
-                </div>
-                <CheckCircle2 className="h-8 w-8 text-emerald-500 opacity-50" />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="border-l-4 border-l-indigo-500">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Total Sessions</p>
-                  <p className="text-3xl font-bold text-indigo-600 dark:text-indigo-400">{stats?.total_sessions || 0}</p>
-                </div>
-                <Calendar className="h-8 w-8 text-indigo-500 opacity-50" />
-              </div>
-            </CardContent>
-          </Card>
+                <Card className={`border-l-4 ${0 === 0 ? 'border-l-green-500' : 'border-l-purple-500'}`}>
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-muted-foreground">Scheduled Tomorrow</p>
+                        <div className="flex items-center gap-2 mt-1">
+                          <Calendar className={`h-5 w-5 ${0 === 0 ? 'text-green-500 dark:text-green-400' : 'text-purple-500 dark:text-purple-400'}`} />
+                          <p className={`text-3xl font-bold ${0 === 0 ? 'text-green-600 dark:text-green-400' : 'text-purple-600 dark:text-purple-400'}`}>{0}</p>
+                        </div>
+                        {0 === 0 ? (
+                          <p className="text-xs text-green-600 dark:text-green-400 mt-1">No sessions scheduled</p>
+                        ) : null}
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </>
+            )}
           </div>
         </div>
 
         {/* Quick Actions */}
-        <div className="grid gap-4 md:grid-cols-3">
-          {quickActions.map((action, index) => (
-            <Link key={index} href={action.href}>
-              <Card className={`cursor-pointer hover:shadow-md transition-shadow border-2 ${action.border}`}>
-                <CardContent className="p-6">
-                  <div className="flex items-center gap-4">
-                    <div className={`p-3 rounded-lg ${action.bg}`}>
-                      <action.icon className={`h-6 w-6 ${action.color}`} />
-                    </div>
-                    <div>
-                      <h3 className="font-semibold text-foreground">{action.title}</h3>
-                      <p className="text-sm text-muted-foreground">{action.description}</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </Link>
-          ))}
+        <div>
+          <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+            <Activity className="h-5 w-5 text-blue-500 dark:text-blue-400" />
+            Quick Actions
+          </h2>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <Button onClick={() => window.location.href = '/physiotherapy/sessions/new'} className="h-auto py-6 flex flex-col items-center gap-3 bg-gradient-to-br from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 text-white border-l-4 border-l-white/20">
+              <div className="flex items-center gap-2">
+                <Plus className="h-6 w-6" />
+              </div>
+              <span className="text-sm font-medium">New Session</span>
+              <span className="text-xs opacity-90">Start therapy session</span>
+            </Button>
+            <Button onClick={() => window.location.href = '/physiotherapy/patients'} variant="outline" className="h-auto py-6 flex flex-col items-center gap-3 border-green-500/30 hover:bg-green-500/10 border-l-4 border-l-green-500">
+              <UserCheck className="h-6 w-6 text-green-500 dark:text-green-400" />
+              <span className="text-sm font-medium">Patient Progress</span>
+              <span className="text-xs text-muted-foreground">Track recovery progress</span>
+            </Button>
+            <Button onClick={() => window.location.href = '/physiotherapy/pool-queue'} variant="outline" className="h-auto py-6 flex flex-col items-center gap-3 border-green-500/30 hover:bg-green-500/10 border-l-4 border-l-blue-500">
+              <ClipboardList className="h-6 w-6 text-blue-500 dark:text-blue-400" />
+              <span className="text-sm font-medium">Pool Queue</span>
+              <span className="text-xs text-muted-foreground">Manage therapy pool</span>
+            </Button>
+            <Button onClick={() => window.location.href = '/physiotherapy/reports'} variant="outline" className="h-auto py-6 flex flex-col items-center gap-3 border-green-500/30 hover:bg-green-500/10 border-l-4 border-l-emerald-500">
+              <Activity className="h-6 w-6 text-emerald-500 dark:text-emerald-400" />
+              <span className="text-sm font-medium">Exercise Plans</span>
+              <span className="text-xs text-muted-foreground">Create therapy plans</span>
+            </Button>
+          </div>
         </div>
 
-        {/* Physiotherapy Workflow */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <TrendingUp className="h-5 w-5 text-blue-500" />
-              Physiotherapy Workflow
-            </CardTitle>
-            <CardDescription>Standard process for physiotherapy treatment and rehabilitation</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {workflowSteps.map((step, index) => (
-                <div key={index} className="flex items-start gap-3 p-4 rounded-lg bg-muted/30">
-                  <div className="flex-shrink-0 w-8 h-8 rounded-full bg-blue-500 text-white flex items-center justify-center text-sm font-medium">
-                    {step.step}
+        <div className="grid gap-6 lg:grid-cols-3">
+          {/* Pending Tasks */}
+          <div className="lg:col-span-2">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <Clock className="h-5 w-5 text-amber-500 dark:text-amber-400" />
+                  Pending Tasks
+                </CardTitle>
+                <Badge variant="default" className="bg-green-500/10 text-green-700 border-green-500/20">
+                  ✓ All Complete
+                </Badge>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {loading ? (
+                  <div className="flex items-center justify-center p-8">
+                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
                   </div>
-                  <div>
-                    <h4 className="font-medium text-foreground">{step.title}</h4>
-                    <p className="text-sm text-muted-foreground">{step.description}</p>
+                ) : (
+                  <div className="text-center py-8">
+                    <CheckCircle2 className="h-8 w-8 mx-auto mb-2 text-green-500" />
+                    <p className="text-muted-foreground text-sm mb-2">All tasks completed!</p>
+                    <p className="text-xs text-muted-foreground">Great work staying on top of physiotherapy operations.</p>
                   </div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+                )}
+              </CardContent>
+            </Card>
+          </div>
 
-        {/* Recent Activity Placeholder */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Recent Activity</CardTitle>
-            <CardDescription>Latest physiotherapy orders and session updates</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="text-center py-8 text-muted-foreground">
-              <Activity className="h-12 w-12 mx-auto mb-4 opacity-50" />
-              <p>Recent activity will appear here once physiotherapy orders are created.</p>
-            </div>
-          </CardContent>
-        </Card>
+          {/* Recent Activity */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Activity className="h-5 w-5 text-emerald-500 dark:text-emerald-400" />
+                Recent Activity
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {loading ? (
+                <div className="flex items-center justify-center p-8">
+                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                </div>
+              ) : (
+                <div className="text-center py-8">
+                  <Activity className="h-8 w-8 mx-auto mb-2 text-muted-foreground/50" />
+                  <p className="text-muted-foreground text-sm mb-2">No recent activity</p>
+                  <p className="text-xs text-muted-foreground">Activity will appear here as you work</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
       </div>
     </DashboardLayout>
   );

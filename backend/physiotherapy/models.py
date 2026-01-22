@@ -55,8 +55,7 @@ class PhysioOrder(models.Model):
     scheduled_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
 
-    # Multi-session support
-    total_sessions = models.PositiveIntegerField(default=1, help_text="Total number of sessions planned for this treatment")
+    # Session tracking (physiotherapist determines session count)
     sessions_completed = models.PositiveIntegerField(default=0, help_text="Number of sessions completed so far")
 
     class Meta:

@@ -223,7 +223,7 @@ const StartConsultation = () => {
         }
         
         const firstPatientIdStr = room.queue[0].patient_id;
-        console.log('First patient ID from room queue:', firstPatientIdStr, typeof firstPatientIdStr);
+        // Security: Removed console.log to prevent patient ID exposure
         
         // Convert patient ID to number
         let numericPatientId = typeof firstPatientIdStr === 'number' 
@@ -241,7 +241,7 @@ const StartConsultation = () => {
           return;
         }
         
-        console.log('Using patient ID:', numericPatientId);
+        // Security: Removed console.log to prevent patient ID exposure
         
         // Convert to number for API call
         const numericRoomId = parseInt(selectedRoom);
@@ -319,7 +319,7 @@ const StartConsultation = () => {
           return;
         }
         
-        console.log('Successfully loaded patient for ID:', numericPatientId);
+        // Security: Removed console.log to prevent patient ID exposure
         
         // Get visit details if available
         let visitDate = new Date().toISOString().split('T')[0];
@@ -430,6 +430,44 @@ const StartConsultation = () => {
     setShowConfirmDialog(true);
   };
 
+  const handleDoubleClickRoom = async (roomId: string, roomStatus: string) => {
+    if (roomStatus !== "available") {
+      toast.error("This room is not available for consultation");
+      return;
+    }
+
+    // Select the room first
+    setSelectedRoom(roomId);
+
+    // Auto-start consultation after a brief delay to show selection
+    setTimeout(() => {
+      handleStartConsultationForRoom(roomId);
+    }, 300);
+  };
+
+  const handleStartConsultationForRoom = async (roomId: string) => {
+    try {
+      setIsLoading(true);
+
+      // Find the room data
+      const room = consultationRooms.find((r) => r.id === roomId);
+      if (!room) {
+        toast.error("Room not found");
+        setIsLoading(false);
+        return;
+      }
+
+      // Start consultation directly by navigating to room
+      toast.success("Entering consultation room...");
+      router.push(`/consultation/room/${roomId}`);
+
+    } catch (error) {
+      console.error("Error starting consultation:", error);
+      toast.error("Failed to start consultation");
+      setIsLoading(false);
+    }
+  };
+
   const confirmStartConsultation = async () => {
     setIsLoading(true);
 
@@ -495,6 +533,9 @@ const StartConsultation = () => {
           <p className="text-gray-600 dark:text-gray-400">
             Select a consultation room to begin your session
           </p>
+          <div className="mt-2 text-xs text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 p-2 rounded-md border border-blue-200 dark:border-blue-800 inline-block">
+            💡 <strong>Quick Start:</strong> Double-click any available room to start consultation immediately!
+          </div>
           {availableRooms.length === 0 && (
             <div className="mt-4 p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
               <div className="flex items-center">
@@ -637,6 +678,7 @@ const StartConsultation = () => {
                   : "hover:border-emerald-300"
               }`}
               onClick={() => handleRoomSelect(room.id, room.status)}
+              onDoubleClick={() => handleDoubleClickRoom(room.id, room.status)}
             >
               <CardHeader className="pb-3 flex-shrink-0">
                 <div className="flex items-center justify-between">

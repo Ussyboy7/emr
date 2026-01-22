@@ -256,7 +256,8 @@ export const apiFetch = async <T = unknown>(path: string, options: FetchOptions 
           continue;
         }
 
-        throw new Error(`API request failed: ${response.status}`);
+        // Security: Never expose raw HTTP status codes to prevent information leakage
+        throw new Error(`Request failed. Please try again`);
       }
 
       if (response.status === 204) {
@@ -315,8 +316,19 @@ export const login = async (username: string, password: string): Promise<LoginRe
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(errorText || "Invalid credentials");
+      // Security: Never expose raw backend error messages to prevent information leakage
+      // Always use generic, non-descriptive error messages
+      if (response.status === 400) {
+        throw new Error("Invalid username or password");
+      } else if (response.status === 401) {
+        throw new Error("Invalid username or password");
+      } else if (response.status === 403) {
+        throw new Error("Account access denied");
+      } else if (response.status === 429) {
+        throw new Error("Too many login attempts. Please try again later");
+      } else {
+        throw new Error("Login failed. Please try again");
+      }
     }
 
     const data = (await response.json()) as LoginResponse;
@@ -409,8 +421,14 @@ export const impersonateUser = async (username: string) => {
   }
 
   if (!response.ok) {
-    const text = await response.text();
-    throw new Error(text || `Unable to impersonate user (status ${response.status})`);
+    // Security: Never expose raw backend error messages or status codes
+    if (response.status === 403) {
+      throw new Error("You don't have permission to impersonate users");
+    } else if (response.status === 404) {
+      throw new Error("User not found");
+    } else {
+      throw new Error("Unable to impersonate user. Please check permissions and try again");
+    }
   }
 
   const data = (await response.json()) as LoginResponse;
