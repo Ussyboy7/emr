@@ -274,7 +274,7 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
           id: session.id?.toString() || String(session.id),
           date: session.created_at ? new Date(session.created_at).toLocaleDateString() : session.date || '',
           doctor: session.doctor?.name || session.doctor_name || 'Unknown',
-          clinic: session.clinic || session.room?.name || 'GOPD',
+          clinic: session.clinic_name || session.room?.clinic_name || 'GOPD',
           room: session.room?.name || '',
           status: session.status || 'completed',
           notes: session.notes || '',

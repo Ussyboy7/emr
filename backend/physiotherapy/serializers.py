@@ -64,7 +64,7 @@ class PhysioOrderCreateSerializer(serializers.ModelSerializer):
         fields = [
             'patient', 'consultation_session', 'diagnosis',
             'chief_complaint', 'treatment_goal', 'special_instructions',
-            'priority', 'total_sessions'
+            'priority'
         ]
 
 

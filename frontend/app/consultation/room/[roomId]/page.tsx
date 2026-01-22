@@ -707,7 +707,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       id: session.id?.toString() || '',
       date: formatDate(session.started_at),
       doctor: session.doctor_name || currentUser?.name || 'Unknown Doctor',
-      clinic: session.room_name || room?.name || 'Consulting Room',
+      clinic: session.clinic_name || room?.clinic_name || 'GOPD',
       sessionId: session.session_id || '',
       status: session.status || 'completed',
       started_at: session.started_at,

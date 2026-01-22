@@ -385,11 +385,11 @@ export function MedicalHistoryTab({
                         return daysAgo <= parseInt(sessionDateFilter);
                       })
                       .slice((consultationsPage - 1) * consultationsPerPage, consultationsPage * consultationsPerPage)
-                      .map((item: any) => {
+                      .map((item: any, index: number) => {
                         const itemDate = safeParseDate(item.date || item.created_at);
                         const formattedDate = itemDate ? itemDate.toLocaleDateString() : (item.date || 'N/A');
                         return (
-                      <tr key={item.id} className="hover:bg-muted/30">
+                      <tr key={`${item.type}-${item.id}-${index}`} className="hover:bg-muted/30">
                         <td className="px-4 py-3 text-muted-foreground">{formattedDate}</td>
                         <td className="px-4 py-3">
                           <Badge variant="outline">{item.type === 'visit' ? item.type : 'Consultation'}</Badge>

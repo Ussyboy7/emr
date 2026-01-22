@@ -35,7 +35,6 @@ export interface PhysioOrder {
   ordered_at: string;
   scheduled_at?: string;
   completed_at?: string;
-  total_sessions: number;
   sessions_completed: number;
 }
 

@@ -115,10 +115,9 @@ class PhysioSessionViewSet(viewsets.ModelViewSet):
             completed_sessions = order.sessions.filter(status='completed').count()
             order.sessions_completed = completed_sessions
 
-            # If all planned sessions are completed, mark order as completed
-            if completed_sessions >= order.total_sessions:
-                order.status = 'completed'
-                order.completed_at = timezone.now()
+            # Update order status - physiotherapist determines when treatment is complete
+            # No longer checking against total_sessions since that field was removed
+            # The physiotherapist will manually mark the order as completed when appropriate
 
             order.save()
 
@@ -140,12 +139,8 @@ class PhysioSessionViewSet(viewsets.ModelViewSet):
                 last_session = order.sessions.order_by('-session_number').first()
                 next_session_number = (last_session.session_number if last_session else 0) + 1
 
-                # Don't create more sessions than planned
-                if next_session_number > order.total_sessions:
-                    return Response(
-                        {'error': f'Cannot create session {next_session_number} - only {order.total_sessions} sessions planned'},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
+                # Allow unlimited sessions - physiotherapist determines treatment length
+                # Removed the check against total_sessions since that field was removed
 
                 session = PhysioSession.objects.create(
                     order=order,
