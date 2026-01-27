@@ -134,7 +134,15 @@ class ConsultationQueue(models.Model):
     class Meta:
         db_table = 'consultation_queue'
         ordering = ['priority', 'queued_at']
-        unique_together = [['room', 'patient', 'is_active']]
+        # Only one ACTIVE queue item per room-patient combo
+        # Multiple inactive items are OK (they've been processed/called)
+        constraints = [
+            models.UniqueConstraint(
+                fields=['room', 'patient'],
+                condition=models.Q(is_active=True),
+                name='unique_active_queue_item'
+            )
+        ]
     
     def __str__(self):
         return f"{self.room.name} - {self.patient.get_full_name()}"

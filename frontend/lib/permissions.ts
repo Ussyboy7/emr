@@ -5,7 +5,6 @@ export type ArchiveLevel = "department" | "division" | "directorate";
 export type PermissionProfile = {
   canAccessApprovals: boolean;
   canAccessAnalytics: boolean;
-  canAccessExecutiveDashboard: boolean;
   canAccessAdministration: boolean;
   canAccessReports: boolean;
   canAccessDocumentManagement: boolean;
@@ -16,7 +15,6 @@ export type PermissionProfile = {
 const defaultProfile: PermissionProfile = {
   canAccessApprovals: false,
   canAccessAnalytics: false,
-  canAccessExecutiveDashboard: false,
   canAccessAdministration: false,
   canAccessReports: false,
   canAccessDocumentManagement: true,
@@ -61,7 +59,6 @@ export const getPermissionProfile = (user?: User | null): PermissionProfile => {
   }
 
   if (isMD || isED || isSuperAdmin) {
-    profile.canAccessExecutiveDashboard = true;
   }
 
   if (isMD || isED || isGM || isSuperAdmin) {

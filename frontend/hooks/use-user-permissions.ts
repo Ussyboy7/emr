@@ -44,7 +44,6 @@ export const useUserPermissions = (user?: User | null): PermissionProfile => {
       // Superadmin should have all permissions
       enhancedProfile.canAccessApprovals = true;
       enhancedProfile.canAccessAnalytics = true;
-      enhancedProfile.canAccessExecutiveDashboard = true;
       enhancedProfile.canAccessAdministration = true;
       enhancedProfile.canAccessReports = true;
       enhancedProfile.canDistribute = true;

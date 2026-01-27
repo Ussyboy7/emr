@@ -6,6 +6,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
+from rest_framework.pagination import PageNumberPagination
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django.shortcuts import get_object_or_404
@@ -19,6 +20,12 @@ from .serializers import (
     MedicalHistorySerializer,
 )
 from audit.services import AuditService
+
+
+class PatientPagination(PageNumberPagination):
+    page_size = 100
+    page_size_query_param = 'page_size'
+    max_page_size = 500
 
 
 class PatientViewSet(viewsets.ModelViewSet):
@@ -35,8 +42,9 @@ class PatientViewSet(viewsets.ModelViewSet):
     
     permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser, JSONParser]  # Support file uploads
+    pagination_class = PatientPagination
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['category', 'gender', 'blood_group', 'is_active']
+    filterset_fields = ['category', 'gender', 'blood_group', 'is_active', 'location']
     search_fields = ['patient_id', 'surname', 'first_name', 'middle_name', 'personal_number', 'phone', 'email']
     ordering_fields = ['created_at', 'surname', 'first_name']
     ordering = ['-created_at']
@@ -112,6 +120,18 @@ class PatientViewSet(viewsets.ModelViewSet):
             request=self.request,
         )
     
+    @action(detail=False, methods=['get'], url_path='counts')
+    def counts(self, request):
+        """Return total and per-category patient counts (active only, not filtered by search/filters)."""
+        qs = self.get_queryset()
+        return Response({
+            'total': qs.count(),
+            'employees': qs.filter(category='employee').count(),
+            'retirees': qs.filter(category='retiree').count(),
+            'dependents': qs.filter(category='dependent').count(),
+            'nonnpa': qs.filter(category='nonnpa').count(),
+        })
+
     @action(detail=True, methods=['get'])
     def visits(self, request, pk=None):
         """Get all visits for a patient."""
@@ -157,12 +177,28 @@ class VisitViewSet(viewsets.ModelViewSet):
     serializer_class = VisitSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['patient', 'status', 'visit_type', 'clinic']
-    search_fields = ['visit_id', 'clinical_notes']
+    search_fields = ['visit_id', 'clinical_notes', 'patient__surname', 'patient__first_name', 'patient__patient_id']
     ordering_fields = ['date', 'time', 'created_at']
     ordering = ['-date', '-time']
     
     def get_queryset(self):
-        return Visit.objects.all().select_related('patient', 'doctor', 'created_by').prefetch_related('vital_readings')
+        queryset = Visit.objects.all().select_related('patient', 'doctor', 'created_by').prefetch_related('vital_readings')
+        
+        # Date filtering
+        date = self.request.query_params.get('date')
+        start_date = self.request.query_params.get('start_date')
+        end_date = self.request.query_params.get('end_date')
+        
+        if date:
+            queryset = queryset.filter(date=date)
+        elif start_date:
+            queryset = queryset.filter(date__gte=start_date)
+            if end_date:
+                queryset = queryset.filter(date__lte=end_date)
+        elif end_date:
+            queryset = queryset.filter(date__lte=end_date)
+        
+        return queryset
     
     def perform_create(self, serializer):
         """Set created_by when creating a visit and log audit."""

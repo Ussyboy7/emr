@@ -105,11 +105,33 @@ class ConsultationSessionViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def end(self, request, pk=None):
         """End a consultation session and log audit."""
+        from patients.models import Visit
+        
         session = self.get_object()
         old_status = session.status
         session.status = 'completed'
         session.ended_at = timezone.now()
         session.save()
+        
+        # Update visit status to 'completed' if visit exists
+        if session.visit:
+            visit = session.visit
+            old_visit_status = visit.status
+            visit.status = 'completed'
+            visit.save()
+            AuditService.log_activity(
+                user=self.request.user,
+                action='update',
+                object_type='visit',
+                object_id=str(visit.id),
+                module='consultation',
+                object_repr=f'Visit {visit.visit_id}',
+                description=f'Marked visit {visit.visit_id} as completed after consultation session ended',
+                old_values={'status': old_visit_status},
+                new_values={'status': 'completed'},
+                request=self.request,
+            )
+        
         AuditService.log_activity(
             user=self.request.user,
             action='update',
@@ -281,6 +303,47 @@ class ConsultationQueueViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         return ConsultationQueue.objects.all().select_related('room', 'patient', 'visit')
+    
+    def perform_create(self, serializer):
+        """Create queue item with duplicate prevention."""
+        from django.db import IntegrityError
+        
+        # Check if patient is already in queue for this room (active)
+        room = serializer.validated_data.get('room')
+        patient = serializer.validated_data.get('patient')
+        
+        existing = ConsultationQueue.objects.filter(
+            room=room,
+            patient=patient,
+            is_active=True
+        ).first()
+        
+        if existing:
+            from rest_framework.exceptions import ValidationError
+            raise ValidationError({
+                'non_field_errors': [f'Patient is already in the queue for {room.name}']
+            })
+        
+        # Save the queue item
+        queue_item = serializer.save()
+        
+        # Log audit
+        AuditService.log_activity(
+            user=self.request.user,
+            action='create',
+            object_type='consultation_queue',
+            object_id=str(queue_item.id),
+            module='consultation',
+            object_repr=f'Queue item for {queue_item.patient.get_full_name()} in {queue_item.room.name}',
+            description=f'Added {queue_item.patient.get_full_name()} to consultation queue for {queue_item.room.name}',
+            new_values={
+                'room': queue_item.room.name,
+                'patient': queue_item.patient.get_full_name(),
+                'priority': queue_item.priority,
+                'visit': str(queue_item.visit.id) if queue_item.visit else None,
+            },
+            request=self.request,
+        )
     
     @action(detail=True, methods=['post'])
     def call(self, request, pk=None):

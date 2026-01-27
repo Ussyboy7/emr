@@ -95,6 +95,7 @@ const menuSections: MenuSection[] = [
       { label: "Dashboard", href: "/medical-records", icon: LayoutDashboard },
       { label: "Register Patient", href: "/medical-records/patients/new", icon: UserPlus },
       { label: "Manage Patients", href: "/medical-records/patients", icon: Users },
+      { label: "Patient Records", href: "/medical-records/patient-records", icon: FileBarChart },
       { label: "Create Visit", href: "/medical-records/visits/new", icon: FilePlus },
       { label: "Manage Visits", href: "/medical-records/visits", icon: Calendar },
       { label: "Appointments", href: "/medical-records/appointments", icon: CalendarDays },
@@ -194,7 +195,6 @@ const menuSections: MenuSection[] = [
     basePath: "/analytics",
     items: [
       { label: "Clinical Reports", href: "/analytics", icon: BarChart3 },
-      { label: "Executive Dashboard", href: "/analytics/executive", icon: Target },
     ],
   },
   {
@@ -412,7 +412,7 @@ export function AppSidebar() {
                       <SidebarGroupContent>
                         <SidebarMenu>
                           {filteredItems.map((item) => (
-                            <SidebarMenuItem key={item.href}>
+                            <SidebarMenuItem key={item.label}>
                               <SidebarMenuButton
                                 asChild
                                 isActive={isItemActive(item.href, section.basePath)}

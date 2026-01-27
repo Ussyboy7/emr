@@ -54,12 +54,15 @@ class Patient(models.Model):
         ('mr', 'Mr'),
         ('mrs', 'Mrs'),
         ('ms', 'Ms'),
+        ('miss', 'Miss'),
         ('dr', 'Dr'),
         ('chief', 'Chief'),
         ('engr', 'Engr'),
         ('prof', 'Prof'),
         ('alhaji', 'Alhaji'),
         ('hajia', 'Hajia'),
+        ('mallam', 'Mallam'),
+        ('lady', 'Lady'),
     ]
     
     # Patient Identification
@@ -160,12 +163,15 @@ class Patient(models.Model):
                 'mr': 'Mr',
                 'mrs': 'Mrs',
                 'ms': 'Ms',
+                'miss': 'Miss',
                 'dr': 'Dr',
                 'chief': 'Chief',
                 'engr': 'Engr',
                 'prof': 'Prof',
                 'alhaji': 'Alhaji',
                 'hajia': 'Hajia',
+                'mallam': 'Mallam',
+                'lady': 'Lady',
             }
             title_str = title_map.get(title_lower, self.title.title())
         

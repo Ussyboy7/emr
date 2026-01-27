@@ -5,96 +5,118 @@ import { DashboardLayout } from '@/components/DashboardLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, FileText, Search, Plus, Users, Activity, Clock, CheckCircle2, UserCheck, ArrowRight, Link as LinkIcon } from 'lucide-react';
+import { Loader2, FileText, Search, Plus, Users, Activity, Clock, CheckCircle2, UserCheck, ArrowRight, Link as LinkIcon, AlertCircle } from 'lucide-react';
 import Link from 'next/link';
+import { patientService, visitService, type Visit } from '@/lib/services';
+import { isAuthenticationError } from '@/lib/auth-errors';
+import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 
-interface Visit {
+interface PatientData {
   id: number;
-  patient: string;
-  type: string;
-  department: string;
-  status: string;
-  time: string;
-}
-
-interface Patient {
-  id: number;
-  name: string;
-  status: string;
-  age: number;
-  gender: string;
+  full_name: string;
+  patient_id: string;
+  status?: string;
+  age?: number;
+  gender?: string;
+  date_of_birth?: string;
 }
 
 export default function MedicalRecordsPage() {
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [authError, setAuthError] = useState<unknown | null>(null);
+  useAuthRedirect(authError);
+  
   const [totalPatients, setTotalPatients] = useState(0);
   const [activeVisitsToday, setActiveVisitsToday] = useState(0);
   const [scheduledToday, setScheduledToday] = useState(0);
   const [completedToday, setCompletedToday] = useState(0);
   const [activeVisits, setActiveVisits] = useState<Visit[]>([]);
-  const [recentPatients, setRecentPatients] = useState<Patient[]>([]);
+  const [recentPatients, setRecentPatients] = useState<PatientData[]>([]);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        // Simulate API calls - replace with actual API calls
-        setTotalPatients(125);
-        setActiveVisitsToday(8);
-        setScheduledToday(12);
-        setCompletedToday(15);
+        setLoading(true);
+        setError(null);
+        
+        // Get today's date
+        const today = new Date().toISOString().split('T')[0];
 
-        setActiveVisits([
-          {
-            id: 1,
-            patient: 'John Doe',
-            type: 'Consultation',
-            department: 'Medical Records',
-            status: 'In Progress',
-            time: '2:30 PM'
-          },
-          {
-            id: 2,
-            patient: 'Jane Smith',
-            type: 'Follow-up',
-            department: 'Medical Records',
-            status: 'Waiting',
-            time: '2:45 PM'
-          },
-          {
-            id: 3,
-            patient: 'Bob Johnson',
-            type: 'New Visit',
-            department: 'Medical Records',
-            status: 'Waiting',
-            time: '3:00 PM'
-          }
-        ]);
+        // Fetch total patients count
+        try {
+          const patientsResult = await patientService.getPatients({ page_size: 1 });
+          setTotalPatients(patientsResult.count || 0);
+        } catch (err) {
+          console.error('Error fetching total patients:', err);
+          setTotalPatients(0);
+        }
 
-        setRecentPatients([
-          {
-            id: 1,
-            name: 'Alice Brown',
-            status: 'Active',
-            age: 45,
-            gender: 'F'
-          },
-          {
-            id: 2,
-            name: 'Charlie Wilson',
-            status: 'Active',
-            age: 32,
-            gender: 'M'
-          },
-          {
-            id: 3,
-            name: 'Diana Prince',
-            status: 'Admitted',
-            age: 28,
-            gender: 'F'
+        // Fetch visits for today
+        try {
+          const visitsResult = await visitService.getVisits({ 
+            date: today,
+            page_size: 100 
+          });
+
+          const visits = visitsResult.results || [];
+
+          // Count visits by status
+          const active = visits.filter(v => v.status === 'in_progress' || v.status === 'waiting').length;
+          const scheduled = visits.filter(v => v.status === 'scheduled').length;
+          const completed = visits.filter(v => v.status === 'completed').length;
+
+          setActiveVisitsToday(active);
+          setScheduledToday(scheduled);
+          setCompletedToday(completed);
+
+          // Get active visits (in_progress and waiting)
+          const activeVisitsList = visits
+            .filter(v => v.status === 'in_progress' || v.status === 'waiting')
+            .slice(0, 3);
+
+          setActiveVisits(activeVisitsList);
+        } catch (err) {
+          console.error('Error fetching visits:', err);
+          if (isAuthenticationError(err)) {
+            setAuthError(err);
+          } else {
+            setError('Failed to load visit data');
           }
-        ]);
-      } catch (error) {
-        console.error('Error fetching data:', error);
+          setActiveVisitsToday(0);
+          setScheduledToday(0);
+          setCompletedToday(0);
+        }
+
+        // Fetch recent patients
+        try {
+          const patientsResult = await patientService.getPatients({ 
+            page_size: 10
+          });
+          
+          const patients = patientsResult.results || [];
+          const recentPatientsData: PatientData[] = patients.slice(0, 5).map(p => ({
+            id: p.id,
+            full_name: p.full_name || `${p.surname || ''} ${p.first_name || ''}`.trim() || 'Unknown Patient',
+            patient_id: p.patient_id,
+            status: 'Active',
+            age: p.age,
+            gender: p.gender,
+            date_of_birth: p.date_of_birth,
+          }));
+          setRecentPatients(recentPatientsData);
+        } catch (err) {
+          console.error('Error fetching recent patients:', err);
+          setRecentPatients([]);
+        }
+
+      } catch (err) {
+        console.error('Error in fetchData:', err);
+        if (isAuthenticationError(err)) {
+          setAuthError(err);
+        } else {
+          setError('Failed to load medical records data');
+        }
       } finally {
         setLoading(false);
       }
@@ -106,6 +128,19 @@ export default function MedicalRecordsPage() {
   return (
     <DashboardLayout>
       <div className="container mx-auto p-6 space-y-6">
+        {/* Error Alert */}
+        {error && (
+          <Card className="border-red-500/50 bg-red-500/10">
+            <CardContent className="p-4 flex items-center gap-3">
+              <AlertCircle className="h-5 w-5 text-red-500 flex-shrink-0" />
+              <div>
+                <p className="font-medium text-red-700 dark:text-red-400">{error}</p>
+                <p className="text-sm text-red-600 dark:text-red-300 mt-1">Please refresh the page or contact support if the issue persists.</p>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Header */}
         <Card className="bg-gradient-to-r from-blue-500 to-indigo-600 text-white border-0">
           <CardContent className="p-6">
@@ -270,16 +305,16 @@ export default function MedicalRecordsPage() {
         </div>
 
         <div className="grid gap-6 lg:grid-cols-3">
-          {/* Pending Tasks */}
+          {/* Active Visits */}
           <div className="lg:col-span-2">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between pb-2">
                 <CardTitle className="text-lg flex items-center gap-2">
-                  <Clock className="h-5 w-5 text-amber-500 dark:text-amber-400" />
-                  Pending Tasks
+                  <Activity className="h-5 w-5 text-blue-500 dark:text-blue-400" />
+                  Active Visits Today
                 </CardTitle>
-                <Badge variant="default" className="bg-green-500/10 text-green-700 border-green-500/20">
-                  ✓ All Complete
+                <Badge variant="default" className={activeVisitsToday > 0 ? "bg-blue-500/10 text-blue-700 border-blue-500/20" : "bg-green-500/10 text-green-700 border-green-500/20"}>
+                  {activeVisitsToday > 0 ? `${activeVisitsToday} Active` : "All Clear"}
                 </Badge>
               </CardHeader>
               <CardContent className="space-y-3">
@@ -287,23 +322,41 @@ export default function MedicalRecordsPage() {
                   <div className="flex items-center justify-center p-8">
                     <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
                   </div>
+                ) : activeVisits.length > 0 ? (
+                  <div className="space-y-2">
+                    {activeVisits.map((visit) => (
+                      <div key={visit.id} className="flex items-center justify-between p-3 rounded-lg border border-muted bg-muted/30 hover:bg-muted/50 transition-colors">
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium text-sm">{visit.patient_name || `Patient ${visit.patient}`}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {visit.visit_type && visit.visit_type.charAt(0).toUpperCase() + visit.visit_type.slice(1).toLowerCase()} • {visit.clinic || 'GOPD'}
+                          </p>
+                        </div>
+                        <Badge variant="outline" className={
+                          visit.status === 'in_progress' ? 'border-blue-500 text-blue-600' : 'border-amber-500 text-amber-600'
+                        }>
+                          {visit.status === 'in_progress' ? 'In Progress' : 'Waiting'}
+                        </Badge>
+                      </div>
+                    ))}
+                  </div>
                 ) : (
                   <div className="text-center py-8">
                     <CheckCircle2 className="h-8 w-8 mx-auto mb-2 text-green-500" />
-                    <p className="text-muted-foreground text-sm mb-2">All tasks completed!</p>
-                    <p className="text-xs text-muted-foreground">Great work staying on top of patient care.</p>
+                    <p className="text-muted-foreground text-sm mb-2">No active visits</p>
+                    <p className="text-xs text-muted-foreground">All patients have been processed or are in consultation.</p>
                   </div>
                 )}
               </CardContent>
             </Card>
           </div>
 
-          {/* Recent Activity */}
+          {/* Recent Patients */}
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-lg flex items-center gap-2">
-                <Activity className="h-5 w-5 text-emerald-500 dark:text-emerald-400" />
-                Recent Activity
+                <Users className="h-5 w-5 text-emerald-500 dark:text-emerald-400" />
+                Recent Patients
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -311,11 +364,29 @@ export default function MedicalRecordsPage() {
                 <div className="flex items-center justify-center p-8">
                   <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
                 </div>
+              ) : recentPatients.length > 0 ? (
+                <div className="space-y-3">
+                  {recentPatients.map((patient) => (
+                    <Link key={patient.id} href={`/medical-records/patients`} className="block">
+                      <div className="p-3 rounded-lg border border-muted bg-muted/30 hover:bg-muted/50 transition-colors cursor-pointer">
+                        <p className="font-medium text-sm">{patient.full_name || patient.patient_id}</p>
+                        <p className="text-xs text-muted-foreground">
+                          ID: {patient.patient_id}
+                        </p>
+                        {patient.age && (
+                          <p className="text-xs text-muted-foreground mt-1">
+                            {patient.age} years • {patient.gender || 'N/A'}
+                          </p>
+                        )}
+                      </div>
+                    </Link>
+                  ))}
+                </div>
               ) : (
                 <div className="text-center py-8">
-                  <Activity className="h-8 w-8 mx-auto mb-2 text-muted-foreground/50" />
-                  <p className="text-muted-foreground text-sm mb-2">No recent activity</p>
-                  <p className="text-xs text-muted-foreground">Activity will appear here as you work</p>
+                  <Users className="h-8 w-8 mx-auto mb-2 text-muted-foreground/50" />
+                  <p className="text-muted-foreground text-sm mb-2">No recent patients</p>
+                  <p className="text-xs text-muted-foreground">Start by registering a new patient</p>
                 </div>
               )}
             </CardContent>

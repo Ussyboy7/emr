@@ -294,7 +294,7 @@ export default function PhysioCompletedPage() {
                               <CheckCircle2 className="h-2 w-2 mr-0.5" />Completed
                             </Badge>
                             <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-gray-500/10 text-gray-600 border-gray-500/30">
-                              Session {session.session_number} of {session.order_details?.total_sessions || 1}
+                              Session {session.session_number}
                             </Badge>
                             <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
                               {session.order_details?.diagnosis || 'Physio Session'}
@@ -602,7 +602,7 @@ export default function PhysioCompletedPage() {
                 Physiotherapy Session Report - {selectedSession?.patient_name}
               </DialogTitle>
               <DialogDescription>
-                PHY-{selectedSession?.id?.toString().padStart(6, '0')} • Session {selectedSession?.session_number} of {selectedSession?.order_details?.total_sessions || 1}
+                PHY-{selectedSession?.id?.toString().padStart(6, '0')} • Session {selectedSession?.session_number}
               </DialogDescription>
             </DialogHeader>
 
@@ -642,7 +642,7 @@ export default function PhysioCompletedPage() {
                     <div className="space-y-2">
                       <h3 className="font-medium text-sm text-muted-foreground uppercase tracking-wide">Session Details</h3>
                       <div className="space-y-1">
-                        <p><span className="font-medium">Session:</span> {selectedSession.session_number} of {selectedSession.order_details?.total_sessions || 1}</p>
+                        <p><span className="font-medium">Session:</span> {selectedSession.session_number}</p>
                         <p><span className="font-medium">Ordered:</span> {selectedSession.scheduled_at ? new Date(selectedSession.scheduled_at).toLocaleString() : 'N/A'}</p>
                         <p><span className="font-medium">Completed:</span> {selectedSession.completed_at ? new Date(selectedSession.completed_at).toLocaleString() : 'N/A'}</p>
                       </div>

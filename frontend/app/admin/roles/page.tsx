@@ -52,6 +52,7 @@ const allPagePermissions: PagePermission[] = [
   { id: '/medical-records', name: 'Dashboard', description: 'Medical Records Dashboard', module: 'Medical Records' },
   { id: '/medical-records/patients/new', name: 'Register Patient', description: 'Register new patients', module: 'Medical Records' },
   { id: '/medical-records/patients', name: 'Manage Patients', description: 'View and manage patient records', module: 'Medical Records' },
+  { id: '/medical-records/patient-records', name: 'Patient Records', description: 'Look up and view patient medical records', module: 'Medical Records' },
   { id: '/medical-records/visits/new', name: 'Create Visit', description: 'Create new patient visits', module: 'Medical Records' },
   { id: '/medical-records/visits', name: 'Manage Visits', description: 'View and manage patient visits', module: 'Medical Records' },
   { id: '/medical-records/appointments', name: 'Appointments', description: 'Manage patient appointments', module: 'Medical Records' },
@@ -101,7 +102,6 @@ const allPagePermissions: PagePermission[] = [
 
   // Analytics
   { id: '/analytics', name: 'Clinical Reports', description: 'View clinical reports', module: 'Analytics' },
-  { id: '/analytics/executive', name: 'Executive Dashboard', description: 'Executive analytics dashboard', module: 'Analytics' },
 
   // Administration
   { id: '/admin', name: 'Dashboard', description: 'Administration Dashboard', module: 'Administration' },

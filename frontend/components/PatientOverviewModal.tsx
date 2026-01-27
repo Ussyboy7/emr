@@ -13,7 +13,6 @@ import { VisitDetailModal } from '@/components/VisitDetailModal';
 import { PatientAvatar } from "@/components/PatientAvatar";
 import { MedicalHistoryTab } from '@/components/patient-overview/MedicalHistoryTab';
 import { TimelineTab } from '@/components/patient-overview/TimelineTab';
-import { CurrentCareTab } from '@/components/patient-overview/CurrentCareTab';
 import {
   User, Phone, Calendar, AlertCircle, Activity, Pill, TestTube,
   ChevronRight, AlertTriangle, Loader2, Mail, MapPin, Droplets,
@@ -22,6 +21,7 @@ import {
 
 interface Patient {
   id: string;
+  numericId?: number;
   name: string;
   category: string;
   personalNumber?: string;
@@ -128,7 +128,6 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('overview');
   const [historySubTab, setHistorySubTab] = useState('background');
-  const [currentCareSubTab, setCurrentCareSubTab] = useState('active-medications');
   
   // History tab filters and pagination
   const [sessionDateFilter, setSessionDateFilter] = useState<string>('all');
@@ -214,8 +213,36 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
           status: visit.status || 'completed',
           clinic: visit.clinic?.name || '',
           notes: visit.clinical_notes || '',
+          source: 'visit' // Mark as regular visit
         }));
-        setVisits(transformedVisits);
+
+        // Combine with consultation sessions for unified display
+        let combinedVisits = [...transformedVisits];
+
+        if (consultationsData.status === 'fulfilled' && consultationsData.value?.results) {
+          const transformedSessions = consultationsData.value.results.map((session: any) => ({
+            id: `session-${session.id}`,
+            numericId: session.id,
+            visitId: session.session_id || session.id.toString(),
+            patientId: numericId.toString(),
+            date: session.created_at ? new Date(session.created_at).toLocaleDateString() : session.date || '',
+            time: session.created_at ? new Date(session.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '',
+            type: 'Consultation',
+            department: 'Consultation',
+            doctor: session.doctor?.name || session.doctor_name || 'Unknown',
+            diagnosis: session.assessment || '',
+            status: session.status || 'completed',
+            clinic: session.clinic_name || session.room?.clinic_name || 'GOPD',
+            notes: session.notes || '',
+            source: 'consultation' // Mark as consultation session
+          }));
+
+          combinedVisits = [...transformedVisits, ...transformedSessions];
+          // Sort by date (newest first)
+          combinedVisits.sort((a, b) => new Date(b.date + ' ' + b.time).getTime() - new Date(a.date + ' ' + a.time).getTime());
+        }
+
+        setVisits(combinedVisits);
       }
 
       // Process vitals
@@ -268,8 +295,9 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
         setLabResults(transformedLabResults);
       }
 
-      // Process consultation sessions
+      // Consultation sessions are now processed within visits above
       if (consultationsData.status === 'fulfilled' && consultationsData.value?.results) {
+        // Sessions are already combined with visits above, just store separately if needed elsewhere
         const transformedSessions = consultationsData.value.results.map((session: any) => ({
           id: session.id?.toString() || String(session.id),
           date: session.created_at ? new Date(session.created_at).toLocaleDateString() : session.date || '',
@@ -456,9 +484,9 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
       loadPatientData();
       setActiveTab('overview');
       setHistorySubTab('background');
-      setCurrentCareSubTab('active-medications');
     }
   }, [isOpen, patient, loadPatientData]);
+
 
   const getCategoryBadge = (category: string) => {
     const styles: Record<string, string> = {
@@ -528,9 +556,6 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
                 <TabsTrigger value="medical-history" className="data-[state=active]:bg-primary/20 data-[state=active]:text-primary">
                   <History className="h-4 w-4 mr-2" />Medical History
                 </TabsTrigger>
-                <TabsTrigger value="current-care" className="data-[state=active]:bg-primary/20 data-[state=active]:text-primary">
-                  <AlertCircle className="h-4 w-4 mr-2" />Current Care
-                </TabsTrigger>
               </TabsList>
             </div>
 
@@ -542,7 +567,7 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
                           <div className="grid grid-cols-3 gap-4">
                             {[
                               { icon: Calendar, value: visits.length, label: 'Total Visits', color: 'text-blue-500' },
-                              { icon: Pill, value: patientDetail.currentMedications.length, label: 'Active Meds', color: 'text-violet-500' },
+                              { icon: Pill, value: patientDetail?.currentMedications?.length || 0, label: 'Active Meds', color: 'text-violet-500' },
                               { icon: TestTube, value: labResults.length, label: 'Lab Tests', color: 'text-amber-500' }
                             ].map((stat, i) => (
                               <Card key={i}>
@@ -583,7 +608,7 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
                                     <div>
                                       <p className="font-medium">{visit.type}</p>
                                       <p className="text-xs text-muted-foreground">
-                                        {visit.date} {visit.doctor && visit.doctor !== 'Unknown' && `• ${visit.doctor}`}
+                                        {visit.date} {visit.doctor && visit.doctor !== 'Unknown' && `• ${visit.doctor}`} {visit.clinic && visit.clinic !== 'Unknown' && `• ${visit.clinic}`}
                                       </p>
                                     </div>
                                   </div>
@@ -812,16 +837,6 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
             </TabsContent>
 
             {/* CURRENT CARE TAB */}
-            <TabsContent value="current-care" className="flex-1 overflow-y-auto px-6 py-4 mt-0">
-              <CurrentCareTab
-                patientDetail={patientDetail}
-                prescriptions={prescriptions}
-                labResults={labResults}
-                imagingResults={imagingResults}
-                currentCareSubTab={currentCareSubTab}
-                onCurrentCareSubTabChange={setCurrentCareSubTab}
-              />
-            </TabsContent>
           </Tabs>
         )}
       </DialogContent>

@@ -41,7 +41,6 @@ export default function AnalyticsPage() {
   });
   const [patientVisitsData, setPatientVisitsData] = useState<any[]>([]);
   const [clinicDistribution, setClinicDistribution] = useState<any[]>([]);
-  const [departmentStats, setDepartmentStats] = useState<any[]>([]);
   const [dailyTrend, setDailyTrend] = useState<any[]>([]);
   const [topDiagnoses, setTopDiagnoses] = useState<any[]>([]);
   const [labTestDistribution, setLabTestDistribution] = useState<any[]>([]);
@@ -62,11 +61,10 @@ export default function AnalyticsPage() {
       const period = parseInt(selectedPeriod);
       
       // Load all analytics data
-      const [summaryStats, visitsTrend, clinicDist, deptStats, daily, diagnoses, labDist, pharmMetrics, demographics, dashboardStats, labPerf, pharmPerf] = await Promise.all([
+      const [summaryStats, visitsTrend, clinicDist, daily, diagnoses, labDist, pharmMetrics, demographics, dashboardStats, labPerf, pharmPerf] = await Promise.all([
         analyticsService.getSummaryStats(period),
         analyticsService.getPatientVisitsTrend(period),
         analyticsService.getClinicDistribution(),
-        analyticsService.getDepartmentStats(),
         analyticsService.getDailyTrend(7),
         analyticsService.getTopDiagnoses(10),
         analyticsService.getLabTestDistribution(),
@@ -80,7 +78,6 @@ export default function AnalyticsPage() {
       setStats(summaryStats);
       setPatientVisitsData(visitsTrend);
       setClinicDistribution(clinicDist);
-      setDepartmentStats(deptStats);
       setDailyTrend(daily);
       setTopDiagnoses(diagnoses);
       setLabTestDistribution(labDist);
@@ -331,36 +328,6 @@ export default function AnalyticsPage() {
                     </BarChart>
                   </ResponsiveContainer>
                 )}
-              </CardContent>
-            </Card>
-
-            {/* Department Performance */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2"><Building2 className="h-5 w-5 text-purple-500" />Department Performance</CardTitle>
-              </CardHeader>
-                <CardContent>
-                  {loading ? (
-                    <div className="h-[200px] flex items-center justify-center">
-                      <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-                    </div>
-                  ) : departmentStats.length === 0 ? (
-                    <div className="h-[200px] flex items-center justify-center text-muted-foreground">
-                      <p>No data available</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      {departmentStats.map(dept => (
-                    <div key={dept.dept} className="flex items-center gap-4">
-                      <div className="w-24 font-medium">{dept.dept}</div>
-                      <div className="flex-1 space-y-1">
-                        <div className="flex justify-between text-sm"><span>Volume: {dept.consultations}</span><span>Avg Wait: {dept.avgWait}min</span><span>Satisfaction: {dept.satisfaction}%</span></div>
-                        <Progress value={dept.satisfaction} className="h-2" />
-                      </div>
-                    </div>
-                      ))}
-                    </div>
-                  )}
               </CardContent>
             </Card>
           </TabsContent>

@@ -101,10 +101,11 @@ export default function DashboardPage() {
         pharmacyQueue: pharmacyStats.pendingRx || pharmacyPrescriptions.count || 0,
       });
 
-      // Get recent patients (from today's visits)
+      // Get recent patients (from today's visits) — use visit id for key; same patient can have multiple visits
       const recent = todayVisits.results
         .slice(0, 5)
         .map((visit: any) => ({
+          visitId: visit.id,
           id: visit.patient?.patient_id || visit.patient_id || '',
           name: visit.patient?.full_name || visit.patient_name || 'Unknown',
           clinic: visit.clinic || 'GOPD',
@@ -377,7 +378,7 @@ export default function DashboardPage() {
               ) : (
                 <div className="space-y-3">
                   {recentPatients.map((patient, index) => (
-                    <div key={patient.id || index} className="flex items-center justify-between p-3 bg-muted/50 rounded-lg hover:bg-muted transition-colors">
+                    <div key={patient.visitId ?? `${patient.id}-${index}`} className="flex items-center justify-between p-3 bg-muted/50 rounded-lg hover:bg-muted transition-colors">
                       <div className="flex items-center gap-3">
                         <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center text-white font-medium text-sm">
                           {patient.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2)}

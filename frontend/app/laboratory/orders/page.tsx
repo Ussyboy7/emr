@@ -1131,7 +1131,8 @@ export default function LabOrdersPage() {
     setSelectedTest(test);
     // Pre-select the clicked test
     setSelectedTestsForCollection([test.id]);
-    setSelectedMethod('');
+    // Pre-select Venipuncture for blood samples
+    setSelectedMethod(test.sampleType === 'Blood' ? 'Venipuncture' : '');
     setCollectionNotes('');
 
     try {
@@ -1749,12 +1750,15 @@ export default function LabOrdersPage() {
                 {/* Collection Method Selection */}
                 <div className="space-y-2">
                   <Label className="text-sm font-medium">Collection Method *</Label>
+                  <div className="text-xs text-muted-foreground mb-1">
+                    Sample Type: {selectedTest?.sampleType || 'Unknown'}
+                  </div>
                   <Select value={selectedMethod} onValueChange={setSelectedMethod}>
                     <SelectTrigger className="w-full">
                       <SelectValue placeholder="Select collection method" />
                     </SelectTrigger>
                     <SelectContent>
-                    {(collectionMethods[selectedTest.sampleType] || []).map((method) => (
+                    {(collectionMethods[selectedTest?.sampleType] || collectionMethods['Blood'] || []).map((method) => (
                         <SelectItem key={method.name} value={method.name}>
                         <div className="flex items-center gap-2">
                             <span>{method.icon}</span>
@@ -1763,6 +1767,11 @@ export default function LabOrdersPage() {
                         </div>
                         </SelectItem>
                     ))}
+                    {(collectionMethods[selectedTest?.sampleType] || collectionMethods['Blood'] || []).length === 0 && (
+                      <div className="px-2 py-1 text-xs text-muted-foreground">
+                        No collection methods available for {selectedTest?.sampleType || 'this sample type'}
+                      </div>
+                    )}
                     </SelectContent>
                   </Select>
                 </div>

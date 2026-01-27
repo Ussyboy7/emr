@@ -80,6 +80,7 @@ const NIGERIA_STATES = [
 // Patient type
 type Patient = {
   id: string;
+  numericId?: number; // DB id for API calls (Edit, Update, etc.)
   name: string;
   category: string;
   personalNumber?: string;
@@ -141,6 +142,7 @@ const transformPatient = (apiPatient: ApiPatient): Patient => {
   
   return {
     id: patientId,
+    numericId: apiPatient.id,
     name: apiPatient.full_name || `${apiPatient.first_name} ${apiPatient.surname}`,
     category: categoryMap[apiPatient.category] || apiPatient.category,
     personalNumber: apiPatient.personal_number || '',
@@ -257,27 +259,31 @@ export default function PatientsListPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [totalCount, setTotalCount] = useState(0);
+  const [counts, setCounts] = useState<{ total: number; employees: number; retirees: number; dependents: number; nonnpa: number } | null>(null);
 
-  const filteredPatients = useMemo(() => patients.filter(patient => {
-    const matchesSearch = patient.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-      patient.id.toLowerCase().includes(searchQuery.toLowerCase()) || 
-      patient.phone.includes(searchQuery);
-    const matchesGender = genderFilter === 'all' || patient.gender.toLowerCase() === genderFilter.toLowerCase();
-    const matchesCategory = categoryFilter === 'all' || patient.category.toLowerCase() === categoryFilter.toLowerCase();
-    const matchesLocation = locationFilter === 'all' || patient.location === locationFilter;
-    const matchesAge = (!ageRange.min || patient.age >= parseInt(ageRange.min)) && (!ageRange.max || patient.age <= parseInt(ageRange.max));
-    return matchesSearch && matchesGender && matchesCategory && matchesLocation && matchesAge;
-  }), [patients, searchQuery, genderFilter, categoryFilter, locationFilter, ageRange]);
+  // Client-side: only filter by age (search, category, gender, location are applied by the API)
+  const filteredPatients = useMemo(() => {
+    if (!ageRange.min && !ageRange.max) return patients;
+    return patients.filter(p => 
+      (!ageRange.min || p.age >= parseInt(ageRange.min, 10)) && 
+      (!ageRange.max || p.age <= parseInt(ageRange.max, 10))
+    );
+  }, [patients, ageRange.min, ageRange.max]);
 
   // Use filtered patients directly (server-side pagination when no client-side filters)
   const paginatedPatients = filteredPatients;
 
-  // Load patients from API
+  // Load counts on mount (global stats, not filtered)
+  useEffect(() => {
+    patientService.getPatientCounts().then(setCounts).catch(() => setCounts(null));
+  }, []);
+
+  // Load patients from API when page, page size, or server-side filters change
   useEffect(() => {
     loadPatients();
-  }, [currentPage, itemsPerPage]);
+  }, [currentPage, itemsPerPage, searchQuery, genderFilter, categoryFilter, locationFilter]);
 
-  // Reset to page 1 when filters change or items per page changes
+  // Reset to page 1 when filters or items per page change
   useEffect(() => {
     setCurrentPage(1);
   }, [searchQuery, genderFilter, categoryFilter, locationFilter, ageRange, itemsPerPage]);
@@ -290,21 +296,10 @@ export default function PatientsListPage() {
         page: currentPage,
         page_size: itemsPerPage,
       };
-      if (categoryFilter !== 'all') {
-        const categoryMap: Record<string, string> = {
-          'Employee': 'employee',
-          'Retiree': 'retiree',
-          'Dependent': 'dependent',
-          'NonNPA': 'nonnpa',
-        };
-        params.category = categoryMap[categoryFilter] || categoryFilter.toLowerCase();
-      }
-      if (genderFilter !== 'all') {
-        params.gender = genderFilter;
-      }
-      if (searchQuery) {
-        params.search = searchQuery;
-      }
+      if (categoryFilter !== 'all') params.category = categoryFilter;
+      if (genderFilter !== 'all') params.gender = genderFilter;
+      if (locationFilter !== 'all') params.location = locationFilter;
+      if (searchQuery) params.search = searchQuery;
       
       const response = await patientService.getPatients(params);
       setTotalCount(response.count || response.results.length);
@@ -353,11 +348,11 @@ export default function PatientsListPage() {
   };
 
   const stats = useMemo(() => [
-    { label: 'Total Patients', value: patients.length, icon: Users, color: 'text-blue-500', bg: 'bg-blue-500/10' },
-    { label: 'Employees', value: patients.filter(p => p.category === 'Employee').length, icon: UserCheck, color: 'text-teal-500', bg: 'bg-teal-500/10' },
-    { label: 'Retirees', value: patients.filter(p => p.category === 'Retiree').length, icon: Activity, color: 'text-amber-500', bg: 'bg-amber-500/10' },
-    { label: 'Dependents', value: patients.filter(p => p.category === 'Dependent').length, icon: Users, color: 'text-violet-500', bg: 'bg-violet-500/10' },
-  ], [patients]);
+    { label: 'Total Patients', value: counts?.total ?? 0, icon: Users, color: 'text-blue-500', bg: 'bg-blue-500/10' },
+    { label: 'Employees', value: counts?.employees ?? 0, icon: UserCheck, color: 'text-teal-500', bg: 'bg-teal-500/10' },
+    { label: 'Retirees', value: counts?.retirees ?? 0, icon: Activity, color: 'text-amber-500', bg: 'bg-amber-500/10' },
+    { label: 'Dependents', value: counts?.dependents ?? 0, icon: Users, color: 'text-violet-500', bg: 'bg-violet-500/10' },
+  ], [counts]);
 
   const openOverviewModal = (patient: Patient) => {
     setSelectedPatient(patient);
@@ -830,7 +825,13 @@ export default function PatientsListPage() {
 
             {/* Patients List */}
             <div className="space-y-3">
-              <p className="text-sm text-muted-foreground">Showing <span className="font-medium">{filteredPatients.length}</span> patients</p>
+              <p className="text-sm text-muted-foreground">
+                {(ageRange.min || ageRange.max)
+                  ? `Showing ${filteredPatients.length} patients on this page`
+                  : totalCount > 0
+                    ? `Showing ${Math.min((currentPage - 1) * itemsPerPage + 1, totalCount)}–${Math.min(currentPage * itemsPerPage, totalCount)} of ${totalCount} patients`
+                    : 'Showing 0 patients'}
+              </p>
               
               {loading ? (
                 <Card><CardContent className="p-8 text-center text-muted-foreground">
@@ -926,9 +927,7 @@ export default function PatientsListPage() {
               <Card className="p-4">
                 <StandardPagination
                   currentPage={currentPage}
-                  totalItems={searchQuery || genderFilter !== 'all' || categoryFilter !== 'all' || locationFilter !== 'all' || ageRange.min || ageRange.max
-                    ? filteredPatients.length 
-                    : totalCount}
+                  totalItems={ageRange.min || ageRange.max ? filteredPatients.length : totalCount}
                   itemsPerPage={itemsPerPage}
                   onPageChange={setCurrentPage}
                   onItemsPerPageChange={(newSize) => {
@@ -970,9 +969,14 @@ export default function PatientsListPage() {
                 <CardTitle className="text-lg">By Category</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                {['Employee', 'Retiree', 'Dependent', 'NonNPA'].map((cat) => {
-                  const count = patients.filter(p => p.category === cat).length;
-                  const percentage = Math.round((count / patients.length) * 100);
+                {[
+                  { label: 'Employee', count: counts?.employees ?? 0 },
+                  { label: 'Retiree', count: counts?.retirees ?? 0 },
+                  { label: 'Dependent', count: counts?.dependents ?? 0 },
+                  { label: 'NonNPA', count: counts?.nonnpa ?? 0 },
+                ].map(({ label: cat, count }) => {
+                  const total = (counts?.total ?? 0) || 1;
+                  const percentage = Math.round((count / total) * 100);
                   return (
                     <div key={cat} className="space-y-1">
                       <div className="flex items-center justify-between text-sm">

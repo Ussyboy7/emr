@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { StandardPagination } from '@/components/StandardPagination';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -93,13 +93,12 @@ export default function NursingPoolQueuePage() {
   useAuthRedirect(authError);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [dateFilter, setDateFilter] = useState('all');
+  const [dateFilter, setDateFilter] = useState('today');
   const [typeFilter, setTypeFilter] = useState('all');
   const [clinicFilter, setClinicFilter] = useState('all');
 
-  // Load visits and rooms from API
-  useEffect(() => {
-    const loadData = async () => {
+  // Load visits and rooms from API - extracted as reusable function
+  const loadData = useCallback(async () => {
       try {
         setLoading(true);
         setError(null);
@@ -117,17 +116,55 @@ export default function NursingPoolQueuePage() {
         }));
         setRooms(transformedRooms);
 
-        // Fetch visits that should go to nursing - try multiple statuses
-        // Some visits might be marked as 'completed' or 'in_progress' when sent to nursing
+        // Build date filter based on dateFilter selection
+        let dateParam: string | undefined = undefined;
+        let startDate: string | undefined = undefined;
+        let endDate: string | undefined = undefined;
+        
+        if (dateFilter === 'today') {
+          const today = new Date().toISOString().split('T')[0];
+          dateParam = today;
+        } else if (dateFilter === 'week') {
+          const today = new Date();
+          const weekStart = new Date(today);
+          weekStart.setDate(today.getDate() - today.getDay()); // Start of week (Sunday)
+          startDate = weekStart.toISOString().split('T')[0];
+          endDate = today.toISOString().split('T')[0];
+        } else if (dateFilter === 'month') {
+          const today = new Date();
+          const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+          startDate = monthStart.toISOString().split('T')[0];
+          endDate = today.toISOString().split('T')[0];
+        }
+        // 'all' means no date filter
+
+        // Fetch visits that should go to nursing
+        // Only visits with status 'in_progress' should appear in nursing pool queue
         const result = await visitService.getVisits({
-          page_size: 500
+          status: 'in_progress',
+          page_size: 500,
+          date: dateParam,
+          start_date: startDate,
+          end_date: endDate,
         });
 
-        // Filter visits that should go to nursing (exclude cancelled visits)
+        // Fetch completed consultation sessions to exclude visits that have completed consultations
+        let completedConsultationVisits = new Set<number>();
+        try {
+          const consultationSessionsResult = await apiFetch<{ results: any[] }>(`/consultation/sessions/?status=completed&page_size=1000`);
+          completedConsultationVisits = new Set(consultationSessionsResult.results
+            .filter((session: any) => session.visit)
+            .map((session: any) => session.visit));
+        } catch (err) {
+          console.error('Error fetching completed consultation sessions:', err);
+        }
+
+        // Filter visits that should go to nursing:
+        // 1. Exclude cancelled visits (API already filters for 'in_progress' status)
+        // 2. Exclude visits with completed consultation sessions
         const nursingVisits = result.results.filter(visit =>
           visit.status !== 'cancelled' &&
-          (visit.status === 'completed' || visit.status === 'in_progress' ||
-           visit.status === 'scheduled') // Include all active visits
+          !completedConsultationVisits.has(visit.id)
         );
 
         console.log('All visits loaded:', result.results.length);
@@ -146,8 +183,8 @@ export default function NursingPoolQueuePage() {
           time: v.time
         })));
         
-        // Fetch vitals for all visits in parallel
-        const vitalsPromises = filteredResult.results.map(async (visit: Visit) => {
+        // Fetch vitals for all nursing visits in parallel
+        const vitalsPromises = nursingVisits.map(async (visit: Visit) => {
           try {
             const vitalsResult = await apiFetch<{ results: any[] }>(`/vitals/?visit=${visit.id}&ordering=-recorded_at`);
             console.log(`Vitals for visit ${visit.id}:`, vitalsResult.results[0] || 'No vitals');
@@ -160,32 +197,42 @@ export default function NursingPoolQueuePage() {
         const vitalsResults = await Promise.all(vitalsPromises);
         const vitalsMap = new Map(vitalsResults.map(r => [r.visitId, r.vitals]));
 
-        // Fetch consultation queue to check which patients have been sent to rooms
-        let queueMap = new Map();
+        // Fetch consultation queue to check which visits have been sent to rooms
+        // Patients sent to rooms should still appear but with "Sent to Room" status
+        // Note: We use visit ID to map to room names
+        let queueVisitToRoom = new Map<number, string>(); // Map visit ID to room name
         try {
           const queueResult = await apiFetch<{ results: any[] }>(`/consultation/queue/?is_active=true&page_size=1000`);
-          queueMap = new Map(queueResult.results.map((item: any) => [item.patient, true]));
+          queueResult.results.forEach((item: any) => {
+            if (item.visit && item.room_name) {
+              queueVisitToRoom.set(item.visit, item.room_name);
+            }
+          });
+          console.log('Consultation queue items:', queueResult.results.length);
+          console.log('Queue visit to room map:', Array.from(queueVisitToRoom.entries()));
         } catch (err) {
           console.error('Error fetching consultation queue:', err);
         }
         
+        // Don't filter out visits - show all visits, but mark those in queue as "Sent to Room"
+        const visitsNeedingNursing = nursingVisits; // Show all visits
+        
         // Transform visits to NursingPatient format
-        console.log('Starting transformation of', filteredResult.results.length, 'visits to nursing patients');
-        const transformedPatients: NursingPatient[] = filteredResult.results.map((visit: Visit) => {
+        console.log('Starting transformation of', visitsNeedingNursing.length, 'visits to nursing patients');
+        const transformedPatients: NursingPatient[] = visitsNeedingNursing.map((visit: Visit) => {
           // Calculate wait time (minutes since visit was created)
           const visitDateTime = new Date(`${visit.date}T${visit.time}`);
           const waitTime = Math.floor((Date.now() - visitDateTime.getTime()) / (1000 * 60));
           
           // Get vitals for this visit
           const vitalsData = vitalsMap.get(visit.id);
-          
-          // Check if patient has been sent to consultation room
-          const patientNumericId = visit.patient;
-          const isInConsultationQueue = queueMap.get(patientNumericId);
 
-          // Determine nursing status based on visit data and vitals
+          // Determine nursing status based on visit data, vitals, and queue status
           let nursingStatus: 'Pending' | 'Vitals Recorded' | 'Ready for Consultation' | 'Sent to Room' = 'Pending';
-          if (isInConsultationQueue) {
+          const roomName = queueVisitToRoom.get(visit.id);
+          
+          if (roomName) {
+            // Patient has been sent to a room
             nursingStatus = 'Sent to Room';
           } else if (vitalsData) {
             // Check if vitals are complete (have essential measurements)
@@ -221,6 +268,7 @@ export default function NursingPoolQueuePage() {
             visitTime: visit.time,
             visitType: visit.visit_type || 'consultation', // Keep lowercase for filtering
             nursingStatus,
+            consultationRoom: roomName, // Store room name if patient is in queue
             vitals,
             waitTime: waitTime > 0 ? waitTime : 0,
             patientNumericId: visit.patient, // Store the actual patient ID from backend
@@ -243,10 +291,12 @@ export default function NursingPoolQueuePage() {
       } finally {
         setLoading(false);
       }
-    };
+  }, [dateFilter, statusFilter, typeFilter, clinicFilter]);
 
+  // Load data when filters change
+  useEffect(() => {
     loadData();
-  }, []);
+  }, [loadData]);
   
   // Dialog states
   const [isVitalsDialogOpen, setIsVitalsDialogOpen] = useState(false);
@@ -264,6 +314,7 @@ export default function NursingPoolQueuePage() {
     visitTime: string;
     visitType: string;
     nursingStatus: 'Pending' | 'Vitals Recorded' | 'Ready for Consultation' | 'Sent to Room';
+    consultationRoom?: string;
     vitals?: any;
     waitTime: number;
     patientNumericId: number;
@@ -276,17 +327,6 @@ export default function NursingPoolQueuePage() {
   const [selectedPatient, setSelectedPatient] = useState<NursingPatient | null>(null);
   const [vitalsForm, setVitalsForm] = useState<VitalsData>(emptyVitals);
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  // Calculate BMI when weight or height changes
-  const calculatedBMI = useMemo(() => {
-    const weight = parseFloat(vitalsForm.weight || '0');
-    const height = parseFloat(vitalsForm.height || '0');
-    if (weight > 0 && height > 0) {
-      const bmi = weight / Math.pow(height / 100, 2);
-      return bmi.toFixed(1);
-    }
-    return null;
-  }, [vitalsForm.weight, vitalsForm.height]);
   
   // Reload rooms when room picker opens
   useEffect(() => {
@@ -403,12 +443,7 @@ export default function NursingPoolQueuePage() {
 
   const openRecordVitals = (patient: NursingPatient) => {
     setSelectedPatient(patient);
-    const vitalsData = patient.vitals || emptyVitals;
-    // Ensure painScale has a valid value for the Select component
-    if (!vitalsData.painScale || vitalsData.painScale === '') {
-      vitalsData.painScale = '';
-    }
-    setVitalsForm(vitalsData);
+    setVitalsForm(patient.vitals || emptyVitals);
     setIsVitalsDialogOpen(true);
   };
 
@@ -436,10 +471,15 @@ export default function NursingPoolQueuePage() {
       const visitId = selectedPatient.id; // This is the visit ID
       
       // Get patient ID from the visit
-      const today = new Date().toISOString().split('T')[0];
+      // Note: Visits in nursing pool queue have status 'in_progress', not 'completed'
+      // Build date filter based on current dateFilter state
+      let dateParam: string | undefined = undefined;
+      if (dateFilter === 'today') {
+        dateParam = new Date().toISOString().split('T')[0];
+      }
       const visitsResult = await visitService.getVisits({ 
-        status: 'completed',
-        date: today,
+        status: 'in_progress',
+        date: dateParam,
         page_size: 500 
       });
       const visit = visitsResult.results.find((v: Visit) => String(v.id) === visitId);
@@ -483,70 +523,8 @@ export default function NursingPoolQueuePage() {
       setIsVitalsDialogOpen(false);
       setVitalsForm(emptyVitals);
       
-      // Reload visits data to reflect the saved vitals
-      const refreshedResult = await visitService.getVisits({ 
-        status: 'completed',
-        date: today,
-        page_size: 500 
-      });
-      
-      // Re-fetch vitals for all visits
-      const vitalsPromises = refreshedResult.results.map(async (v: Visit) => {
-        try {
-          const vitalsResult = await apiFetch<{ results: any[] }>(`/vitals/?visit=${v.id}&ordering=-recorded_at`);
-          return { visitId: v.id, vitals: vitalsResult.results[0] || null };
-        } catch (err) {
-          return { visitId: v.id, vitals: null };
-        }
-      });
-      const vitalsResults = await Promise.all(vitalsPromises);
-      const vitalsMap = new Map(vitalsResults.map(r => [r.visitId, r.vitals]));
-      
-      // Transform and update patients
-      const transformedPatients: NursingPatient[] = refreshedResult.results.map((v: Visit) => {
-        const visitDateTime = new Date(`${v.date}T${v.time}`);
-        const waitTime = Math.floor((Date.now() - visitDateTime.getTime()) / (1000 * 60));
-        const vitalsData = vitalsMap.get(v.id);
-        const nursingStatus: 'Pending' | 'Vitals Recorded' | 'Ready for Consultation' | 'Sent to Room' = vitalsData ? 'Ready for Consultation' : 'Pending';
-        
-        const vitals: VitalsData | undefined = vitalsData ? {
-          temperature: vitalsData.temperature?.toString() || '',
-          pulse: vitalsData.heart_rate?.toString() || '',
-          bloodPressureSystolic: vitalsData.blood_pressure_systolic?.toString() || '',
-          bloodPressureDiastolic: vitalsData.blood_pressure_diastolic?.toString() || '',
-          respiratoryRate: vitalsData.respiratory_rate?.toString() || '',
-          oxygenSaturation: vitalsData.oxygen_saturation?.toString() || '',
-          weight: vitalsData.weight?.toString() || '',
-          height: vitalsData.height?.toString() || '',
-          painScale: '',
-          bloodSugar: '',
-          notes: vitalsData.notes || '',
-          recordedAt: vitalsData.recorded_at || new Date().toISOString(),
-          recordedBy: vitalsData.recorded_by_name || 'Unknown',
-        } : undefined;
-        
-        return {
-          id: String(v.id),
-          name: v.patient_name || `Patient ${v.patient}`,
-          patientId: String(v.patient),
-          visitId: v.visit_id || String(v.id),
-          personalNumber: '',
-          clinic: v.clinic || 'General',
-          visitDate: v.date,
-          visitTime: v.time,
-          visitType: v.visit_type === 'emergency' ? 'Emergency' :
-                    v.visit_type === 'consultation' ? 'Consultation' :
-                    v.visit_type === 'follow_up' ? 'Follow-up' : 'Consultation',
-          visitNotes: (v as any).clinical_notes || undefined,
-          nursingStatus,
-          vitals,
-          waitTime: waitTime > 0 ? waitTime : 0,
-          patientNumericId: v.patient, // Store the actual patient ID from backend
-          visitNumericId: v.id, // Store the actual visit ID from backend
-        };
-      });
-      
-      setPatients(transformedPatients);
+      // Reload all data to reflect the saved vitals (preserves all filters)
+      await loadData();
       
     } catch (err: any) {
       console.error('[Pool Queue] Error saving vitals:', err);
@@ -601,6 +579,13 @@ export default function NursingPoolQueuePage() {
 
   const handleSendToRoom = async (roomId: string) => {
     if (!selectedPatient) return;
+    
+    // Prevent double submission
+    if (isSubmitting) {
+      console.warn('Already submitting, ignoring duplicate request');
+      return;
+    }
+    
     setIsSubmitting(true);
     
     try {
@@ -679,7 +664,11 @@ export default function NursingPoolQueuePage() {
           } else if (errorData.detail) {
             errorMessage = errorData.detail;
           } else if (errorData.non_field_errors) {
-            errorMessage = errorData.non_field_errors[0];
+            // Handle array of non-field errors
+            const errors = Array.isArray(errorData.non_field_errors) 
+              ? errorData.non_field_errors 
+              : [errorData.non_field_errors];
+            errorMessage = errors[0];
           } else {
             // Format field errors
             const fieldErrors = Object.entries(errorData)
@@ -689,21 +678,18 @@ export default function NursingPoolQueuePage() {
           }
         }
         
+        // If it's a duplicate error, reload data to sync state
+        if (errorMessage.includes('already in the queue')) {
+          await loadData();
+        }
+        
         toast.error(errorMessage);
         setIsSubmitting(false);
         return;
       }
       
-      // Update local state
-      setPatients(prev => prev.map(p => 
-        p.id === selectedPatient.id 
-          ? { ...p, nursingStatus: 'Sent to Room' as const, consultationRoom: roomId }
-          : p
-      ));
-
-      setRooms(prev => prev.map(r => 
-        r.id === roomId ? { ...r, queueCount: r.queueCount + 1 } : r
-      ));
+      // Reload data to reflect the queue addition (patient will be filtered out)
+      await loadData();
 
       toast.success(`Patient sent to ${room.name}`, {
         description: `${selectedPatient.name} added to consultation queue`
@@ -789,7 +775,7 @@ export default function NursingPoolQueuePage() {
           <div>
             <h1 className="text-3xl font-bold text-foreground flex items-center gap-2">
               <Users className="h-8 w-8 text-rose-500" />
-              Nursing Patients
+              Today's Visits
             </h1>
             <p className="text-muted-foreground mt-1">View all patients processed by nursing - record vitals and send to consultation rooms</p>
           </div>
@@ -798,7 +784,7 @@ export default function NursingPoolQueuePage() {
         {/* Stats Cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[
-            { label: 'Nursing Patients', value: stats.totalInPool, icon: Users, color: 'text-rose-500', bg: 'bg-rose-500/10' },
+            { label: "Today's Visits", value: stats.totalInPool, icon: Users, color: 'text-rose-500', bg: 'bg-rose-500/10' },
             { label: 'Pending Vitals', value: stats.pendingVitals, icon: Stethoscope, color: 'text-amber-500', bg: 'bg-amber-500/10' },
             { label: 'Ready for Consultation', value: stats.readyForConsultation, icon: UserCheck, color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
             { label: 'Sent to Rooms', value: stats.sentToRooms, icon: ArrowRight, color: 'text-violet-500', bg: 'bg-violet-500/10' },
@@ -911,7 +897,11 @@ export default function NursingPoolQueuePage() {
                         <div className="flex items-center gap-2 flex-wrap min-w-0">
                           <span className="font-semibold text-foreground truncate">{patient.name}</span>
                           <Badge className={`text-[10px] px-1.5 py-0 ${getVisitTypeColor(patient.visitType)}`}>{patient.visitType}</Badge>
-                          <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${getStatusColor(patient.nursingStatus)}`}>{patient.nursingStatus}</Badge>
+                          <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${getStatusColor(patient.nursingStatus)}`}>
+                            {patient.nursingStatus === 'Sent to Room' && patient.consultationRoom
+                              ? `Sent to ${patient.consultationRoom}`
+                              : patient.nursingStatus}
+                          </Badge>
                         </div>
                         <div className="flex items-center gap-1 flex-shrink-0">
                           {patient.nursingStatus === 'Pending' && (
@@ -933,6 +923,11 @@ export default function NursingPoolQueuePage() {
                             <Button size="sm" onClick={() => openRoomPicker(patient)} className="h-7 px-2 bg-emerald-500 hover:bg-emerald-600 text-white text-xs">
                               <ArrowRight className="h-3 w-3 mr-1" />Send
                             </Button>
+                          )}
+                          {patient.nursingStatus === 'Sent to Room' && (
+                            <Badge variant="outline" className="h-7 px-2 border-violet-500/50 text-violet-600 dark:text-violet-400 bg-violet-500/10 text-xs">
+                              In Queue
+                            </Badge>
                           )}
                         </div>
                       </div>
@@ -1055,13 +1050,13 @@ export default function NursingPoolQueuePage() {
                 <div className="space-y-2">
                   <Label>BMI (auto)</Label>
                   <div className="h-10 px-3 py-2 rounded-md border bg-muted/50 text-sm flex items-center">
-                    {calculatedBMI ? (
+                    {vitalsForm.weight && vitalsForm.height ? (
                       <span className={`font-medium ${
-                        parseFloat(calculatedBMI) < 18.5 ? 'text-blue-600' :
-                        parseFloat(calculatedBMI) < 25 ? 'text-emerald-600' :
-                        parseFloat(calculatedBMI) < 30 ? 'text-amber-600' : 'text-rose-600'
+                        parseFloat(vitalsForm.weight) / Math.pow(parseFloat(vitalsForm.height) / 100, 2) < 18.5 ? 'text-blue-600' :
+                        parseFloat(vitalsForm.weight) / Math.pow(parseFloat(vitalsForm.height) / 100, 2) < 25 ? 'text-emerald-600' :
+                        parseFloat(vitalsForm.weight) / Math.pow(parseFloat(vitalsForm.height) / 100, 2) < 30 ? 'text-amber-600' : 'text-rose-600'
                       }`}>
-                        {calculatedBMI} kg/m²
+                        {(parseFloat(vitalsForm.weight) / Math.pow(parseFloat(vitalsForm.height) / 100, 2)).toFixed(1)} kg/m²
                       </span>
                     ) : (
                       <span className="text-muted-foreground">Enter weight & height</span>
@@ -1073,8 +1068,8 @@ export default function NursingPoolQueuePage() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Pain Scale (0-10)</Label>
-                  <Select value={vitalsForm.painScale || ''} onValueChange={(v) => setVitalsForm(prev => ({ ...prev, painScale: v }))}>
-                    <SelectTrigger><SelectValue placeholder="Select pain level" /></SelectTrigger>
+                  <Select value={vitalsForm.painScale} onValueChange={(v) => setVitalsForm(prev => ({ ...prev, painScale: v }))}>
+                    <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
                     <SelectContent>
                       {[...Array(11)].map((_, i) => (
                         <SelectItem key={i} value={String(i)}>{i} - {i === 0 ? 'No pain' : i <= 3 ? 'Mild' : i <= 6 ? 'Moderate' : 'Severe'}</SelectItem>

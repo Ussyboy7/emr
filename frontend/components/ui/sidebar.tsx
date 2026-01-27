@@ -8,8 +8,9 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
-import { Sheet, SheetContent } from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
+import { VisuallyHidden } from "@/components/ui/visually-hidden";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 const SIDEBAR_COOKIE_NAME = "sidebar:state";
@@ -164,6 +165,9 @@ const Sidebar = React.forwardRef<
           }
           side={side}
         >
+          <VisuallyHidden>
+            <SheetTitle>Navigation Menu</SheetTitle>
+          </VisuallyHidden>
           <div className="flex h-full w-full flex-col">{children}</div>
         </SheetContent>
       </Sheet>
@@ -173,7 +177,7 @@ const Sidebar = React.forwardRef<
   return (
     <div
       ref={ref}
-      className="group peer hidden text-sidebar-foreground md:block"
+      className="group peer hidden shrink-0 text-sidebar-foreground md:block"
       data-state={state}
       data-collapsible={state === "collapsed" ? collapsible : ""}
       data-variant={variant}

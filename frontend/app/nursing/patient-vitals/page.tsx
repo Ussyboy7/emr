@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { apiFetch } from '@/lib/api-client';
-import { patientService } from '@/lib/services';
+import { patientService, consultationService } from '@/lib/services';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { PatientAvatar } from "@/components/PatientAvatar";
@@ -52,6 +52,7 @@ interface PatientVitals {
   latestVitals: VitalsData;
   vitalsHistory: VitalsData[];
   status: 'normal' | 'warning' | 'critical';
+  nursingStatus: 'Pending Vitals' | 'Ready for Consultation' | 'Sent to Rooms';
   alerts: string[];
 }
 
@@ -74,95 +75,118 @@ export default function PatientVitalsPage() {
       try {
         setLoading(true);
         setError(null);
-        
-        // Fetch all vitals
-        console.log('[Patient Vitals] Fetching vitals from API...');
-        const vitalsResult = await apiFetch<{ results: any[] }>('/vitals/?ordering=-recorded_at&page_size=1000');
-        console.log('[Patient Vitals] Full API response:', vitalsResult);
-        const allVitals = vitalsResult.results || vitalsResult || [];
-        console.log('[Patient Vitals] Fetched vitals:', allVitals.length, 'records');
-        console.log('[Patient Vitals] Sample vital record:', allVitals[0]);
-        
-        if (allVitals.length === 0) {
-          console.log('[Patient Vitals] No vitals found in database');
-          setPatients([]);
-          setLoading(false);
-          return;
+
+        // Fetch visits that should be processed by nursing (similar to pool queue)
+        console.log('[Patient Vitals] Fetching visits for nursing...');
+        const visitsResult = await patientService.getPatientVisits(0); // Get all visits, we'll filter client-side
+        const allVisits = visitsResult || [];
+        console.log('[Patient Vitals] Fetched visits:', allVisits.length, 'records');
+
+        // Get all visit IDs that have consultation sessions
+        let visitsWithSessions: Set<number> = new Set();
+        try {
+          const sessionsResult = await consultationService.getSessions({ page_size: 1000 });
+          visitsWithSessions = new Set(
+            sessionsResult.results
+              .map((s: any) => s.visit?.id || s.visit_id)
+              .filter((id: any) => id)
+          );
+          console.log('[Patient Vitals] Visits with consultation sessions:', Array.from(visitsWithSessions));
+        } catch (error) {
+          console.log('[Patient Vitals] Could not load consultation sessions:', error);
         }
-        
-        // Group vitals by patient ID
-        const vitalsByPatient: Record<string, any[]> = {};
-        allVitals.forEach((vital: any) => {
-          // Handle both numeric and object patient IDs
-          let patientId: string | null = null;
-          if (vital.patient) {
-            if (typeof vital.patient === 'object' && vital.patient.id) {
-              patientId = String(vital.patient.id);
-            } else if (typeof vital.patient === 'number') {
-              patientId = String(vital.patient);
-            } else if (typeof vital.patient === 'string') {
-              patientId = vital.patient;
-            }
+
+        // Filter visits that should go to nursing (active visits that don't have consultation sessions)
+        const nursingVisits = allVisits.filter((visit: any) => {
+          // Exclude cancelled visits
+          if (visit.status === 'cancelled') return false;
+
+          // Only include active visits
+          if (!['completed', 'in_progress', 'scheduled', 'waiting'].includes(visit.status)) return false;
+
+          // Exclude visits that have consultation sessions (already sent to consultation)
+          if (visitsWithSessions.has(visit.id)) {
+            console.log('[Patient Vitals] Excluding visit', visit.visit_id, '- has consultation sessions');
+            return false;
           }
-          
-          if (!patientId || patientId === 'null' || patientId === 'undefined') {
-            console.warn('[Patient Vitals] Vital record missing or invalid patient ID:', vital);
-            return;
-          }
-          
-          if (!vitalsByPatient[patientId]) {
-            vitalsByPatient[patientId] = [];
-          }
-          vitalsByPatient[patientId].push(vital);
+
+          return true;
         });
-        
-        // Get unique patient IDs
-        const patientIds = Object.keys(vitalsByPatient);
-        // Security: Removed console.log to prevent patient ID list exposure
-        
-        if (patientIds.length === 0) {
-          console.log('[Patient Vitals] No patient IDs found in vitals - all vitals may be missing patient field');
+
+        console.log('[Patient Vitals] Filtered nursing visits:', nursingVisits.length);
+
+        if (nursingVisits.length === 0) {
+          console.log('[Patient Vitals] No visits found for nursing');
           setPatients([]);
           setLoading(false);
           return;
         }
+
+        // Get unique patient IDs from nursing visits
+        const patientIds = [...new Set(nursingVisits.map((v: any) => String(v.patient?.id || v.patient_id || v.patient)))].filter(id => id && id !== 'null' && id !== 'undefined');
+
+        console.log('[Patient Vitals] Unique patient IDs:', patientIds.length);
         
-        // Fetch patient details for all patients with vitals
+        // Fetch patient details and check vitals status
         const patientPromises = patientIds.map(async (patientId) => {
           try {
             console.log('[Patient Vitals] Fetching patient details for ID:', patientId);
             const patient = await patientService.getPatient(parseInt(patientId));
-            const patientVitals = vitalsByPatient[patientId];
-            const latestVitals = patientVitals[0]; // Already sorted by -recorded_at
-            console.log('[Patient Vitals] Loaded patient with', patientVitals.length, 'vitals records');
+
+            // Load patient's vitals history
+            let patientVitals: any[] = [];
+            let latestVitals: any = null;
+            let hasVitalsToday = false;
+
+            try {
+              const vitalsResponse = await apiFetch<{ results: any[] }>(`/vitals/?patient=${patientId}&ordering=-recorded_at&page_size=10`);
+              patientVitals = vitalsResponse.results || [];
+              if (patientVitals.length > 0) {
+                latestVitals = patientVitals[0];
+                // Check if vitals were recorded recently (within last 7 days)
+                const sevenDaysAgo = new Date();
+                sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+                const vitalsDate = new Date(latestVitals.recorded_at);
+                hasVitalsToday = vitalsDate >= sevenDaysAgo;
+              }
+            } catch (vitalsError) {
+              console.log('[Patient Vitals] Could not load vitals for patient:', patientId, vitalsError);
+            }
+
+            console.log('[Patient Vitals] Patient', patientId, 'has vitals today:', hasVitalsToday);
             
-            // Calculate status based on vitals
-            let status: 'normal' | 'warning' | 'critical' = 'normal';
+            // Determine nursing status based on vitals recording
+            const nursingStatus = hasVitalsToday ? 'Ready for Consultation' : 'Pending Vitals';
+
+            // Calculate vitals status if vitals exist
+            let vitalsStatus: 'normal' | 'warning' | 'critical' = 'normal';
             const alerts: string[] = [];
-            
-            if (latestVitals.temperature) {
-              const temp = parseFloat(latestVitals.temperature);
-              if (temp >= 39) { status = 'critical'; alerts.push('High temperature'); }
-              else if (temp >= 38) { status = status === 'normal' ? 'warning' : status; alerts.push('Elevated temperature'); }
-              else if (temp < 36) { status = status === 'normal' ? 'warning' : status; alerts.push('Low temperature'); }
-            }
-            
-            if (latestVitals.heart_rate) {
-              const hr = parseInt(latestVitals.heart_rate);
-              if (hr >= 120 || hr < 60) { status = status !== 'critical' ? 'warning' : status; alerts.push('Abnormal heart rate'); }
-            }
 
-            if (latestVitals.bloodPressureSystolic && latestVitals.bloodPressureDiastolic) {
-              const systolic = parseInt(latestVitals.bloodPressureSystolic);
-              const diastolic = parseInt(latestVitals.bloodPressureDiastolic);
+            if (latestVitals && hasVitalsToday) {
+              if (latestVitals.temperature) {
+                const temp = parseFloat(latestVitals.temperature);
+                if (temp >= 39) { vitalsStatus = 'critical'; alerts.push('High temperature'); }
+                else if (temp >= 38) { vitalsStatus = vitalsStatus === 'normal' ? 'warning' : vitalsStatus; alerts.push('Elevated temperature'); }
+                else if (temp < 36) { vitalsStatus = vitalsStatus === 'normal' ? 'warning' : vitalsStatus; alerts.push('Low temperature'); }
+              }
 
-              // Hypertension stages (medical guidelines)
-              if (systolic >= 180 || diastolic >= 120) {
-                status = 'critical'; alerts.push('Hypertensive crisis');
-              } else if (systolic >= 130 || diastolic >= 80) {
-                status = status !== 'critical' ? 'warning' : status; alerts.push('High blood pressure');
-              } else if (systolic < 90 || diastolic < 60) {
-                status = status !== 'critical' ? 'warning' : status; alerts.push('Low blood pressure');
+              if (latestVitals.heart_rate) {
+                const hr = parseInt(latestVitals.heart_rate);
+                if (hr >= 120 || hr < 60) { vitalsStatus = vitalsStatus !== 'critical' ? 'warning' : vitalsStatus; alerts.push('Abnormal heart rate'); }
+              }
+
+              if (latestVitals.bloodPressureSystolic && latestVitals.bloodPressureDiastolic) {
+                const systolic = parseInt(latestVitals.bloodPressureSystolic);
+                const diastolic = parseInt(latestVitals.bloodPressureDiastolic);
+
+                // Hypertension stages (medical guidelines)
+                if (systolic >= 180 || diastolic >= 120) {
+                  vitalsStatus = 'critical'; alerts.push('Hypertensive crisis');
+                } else if (systolic >= 130 || diastolic >= 80) {
+                  vitalsStatus = vitalsStatus !== 'critical' ? 'warning' : vitalsStatus; alerts.push('High blood pressure');
+                } else if (systolic < 90 || diastolic < 60) {
+                  vitalsStatus = vitalsStatus !== 'critical' ? 'warning' : vitalsStatus; alerts.push('Low blood pressure');
+                }
               }
             }
             
@@ -213,7 +237,8 @@ export default function PatientVitalsPage() {
               gender: patient.gender || '',
               latestVitals: transformedVitals,
               vitalsHistory,
-              status,
+              status: vitalsStatus,
+              nursingStatus,
               alerts,
             } as PatientVitals;
           } catch (err) {
@@ -263,7 +288,7 @@ export default function PatientVitalsPage() {
       const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
                            p.patientId.toLowerCase().includes(searchQuery.toLowerCase()) ||
                            p.personalNumber.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesStatus = statusFilter === 'all' || p.status === statusFilter;
+      const matchesStatus = statusFilter === 'all' || p.nursingStatus === statusFilter;
       const matchesGender = genderFilter === 'all' || p.gender.toLowerCase() === genderFilter.toLowerCase();
       
       // Date filter (filter by latest vitals recorded date)
@@ -303,9 +328,9 @@ export default function PatientVitalsPage() {
   // Stats
   const stats = useMemo(() => ({
     total: patients.length,
-    normal: patients.filter(p => p.status === 'normal').length,
-    warning: patients.filter(p => p.status === 'warning').length,
-    critical: patients.filter(p => p.status === 'critical').length,
+    pendingVitals: patients.filter(p => p.nursingStatus === 'Pending Vitals').length,
+    readyForConsultation: patients.filter(p => p.nursingStatus === 'Ready for Consultation').length,
+    sentToRooms: patients.filter(p => p.nursingStatus === 'Sent to Rooms').length,
   }), [patients]);
 
 
@@ -317,6 +342,9 @@ export default function PatientVitalsPage() {
 
   const getStatusColor = (status: string) => {
     switch (status) {
+      case 'Pending Vitals': return 'border-amber-500/50 text-amber-600 dark:text-amber-400 bg-amber-500/10';
+      case 'Ready for Consultation': return 'border-emerald-500/50 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10';
+      case 'Sent to Rooms': return 'border-blue-500/50 text-blue-600 dark:text-blue-400 bg-blue-500/10';
       case 'normal': return 'border-emerald-500/50 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10';
       case 'warning': return 'border-amber-500/50 text-amber-600 dark:text-amber-400 bg-amber-500/10';
       case 'critical': return 'border-rose-500/50 text-rose-600 dark:text-rose-400 bg-rose-500/10';
@@ -408,11 +436,11 @@ export default function PatientVitalsPage() {
         {/* Stats Cards */}
         {!loading && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {[
+          {          [
             { label: 'Total Patients', value: stats.total, icon: User, color: 'text-blue-500', bg: 'bg-blue-500/10' },
-            { label: 'Normal', value: stats.normal, icon: CheckCircle2, color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
-            { label: 'Warning', value: stats.warning, icon: AlertTriangle, color: 'text-amber-500', bg: 'bg-amber-500/10' },
-            { label: 'Critical', value: stats.critical, icon: AlertTriangle, color: 'text-rose-500', bg: 'bg-rose-500/10' },
+            { label: 'Pending Vitals', value: stats.pendingVitals, icon: Activity, color: 'text-amber-500', bg: 'bg-amber-500/10' },
+            { label: 'Ready for Consultation', value: stats.readyForConsultation, icon: CheckCircle2, color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
+            { label: 'Sent to Rooms', value: stats.sentToRooms, icon: TrendingUp, color: 'text-blue-500', bg: 'bg-blue-500/10' },
           ].map((stat, i) => (
             <Card key={i}>
               <CardContent className="p-4">
@@ -459,9 +487,9 @@ export default function PatientVitalsPage() {
                   <SelectTrigger className="w-[140px]"><SelectValue placeholder="Status" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Status</SelectItem>
-                    <SelectItem value="normal">Normal</SelectItem>
-                    <SelectItem value="warning">Warning</SelectItem>
-                    <SelectItem value="critical">Critical</SelectItem>
+                    <SelectItem value="Pending Vitals">Pending Vitals</SelectItem>
+                    <SelectItem value="Ready for Consultation">Ready for Consultation</SelectItem>
+                    <SelectItem value="Sent to Rooms">Sent to Rooms</SelectItem>
                   </SelectContent>
                 </Select>
                 <Select value={genderFilter} onValueChange={setGenderFilter}>
@@ -529,7 +557,7 @@ export default function PatientVitalsPage() {
                       <div className="flex items-center justify-between gap-2">
                         <div className="flex items-center gap-2 flex-wrap min-w-0">
                           <span className="font-semibold text-foreground truncate">{patient.name}</span>
-                          <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${getStatusColor(patient.status)}`}>{patient.status}</Badge>
+                          <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${getStatusColor(patient.nursingStatus)}`}>{patient.nursingStatus}</Badge>
                           {patient.alerts.length > 0 && (
                             <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-rose-500 text-rose-500">⚠️ Alert</Badge>
                           )}

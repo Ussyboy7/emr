@@ -186,15 +186,35 @@ export function MedicalHistoryTab({
   };
 
   // Combined visits and consultations for consultations tab
-  const allVisitsAndConsultations = [
-    ...visits.map(v => ({ ...v, type: 'visit' })),
-    ...consultationSessions.map(c => ({ ...c, type: 'consultation' })),
-  ].sort((a, b) => {
-    const dateA = safeParseDate(a.date || a.created_at);
-    const dateB = safeParseDate(b.date || b.created_at);
-    if (!dateA || !dateB) return 0;
-    return dateB.getTime() - dateA.getTime(); // Newest first
+  // For the Consultations tab, show consultation sessions only
+  const allVisitsAndConsultations = consultationSessions.map(c => ({
+    ...c,
+    type: 'consultation'
+  })).sort((a, b) => {
+    const dateA = safeParseDate(a.date);
+    const dateB = safeParseDate(b.date);
+    return dateA && dateB ? dateB.getTime() - dateA.getTime() : 0;
   });
+
+  // Apply filters
+  const filteredVisitsAndConsultations = allVisitsAndConsultations.filter((item: any) => {
+    // Type filter
+    if (typeFilter === 'visits' && item.type !== 'visit') return false;
+    if (typeFilter === 'consultations' && item.type === 'visit') return false;
+
+    // Date filter
+    if (sessionDateFilter === 'all') return true;
+    const itemDate = safeParseDate(item.date || item.created_at);
+    if (!itemDate) return true; // Include items without dates in all filters
+    const daysAgo = Math.floor((Date.now() - itemDate.getTime()) / (1000 * 60 * 60 * 24));
+    return daysAgo <= parseInt(sessionDateFilter);
+  });
+
+  // Apply pagination
+  const paginatedVisitsAndConsultations = filteredVisitsAndConsultations.slice(
+    (consultationsPage - 1) * consultationsPerPage,
+    consultationsPage * consultationsPerPage
+  );
 
   return (
     <div className="space-y-4">
@@ -211,7 +231,7 @@ export function MedicalHistoryTab({
               </TabsTrigger>
               <TabsTrigger value="consultations" className="text-xs">
                 <Stethoscope className="h-3 w-3 mr-1" />
-                Consultations ({visits.length + consultationSessions.length})
+                Consultations ({consultationSessions.length})
               </TabsTrigger>
               <TabsTrigger value="labs" className="text-xs">
                 <TestTube className="h-3 w-3 mr-1" />
@@ -365,28 +385,15 @@ export function MedicalHistoryTab({
                     <tr>
                       <th className="px-4 py-2 text-left font-medium">Date</th>
                       <th className="px-4 py-2 text-left font-medium">Type</th>
+                      <th className="px-4 py-2 text-left font-medium">Patient</th>
                       <th className="px-4 py-2 text-left font-medium">Doctor</th>
                       <th className="px-4 py-2 text-left font-medium">Clinic</th>
                       <th className="px-4 py-2 text-center font-medium">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y">
-                    {allVisitsAndConsultations
-                      .filter((item: any) => {
-                        // Type filter
-                        if (typeFilter === 'visits' && item.type !== 'visit') return false;
-                        if (typeFilter === 'consultations' && item.type === 'visit') return false;
-                        
-                        // Date filter
-                        if (sessionDateFilter === 'all') return true;
-                        const itemDate = safeParseDate(item.date || item.created_at);
-                        if (!itemDate) return false;
-                        const daysAgo = Math.floor((Date.now() - itemDate.getTime()) / (1000 * 60 * 60 * 24));
-                        return daysAgo <= parseInt(sessionDateFilter);
-                      })
-                      .slice((consultationsPage - 1) * consultationsPerPage, consultationsPage * consultationsPerPage)
-                      .map((item: any, index: number) => {
-                        const itemDate = safeParseDate(item.date || item.created_at);
+                    {paginatedVisitsAndConsultations.map((item: any, index: number) => {
+                        const itemDate = safeParseDate(item.date || item.started_at || item.created_at);
                         const formattedDate = itemDate ? itemDate.toLocaleDateString() : (item.date || 'N/A');
                         return (
                       <tr key={`${item.type}-${item.id}-${index}`} className="hover:bg-muted/30">
@@ -394,6 +401,7 @@ export function MedicalHistoryTab({
                         <td className="px-4 py-3">
                           <Badge variant="outline">{item.type === 'visit' ? item.type : 'Consultation'}</Badge>
                         </td>
+                        <td className="px-4 py-3">{item.patient_id || item.patientId || 'Current'}</td>
                         <td className="px-4 py-3">{item.doctor || item.doctor_name || 'Unknown'}</td>
                         <td className="px-4 py-3">
                           <Badge variant="outline">{item.clinic || item.clinic_name || 'N/A'}</Badge>
@@ -413,9 +421,9 @@ export function MedicalHistoryTab({
                       </tr>
                         );
                       })}
-                    {allVisitsAndConsultations.length === 0 && (
+                    {filteredVisitsAndConsultations.length === 0 && (
                       <tr>
-                        <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">
+                        <td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">
                           No visits or consultations found
                         </td>
                       </tr>
@@ -423,11 +431,11 @@ export function MedicalHistoryTab({
                   </tbody>
                 </table>
               </div>
-              {allVisitsAndConsultations.length > 0 && (
+              {filteredVisitsAndConsultations.length > 0 && (
                 <div className="flex flex-col gap-3 border-t border-border/60 pt-3 mt-3 md:flex-row md:items-center md:justify-between">
                   <div className="flex items-center gap-4">
                     <p className="text-sm text-muted-foreground">
-                      Showing {allVisitsAndConsultations.length === 0 ? 0 : `${(consultationsPage - 1) * consultationsPerPage + 1}-${Math.min(allVisitsAndConsultations.length, consultationsPage * consultationsPerPage)}`} of {allVisitsAndConsultations.length}
+                      Showing {filteredVisitsAndConsultations.length === 0 ? 0 : `${(consultationsPage - 1) * consultationsPerPage + 1}-${Math.min(filteredVisitsAndConsultations.length, consultationsPage * consultationsPerPage)}`} of {filteredVisitsAndConsultations.length}
                     </p>
                     <Select value={String(consultationsPerPage)} onValueChange={(v) => { setConsultationsPerPage(Number(v)); setConsultationsPage(1); }}>
                       <SelectTrigger className="w-16 h-8">
@@ -446,7 +454,7 @@ export function MedicalHistoryTab({
                       <ChevronLeft className="h-4 w-4" />
                       Previous
                     </Button>
-                    <Button variant="outline" size="sm" disabled={consultationsPage >= Math.ceil(allVisitsAndConsultations.length / consultationsPerPage)} onClick={() => setConsultationsPage(p => p + 1)}>
+                    <Button variant="outline" size="sm" disabled={consultationsPage >= Math.ceil(filteredVisitsAndConsultations.length / consultationsPerPage)} onClick={() => setConsultationsPage(p => p + 1)}>
                       Next
                       <ChevronRight className="h-4 w-4" />
                     </Button>

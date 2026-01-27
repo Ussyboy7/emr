@@ -136,6 +136,7 @@ class PatientService {
     category?: string;
     gender?: string;
     blood_group?: string;
+    location?: string;
     search?: string;
     page?: number;
     page_size?: number;
@@ -144,6 +145,13 @@ class PatientService {
     return apiFetch<{ results: Patient[]; count: number; next?: string; previous?: string }>(
       `/patients/${query}`
     );
+  }
+
+  /**
+   * Get total and per-category patient counts.
+   */
+  async getPatientCounts(): Promise<{ total: number; employees: number; retirees: number; dependents: number; nonnpa: number }> {
+    return apiFetch<{ total: number; employees: number; retirees: number; dependents: number; nonnpa: number }>('/patients/counts/');
   }
 
   /**

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -37,7 +37,7 @@ const locations = [
 // Simplified visit statuses for Medical Records
 // Scheduled = Created, waiting to be sent to nursing
 // Sent to Nursing = Confirmed and forwarded (completed from Medical Records perspective)
-type VisitStatus = 'Scheduled' | 'Sent to Nursing';
+type VisitStatus = 'Scheduled' | 'In Progress'| 'Completed';
 
 // Visits data will be loaded from API
 
@@ -82,47 +82,79 @@ export default function VisitsPage() {
     time: visit.time,
     status: visit.status === 'scheduled' ? 'Scheduled' :
            visit.status === 'in_progress' ? 'In Progress' :
-           visit.status === 'completed' ? 'Sent to Nursing' :
+           visit.status === 'completed' ? 'Completed' :
            visit.status === 'cancelled' ? 'Cancelled' : visit.status,
     department: visit.clinic || 'GOPD',
     notes: visit.clinical_notes || '',
     location: visit.location || '',
   });
 
-  // Load visits from API
-  useEffect(() => {
-    const loadVisits = async () => {
-      try {
-        setLoading(true);
-        setError(null);
+  // Load visits from API - extracted as a reusable function
+  const loadVisits = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
 
-        const result = await visitService.getVisits({
+      // Helper function to build filter parameters (inside loadVisits to access current state)
+      const buildFilterParams = () => {
+        // Build date filter based on dateFilter selection
+        let dateParam: string | undefined = undefined;
+        let startDate: string | undefined = undefined;
+        let endDate: string | undefined = undefined;
+        
+        if (dateFilter === 'today') {
+          const today = new Date().toISOString().split('T')[0];
+          dateParam = today;
+        } else if (dateFilter === 'week') {
+          const today = new Date();
+          const weekStart = new Date(today);
+          weekStart.setDate(today.getDate() - today.getDay()); // Start of week (Sunday)
+          startDate = weekStart.toISOString().split('T')[0];
+          endDate = today.toISOString().split('T')[0];
+        } else if (dateFilter === 'month') {
+          const today = new Date();
+          const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+          startDate = monthStart.toISOString().split('T')[0];
+          endDate = today.toISOString().split('T')[0];
+        }
+        // 'all' means no date filter
+
+        return {
           page: currentPage,
           page_size: itemsPerPage,
           search: searchQuery || undefined,
           status: statusFilter !== 'all' ? statusFilter : undefined,
           visit_type: typeFilter !== 'all' ? typeFilter : undefined,
-          // Note: clinicFilter, dateFilter not yet implemented in backend
-        });
-        setTotalCount(result.count || result.results.length);
-        
-        // Transform visits to match frontend structure
-        const transformedVisits = result.results.map(transformVisit);
-        setVisits(transformedVisits);
-      } catch (err) {
-        console.error('Error loading visits:', err);
-        if (isAuthenticationError(err)) {
-          setAuthError(err);
-        } else {
-          setError('Failed to load visits. Please try again.');
-        }
-      } finally {
-        setLoading(false);
-      }
-    };
+          clinic: clinicFilter !== 'all' ? clinicFilter : undefined,
+          date: dateParam,
+          start_date: startDate,
+          end_date: endDate,
+        };
+      };
 
+      const filterParams = buildFilterParams();
+      const result = await visitService.getVisits(filterParams);
+      setTotalCount(result.count || result.results.length);
+      
+      // Transform visits to match frontend structure
+      const transformedVisits = result.results.map(transformVisit);
+      setVisits(transformedVisits);
+    } catch (err) {
+      console.error('Error loading visits:', err);
+      if (isAuthenticationError(err)) {
+        setAuthError(err);
+      } else {
+        setError('Failed to load visits. Please try again.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [currentPage, itemsPerPage, searchQuery, statusFilter, typeFilter, clinicFilter, dateFilter]);
+
+  // Load visits when filters change
+  useEffect(() => {
     loadVisits();
-  }, [currentPage, itemsPerPage, searchQuery, statusFilter, typeFilter]);
+  }, [loadVisits]);
 
   // With server-side pagination, visits array contains only current page results
   const paginatedVisits = visits;
@@ -130,17 +162,19 @@ export default function VisitsPage() {
   // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, statusFilter, typeFilter]);
+  }, [searchQuery, statusFilter, typeFilter, clinicFilter, dateFilter]);
 
   // Stats - 4 cards with useful metrics
+  // Note: Stats are calculated from current page results only
+  // For accurate stats across all visits, we'd need a separate stats endpoint
   const stats = useMemo(() => {
     const today = new Date().toISOString().split('T')[0];
     const todayVisits = visits.filter(v => v.date === today);
     return [
       { label: "Today's Visits", value: todayVisits.length, icon: Calendar, color: 'text-blue-500', bg: 'bg-blue-500/10' },
-      { label: 'Scheduled', value: visits.filter(v => v.status === 'Scheduled' || v.status?.toLowerCase() === 'scheduled').length, icon: Clock, color: 'text-amber-500', bg: 'bg-amber-500/10' },
-      { label: 'In Progress', value: visits.filter(v => v.status === 'In Progress' || v.status?.toLowerCase() === 'in_progress').length, icon: CheckCircle2, color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
-      { label: 'Completed', value: visits.filter(v => v.status === 'Sent to Nursing' || v.status === 'Completed' || v.status?.toLowerCase() === 'completed').length, icon: CheckCircle2, color: 'text-violet-500', bg: 'bg-violet-500/10' },
+      { label: 'Scheduled', value: visits.filter(v => v.status === 'Scheduled').length, icon: Clock, color: 'text-amber-500', bg: 'bg-amber-500/10' },
+      { label: 'In Progress', value: visits.filter(v => v.status === 'In Progress').length, icon: CheckCircle2, color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
+      { label: 'Completed', value: visits.filter(v => v.status === 'Completed').length, icon: CheckCircle2, color: 'text-violet-500', bg: 'bg-violet-500/10' },
     ];
   }, [visits]);
 
@@ -173,7 +207,6 @@ export default function VisitsPage() {
       const statusMap: Record<string, string> = {
         'Scheduled': 'scheduled',
         'In Progress': 'in_progress',
-        'Sent to Nursing': 'completed',
         'Completed': 'completed',
         'Cancelled': 'cancelled',
       };
@@ -187,10 +220,8 @@ export default function VisitsPage() {
 
       await visitService.updateVisit(visitId, updateData);
       
-      // Reload visits
-      const result = await visitService.getVisits({ page_size: 500 });
-      const transformedVisits = result.results.map(transformVisit);
-      setVisits(transformedVisits);
+      // Reload visits with current filters preserved
+      await loadVisits();
       setIsEditModalOpen(false);
       toast.success('Visit updated successfully');
     } catch (err: any) {
@@ -215,13 +246,11 @@ export default function VisitsPage() {
       // Use numeric ID for API calls (backend expects primary key, not visit_id string)
       const visitId = selectedVisit.numericId || Number(selectedVisit.id);
       
-      // Update visit status to completed (sent to nursing)
-      await visitService.updateVisit(visitId, { status: 'completed' });
+      // Update visit status to in_progress (sent to nursing)
+      await visitService.updateVisit(visitId, { status: 'in_progress' });
       
-      // Reload visits
-      const result = await visitService.getVisits({ page_size: 500 });
-      const transformedVisits = result.results.map(transformVisit);
-      setVisits(transformedVisits);
+      // Reload visits with current filters preserved
+      await loadVisits();
       setIsForwardModalOpen(false);
       toast.success(`${selectedVisit.patient} has been sent to Nursing`, {
         description: 'The patient will appear in the Nursing Pool Queue.',
@@ -239,7 +268,9 @@ export default function VisitsPage() {
   const getStatusBadge = (status: string) => {
     const styles: Record<string, string> = {
       'Scheduled': 'border-amber-500/50 text-amber-600 dark:text-amber-400 bg-amber-500/10',
-      'Sent to Nursing': 'border-emerald-500/50 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10',
+      'In Progress': 'border-blue-500/50 text-blue-600 dark:text-blue-400 bg-blue-500/10',
+      'Completed': 'border-emerald-500/50 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10',
+      'Cancelled': 'border-red-500/50 text-red-600 dark:text-red-400 bg-red-500/10',
     };
     return styles[status] || 'border-muted-foreground/50 text-muted-foreground';
   };
@@ -346,7 +377,7 @@ export default function VisitsPage() {
                 />
               </div>
               <div className="flex flex-wrap gap-2">
-                <Select value={dateFilter} onValueChange={setDateFilter} disabled>
+                <Select value={dateFilter} onValueChange={setDateFilter}>
                   <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Time</SelectItem>
@@ -360,7 +391,9 @@ export default function VisitsPage() {
                   <SelectContent>
                     <SelectItem value="all">All Status</SelectItem>
                     <SelectItem value="scheduled">Pending</SelectItem>
-                    <SelectItem value="sent-to-nursing">Sent to Nursing</SelectItem>
+                    <SelectItem value="in_progress">In Progress</SelectItem>
+                    <SelectItem value="completed">Completed</SelectItem>
+                    <SelectItem value="cancelled">Cancelled</SelectItem>
                   </SelectContent>
                 </Select>
                 <Select value={typeFilter} onValueChange={setTypeFilter}>
@@ -373,7 +406,7 @@ export default function VisitsPage() {
                     <SelectItem value="routine">Routine Checkup</SelectItem>
                   </SelectContent>
                 </Select>
-                <Select value={clinicFilter} onValueChange={setClinicFilter} disabled>
+                <Select value={clinicFilter} onValueChange={setClinicFilter}>
                   <SelectTrigger className="w-[140px]"><SelectValue placeholder="Clinic" /></SelectTrigger>
                   <SelectContent>
                     {clinics.map(c => <SelectItem key={c} value={c === 'All Clinics' ? 'all' : c}>{c}</SelectItem>)}
@@ -424,7 +457,9 @@ export default function VisitsPage() {
                     <div className="flex items-center gap-2">
                       <h3 className="font-medium text-foreground text-sm truncate">{visit.patient}</h3>
                       <Badge variant="outline" className={`text-[10px] px-1.5 py-0 h-5 ${getTypeBadge(visit.type)}`}>{getVisitTypeLabel(visit.type)}</Badge>
-                      <Badge variant="outline" className={`text-[10px] px-1.5 py-0 h-5 ${getStatusBadge(visit.status)}`}>{visit.status === 'Scheduled' ? 'Pending' : 'Sent'}</Badge>
+                      <Badge variant="outline" className={`text-[10px] px-1.5 py-0 h-5 ${getStatusBadge(visit.status)}`}>
+                        {visit.status === 'Scheduled' ? 'Pending' : visit.status}
+                      </Badge>
                     </div>
                     
                     {/* Row 2: IDs + Clinic + Location + Date/Time */}
@@ -462,7 +497,7 @@ export default function VisitsPage() {
                       </>
                     )}
                     
-                    {visit.status === 'Sent to Nursing' && (
+                    {visit.status === 'Completed' && (
                       <div className="h-7 w-7 flex items-center justify-center rounded bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400">
                         <CheckCircle2 className="h-4 w-4" />
                       </div>

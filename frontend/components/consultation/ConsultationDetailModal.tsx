@@ -1089,8 +1089,9 @@ const loadConsultationFromSession = async (sessionId: string | number): Promise<
       let prescriptionsResult;
       try {
         prescriptionsResult = await apiFetch<{ results: any[] }>(`/pharmacy/prescriptions/?${sessionFilter}&page_size=100`);
-      } catch (sessionErr) {
+      } catch (sessionErr: any) {
         // Don't fallback to visit - only show prescriptions created during this session
+        console.warn('Could not load prescriptions by session:', sessionErr?.message || sessionErr);
         prescriptionsResult = { results: [] };
       }
       const filteredPrescriptions = filterBySessionTime(prescriptionsResult.results || []);
@@ -1116,8 +1117,9 @@ const loadConsultationFromSession = async (sessionId: string | number): Promise<
       let labOrdersResult;
       try {
         labOrdersResult = await apiFetch<{ results: any[] }>(`/laboratory/orders/?${sessionFilter}&page_size=100`);
-      } catch (sessionErr) {
+      } catch (sessionErr: any) {
         // Don't fallback to visit - only show lab orders created during this session
+        console.warn('Could not load lab orders by session:', sessionErr?.message || sessionErr);
         labOrdersResult = { results: [] };
       }
       const filteredLabOrders = filterBySessionTime(labOrdersResult.results || []);
@@ -1158,8 +1160,9 @@ const loadConsultationFromSession = async (sessionId: string | number): Promise<
       let radiologyOrdersResult;
       try {
         radiologyOrdersResult = await apiFetch<{ results: any[] }>(`/radiology/orders/?${sessionFilter}&page_size=100`);
-      } catch (sessionErr) {
+      } catch (sessionErr: any) {
         // Don't fallback to visit - only show radiology orders created during this session
+        console.warn('Could not load radiology orders by session:', sessionErr?.message || sessionErr);
         radiologyOrdersResult = { results: [] };
       }
       const filteredRadiologyOrders = filterBySessionTime(radiologyOrdersResult.results || []);
@@ -1198,8 +1201,9 @@ const loadConsultationFromSession = async (sessionId: string | number): Promise<
       let nursingOrdersResult;
       try {
         nursingOrdersResult = await apiFetch<{ results: any[] }>(`/nursing/orders/?${sessionFilter}&page_size=100`);
-      } catch (sessionErr) {
+      } catch (sessionErr: any) {
         // Don't fallback to visit - only show nursing orders created during this session
+        console.warn('Could not load nursing orders by session:', sessionErr?.message || sessionErr);
         nursingOrdersResult = { results: [] };
       }
       const filteredNursingOrders = filterBySessionTime(nursingOrdersResult.results || []);
@@ -1223,19 +1227,25 @@ const loadConsultationFromSession = async (sessionId: string | number): Promise<
       let vitalsResult;
       try {
         vitalsResult = await apiFetch<{ results: any[] }>(`/vitals/?consultation_session=${sessionId}&page_size=10`);
-      } catch (sessionErr) {
+      } catch (sessionErr: any) {
         // Fallback to visit filter and filter by session timeframe
+        console.warn('Could not load vitals by session:', sessionErr?.message || sessionErr);
         const visitId = session.visit || '';
         if (visitId) {
-          vitalsResult = await apiFetch<{ results: any[] }>(`/vitals/?visit=${visitId}&page_size=10`);
-          // Filter vitals to only those recorded during this session timeframe
-          if (vitalsResult.results && session.started_at) {
-            const sessionStart = new Date(session.started_at);
-            const sessionEnd = session.ended_at ? new Date(session.ended_at) : new Date();
-            vitalsResult.results = vitalsResult.results.filter((v: any) => {
-              const vitalDate = new Date(v.recorded_at || v.created_at);
-              return vitalDate >= sessionStart && vitalDate <= sessionEnd;
-            });
+          try {
+            vitalsResult = await apiFetch<{ results: any[] }>(`/vitals/?visit=${visitId}&page_size=10`);
+            // Filter vitals to only those recorded during this session timeframe
+            if (vitalsResult.results && session.started_at) {
+              const sessionStart = new Date(session.started_at);
+              const sessionEnd = session.ended_at ? new Date(session.ended_at) : new Date();
+              vitalsResult.results = vitalsResult.results.filter((v: any) => {
+                const vitalDate = new Date(v.recorded_at || v.created_at);
+                return vitalDate >= sessionStart && vitalDate <= sessionEnd;
+              });
+            }
+          } catch (visitErr) {
+            console.warn('Could not load vitals by visit:', visitErr);
+            vitalsResult = { results: [] };
           }
         } else {
           vitalsResult = { results: [] };
@@ -1468,18 +1478,16 @@ export const ConsultationDetailModal = React.memo(function ConsultationDetailMod
         aria-labelledby="consultation-modal-title"
         aria-describedby="consultation-modal-description"
       >
-        <DialogHeader>
-          <DialogTitle id="consultation-modal-title" className="flex items-center gap-2">
-            <Stethoscope className="h-5 w-5 text-emerald-500" aria-hidden="true" />
-            {loading ? 'Loading Consultation Details...' : (safeConsultation?.type === 'visit' ? 'Visit Details' : 'Consultation Details')}
-          </DialogTitle>
-            <DialogDescription id="consultation-modal-description">
-              {loading
-                ? 'Loading consultation details...'
-                : `${safeConsultation?.id || 'Unknown ID'} • ${safeConsultation?.patient || 'Unknown Patient'} • ${safeConsultation?.date || 'Unknown Date'}`
-              }
-            </DialogDescription>
-        </DialogHeader>
+        <DialogTitle id="consultation-modal-title" className="flex items-center gap-2">
+          <Stethoscope className="h-5 w-5 text-emerald-500" aria-hidden="true" />
+          {loading ? 'Loading Consultation Details...' : (safeConsultation?.type === 'visit' ? 'Visit Details' : 'Consultation Details')}
+        </DialogTitle>
+        <DialogDescription id="consultation-modal-description">
+          {loading
+            ? 'Loading consultation details...'
+            : `${safeConsultation?.id || 'Unknown ID'} • ${safeConsultation?.patient || 'Unknown Patient'} • ${safeConsultation?.date || 'Unknown Date'}`
+          }
+        </DialogDescription>
         
         {loading ? (
           <div

@@ -6,11 +6,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { toast } from "sonner";
-import { visitService, patientService, consultationService, pharmacyService, labService } from '@/lib/services';
+import { visitService, patientService, consultationService, pharmacyService, labService, radiologyService } from '@/lib/services';
 import { isAuthenticationError } from '@/lib/auth-errors';
-import { 
+import {
   Calendar, Clock, CheckCircle2, Loader2, RefreshCw, AlertTriangle,
-  ClipboardList, Heart, Stethoscope, Pill, TestTube, User, Building2
+  ClipboardList, Heart, Stethoscope, Pill, TestTube, User, Building2, ScanLine
 } from 'lucide-react';
 
 interface Visit {
@@ -66,17 +66,46 @@ export function VisitDetailModal({ visit: visitProp, visitId: visitIdProp, isOpe
       setLoading(true);
 
       // Get visit data
-      const numericId = Number(idToUse);
       let rawVisitData: any;
-      if (!isNaN(numericId) && numericId > 0) {
-        rawVisitData = await visitService.getVisit(numericId);
-      } else {
-        const visitsResult = await visitService.getVisits({ search: String(idToUse), page_size: 100 });
-        const foundVisit = visitsResult.results.find((v: any) => (v.visit_id || String(v.id)) === idToUse);
-        if (!foundVisit) {
-          throw new Error(`Visit with ID "${idToUse}" not found`);
+      let isConsultationSession = false;
+
+      // Check if this is a consultation session ID (prefixed with "session-")
+      if (typeof idToUse === 'string' && idToUse.startsWith('session-')) {
+        const sessionId = idToUse.replace('session-', '');
+        const numericSessionId = Number(sessionId);
+        if (!isNaN(numericSessionId) && numericSessionId > 0) {
+          // Load consultation session data
+          const sessionData = await consultationService.getSession(numericSessionId);
+          rawVisitData = {
+            id: sessionData.id,
+            visit_id: `session-${sessionData.id}`,
+            patient: sessionData.patient,
+            date: sessionData.started_at?.split('T')[0] || '',
+            time: sessionData.started_at?.split('T')[1]?.substring(0, 5) || '',
+            visit_type: 'Consultation',
+            clinic: (sessionData.room as any)?.clinic_name || (sessionData.room as any)?.clinic?.name || 'GOPD',
+            doctor_name: (sessionData.doctor as any)?.name || (sessionData.doctor as any)?.get_full_name || sessionData.doctor_name || 'Unknown',
+            clinical_notes: sessionData.notes || '',
+            status: sessionData.status,
+            created_at: sessionData.started_at,
+            ended_at: sessionData.ended_at,
+          };
+          isConsultationSession = true;
         }
-        rawVisitData = await visitService.getVisit(foundVisit.id);
+      }
+
+      if (!isConsultationSession) {
+        const numericId = Number(idToUse);
+        if (!isNaN(numericId) && numericId > 0) {
+          rawVisitData = await visitService.getVisit(numericId);
+        } else {
+          const visitsResult = await visitService.getVisits({ search: String(idToUse), page_size: 100 });
+          const foundVisit = visitsResult.results.find((v: any) => (v.visit_id || String(v.id)) === idToUse);
+          if (!foundVisit) {
+            throw new Error(`Visit with ID "${idToUse}" not found`);
+          }
+          rawVisitData = await visitService.getVisit(foundVisit.id);
+        }
       }
 
       setVisit({
@@ -106,6 +135,10 @@ export function VisitDetailModal({ visit: visitProp, visitId: visitIdProp, isOpe
       // Build journey timeline
       const journeyEvents: JourneyEvent[] = [];
       let step = 1;
+
+      // Declare variables for later use in completion checks
+      let visitLabOrders: any[] = [];
+      let visitPrescriptions: any[] = [];
 
       // 1. Visit Created (always present)
       journeyEvents.push({
@@ -172,10 +205,16 @@ export function VisitDetailModal({ visit: visitProp, visitId: visitIdProp, isOpe
       try {
         const sessions = await consultationService.getSessions({ patient: rawVisitData.patient.toString() });
         if (sessions.results && sessions.results.length > 0) {
-          // Filter sessions by visit date
+          // Filter sessions by visit date or session ID
           const visitSessions = sessions.results.filter((s: any) => {
-            const sessionDate = s.started_at ? new Date(s.started_at).toISOString().split('T')[0] : '';
-            return sessionDate === rawVisitData.date || s.visit === rawVisitData.id;
+            if (isConsultationSession) {
+              // For consultation sessions, match by session ID
+              return s.id === rawVisitData.id;
+            } else {
+              // For regular visits, match by date or visit reference
+              const sessionDate = s.started_at ? new Date(s.started_at).toISOString().split('T')[0] : '';
+              return sessionDate === rawVisitData.date || s.visit === rawVisitData.id;
+            }
           });
           if (visitSessions.length > 0) {
             const session = visitSessions[0];
@@ -183,16 +222,34 @@ export function VisitDetailModal({ visit: visitProp, visitId: visitIdProp, isOpe
               id: 'consultation-started',
               step: step++,
               title: 'Consultation Started',
-              description: 'Consultation in progress',
+              description: 'Consultation session initiated',
               module: 'Consultation',
               location: session.room_name || (session as any).clinic || 'Consultation Room',
-              status: session.status === 'completed' ? 'completed' : 'in_progress',
+              status: 'completed',
               timestamp: session.started_at,
               staff: session.doctor_name,
               icon: Stethoscope,
               color: 'bg-purple-500',
               details: session,
             });
+
+            // Add consultation completed event if session has ended
+            if (session.status === 'completed' && session.ended_at) {
+              journeyEvents.push({
+                id: 'consultation-completed',
+                step: step++,
+                title: 'Consultation Completed',
+                description: 'Consultation session ended',
+                module: 'Consultation',
+                location: session.room_name || (session as any).clinic || 'Consultation Room',
+                status: 'completed',
+                timestamp: session.ended_at,
+                staff: session.doctor_name,
+                icon: CheckCircle2,
+                color: 'bg-emerald-500',
+                details: session,
+              });
+            }
           }
         }
       } catch (err) {
@@ -203,7 +260,16 @@ export function VisitDetailModal({ visit: visitProp, visitId: visitIdProp, isOpe
       try {
         const labOrders = await labService.getOrders({ patient: rawVisitData.patient.toString() });
         if (labOrders.results && labOrders.results.length > 0) {
-          const visitLabOrders = labOrders.results.filter((order: any) => order.visit === rawVisitData.id);
+          visitLabOrders = labOrders.results.filter((order: any) => {
+            if (isConsultationSession) {
+              // For consultation sessions, match by date
+              const orderDate = order.ordered_at ? new Date(order.ordered_at).toISOString().split('T')[0] : '';
+              return orderDate === rawVisitData.date;
+            } else {
+              // For regular visits, match by visit ID
+              return order.visit === rawVisitData.id;
+            }
+          });
           if (visitLabOrders.length > 0) {
             const testCount = visitLabOrders.reduce((count: number, order: any) => count + (order.tests?.length || 0), 0);
             journeyEvents.push({
@@ -230,7 +296,16 @@ export function VisitDetailModal({ visit: visitProp, visitId: visitIdProp, isOpe
       try {
         const prescriptions = await pharmacyService.getPrescriptions({ patient: rawVisitData.patient.toString() });
         if (prescriptions.results && prescriptions.results.length > 0) {
-          const visitPrescriptions = prescriptions.results.filter((rx: any) => rx.visit === rawVisitData.id);
+          visitPrescriptions = prescriptions.results.filter((rx: any) => {
+            if (isConsultationSession) {
+              // For consultation sessions, match by date
+              const rxDate = rx.prescribed_at ? new Date(rx.prescribed_at).toISOString().split('T')[0] : '';
+              return rxDate === rawVisitData.date;
+            } else {
+              // For regular visits, match by visit ID
+              return rx.visit === rawVisitData.id;
+            }
+          });
           if (visitPrescriptions.length > 0) {
             const itemCount = visitPrescriptions.reduce((count: number, rx: any) => count + (rx.items?.length || rx.medications?.length || 0), 0);
             journeyEvents.push({
@@ -253,7 +328,134 @@ export function VisitDetailModal({ visit: visitProp, visitId: visitIdProp, isOpe
         // Ignore
       }
 
-      // 7. Visit Completed (if status is completed)
+      // 7. Lab Results Completed (if any tests have results)
+      try {
+        if (visitLabOrders && visitLabOrders.length > 0) {
+          const completedTests = visitLabOrders.flatMap((order: any) =>
+            (order.tests || []).filter((test: any) => test.status === 'results_ready' || test.status === 'verified')
+          );
+          if (completedTests.length > 0) {
+            // Find the latest completion timestamp
+            const latestResult = completedTests.reduce((latest: any, test: any) => {
+              const testTime = new Date(test.verified_at || test.processed_at || test.updated_at);
+              return testTime > new Date(latest.timestamp || '1970-01-01') ? { ...test, timestamp: testTime } : latest;
+            }, {});
+
+            journeyEvents.push({
+              id: 'lab-results-completed',
+              step: step++,
+              title: 'Lab Results Completed',
+              description: `${completedTests.length} test${completedTests.length !== 1 ? 's' : ''} completed`,
+              module: 'Laboratory',
+              location: 'Laboratory',
+              status: 'completed',
+              timestamp: latestResult.timestamp?.toISOString() || latestResult.verified_at || latestResult.processed_at,
+              staff: latestResult.verified_by || latestResult.processed_by || 'Lab Technician',
+              icon: TestTube,
+              color: 'bg-blue-500',
+              details: completedTests,
+            });
+          }
+        }
+      } catch (err) {
+        // Ignore
+      }
+
+      // 8. Radiology Reports Completed (if any studies have reports)
+      try {
+        const radiologyOrders = await radiologyService.getOrders({ patient: rawVisitData.patient.toString() });
+        if (radiologyOrders.results && radiologyOrders.results.length > 0) {
+          const visitRadiologyOrders = radiologyOrders.results.filter((order: any) => {
+            if (isConsultationSession) {
+              // For consultation sessions, match by date
+              const orderDate = order.ordered_at ? new Date(order.ordered_at).toISOString().split('T')[0] : '';
+              return orderDate === rawVisitData.date;
+            } else {
+              // For regular visits, match by visit ID
+              return order.visit === rawVisitData.id;
+            }
+          });
+          if (visitRadiologyOrders.length > 0) {
+            const studyCount = visitRadiologyOrders.reduce((count: number, order: any) => count + (order.studies?.length || 0), 0);
+            journeyEvents.push({
+              id: 'radiology-orders',
+              step: step++,
+              title: 'Radiology Studies Ordered',
+              description: `${studyCount} stud${studyCount !== 1 ? 'ies' : 'y'} ordered`,
+              module: 'Radiology',
+              location: 'Radiology',
+              status: 'completed',
+              timestamp: visitRadiologyOrders[0].ordered_at,
+              staff: (visitRadiologyOrders[0] as any).doctor_name || (visitRadiologyOrders[0] as any).doctor?.name,
+              icon: ScanLine,
+              color: 'bg-indigo-500',
+              details: visitRadiologyOrders,
+            });
+
+            // Check for completed radiology reports
+            const completedStudies = visitRadiologyOrders.flatMap((order: any) =>
+              (order.studies || []).filter((study: any) => study.status === 'reported' || study.status === 'completed')
+            );
+            if (completedStudies.length > 0) {
+              const latestReport = completedStudies.reduce((latest: any, study: any) => {
+                const studyTime = new Date(study.reported_at || study.updated_at);
+                return studyTime > new Date(latest.timestamp || '1970-01-01') ? { ...study, timestamp: studyTime } : latest;
+              }, {});
+
+              journeyEvents.push({
+                id: 'radiology-reports-completed',
+                step: step++,
+                title: 'Radiology Reports Completed',
+                description: `${completedStudies.length} report${completedStudies.length !== 1 ? 's' : ''} completed`,
+                module: 'Radiology',
+                location: 'Radiology',
+                status: 'completed',
+                timestamp: latestReport.timestamp?.toISOString() || latestReport.reported_at || latestReport.updated_at,
+                staff: latestReport.reported_by || 'Radiologist',
+                icon: ScanLine,
+                color: 'bg-teal-500',
+                details: completedStudies,
+              });
+            }
+          }
+        }
+      } catch (err) {
+        // Ignore
+      }
+
+      // 9. Prescriptions Dispensed (if any prescriptions were dispensed)
+      try {
+        if (visitPrescriptions && visitPrescriptions.length > 0) {
+          const dispensedItems = visitPrescriptions.flatMap((rx: any) =>
+            (rx.items || rx.medications || []).filter((item: any) => item.status === 'dispensed' || item.dispensed_at)
+          );
+          if (dispensedItems.length > 0) {
+            const latestDispense = dispensedItems.reduce((latest: any, item: any) => {
+              const dispenseTime = new Date(item.dispensed_at || item.updated_at);
+              return dispenseTime > new Date(latest.timestamp || '1970-01-01') ? { ...item, timestamp: dispenseTime } : latest;
+            }, {});
+
+            journeyEvents.push({
+              id: 'prescriptions-dispensed',
+              step: step++,
+              title: 'Prescriptions Dispensed',
+              description: `${dispensedItems.length} medication${dispensedItems.length !== 1 ? 's' : ''} dispensed`,
+              module: 'Pharmacy',
+              location: 'Pharmacy',
+              status: 'completed',
+              timestamp: latestDispense.timestamp?.toISOString() || latestDispense.dispensed_at || latestDispense.updated_at,
+              staff: latestDispense.dispensed_by || 'Pharmacist',
+              icon: Pill,
+              color: 'bg-emerald-500',
+              details: dispensedItems,
+            });
+          }
+        }
+      } catch (err) {
+        // Ignore
+      }
+
+      // 10. Visit Completed (if status is completed)
       if (rawVisitData.status === 'completed') {
         journeyEvents.push({
           id: 'visit-completed',

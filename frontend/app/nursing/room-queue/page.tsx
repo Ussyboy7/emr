@@ -393,10 +393,9 @@ export default function RoomQueuePage() {
         return;
       }
       
-      // Deactivate queue item (soft delete by setting is_active=false)
-      await apiFetch(`/consultation/queue/${queueItemId}/`, {
-        method: 'PATCH',
-        body: JSON.stringify({ is_active: false }),
+      // Deactivate queue item using the 'call' action endpoint
+      await apiFetch(`/consultation/queue/${queueItemId}/call/`, {
+        method: 'POST',
       });
       
       setPatients(prev => prev.filter(p => p.id !== patient.id));

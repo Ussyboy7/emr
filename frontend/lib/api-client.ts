@@ -256,7 +256,21 @@ export const apiFetch = async <T = unknown>(path: string, options: FetchOptions 
           continue;
         }
 
+        // Try to read response body for error details
+        let responseBody = '';
+        try {
+          responseBody = await response.text();
+        } catch (e) {
+          responseBody = 'Could not read response body';
+        }
+
         // Security: Never expose raw HTTP status codes to prevent information leakage
+        console.error(`API request failed with status ${response.status}`, {
+          url: response.url,
+          status: response.status,
+          statusText: response.statusText,
+          body: responseBody
+        });
         throw new Error(`Request failed. Please try again`);
       }
 

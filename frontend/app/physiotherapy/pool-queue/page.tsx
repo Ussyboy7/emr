@@ -524,7 +524,8 @@ export default function PhysioPoolQueuePage() {
 
       // If there are more sessions to complete, create the next session
       const nextSessionNumber = completedCount + 1;
-      if (nextSessionNumber <= (selectedOrder!.total_sessions || 1)) {
+      // Since we removed total_sessions limit, allow unlimited sessions
+      if (true) {
         // Creating next session in sequence
         const nextSessionPayload = {
           order: selectedOrder!.id,
@@ -583,12 +584,9 @@ export default function PhysioPoolQueuePage() {
     setIsSubmitting(true);
 
     try {
-      const newTotalSessions = (selectedOrder.total_sessions || 1) + additionalSessions;
-
-      // Update the order with new total sessions
-      await physioService.updateOrder(selectedOrder.id, {
-        total_sessions: newTotalSessions
-      });
+      // Note: total_sessions field was removed from backend
+      // Extension functionality is now unlimited - no total limit
+      console.log(`Extending treatment by ${additionalSessions} sessions`);
 
       // If clinical notes provided, add them as a recommendation/note
       if (sessionNotes.trim()) {
@@ -596,7 +594,7 @@ export default function PhysioPoolQueuePage() {
         // For now, we'll just update the order
       }
 
-      toast.success(`Treatment extended to ${newTotalSessions} sessions`);
+      toast.success(`Treatment extended by ${additionalSessions} sessions`);
       setIsExtendTreatmentDialogOpen(false);
       setSelectedOrder(null);
       setAdditionalSessions(1);
@@ -620,7 +618,6 @@ export default function PhysioPoolQueuePage() {
         chief_complaint: newTreatmentData.chiefComplaint,
         treatment_goal: newTreatmentData.treatmentGoal,
         special_instructions: newTreatmentData.specialInstructions,
-        total_sessions: newTreatmentData.totalSessions,
         priority: 'routine' // Default priority for physio-initiated treatments
       } as any);
 
@@ -705,7 +702,7 @@ export default function PhysioPoolQueuePage() {
                                 ? 'bg-orange-500/10 text-orange-600 border-orange-500/30'
                                 : 'bg-blue-500/10 text-blue-600 border-blue-500/30'
                             }`}>
-                              {order.sessions_completed || 0}/{order.total_sessions || 1} sessions
+                              {order.sessions_completed || 0} sessions completed
                             </Badge>
                             {order.diagnosis && (
                               <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{order.diagnosis}</Badge>
@@ -1026,7 +1023,7 @@ export default function PhysioPoolQueuePage() {
                       </Label>
                       <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-md p-3">
                         <p className="text-sm text-blue-700 dark:text-blue-300">
-                          <strong>Session {selectedOrder.sessions_completed ? selectedOrder.sessions_completed + 1 : 1} of {selectedOrder.total_sessions || 1}</strong> is currently active.
+                          <strong>Session {selectedOrder.sessions_completed ? selectedOrder.sessions_completed + 1 : 1}</strong> is currently active.
                         </p>
                         <div className="mt-2 text-xs space-y-1">
                           <p>• Click "Continue Session" to record treatment activities in real-time</p>
@@ -1059,7 +1056,7 @@ export default function PhysioPoolQueuePage() {
                     </div>
                     {selectedOrder.sessions_completed > 0 && (
                       <div className="mt-2 text-xs text-muted-foreground">
-                        {selectedOrder.sessions_completed} of {selectedOrder.total_sessions || 1} sessions completed
+                        {selectedOrder.sessions_completed || 0} sessions completed
                       </div>
                     )}
                   </div>
@@ -1159,7 +1156,8 @@ export default function PhysioPoolQueuePage() {
                                 const existingSessions = await physioService.getSessions({ order: selectedOrder.id });
                                 const nextSessionNumber = (selectedOrder.sessions_completed || 0) + 1;
 
-                                if (nextSessionNumber <= (selectedOrder.total_sessions || 1)) {
+                                // Since we removed total_sessions limit, allow unlimited sessions
+                                if (true) {
                                   // Create new session
                                     const sessionPayload = {
                                       order: selectedOrder.id,
@@ -1254,7 +1252,7 @@ export default function PhysioPoolQueuePage() {
                         </>
                       )}
                       {/* Schedule next session if treatment is ongoing but current session completed */}
-                      {selectedOrder.status === 'completed' && (selectedOrder.sessions_completed || 0) < (selectedOrder.total_sessions || 1) && (
+                      {selectedOrder.status === 'completed' && (
                         <Button
                           onClick={() => { setIsScheduleNextDialogOpen(true); setIsViewDialogOpen(false); }}
                           className="bg-purple-600 hover:bg-purple-700 text-white shadow-sm"
@@ -1377,7 +1375,7 @@ export default function PhysioPoolQueuePage() {
                     <div>
                       <p className="font-medium">{selectedOrder.patient_name}</p>
                       <p className="text-xs text-muted-foreground">
-                        Session {(selectedOrder.sessions_completed || 0) + 1} of {selectedOrder.total_sessions || 1}
+                        Session {(selectedOrder.sessions_completed || 0) + 1}
                       </p>
                     </div>
                   </div>
@@ -1447,7 +1445,7 @@ export default function PhysioPoolQueuePage() {
                       <div>
                         <p className="font-medium">{selectedOrder.patient_name}</p>
                         <p className="text-sm text-muted-foreground">
-                          Currently: {selectedOrder.sessions_completed || 0} of {selectedOrder.total_sessions || 1} sessions completed
+                          Currently: {selectedOrder.sessions_completed || 0} sessions completed
                         </p>
                       </div>
                     </div>
@@ -1477,7 +1475,7 @@ export default function PhysioPoolQueuePage() {
                       </SelectContent>
                     </Select>
                     <p className="text-sm text-muted-foreground">
-                      New total: {(selectedOrder.total_sessions || 1) + additionalSessions} sessions
+                      New total: {additionalSessions} additional sessions
                     </p>
                   </div>
 
@@ -1633,7 +1631,7 @@ export default function PhysioPoolQueuePage() {
                     </div>
                     <div>
                       <p className="text-xs text-muted-foreground mb-1">Session Info</p>
-                      <p className="font-medium">Session {currentSession.session_number} of {selectedOrder.total_sessions || 1}</p>
+                      <p className="font-medium">Session {currentSession.session_number}</p>
                       <p className="text-sm text-muted-foreground">Treatment in Progress</p>
                     </div>
                   </div>
@@ -1830,7 +1828,7 @@ export default function PhysioPoolQueuePage() {
                     </div>
                     <div>
                       <p className="text-xs text-muted-foreground mb-1">Session Info</p>
-                      <p className="font-medium">Session {currentSession.session_number} of {selectedOrder.total_sessions || 1}</p>
+                      <p className="font-medium">Session {currentSession.session_number}</p>
                       <p className="text-sm text-muted-foreground">Completing Treatment Session</p>
                     </div>
                   </div>
@@ -2105,7 +2103,7 @@ export default function PhysioPoolQueuePage() {
                     </div>
                     <div>
                       <p className="text-xs text-muted-foreground mb-1">Session Info</p>
-                      <p className="font-medium">Session {(selectedOrder.sessions_completed || 0) + 1} of {selectedOrder.total_sessions || 1}</p>
+                      <p className="font-medium">Session {(selectedOrder.sessions_completed || 0) + 1}</p>
                       <p className="text-sm text-muted-foreground">
                         {(selectedOrder.sessions_completed || 0) === 0 ? 'Comprehensive Initial Assessment' : 'Follow-up Treatment Session'}
                       </p>

@@ -707,7 +707,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       id: session.id?.toString() || '',
       date: formatDate(session.started_at),
       doctor: session.doctor_name || currentUser?.name || 'Unknown Doctor',
-      clinic: session.clinic_name || room?.clinic_name || 'GOPD',
+      clinic: session.clinic_name || (room as any)?.clinic_name || 'GOPD',
       sessionId: session.session_id || '',
       status: session.status || 'completed',
       started_at: session.started_at,
@@ -2666,67 +2666,32 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         throw new Error('No active session to end');
       }
 
-      // Step 1: Save all medical notes and data to the session before ending
-      const sessionUpdateData: any = {
-        history_of_presenting_illness: medicalNotes.historyOfPresentIllness || '',
-        physical_examination: medicalNotes.physicalExamination || '',
-        assessment: medicalNotes.assessment || '',
-        plan: medicalNotes.plan || '',
-        notes: '',
-      };
-
-      // Diagnoses are now saved separately to the Diagnosis model
-
-      // Add follow-up information to notes if scheduled
-      if (followUpRequired && followUpDate && followUpReason) {
-        const followUpNote = `\n\nFollow-up Appointment:\nDate: ${followUpDate}\nReason: ${followUpReason}`;
-        sessionUpdateData.notes = sessionUpdateData.notes 
-          ? `${sessionUpdateData.notes}${followUpNote}`
-          : followUpNote.trim();
-        
-        // Create follow-up appointment
-        if (currentPatient && sessionId) {
-          try {
-            const patientId = typeof currentPatient.id === 'string' ? parseInt(currentPatient.id, 10) : currentPatient.id;
-            const doctorId = undefined; // Doctor ID can be set later or obtained from room/context
-
-            await appointmentService.createAppointment({
-              patient: patientId,
-              doctor: doctorId,
-              clinic: undefined, // Clinic can be obtained from room context if needed
-              // Don't specify room for follow-up appointments to avoid validation issues
-              appointment_type: 'follow_up',
-              appointment_date: followUpDate,
-              appointment_time: '09:00', // Default time, can be made configurable
-              duration_minutes: 30,
-              reason: followUpReason,
-              notes: `Follow-up from consultation session ${sessionId}. ${sessionUpdateData.notes || ''}`,
-            });
-
-            toast.success('Follow-up appointment created successfully');
-          } catch (apptError: any) {
-            console.error('Failed to create follow-up appointment:', apptError);
-            toast.error('Failed to create follow-up appointment: ' + (apptError.message || 'Unknown error'));
-            // Continue - follow-up info is still saved in session notes as fallback
-          }
+      // Step 1: Handle follow-up appointment if needed (separate from session)
+      if (followUpRequired && followUpDate && followUpReason && currentPatient && sessionId) {
+        try {
+          const patientId = typeof currentPatient.id === 'string' ? parseInt(currentPatient.id, 10) : currentPatient.id;
+          await appointmentService.createAppointment({
+            patient: patientId,
+            doctor: undefined,
+            clinic: undefined,
+            appointment_type: 'follow_up',
+            appointment_date: followUpDate,
+            appointment_time: '09:00',
+            duration_minutes: 30,
+            reason: followUpReason,
+            notes: `Follow-up from consultation session ${sessionId}. Reason: ${followUpReason}`,
+          });
+          console.log('Follow-up appointment created');
+        } catch (apptError: any) {
+          console.warn('Could not create follow-up appointment:', apptError?.message);
         }
       }
 
-      // Update session with all medical data
-      try {
-        if (!sessionId) throw new Error('Session ID is required');
-        await consultationService.updateSession(sessionId, sessionUpdateData);
-        console.log('Session data saved successfully');
-      } catch (err) {
-        console.error('Error saving session data:', err);
-        toast.error('Failed to save session data. Please try again.');
-        setIsEnding(false);
-        return;
-      }
-
       // Step 2: Deactivate queue item if patient was in queue
+      // Now safe with the new conditional unique constraint
       if (currentPatient?.id) {
         try {
+          console.log('Attempting to deactivate queue item for patient:', currentPatient.id);
           const queueData = await consultationService.getQueue({
             room: parseInt(roomId),
             patient: typeof currentPatient.id === 'string' ? parseInt(currentPatient.id) : currentPatient.id,
@@ -2735,26 +2700,57 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           
           if (queueData.results && queueData.results.length > 0) {
             const queueItem = queueData.results[0];
-            await apiFetch(`/consultation/queue/${queueItem.id}/`, {
-              method: 'PATCH',
-              body: JSON.stringify({ is_active: false }),
+            console.log('Found queue item to deactivate:', {
+              id: queueItem.id,
+              patient: queueItem.patient,
+              room: queueItem.room,
+              is_active: queueItem.is_active,
             });
-            console.log('Queue item deactivated');
+            
+            try {
+              console.log('Sending POST request to call/deactivate queue item:', `/consultation/queue/${queueItem.id}/call/`);
+              await apiFetch(`/consultation/queue/${queueItem.id}/call/`, {
+                method: 'POST',
+              });
+              console.log('Queue item deactivated successfully');
+            } catch (deactivateErr: any) {
+              // Log but don't fail - queue deactivation is not critical
+              console.warn('Could not deactivate queue item (non-critical):', {
+                queueItemId: queueItem.id,
+                error: deactivateErr?.message,
+              });
+            }
+          } else {
+            console.log('No active queue items found for patient');
           }
         } catch (err) {
-          console.error('Error deactivating queue item:', err);
-          // Don't fail the entire process if queue deactivation fails
+          console.error('Error fetching queue items:', err);
+          // Don't fail the entire process if queue lookup fails
         }
       }
 
       // Step 3: End the session using the dedicated endpoint
       try {
         if (!sessionId) throw new Error('Session ID is required');
+        console.log('Ending session with ID:', sessionId);
         await consultationService.endSession(sessionId);
         console.log('Session ended successfully');
       } catch (err: any) {
-        console.error('Error ending session:', err);
-        throw new Error(err.message || 'Failed to end session');
+        console.error('Error ending session:', {
+          sessionId,
+          error: err,
+          message: err?.message,
+          response: err?.response,
+          status: err?.status,
+        });
+        // Provide more helpful error message
+        let errorMessage = 'Failed to end session';
+        if (err?.message?.includes('404')) {
+          errorMessage = 'Session not found - it may have already been completed';
+        } else if (err?.message?.includes('400')) {
+          errorMessage = 'Invalid session state - session may already be completed';
+        }
+        throw new Error(errorMessage);
       }
       
       // Generate PDF for the session
@@ -2764,7 +2760,11 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           description: `Session ${sessionPDF.id} saved to patient history`,
           action: {
             label: "View",
-            onClick: () => console.log("View PDF", sessionPDF.pdfUrl)
+            onClick: () => {
+              // Open session details in a new view or download
+              // For now, navigate to consultation history where the session can be viewed
+              window.open(`/consultation/history?session=${sessionPDF.id}`, '_blank');
+            }
           }
         });
       }
