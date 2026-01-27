@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, Suspense } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -48,77 +48,101 @@ function NewVisitPageContent() {
   const searchParams = useSearchParams();
   const patientIdParam = searchParams.get('patient');
   
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!!patientIdParam);
+  const [searching, setSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [authError, setAuthError] = useState<unknown | null>(null);
   useAuthRedirect(authError);
-  
+
   const [patients, setPatients] = useState<any[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectedPatient, setSelectedPatient] = useState<any | null>(null);
   const [patientSearch, setPatientSearch] = useState('');
   const [isSuccessDialogOpen, setIsSuccessDialogOpen] = useState(false);
   const [createdVisitData, setCreatedVisitData] = useState<{ visitId: string; patientName: string; date: string; time: string; location: string; clinic: string } | null>(null);
-  
+
   const [formData, setFormData] = useState({
-    patientId: patientIdParam || '', 
-    visitType: '', 
-    clinic: '', 
+    patientId: patientIdParam || '',
+    visitType: '',
+    clinic: '',
     location: '',
-    visitDate: new Date().toISOString().split('T')[0], 
+    visitDate: new Date().toISOString().split('T')[0],
     visitTime: new Date().toTimeString().slice(0, 5),
     notes: '',
   });
 
-  // Load patients from API
+  const mapPatient = useCallback((p: any) => ({
+    id: p.patient_id || String(p.id),
+    numericId: p.id,
+    name: p.full_name || `${p.first_name || ''} ${p.surname || ''}`.trim() || 'Unknown',
+    age: p.age || 0,
+    gender: p.gender === 'male' ? 'Male' : 'Female',
+    bloodGroup: p.blood_group || '',
+    allergies: p.allergies ? String(p.allergies).split(/[,\n]/).map((a: string) => a.trim()).filter(Boolean) : [],
+  }), []);
+
+  // Preselect patient from ?patient= URL
   useEffect(() => {
-    const loadPatients = async () => {
+    if (!patientIdParam) {
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
       try {
         setLoading(true);
         setError(null);
-
-        const result = await patientService.getPatients({} as any);
-        setPatients(result.results.map(p => ({
-          id: p.patient_id || String(p.id),
-          numericId: p.id,
-          name: p.full_name || `${p.first_name} ${p.surname}`,
-          age: p.age || 0,
-          gender: p.gender === 'male' ? 'Male' : 'Female',
-          bloodGroup: p.blood_group || '',
-          allergies: p.allergies ? p.allergies.split(/[,\n]/).map(a => a.trim()).filter(a => a) : [],
-        })));
-
-        // If patientIdParam is provided, select that patient
-        if (patientIdParam) {
-          const patient = result.results.find(
-            p => (p.patient_id || String(p.id)) === patientIdParam || String(p.id) === patientIdParam
-          );
-          if (patient) {
-            setSelectedPatient({
-              id: patient.patient_id || String(patient.id),
-              numericId: patient.id,
-              name: patient.full_name || `${patient.first_name} ${patient.surname}`,
-              age: patient.age || 0,
-              gender: patient.gender === 'male' ? 'Male' : 'Female',
-              bloodGroup: patient.blood_group || '',
-              allergies: [],
-            });
-          }
+        const result = await patientService.getPatients({ search: patientIdParam, page_size: 10 });
+        if (cancelled) return;
+        const p = result.results.find(
+          (r: any) => (r.patient_id || String(r.id)) === patientIdParam || String(r.id) === patientIdParam
+        );
+        if (p) {
+          setSelectedPatient(mapPatient(p));
+          setFormData(prev => ({ ...prev, patientId: patientIdParam }));
         }
       } catch (err) {
-        console.error('Error loading patients:', err);
-        if (isAuthenticationError(err)) {
-          setAuthError(err);
-        } else {
-          setError('Failed to load patients. Please try again.');
-        }
+        if (cancelled) return;
+        console.error('Error loading patient:', err);
+        if (isAuthenticationError(err)) setAuthError(err);
+        else setError('Failed to load patient.');
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
-    };
+    })();
+    return () => { cancelled = true; };
+  }, [patientIdParam, mapPatient]);
 
-    loadPatients();
-  }, [patientIdParam]);
+  // Backend search: debounced by patientSearch
+  const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    const q = patientSearch.trim();
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+      searchTimeoutRef.current = null;
+    }
+    if (!q) {
+      setPatients([]);
+      setSearching(false);
+      return;
+    }
+    setSearching(true);
+    searchTimeoutRef.current = setTimeout(async () => {
+      searchTimeoutRef.current = null;
+      try {
+        const result = await patientService.getPatients({ search: q, page_size: 50 });
+        setPatients((result.results || []).map(mapPatient));
+      } catch (err) {
+        if (isAuthenticationError(err)) setAuthError(err);
+        else setPatients([]);
+      } finally {
+        setSearching(false);
+      }
+    }, 300);
+    return () => {
+      if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+    };
+  }, [patientSearch, mapPatient]);
 
   const handleInputChange = (field: string, value: string) => setFormData(prev => ({ ...prev, [field]: value }));
 
@@ -202,11 +226,6 @@ function NewVisitPageContent() {
     }
   };
 
-  const filteredPatients = patients.filter(p => 
-    p.name.toLowerCase().includes(patientSearch.toLowerCase()) || 
-    (p.id && p.id.toLowerCase().includes(patientSearch.toLowerCase()))
-  );
-
   const selectedVisitType = visitTypes.find(v => v.value === formData.visitType);
 
   // Loading state
@@ -272,8 +291,20 @@ function NewVisitPageContent() {
                         className="pl-10" 
                       />
                     </div>
-                    <div className="space-y-2 max-h-[200px] overflow-y-auto">
-                      {filteredPatients.map(patient => (
+                    <div className="space-y-2 max-h-[280px] overflow-y-auto">
+                      {searching && (
+                        <div className="flex items-center justify-center gap-2 py-6 text-muted-foreground">
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          <span>Searching...</span>
+                        </div>
+                      )}
+                      {!searching && patients.length === 0 && patientSearch.trim() && (
+                        <p className="text-center text-muted-foreground py-6">No patients found. Try a different search.</p>
+                      )}
+                      {!searching && patients.length === 0 && !patientSearch.trim() && (
+                        <p className="text-center text-muted-foreground py-6">Type to search by name or patient ID</p>
+                      )}
+                      {!searching && patients.map(patient => (
                         <div 
                           key={patient.id} 
                           onClick={() => handlePatientSelect(patient.id)} 
@@ -299,9 +330,6 @@ function NewVisitPageContent() {
                           )}
                         </div>
                       ))}
-                      {filteredPatients.length === 0 && (
-                        <p className="text-center text-muted-foreground py-4">No patients found</p>
-                      )}
                     </div>
                   </>
                 ) : (
