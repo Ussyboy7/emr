@@ -285,12 +285,8 @@ class PharmacyService {
     page_size?: number;
   }): Promise<{ results: Dispense[]; count: number }> {
     const query = buildQueryString(params || {});
-    // Try dispenses endpoint first, fallback to history
-    try {
-      return await apiFetch<{ results: Dispense[]; count: number }>(`/pharmacy/dispenses/${query}`);
-    } catch {
-      return await apiFetch<{ results: Dispense[]; count: number }>(`/pharmacy/history/${query}`);
-    }
+    const url = query ? `/pharmacy/history/${query}` : '/pharmacy/history/';
+    return await apiFetch<{ results: Dispense[]; count: number }>(url);
   }
 
   /**
