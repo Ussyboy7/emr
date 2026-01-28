@@ -1165,7 +1165,7 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
                       <SelectContent>
                         {selectedPhysioSessions.map((s, idx) => (
                           <SelectItem key={s.id ?? `s-${idx}`} value={String(s.id ?? '')}>
-                            Session {s.session_number ?? '—'} — {s.scheduled_at ? new Date(s.scheduled_at).toLocaleString() : (s.id != null ? `PHY-${String(s.id).padStart(6, '0')}` : '—')}
+                            Session {s.session_number ?? '—'} {s.status === 'completed' ? '(Completed)' : ''} — {s.scheduled_at ? new Date(s.scheduled_at).toLocaleString() : (s.id != null ? `PHY-${String(s.id).padStart(6, '0')}` : '—')}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -1887,9 +1887,14 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
                                 setLoadingPhysioSessions(true);
                                 try {
                                   const sessions = await physioService.getSessions({ order: order.id });
-                                  setSelectedPhysioSessions(sessions.results || []);
+                                  const completedSessions = (sessions.results || []).filter((s: any) => s.status === 'completed');
+                                  setSelectedPhysioSessions(completedSessions.length > 0 ? completedSessions : (sessions.results || []));
                                   if (sessions.results && sessions.results.length > 0) {
-                                    setSelectedPhysioSession(sessions.results[0]);
+                                    // Prefer completed sessions, otherwise show the first one
+                                    const sessionToShow = completedSessions.length > 0 
+                                      ? completedSessions[0] 
+                                      : sessions.results[0];
+                                    setSelectedPhysioSession(sessionToShow);
                                   }
                                 } catch (err) {
                                   console.error('Error loading physio sessions:', err);
