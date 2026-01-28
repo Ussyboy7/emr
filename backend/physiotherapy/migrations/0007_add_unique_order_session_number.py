@@ -3,6 +3,35 @@
 from django.db import migrations, models
 
 
+def remove_duplicate_sessions(apps, schema_editor):
+    """Remove duplicate sessions before adding unique constraint."""
+    PhysioSession = apps.get_model('physiotherapy', 'PhysioSession')
+    from django.db.models import Count
+    
+    # Find duplicates: same order_id and session_number
+    duplicates = (
+        PhysioSession.objects
+        .values('order_id', 'session_number')
+        .annotate(count=Count('id'))
+        .filter(count__gt=1)
+    )
+    
+    # For each duplicate pair, keep the first one (lowest id), delete the rest
+    for dup in duplicates:
+        sessions = PhysioSession.objects.filter(
+            order_id=dup['order_id'],
+            session_number=dup['session_number']
+        ).order_by('id')
+        
+        # Keep the first, delete the rest
+        if sessions.count() > 1:
+            first_id = sessions.first().id
+            PhysioSession.objects.filter(
+                order_id=dup['order_id'],
+                session_number=dup['session_number']
+            ).exclude(id=first_id).delete()
+
+
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -10,6 +39,7 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
+        migrations.RunPython(remove_duplicate_sessions, migrations.RunPython.noop),
         migrations.AddConstraint(
             model_name='physiosession',
             constraint=models.UniqueConstraint(fields=('order', 'session_number'), name='unique_order_session_number'),

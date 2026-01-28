@@ -26,7 +26,7 @@ class LabTemplateViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     serializer_class = LabTemplateSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['sample_type', 'is_active']
+    filterset_fields = ['sample_type', 'is_active', 'code']
     search_fields = ['name', 'code']
     ordering_fields = ['name', 'code']
     ordering = ['name']
@@ -173,25 +173,35 @@ class LabOrderViewSet(viewsets.ModelViewSet):
             return Response({'error': 'No tests specified'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            tests = order.tests.filter(id__in=test_ids)
-
-            # One Lab ID (BT-YY-NNNN) for this collection – shared by all tests
-            current_year = timezone.now().year % 100
-            clinic_code = 'BT'
-            year_prefix = f"{clinic_code}-{current_year:02d}-"
-            max_lab_number = LabTest.objects.filter(
-                lab_number__startswith=year_prefix
-            ).aggregate(Max('lab_number'))['lab_number__max']
-
-            if max_lab_number:
-                try:
-                    next_serial = int(max_lab_number.split('-')[-1]) + 1
-                except (ValueError, IndexError):
-                    next_serial = 1
+            # Ensure test_ids are integers
+            test_ids = [int(tid) for tid in test_ids]
+            
+            # One Lab ID per order: refresh order from DB (single source of truth)
+            order.refresh_from_db()
+            tests = list(order.tests.filter(id__in=test_ids))
+            
+            if order.lab_number and order.lab_number.strip():
+                shared_lab_number = order.lab_number
             else:
-                next_serial = 1
+                # Generate new BT-YY-NNNN and save on the order
+                current_year = timezone.now().year % 100
+                clinic_code = 'BT'
+                year_prefix = f"{clinic_code}-{current_year:02d}-"
+                max_lab_number = LabTest.objects.filter(
+                    lab_number__startswith=year_prefix
+                ).aggregate(Max('lab_number'))['lab_number__max']
 
-            shared_lab_number = f"{clinic_code}-{current_year:02d}-{next_serial:04d}"
+                if max_lab_number:
+                    try:
+                        next_serial = int(max_lab_number.split('-')[-1]) + 1
+                    except (ValueError, IndexError):
+                        next_serial = 1
+                else:
+                    next_serial = 1
+
+                shared_lab_number = f"{clinic_code}-{current_year:02d}-{next_serial:04d}"
+                order.lab_number = shared_lab_number
+                order.save(update_fields=['lab_number'])
 
             updated_tests = []
             for test in tests:

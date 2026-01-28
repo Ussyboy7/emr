@@ -79,7 +79,7 @@ export default function CompletedTestsPage() {
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [dateFilter, setDateFilter] = useState('today');
+  const [dateFilter, setDateFilter] = useState('all');
   const [clinicFilter, setClinicFilter] = useState('all');
   const [genderFilter, setGenderFilter] = useState('all');
 
@@ -335,11 +335,12 @@ export default function CompletedTestsPage() {
     setCurrentPage(1);
   }, [searchQuery, statusFilter, clinicFilter, dateFilter, genderFilter, itemsPerPage]);
 
+  // Use filteredTests so stats match the visible list (date, search, clinic, gender, status)
   const stats = {
-    total: tests.length,
-    normal: tests.filter(t => t.overallStatus === 'Normal').length,
-    abnormal: tests.filter(t => t.overallStatus === 'Abnormal').length,
-    critical: tests.filter(t => t.overallStatus === 'Critical').length,
+    total: filteredTests.length,
+    normal: filteredTests.filter(t => t.overallStatus === 'Normal').length,
+    abnormal: filteredTests.filter(t => t.overallStatus === 'Abnormal').length,
+    critical: filteredTests.filter(t => t.overallStatus === 'Critical').length,
   };
 
   const getOverallStatusBadge = (status: string) => {

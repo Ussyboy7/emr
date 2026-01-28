@@ -30,11 +30,18 @@ class MedicationInventorySerializer(serializers.ModelSerializer):
 class PrescriptionItemSerializer(serializers.ModelSerializer):
     """Serializer for PrescriptionItem model."""
     
-    medication_name = serializers.CharField(source='medication.name', read_only=True)
-    medication_code = serializers.CharField(source='medication.code', read_only=True)
+    medication_name = serializers.SerializerMethodField()
+    medication_code = serializers.SerializerMethodField()
     medication_details = serializers.SerializerMethodField()
     prescription = serializers.PrimaryKeyRelatedField(read_only=True)  # Make prescription read-only for nested writes
 
+    def get_medication_name(self, obj):
+        """Get medication name safely."""
+        return obj.medication.name if obj.medication else None
+
+    def get_medication_code(self, obj):
+        """Get medication code safely."""
+        return obj.medication.code if obj.medication else None
 
     def get_medication_details(self, obj):
         """Get medication details including current stock."""

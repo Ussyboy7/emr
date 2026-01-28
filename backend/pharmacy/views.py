@@ -184,7 +184,7 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
     ordering = ['-prescribed_at']
     
     def get_queryset(self):
-        return Prescription.objects.all().select_related('patient', 'doctor', 'visit', 'consultation_session', 'created_by').prefetch_related('medications')
+        return Prescription.objects.all().select_related('patient', 'doctor', 'visit', 'consultation_session', 'created_by').prefetch_related('medications__medication')
     
     def perform_update(self, serializer):
         """Update prescription and log audit."""

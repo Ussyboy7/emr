@@ -77,6 +77,7 @@ interface LabTest {
 interface LabOrder {
   id: string;
   orderId: string;
+  lab_number?: string;  // One Lab ID per order (BT-YY-NNNN)
   patient: {
     id: string;
     name: string;
@@ -99,6 +100,7 @@ const transformOrder = (apiOrder: ApiLabOrder): LabOrder => {
   return {
     id: apiOrder.id.toString(),
     orderId: apiOrder.order_id,
+    lab_number: (apiOrder as any).lab_number,
     patient: {
       id: apiOrder.patient.id?.toString() || '',
       name: apiOrder.patient.name || 'Unknown',
@@ -143,6 +145,7 @@ const transformTest = (apiTest: ApiLabTest): LabTest => {
     status: transformLabTestStatus(apiTest.status) as LabTest['status'],
     processingMethod: apiTest.processing_method ? transformProcessingMethod(apiTest.processing_method) as 'In-house' | 'Outsourced' : undefined,
     outsourcedLab: apiTest.outsourced_lab,
+    lab_number: apiTest.lab_number,
     collectedBy: apiTest.collected_by_name || apiTest.collected_by?.toString(),
     collectedAt: apiTest.collected_at,
     processedBy: apiTest.processed_by_name || apiTest.processed_by?.toString(),
@@ -697,6 +700,13 @@ export default function LabOrdersPage() {
   const [resultValues, setResultValues] = useState<Record<string, string>>({});
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
 
+  // Templates from API for result entry (params from Test Templates / normal_range)
+  const [apiTemplatesByCode, setApiTemplatesByCode] = useState<Record<string, { name: string; fields: { name: string; unit: string; normalRange: string }[] }>>({});
+
+  // Resolve template for result entry: API (from Test Templates) first, then hardcoded fallback
+  const getTemplateForCode = (code: string): { name: string; fields: { name: string; unit: string; normalRange: string }[] } | undefined =>
+    apiTemplatesByCode[code] || testTemplates[code];
+
   // Calculate order progress percentage
   const getOrderProgress = (tests: LabTest[]) => {
     if (!tests || tests.length === 0) return 0;
@@ -861,6 +871,29 @@ export default function LabOrdersPage() {
   useEffect(() => {
     loadOrders();
   }, [loadOrders]);
+
+  // Load Test Templates from API for result entry (so FBC, etc. use template parameters)
+  const loadTemplatesForResults = useCallback(async () => {
+    try {
+      const { results } = await labService.getTemplates({ page_size: 1000 });
+      const next: Record<string, { name: string; fields: { name: string; unit: string; normalRange: string }[] }> = {};
+      for (const t of results) {
+        const nr = (t as any).normal_range;
+        if (!nr || typeof nr !== 'object') continue;
+        const fields = Object.entries(nr).map(([name, v]: [string, any]) => {
+          let normalRange = v.range || v.normal_range || v.normalRange || v.normalRangeText || '';
+          if (!normalRange && v.min != null && v.max != null) normalRange = `${v.min}-${v.max}`;
+          if (!normalRange && v.normalRangeMin != null && v.normalRangeMax != null) normalRange = `${v.normalRangeMin}-${v.normalRangeMax}`;
+          return { name, unit: v.unit || '', normalRange };
+        });
+        if (fields.length) next[t.code] = { name: t.name, fields };
+      }
+      setApiTemplatesByCode(prev => ({ ...prev, ...next }));
+    } catch (e) {
+      console.warn('Could not load lab templates for result entry, using fallbacks:', e);
+    }
+  }, []);
+  useEffect(() => { loadTemplatesForResults(); }, [loadTemplatesForResults]);
 
   const stats = useMemo(() => {
     const allTests = orders.flatMap(o => o.tests);
@@ -1040,7 +1073,7 @@ export default function LabOrdersPage() {
     if (!selectedOrder || !selectedTest) return;
     
     if (resultEntryMode === 'values') {
-      const template = testTemplates[selectedTest.code];
+      const template = getTemplateForCode(selectedTest.code);
       if (template) {
         const allFieldsFilled = template.fields.every(f => resultValues[f.name]);
         if (!allFieldsFilled) {
@@ -1127,28 +1160,15 @@ export default function LabOrdersPage() {
 
   const openViewDialog = (order: LabOrder) => { setSelectedOrder(order); setIsViewDialogOpen(true); };
   
-  const openCollectDialog = async (test: LabTest) => {
+  const openCollectDialog = (test: LabTest) => {
     setSelectedTest(test);
     // Pre-select the clicked test
     setSelectedTestsForCollection([test.id]);
     // Pre-select Venipuncture for blood samples
     setSelectedMethod(test.sampleType === 'Blood' ? 'Venipuncture' : '');
     setCollectionNotes('');
-
-    try {
-      // Generate lab number when dialog opens
-      const updatedTest = await labService.generateLabNumber(parseInt(selectedOrder!.id), parseInt(test.id));
-      // Update the selected test with the generated lab number, preserving existing fields
-      setSelectedTest({
-        ...test,
-        lab_number: updatedTest.lab_number,
-      });
-    } catch (error) {
-      console.error('Failed to generate Lab ID:', error);
-      toast.error('Failed to generate Lab ID');
-    }
-
-    setIsCollectDialogOpen(true); 
+    // Lab ID is assigned only on Collect (one per order); reuse if order already has one
+    setIsCollectDialogOpen(true);
   };
   
   const openProcessDialog = (test: LabTest) => { 
@@ -1163,7 +1183,7 @@ export default function LabOrdersPage() {
     
     // Initialize result values - pre-fill existing results if reworking a rejected test
     const initial: Record<string, string> = {};
-    const template = testTemplates[test.code];
+    const template = getTemplateForCode(test.code);
     
     if (isRework && test.results) {
       // Pre-fill with existing results for rework
@@ -1696,16 +1716,26 @@ export default function LabOrdersPage() {
                       )}
                     </div>
 
-                    {selectedTest.lab_number && (
-                      <div className="mt-2 text-sm">
-                        <p className="font-mono text-blue-600 dark:text-blue-400">Lab ID: {selectedTest.lab_number}</p>
-                        {selectedTestsForCollection.length > 1 && (
-                          <p className="text-xs text-muted-foreground mt-1">
-                            All {selectedTestsForCollection.length} tests will share this Lab ID
-                          </p>
-                        )}
-                      </div>
-                    )}
+                    <div className="mt-2 text-sm">
+                      {(() => {
+                        const existingLabId = selectedOrder.lab_number || selectedOrder.tests.find(t => t.lab_number)?.lab_number;
+                        return existingLabId ? (
+                          <>
+                            <p className="font-mono text-blue-600 dark:text-blue-400">Lab ID: {existingLabId}</p>
+                            <p className="text-xs text-muted-foreground mt-1">
+                              One per order. New tests will use this same Lab ID.
+                            </p>
+                          </>
+                        ) : (
+                          <p className="text-muted-foreground">Lab ID will be assigned when you collect (one per order)</p>
+                        );
+                      })()}
+                      {selectedTestsForCollection.length > 1 && (
+                        <p className="text-xs text-muted-foreground mt-1">
+                          All {selectedTestsForCollection.length} tests will share the same Lab ID
+                        </p>
+                      )}
+                    </div>
                   </div>
                 </div>
 
@@ -1992,8 +2022,9 @@ export default function LabOrdersPage() {
                       </CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-3">
-                      {testTemplates[selectedTest.code] ? (
-                        testTemplates[selectedTest.code].fields.map(field => {
+                      {(() => {
+                        const tpl = getTemplateForCode(selectedTest.code);
+                        return tpl ? tpl.fields.map(field => {
                           const value = resultValues[field.name] || '';
                           const numValue = parseFloat(value);
                           let validationStatus: 'normal' | 'warning' | 'critical' = 'normal';
@@ -2047,8 +2078,7 @@ export default function LabOrdersPage() {
                               )}
                             </div>
                           );
-                        })
-                      ) : (
+                        }) : (
                         <div className="space-y-2">
                           <Label>Result Value</Label>
                           <Input
@@ -2057,7 +2087,8 @@ export default function LabOrdersPage() {
                             placeholder="Enter result..."
                           />
                         </div>
-                      )}
+                      );
+                    })()}
                     </CardContent>
                   </Card>
                 ) : (

@@ -6,6 +6,7 @@ import { apiFetch, buildQueryString } from '../api-client';
 export interface LabOrder {
   id: number;
   order_id: string;
+  lab_number?: string;  // One Lab ID per order (BT-YY-NNNN)
   patient: {
     id: number;
     name: string;

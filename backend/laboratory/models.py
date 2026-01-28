@@ -65,6 +65,9 @@ class LabOrder(models.Model):
     clinic = models.CharField(max_length=100, blank=True)
     clinical_notes = models.TextField(blank=True)
     
+    # One Lab ID (BT-YY-NNNN) per order; set on first sample collection, reused for all tests
+    lab_number = models.CharField(max_length=20, blank=True, null=True, db_index=True)
+    
     ordered_at = models.DateTimeField(auto_now_add=True)
     created_by = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, related_name='created_lab_orders')
     
