@@ -20,29 +20,51 @@ import { apiFetch } from '@/lib/api-client';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { PatientAvatar } from '@/components/PatientAvatar';
+import { VitalsDetailModal } from '@/components/VitalsDetailModal';
 import { getOrganizationHeader } from '@/lib/constants/organization';
 
 // Utility functions
 const formatDate = (dateString: string | undefined): string => {
-  if (!dateString) return 'N/A';
+  if (!dateString) return '';
   try {
     const date = new Date(dateString);
-    if (isNaN(date.getTime())) return 'Invalid Date';
+    if (isNaN(date.getTime())) return '';
     return date.toLocaleDateString();
   } catch {
-    return 'Invalid Date';
+    return '';
   }
 };
 
 const formatTime = (dateString: string | undefined): string => {
-  if (!dateString) return 'N/A';
+  if (!dateString) return '';
   try {
     const date = new Date(dateString);
-    if (isNaN(date.getTime())) return 'Invalid Time';
+    if (isNaN(date.getTime())) return '';
     return date.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
   } catch {
-    return 'Invalid Time';
+    return '';
   }
+};
+
+const formatPriority = (p: string | undefined): string => {
+  if (p == null || p === '') return '';
+  const s = String(p).toLowerCase();
+  if (s === 'stat') return 'STAT';
+  if (s === 'urgent') return 'Urgent';
+  if (s === 'routine') return 'Routine';
+  return String(p);
+};
+
+const formatVitalDisplay = (key: string, value: unknown): string => {
+  if (value == null || value === '') return '';
+  if (key === 'recordedAt' || key === 'recorded_at' || (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(value)))
+    return formatDate(String(value)) + ' ' + formatTime(String(value));
+  return String(value);
+};
+
+const vitalLabel = (key: string): string => {
+  if (key === 'recordedAt' || key === 'recorded_at') return 'Recorded at';
+  return key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
 };
 
 export default function PatientMedicalRecordsPage({ params }: { params: Promise<{ patientId: string }> }) {
@@ -58,6 +80,20 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
   // Consultation Report state
   const [selectedSession, setSelectedSession] = useState<any>(null);
   const [showConsultationReport, setShowConsultationReport] = useState(false);
+
+  // Prescription view dialog
+  const [selectedPrescription, setSelectedPrescription] = useState<any>(null);
+  const [showPrescriptionView, setShowPrescriptionView] = useState(false);
+
+  // Vitals view (VitalsDetailModal)
+  const [selectedVital, setSelectedVital] = useState<any>(null);
+  const [isVitalsDetailModalOpen, setIsVitalsDetailModalOpen] = useState(false);
+
+  // Lab / Imaging / Physio / Ward view dialogs
+  const [selectedLab, setSelectedLab] = useState<any>(null);
+  const [selectedImaging, setSelectedImaging] = useState<any>(null);
+  const [selectedPhysio, setSelectedPhysio] = useState<any>(null);
+  const [selectedWard, setSelectedWard] = useState<any>(null);
 
   // History data
   const [consultationHistory, setConsultationHistory] = useState<any[]>([]);
@@ -176,6 +212,8 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
     const vitals = session.vitals || {};
     const prescriptions = session.prescriptions || [];
     const labOrders = session.labOrders || [];
+    const radiologyOrders = session.radiologyOrders || [];
+    const physioOrders = session.physioOrders || [];
     const diagnoses = session.diagnoses || [];
 
     return `
@@ -206,30 +244,28 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
 
         <div class="section">
           <h3>PATIENT INFORMATION</h3>
-          <p><strong>Name:</strong> ${session.patient_name || 'Unknown'}</p>
-          <p><strong>Patient ID:</strong> ${session.patient_id || 'N/A'}</p>
-          <p><strong>Age:</strong> ${session.patient_age || 'N/A'} years</p>
-          <p><strong>Gender:</strong> ${session.patient_gender || 'N/A'}</p>
+          <p><strong>Name:</strong> ${session.patient_name ?? ''}</p>
+          <p><strong>Patient ID:</strong> ${session.patient_id ?? ''}</p>
+          <p><strong>Age:</strong> ${session.patient_age ?? ''} years</p>
+          <p><strong>Gender:</strong> ${session.patient_gender ?? ''}</p>
         </div>
 
         <div class="section">
           <h3>CONSULTATION DETAILS</h3>
-          <p><strong>Doctor:</strong> ${session.doctor_name || 'Unknown'}</p>
-          <p><strong>Clinic:</strong> ${session.clinic_name || 'Unknown'}</p>
-          <p><strong>Room:</strong> ${session.room_name || 'Unknown'}</p>
+          <p><strong>Doctor:</strong> ${session.doctor_name ?? ''}</p>
+          <p><strong>Clinic:</strong> ${session.clinic_name ?? ''}</p>
+          <p><strong>Room:</strong> ${session.room_name ?? ''}</p>
           <p><strong>Date & Time:</strong> ${formatDate(session.started_at)} ${formatTime(session.started_at)}</p>
-          <p><strong>Duration:</strong> ${session.ended_at ? Math.round((new Date(session.ended_at).getTime() - new Date(session.started_at).getTime()) / (1000 * 60)) + ' minutes' : 'Ongoing'}</p>
+          <p><strong>Duration:</strong> ${session.ended_at ? Math.round((new Date(session.ended_at).getTime() - new Date(session.started_at).getTime()) / (1000 * 60)) + ' minutes' : ''}</p>
         </div>
 
         ${Object.keys(vitals).length > 0 ? `
         <div class="section">
           <h3>VITAL SIGNS</h3>
           <div class="vitals-grid">
-            ${Object.entries(vitals).map(([key, value]: [string, any]) => {
-              if (key === 'recordedAt') return '';
-              const displayKey = key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
-              return `<div class="vital-item"><strong>${displayKey}</strong><br>${value || 'N/A'}</div>`;
-            }).join('')}
+            ${Object.entries(vitals).map(([key, value]: [string, any]) =>
+              `<div class="vital-item"><strong>${vitalLabel(key)}</strong><br>${formatVitalDisplay(key, value)}</div>`
+            ).join('')}
           </div>
         </div>
         ` : ''}
@@ -257,9 +293,9 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
             <tbody>
               ${diagnoses.map((dx: any) => `
                 <tr>
-                  <td>${dx.code || 'N/A'}</td>
-                  <td>${dx.name || 'Unknown'}</td>
-                  <td>${dx.type || 'Unknown'}</td>
+                  <td>${dx.code ?? ''}</td>
+                  <td>${dx.name ?? ''}</td>
+                  <td>${dx.type ?? ''}</td>
                 </tr>
               `).join('')}
             </tbody>
@@ -283,11 +319,83 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
             <tbody>
               ${prescriptions.map((rx: any) => `
                 <tr>
-                  <td>${rx.medication || 'Unknown'}</td>
-                  <td>${rx.dosage || 'N/A'}</td>
-                  <td>${rx.frequency || 'N/A'}</td>
-                  <td>${rx.duration || 'N/A'}</td>
-                  <td>${rx.quantity || 'N/A'}</td>
+                  <td>${rx.medication ?? ''}</td>
+                  <td>${rx.dosage ?? ''}</td>
+                  <td>${rx.frequency ?? ''}</td>
+                  <td>${rx.duration ?? ''}</td>
+                  <td>${rx.quantity ?? ''}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+        ` : ''}
+
+        ${labOrders.length > 0 ? `
+        <div class="section">
+          <h3>LABORATORY ORDERS</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Test</th>
+                <th>Priority</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${labOrders.map((lab: any) => `
+                <tr>
+                  <td>${lab.test ?? ''}</td>
+                  <td>${formatPriority(lab.priority)}</td>
+                  <td>${lab.status ?? ''}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+        ` : ''}
+
+        ${radiologyOrders.length > 0 ? `
+        <div class="section">
+          <h3>RADIOLOGY ORDERS</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Procedure</th>
+                <th>Priority</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${radiologyOrders.map((rad: any) => `
+                <tr>
+                  <td>${rad.procedure ?? ''}</td>
+                  <td>${formatPriority(rad.priority)}</td>
+                  <td>${rad.status ?? ''}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+        ` : ''}
+
+        ${physioOrders.length > 0 ? `
+        <div class="section">
+          <h3>PHYSIOTHERAPY ORDERS</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Diagnosis / Chief Complaint</th>
+                <th>Priority</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${physioOrders.map((p: any) => `
+                <tr>
+                  <td>${p.diagnosis ?? ''}</td>
+                  <td>${formatPriority(p.priority)}</td>
+                  <td>${p.status ?? ''}</td>
                 </tr>
               `).join('')}
             </tbody>
@@ -297,7 +405,7 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
 
         <div class="section">
           <h3>SESSION OUTCOME</h3>
-          <p><strong>Status:</strong> ${session.status === 'completed' ? 'Completed' : 'In Progress'}</p>
+          <p><strong>Status:</strong> ${session.status === 'completed' ? 'Completed' : (session.status ?? '')}</p>
         </div>
 
         <div class="footer">
@@ -394,17 +502,58 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
       // Load related data
       if (fullSession.visit) {
         try {
-          const prescriptions = await apiFetch<{ results: any[] }>(`/pharmacy/prescriptions/?visit=${fullSession.visit}&page_size=100`);
-          fullSession.prescriptions = prescriptions.results || [];
+          const prescriptionsResult = await apiFetch<{ results: any[] }>(`/pharmacy/prescriptions/?visit=${fullSession.visit}&page_size=100`);
+          // Flatten: support p.medications[] and top-level p.medication_name/p.medication (single-med per rx)
+          fullSession.prescriptions = (prescriptionsResult.results || []).flatMap((p: any) => {
+            const items = (p.medications && p.medications.length) ? p.medications : (p.medication_name || p.medication ? [p] : []);
+            return items.map((m: any) => ({
+              id: String(p.id) + (m.id != null ? '-' + m.id : ''),
+              medication: (m.medication_name || m.medication_details?.name || m.medication?.name || p.medication_name || p.medication) ?? '',
+              dosage: m.dosage || p.dosage || '',
+              frequency: m.frequency || p.frequency || '',
+              duration: m.duration || p.duration || '',
+              quantity: m.quantity ?? p.quantity ?? '',
+            }));
+          });
         } catch (err) {
           console.warn('Could not load prescriptions:', err);
+          fullSession.prescriptions = [];
         }
 
         try {
           const labOrders = await apiFetch<{ results: any[] }>(`/laboratory/orders/?visit=${fullSession.visit}&page_size=100`);
-          fullSession.labOrders = labOrders.results || [];
+          fullSession.labOrders = (labOrders.results || []).flatMap((order: any) => {
+            const tests = order.tests || [];
+            if (!tests.length) return [];
+            return tests.map((t: any) => ({
+              test: (t.name || t.test_name || t.template_name || '').trim(),
+              priority: order.priority ?? '',
+              status: t.status ?? order.status ?? '',
+            }));
+          });
         } catch (err) {
           console.warn('Could not load lab orders:', err);
+          fullSession.labOrders = [];
+        }
+
+        try {
+          const radiologyOrders = await apiFetch<{ results: any[] }>(`/radiology/orders/?visit=${fullSession.visit}&page_size=100`);
+          fullSession.radiologyOrders = (radiologyOrders.results || []).flatMap((order: any) => {
+            const studies = order.studies || [];
+            if (studies.length) {
+              return studies.map((s: any) => ({
+                procedure: (s.procedure ?? order.procedure_name ?? order.procedure ?? '').toString().trim(),
+                priority: order.priority ?? '',
+                status: s.status ?? order.status ?? '',
+              }));
+            }
+            const proc = (order.procedure_name ?? order.procedure ?? '').toString().trim();
+            if (!proc) return [];
+            return [{ procedure: proc, priority: order.priority ?? '', status: order.status ?? '' }];
+          });
+        } catch (err) {
+          console.warn('Could not load radiology orders:', err);
+          fullSession.radiologyOrders = [];
         }
 
         try {
@@ -427,13 +576,41 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
         } catch (err) {
           console.warn('Could not load vitals:', err);
         }
+      } else {
+        fullSession.prescriptions = [];
+        fullSession.labOrders = [];
+        fullSession.radiologyOrders = [];
+      }
+
+      // Physio orders are keyed by consultation_session (always available)
+      try {
+        const physioOrders = await physioService.getOrders({
+          consultation_session: fullSession.id as number,
+          patient: fullSession.patient != null ? String(fullSession.patient) : undefined,
+          page_size: 100,
+        });
+        fullSession.physioOrders = (physioOrders.results || []).map((o: any) => ({
+          diagnosis: (o.diagnosis ?? o.chief_complaint ?? '').toString().trim(),
+          priority: o.priority ?? '',
+          status: o.status ?? '',
+        }));
+      } catch (err) {
+        console.warn('Could not load physio orders:', err);
+        fullSession.physioOrders = [];
       }
 
       try {
-        const diagnoses = await consultationService.getDiagnoses({ session: fullSession.id as number, page_size: 100 });
-        fullSession.diagnoses = diagnoses.results || [];
+        const diagnosesResult = await consultationService.getDiagnoses({ session: fullSession.id as number, page_size: 100 });
+        fullSession.diagnoses = (diagnosesResult.results || []).map((d: any) => ({
+          id: String(d.id),
+          code: d.icd10_code_details?.code ?? '',
+          name: (d.icd10_code_details?.description || d.diagnosis_text) ?? '',
+          type: d.certainty === 'confirmed' ? 'Primary' : d.certainty === 'probable' ? 'Secondary' : (d.certainty ?? ''),
+          notes: d.notes || d.diagnosis_text || '',
+        }));
       } catch (err) {
         console.warn('Could not load diagnoses:', err);
+        fullSession.diagnoses = [];
       }
 
       setSelectedSession(fullSession);
@@ -505,11 +682,11 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
         <Card>
           <CardContent className="p-6">
             <div className="flex items-start gap-6">
-              <PatientAvatar name={patient.full_name || `${patient.first_name} ${patient.surname}`.trim() || 'Unknown'} photoUrl={patient.photo} size="lg" />
+              <PatientAvatar name={(patient.full_name || `${patient.first_name || ''} ${patient.surname || ''}`.trim()) || ''} photoUrl={patient.photo} size="lg" />
               <div className="flex-1">
                 <h2 className="text-2xl font-bold">{patient.full_name || `${patient.first_name} ${patient.surname}`}</h2>
                 <div className="mt-2 space-y-1 text-sm text-muted-foreground">
-                  <p>Patient ID: {patient.patient_id} • Age: {patient.age || 'N/A'} • Gender: {patient.gender || 'N/A'}</p>
+                  <p>Patient ID: {patient.patient_id} • Age: {patient.age ?? ''} • Gender: {patient.gender ?? ''}</p>
                   {patient.blood_group && <p>Blood Group: {patient.blood_group} {patient.genotype ? `• Genotype: ${patient.genotype}` : ''}</p>}
                   {patient.phone && <p>Phone: {patient.phone}</p>}
                   {patient.email && <p>Email: {patient.email}</p>}
@@ -533,7 +710,7 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
                         <Badge variant="outline">{selectedSession.id}</Badge>
                       </DialogTitle>
                       <DialogDescription>
-                        {formatDate(selectedSession.started_at)} • {formatTime(selectedSession.started_at)} • {selectedSession.room_name || 'Consulting Room'}
+                        {formatDate(selectedSession.started_at)} • {formatTime(selectedSession.started_at)} • {selectedSession.room_name ?? ''}
                       </DialogDescription>
                     </div>
                     <div className="flex gap-2">
@@ -557,20 +734,20 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
                       <div className="space-y-1">
                         <div className="flex items-center gap-2">
                           <User className="h-4 w-4 text-muted-foreground" />
-                          <span className="font-medium">{selectedSession.patient_name || 'Unknown Patient'}</span>
+                          <span className="font-medium">{selectedSession.patient_name ?? ''}</span>
                         </div>
                         <div className="text-sm text-muted-foreground">
-                          Patient ID: {selectedSession.patient_id || 'N/A'} • Age: {selectedSession.patient_age || 'N/A'} • Gender: {selectedSession.patient_gender || 'N/A'}
+                          Patient ID: {selectedSession.patient_id ?? ''} • Age: {selectedSession.patient_age ?? ''} • Gender: {selectedSession.patient_gender ?? ''}
                         </div>
                       </div>
                     </div>
                     <div>
                       <h4 className="text-sm font-semibold text-muted-foreground mb-2">CONSULTATION DETAILS</h4>
                       <div className="space-y-1 text-sm">
-                        <div><strong>Doctor:</strong> {selectedSession.doctor_name || 'Unknown'}</div>
-                        <div><strong>Clinic:</strong> {selectedSession.clinic_name || 'Unknown Clinic'}</div>
-                        <div><strong>Duration:</strong> {selectedSession.ended_at ? Math.round((new Date(selectedSession.ended_at).getTime() - new Date(selectedSession.started_at).getTime()) / (1000 * 60)) + ' min' : 'Ongoing'}</div>
-                        <div><strong>Room:</strong> {selectedSession.room_name || 'Unknown Room'}</div>
+                        <div><strong>Doctor:</strong> {selectedSession.doctor_name ?? ''}</div>
+                        <div><strong>Clinic:</strong> {selectedSession.clinic_name ?? ''}</div>
+                        <div><strong>Duration:</strong> {selectedSession.ended_at ? Math.round((new Date(selectedSession.ended_at).getTime() - new Date(selectedSession.started_at).getTime()) / (1000 * 60)) + ' min' : ''}</div>
+                        <div><strong>Room:</strong> {selectedSession.room_name ?? ''}</div>
                       </div>
                     </div>
                   </div>
@@ -582,8 +759,8 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
                       <div className="grid grid-cols-3 md:grid-cols-6 gap-3">
                         {Object.entries(selectedSession.vitals).map(([key, value]: [string, unknown]) => (
                           <div key={key} className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-center border border-blue-200 dark:border-blue-800">
-                            <div className="text-xs text-muted-foreground capitalize">{key.replace(/([A-Z])/g, ' $1')}</div>
-                            <div className="font-medium">{String(value)}</div>
+                            <div className="text-xs text-muted-foreground">{vitalLabel(key)}</div>
+                            <div className="font-medium">{formatVitalDisplay(key, value)}</div>
                           </div>
                         ))}
                       </div>
@@ -698,11 +875,101 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
                           <tbody className="divide-y">
                             {selectedSession.prescriptions.map((rx: any, index: number) => (
                               <tr key={index}>
-                                <td className="px-3 py-2 font-medium">{rx.medication_name || rx.medication || 'Unknown'}</td>
-                                <td className="px-3 py-2">{rx.dosage || 'N/A'}</td>
-                                <td className="px-3 py-2">{rx.frequency || 'N/A'}</td>
-                                <td className="px-3 py-2">{rx.duration || 'N/A'}</td>
-                                <td className="px-3 py-2 text-center">{rx.quantity || 'N/A'}</td>
+                                <td className="px-3 py-2 font-medium">{(rx.medication_name || rx.medication) ?? ''}</td>
+                                <td className="px-3 py-2">{rx.dosage ?? ''}</td>
+                                <td className="px-3 py-2">{rx.frequency ?? ''}</td>
+                                <td className="px-3 py-2">{rx.duration ?? ''}</td>
+                                <td className="px-3 py-2 text-center">{rx.quantity ?? ''}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Laboratory Orders */}
+                  {selectedSession.labOrders && selectedSession.labOrders.length > 0 && (
+                    <div>
+                      <h4 className="text-sm font-semibold text-amber-600 mb-2 flex items-center gap-2">
+                        <TestTube className="h-4 w-4" />
+                        LABORATORY ORDERS
+                      </h4>
+                      <div className="border rounded-lg overflow-hidden">
+                        <table className="w-full text-sm">
+                          <thead className="bg-amber-50 dark:bg-amber-900/20">
+                            <tr>
+                              <th className="px-3 py-2 text-left font-medium">Test</th>
+                              <th className="px-3 py-2 text-left font-medium">Priority</th>
+                              <th className="px-3 py-2 text-left font-medium">Status</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y">
+                            {selectedSession.labOrders.map((lab: any, idx: number) => (
+                              <tr key={idx}>
+                                <td className="px-3 py-2 font-medium">{lab.test ?? ''}</td>
+                                <td className="px-3 py-2">{formatPriority(lab.priority)}</td>
+                                <td className="px-3 py-2">{lab.status ?? ''}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Radiology Orders */}
+                  {selectedSession.radiologyOrders && selectedSession.radiologyOrders.length > 0 && (
+                    <div>
+                      <h4 className="text-sm font-semibold text-sky-600 mb-2 flex items-center gap-2">
+                        <ScanLine className="h-4 w-4" />
+                        RADIOLOGY ORDERS
+                      </h4>
+                      <div className="border rounded-lg overflow-hidden">
+                        <table className="w-full text-sm">
+                          <thead className="bg-sky-50 dark:bg-sky-900/20">
+                            <tr>
+                              <th className="px-3 py-2 text-left font-medium">Procedure</th>
+                              <th className="px-3 py-2 text-left font-medium">Priority</th>
+                              <th className="px-3 py-2 text-left font-medium">Status</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y">
+                            {selectedSession.radiologyOrders.map((rad: any, idx: number) => (
+                              <tr key={idx}>
+                                <td className="px-3 py-2 font-medium">{rad.procedure ?? ''}</td>
+                                <td className="px-3 py-2">{formatPriority(rad.priority)}</td>
+                                <td className="px-3 py-2">{rad.status ?? ''}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Physiotherapy Orders */}
+                  {selectedSession.physioOrders && selectedSession.physioOrders.length > 0 && (
+                    <div>
+                      <h4 className="text-sm font-semibold text-emerald-600 mb-2 flex items-center gap-2">
+                        <Activity className="h-4 w-4" />
+                        PHYSIOTHERAPY ORDERS
+                      </h4>
+                      <div className="border rounded-lg overflow-hidden">
+                        <table className="w-full text-sm">
+                          <thead className="bg-emerald-50 dark:bg-emerald-900/20">
+                            <tr>
+                              <th className="px-3 py-2 text-left font-medium">Diagnosis / Chief Complaint</th>
+                              <th className="px-3 py-2 text-left font-medium">Priority</th>
+                              <th className="px-3 py-2 text-left font-medium">Status</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y">
+                            {selectedSession.physioOrders.map((p: any, idx: number) => (
+                              <tr key={idx}>
+                                <td className="px-3 py-2 font-medium">{p.diagnosis ?? ''}</td>
+                                <td className="px-3 py-2">{formatPriority(p.priority)}</td>
+                                <td className="px-3 py-2">{p.status ?? ''}</td>
                               </tr>
                             ))}
                           </tbody>
@@ -721,6 +988,170 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
                       {getOrganizationHeader()}
                     </div>
                   </div>
+                </div>
+              </>
+            )}
+          </DialogContent>
+        </Dialog>
+
+        {/* Prescription View Dialog */}
+        <Dialog open={showPrescriptionView} onOpenChange={setShowPrescriptionView}>
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+            {selectedPrescription && (
+              <>
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2">
+                    <Pill className="h-5 w-5 text-violet-500" />
+                    Prescription {selectedPrescription.prescription_id || selectedPrescription.id}
+                  </DialogTitle>
+                  <DialogDescription>
+                    {formatDate(selectedPrescription.prescribed_at || selectedPrescription.date)}
+                    {selectedPrescription.prescribed_at && ` at ${formatTime(selectedPrescription.prescribed_at)}`}
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4 py-2">
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <div><span className="text-muted-foreground">Doctor:</span> {selectedPrescription.doctor_name ?? ''}</div>
+                    <div><span className="text-muted-foreground">Status:</span> <Badge variant="outline">{selectedPrescription.status ?? ''}</Badge></div>
+                    {selectedPrescription.diagnosis && <div className="col-span-2"><span className="text-muted-foreground">Diagnosis:</span> {selectedPrescription.diagnosis}</div>}
+                    {selectedPrescription.notes && <div className="col-span-2"><span className="text-muted-foreground">Notes:</span> {selectedPrescription.notes}</div>}
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-semibold mb-2">Medications</h4>
+                    <div className="border rounded-lg overflow-hidden">
+                      <table className="w-full text-sm">
+                        <thead className="bg-muted/50">
+                          <tr>
+                            <th className="px-3 py-2 text-left font-medium">Medication</th>
+                            <th className="px-3 py-2 text-left font-medium">Dosage</th>
+                            <th className="px-3 py-2 text-left font-medium">Frequency</th>
+                            <th className="px-3 py-2 text-left font-medium">Duration</th>
+                            <th className="px-3 py-2 text-center font-medium">Qty</th>
+                            <th className="px-3 py-2 text-center font-medium">Dispensed</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y">
+                          {(selectedPrescription.medications || []).map((med: any, idx: number) => (
+                            <tr key={med.id || idx}>
+                              <td className="px-3 py-2 font-medium">{(med.medication_name || med.medication?.name || med.name) ?? ''}</td>
+                              <td className="px-3 py-2">{med.dosage ?? ''}</td>
+                              <td className="px-3 py-2">{med.frequency ?? ''}</td>
+                              <td className="px-3 py-2">{med.duration ?? ''}</td>
+                              <td className="px-3 py-2 text-center">{med.quantity ?? ''}{med.unit ? ` ${med.unit}` : ''}</td>
+                              <td className="px-3 py-2 text-center">
+                                <Badge variant={med.is_dispensed ? 'default' : 'outline'} className={med.is_dispensed ? 'bg-emerald-600' : ''}>
+                                  {med.is_dispensed ? 'Yes' : 'No'}
+                                </Badge>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
+          </DialogContent>
+        </Dialog>
+
+        <VitalsDetailModal
+          vitals={selectedVital}
+          patientName={patient?.full_name || (patient ? `${patient.first_name || ''} ${patient.surname || ''}`.trim() : '')}
+          isOpen={isVitalsDetailModalOpen}
+          onClose={() => { setIsVitalsDetailModalOpen(false); setSelectedVital(null); }}
+        />
+
+        {/* Lab View Dialog */}
+        <Dialog open={!!selectedLab} onOpenChange={(open) => { if (!open) setSelectedLab(null); }}>
+          <DialogContent className="max-w-lg">
+            {selectedLab && (
+              <>
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2"><TestTube className="h-5 w-5" /> Lab Result</DialogTitle>
+                  <DialogDescription>{(selectedLab.test_name || selectedLab.name) ?? ''} • {formatDate(selectedLab.processed_at || selectedLab.verified_at)}</DialogDescription>
+                </DialogHeader>
+                <div className="space-y-3 text-sm">
+                  <div><span className="text-muted-foreground">Test:</span> {(selectedLab.test_name || selectedLab.name) ?? ''}</div>
+                  <div><span className="text-muted-foreground">Date:</span> {formatDate(selectedLab.processed_at || selectedLab.verified_at)} {formatTime(selectedLab.processed_at || selectedLab.verified_at)}</div>
+                  <div><span className="text-muted-foreground">Status:</span> <Badge variant="outline">{selectedLab.status ?? ''}</Badge></div>
+                  {selectedLab.results && Object.keys(selectedLab.results || {}).length > 0 && (
+                    <div>
+                      <div className="font-medium mb-2">Results</div>
+                      <div className="border rounded p-3 space-y-1">
+                        {Object.entries(selectedLab.results || {}).map(([k, v]: [string, any]) => (
+                          <div key={k} className="flex justify-between"><span className="text-muted-foreground">{k}:</span> {String(v ?? '')}</div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+          </DialogContent>
+        </Dialog>
+
+        {/* Imaging View Dialog */}
+        <Dialog open={!!selectedImaging} onOpenChange={(open) => { if (!open) setSelectedImaging(null); }}>
+          <DialogContent className="max-w-lg">
+            {selectedImaging && (
+              <>
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2"><ScanLine className="h-5 w-5" /> Imaging Report</DialogTitle>
+                  <DialogDescription>{(selectedImaging.study_details?.procedure || selectedImaging.procedure) ?? ''} • {formatDate(selectedImaging.reported_at || selectedImaging.created_at)}</DialogDescription>
+                </DialogHeader>
+                <div className="space-y-3 text-sm">
+                  <div><span className="text-muted-foreground">Procedure:</span> {(selectedImaging.study_details?.procedure || selectedImaging.procedure) ?? ''}</div>
+                  <div><span className="text-muted-foreground">Date:</span> {formatDate(selectedImaging.reported_at || selectedImaging.created_at)} {formatTime(selectedImaging.reported_at || selectedImaging.created_at)}</div>
+                  <div><span className="text-muted-foreground">Status:</span> <Badge variant="outline">{selectedImaging.overall_status ?? ''}</Badge></div>
+                  {(selectedImaging.impression || selectedImaging.finding || selectedImaging.conclusion) && (
+                    <div><span className="text-muted-foreground">Finding:</span> <p className="mt-1 p-2 bg-muted/50 rounded">{selectedImaging.impression || selectedImaging.finding || selectedImaging.conclusion}</p></div>
+                  )}
+                </div>
+              </>
+            )}
+          </DialogContent>
+        </Dialog>
+
+        {/* Physio View Dialog */}
+        <Dialog open={!!selectedPhysio} onOpenChange={(open) => { if (!open) setSelectedPhysio(null); }}>
+          <DialogContent className="max-w-lg">
+            {selectedPhysio && (
+              <>
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2"><Activity className="h-5 w-5" /> Physiotherapy Order</DialogTitle>
+                  <DialogDescription>PHY-{String(selectedPhysio.id || '').padStart(6, '0')} • {formatDate(selectedPhysio.ordered_at)}</DialogDescription>
+                </DialogHeader>
+                <div className="space-y-3 text-sm">
+                  <div><span className="text-muted-foreground">Diagnosis:</span> {selectedPhysio.diagnosis ?? ''}</div>
+                  {selectedPhysio.chief_complaint && <div><span className="text-muted-foreground">Chief Complaint:</span> {selectedPhysio.chief_complaint}</div>}
+                  {selectedPhysio.treatment_goal && <div><span className="text-muted-foreground">Treatment Goal:</span> {selectedPhysio.treatment_goal}</div>}
+                  {selectedPhysio.special_instructions && <div><span className="text-muted-foreground">Special Instructions:</span> {selectedPhysio.special_instructions}</div>}
+                  <div><span className="text-muted-foreground">Status:</span> <Badge variant="outline">{selectedPhysio.status ?? ''}</Badge></div>
+                  <div><span className="text-muted-foreground">Ordered:</span> {formatDate(selectedPhysio.ordered_at)} {formatTime(selectedPhysio.ordered_at)}</div>
+                </div>
+              </>
+            )}
+          </DialogContent>
+        </Dialog>
+
+        {/* Ward Admission View Dialog */}
+        <Dialog open={!!selectedWard} onOpenChange={(open) => { if (!open) setSelectedWard(null); }}>
+          <DialogContent className="max-w-lg">
+            {selectedWard && (
+              <>
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2"><Building2 className="h-5 w-5" /> Ward Admission</DialogTitle>
+                  <DialogDescription>{selectedWard.ward_name ?? ''} • {formatDate(selectedWard.admission_date)}</DialogDescription>
+                </DialogHeader>
+                <div className="space-y-3 text-sm">
+                  <div><span className="text-muted-foreground">Admission Date:</span> {formatDate(selectedWard.admission_date)} {formatTime(selectedWard.admission_date)}</div>
+                  <div><span className="text-muted-foreground">Ward:</span> {selectedWard.ward_name ?? ''}</div>
+                  <div><span className="text-muted-foreground">Type:</span> {selectedWard.admission_type ?? ''}</div>
+                  <div><span className="text-muted-foreground">Diagnosis:</span> {selectedWard.admission_diagnosis ?? ''}</div>
+                  <div><span className="text-muted-foreground">Length of Stay:</span> {selectedWard.length_of_stay ?? 0} days</div>
+                  <div><span className="text-muted-foreground">Status:</span> <Badge variant="outline">{selectedWard.status ?? ''}</Badge></div>
+                  {selectedWard.discharge_date && <div><span className="text-muted-foreground">Discharge Date:</span> {formatDate(selectedWard.discharge_date)}</div>}
                 </div>
               </>
             )}
@@ -795,9 +1226,9 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
                           {paginatedConsultations.map((session) => (
                             <tr key={session.id} className="hover:bg-muted/30">
                               <td className="px-4 py-3 text-muted-foreground">{formatDate(session.started_at)}</td>
-                              <td className="px-4 py-3">{session.doctor_name || 'Unknown'}</td>
+                              <td className="px-4 py-3">{session.doctor_name ?? ''}</td>
                               <td className="px-4 py-3">
-                                <Badge variant="outline">{session.clinic_name || 'Unknown'}</Badge>
+                                <Badge variant="outline">{session.clinic_name ?? ''}</Badge>
                               </td>
                               <td className="px-4 py-3 text-center">
                                 <Button variant="ghost" size="sm" onClick={() => viewSessionDetails(session)}>
@@ -875,15 +1306,17 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
                       <tbody className="divide-y">
                         {labHistory.map((lab: any) => (
                           <tr key={lab.id} className="hover:bg-muted/30">
-                            <td className="px-4 py-3 text-muted-foreground">{formatDate(lab.processed_at || lab.verified_at)}</td>
-                            <td className="px-4 py-3 font-medium">{lab.test_name || lab.name || 'Unknown Test'}</td>
+                            <td className="px-4 py-3 text-muted-foreground">
+                              {formatDate(lab.processed_at || lab.verified_at)} {formatTime(lab.processed_at || lab.verified_at)}
+                            </td>
+                            <td className="px-4 py-3 font-medium">{(lab.test_name || lab.name) ?? ''}</td>
                             <td className="px-4 py-3">
                               <Badge className={lab.status === 'Normal' ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}>
-                                {lab.status || 'Pending'}
+                                {lab.status ?? ''}
                               </Badge>
                             </td>
                             <td className="px-4 py-3 text-center">
-                              <Button variant="ghost" size="sm">
+                              <Button variant="ghost" size="sm" onClick={() => { setSelectedLab(lab); }}>
                                 <Eye className="h-4 w-4 mr-1" /> View
                               </Button>
                             </td>
@@ -922,15 +1355,17 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
                       <tbody className="divide-y">
                         {imagingHistory.map((img: any) => (
                           <tr key={img.id} className="hover:bg-muted/30">
-                            <td className="px-4 py-3 text-muted-foreground">{formatDate(img.reported_at || img.created_at)}</td>
-                            <td className="px-4 py-3 font-medium">{img.study_details?.procedure || 'Unknown Procedure'}</td>
+                            <td className="px-4 py-3 text-muted-foreground">
+                              {formatDate(img.reported_at || img.created_at)} {formatTime(img.reported_at || img.created_at)}
+                            </td>
+                            <td className="px-4 py-3 font-medium">{(img.study_details?.procedure || img.procedure) ?? ''}</td>
                             <td className="px-4 py-3">
                               <Badge className={img.overall_status === 'normal' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}>
-                                {img.overall_status || 'Pending'}
+                                {img.overall_status ?? ''}
                               </Badge>
                             </td>
                             <td className="px-4 py-3 text-center">
-                              <Button variant="ghost" size="sm">
+                              <Button variant="ghost" size="sm" onClick={() => { setSelectedImaging(img); }}>
                                 <Eye className="h-4 w-4 mr-1" /> View
                               </Button>
                             </td>
@@ -971,21 +1406,21 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
                       <tbody className="divide-y">
                         {prescriptionHistory.map((prescription: any) => (
                           <tr key={prescription.id} className="hover:bg-muted/30">
-                            <td className="px-4 py-3 text-muted-foreground">{formatDate(prescription.date)}</td>
+                            <td className="px-4 py-3 text-muted-foreground">{formatDate(prescription.prescribed_at || prescription.date)}</td>
                             <td className="px-4 py-3">
                               <Badge variant="outline">{prescription.prescription_id || prescription.id}</Badge>
                             </td>
-                            <td className="px-4 py-3">{prescription.doctor_name || 'Unknown'}</td>
+                            <td className="px-4 py-3">{prescription.doctor_name ?? ''}</td>
                             <td className="px-4 py-3">
                               <div className="flex flex-wrap gap-1">
-                                {(prescription.medications || []).slice(0, 2).map((med: any, idx: number) => (
+                                {(prescription.medications || []).slice(0, 3).map((med: any, idx: number) => (
                                   <Badge key={idx} variant="outline" className="text-xs">
-                                    {med.medication_name || med.medication?.name || med.name || 'Unknown'}
+                                    {[med.medication_name || med.medication?.name || med.name, med.dosage].filter(Boolean).join(' ')}
                                   </Badge>
                                 ))}
-                                {(prescription.medications || []).length > 2 && (
+                                {(prescription.medications || []).length > 3 && (
                                   <Badge variant="outline" className="text-xs">
-                                    +{(prescription.medications || []).length - 2} more
+                                    +{(prescription.medications || []).length - 3} more
                                   </Badge>
                                 )}
                               </div>
@@ -996,11 +1431,11 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
                                 prescription.status === 'partially_dispensed' ? 'bg-amber-100 text-amber-800' :
                                 'bg-gray-100 text-gray-800'
                               }>
-                                {prescription.status || 'Pending'}
+                                {prescription.status ?? ''}
                               </Badge>
                             </td>
                             <td className="px-4 py-3 text-center">
-                              <Button variant="ghost" size="sm">
+                              <Button variant="ghost" size="sm" onClick={() => { setSelectedPrescription(prescription); setShowPrescriptionView(true); }}>
                                 <Eye className="h-4 w-4 mr-1" /> View
                               </Button>
                             </td>
@@ -1040,8 +1475,7 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
                         {vitalsHistory.map((vital: any) => (
                           <tr key={vital.id} className="hover:bg-muted/30">
                             <td className="px-4 py-3 text-muted-foreground">
-                              <div className="font-medium">{formatDate(vital.recorded_at)}</div>
-                              <div className="text-xs text-muted-foreground">{formatTime(vital.recorded_at)}</div>
+                              {formatDate(vital.recorded_at)} {formatTime(vital.recorded_at)}
                             </td>
                             <td className="px-4 py-3">
                               <div className="flex flex-wrap gap-2 text-xs">
@@ -1067,9 +1501,25 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
                                 )}
                               </div>
                             </td>
-                            <td className="px-4 py-3 text-muted-foreground text-sm">{vital.recorded_by_name || 'Unknown'}</td>
+                            <td className="px-4 py-3 text-muted-foreground text-sm">{vital.recorded_by_name ?? ''}</td>
                             <td className="px-4 py-3 text-center">
-                              <Button variant="ghost" size="sm">
+                              <Button variant="ghost" size="sm" onClick={() => {
+                                setSelectedVital({
+                                  id: vital.id,
+                                  recordedAt: vital.recorded_at,
+                                  recordedBy: vital.recorded_by_name,
+                                  bloodPressureSystolic: vital.blood_pressure_systolic,
+                                  bloodPressureDiastolic: vital.blood_pressure_diastolic,
+                                  pulse: vital.heart_rate,
+                                  temperature: vital.temperature,
+                                  respiratoryRate: vital.respiratory_rate,
+                                  oxygenSaturation: vital.oxygen_saturation,
+                                  weight: vital.weight,
+                                  height: vital.height,
+                                  notes: vital.notes,
+                                });
+                                setIsVitalsDetailModalOpen(true);
+                              }}>
                                 <Eye className="h-4 w-4 mr-1" /> View
                               </Button>
                             </td>
@@ -1109,10 +1559,10 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
                         {physioHistory.map((order: any) => (
                           <tr key={order.id} className="hover:bg-muted/30">
                             <td className="px-4 py-3 text-muted-foreground">
-                              {formatDate(order.ordered_at)}
+                              {formatDate(order.ordered_at)} {formatTime(order.ordered_at)}
                             </td>
                             <td className="px-4 py-3">
-                              <div className="font-medium">{order.diagnosis || 'N/A'}</div>
+                              <div className="font-medium">{order.diagnosis ?? ''}</div>
                             </td>
                             <td className="px-4 py-3">
                               <Badge className={
@@ -1120,11 +1570,11 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
                                 order.status === 'in_progress' ? 'bg-blue-100 text-blue-800' :
                                 'bg-gray-100 text-gray-800'
                               }>
-                                {order.status || 'Pending'}
+                                {order.status ?? ''}
                               </Badge>
                             </td>
                             <td className="px-4 py-3 text-center">
-                              <Button variant="ghost" size="sm">
+                              <Button variant="ghost" size="sm" onClick={() => { setSelectedPhysio(order); }}>
                                 <Eye className="h-4 w-4 mr-1" /> View
                               </Button>
                             </td>
@@ -1166,30 +1616,29 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
                         {wardAdmissions.map((admission: any) => (
                           <tr key={admission.id} className="hover:bg-muted/30">
                             <td className="px-4 py-3 text-muted-foreground">
-                              <div className="font-medium">{formatDate(admission.admission_date)}</div>
-                              <div className="text-xs text-muted-foreground">{formatTime(admission.admission_date)}</div>
+                              {formatDate(admission.admission_date)} {formatTime(admission.admission_date)}
                             </td>
                             <td className="px-4 py-3">
-                              <div className="font-medium">{admission.ward_name || 'Unknown'}</div>
-                              <div className="text-xs text-muted-foreground">{admission.admission_type || 'N/A'}</div>
+                              <div className="font-medium">{admission.ward_name ?? ''}</div>
+                              <div className="text-xs text-muted-foreground">{admission.admission_type ?? ''}</div>
                             </td>
                             <td className="px-4 py-3">
-                              <p className="text-sm max-w-[200px] truncate" title={admission.admission_diagnosis}>
-                                {admission.admission_diagnosis || 'N/A'}
+                              <p className="text-sm max-w-[200px] truncate" title={admission.admission_diagnosis ?? ''}>
+                                {admission.admission_diagnosis ?? ''}
                               </p>
                             </td>
-                            <td className="px-4 py-3">{admission.length_of_stay || 0} days</td>
+                            <td className="px-4 py-3">{admission.length_of_stay ?? 0} days</td>
                             <td className="px-4 py-3">
                               <Badge className={`${
                                 admission.status === 'admitted' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' :
                                 admission.status === 'discharged' ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' :
                                 'bg-gray-100 text-gray-800'
                               }`}>
-                                {admission.status || 'Unknown'}
+                                {admission.status ?? ''}
                               </Badge>
                             </td>
                             <td className="px-4 py-3 text-center">
-                              <Button variant="ghost" size="sm">
+                              <Button variant="ghost" size="sm" onClick={() => { setSelectedWard(admission); }}>
                                 <Eye className="h-4 w-4 mr-1" /> View
                               </Button>
                             </td>
@@ -1268,7 +1717,7 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
                               <div key={index} className="p-2 bg-amber-50 dark:bg-amber-900/20 rounded-lg border border-amber-200 dark:border-amber-800">
                                 <div className="flex items-center gap-2">
                                   <Badge variant="outline" className="bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400 text-xs">
-                                    {diagnosis.code || 'N/A'}
+                                    {diagnosis.code ?? ''}
                                   </Badge>
                                   <span className="font-medium text-sm">{diagnosis.name}</span>
                                 </div>
@@ -1366,15 +1815,15 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                           <div className="p-4 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg border border-emerald-200 dark:border-emerald-800 text-center">
                             <div className="text-xs text-muted-foreground mb-2">Smoking</div>
-                            <div className="font-semibold text-emerald-700 dark:text-emerald-300">{medicalHistory.social_history?.smoking || 'Not recorded'}</div>
+                            <div className="font-semibold text-emerald-700 dark:text-emerald-300">{medicalHistory.social_history?.smoking ?? ''}</div>
                           </div>
                           <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800 text-center">
                             <div className="text-xs text-muted-foreground mb-2">Alcohol</div>
-                            <div className="font-semibold text-blue-700 dark:text-blue-300">{medicalHistory.social_history?.alcohol || 'Not recorded'}</div>
+                            <div className="font-semibold text-blue-700 dark:text-blue-300">{medicalHistory.social_history?.alcohol ?? ''}</div>
                           </div>
                           <div className="p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg border border-purple-200 dark:border-purple-800 text-center">
                             <div className="text-xs text-muted-foreground mb-2">Exercise</div>
-                            <div className="font-semibold text-purple-700 dark:text-purple-300">{medicalHistory.social_history?.exercise || 'Not recorded'}</div>
+                            <div className="font-semibold text-purple-700 dark:text-purple-300">{medicalHistory.social_history?.exercise ?? ''}</div>
                           </div>
                           {medicalHistory.social_history?.occupation && (
                             <div className="p-4 bg-amber-50 dark:bg-amber-900/20 rounded-lg border border-amber-200 dark:border-amber-800 text-center">

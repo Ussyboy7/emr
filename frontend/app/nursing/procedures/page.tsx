@@ -142,7 +142,7 @@ export default function ProceduresQueuePage() {
         }
         
         // Fetch pending nursing orders
-        const ordersResult = await apiFetch<{ results: any[] }>('/orders/?status=pending&page_size=1000');
+        const ordersResult = await apiFetch<{ results: any[] }>('/nursing/orders/?status=pending&page_size=1000');
         const orders = ordersResult.results || [];
         
         // Transform orders to procedures format
@@ -330,7 +330,7 @@ export default function ProceduresQueuePage() {
   // ==================== HANDLERS ====================
   const loadOrders = async () => {
     try {
-      const ordersResult = await apiFetch<{ results: any[] }>('/orders/?status=pending&page_size=1000');
+      const ordersResult = await apiFetch<{ results: any[] }>('/nursing/orders/?status=pending&page_size=1000');
       const orders = ordersResult.results || [];
       
           const transformedProcedures = await Promise.all(orders.map(async (order: any) => {
@@ -621,7 +621,7 @@ export default function ProceduresQueuePage() {
 
       // Update order status to completed
       console.log('Updating order status for orderId:', orderId);
-      const orderResponse = await apiFetch(`/orders/${orderId}/`, {
+      const orderResponse = await apiFetch(`/nursing/orders/${orderId}/`, {
         method: 'PATCH',
         body: JSON.stringify({ status: 'completed' }),
       });

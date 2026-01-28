@@ -271,7 +271,9 @@ export const apiFetch = async <T = unknown>(path: string, options: FetchOptions 
           statusText: response.statusText,
           body: responseBody
         });
-        throw new Error(`Request failed. Please try again`);
+        const err = new Error('Request failed. Please try again');
+        (err as any).status = response.status;
+        throw err;
       }
 
       if (response.status === 204) {
@@ -287,7 +289,8 @@ export const apiFetch = async <T = unknown>(path: string, options: FetchOptions 
       if (error.name === "NetworkError" ||
           error.name === "AuthenticationError" ||
           error.name === "AuthenticationExpiredError" ||
-          (error.message && error.message.includes("API request failed: 4"))) {
+          (error.message && error.message.includes("API request failed: 4")) ||
+          (typeof error?.status === 'number' && error.status >= 400 && error.status < 500)) {
         throw error;
       }
 

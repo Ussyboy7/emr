@@ -63,8 +63,12 @@ class PrescriptionItemSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = PrescriptionItem
-        fields = '__all__'
-        read_only_fields = ['prescription']  # Exclude prescription from required fields during nested writes
+        fields = [
+            'id', 'prescription', 'medication', 'medication_name', 'medication_code',
+            'quantity', 'unit', 'dosage_form', 'dosage', 'frequency', 'duration',
+            'instructions', 'dispensed_quantity', 'is_dispensed',
+        ]
+        read_only_fields = ['prescription']
 
 
 class PrescriptionSerializer(serializers.ModelSerializer):

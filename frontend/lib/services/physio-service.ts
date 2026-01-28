@@ -171,6 +171,7 @@ class PhysioService {
     priority?: string;
     clinic?: string;
     patient?: string;
+    consultation_session?: number;
     search?: string;
     page?: number;
     page_size?: number;
@@ -217,11 +218,13 @@ class PhysioService {
   }
 
   /**
-   * Complete a physiotherapy order
+   * Complete a physiotherapy order (sets status=completed, completed_at=now).
+   * Backend has no /orders/{id}/complete/ action; this uses updateOrder.
    */
   async completeOrder(orderId: number): Promise<PhysioOrder> {
-    return apiFetch<PhysioOrder>(`/physiotherapy/orders/${orderId}/complete/`, {
-      method: 'POST',
+    return this.updateOrder(orderId, {
+      status: 'completed',
+      completed_at: new Date().toISOString(),
     });
   }
 

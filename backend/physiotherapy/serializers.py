@@ -104,7 +104,7 @@ class PhysioSessionSerializer(serializers.ModelSerializer):
             'diagnosis_impression', 'prognosis', 'clinical_reasoning',
 
             # F. Treatment Plan
-            'treatment_performed', 'patient_education',
+            'treatment_performed', 'exercises_prescribed', 'equipment_used', 'patient_education',
 
             # G. Session & Continuity
             'session_notes', 'progress_notes', 'recommendations', 'follow_up_instructions', 'next_session_plan'
@@ -150,11 +150,29 @@ class PhysioSessionSerializer(serializers.ModelSerializer):
 
 
 class PhysioSessionCreateSerializer(serializers.ModelSerializer):
-    """Serializer for creating physiotherapy sessions."""
+    """Serializer for creating physiotherapy sessions. Accepts full assessment data."""
 
     class Meta:
         model = PhysioSession
         fields = [
-            'order', 'physiotherapist', 'session_number', 'scheduled_at',
-            'presenting_complaint', 'pain_level_before', 'status'
+            'id', 'order', 'physiotherapist', 'session_number', 'scheduled_at',
+            'started_at', 'completed_at', 'duration_minutes', 'status',
+            # A. Patient Assessment
+            'presenting_complaint', 'pain_level_before', 'pain_level_after',
+            # B. Medical & Social Background
+            'medical_history', 'surgical_history', 'medications', 'allergies',
+            'social_history', 'previous_treatments',
+            # C. Physical Examination
+            'posture_gait', 'range_of_motion', 'muscle_strength', 'sensation',
+            'reflexes', 'balance_coordination', 'special_tests',
+            # D. Functional Evaluation
+            'functional_assessment', 'assistive_devices', 'functional_goals', 'functional_limitations',
+            # E. Clinical Reasoning
+            'assessment_findings', 'diagnosis_impression', 'prognosis', 'clinical_reasoning',
+            # F. Treatment & Plan
+            'treatment_performed', 'exercises_prescribed', 'equipment_used',
+            'patient_education', 'next_session_plan',
+            # G. Session & Continuity
+            'session_notes', 'progress_notes', 'recommendations', 'follow_up_instructions',
         ]
+        read_only_fields = ['id']

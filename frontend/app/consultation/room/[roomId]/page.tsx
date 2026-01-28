@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, use } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -36,6 +37,7 @@ interface ExtendedConsultationSession extends ConsultationSession {
   prescriptions?: any[];
   labOrders?: any[];
   radiologyOrders?: any[];
+  physioOrders?: any[];
   nursingOrders?: any[];
   followUp?: any;
   outcome?: string;
@@ -95,6 +97,27 @@ const formatTime = (dateString: string | undefined): string => {
   } catch {
     return 'Invalid Time';
   }
+};
+
+const formatPriority = (p: string | undefined): string => {
+  if (p == null || p === '') return '';
+  const s = String(p).toLowerCase();
+  if (s === 'stat') return 'STAT';
+  if (s === 'urgent') return 'Urgent';
+  if (s === 'routine') return 'Routine';
+  return String(p);
+};
+
+const formatVitalDisplay = (key: string, value: unknown): string => {
+  if (value == null || value === '') return '';
+  if (key === 'recordedAt' || key === 'recorded_at' || (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(value)))
+    return formatDate(String(value)) + ' ' + formatTime(String(value));
+  return String(value);
+};
+
+const vitalLabel = (key: string): string => {
+  if (key === 'recordedAt' || key === 'recorded_at') return 'Recorded at';
+  return key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
 };
 
 // ==========================================
@@ -647,6 +670,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     priority: 'routine' | 'urgent' | 'stat';
     status: 'Draft' | 'Sent to Physiotherapy' | 'Scheduled' | 'In Progress' | 'Completed';
   }[]>([]);
+  const [physioOrdersFromApi, setPhysioOrdersFromApi] = useState<any[]>([]);
   const [showAddPhysio, setShowAddPhysio] = useState(false);
   const [editingPhysioIndex, setEditingPhysioIndex] = useState<number | null>(null);
   const [newPhysio, setNewPhysio] = useState({
@@ -1421,14 +1445,17 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       if (visitId) {
         try {
           const prescriptionsResult = await apiFetch<{ results: any[] }>(`/pharmacy/prescriptions/?visit=${visitId}&page_size=100`);
-          enrichedSession.prescriptions = (prescriptionsResult.results || []).map((p: any) => ({
-            id: String(p.id),
-            medication: p.medication_name || p.medication || 'Unknown',
-            dosage: p.dosage || '',
-            frequency: p.frequency || '',
-            duration: p.duration || '',
-            quantity: p.quantity || 0,
-          }));
+          enrichedSession.prescriptions = (prescriptionsResult.results || []).flatMap((p: any) => {
+            const items = (p.medications && p.medications.length) ? p.medications : (p.medication_name || p.medication ? [p] : []);
+            return items.map((m: any) => ({
+              id: String(p.id) + (m.id != null ? '-' + m.id : ''),
+              medication: m.medication_name || m.medication?.name || p.medication_name || p.medication || 'Unknown',
+              dosage: m.dosage || p.dosage || '',
+              frequency: m.frequency || p.frequency || '',
+              duration: m.duration || p.duration || '',
+              quantity: m.quantity ?? p.quantity ?? 0,
+            }));
+          });
         } catch (err) {
           console.warn('Could not load prescriptions for session:', err);
           enrichedSession.prescriptions = [];
@@ -1437,16 +1464,18 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         // Load lab orders for this visit
         try {
           const labOrdersResult = await apiFetch<{ results: any[] }>(`/laboratory/orders/?visit=${visitId}&page_size=100`);
-          enrichedSession.labOrders = (labOrdersResult.results || []).flatMap((order: any) =>
-            (order.tests || []).map((test: any) => ({
+          enrichedSession.labOrders = (labOrdersResult.results || []).flatMap((order: any) => {
+            const tests = order.tests || [];
+            if (!tests.length) return [];
+            return tests.map((test: any) => ({
               id: `LAB-${order.id}-${test.id}`,
-              test: test.name || test.test_name || 'Unknown Test',
-              status: test.status || 'pending',
-              priority: order.priority === 'stat' ? 'STAT' : order.priority === 'urgent' ? 'Urgent' : 'Routine',
-              orderedBy: order.doctor_name || 'Unknown',
-              createdAt: test.created_at || order.ordered_at || new Date().toISOString(),
-            }))
-          );
+              test: (test.name ?? test.test_name ?? test.template_name ?? '').toString().trim(),
+              status: test.status ?? order.status ?? '',
+              priority: order.priority ?? '',
+              orderedBy: order.doctor_name ?? '',
+              createdAt: test.created_at ?? order.ordered_at ?? '',
+            }));
+          });
         } catch (err) {
           console.warn('Could not load lab orders for session:', err);
           enrichedSession.labOrders = [];
@@ -1455,15 +1484,31 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         // Load radiology orders for this visit
         try {
           const radiologyOrdersResult = await apiFetch<{ results: any[] }>(`/radiology/orders/?visit=${visitId}&page_size=100`);
-          enrichedSession.radiologyOrders = (radiologyOrdersResult.results || []).map((order: any) => ({
-            id: String(order.id),
-            procedure: order.procedure || 'Unknown Procedure',
-            priority: order.priority === 'stat' ? 'STAT' : order.priority === 'urgent' ? 'Urgent' : 'Routine',
-            status: order.status || 'pending',
-            finding: order.finding || '',
-            orderedBy: order.doctor_name || 'Unknown',
-            createdAt: order.ordered_at || new Date().toISOString(),
-          }));
+          enrichedSession.radiologyOrders = (radiologyOrdersResult.results || []).flatMap((order: any) => {
+            const studies = order.studies || [];
+            if (studies.length) {
+              return studies.map((s: any) => ({
+                id: `RAD-${order.id}-${s.id}`,
+                procedure: (s.procedure ?? order.procedure_name ?? order.procedure ?? '').toString().trim(),
+                priority: order.priority ?? '',
+                status: s.status ?? order.status ?? '',
+                finding: s.finding ?? order.finding ?? '',
+                orderedBy: order.doctor_name ?? '',
+                createdAt: s.created_at ?? order.ordered_at ?? '',
+              }));
+            }
+            const proc = (order.procedure_name ?? order.procedure ?? '').toString().trim();
+            if (!proc) return [];
+            return [{
+              id: String(order.id),
+              procedure: proc,
+              priority: order.priority ?? '',
+              status: order.status ?? '',
+              finding: order.finding ?? '',
+              orderedBy: order.doctor_name ?? '',
+              createdAt: order.ordered_at ?? '',
+            }];
+          });
         } catch (err) {
           console.warn('Could not load radiology orders for session:', err);
           enrichedSession.radiologyOrders = [];
@@ -1471,7 +1516,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
         // Load nursing orders for this visit
         try {
-          const nursingOrdersResult = await apiFetch<{ results: any[] }>(`/orders/?visit=${visitId}&page_size=100`);
+          const nursingOrdersResult = await apiFetch<{ results: any[] }>(`/nursing/orders/?visit=${visitId}&page_size=100`);
           enrichedSession.nursingOrders = (nursingOrdersResult.results || []).map((order: any) => ({
             id: String(order.id),
             type: order.order_type || order.type || 'General',
@@ -1491,6 +1536,23 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         enrichedSession.labOrders = [];
         enrichedSession.radiologyOrders = [];
         enrichedSession.nursingOrders = [];
+      }
+
+      // Load physio orders for this session (by consultation_session)
+      try {
+        const physioOrdersResult = await physioService.getOrders({
+          consultation_session: session.id,
+          patient: session.patient != null ? String(session.patient) : undefined,
+          page_size: 100,
+        });
+        enrichedSession.physioOrders = (physioOrdersResult.results || []).map((o: any) => ({
+          diagnosis: (o.diagnosis ?? o.chief_complaint ?? '').toString().trim(),
+          priority: o.priority ?? '',
+          status: o.status ?? '',
+        }));
+      } catch (err) {
+        console.warn('Could not load physio orders for session:', err);
+        enrichedSession.physioOrders = [];
       }
 
       // Load vitals for the session viewer
@@ -1524,10 +1586,19 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           session: session.id,
           page_size: 100
         });
-        setDiagnoses(diagnosesResult.results || []);
+        const list = diagnosesResult.results || [];
+        setDiagnoses(list);
+        enrichedSession.diagnoses = list.map((d: any) => ({
+          id: d.id,
+          code: d.icd10_code_details?.code || '',
+          name: d.icd10_code_details?.description || d.diagnosis_text || '',
+          type: d.certainty === 'confirmed' ? 'Primary' : d.certainty === 'probable' ? 'Secondary' : 'Differential',
+          notes: d.notes || ''
+        }));
       } catch (err) {
         console.warn('Could not load diagnoses for session:', err);
         setDiagnoses([]);
+        enrichedSession.diagnoses = [];
       }
 
       // Set the enriched session
@@ -1657,7 +1728,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       // Load nursing orders if visit exists
       if (visitId) {
         try {
-          const nursingOrdersResult = await apiFetch<{ results: any[] }>(`/orders/?visit=${visitId}&page_size=100`);
+          const nursingOrdersResult = await apiFetch<{ results: any[] }>(`/nursing/orders/?visit=${visitId}&page_size=100`);
           // Transform nursing orders
           const transformedNursingOrders: typeof nursingOrders = [];
           nursingOrdersResult.results?.forEach((order: any) => {
@@ -1853,6 +1924,24 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       setLoadingRadiologyTemplates(false);
     }
   }, []);
+
+  // Load physio orders from API for this consultation session so doctor sees real status (pending/scheduled/in_progress/completed)
+  useEffect(() => {
+    if (!sessionId) {
+      setPhysioOrdersFromApi([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await physioService.getOrders({ consultation_session: sessionId, page_size: 100 });
+        if (!cancelled) setPhysioOrdersFromApi(r?.results ?? []);
+      } catch {
+        if (!cancelled) setPhysioOrdersFromApi([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [sessionId]);
 
   // Close lab template dropdown when clicking outside
   useEffect(() => {
@@ -2143,16 +2232,18 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       page_size: 100
     });
     // Flatten prescription medications into individual prescription items
-    enrichedSession.prescriptions = (prescriptionsResult.results || []).flatMap((p: any) =>
-      (p.medications || []).map((med: any) => ({
-        id: String(p.id) + '-' + String(med.id),
-        medication: med.medication_name || 'Unknown',
-        dosage: med.dosage || '',
-        frequency: med.frequency || '',
-        duration: med.duration || '',
-        quantity: med.quantity || 0,
-      }))
-    );
+    // Support both: p.medications[] and top-level p.medication_name / p.medication (single-med per rx)
+    enrichedSession.prescriptions = (prescriptionsResult.results || []).flatMap((p: any) => {
+      const items = (p.medications && p.medications.length) ? p.medications : (p.medication_name || p.medication ? [p] : []);
+      return items.map((m: any) => ({
+        id: String(p.id) + (m.id != null ? '-' + m.id : ''),
+        medication: m.medication_name || m.medication?.name || p.medication_name || p.medication || 'Unknown',
+        dosage: m.dosage || p.dosage || '',
+        frequency: m.frequency || p.frequency || '',
+        duration: m.duration || p.duration || '',
+        quantity: m.quantity ?? p.quantity ?? 0,
+      }));
+    });
     } catch (err) {
       console.warn('Could not load prescriptions for session:', err);
       enrichedSession.prescriptions = [];
@@ -2164,16 +2255,18 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         consultation_session: fullSession.id,
         page_size: 100
       });
-      enrichedSession.labOrders = (labOrdersResult.results || []).flatMap((order: any) =>
-        (order.tests || []).map((test: any) => ({
+      enrichedSession.labOrders = (labOrdersResult.results || []).flatMap((order: any) => {
+        const tests = order.tests || [];
+        if (!tests.length) return [];
+        return tests.map((test: any) => ({
           id: `LAB-${order.id}-${test.id}`,
-          test: test.name || test.test_name || 'Unknown Test',
-          status: test.status || 'pending',
-          priority: order.priority === 'stat' ? 'STAT' : order.priority === 'urgent' ? 'Urgent' : 'Routine',
-          orderedBy: order.doctor_name || 'Unknown',
-          createdAt: test.created_at || order.ordered_at || new Date().toISOString(),
-        }))
-      );
+          test: (test.name ?? test.test_name ?? test.template_name ?? '').toString().trim(),
+          status: test.status ?? order.status ?? '',
+          priority: order.priority ?? '',
+          orderedBy: order.doctor_name ?? '',
+          createdAt: test.created_at ?? order.ordered_at ?? '',
+        }));
+      });
     } catch (err) {
       console.warn('Could not load lab orders for session:', err);
       enrichedSession.labOrders = [];
@@ -2185,19 +2278,31 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         consultation_session: fullSession.id,
         page_size: 100
       });
-
-      // Flatten radiology studies into individual order items
-      enrichedSession.radiologyOrders = (radiologyOrdersResult.results || []).flatMap((order: any) =>
-        (order.studies || []).map((study: any) => ({
-          id: `RAD-${order.id}-${study.id}`,
-          procedure: study.procedure || 'Unknown Procedure',
-          priority: order.priority === 'stat' ? 'STAT' : order.priority === 'urgent' ? 'Urgent' : 'Routine',
-          status: study.status || 'pending',
-          finding: study.finding || '',
-          orderedBy: order.doctor_name || 'Unknown',
-          createdAt: study.created_at || order.ordered_at || new Date().toISOString(),
-        }))
-      );
+      enrichedSession.radiologyOrders = (radiologyOrdersResult.results || []).flatMap((order: any) => {
+        const studies = order.studies || [];
+        if (studies.length) {
+          return studies.map((s: any) => ({
+            id: `RAD-${order.id}-${s.id}`,
+            procedure: (s.procedure ?? order.procedure_name ?? order.procedure ?? '').toString().trim(),
+            priority: order.priority ?? '',
+            status: s.status ?? order.status ?? '',
+            finding: s.finding ?? order.finding ?? '',
+            orderedBy: order.doctor_name ?? '',
+            createdAt: s.created_at ?? order.ordered_at ?? '',
+          }));
+        }
+        const proc = (order.procedure_name ?? order.procedure ?? '').toString().trim();
+        if (!proc) return [];
+        return [{
+          id: String(order.id),
+          procedure: proc,
+          priority: order.priority ?? '',
+          status: order.status ?? '',
+          finding: order.finding ?? '',
+          orderedBy: order.doctor_name ?? '',
+          createdAt: order.ordered_at ?? '',
+        }];
+      });
     } catch (err) {
       console.warn('Could not load radiology orders for session:', err);
       enrichedSession.radiologyOrders = [];
@@ -2205,7 +2310,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
     // Load nursing orders for this session (using direct API call since no service method)
     try {
-      const nursingOrdersResult = await apiFetch<{ results: any[] }>(`/orders/?consultation_session=${fullSession.id}&page_size=100`);
+      const nursingOrdersResult = await apiFetch<{ results: any[] }>(`/nursing/orders/?consultation_session=${fullSession.id}&page_size=100`);
       enrichedSession.nursingOrders = (nursingOrdersResult.results || []).map((order: any) => ({
         id: String(order.id),
         type: order.order_type || order.type || 'General',
@@ -2218,6 +2323,23 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     } catch (err) {
       console.warn('Could not load nursing orders for session:', err);
       enrichedSession.nursingOrders = [];
+    }
+
+    // Load physio orders for this session (by consultation_session)
+    try {
+      const physioOrdersResult = await physioService.getOrders({
+        consultation_session: fullSession.id,
+        patient: fullSession.patient != null ? String(fullSession.patient) : undefined,
+        page_size: 100,
+      });
+      enrichedSession.physioOrders = (physioOrdersResult.results || []).map((o: any) => ({
+        diagnosis: (o.diagnosis ?? o.chief_complaint ?? '').toString().trim(),
+        priority: o.priority ?? '',
+        status: o.status ?? '',
+      }));
+    } catch (err) {
+      console.warn('Could not load physio orders for session:', err);
+      enrichedSession.physioOrders = [];
     }
 
     // Load vitals for the session (by visit if available, otherwise by patient)
@@ -2413,10 +2535,11 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
   // Generate HTML for consultation report
   const generateConsultationReportHTML = (session: any) => {
-    const vitals = getSessionProperty(session, 'vitals');
+    const vitalsObj = Array.isArray(session.vitals) ? (session.vitals[0] || {}) : (session.vitals || {});
     const prescriptions = getSessionProperty(session, 'prescriptions');
     const labOrders = getSessionProperty(session, 'labOrders');
     const radiologyOrders = getSessionProperty(session, 'radiologyOrders');
+    const physioOrders = getSessionProperty(session, 'physioOrders') || [];
     const nursingOrders = getSessionProperty(session, 'nursingOrders');
 
     return `
@@ -2462,15 +2585,13 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           <p><strong>Duration:</strong> ${session.ended_at ? Math.round((new Date(session.ended_at).getTime() - new Date(session.started_at).getTime()) / (1000 * 60)) + ' minutes' : 'Ongoing'}</p>
         </div>
 
-        ${vitals.length > 0 ? `
+        ${Object.keys(vitalsObj).length > 0 ? `
         <div class="section">
           <h3>Vital Signs</h3>
           <div class="vitals-grid">
-            ${Object.entries(vitals[0] || {}).map(([key, value]: [string, any]) => {
-              if (key === 'recordedAt') return '';
-              const displayKey = key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
-              return `<div class="vital-item"><strong>${displayKey}</strong><br>${value || 'N/A'}</div>`;
-            }).join('')}
+            ${Object.entries(vitalsObj).map(([key, value]: [string, any]) =>
+              `<div class="vital-item"><strong>${vitalLabel(key)}</strong><br>${formatVitalDisplay(key, value)}</div>`
+            ).join('')}
           </div>
         </div>
         ` : ''}
@@ -2550,9 +2671,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
             <tbody>
               ${labOrders.map((lab: any) => `
                 <tr>
-                  <td>${lab.test || 'Unknown'}</td>
-                  <td>${lab.priority || 'Routine'}</td>
-                  <td>${lab.status || 'Pending'}</td>
+                  <td>${lab.test ?? ''}</td>
+                  <td>${formatPriority(lab.priority)}</td>
+                  <td>${lab.status ?? ''}</td>
                 </tr>
               `).join('')}
             </tbody>
@@ -2574,9 +2695,33 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
             <tbody>
               ${radiologyOrders.map((rad: any) => `
                 <tr>
-                  <td>${rad.procedure || 'Unknown'}</td>
-                  <td>${rad.priority || 'Routine'}</td>
-                  <td>${rad.status || 'Pending'}</td>
+                  <td>${rad.procedure ?? ''}</td>
+                  <td>${formatPriority(rad.priority)}</td>
+                  <td>${rad.status ?? ''}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+        ` : ''}
+
+        ${physioOrders.length > 0 ? `
+        <div class="section">
+          <h3>Physiotherapy Orders</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Diagnosis / Chief Complaint</th>
+                <th>Priority</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${physioOrders.map((p: any) => `
+                <tr>
+                  <td>${p.diagnosis ?? ''}</td>
+                  <td>${formatPriority(p.priority)}</td>
+                  <td>${p.status ?? ''}</td>
                 </tr>
               `).join('')}
             </tbody>
@@ -3511,7 +3656,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           }
 
           // Create nursing order only - nurse will do the actual admission
-          return apiFetch('/orders/', {
+          return apiFetch('/nursing/orders/', {
             method: 'POST',
             body: JSON.stringify({
               patient: numericPatientId,
@@ -3536,7 +3681,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           description = `${order.woundType || 'Wound'} dressing at ${order.woundLocation || 'site'}. Supplies: ${order.supplies || 'Standard'}. ${order.instructions}`;
         }
         
-          return apiFetch('/orders/', {
+          return apiFetch('/nursing/orders/', {
           method: 'POST',
           body: JSON.stringify({
             patient: numericPatientId,
@@ -3955,12 +4100,14 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         } as any);
       }
 
-      // Update status of sent orders
-      setPhysioOrders(prev => prev.map(order =>
-        draftOrders.some(draft => draft.id === order.id)
-          ? { ...order, status: 'Sent to Physiotherapy' as const }
-          : order
-      ));
+      // Remove sent drafts from local state and refetch from API so doctor sees real status (pending, scheduled, etc.)
+      setPhysioOrders(prev => prev.filter(o => !draftOrders.some(d => d.id === o.id)));
+      try {
+        const updated = await physioService.getOrders({ consultation_session: sessionId, page_size: 100 });
+        setPhysioOrdersFromApi(updated?.results ?? []);
+      } catch {
+        // non-fatal: orders were created
+      }
 
       toast.success(`${draftOrders.length} physiotherapy order(s) sent to Physiotherapy department`);
     } catch (err: any) {
@@ -4804,13 +4951,18 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                       <Activity className="h-5 w-5 text-emerald-500" />
                       Physiotherapy Orders
                     </CardTitle>
-                    <CardDescription>Order physiotherapy treatment sessions - will be sent to Physiotherapy pool queue</CardDescription>
+                    <CardDescription className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      Order physiotherapy treatment sessions — will be sent to Physiotherapy pool queue.
+                      <Link href="/physiotherapy/pool-queue" className="text-emerald-600 hover:underline font-medium inline-flex items-center gap-1">
+                        View in Physiotherapy queue →
+                      </Link>
+                    </CardDescription>
                   </div>
                   <div className="flex gap-2">
                     <Button variant="outline" onClick={() => setShowAddPhysio(true)}>
                       <Plus className="mr-2 h-4 w-4" />Add Physio Order
                     </Button>
-                    {physioOrders.length > 0 && physioOrders.some(p => p.status === 'Draft') && (
+                    {physioOrders.some(p => p.status === 'Draft') && (
                       <Button onClick={sendPhysioOrders} className="bg-emerald-600 hover:bg-emerald-700">
                         <Activity className="mr-2 h-4 w-4" />
                         Send to Physio ({physioOrders.filter(p => p.status === 'Draft').length})
@@ -4820,30 +4972,36 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
-                {physioOrders.length > 0 ? (
-                  <div className="space-y-3">
-                    {physioOrders.map((order, index) => {
-                      const getStatusBadge = (status: string) => {
-                        switch (status) {
-                          case 'Draft': return 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300';
-                          case 'Sent to Physiotherapy': return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400';
-                          case 'Scheduled': return 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400';
-                          case 'In Progress': return 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400';
-                          case 'Completed': return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400';
-                          default: return 'bg-gray-100 text-gray-800';
-                        }
-                      };
-                      const getPriorityBadge = (priority: string) => {
-                        switch (priority) {
-                          case 'stat': return 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400';
-                          case 'urgent': return 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400';
-                          case 'routine': return 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400';
-                          default: return 'bg-gray-100 text-gray-800';
-                        }
-                      };
-
-                      return (
-                        <Card key={order.id || index} className={`border-l-4 ${order.status === 'Draft' ? 'border-l-gray-400' : order.status === 'Sent to Physiotherapy' ? 'border-l-emerald-500' : 'border-l-green-500'} ${order.priority === 'stat' ? 'bg-rose-50 dark:bg-rose-900/10' : ''}`}>
+                {(() => {
+                  const apiDisplay = (physioOrdersFromApi || []).map((o: any) => ({
+                    id: o.id, diagnosis: o.diagnosis, chiefComplaint: o.chief_complaint, treatmentGoal: o.treatment_goal, specialInstructions: o.special_instructions, priority: o.priority || 'routine',
+                    status: (o.status === 'pending' ? 'Sent to Physiotherapy' : o.status === 'scheduled' ? 'Scheduled' : o.status === 'in_progress' ? 'In Progress' : o.status === 'completed' ? 'Completed' : String(o.status || '')) as any,
+                    fromApi: true
+                  }));
+                  const draftsWithIndex = physioOrders.map((o, i) => ({ ...o, draftIndex: i }));
+                  const allOrders = [...apiDisplay, ...draftsWithIndex];
+                  const getStatusBadge = (status: string) => {
+                    switch (status) {
+                      case 'Draft': return 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300';
+                      case 'Sent to Physiotherapy': return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400';
+                      case 'Scheduled': return 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400';
+                      case 'In Progress': return 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400';
+                      case 'Completed': return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400';
+                      default: return 'bg-gray-100 text-gray-800';
+                    }
+                  };
+                  const getPriorityBadge = (priority: string) => {
+                    switch (priority) {
+                      case 'stat': return 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400';
+                      case 'urgent': return 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400';
+                      case 'routine': return 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400';
+                      default: return 'bg-gray-100 text-gray-800';
+                    }
+                  };
+                  return allOrders.length > 0 ? (
+                    <div className="space-y-3">
+                      {allOrders.map((order: any, index: number) => (
+                        <Card key={order.fromApi ? `api-${order.id}` : order.id || index} className={`border-l-4 ${order.status === 'Draft' ? 'border-l-gray-400' : order.status === 'Sent to Physiotherapy' ? 'border-l-emerald-500' : order.status === 'Completed' ? 'border-l-green-500' : 'border-l-emerald-500'} ${order.priority === 'stat' ? 'bg-rose-50 dark:bg-rose-900/10' : ''}`}>
                           <CardContent className="p-3">
                             <div className="flex items-start justify-between gap-3">
                               <div className="flex items-start gap-2 flex-1">
@@ -4859,8 +5017,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                     </Badge>
                                     <Badge className={`text-xs px-1.5 py-0.5 ${getStatusBadge(order.status)}`}>{order.status}</Badge>
                                   </div>
-                                  {order.chiefComplaint && <p className="text-xs text-muted-foreground mb-0.5">{order.chiefComplaint}</p>}
-                                  {order.treatmentGoal && <p className="text-xs text-muted-foreground">{order.treatmentGoal}</p>}
+                                  {(order.chiefComplaint || order.chief_complaint) && <p className="text-xs text-muted-foreground mb-0.5">{order.chiefComplaint || order.chief_complaint}</p>}
+                                  {(order.treatmentGoal || order.treatment_goal) && <p className="text-xs text-muted-foreground">{order.treatmentGoal || order.treatment_goal}</p>}
                                   {order.status === 'Sent to Physiotherapy' && (
                                     <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
                                       <Clock className="h-3 w-3" />
@@ -4869,50 +5027,35 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                   )}
                                 </div>
                               </div>
-                              {order.status === 'Draft' && (
+                              {order.status === 'Draft' && typeof order.draftIndex === 'number' && (
                                 <div className="flex gap-1">
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => editPhysioOrder(index)}
-                                    className="text-blue-500 hover:text-blue-600"
-                                    title="Edit physio order"
-                                  >
+                                  <Button variant="ghost" size="sm" onClick={() => editPhysioOrder(order.draftIndex)} className="text-blue-500 hover:text-blue-600" title="Edit physio order">
                                     <Edit className="h-4 w-4" />
                                   </Button>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => setPhysioOrders(physioOrders.filter((_, i) => i !== index))}
-                                    className="text-rose-500 hover:text-rose-600"
-                                    title="Remove physio order"
-                                  >
+                                  <Button variant="ghost" size="sm" onClick={() => setPhysioOrders(prev => prev.filter((_, i) => i !== order.draftIndex))} className="text-rose-500 hover:text-rose-600" title="Remove physio order">
                                     <X className="h-4 w-4" />
                                   </Button>
                                 </div>
                               )}
                               {order.status === 'Sent to Physiotherapy' && (
-                                <Badge className="bg-emerald-500 text-white">
-                                  <CheckCircle className="h-3 w-3 mr-1" />
-                                  Queued
-                                </Badge>
+                                <Badge className="bg-emerald-500 text-white"><CheckCircle className="h-3 w-3 mr-1" />Queued</Badge>
                               )}
                             </div>
                           </CardContent>
                         </Card>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div className="text-center py-12 bg-gradient-to-b from-emerald-50 to-emerald-100/50 dark:from-emerald-900/10 dark:to-emerald-900/5 rounded-lg border-2 border-dashed border-emerald-200 dark:border-emerald-800">
-                    <Activity className="h-12 w-12 mx-auto mb-3 text-emerald-500 opacity-60" />
-                    <p className="font-medium text-emerald-900 dark:text-emerald-100 mb-1">No physiotherapy orders yet</p>
-                    <p className="text-sm text-muted-foreground mb-4">Order treatments to be processed by physiotherapy</p>
-                    <Button variant="outline" size="sm" onClick={() => setShowAddPhysio(true)} className="border-emerald-300 text-emerald-700 hover:bg-emerald-100">
-                      <Plus className="h-4 w-4 mr-1" />Order First Treatment
-                    </Button>
-                  </div>
-                )}
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-12 bg-gradient-to-b from-emerald-50 to-emerald-100/50 dark:from-emerald-900/10 dark:to-emerald-900/5 rounded-lg border-2 border-dashed border-emerald-200 dark:border-emerald-800">
+                      <Activity className="h-12 w-12 mx-auto mb-3 text-emerald-500 opacity-60" />
+                      <p className="font-medium text-emerald-900 dark:text-emerald-100 mb-1">No physiotherapy orders yet</p>
+                      <p className="text-sm text-muted-foreground mb-4">Order treatments to be processed by physiotherapy</p>
+                      <Button variant="outline" size="sm" onClick={() => setShowAddPhysio(true)} className="border-emerald-300 text-emerald-700 hover:bg-emerald-100">
+                        <Plus className="h-4 w-4 mr-1" />Order First Treatment
+                      </Button>
+                    </div>
+                  );
+                })()}
               </CardContent>
             </Card>
           </TabsContent>
@@ -8546,8 +8689,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                     <div className="grid grid-cols-3 md:grid-cols-6 gap-3">
                       {Object.entries((selectedSession as ExtendedConsultationSession).vitals || {}).map(([key, value]: [string, unknown]) => (
                         <div key={key} className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-center border border-blue-200 dark:border-blue-800">
-                          <div className="text-xs text-muted-foreground capitalize">{key.replace(/([A-Z])/g, ' $1')}</div>
-                          <div className="font-medium">{String(value)}</div>
+                          <div className="text-xs text-muted-foreground">{vitalLabel(key)}</div>
+                          <div className="font-medium">{formatVitalDisplay(key, value)}</div>
                         </div>
                       ))}
                     </div>
@@ -8684,14 +8827,14 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                             </tr>
                           </thead>
                           <tbody className="divide-y">
-                            {getSessionProperty(selectedSession as ExtendedConsultationSession, 'labOrders').map((lab: { test: string; status: string; priority?: string }, index: number) => (
+                            {getSessionProperty(selectedSession as ExtendedConsultationSession, 'labOrders').map((lab: { test?: string; status?: string; priority?: string; result?: string }, index: number) => (
                               <tr key={index}>
-                                <td className="px-3 py-2 font-medium">{lab.test}</td>
-                                <td className="px-3 py-2">{lab.priority}</td>
+                                <td className="px-3 py-2 font-medium">{lab.test ?? ''}</td>
+                                <td className="px-3 py-2">{formatPriority(lab.priority)}</td>
                                 <td className="px-3 py-2">
-                                  <Badge className="bg-emerald-100 text-emerald-800">{lab.status}</Badge>
+                                  <Badge className="bg-emerald-100 text-emerald-800">{lab.status ?? ''}</Badge>
                                 </td>
-                                <td className="px-3 py-2 text-sm">{(lab as { result?: string }).result || '-'}</td>
+                                <td className="px-3 py-2 text-sm">{lab.result ?? ''}</td>
                               </tr>
                             ))}
                           </tbody>
@@ -8718,14 +8861,46 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                             </tr>
                           </thead>
                           <tbody className="divide-y">
-                            {getSessionProperty(selectedSession as ExtendedConsultationSession, 'radiologyOrders').map((img: { procedure: string; priority?: string; status: string; finding?: string }, index: number) => (
+                            {getSessionProperty(selectedSession as ExtendedConsultationSession, 'radiologyOrders').map((img: { procedure?: string; priority?: string; status?: string; finding?: string }, index: number) => (
                               <tr key={index}>
-                                <td className="px-3 py-2 font-medium">{img.procedure}</td>
-                                <td className="px-3 py-2">{img.priority || '-'}</td>
+                                <td className="px-3 py-2 font-medium">{img.procedure ?? ''}</td>
+                                <td className="px-3 py-2">{formatPriority(img.priority)}</td>
                                 <td className="px-3 py-2">
-                                  <Badge className="bg-emerald-100 text-emerald-800">{img.status}</Badge>
+                                  <Badge className="bg-emerald-100 text-emerald-800">{img.status ?? ''}</Badge>
                                 </td>
-                                <td className="px-3 py-2 text-sm">{img.finding || '-'}</td>
+                                <td className="px-3 py-2 text-sm">{img.finding ?? ''}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Physiotherapy Orders */}
+                  {getSessionProperty(selectedSession as ExtendedConsultationSession, 'physioOrders').length > 0 && (
+                    <div>
+                      <h4 className="text-sm font-semibold text-emerald-600 mb-2 flex items-center gap-2">
+                        <Activity className="h-4 w-4" />
+                        PHYSIOTHERAPY ORDERS
+                      </h4>
+                      <div className="border rounded-lg overflow-hidden">
+                        <table className="w-full text-sm">
+                          <thead className="bg-emerald-50 dark:bg-emerald-900/20">
+                            <tr>
+                              <th className="px-3 py-2 text-left font-medium">Diagnosis / Chief Complaint</th>
+                              <th className="px-3 py-2 text-left font-medium">Priority</th>
+                              <th className="px-3 py-2 text-left font-medium">Status</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y">
+                            {getSessionProperty(selectedSession as ExtendedConsultationSession, 'physioOrders').map((p: { diagnosis?: string; priority?: string; status?: string }, index: number) => (
+                              <tr key={index}>
+                                <td className="px-3 py-2 font-medium">{p.diagnosis ?? ''}</td>
+                                <td className="px-3 py-2">{formatPriority(p.priority)}</td>
+                                <td className="px-3 py-2">
+                                  <Badge className="bg-emerald-100 text-emerald-800">{p.status ?? ''}</Badge>
+                                </td>
                               </tr>
                             ))}
                           </tbody>

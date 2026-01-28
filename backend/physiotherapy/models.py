@@ -136,6 +136,12 @@ class PhysioSession(models.Model):
 
     class Meta:
         db_table = 'physio_sessions'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['order', 'session_number'],
+                name='unique_order_session_number',
+            ),
+        ]
 
     def __str__(self):
         return f"Session {self.id}"

@@ -14,8 +14,9 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from '@/components/ui/textarea';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from 'sonner';
-import { physioService, type PhysioOrder } from '@/lib/services';
+import { physioService, type PhysioOrder, type PhysioSession } from '@/lib/services';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
+import { useCurrentUser } from '@/hooks/use-current-user';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { PatientAvatar } from "@/components/PatientAvatar";
 import { apiFetch } from '@/lib/api-client';
@@ -23,7 +24,7 @@ import { apiFetch } from '@/lib/api-client';
 import {
   Users, Search, Stethoscope, Calendar, Clock, CheckCircle,
   Eye, Play, AlertTriangle, Loader2, Activity, RefreshCw, XCircle,
-  FileText, Target, ClipboardList, Plus, User, Lightbulb, Heart
+  FileText, Target, ClipboardList, Plus, User, Lightbulb, Heart, Pencil
 } from 'lucide-react';
 
 // Helper function to format relative time
@@ -62,6 +63,8 @@ export default function PhysioPoolQueuePage() {
   const [error, setError] = useState<string | null>(null);
   const [authError, setAuthError] = useState<unknown | null>(null);
   useAuthRedirect(authError);
+  const { currentUser } = useCurrentUser();
+  const physioId = currentUser?.id ? Number(currentUser.id) : 1;
 
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState('pending');
@@ -83,6 +86,19 @@ export default function PhysioPoolQueuePage() {
   const [isCompleteSessionDialogOpen, setIsCompleteSessionDialogOpen] = useState(false);
   const [isContinueSessionDialogOpen, setIsContinueSessionDialogOpen] = useState(false);
   const [currentSession, setCurrentSession] = useState<any>(null);
+  const [orderSessionsList, setOrderSessionsList] = useState<PhysioSession[]>([]);
+  const [isEditSessionDialogOpen, setIsEditSessionDialogOpen] = useState(false);
+  const [editingSession, setEditingSession] = useState<PhysioSession | null>(null);
+  const [isEditSaving, setIsEditSaving] = useState(false);
+  const [editSessionData, setEditSessionData] = useState({
+    presenting_complaint: '', pain_level_before: null as number | null, pain_level_after: null as number | null,
+    medical_history: '', surgical_history: '', medications: '', allergies: '', social_history: '', previous_treatments: '',
+    posture_gait: '', range_of_motion: '', muscle_strength: '', sensation: '', reflexes: '', balance_coordination: '', special_tests: '',
+    functional_assessment: '', assistive_devices: '', functional_goals: '', functional_limitations: '',
+    assessment_findings: '', diagnosis_impression: '', prognosis: '', clinical_reasoning: '',
+    treatment_performed: '', exercises_prescribed: [] as string[], equipment_used: [] as any[],
+    patient_education: '', next_session_plan: '', session_notes: '', progress_notes: '', recommendations: [] as any[], follow_up_instructions: '',
+  });
 
   // Extend treatment form
   const [additionalSessions, setAdditionalSessions] = useState(1);
@@ -186,10 +202,76 @@ export default function PhysioPoolQueuePage() {
     loadOrders();
   }, [loadOrders]);
 
+  // Load sessions for the order when View dialog is open
+  useEffect(() => {
+    if (!isViewDialogOpen || !selectedOrder?.id) {
+      setOrderSessionsList([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await physioService.getSessions({ order: selectedOrder.id, page_size: 100 });
+        if (!cancelled) setOrderSessionsList(r?.results ?? []);
+      } catch {
+        if (!cancelled) setOrderSessionsList([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isViewDialogOpen, selectedOrder?.id]);
+
   // Reset page when filters change
   useEffect(() => {
     setCurrentPage(1);
   }, [searchQuery, activeTab, dateFilter, itemsPerPage]);
+
+  const openEditSession = (session: PhysioSession) => {
+    const s = session as any;
+    const ex = s.exercises_prescribed || s.home_exercises || [];
+    const exLines = Array.isArray(ex) ? ex.map((e: any) => (typeof e === 'string' ? e : (e?.description ?? ''))) : [];
+    setEditSessionData({
+      presenting_complaint: s.presenting_complaint || '', pain_level_before: s.pain_level_before ?? null, pain_level_after: s.pain_level_after ?? null,
+      medical_history: s.medical_history || '', surgical_history: s.surgical_history || '', medications: s.medications || '', allergies: s.allergies || '',
+      social_history: s.social_history || '', previous_treatments: s.previous_treatments || '',
+      posture_gait: s.posture_gait || '', range_of_motion: s.range_of_motion || '', muscle_strength: s.muscle_strength || '',
+      sensation: s.sensation || '', reflexes: s.reflexes || '', balance_coordination: s.balance_coordination || '', special_tests: s.special_tests || '',
+      functional_assessment: s.functional_assessment || '', assistive_devices: s.assistive_devices || '', functional_goals: s.functional_goals || '', functional_limitations: s.functional_limitations || '',
+      assessment_findings: s.assessment_findings || '', diagnosis_impression: s.diagnosis_impression || '', prognosis: s.prognosis || '',
+      clinical_reasoning: s.clinical_reasoning || s.assessment_findings || '',
+      treatment_performed: s.treatment_performed || '', exercises_prescribed: exLines, equipment_used: Array.isArray(s.equipment_used) ? s.equipment_used : [],
+      patient_education: s.patient_education || '', next_session_plan: s.next_session_plan || '', session_notes: s.session_notes || '',
+      progress_notes: s.progress_notes || '', recommendations: Array.isArray(s.recommendations) ? s.recommendations : [], follow_up_instructions: s.follow_up_instructions || '',
+    });
+    setEditingSession(session);
+    setIsEditSessionDialogOpen(true);
+  };
+
+  const handleEditSessionSave = async () => {
+    if (!editingSession) return;
+    setIsEditSaving(true);
+    try {
+      await physioService.updateSession(editingSession.id, {
+        presenting_complaint: editSessionData.presenting_complaint, pain_level_before: editSessionData.pain_level_before ?? undefined, pain_level_after: editSessionData.pain_level_after ?? undefined,
+        medical_history: editSessionData.medical_history, surgical_history: editSessionData.surgical_history, medications: editSessionData.medications, allergies: editSessionData.allergies,
+        social_history: editSessionData.social_history, previous_treatments: editSessionData.previous_treatments,
+        posture_gait: editSessionData.posture_gait, range_of_motion: editSessionData.range_of_motion, muscle_strength: editSessionData.muscle_strength,
+        sensation: editSessionData.sensation, reflexes: editSessionData.reflexes, balance_coordination: editSessionData.balance_coordination, special_tests: editSessionData.special_tests,
+        functional_assessment: editSessionData.functional_assessment, assistive_devices: editSessionData.assistive_devices, functional_goals: editSessionData.functional_goals, functional_limitations: editSessionData.functional_limitations,
+        assessment_findings: editSessionData.assessment_findings, diagnosis_impression: editSessionData.diagnosis_impression, prognosis: editSessionData.prognosis, clinical_reasoning: editSessionData.clinical_reasoning,
+        treatment_performed: editSessionData.treatment_performed, exercises_prescribed: editSessionData.exercises_prescribed.map((d) => ({ description: d })), equipment_used: editSessionData.equipment_used,
+        patient_education: editSessionData.patient_education, next_session_plan: editSessionData.next_session_plan, session_notes: editSessionData.session_notes,
+        progress_notes: editSessionData.progress_notes, recommendations: editSessionData.recommendations, follow_up_instructions: editSessionData.follow_up_instructions,
+      });
+      toast.success('Session updated successfully');
+      setIsEditSessionDialogOpen(false);
+      setEditingSession(null);
+      await loadOrders();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to update session');
+    } finally {
+      setIsEditSaving(false);
+    }
+  };
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -242,6 +324,7 @@ export default function PhysioPoolQueuePage() {
       if (activeTab === 'scheduled') return matchesSearch && order.status === 'scheduled';
       if (activeTab === 'in_progress') return matchesSearch && order.status === 'in_progress';
       if (activeTab === 'cancelled') return matchesSearch && order.status === 'cancelled';
+      if (activeTab === 'completed') return matchesSearch && order.status === 'completed';
       return matchesSearch;
     });
   };
@@ -253,6 +336,7 @@ export default function PhysioPoolQueuePage() {
     scheduled: orders.filter(o => o.status === 'scheduled').length,
     inProgress: orders.filter(o => o.status === 'in_progress').length,
     cancelled: orders.filter(o => o.status === 'cancelled').length,
+    completed: orders.filter(o => o.status === 'completed').length,
   }), [orders]);
 
   const handleScheduleOrder = async () => {
@@ -279,8 +363,14 @@ export default function PhysioPoolQueuePage() {
 
     try {
       if (currentSession) {
-        // Update existing session
-        await physioService.updateSession(currentSession.id, {
+        const sessionId = currentSession.id ?? currentSession.pk;
+        if (sessionId == null || sessionId === undefined || sessionId === '') {
+          toast.error('Session ID is missing. Please close and try Continue Session again.');
+          setIsSubmitting(false);
+          return;
+        }
+        // Update existing session (from Continue Session flow — save form into the new session)
+        await physioService.updateSession(sessionId, {
           presenting_complaint: sessionData.presenting_complaint,
           pain_level_before: sessionData.pain_level_before ?? undefined,
           medical_history: sessionData.medical_history,
@@ -325,7 +415,7 @@ export default function PhysioPoolQueuePage() {
         // Create comprehensive session with all assessment data
         const sessionPayload = {
           order: selectedOrder.id,
-          physiotherapist: 1, // TODO: Get current user ID from auth context
+          physiotherapist: physioId, // TODO: Get current user ID from auth context
           session_number: nextSessionNumber,
           scheduled_at: new Date().toISOString(),
           presenting_complaint: sessionData.presenting_complaint,
@@ -507,8 +597,7 @@ export default function PhysioPoolQueuePage() {
         treatment_performed: treatmentData.treatment_performed,
         pain_level_after: treatmentData.pain_level_after,
         progress_notes: treatmentData.progress_notes,
-        exercises_prescribed: treatmentData.exercises_prescribed,
-        home_exercises: treatmentData.home_exercises,
+        exercises_prescribed: treatmentData.home_exercises?.length ? treatmentData.home_exercises : (treatmentData.exercises_prescribed || []),
         next_session_plan: treatmentData.next_session_plan,
         recommendations: treatmentData.recommendations,
         follow_up_instructions: treatmentData.follow_up_instructions
@@ -522,32 +611,7 @@ export default function PhysioPoolQueuePage() {
         sessions_completed: completedCount
       });
 
-      // If there are more sessions to complete, create the next session
-      const nextSessionNumber = completedCount + 1;
-      // Since we removed total_sessions limit, allow unlimited sessions
-      if (true) {
-        // Creating next session in sequence
-        const nextSessionPayload = {
-          order: selectedOrder!.id,
-          physiotherapist: 1, // TODO: Get current user ID
-          session_number: nextSessionNumber,
-          scheduled_at: new Date().toISOString(),
-          status: 'in_progress',
-          // Copy assessment data from completed session for continuity
-          presenting_complaint: sessionData.presenting_complaint,
-          medical_history: sessionData.medical_history,
-          medications: sessionData.medications,
-          functional_goals: sessionData.functional_goals,
-          clinical_reasoning: sessionData.clinical_reasoning,
-        };
-
-        try {
-          await physioService.createSession(nextSessionPayload as any);
-          // Next session created successfully
-        } catch (error) {
-          console.error('Failed to create next session:', error);
-        }
-      }
+      // No longer auto-creating next session. Use "Continue Session" or "Schedule Next" when more sessions are needed.
 
       toast.success('Session completed successfully');
       setIsViewDialogOpen(false);
@@ -853,6 +917,25 @@ export default function PhysioPoolQueuePage() {
                 <p className="text-xs">Cancelled orders</p>
               </TooltipContent>
             </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Card className="border-l-4 border-l-emerald-500 cursor-pointer hover:shadow-md" onClick={() => setActiveTab('completed')}>
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-muted-foreground">Completed</p>
+                        <p className="text-3xl font-bold text-emerald-600 dark:text-emerald-400">{stats.completed}</p>
+                      </div>
+                      <CheckCircle className="h-8 w-8 text-emerald-400" />
+                    </div>
+                  </CardContent>
+                </Card>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p className="text-xs">Finished treatment plans</p>
+              </TooltipContent>
+            </Tooltip>
           </div>
 
           {/* Filters & Tabs */}
@@ -865,6 +948,7 @@ export default function PhysioPoolQueuePage() {
                     <TabsTrigger value="scheduled">Scheduled ({stats.scheduled})</TabsTrigger>
                     <TabsTrigger value="in_progress">In Progress ({stats.inProgress})</TabsTrigger>
                     <TabsTrigger value="cancelled">Cancelled ({stats.cancelled})</TabsTrigger>
+                    <TabsTrigger value="completed">Completed ({stats.completed})</TabsTrigger>
                     <TabsTrigger value="all">All</TabsTrigger>
                   </TabsList>
                 </Tabs>
@@ -1061,6 +1145,29 @@ export default function PhysioPoolQueuePage() {
                     )}
                   </div>
 
+                  {/* Sessions list with Edit */}
+                  {orderSessionsList.length > 0 && (
+                    <div className="space-y-3">
+                      <Label className="text-sm text-muted-foreground flex items-center gap-1">
+                        <FileText className="h-3.5 w-3.5" />
+                        Sessions ({orderSessionsList.length})
+                      </Label>
+                      <div className="border rounded-md divide-y max-h-48 overflow-y-auto">
+                        {orderSessionsList
+                          .sort((a, b) => (a.session_number ?? 0) - (b.session_number ?? 0))
+                          .map((s) => (
+                            <div key={s.id} className="flex items-center justify-between px-3 py-2 text-sm">
+                              <span>Session {s.session_number ?? '—'} — {s.status?.replace('_', ' ')}</span>
+                              <Button variant="ghost" size="sm" className="h-8" onClick={() => openEditSession(s)}>
+                                <Pencil className="h-4 w-4 mr-1" />
+                                Edit
+                              </Button>
+                            </div>
+                          ))}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Action Buttons */}
                   <div className="flex flex-wrap gap-2 pt-4 border-t">
                     {/* Primary Actions */}
@@ -1099,123 +1206,74 @@ export default function PhysioPoolQueuePage() {
                           <Button
                             onClick={async () => {
                               try {
-                              // Get active sessions for this order
-                              const sessionsResponse = await physioService.getSessions({ order: selectedOrder.id, status: 'in_progress' });
-
-                                if (sessionsResponse.results && sessionsResponse.results.length > 0) {
-                                const session = sessionsResponse.results[0];
-                                  setCurrentSession(session);
-
-                                  // Pre-populate session data with existing assessment
-                                  if (session) {
-                                  const sessionDataToSet = {
-                                    presenting_complaint: session.presenting_complaint || '',
-                                    pain_level_before: session.pain_level_before || null,
-                                    medical_history: session.medical_history || '',
-                                    surgical_history: session.surgical_history || '',
-                                    medications: session.medications || '',
-                                    allergies: session.allergies || '',
-                                    social_history: session.social_history || '',
-                                    previous_treatments: session.previous_treatments || '',
-                                    posture_gait: session.posture_gait || '',
-                                    range_of_motion: session.range_of_motion || '',
-                                    muscle_strength: session.muscle_strength || '',
-                                    sensation: session.sensation || '',
-                                    reflexes: session.reflexes || '',
-                                    balance_coordination: session.balance_coordination || '',
-                                    special_tests: session.special_tests || '',
-                                    functional_assessment: session.functional_assessment || '',
-                                    assistive_devices: session.assistive_devices || '',
-                                    functional_goals: session.functional_goals || '',
-                                    functional_limitations: session.functional_limitations || '',
-                                    assessment_findings: session.assessment_findings || '',
-                                    diagnosis_impression: session.diagnosis_impression || '',
-                                    prognosis: session.prognosis || '',
-                                    clinical_reasoning: session.clinical_reasoning || '',
-                                    treatment_performed: session.treatment_performed || '',
-                                    exercises_prescribed: session.exercises_prescribed || [],
-                                    equipment_used: session.equipment_used || [],
-                                    patient_education: session.patient_education || '',
-                                    next_session_plan: session.next_session_plan || '',
-                                    session_notes: session.session_notes || '',
-                                    progress_notes: session.progress_notes || '',
-                                    recommendations: session.recommendations || [],
-                                    follow_up_instructions: session.follow_up_instructions || '',
-                                    home_exercises: session.home_exercises || []
-                                  };
-                                    // Pre-populate form with existing session data
-                                    (setSessionData as any)(sessionDataToSet);
-                                  }
-
-                                  // Show comprehensive assessment form for active session
-                                  // Open session assessment dialog
-                                  setIsStartSessionDialogOpen(true);
-                                  setIsViewDialogOpen(false);
-                              } else {
-                                // No active session found - create a new session for the next session number
+                                await loadPatientVitals(selectedOrder.patient);
+                                // Continue Session = always start a NEW session (next in sequence), never edit the last session's notes
                                 const existingSessions = await physioService.getSessions({ order: selectedOrder.id });
-                                const nextSessionNumber = (selectedOrder.sessions_completed || 0) + 1;
+                                const nextSessionNumber = (existingSessions.results?.length)
+                                  ? Math.max(...existingSessions.results.map((s: any) => s.session_number || 0)) + 1
+                                  : 1;
 
-                                // Since we removed total_sessions limit, allow unlimited sessions
-                                if (true) {
-                                  // Create new session
-                                    const sessionPayload = {
-                                      order: selectedOrder.id,
-                                      physiotherapist: 1, // TODO: Get current user ID
-                                      session_number: nextSessionNumber,
-                                      scheduled_at: new Date().toISOString(),
-                                      status: 'in_progress',
-                                    };
+                                const sessionPayload = {
+                                  order: selectedOrder.id,
+                                  physiotherapist: physioId, // TODO: Get current user ID from auth context
+                                  session_number: nextSessionNumber,
+                                  scheduled_at: new Date().toISOString(),
+                                  status: 'in_progress',
+                                };
+                                const createdSession = await physioService.createSession(sessionPayload as any);
+                                toast.success(`Session ${nextSessionNumber} started`);
 
-                                  const createdSession = await physioService.createSession(sessionPayload as any);
-                                    toast.success(`Session ${nextSessionNumber} started successfully`);
+                                // Optional: prefill from last COMPLETED session for continuity (not from in-progress)
+                                const lastCompleted = (existingSessions.results || [])
+                                  .filter((s: any) => s.status === 'completed')
+                                  .sort((a: any, b: any) => (b.id || 0) - (a.id || 0))[0];
 
-                                    // Re-fetch sessions to get the newly created one
-                                    const updatedSessions = await physioService.getSessions({ order: selectedOrder.id, status: 'in_progress' });
-                                    if (updatedSessions.results && updatedSessions.results.length > 0) {
-                                      const newSession = updatedSessions.results[0];
-                                      setCurrentSession(newSession);
-                                      (setSessionData as any)({
-                                        presenting_complaint: '',
-                                        pain_level_before: null,
-                                        medical_history: '',
-                                        surgical_history: '',
-                                        medications: '',
-                                        allergies: '',
-                                        social_history: '',
-                                        previous_treatments: '',
-                                        posture_gait: '',
-                                        range_of_motion: '',
-                                        muscle_strength: '',
-                                        sensation: '',
-                                        reflexes: '',
-                                        balance_coordination: '',
-                                        special_tests: '',
-                                        functional_assessment: '',
-                                        assistive_devices: '',
-                                        functional_goals: '',
-                                        functional_limitations: '',
-                                        assessment_findings: '',
-                                        diagnosis_impression: '',
-                                        prognosis: '',
-                                        clinical_reasoning: '',
-                                        treatment_performed: '',
-                                        exercises_prescribed: [],
-                                        equipment_used: [],
-                                        patient_education: '',
-                                        next_session_plan: '',
-                                        session_notes: '',
-                                        progress_notes: '',
-                                        recommendations: [],
-                                        follow_up_instructions: ''
-                                      });
-                                      setIsStartSessionDialogOpen(true);
-                                      setIsViewDialogOpen(false);
-                                    }
-                                  } else {
-                                    toast.error('All sessions have been completed for this order');
-                                  }
+                                const baseData = {
+                                  presenting_complaint: '',
+                                  pain_level_before: null,
+                                  medical_history: '',
+                                  surgical_history: '',
+                                  medications: '',
+                                  allergies: '',
+                                  social_history: '',
+                                  previous_treatments: '',
+                                  posture_gait: '',
+                                  range_of_motion: '',
+                                  muscle_strength: '',
+                                  sensation: '',
+                                  reflexes: '',
+                                  balance_coordination: '',
+                                  special_tests: '',
+                                  functional_assessment: '',
+                                  assistive_devices: '',
+                                  functional_goals: '',
+                                  functional_limitations: '',
+                                  assessment_findings: '',
+                                  diagnosis_impression: '',
+                                  prognosis: '',
+                                  clinical_reasoning: '',
+                                  treatment_performed: '',
+                                  exercises_prescribed: [] as string[],
+                                  equipment_used: [] as string[],
+                                  patient_education: '',
+                                  next_session_plan: '',
+                                  session_notes: '',
+                                  progress_notes: '',
+                                  recommendations: [] as any[],
+                                  follow_up_instructions: '',
+                                  home_exercises: [] as any[]
+                                };
+                                if (lastCompleted) {
+                                  baseData.presenting_complaint = lastCompleted.presenting_complaint || '';
+                                  baseData.medical_history = lastCompleted.medical_history || '';
+                                  baseData.functional_goals = lastCompleted.functional_goals || '';
+                                  baseData.diagnosis_impression = lastCompleted.diagnosis_impression || '';
+                                  baseData.clinical_reasoning = lastCompleted.clinical_reasoning || '';
                                 }
+                                (setSessionData as any)(baseData);
+                                setCurrentSession(createdSession);
+                                setIsStartSessionDialogOpen(true);
+                                setIsViewDialogOpen(false);
                               } catch (error) {
                                 console.error('Error continuing session:', error);
                                 toast.error('Failed to continue session');
@@ -1227,27 +1285,33 @@ export default function PhysioPoolQueuePage() {
                             Continue Session
                           </Button>
                           <Button
-                          onClick={async () => {
-                            try {
-                              // Get active sessions for this order
-                              const sessionsResponse = await physioService.getSessions({ order: selectedOrder.id, status: 'in_progress' });
-                              if (sessionsResponse.results && sessionsResponse.results.length > 0) {
-                                setCurrentSession(sessionsResponse.results[0]);
-                                setIsCompleteSessionDialogOpen(true);
-                                setIsViewDialogOpen(false);
-                              } else {
-                                // No active sessions, complete the whole order
-                                handleCompleteOrder(selectedOrder);
+                            onClick={async () => {
+                              try {
+                                const sessionsResponse = await physioService.getSessions({ order: selectedOrder.id, status: 'in_progress' });
+                                if (sessionsResponse.results && sessionsResponse.results.length > 0) {
+                                  setCurrentSession(sessionsResponse.results[0]);
+                                  setIsCompleteSessionDialogOpen(true);
+                                  setIsViewDialogOpen(false);
+                                } else {
+                                  handleCompleteOrder(selectedOrder);
+                                }
+                              } catch (error) {
+                                console.error('Error completing session:', error);
+                                toast.error('Failed to complete session');
                               }
-                            } catch (error) {
-                              console.error('Error completing session:', error);
-                              toast.error('Failed to complete session');
-                            }
-                          }}
+                            }}
                             className="bg-green-600 hover:bg-green-700 text-white shadow-sm"
                           >
                             <CheckCircle className="h-4 w-4 mr-2" />
                             Complete Session
+                          </Button>
+                          <Button
+                            onClick={() => { handleCompleteOrder(selectedOrder); setIsViewDialogOpen(false); }}
+                            variant="outline"
+                            className="border-emerald-600 text-emerald-600 hover:bg-emerald-50"
+                          >
+                            <CheckCircle className="h-4 w-4 mr-2" />
+                            End treatment plan
                           </Button>
                         </>
                       )}
@@ -1809,7 +1873,7 @@ export default function PhysioPoolQueuePage() {
                   Complete Physiotherapy Session
                 </DialogTitle>
                 <DialogDescription>
-                  Record treatment performed and update patient progress
+                  Record treatment performed and update patient progress. Only this green <strong>Complete Session</strong> flow sets the session status to completed; it will appear under Physiotherapy → Completed Sessions. <strong>Save Session</strong> in Start/Continue does not.
                 </DialogDescription>
               </DialogHeader>
               {selectedOrder && currentSession && (
@@ -1976,6 +2040,76 @@ export default function PhysioPoolQueuePage() {
                     <CheckCircle className="h-4 w-4 mr-2" />
                   )}
                   Complete Session
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          {/* Edit Session Dialog (Pool Queue) */}
+          <Dialog open={isEditSessionDialogOpen} onOpenChange={(o) => { if (!o) { setIsEditSessionDialogOpen(false); setEditingSession(null); } }}>
+            <DialogContent className="w-[95vw] sm:max-w-[900px] max-h-[90vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <Pencil className="h-5 w-5 text-amber-500" />
+                  Edit Session {editingSession?.session_number} — {(editingSession as any)?.patient_name || selectedOrder?.patient_name}
+                </DialogTitle>
+                <DialogDescription>Update assessment and treatment documentation. Changes will appear in the Session Report.</DialogDescription>
+              </DialogHeader>
+              {editingSession && (
+                <div className="space-y-6 py-4">
+                  <div className="space-y-3">
+                    <h3 className="text-lg font-semibold text-teal-700 dark:text-teal-400 flex items-center gap-2"><User className="h-5 w-5" /> A. Patient Assessment</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-2"><Label>Presenting Complaint</Label><Textarea value={editSessionData.presenting_complaint} onChange={(e) => setEditSessionData({ ...editSessionData, presenting_complaint: e.target.value })} placeholder="Chief complaint..." rows={3} className="resize-none" /></div>
+                      <div className="space-y-2"><Label>Pain Before (0–10)</Label><Select value={editSessionData.pain_level_before?.toString() ?? ''} onValueChange={(v) => setEditSessionData({ ...editSessionData, pain_level_before: v ? parseInt(v) : null })}><SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger><SelectContent>{[0,1,2,3,4,5,6,7,8,9,10].map((n) => <SelectItem key={n} value={n.toString()}>{n}/10</SelectItem>)}</SelectContent></Select></div>
+                      <div className="space-y-2"><Label>Pain After (0–10)</Label><Select value={editSessionData.pain_level_after?.toString() ?? ''} onValueChange={(v) => setEditSessionData({ ...editSessionData, pain_level_after: v ? parseInt(v) : null })}><SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger><SelectContent>{[0,1,2,3,4,5,6,7,8,9,10].map((n) => <SelectItem key={n} value={n.toString()}>{n}/10</SelectItem>)}</SelectContent></Select></div>
+                    </div>
+                  </div>
+                  <div className="space-y-3">
+                    <h3 className="text-lg font-semibold text-blue-700 dark:text-blue-400 flex items-center gap-2"><FileText className="h-5 w-5" /> B. Medical & Social Background</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-2"><Label>Medical History</Label><Textarea value={editSessionData.medical_history} onChange={(e) => setEditSessionData({ ...editSessionData, medical_history: e.target.value })} rows={2} className="resize-none" /></div>
+                      <div className="space-y-2"><Label>Medications</Label><Textarea value={editSessionData.medications} onChange={(e) => setEditSessionData({ ...editSessionData, medications: e.target.value })} rows={2} className="resize-none" /></div>
+                      <div className="space-y-2"><Label>Social History</Label><Textarea value={editSessionData.social_history} onChange={(e) => setEditSessionData({ ...editSessionData, social_history: e.target.value })} rows={2} className="resize-none" /></div>
+                      <div className="space-y-2"><Label>Previous Treatments</Label><Textarea value={editSessionData.previous_treatments} onChange={(e) => setEditSessionData({ ...editSessionData, previous_treatments: e.target.value })} rows={2} className="resize-none" /></div>
+                    </div>
+                  </div>
+                  <div className="space-y-3">
+                    <h3 className="text-lg font-semibold text-green-700 dark:text-green-400 flex items-center gap-2"><Activity className="h-5 w-5" /> C. Physical Examination</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-2"><Label>Posture & Gait</Label><Textarea value={editSessionData.posture_gait} onChange={(e) => setEditSessionData({ ...editSessionData, posture_gait: e.target.value })} rows={2} className="resize-none" /></div>
+                      <div className="space-y-2"><Label>Range of Motion</Label><Textarea value={editSessionData.range_of_motion} onChange={(e) => setEditSessionData({ ...editSessionData, range_of_motion: e.target.value })} rows={2} className="resize-none" /></div>
+                      <div className="space-y-2"><Label>Muscle Strength</Label><Textarea value={editSessionData.muscle_strength} onChange={(e) => setEditSessionData({ ...editSessionData, muscle_strength: e.target.value })} rows={2} className="resize-none" /></div>
+                      <div className="space-y-2"><Label>Special Tests</Label><Textarea value={editSessionData.special_tests} onChange={(e) => setEditSessionData({ ...editSessionData, special_tests: e.target.value })} rows={2} className="resize-none" /></div>
+                    </div>
+                  </div>
+                  <div className="space-y-3">
+                    <h3 className="text-lg font-semibold text-purple-700 dark:text-purple-400 flex items-center gap-2"><Target className="h-5 w-5" /> D. Functional Evaluation</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-2"><Label>Functional Assessment</Label><Textarea value={editSessionData.functional_assessment} onChange={(e) => setEditSessionData({ ...editSessionData, functional_assessment: e.target.value })} rows={2} className="resize-none" /></div>
+                      <div className="space-y-2"><Label>Functional Goals</Label><Textarea value={editSessionData.functional_goals} onChange={(e) => setEditSessionData({ ...editSessionData, functional_goals: e.target.value })} rows={2} className="resize-none" /></div>
+                    </div>
+                  </div>
+                  <div className="space-y-3">
+                    <h3 className="text-lg font-semibold text-orange-700 dark:text-orange-400 flex items-center gap-2"><Lightbulb className="h-5 w-5" /> E. Clinical Reasoning</h3>
+                    <div className="space-y-2"><Label>Assessment Findings & Clinical Impression</Label><Textarea value={editSessionData.clinical_reasoning} onChange={(e) => setEditSessionData({ ...editSessionData, clinical_reasoning: e.target.value })} rows={3} className="resize-none" /></div>
+                  </div>
+                  <div className="space-y-3">
+                    <h3 className="text-lg font-semibold text-red-700 dark:text-red-400 flex items-center gap-2"><ClipboardList className="h-5 w-5" /> F. Treatment Plan & Outcomes</h3>
+                    <div className="space-y-4">
+                      <div className="space-y-2"><Label>Planned Treatment / Next Session Plan</Label><Textarea value={editSessionData.next_session_plan} onChange={(e) => setEditSessionData({ ...editSessionData, next_session_plan: e.target.value })} rows={2} className="resize-none" /></div>
+                      <div className="space-y-2"><Label>Treatment Performed</Label><Textarea value={editSessionData.treatment_performed} onChange={(e) => setEditSessionData({ ...editSessionData, treatment_performed: e.target.value })} rows={3} className="resize-none" /></div>
+                      <div className="space-y-2"><Label>Progress Notes</Label><Textarea value={editSessionData.progress_notes} onChange={(e) => setEditSessionData({ ...editSessionData, progress_notes: e.target.value })} rows={2} className="resize-none" /></div>
+                      <div className="space-y-2"><Label>Home Exercises (one per line)</Label><Textarea value={editSessionData.exercises_prescribed.join('\n')} onChange={(e) => setEditSessionData({ ...editSessionData, exercises_prescribed: e.target.value.split('\n').map((l) => l.trim()).filter(Boolean) })} rows={3} className="resize-none" /></div>
+                    </div>
+                  </div>
+                </div>
+              )}
+              <DialogFooter className="gap-2 sm:gap-0">
+                <Button variant="outline" onClick={() => { setIsEditSessionDialogOpen(false); setEditingSession(null); }}>Cancel</Button>
+                <Button onClick={handleEditSessionSave} disabled={isEditSaving} className="bg-amber-500 hover:bg-amber-600 text-white">
+                  {isEditSaving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Pencil className="h-4 w-4 mr-2" />}
+                  Save changes
                 </Button>
               </DialogFooter>
             </DialogContent>
@@ -2324,7 +2458,7 @@ export default function PhysioPoolQueuePage() {
                   ) : (
                     <Play className="h-4 w-4 mr-2" />
                   )}
-                  {currentSession ? 'Update Session' : 'Start Comprehensive Session'}
+                  {currentSession ? 'Save Session' : 'Start Session'}
                 </Button>
               </DialogFooter>
             </DialogContent>

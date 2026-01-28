@@ -248,6 +248,7 @@ export default function ConsultationHistoryPage() {
   const [clinicFilter, setClinicFilter] = useState("all");
   const [genderFilter, setGenderFilter] = useState("all");
   const [viewMode, setViewMode] = useState<"table" | "cards">("table");
+  const [groupByPatient, setGroupByPatient] = useState(false);
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -298,11 +299,12 @@ export default function ConsultationHistoryPage() {
       try {
         setLoading(true);
         
-        // Use itemsPerPage for server-side pagination, or load more if filters are active
-        // Fetch consultation sessions from API
+        // When grouped by patient, load up to 1000 to group client-side; otherwise use server pagination
+        const page = groupByPatient ? 1 : currentPage;
+        const pageSize = groupByPatient ? 1000 : itemsPerPage;
         const sessionsResult = await consultationService.getSessions({
-          page: currentPage,
-          page_size: itemsPerPage,
+          page,
+          page_size: pageSize,
           search: searchQuery || undefined,
           status: statusFilter !== 'all' ? statusFilter : undefined,
           // Note: clinicFilter, genderFilter not yet implemented in backend
@@ -337,66 +339,27 @@ export default function ConsultationHistoryPage() {
                 console.warn('Could not load visit details:', visitErr);
               }
             }
-            
-            // Get consultation notes directly from session
-            // Extract diagnosis with improved logic
-            const extractDiagnosis = (text: string): string => {
-              if (!text || text.trim().length < 3) return '';
 
-              // First clean the text
-              const cleaned = cleanClinicalText(text);
-              if (!cleaned) return '';
+            // Load diagnoses from the diagnoses API (ICD-10), not from assessment
+            try {
+              const dxResult = await consultationService.getDiagnoses({ session: session.id, page_size: 100 });
+              const list = dxResult.results || [];
+              diagnosisCodes = list.map((d: any) => ({
+                code: d.icd10_code_details?.code || '',
+                description: d.icd10_code_details?.description || d.diagnosis_text || '',
+                type: (d.certainty === 'confirmed' ? 'Primary' : d.certainty === 'probable' ? 'Secondary' : 'Differential') as 'Primary' | 'Secondary' | 'Differential'
+              })).filter((d: any) => d.code || d.description);
+              diagnosis = diagnosisCodes.length > 0
+                ? (diagnosisCodes[0].code ? `${diagnosisCodes[0].code} – ${diagnosisCodes[0].description}` : diagnosisCodes[0].description)
+                : '';
+            } catch (dxErr) {
+              console.warn('Could not load diagnoses for session:', session.id, dxErr);
+            }
 
-              // Try to extract diagnosis from common patterns
-              const diagnosisPatterns = [
-                /diagnosis:?\s*([^.]+)/i,
-                /dx:?\s*([^.]+)/i,
-                /impression:?\s*([^.]+)/i,
-                /primary:?\s*([^.]+)/i
-              ];
-
-              for (const pattern of diagnosisPatterns) {
-                const match = text.match(pattern);
-                if (match && match[1] && match[1].trim().length > 2) {
-                  const extracted = cleanClinicalText(match[1].trim());
-                  if (extracted) return extracted;
-                }
-              }
-
-              // If no specific pattern found, use the cleaned text but limit length
-              return cleaned.length > 100 ? cleaned.substring(0, 100) + '...' : cleaned;
-            };
-
-            diagnosis = extractDiagnosis(session.assessment || session.diagnosis || '');
             assessment = cleanClinicalText(session.assessment || '');
             plan = cleanClinicalText(session.plan || '');
             const historyOfPresentIllness = session.history_of_presenting_illness || '';
             const physicalExamination = session.physical_examination || '';
-
-            // Parse ICD-10 diagnosis codes from notes field
-            if (session.notes) {
-              try {
-                const notesData = JSON.parse(session.notes);
-                if (notesData.diagnosis_codes && Array.isArray(notesData.diagnosis_codes)) {
-                  diagnosisCodes = notesData.diagnosis_codes
-                    .map((dx: any) => ({
-                      code: dx.code || '',
-                      description: dx.description || ''
-                    }))
-                    .filter((dx: any) => dx.code && dx.description);
-                }
-              } catch (parseErr) {
-                // If notes is not JSON, try to parse old format or extract ICD-10 codes from text
-                const icd10Regex = /\b([A-Z]\d{2}(?:\.\d{1,3})?)\b/g;
-                const matches = session.notes.match(icd10Regex);
-                if (matches) {
-                  diagnosisCodes = matches.map((code: string) => ({
-                    code: code,
-                    description: 'Diagnosis code extracted from notes'
-                  }));
-                }
-              }
-            }
             
             // Calculate session duration
             let sessionDuration = 0;
@@ -458,7 +421,7 @@ export default function ConsultationHistoryPage() {
               }
               
               try {
-                const nursingOrdersResult = await apiFetch<{ results: any[] }>(`/nursing/orders/?visit=${session.visit}&page_size=100`);
+                const nursingOrdersResult = await apiFetch<{ results: any[] }>(`/nursing/orders/?visit=${session.visit}&page_size=100`, { retryOnFailure: false });
                 nursingOrders = (nursingOrdersResult.results || []).map((n: any) => ({
                   id: String(n.id),
                   type: n.order_type || n.type || 'General',
@@ -559,7 +522,7 @@ export default function ConsultationHistoryPage() {
     };
     
     loadConsultations();
-  }, [currentPage, itemsPerPage, refreshTrigger]);
+  }, [currentPage, itemsPerPage, refreshTrigger, groupByPatient, searchQuery, statusFilter]);
 
   // Client-side filtering only for scope (my consultations)
   const filteredConsultations = useMemo(() => {
@@ -573,6 +536,30 @@ export default function ConsultationHistoryPage() {
 
   // With server-side pagination, consultations array contains only current page results
   const paginatedConsultations = filteredConsultations;
+
+  // Group by patient: one entry per patientId, consultations sorted by date desc (most recent first)
+  const patientGroups = useMemo(() => {
+    const byId = new Map<string, ConsultationRecordWithGender[]>();
+    for (const c of filteredConsultations) {
+      const key = c.patientId || `${c.patient}-${c.id}`;
+      if (!byId.has(key)) byId.set(key, []);
+      byId.get(key)!.push(c);
+    }
+    return Array.from(byId.entries()).map(([patientId, list]) => {
+      const sorted = [...list].sort((a, b) => {
+        const da = new Date(a.date + 'T' + (a.time || '00:00:00')).getTime();
+        const db = new Date(b.date + 'T' + (b.time || '00:00:00')).getTime();
+        return db - da;
+      });
+      const latest = sorted[0];
+      return { patientId, patientName: latest.patient, consultations: sorted };
+    });
+  }, [filteredConsultations]);
+
+  const paginatedPatientGroups = useMemo(() => {
+    const start = (currentPage - 1) * itemsPerPage;
+    return patientGroups.slice(start, start + itemsPerPage);
+  }, [patientGroups, currentPage, itemsPerPage]);
 
   // Reset to page 1 when filters change
   useEffect(() => {
@@ -799,14 +786,29 @@ export default function ConsultationHistoryPage() {
                   My Sessions
                 </Button>
               </div>
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-muted-foreground">View:</span>
-                <Button variant={viewMode === "table" ? "default" : "ghost"} size="icon" onClick={() => setViewMode("table")} className={viewMode === "table" ? "bg-emerald-600 hover:bg-emerald-700" : ""}>
-                  <List className="h-4 w-4" />
-                </Button>
-                <Button variant={viewMode === "cards" ? "default" : "ghost"} size="icon" onClick={() => setViewMode("cards")} className={viewMode === "cards" ? "bg-emerald-600 hover:bg-emerald-700" : ""}>
-                  <LayoutGrid className="h-4 w-4" />
-                </Button>
+              <div className="flex items-center gap-4 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-muted-foreground">Show:</span>
+                  <Button variant={!groupByPatient ? "default" : "outline"} size="sm" onClick={() => { setGroupByPatient(false); setCurrentPage(1); }} className={!groupByPatient ? "bg-emerald-600 hover:bg-emerald-700" : ""}>
+                    <FileText className="h-4 w-4 mr-2" />
+                    By visit
+                  </Button>
+                  <Button variant={groupByPatient ? "default" : "outline"} size="sm" onClick={() => { setGroupByPatient(true); setCurrentPage(1); }} className={groupByPatient ? "bg-emerald-600 hover:bg-emerald-700" : ""}>
+                    <Users className="h-4 w-4 mr-2" />
+                    By patient
+                  </Button>
+                </div>
+                {!groupByPatient && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-muted-foreground">View:</span>
+                    <Button variant={viewMode === "table" ? "default" : "ghost"} size="icon" onClick={() => setViewMode("table")} className={viewMode === "table" ? "bg-emerald-600 hover:bg-emerald-700" : ""}>
+                      <List className="h-4 w-4" />
+                    </Button>
+                    <Button variant={viewMode === "cards" ? "default" : "ghost"} size="icon" onClick={() => setViewMode("cards")} className={viewMode === "cards" ? "bg-emerald-600 hover:bg-emerald-700" : ""}>
+                      <LayoutGrid className="h-4 w-4" />
+                    </Button>
+                  </div>
+                )}
               </div>
             </div>
           </CardContent>
@@ -914,26 +916,39 @@ export default function ConsultationHistoryPage() {
         </Card>
 
         {/* Results */}
-        {viewMode === "table" ? (
+        {(viewMode === "table" || groupByPatient) ? (
           <Card>
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
                   <tr className="border-b bg-muted/50">
-                    <th className="text-left p-4 text-sm font-medium text-muted-foreground">ID</th>
-                    <th className="text-left p-4 text-sm font-medium text-muted-foreground">Patient</th>
-                    <th className="text-left p-4 text-sm font-medium text-muted-foreground">Doctor</th>
-                    <th className="text-left p-4 text-sm font-medium text-muted-foreground">Date/Time</th>
-                    <th className="text-left p-4 text-sm font-medium text-muted-foreground">Clinic</th>
-                    <th className="text-left p-4 text-sm font-medium text-muted-foreground">Diagnosis</th>
-                    <th className="text-left p-4 text-sm font-medium text-muted-foreground">Status</th>
-                    <th className="text-left p-4 text-sm font-medium text-muted-foreground">Actions</th>
+                    {groupByPatient ? (
+                      <>
+                        <th className="text-left p-4 text-sm font-medium text-muted-foreground">Patient</th>
+                        <th className="text-left p-4 text-sm font-medium text-muted-foreground">Visits</th>
+                        <th className="text-left p-4 text-sm font-medium text-muted-foreground">Last Date</th>
+                        <th className="text-left p-4 text-sm font-medium text-muted-foreground">Last Diagnosis</th>
+                        <th className="text-left p-4 text-sm font-medium text-muted-foreground">Last Doctor</th>
+                        <th className="text-left p-4 text-sm font-medium text-muted-foreground">Actions</th>
+                      </>
+                    ) : (
+                      <>
+                        <th className="text-left p-4 text-sm font-medium text-muted-foreground">ID</th>
+                        <th className="text-left p-4 text-sm font-medium text-muted-foreground">Patient</th>
+                        <th className="text-left p-4 text-sm font-medium text-muted-foreground">Doctor</th>
+                        <th className="text-left p-4 text-sm font-medium text-muted-foreground">Date/Time</th>
+                        <th className="text-left p-4 text-sm font-medium text-muted-foreground">Clinic</th>
+                        <th className="text-left p-4 text-sm font-medium text-muted-foreground">Diagnosis</th>
+                        <th className="text-left p-4 text-sm font-medium text-muted-foreground">Status</th>
+                        <th className="text-left p-4 text-sm font-medium text-muted-foreground">Actions</th>
+                      </>
+                    )}
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredConsultations.length === 0 ? (
+                  {(groupByPatient ? paginatedPatientGroups.length === 0 : filteredConsultations.length === 0) ? (
                     <tr>
-                      <td colSpan={8} className="p-8 text-center">
+                      <td colSpan={groupByPatient ? 6 : 8} className="p-8 text-center">
                         <div className="flex flex-col items-center gap-3">
                           <History className="h-12 w-12 text-muted-foreground/50" />
                           <div>
@@ -967,6 +982,51 @@ export default function ConsultationHistoryPage() {
                         </div>
                       </td>
                     </tr>
+                  ) : groupByPatient ? (
+                    paginatedPatientGroups.map((gr) => {
+                      const latest = gr.consultations[0];
+                      const isEditable = canEditConsultation(latest);
+                      return (
+                        <tr key={gr.patientId} className={`border-b hover:bg-muted/30 transition-colors ${isEditable ? 'bg-emerald-50/30 dark:bg-emerald-900/10 border-l-4 border-l-emerald-500' : ''}`}>
+                        <td className="p-4">
+                          <p className="font-medium">{gr.patientName}</p>
+                          <p className="text-xs text-muted-foreground">{gr.patientId}</p>
+                        </td>
+                        <td className="p-4">{gr.consultations.length}</td>
+                        <td className="p-4">
+                          <p>{new Date(latest.date + 'T' + latest.time).toLocaleDateString()}</p>
+                          <p className="text-xs text-muted-foreground">{new Date(latest.date + 'T' + latest.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
+                        </td>
+                        <td className="p-4 max-w-[200px]">
+                          <div className="flex flex-col gap-1">
+                            {latest.diagnosisCodes && latest.diagnosisCodes.length > 0 ? (
+                              <div className="flex flex-wrap gap-1">
+                                {latest.diagnosisCodes.slice(0, 2).map((dx, idx) => (
+                                  <Badge key={idx} variant="outline" className="text-xs font-mono bg-blue-50 text-blue-700 border-blue-200">{dx.code}</Badge>
+                                ))}
+                                {latest.diagnosisCodes.length > 2 && <Badge variant="outline" className="text-xs bg-gray-100">+{latest.diagnosisCodes.length - 2}</Badge>}
+                              </div>
+                            ) : latest.diagnosis && latest.diagnosis.trim() ? (
+                              <span className="truncate text-sm">{latest.diagnosis}</span>
+                            ) : (
+                              <span className="truncate text-sm text-amber-600">No diagnosis recorded</span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="p-4">
+                          <span className={latest.doctor === 'Unknown' ? 'text-amber-600' : ''}>{latest.doctor}</span>
+                          {latest.doctor === 'Unknown' && <AlertTriangle className="h-3 w-3 text-amber-500 inline ml-1" />}
+                        </td>
+                        <td className="p-4">
+                          <div className="flex items-center gap-1 min-w-[100px]">
+                            <Button variant="ghost" size="sm" onClick={() => openViewModal(latest)} title="View latest consultation" className="hover:bg-blue-50 hover:text-blue-600"><Eye className="h-4 w-4" /></Button>
+                            <Button variant="ghost" size="sm" onClick={() => openEditModal(latest)} title={canEditConsultation(latest) ? "Edit latest consultation" : "Editable within 48h"} className="hover:bg-amber-50 hover:text-amber-600" disabled={!isEditable}><Edit className="h-4 w-4" /></Button>
+                            {isEditable && <div className="w-2 h-2 bg-emerald-500 rounded-full" title="Editable" />}
+                          </div>
+                        </td>
+                        </tr>
+                      );
+                    })
                   ) : (
                     paginatedConsultations.map((c) => {
                       const isEditable = canEditConsultation(c);
@@ -1176,15 +1236,15 @@ export default function ConsultationHistoryPage() {
         )}
 
         {/* Pagination */}
-        {filteredConsultations.length > 0 && (
+        {(groupByPatient ? patientGroups.length : filteredConsultations.length) > 0 && (
           <Card className="p-4">
             <StandardPagination
               currentPage={currentPage}
-              totalItems={totalCount}
+              totalItems={groupByPatient ? patientGroups.length : totalCount}
               itemsPerPage={itemsPerPage}
               onPageChange={setCurrentPage}
               onItemsPerPageChange={setItemsPerPage}
-              itemName="consultations"
+              itemName={groupByPatient ? "patients" : "consultations"}
             />
           </Card>
         )}

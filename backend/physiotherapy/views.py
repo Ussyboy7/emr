@@ -1,13 +1,16 @@
 """
 Views for the Physiotherapy app.
 """
-from rest_framework import viewsets, status
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.decorators import action
+import traceback
+
+from django.utils import timezone
 from django_filters.rest_framework import DjangoFilterBackend
+from rest_framework import viewsets, status
+from rest_framework.decorators import action
 from rest_framework.filters import SearchFilter, OrderingFilter
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from .models import PhysioTemplate, PhysioOrder, PhysioSession
 from .serializers import (
@@ -36,7 +39,7 @@ class PhysioOrderViewSet(viewsets.ModelViewSet):
     """ViewSet for managing physiotherapy orders."""
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['status', 'patient', 'priority']
+    filterset_fields = ['status', 'patient', 'priority', 'consultation_session']
     search_fields = ['patient__full_name', 'patient__patient_id', 'diagnosis', 'chief_complaint']
     ordering = ['-ordered_at']
 
@@ -77,87 +80,64 @@ class PhysioSessionViewSet(viewsets.ModelViewSet):
     ordering = ['-created_at']
 
     def get_queryset(self):
-        return PhysioSession.objects.all()
+        return PhysioSession.objects.select_related(
+            'order', 'order__patient', 'physiotherapist'
+        ).all()
 
     def list(self, request, *args, **kwargs):
         try:
             return super().list(request, *args, **kwargs)
         except Exception as e:
-            # Log the error and return empty response
-            print(f"Error in PhysioSessionViewSet.list: {e}")
-            from rest_framework.response import Response
-            return Response([], status=200)
+            traceback.print_exc()
+            # Return paginated shape so frontend does not break
+            return Response({'results': [], 'count': 0}, status=200)
 
-        @action(detail=True, methods=['post'])
-        def start_session(self, request, pk=None):
-            session = self.get_object()
-            session.status = 'in_progress'
-            session.started_at = timezone.now()
-            session.save()
+    @action(detail=True, methods=['post'])
+    def start_session(self, request, pk=None):
+        session = self.get_object()
+        session.status = 'in_progress'
+        session.started_at = timezone.now()
+        session.save()
+        if session.order.status == 'scheduled':
+            session.order.status = 'in_progress'
+            session.order.save()
+        return Response(self.get_serializer(session).data)
 
-            # Update order status if this is the first session being started
-            if session.order.status == 'scheduled':
-                session.order.status = 'in_progress'
-                session.order.save()
+    @action(detail=True, methods=['post'])
+    def complete_session(self, request, pk=None):
+        session = self.get_object()
+        session.completed_at = timezone.now()
+        session.status = 'completed'
+        session.save()
+        order = session.order
+        order.sessions_completed = order.sessions.filter(status='completed').count()
+        order.save()
+        return Response(self.get_serializer(session).data)
 
-            serializer = self.get_serializer(session)
-            return Response(serializer.data)
-
-        @action(detail=True, methods=['post'])
-        def complete_session(self, request, pk=None):
-            session = self.get_object()
-            session.completed_at = timezone.now()
-            session.status = 'completed'
-            session.save()
-
-            # Update order progress
-            order = session.order
-            completed_sessions = order.sessions.filter(status='completed').count()
-            order.sessions_completed = completed_sessions
-
-            # Update order status - physiotherapist determines when treatment is complete
-            # No longer checking against total_sessions since that field was removed
-            # The physiotherapist will manually mark the order as completed when appropriate
-
-            order.save()
-
-            serializer = self.get_serializer(session)
-            return Response(serializer.data)
-
-        @action(detail=False, methods=['post'])
-        def create_next_session(self, request):
-            """Create the next session in a treatment plan."""
-            order_id = request.data.get('order_id')
-            scheduled_at = request.data.get('scheduled_at')
-            physiotherapist_id = request.data.get('physiotherapist_id')
-            notes = request.data.get('notes', '')
-
-            try:
-                order = PhysioOrder.objects.get(id=order_id)
-
-                # Calculate next session number
-                last_session = order.sessions.order_by('-session_number').first()
-                next_session_number = (last_session.session_number if last_session else 0) + 1
-
-                # Allow unlimited sessions - physiotherapist determines treatment length
-                # Removed the check against total_sessions since that field was removed
-
-                session = PhysioSession.objects.create(
-                    order=order,
-                    physiotherapist_id=physiotherapist_id,
-                    session_number=next_session_number,
-                    scheduled_at=scheduled_at,
-                    notes=notes,
-                    status='scheduled'
-                )
-
-                serializer = self.get_serializer(session)
-                return Response(serializer.data, status=status.HTTP_201_CREATED)
-
-            except PhysioOrder.DoesNotExist:
-                return Response({'error': 'Order not found'}, status=status.HTTP_404_NOT_FOUND)
-            except Exception as e:
-                return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+    @action(detail=False, methods=['post'])
+    def create_next_session(self, request):
+        """Create the next session in a treatment plan."""
+        order_id = request.data.get('order_id')
+        scheduled_at = request.data.get('scheduled_at')
+        physiotherapist_id = request.data.get('physiotherapist_id')
+        notes = request.data.get('notes', '')
+        try:
+            order = PhysioOrder.objects.get(id=order_id)
+            last_session = order.sessions.order_by('-session_number').first()
+            next_session_number = (last_session.session_number if last_session else 0) + 1
+            session = PhysioSession.objects.create(
+                order=order,
+                physiotherapist_id=physiotherapist_id,
+                session_number=next_session_number,
+                scheduled_at=scheduled_at,
+                session_notes=notes or '',
+                status='scheduled',
+            )
+            return Response(self.get_serializer(session).data, status=status.HTTP_201_CREATED)
+        except PhysioOrder.DoesNotExist:
+            return Response({'error': 'Order not found'}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
     def get_serializer_class(self):
         if self.action == 'create':
