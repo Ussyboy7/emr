@@ -8,11 +8,13 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import {
   ArrowLeft, Download, Printer, Eye, User, Calendar, Clock, Stethoscope,
   TestTube, ScanLine, Pill, Heart, Activity, Building2, ClipboardList,
-  ChevronLeft, ChevronRight, Loader2, AlertTriangle, FileText
+  ChevronLeft, ChevronRight, Loader2, AlertTriangle, FileText, Pencil
 } from "lucide-react";
 import { patientService, consultationService, labService, radiologyService, 
          pharmacyService, physioService, wardService, type Patient } from '@/lib/services';
@@ -93,6 +95,9 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
   const [selectedLab, setSelectedLab] = useState<any>(null);
   const [selectedImaging, setSelectedImaging] = useState<any>(null);
   const [selectedPhysio, setSelectedPhysio] = useState<any>(null);
+  const [selectedPhysioSessions, setSelectedPhysioSessions] = useState<any[]>([]);
+  const [selectedPhysioSession, setSelectedPhysioSession] = useState<any>(null);
+  const [loadingPhysioSessions, setLoadingPhysioSessions] = useState(false);
   const [selectedWard, setSelectedWard] = useState<any>(null);
 
   // History data
@@ -1113,25 +1118,314 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
           </DialogContent>
         </Dialog>
 
-        {/* Physio View Dialog */}
-        <Dialog open={!!selectedPhysio} onOpenChange={(open) => { if (!open) setSelectedPhysio(null); }}>
-          <DialogContent className="max-w-lg">
-            {selectedPhysio && (
+        {/* Physio View Dialog - Full Session Report */}
+        <Dialog open={!!selectedPhysio} onOpenChange={(open) => { 
+          if (!open) {
+            setSelectedPhysio(null);
+            setSelectedPhysioSessions([]);
+            setSelectedPhysioSession(null);
+          }
+        }}>
+          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+            {loadingPhysioSessions ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                <p className="ml-3 text-sm text-muted-foreground">Loading session details...</p>
+              </div>
+            ) : selectedPhysio && selectedPhysioSession ? (
               <>
-                <DialogHeader>
-                  <DialogTitle className="flex items-center gap-2"><Activity className="h-5 w-5" /> Physiotherapy Order</DialogTitle>
-                  <DialogDescription>PHY-{String(selectedPhysio.id || '').padStart(6, '0')} • {formatDate(selectedPhysio.ordered_at)}</DialogDescription>
-                </DialogHeader>
-                <div className="space-y-3 text-sm">
+                {/* Session Selector */}
+                {selectedPhysioSessions.length > 1 && (
+                  <div className="mb-4">
+                    <Label className="text-sm font-medium mb-2 block">Select Session</Label>
+                    <Select
+                      value={String(selectedPhysioSession.id ?? '')}
+                      onValueChange={(value) => {
+                        const session = selectedPhysioSessions.find(s => String(s.id) === value);
+                        if (session) setSelectedPhysioSession(session);
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select session" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {selectedPhysioSessions.map((s, idx) => (
+                          <SelectItem key={s.id ?? `s-${idx}`} value={String(s.id ?? '')}>
+                            Session {s.session_number ?? '—'} — {s.scheduled_at ? new Date(s.scheduled_at).toLocaleString() : (s.id != null ? `PHY-${String(s.id).padStart(6, '0')}` : '—')}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
+                <div className="space-y-6">
+                  {/* Report Header */}
+                  <div className="border-b pb-4">
+                    <div className="flex items-center justify-between mb-4">
+                      <div>
+                        <h2 className="text-lg font-semibold text-blue-700">PHYSIOTHERAPY SESSION REPORT</h2>
+                        <p className="text-sm text-muted-foreground">Nigerian Ports Authority Medical Services</p>
+                      </div>
+                      <div className="text-right">
+                        <div className="flex gap-2">
+                          <Button variant="outline" size="sm" onClick={() => window.print()}>
+                            <Printer className="h-4 w-4 mr-1" />
+                            Print
+                          </Button>
+                          <Button variant="outline" size="sm">
+                            <Download className="h-4 w-4 mr-1" />
+                            Download PDF
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Patient & Session Info */}
+                    <div className="grid grid-cols-2 gap-6">
+                      <div className="space-y-2">
+                        <h3 className="font-medium text-sm text-muted-foreground uppercase tracking-wide">Patient Information</h3>
+                        <div className="space-y-1">
+                          <p><span className="font-medium">Name:</span> {selectedPhysioSession.patient_name || patient?.name || 'Unknown'}</p>
+                          <p><span className="font-medium">ID:</span> {selectedPhysioSession.patient_id || patient?.patient_id || '—'}</p>
+                          <p><span className="font-medium">Physiotherapist:</span> {selectedPhysioSession.physiotherapist_name || 'Not specified'}</p>
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <h3 className="font-medium text-sm text-muted-foreground uppercase tracking-wide">Session Details</h3>
+                        <div className="space-y-1">
+                          <p><span className="font-medium">Session:</span> {selectedPhysioSession.session_number ?? '—'}</p>
+                          <p><span className="font-medium">Scheduled:</span> {selectedPhysioSession.scheduled_at ? new Date(selectedPhysioSession.scheduled_at).toLocaleString() : '—'}</p>
+                          <p><span className="font-medium">Completed:</span> {selectedPhysioSession.completed_at ? new Date(selectedPhysioSession.completed_at).toLocaleString() : '—'}</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Diagnosis */}
+                    {selectedPhysioSession.order_details?.diagnosis && (
+                      <div className="mt-4 p-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg border border-amber-200 dark:border-amber-800">
+                        <p className="text-sm font-medium text-amber-800 dark:text-amber-200">Primary Diagnosis</p>
+                        <p className="text-sm mt-1">{selectedPhysioSession.order_details.diagnosis}</p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Assessment Sections */}
+                  <div className="space-y-6">
+                    {/* A. Patient Assessment */}
+                    <div className="space-y-3">
+                      <h3 className="text-lg font-semibold text-teal-700 dark:text-teal-400 border-b pb-2">A. Patient Assessment</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label className="text-sm font-medium">Presenting Complaint</Label>
+                          <p className="text-sm bg-muted/50 p-3 rounded border min-h-[60px]">
+                            {selectedPhysioSession.presenting_complaint || 'Not documented'}
+                          </p>
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-sm font-medium">Pain Assessment</Label>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div className="text-center p-3 bg-red-50 dark:bg-red-900/20 rounded border">
+                              <p className="text-xs text-muted-foreground">Before Treatment</p>
+                              <p className="text-xl font-bold text-red-600">{selectedPhysioSession.pain_level_before != null ? `${selectedPhysioSession.pain_level_before}/10` : '—'}</p>
+                            </div>
+                            <div className="text-center p-3 bg-green-50 dark:bg-green-900/20 rounded border">
+                              <p className="text-xs text-muted-foreground">After Treatment</p>
+                              <p className="text-xl font-bold text-green-600">{selectedPhysioSession.pain_level_after != null ? `${selectedPhysioSession.pain_level_after}/10` : '—'}</p>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* B. Medical & Social Background */}
+                    <div className="space-y-3">
+                      <h3 className="text-lg font-semibold text-blue-700 dark:text-blue-400 border-b pb-2">B. Medical & Social Background</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label className="text-sm font-medium">Medical History</Label>
+                          <p className="text-sm bg-muted/50 p-3 rounded border min-h-[60px]">
+                            {selectedPhysioSession.medical_history || 'Not documented'}
+                          </p>
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-sm font-medium">Medications</Label>
+                          <p className="text-sm bg-muted/50 p-3 rounded border min-h-[60px]">
+                            {selectedPhysioSession.medications || 'Not documented'}
+                          </p>
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-sm font-medium">Social History</Label>
+                          <p className="text-sm bg-muted/50 p-3 rounded border min-h-[60px]">
+                            {selectedPhysioSession.social_history || 'Not documented'}
+                          </p>
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-sm font-medium">Previous Treatments</Label>
+                          <p className="text-sm bg-muted/50 p-3 rounded border min-h-[60px]">
+                            {selectedPhysioSession.previous_treatments || 'Not documented'}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* C. Physical Examination */}
+                    <div className="space-y-3">
+                      <h3 className="text-lg font-semibold text-green-700 dark:text-green-400 border-b pb-2">C. Physical Examination</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label className="text-sm font-medium">Posture & Gait</Label>
+                          <p className="text-sm bg-muted/50 p-3 rounded border min-h-[60px]">
+                            {selectedPhysioSession.posture_gait || 'Not documented'}
+                          </p>
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-sm font-medium">Range of Motion</Label>
+                          <p className="text-sm bg-muted/50 p-3 rounded border min-h-[60px]">
+                            {selectedPhysioSession.range_of_motion || 'Not documented'}
+                          </p>
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-sm font-medium">Muscle Strength</Label>
+                          <p className="text-sm bg-muted/50 p-3 rounded border min-h-[60px]">
+                            {selectedPhysioSession.muscle_strength || 'Not documented'}
+                          </p>
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-sm font-medium">Special Tests</Label>
+                          <p className="text-sm bg-muted/50 p-3 rounded border min-h-[60px]">
+                            {selectedPhysioSession.special_tests || 'Not documented'}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* D. Functional Evaluation */}
+                    <div className="space-y-3">
+                      <h3 className="text-lg font-semibold text-purple-700 dark:text-purple-400 border-b pb-2">D. Functional Evaluation</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label className="text-sm font-medium">Functional Assessment</Label>
+                          <p className="text-sm bg-muted/50 p-3 rounded border min-h-[60px]">
+                            {selectedPhysioSession.functional_assessment || 'Not documented'}
+                          </p>
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-sm font-medium">Functional Goals</Label>
+                          <p className="text-sm bg-muted/50 p-3 rounded border min-h-[60px]">
+                            {selectedPhysioSession.functional_goals || 'Not documented'}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* E. Clinical Reasoning */}
+                    <div className="space-y-3">
+                      <h3 className="text-lg font-semibold text-orange-700 dark:text-orange-400 border-b pb-2">E. Clinical Reasoning</h3>
+                      <div className="space-y-2">
+                        <Label className="text-sm font-medium">Assessment Findings & Clinical Impression</Label>
+                        <p className="text-sm bg-muted/50 p-3 rounded border min-h-[80px]">
+                          {selectedPhysioSession.clinical_reasoning || selectedPhysioSession.assessment_findings || 'Not documented'}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* F. Treatment Plan */}
+                    <div className="space-y-3">
+                      <h3 className="text-lg font-semibold text-red-700 dark:text-red-400 border-b pb-2">F. Treatment Plan</h3>
+                      <div className="space-y-2">
+                        <Label className="text-sm font-medium">Planned Treatment Approach</Label>
+                        <p className="text-sm bg-muted/50 p-3 rounded border min-h-[80px]">
+                          {selectedPhysioSession.next_session_plan || selectedPhysioSession.treatment_performed || 'Not documented'}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Treatment Performed & Outcomes */}
+                    {(selectedPhysioSession.treatment_performed || selectedPhysioSession.progress_notes) && (
+                      <div className="space-y-3">
+                        <h3 className="text-lg font-semibold text-indigo-700 dark:text-indigo-400 border-b pb-2">Treatment Performed & Outcomes</h3>
+                        <div className="space-y-4">
+                          {selectedPhysioSession.treatment_performed && (
+                            <div className="space-y-2">
+                              <Label className="text-sm font-medium">Treatment Performed</Label>
+                              <p className="text-sm bg-muted/50 p-3 rounded border min-h-[60px]">
+                                {selectedPhysioSession.treatment_performed}
+                              </p>
+                            </div>
+                          )}
+                          {selectedPhysioSession.progress_notes && (
+                            <div className="space-y-2">
+                              <Label className="text-sm font-medium">Progress Notes</Label>
+                              <p className="text-sm bg-muted/50 p-3 rounded border min-h-[60px]">
+                                {selectedPhysioSession.progress_notes}
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Home Exercises & Recommendations */}
+                    {((selectedPhysioSession.home_exercises?.length ?? 0) > 0 || (selectedPhysioSession.exercises_prescribed?.length ?? 0) > 0 || (selectedPhysioSession.recommendations?.length ?? 0) > 0) && (
+                      <div className="space-y-3">
+                        <h3 className="text-lg font-semibold text-emerald-700 dark:text-emerald-400 border-b pb-2">Home Program & Recommendations</h3>
+                        <div className="space-y-4">
+                          {((selectedPhysioSession.home_exercises || selectedPhysioSession.exercises_prescribed) || []).length > 0 && (
+                            <div className="space-y-2">
+                              <Label className="text-sm font-medium">Home Exercises</Label>
+                              <div className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-md p-3">
+                                <ul className="text-sm space-y-1">
+                                  {(selectedPhysioSession.home_exercises || selectedPhysioSession.exercises_prescribed || []).map((exercise: any, index: number) => (
+                                    <li key={index} className="flex items-start gap-2">
+                                      <span className="text-emerald-600 mt-1">•</span>
+                                      <span>{typeof exercise === 'string' ? exercise : (exercise?.description ?? exercise)}</span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            </div>
+                          )}
+                          {selectedPhysioSession.recommendations && selectedPhysioSession.recommendations.length > 0 && (
+                            <div className="space-y-2">
+                              <Label className="text-sm font-medium">Recommendations</Label>
+                              <div className="space-y-2">
+                                {selectedPhysioSession.recommendations.map((rec: any, index: number) => (
+                                  <div key={index} className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-md p-3">
+                                    <p className="text-sm">{rec.text}</p>
+                                    <p className="text-xs text-muted-foreground mt-1">Type: {rec.type || 'general'}</p>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Footer */}
+                  <div className="border-t pt-4">
+                    <div className="flex items-center justify-between text-xs text-muted-foreground">
+                      <p>Report generated on {new Date().toLocaleString()}</p>
+                      <p>Session ID: {selectedPhysioSession?.id != null ? `PHY-${String(selectedPhysioSession.id).padStart(6, '0')}` : '—'}</p>
+                    </div>
+                  </div>
+                </div>
+              </>
+            ) : selectedPhysio && selectedPhysioSessions.length === 0 ? (
+              <div className="text-center py-12">
+                <Activity className="h-12 w-12 mx-auto mb-3 text-muted-foreground opacity-50" />
+                <p className="font-medium text-muted-foreground mb-1">No sessions found</p>
+                <p className="text-sm text-muted-foreground">This order has no completed sessions yet.</p>
+                <div className="mt-4 space-y-2 text-sm text-left">
                   <div><span className="text-muted-foreground">Diagnosis:</span> {selectedPhysio.diagnosis ?? ''}</div>
                   {selectedPhysio.chief_complaint && <div><span className="text-muted-foreground">Chief Complaint:</span> {selectedPhysio.chief_complaint}</div>}
                   {selectedPhysio.treatment_goal && <div><span className="text-muted-foreground">Treatment Goal:</span> {selectedPhysio.treatment_goal}</div>}
-                  {selectedPhysio.special_instructions && <div><span className="text-muted-foreground">Special Instructions:</span> {selectedPhysio.special_instructions}</div>}
                   <div><span className="text-muted-foreground">Status:</span> <Badge variant="outline">{selectedPhysio.status ?? ''}</Badge></div>
-                  <div><span className="text-muted-foreground">Ordered:</span> {formatDate(selectedPhysio.ordered_at)} {formatTime(selectedPhysio.ordered_at)}</div>
                 </div>
-              </>
-            )}
+              </div>
+            ) : null}
           </DialogContent>
         </Dialog>
 
@@ -1574,7 +1868,22 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
                               </Badge>
                             </td>
                             <td className="px-4 py-3 text-center">
-                              <Button variant="ghost" size="sm" onClick={() => { setSelectedPhysio(order); }}>
+                              <Button variant="ghost" size="sm" onClick={async () => {
+                                setSelectedPhysio(order);
+                                setLoadingPhysioSessions(true);
+                                try {
+                                  const sessions = await physioService.getSessions({ order: order.id });
+                                  setSelectedPhysioSessions(sessions.results || []);
+                                  if (sessions.results && sessions.results.length > 0) {
+                                    setSelectedPhysioSession(sessions.results[0]);
+                                  }
+                                } catch (err) {
+                                  console.error('Error loading physio sessions:', err);
+                                  toast.error('Failed to load session details');
+                                } finally {
+                                  setLoadingPhysioSessions(false);
+                                }
+                              }}>
                                 <Eye className="h-4 w-4 mr-1" /> View
                               </Button>
                             </td>
