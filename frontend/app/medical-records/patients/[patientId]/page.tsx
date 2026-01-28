@@ -1127,6 +1127,20 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
           }
         }}>
           <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Activity className="h-5 w-5" />
+                Physiotherapy Session Report
+              </DialogTitle>
+              {selectedPhysio && (
+                <DialogDescription>
+                  {selectedPhysioSession 
+                    ? `${selectedPhysioSession.patient_name || patient?.name || 'Patient'} · PHY-${String(selectedPhysioSession.id || '').padStart(6, '0')} · Session ${selectedPhysioSession.session_number ?? '—'}`
+                    : `PHY-${String(selectedPhysio.id || '').padStart(6, '0')} · ${formatDate(selectedPhysio.ordered_at)}`
+                  }
+                </DialogDescription>
+              )}
+            </DialogHeader>
             {loadingPhysioSessions ? (
               <div className="flex items-center justify-center py-12">
                 <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
