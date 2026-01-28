@@ -1430,13 +1430,13 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
             ) : selectedPhysio && selectedPhysioSessions.length === 0 ? (
               <div className="text-center py-12">
                 <Activity className="h-12 w-12 mx-auto mb-3 text-muted-foreground opacity-50" />
-                <p className="font-medium text-muted-foreground mb-1">No sessions found</p>
-                <p className="text-sm text-muted-foreground">This order has no completed sessions yet.</p>
-                <div className="mt-4 space-y-2 text-sm text-left">
+                <p className="font-medium text-muted-foreground mb-1">No completed sessions found</p>
+                <p className="text-sm text-muted-foreground">This order has no completed sessions yet. Session reports will appear here once sessions are completed.</p>
+                <div className="mt-4 space-y-2 text-sm text-left bg-muted/30 p-4 rounded-lg">
+                  <div><span className="text-muted-foreground">Order Status:</span> <Badge variant="outline" className="ml-2">{selectedPhysio.status ?? ''}</Badge></div>
                   <div><span className="text-muted-foreground">Diagnosis:</span> {selectedPhysio.diagnosis ?? ''}</div>
                   {selectedPhysio.chief_complaint && <div><span className="text-muted-foreground">Chief Complaint:</span> {selectedPhysio.chief_complaint}</div>}
                   {selectedPhysio.treatment_goal && <div><span className="text-muted-foreground">Treatment Goal:</span> {selectedPhysio.treatment_goal}</div>}
-                  <div><span className="text-muted-foreground">Status:</span> <Badge variant="outline">{selectedPhysio.status ?? ''}</Badge></div>
                 </div>
               </div>
             ) : null}
@@ -1887,18 +1887,19 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
                                 setLoadingPhysioSessions(true);
                                 try {
                                   const sessions = await physioService.getSessions({ order: order.id });
+                                  // Only show completed sessions - no fallback
                                   const completedSessions = (sessions.results || []).filter((s: any) => s.status === 'completed');
-                                  setSelectedPhysioSessions(completedSessions.length > 0 ? completedSessions : (sessions.results || []));
-                                  if (sessions.results && sessions.results.length > 0) {
-                                    // Prefer completed sessions, otherwise show the first one
-                                    const sessionToShow = completedSessions.length > 0 
-                                      ? completedSessions[0] 
-                                      : sessions.results[0];
-                                    setSelectedPhysioSession(sessionToShow);
+                                  setSelectedPhysioSessions(completedSessions);
+                                  if (completedSessions.length > 0) {
+                                    setSelectedPhysioSession(completedSessions[0]);
+                                  } else {
+                                    setSelectedPhysioSession(null);
                                   }
                                 } catch (err) {
                                   console.error('Error loading physio sessions:', err);
                                   toast.error('Failed to load session details');
+                                  setSelectedPhysioSessions([]);
+                                  setSelectedPhysioSession(null);
                                 } finally {
                                   setLoadingPhysioSessions(false);
                                 }
