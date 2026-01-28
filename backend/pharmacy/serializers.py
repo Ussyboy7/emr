@@ -37,36 +37,51 @@ class PrescriptionItemSerializer(serializers.ModelSerializer):
 
     def get_medication_name(self, obj):
         """Get medication name safely."""
-        return obj.medication.name if obj.medication else None
+        try:
+            if hasattr(obj, 'medication') and obj.medication:
+                return getattr(obj.medication, 'name', None)
+            return None
+        except (AttributeError, TypeError):
+            return None
 
     def get_medication_code(self, obj):
         """Get medication code safely."""
-        return obj.medication.code if obj.medication else None
+        try:
+            if hasattr(obj, 'medication') and obj.medication:
+                return getattr(obj.medication, 'code', None)
+            return None
+        except (AttributeError, TypeError):
+            return None
 
     def get_medication_details(self, obj):
         """Get medication details including current stock."""
-        if not obj.medication:
+        try:
+            if not hasattr(obj, 'medication') or not obj.medication:
+                return None
+            
+            medication = obj.medication
+            
+            # Calculate total available stock from inventory
+            from .models import MedicationInventory
+            from django.db.models import Sum
+            from django.utils import timezone
+            
+            total_stock = MedicationInventory.objects.filter(
+                medication=medication,
+                expiry_date__gt=timezone.now().date()
+            ).aggregate(total=Sum('quantity'))['total'] or 0
+            
+            return {
+                'id': getattr(medication, 'id', None),
+                'name': getattr(medication, 'name', None),
+                'code': getattr(medication, 'code', None),
+                'current_stock': float(total_stock),
+                'unit': getattr(medication, 'unit', None),
+                'strength': getattr(medication, 'strength', None),
+                'form': getattr(medication, 'form', None),
+            }
+        except (AttributeError, TypeError, ValueError):
             return None
-        
-        # Calculate total available stock from inventory
-        from .models import MedicationInventory
-        from django.db.models import Sum
-        from django.utils import timezone
-        
-        total_stock = MedicationInventory.objects.filter(
-            medication=obj.medication,
-            expiry_date__gt=timezone.now().date()
-        ).aggregate(total=Sum('quantity'))['total'] or 0
-        
-        return {
-            'id': obj.medication.id,
-            'name': obj.medication.name,
-            'code': obj.medication.code,
-            'current_stock': float(total_stock),
-            'unit': obj.medication.unit,
-            'strength': obj.medication.strength,
-            'form': obj.medication.form,
-        }
     
     class Meta:
         model = PrescriptionItem
