@@ -74,23 +74,6 @@ def _pno_from_col4(s):
     return v
 
 
-def _split_name(s):
-    """
-    Split "SURNAME FIRSTNAME MIDDLENAME" -> (surname, first_name, middle_name).
-    E.g. "BUCKNOR JOSEPH AKINKUMI" -> ("BUCKNOR", "JOSEPH", "AKINKUMI").
-    1 word -> (s, "", ""); 2 -> (s, f, ""); 3 -> (s, f, m); 4+ -> (s, f, "m1 m2 ...").
-    """
-    s = _clean(s)
-    if not s:
-        return ("", "", "")
-    parts = s.split()
-    if len(parts) == 1:
-        return (parts[0], "", "")
-    if len(parts) == 2:
-        return (parts[0], parts[1], "")
-    return (parts[0], parts[1], " ".join(parts[2:]))
-
-
 class Command(BaseCommand):
     help = "Clean retiree CSV: unique personal_number, surname, first_name, middle_name, gender, DOB."
 
@@ -117,16 +100,20 @@ class Command(BaseCommand):
                 emp_no = _clean(row[0])
                 pno = _pno_from_col4(row[4]) if len(row) > 4 else ""
                 pn = emp_no or pno
-                name_col5 = _clean(row[5]) if len(row) > 5 else ""
                 name_col1 = _clean(row[1])
-
-                if name_col5 and name_col5.upper() not in ("P/NO", "NAME"):
-                    surname, first, middle = _split_name(name_col5)
-                    if not surname:
-                        surname = name_col1
+                # Use col 1 (Name) as the source of truth for this row's name.
+                # Col 5 (NAME) in the raw CSV often contains repeated placeholder values
+                # (e.g. BUCKNOR JOSEPH AKINKUMI) that do not match the person in this row;
+                # col 1 holds the correct surname for Emp. No.
+                parts = name_col1.split(None, 2)  # max 3: surname, first, middle
+                if len(parts) == 1:
+                    surname, first, middle = parts[0], "", ""
+                elif len(parts) == 2:
+                    surname, first, middle = parts[0], parts[1], ""
                 else:
-                    surname = name_col1
-                    first, middle = "", ""
+                    surname = parts[0] if len(parts) > 0 else ""
+                    first = parts[1] if len(parts) > 1 else ""
+                    middle = parts[2] if len(parts) > 2 else ""
 
                 g = _gender(row[2]) if len(row) > 2 else None
                 dob = _parse_dob(row[3]) if len(row) > 3 else None

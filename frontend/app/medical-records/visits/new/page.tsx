@@ -66,10 +66,19 @@ function NewVisitPageContent() {
     visitType: '',
     clinic: '',
     location: '',
-    visitDate: new Date().toISOString().split('T')[0],
-    visitTime: new Date().toTimeString().slice(0, 5),
+    visitDate: '',
+    visitTime: '',
     notes: '',
   });
+
+  // Set date/time on client only to avoid hydration mismatch (new Date() differs server vs client)
+  useEffect(() => {
+    setFormData(prev => ({
+      ...prev,
+      visitDate: prev.visitDate || new Date().toISOString().split('T')[0],
+      visitTime: prev.visitTime || new Date().toTimeString().slice(0, 5),
+    }));
+  }, []);
 
   const mapPatient = useCallback((p: any) => ({
     id: p.patient_id || String(p.id),

@@ -949,7 +949,7 @@ export default function LabOrdersPage() {
         );
 
       const count = selectedTestsForCollection.length;
-      toast.success(`${count} sample${count > 1 ? 's' : ''} collected via ${selectedMethod} with shared lab number`);
+      toast.success(`${count} sample${count > 1 ? 's' : ''} collected via ${selectedMethod} with shared Lab ID`);
       
       // Reload orders to get updated data
       await loadOrders();
@@ -1144,8 +1144,8 @@ export default function LabOrdersPage() {
         lab_number: updatedTest.lab_number,
       });
     } catch (error) {
-      console.error('Failed to generate lab number:', error);
-      toast.error('Failed to generate lab number');
+      console.error('Failed to generate Lab ID:', error);
+      toast.error('Failed to generate Lab ID');
     }
 
     setIsCollectDialogOpen(true); 
@@ -1524,7 +1524,7 @@ export default function LabOrdersPage() {
                       {/* Test Details & Actions */}
                       <div className="flex items-center justify-between">
                         <div className="text-xs text-muted-foreground">
-                          {test.lab_number && <span className="font-mono text-blue-600 dark:text-blue-400">Lab #: {test.lab_number}</span>}
+                          {test.lab_number && <span className="font-mono text-blue-600 dark:text-blue-400">Lab ID: {test.lab_number}</span>}
                           {test.collectedBy && <span className={test.lab_number ? " ml-2" : ""}>Collected by {test.collectedBy} {test.collectedAt && `at ${formatTime(test.collectedAt)}`}</span>}
                           {/* Extract collection method from notes if available */}
                           {(() => {
@@ -1698,10 +1698,10 @@ export default function LabOrdersPage() {
 
                     {selectedTest.lab_number && (
                       <div className="mt-2 text-sm">
-                        <p className="font-mono text-blue-600 dark:text-blue-400">Lab #: {selectedTest.lab_number}</p>
+                        <p className="font-mono text-blue-600 dark:text-blue-400">Lab ID: {selectedTest.lab_number}</p>
                         {selectedTestsForCollection.length > 1 && (
                           <p className="text-xs text-muted-foreground mt-1">
-                            All {selectedTestsForCollection.length} tests will share this lab number
+                            All {selectedTestsForCollection.length} tests will share this Lab ID
                           </p>
                         )}
                       </div>

@@ -98,22 +98,6 @@ def _pno_from_col4(s):
     return v
 
 
-def _split_name(s):
-    """
-    Split "SURNAME FIRSTNAME MIDDLENAME" -> (surname, first_name, middle_name).
-    E.g. "BUCKNOR JOSEPH AKINKUMI" -> ("BUCKNOR", "JOSEPH", "AKINKUMI").
-    """
-    s = _clean(s)
-    if not s:
-        return ("", "", "")
-    parts = s.split()
-    if len(parts) == 1:
-        return (parts[0], "", "")
-    if len(parts) == 2:
-        return (parts[0], parts[1], "")
-    return (parts[0], parts[1], " ".join(parts[2:]))
-
-
 def _load_csv(path):
     """
     Yield dicts: personal_number, surname, first_name, middle_name, gender, date_of_birth.
@@ -155,15 +139,16 @@ def _load_csv(path):
                 emp_no = _clean(row[0])
                 pno = _pno_from_col4(row[4]) if len(row) > 4 else ""
                 pn = emp_no or pno
-                name_col5 = _clean(row[5]) if len(row) > 5 else ""
                 name_col1 = _clean(row[1])
-                if name_col5 and name_col5.upper() not in ("P/NO", "NAME"):
-                    surname, first, middle = _split_name(name_col5)
-                    if not surname:
-                        surname = name_col1
+                # Use col 1 (Name) as the source of truth. Col 5 (NAME) in the raw CSV
+                # often contains repeated placeholder values that do not match this row.
+                parts = (name_col1 or "").split(None, 2)
+                if len(parts) == 1:
+                    surname, first, middle = parts[0], "", ""
+                elif len(parts) == 2:
+                    surname, first, middle = parts[0], parts[1], ""
                 else:
-                    surname = name_col1
-                    first, middle = "", ""
+                    surname, first, middle = parts[0], parts[1], (parts[2] if len(parts) > 2 else "")
                 if not pn or not surname:
                     continue
                 g = _gender(row[2]) if len(row) > 2 else None

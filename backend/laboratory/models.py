@@ -125,8 +125,10 @@ class LabTest(models.Model):
     sample_type = models.CharField(max_length=50)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
 
-    # Lab number for sample identification (format: BT-YY-XXXX)
-    lab_number = models.CharField(max_length=20, unique=True, blank=True, null=True, db_index=True)
+    # Lab ID (Lab #): BT-YY-NNNN, generated when sample is collected. Identifies the
+    # patient/sample at the lab. One Lab ID per order: all tests in the order share it.
+    # Not unique: multiple tests can have the same lab_number.
+    lab_number = models.CharField(max_length=20, blank=True, null=True, db_index=True)
     
     # Processing information
     processing_method = models.CharField(max_length=20, choices=PROCESSING_METHOD_CHOICES, blank=True, null=True)

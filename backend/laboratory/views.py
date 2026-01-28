@@ -109,7 +109,8 @@ class LabOrderViewSet(viewsets.ModelViewSet):
     
     @action(detail=True, methods=['post'])
     def generate_lab_number(self, request, pk=None):
-        """Generate and assign lab number for a test (called when dialog opens)."""
+        """Generate Lab ID (BT-YY-NNNN) for a test. Used when patient comes to lab and sample is collected.
+        One Lab ID per order: all tests in the order share the same Lab ID when collected together."""
         from django.db.models import Max
 
         order = self.get_object()
@@ -118,20 +119,16 @@ class LabOrderViewSet(viewsets.ModelViewSet):
         try:
             test = order.tests.get(id=test_id)
 
-            # Generate lab number if not already assigned
             if not test.lab_number:
-                # Format: BT-YY-XXXX (BT = Bode Thomas, YY = year, XXXX = serial)
-                current_year = timezone.now().year % 100  # Get last 2 digits of year
-                clinic_code = 'BT'  # Bode Thomas clinic
-
-                # Get the highest serial number for this year
+                # Format: BT-YY-NNNN (BT = Bode Thomas, YY = year, NNNN = serial)
+                current_year = timezone.now().year % 100
+                clinic_code = 'BT'
                 year_prefix = f"{clinic_code}-{current_year:02d}-"
                 max_lab_number = LabTest.objects.filter(
                     lab_number__startswith=year_prefix
                 ).aggregate(Max('lab_number'))['lab_number__max']
 
                 if max_lab_number:
-                    # Extract serial number and increment
                     try:
                         serial = int(max_lab_number.split('-')[-1]) + 1
                     except (ValueError, IndexError):
@@ -139,11 +136,9 @@ class LabOrderViewSet(viewsets.ModelViewSet):
                 else:
                     serial = 1
 
-                # Generate lab number with 4-digit serial
                 test.lab_number = f"{clinic_code}-{current_year:02d}-{serial:04d}"
                 test.save()
 
-                # Log audit
                 AuditService.log_activity(
                     user=request.user,
                     action='update',
@@ -151,7 +146,7 @@ class LabOrderViewSet(viewsets.ModelViewSet):
                     object_id=str(test.id),
                     module='laboratory',
                     object_repr=f'Lab Test {test.template.name if test.template else "Unknown"}',
-                    description=f'Lab number generated: {test.lab_number} (Order: {order.order_id})',
+                    description=f'Lab ID generated: {test.lab_number} (Order: {order.order_id})',
                     old_values={},
                     new_values={'lab_number': test.lab_number},
                     metadata={'order_id': order.order_id},
@@ -164,7 +159,9 @@ class LabOrderViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def collect_samples(self, request, pk=None):
-        """Collect multiple samples and assign the same lab number to all tests."""
+        """Collect samples for multiple tests in the order. Generates ONE Lab ID (BT-YY-NNNN) and
+        assigns it to all tests in the order. When a patient comes to the lab, one Lab ID covers
+        all tests in that order."""
         from django.db.models import Max
 
         order = self.get_object()
@@ -178,18 +175,15 @@ class LabOrderViewSet(viewsets.ModelViewSet):
         try:
             tests = order.tests.filter(id__in=test_ids)
 
-            # Generate ONE lab number for all tests collected together
-            current_year = timezone.now().year % 100  # Get last 2 digits of year
-            clinic_code = 'BT'  # Bode Thomas clinic
-
-            # Get the next available serial number
+            # One Lab ID (BT-YY-NNNN) for this collection – shared by all tests
+            current_year = timezone.now().year % 100
+            clinic_code = 'BT'
             year_prefix = f"{clinic_code}-{current_year:02d}-"
             max_lab_number = LabTest.objects.filter(
                 lab_number__startswith=year_prefix
             ).aggregate(Max('lab_number'))['lab_number__max']
 
             if max_lab_number:
-                # Extract serial number and increment
                 try:
                     next_serial = int(max_lab_number.split('-')[-1]) + 1
                 except (ValueError, IndexError):
@@ -197,10 +191,8 @@ class LabOrderViewSet(viewsets.ModelViewSet):
             else:
                 next_serial = 1
 
-            # Generate the shared lab number
             shared_lab_number = f"{clinic_code}-{current_year:02d}-{next_serial:04d}"
 
-            # Assign the SAME lab number to all tests
             updated_tests = []
             for test in tests:
                 test.lab_number = shared_lab_number
@@ -211,7 +203,7 @@ class LabOrderViewSet(viewsets.ModelViewSet):
                 # Store collection method and notes
                 collection_info = []
                 if test.lab_number:
-                    collection_info.append(f"Lab Number: {test.lab_number}")
+                    collection_info.append(f"Lab ID: {test.lab_number}")
                 if collection_method:
                     collection_info.append(f"Method: {collection_method}")
                 if notes:
