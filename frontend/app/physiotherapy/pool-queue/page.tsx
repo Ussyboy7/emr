@@ -825,11 +825,11 @@ export default function PhysioPoolQueuePage() {
   return (
     <TooltipProvider>
       <DashboardLayout>
-        <div className="container mx-auto p-6 space-y-6">
+        <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
           {/* Header */}
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
-              <h1 className="text-3xl font-bold text-foreground flex items-center gap-3">
+              <h1 className="text-2xl sm:text-3xl font-bold text-foreground flex items-center gap-3">
                 <Activity className="h-8 w-8 text-blue-500" />
                 Physio Orders
               </h1>
@@ -849,7 +849,7 @@ export default function PhysioPoolQueuePage() {
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-sm text-muted-foreground">Pending Orders</p>
-                        <p className="text-3xl font-bold text-yellow-600 dark:text-yellow-400">{stats.pending}</p>
+                        <p className="text-2xl sm:text-3xl font-bold text-yellow-600 dark:text-yellow-400">{stats.pending}</p>
                       </div>
                       <Clock className="h-8 w-8 text-yellow-400" />
                     </div>
@@ -868,7 +868,7 @@ export default function PhysioPoolQueuePage() {
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-sm text-muted-foreground">Scheduled</p>
-                        <p className="text-3xl font-bold text-blue-600 dark:text-blue-400">{stats.scheduled}</p>
+                        <p className="text-2xl sm:text-3xl font-bold text-blue-600 dark:text-blue-400">{stats.scheduled}</p>
                       </div>
                       <Calendar className="h-8 w-8 text-blue-400" />
                     </div>
@@ -887,7 +887,7 @@ export default function PhysioPoolQueuePage() {
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-sm text-muted-foreground">In Progress</p>
-                        <p className="text-3xl font-bold text-orange-600 dark:text-orange-400">{stats.inProgress}</p>
+                        <p className="text-2xl sm:text-3xl font-bold text-orange-600 dark:text-orange-400">{stats.inProgress}</p>
                       </div>
                       <Activity className="h-8 w-8 text-orange-400" />
                     </div>
@@ -906,7 +906,7 @@ export default function PhysioPoolQueuePage() {
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-sm text-muted-foreground">Cancelled</p>
-                        <p className="text-3xl font-bold text-red-600 dark:text-red-400">{stats.cancelled}</p>
+                        <p className="text-2xl sm:text-3xl font-bold text-red-600 dark:text-red-400">{stats.cancelled}</p>
                       </div>
                       <XCircle className="h-8 w-8 text-red-400" />
                     </div>
@@ -925,7 +925,7 @@ export default function PhysioPoolQueuePage() {
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-sm text-muted-foreground">Completed</p>
-                        <p className="text-3xl font-bold text-emerald-600 dark:text-emerald-400">{stats.completed}</p>
+                        <p className="text-2xl sm:text-3xl font-bold text-emerald-600 dark:text-emerald-400">{stats.completed}</p>
                       </div>
                       <CheckCircle className="h-8 w-8 text-emerald-400" />
                     </div>

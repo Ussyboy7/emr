@@ -1,3 +1,5 @@
+"use client";
+
 /**
  * Laboratory API service
  */
@@ -374,5 +376,5 @@ class LabService {
   }
 }
 
-export const labService = new LabService();
+export default new LabService();
 

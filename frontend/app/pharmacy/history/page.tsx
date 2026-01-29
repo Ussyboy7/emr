@@ -218,11 +218,11 @@ export default function DispenseHistoryPage() {
 
   return (
     <DashboardLayout>
-      <div className="container mx-auto p-6 space-y-6">
+      <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
         {/* Header */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold text-foreground flex items-center gap-3">
+            <h1 className="text-2xl sm:text-3xl font-bold text-foreground flex items-center gap-3">
               <History className="h-8 w-8 text-violet-500" />
               Dispense History
             </h1>
@@ -237,7 +237,7 @@ export default function DispenseHistoryPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Total Dispensed</p>
-                  <p className="text-3xl font-bold text-violet-600">{stats.total}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-violet-600">{stats.total}</p>
                 </div>
                 <Package className="h-6 w-6 text-violet-500" />
               </div>
@@ -249,7 +249,7 @@ export default function DispenseHistoryPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Today</p>
-                  <p className="text-3xl font-bold text-emerald-600">{stats.today}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-emerald-600">{stats.today}</p>
                 </div>
                 <Calendar className="h-6 w-6 text-emerald-500" />
               </div>
@@ -261,7 +261,7 @@ export default function DispenseHistoryPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Substitutions</p>
-                  <p className="text-3xl font-bold text-amber-600">{stats.withSubstitutions}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-amber-600">{stats.withSubstitutions}</p>
                 </div>
                 <TrendingUp className="h-6 w-6 text-amber-500" />
               </div>
@@ -273,7 +273,7 @@ export default function DispenseHistoryPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Avg Wait Time</p>
-                  <p className="text-3xl font-bold text-blue-600">{stats.avgWaitTime}m</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-blue-600">{stats.avgWaitTime}m</p>
                 </div>
                 <Clock className="h-6 w-6 text-blue-500" />
               </div>

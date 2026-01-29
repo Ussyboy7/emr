@@ -167,11 +167,11 @@ export default function NotificationsPage() {
 
   return (
     <DashboardLayout>
-      <div className="container mx-auto p-6 space-y-6">
+      <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
         {/* Header */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold text-foreground flex items-center gap-3">
+            <h1 className="text-2xl sm:text-3xl font-bold text-foreground flex items-center gap-3">
               <Bell className="h-8 w-8 text-blue-500" />
               Notifications
             </h1>
@@ -192,7 +192,7 @@ export default function NotificationsPage() {
           <Card className="border-l-4 border-l-blue-500">
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
-                <div><p className="text-sm text-muted-foreground">Total</p><p className="text-3xl font-bold text-blue-600 dark:text-blue-400">{stats.total}</p></div>
+                <div><p className="text-sm text-muted-foreground">Total</p><p className="text-2xl sm:text-3xl font-bold text-blue-600 dark:text-blue-400">{stats.total}</p></div>
                 <Bell className="h-8 w-8 text-blue-500 opacity-50" />
               </div>
             </CardContent>
@@ -200,7 +200,7 @@ export default function NotificationsPage() {
           <Card className="border-l-4 border-l-amber-500">
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
-                <div><p className="text-sm text-muted-foreground">Unread</p><p className="text-3xl font-bold text-amber-600 dark:text-amber-400">{stats.unread}</p></div>
+                <div><p className="text-sm text-muted-foreground">Unread</p><p className="text-2xl sm:text-3xl font-bold text-amber-600 dark:text-amber-400">{stats.unread}</p></div>
                 <BellRing className="h-8 w-8 text-amber-500 opacity-50" />
               </div>
             </CardContent>
@@ -208,7 +208,7 @@ export default function NotificationsPage() {
           <Card className="border-l-4 border-l-rose-500">
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
-                <div><p className="text-sm text-muted-foreground">Critical</p><p className="text-3xl font-bold text-rose-600 dark:text-rose-400">{stats.critical}</p></div>
+                <div><p className="text-sm text-muted-foreground">Critical</p><p className="text-2xl sm:text-3xl font-bold text-rose-600 dark:text-rose-400">{stats.critical}</p></div>
                 <AlertTriangle className="h-8 w-8 text-rose-500 opacity-50" />
               </div>
             </CardContent>
@@ -216,7 +216,7 @@ export default function NotificationsPage() {
           <Card className="border-l-4 border-l-emerald-500">
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
-                <div><p className="text-sm text-muted-foreground">Today</p><p className="text-3xl font-bold text-emerald-600 dark:text-emerald-400">{stats.today}</p></div>
+                <div><p className="text-sm text-muted-foreground">Today</p><p className="text-2xl sm:text-3xl font-bold text-emerald-600 dark:text-emerald-400">{stats.today}</p></div>
                 <Clock className="h-8 w-8 text-emerald-500 opacity-50" />
               </div>
             </CardContent>

@@ -107,7 +107,7 @@ export default function ComprehensiveReport() {
 
   return (
     <DashboardLayout>
-      <div className="container mx-auto p-6 space-y-6">
+      <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
         {/* Header */}
         <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
           <Link href="/medical-records" className="hover:text-primary">Medical Records</Link>
@@ -119,7 +119,7 @@ export default function ComprehensiveReport() {
 
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold text-foreground flex items-center gap-3">
+            <h1 className="text-2xl sm:text-3xl font-bold text-foreground flex items-center gap-3">
               <BarChart3 className="h-8 w-8 text-gray-500" />
               Comprehensive Report
             </h1>
@@ -179,7 +179,7 @@ export default function ComprehensiveReport() {
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div className="text-3xl font-bold text-blue-600 dark:text-blue-400">{reportData.overview.total_visits.toLocaleString()}</div>
+                    <div className="text-2xl sm:text-3xl font-bold text-blue-600 dark:text-blue-400">{reportData.overview.total_visits.toLocaleString()}</div>
                   </CardContent>
                 </Card>
                 <Card className="border-l-4 border-l-purple-500">
@@ -190,7 +190,7 @@ export default function ComprehensiveReport() {
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div className="text-3xl font-bold text-purple-600 dark:text-purple-400">{reportData.overview.total_prescriptions.toLocaleString()}</div>
+                    <div className="text-2xl sm:text-3xl font-bold text-purple-600 dark:text-purple-400">{reportData.overview.total_prescriptions.toLocaleString()}</div>
                     <p className="text-xs text-muted-foreground">{reportData.overview.dispensed_prescriptions} dispensed</p>
                   </CardContent>
                 </Card>
@@ -202,7 +202,7 @@ export default function ComprehensiveReport() {
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div className="text-3xl font-bold text-pink-600 dark:text-pink-400">{reportData.overview.total_lab_tests.toLocaleString()}</div>
+                    <div className="text-2xl sm:text-3xl font-bold text-pink-600 dark:text-pink-400">{reportData.overview.total_lab_tests.toLocaleString()}</div>
                   </CardContent>
                 </Card>
                 <Card className="border-l-4 border-l-green-500">
@@ -213,7 +213,7 @@ export default function ComprehensiveReport() {
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div className="text-3xl font-bold text-green-600 dark:text-green-400">{reportData.overview.total_nursing_orders.toLocaleString()}</div>
+                    <div className="text-2xl sm:text-3xl font-bold text-green-600 dark:text-green-400">{reportData.overview.total_nursing_orders.toLocaleString()}</div>
                     <p className="text-xs text-muted-foreground">
                       {reportData.overview.injections} injections, {reportData.overview.dressing} dressing
                     </p>
@@ -230,7 +230,7 @@ export default function ComprehensiveReport() {
                   <div className="grid gap-6 md:grid-cols-5">
                     {Object.entries(reportData.category_breakdown).map(([category, count]) => (
                       <div key={category} className="text-center">
-                        <div className="text-3xl font-bold text-blue-600 dark:text-blue-400 mb-2">{count.toLocaleString()}</div>
+                        <div className="text-2xl sm:text-3xl font-bold text-blue-600 dark:text-blue-400 mb-2">{count.toLocaleString()}</div>
                         <div className="text-sm text-muted-foreground">{category}</div>
                         <div className="text-xs text-muted-foreground mt-1">
                           {reportData.overview.total_visits > 0 

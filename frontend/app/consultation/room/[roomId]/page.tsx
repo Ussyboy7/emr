@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState, use } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -3298,9 +3297,11 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       };
 
       const dailyDoses = frequencyToDailyDoses[config.frequency] || 1;
+      // Extract numeric dosage value (e.g., "2" or "2 tablets" -> 2)
+      const dosageValue = config.dosage ? parseFloat(String(config.dosage).replace(/[^\d.]/g, '')) || 1 : 1;
       const calculatedQty = config.frequency === 'STAT (Single dose)'
-        ? 1
-        : Math.ceil(dailyDoses * (config.durationDays || 1));
+        ? dosageValue
+        : Math.ceil(dosageValue * dailyDoses * (config.durationDays || 1));
 
       const rxId = `RX-${Date.now()}-${medicationId}`;
       
@@ -3345,10 +3346,14 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     toast.success(`${selectedMeds.length} medication(s) added to prescription order`);
   };
 
-  const calculateQuantity = (frequency: string, durationDays: number) => {
-    if (frequency === 'STAT (Single dose)') return 1;
+  const calculateQuantity = (frequency: string, durationDays: number, dosage: string | number = 1) => {
+    if (frequency === 'STAT (Single dose)') {
+      const dosageValue = typeof dosage === 'string' ? (parseFloat(dosage.replace(/[^\d.]/g, '')) || 1) : (dosage || 1);
+      return dosageValue;
+    }
     const dailyDoses = frequencyToDailyDoses[frequency] || 1;
-    return Math.ceil(dailyDoses * durationDays);
+    const dosageValue = typeof dosage === 'string' ? (parseFloat(dosage.replace(/[^\d.]/g, '')) || 1) : (dosage || 1);
+    return Math.ceil(dosageValue * dailyDoses * durationDays);
   };
 
   // CRITICAL: Only use real medications from API - do NOT use demo medications
@@ -3937,8 +3942,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         'STAT': 'stat',
       };
       
-      // Create all studies for the order (limit to first order to prevent array issues)
-      const studiesData = draftOrders.slice(0, 1).map(order => {
+      // Create all studies for the order
+      const studiesData = draftOrders.map(order => {
         // Find the template that matches this order
         const template = radiologyTemplates.find(t => t.name === order.procedure);
         const studyData: any = {
@@ -4216,11 +4221,11 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
     return (
       <DashboardLayout>
-        <div className="container mx-auto p-6 space-y-6">
+        <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
           {/* Header Section */}
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
-              <h1 className="text-3xl font-bold text-foreground flex items-center gap-3">
+              <h1 className="text-2xl sm:text-3xl font-bold text-foreground flex items-center gap-3">
                 <div className="w-12 h-12 bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-lg flex items-center justify-center text-white text-xl font-bold shadow-lg">
                   {room.name.charAt(0)}
                 </div>
@@ -4317,11 +4322,11 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   // Active Session View
   return (
     <DashboardLayout>
-      <div className="container mx-auto p-6 space-y-6">
+      <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
         {/* Header Section */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold text-foreground">Consultation Session</h1>
+            <h1 className="text-2xl sm:text-3xl font-bold text-foreground">Consultation Session</h1>
             <p className="text-muted-foreground mt-1">Room: {room.name} • {room.doctor}</p>
             <div className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
               <Clock className="h-4 w-4" />
@@ -4951,11 +4956,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                       <Activity className="h-5 w-5 text-emerald-500" />
                       Physiotherapy Orders
                     </CardTitle>
-                    <CardDescription className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <CardDescription>
                       Order physiotherapy treatment sessions — will be sent to Physiotherapy pool queue.
-                      <Link href="/physiotherapy/pool-queue" className="text-emerald-600 hover:underline font-medium inline-flex items-center gap-1">
-                        View in Physiotherapy queue →
-                      </Link>
                     </CardDescription>
                   </div>
                   <div className="flex gap-2">

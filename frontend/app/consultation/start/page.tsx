@@ -524,10 +524,10 @@ const StartConsultation = () => {
 
   return (
     <DashboardLayout>
-      <div className="container mx-auto p-6 space-y-6">
+      <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
         {/* Header */}
         <div className="mb-6">
-          <h1 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white mb-2">
+          <h1 className="text-2xl md:text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white mb-2">
             Start Consultation
           </h1>
           <p className="text-gray-600 dark:text-gray-400">
@@ -556,7 +556,7 @@ const StartConsultation = () => {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground font-medium">Available Rooms</p>
-                  <p className="text-3xl font-bold text-emerald-600 dark:text-emerald-400">
+                  <p className="text-2xl sm:text-3xl font-bold text-emerald-600 dark:text-emerald-400">
                     {availableRooms.length}
                   </p>
                   <p className="text-xs text-muted-foreground mt-1">
@@ -576,7 +576,7 @@ const StartConsultation = () => {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground font-medium">Active Sessions</p>
-                  <p className="text-3xl font-bold text-red-600 dark:text-red-400">
+                  <p className="text-2xl sm:text-3xl font-bold text-red-600 dark:text-red-400">
                     {consultationRooms.length - availableRooms.length}
                   </p>
                   <p className="text-xs text-muted-foreground mt-1">
@@ -596,7 +596,7 @@ const StartConsultation = () => {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground font-medium">Patients Waiting</p>
-                  <p className="text-3xl font-bold text-blue-600 dark:text-blue-400">
+                  <p className="text-2xl sm:text-3xl font-bold text-blue-600 dark:text-blue-400">
                     {consultationRooms.reduce((acc, room) => acc + room.queue.length, 0)}
                   </p>
                   <p className="text-xs text-muted-foreground mt-1">
@@ -616,7 +616,7 @@ const StartConsultation = () => {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground font-medium">Today's Sessions</p>
-                  <p className="text-3xl font-bold text-purple-600 dark:text-purple-400">
+                  <p className="text-2xl sm:text-3xl font-bold text-purple-600 dark:text-purple-400">
                     {consultationRooms.reduce((acc, room) => acc + room.totalConsultationsToday, 0)}
                   </p>
                   <p className="text-xs text-muted-foreground mt-1">

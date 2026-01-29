@@ -145,30 +145,30 @@ export default function DoctorDashboardPage() {
 
   return (
     <DashboardLayout>
-      <div className="container mx-auto p-6 space-y-6">
+      <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
         {/* Doctor Profile Header */}
         <Card className="bg-gradient-to-r from-emerald-500 to-teal-600 text-white border-0">
-          <CardContent className="p-6">
+          <CardContent className="p-4 sm:p-6">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div className="flex items-center gap-4">
-                <div className="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center">
-                  <Stethoscope className="h-8 w-8 text-white" />
+              <div className="flex items-center gap-3 sm:gap-4">
+                <div className="w-12 h-12 sm:w-16 sm:h-16 bg-white/20 rounded-full flex items-center justify-center flex-shrink-0">
+                  <Stethoscope className="h-6 w-6 sm:h-8 sm:w-8 text-white" />
                 </div>
-                <div>
-                  <h1 className="text-2xl font-bold">Consultation Department</h1>
-                  <p className="text-emerald-100">Digital consultation and patient management</p>
-                  <p className="text-emerald-200 text-sm">Welcome back, {CURRENT_DOCTOR.name}</p>
+                <div className="min-w-0">
+                  <h1 className="text-xl sm:text-2xl font-bold">Consultation Department</h1>
+                  <p className="text-sm sm:text-base text-emerald-100">Digital consultation and patient management</p>
+                  <p className="text-xs sm:text-sm text-emerald-200">Welcome back, {CURRENT_DOCTOR.name}</p>
                 </div>
               </div>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <Link href="/consultation/start">
-                  <Button className="bg-white text-emerald-600 hover:bg-emerald-50">
+                  <Button className="bg-white text-emerald-600 hover:bg-emerald-50 shadow-md">
                     <Play className="h-4 w-4 mr-2" />
                     Start Consultation
                   </Button>
                 </Link>
                 <Link href="/consultation/history?scope=my">
-                  <Button variant="outline" className="border-white text-white hover:bg-white/20">
+                  <Button variant="outline" className="border-2 border-white/90 text-white hover:bg-white/30 hover:border-white dark:border-white dark:text-white dark:hover:bg-white/20 shadow-md backdrop-blur-sm bg-white/10">
                     <History className="h-4 w-4 mr-2" />
                     My Sessions
                   </Button>

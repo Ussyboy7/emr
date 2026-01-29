@@ -93,7 +93,7 @@ export default function ProceduresHistoryPage() {
         setError(null);
         
         // Fetch completed nursing procedures
-        const proceduresResult = await apiFetch<{ results: any[] }>('/procedures/?page_size=1000');
+        const proceduresResult = await apiFetch<{ results: any[] }>('/nursing/procedures/?page_size=1000');
         const procedures = proceduresResult.results || [];
         
         // Transform procedures to history format
@@ -244,7 +244,7 @@ export default function ProceduresHistoryPage() {
   if (loading) {
     return (
       <DashboardLayout>
-        <div className="container mx-auto p-6">
+        <div className="container mx-auto p-4 sm:p-6">
           <div className="flex items-center justify-center h-[60vh]">
             <div className="text-center">
               <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto mb-4" />
@@ -259,7 +259,7 @@ export default function ProceduresHistoryPage() {
   if (error) {
     return (
       <DashboardLayout>
-        <div className="container mx-auto p-6">
+        <div className="container mx-auto p-4 sm:p-6">
           <div className="flex items-center justify-center h-[60vh]">
             <div className="text-center">
               <AlertTriangle className="h-12 w-12 text-destructive mx-auto mb-4" />
@@ -275,10 +275,10 @@ export default function ProceduresHistoryPage() {
 
   return (
     <DashboardLayout>
-      <div className="container mx-auto p-6 space-y-6">
+      <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
         {/* Header */}
         <div>
-          <h1 className="text-3xl font-bold text-foreground flex items-center gap-3">
+          <h1 className="text-2xl sm:text-3xl font-bold text-foreground flex items-center gap-3">
             <div className="p-2 rounded-xl bg-gradient-to-br from-slate-600 to-slate-700">
               <FileText className="h-6 w-6 text-white" />
             </div>
@@ -292,7 +292,7 @@ export default function ProceduresHistoryPage() {
           <Card>
             <CardContent className="p-4 text-center">
               <p className="text-xs text-muted-foreground uppercase tracking-wider">Total Records</p>
-              <p className="text-3xl font-bold text-foreground">{stats.total}</p>
+              <p className="text-2xl sm:text-3xl font-bold text-foreground">{stats.total}</p>
             </CardContent>
           </Card>
           <Card>

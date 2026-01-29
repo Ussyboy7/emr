@@ -603,7 +603,7 @@ export default function ProceduresQueuePage() {
       // Create procedure
       console.log('Creating procedure with data:', procedureData);
       try {
-        const procedureResponse = await apiFetch('/procedures/', {
+        const procedureResponse = await apiFetch('/nursing/procedures/', {
           method: 'POST',
           body: JSON.stringify(procedureData),
         });
@@ -656,11 +656,11 @@ export default function ProceduresQueuePage() {
   // ==================== RENDER ====================
   return (
     <DashboardLayout>
-      <div className="container mx-auto p-6 space-y-6">
+      <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
         {/* Header */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold text-foreground flex items-center gap-3">
+            <h1 className="text-2xl sm:text-3xl font-bold text-foreground flex items-center gap-3">
               <div className="p-2 rounded-xl bg-gradient-to-br from-rose-500 to-pink-500">
                 <Activity className="h-6 w-6 text-white" />
               </div>
@@ -675,7 +675,7 @@ export default function ProceduresQueuePage() {
           <Card className={`${stats.total > 0 ? 'bg-gradient-to-br from-rose-500/10 to-pink-500/10 border-rose-500/20' : ''}`}>
             <CardContent className="p-4 text-center">
               <p className="text-xs text-muted-foreground uppercase tracking-wider">Pending</p>
-              <p className={`text-3xl font-bold ${stats.total > 0 ? 'text-rose-500' : 'text-muted-foreground'}`}>{stats.total}</p>
+              <p className={`text-2xl sm:text-3xl font-bold ${stats.total > 0 ? 'text-rose-500' : 'text-muted-foreground'}`}>{stats.total}</p>
             </CardContent>
           </Card>
           <Card className={stats.emergency > 0 ? 'border-rose-500/50 bg-rose-500/5' : ''}>

@@ -365,6 +365,7 @@ class RadiologyStudyViewSet(viewsets.ModelViewSet):
         """Update study status (like lab test status)."""
         try:
             study = self.get_object()
+            old_status = study.status  # Capture old status before updating
             new_status = request.data.get('status')
             processing_method = request.data.get('processing_method')
             outsourced_facility = request.data.get('outsourced_facility')
@@ -380,8 +381,8 @@ class RadiologyStudyViewSet(viewsets.ModelViewSet):
             # Update processing method if provided
             if processing_method:
                 study.processing_method = processing_method
-            if outsourced_facility:
-                study.outsourced_facility = outsourced_facility
+            if outsourced_facility is not None:
+                study.outsourced_facility = outsourced_facility if outsourced_facility else ''
 
             # Set timestamps based on status
             if new_status == 'processing':
@@ -406,12 +407,13 @@ class RadiologyStudyViewSet(viewsets.ModelViewSet):
                 module='radiology',
                 object_repr=f'Radiology Study {study.procedure}',
                 description=f'Updated study status to {new_status}',
-                old_values={'status': study.status},
+                old_values={'status': old_status},
                 new_values={'status': new_status},
                 request=request,
             )
 
-            return Response({'message': f'Status updated to {new_status}', 'study_id': study.id})
+            # Return serialized study data (like lab orders)
+            return Response(RadiologyStudySerializer(study).data)
         except Exception as e:
             print(f"DEBUG: Exception in update_study_status: {e}")
             import traceback

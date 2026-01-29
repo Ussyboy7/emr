@@ -1,35 +1,65 @@
 /**
  * Central export for all API services
  */
-export * from './lab-service';
-export * from './patient-service';
-export * from './pharmacy-service';
-export * from './radiology-service';
-export * from './visit-service';
-export * from './room-service';
-export * from './analytics-service';
-export { labService } from './lab-service';
+// Export types and interfaces
+export type {
+  LabOrder,
+  LabTest,
+  LabTemplate,
+  LabResult,
+} from './lab-service';
+export type {
+  Patient,
+  Visit,
+  VitalReading,
+} from './patient-service';
+export type {
+  Prescription,
+  PrescriptionItem,
+  Medication,
+  MedicationInventory,
+  Dispense,
+  DrugInteraction,
+} from './pharmacy-service';
+export type {
+  RadiologyOrder,
+  RadiologyStudy,
+  RadiologyReport,
+  RadiologyTemplate,
+} from './radiology-service';
+export type {
+  ConsultationStats,
+  ConsultationSession,
+  ConsultationQueueItem,
+  ICD10Code,
+  Diagnosis,
+} from './consultation-service';
+export type {
+  PhysioOrder,
+  PhysioSession,
+  PhysioTemplate,
+} from './physio-service';
+export type { User, Role, Clinic, Department, AuditLog } from './admin-service';
+export type { Room } from './room-service';
+
+// Export service instances
+export { default as labService } from './lab-service';
 export { patientService } from './patient-service';
 export { pharmacyService } from './pharmacy-service';
 export { radiologyService } from './radiology-service';
 export { visitService } from './visit-service';
 export { roomService } from './room-service';
 export { analyticsService } from './analytics-service';
-export * from './admin-service';
 export { adminService } from './admin-service';
-export * from './help-service';
 export { helpService } from './help-service';
-export * from './referral-service';
 export { referralService } from './referral-service';
-export * from './consultation-service';
 export { consultationService } from './consultation-service';
-export * from './appointment-service';
 export { appointmentService } from './appointment-service';
-export * from './ward-service';
 export { wardService } from './ward-service';
-export * from './physio-service';
 export { physioService } from './physio-service';
-export * from './nursing-service';
 export { nursingService } from './nursing-service';
+
+// Export utility functions
+export { sanitizePatientForRendering } from './patient-service';
 
 

@@ -233,4 +233,3 @@ class NursingService {
 }
 
 export const nursingService = new NursingService();
-export { NursingService };

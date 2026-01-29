@@ -108,11 +108,11 @@ export default function AnalyticsPage() {
 
   return (
     <DashboardLayout>
-      <div className="container mx-auto p-6 space-y-6">
+      <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
         {/* Header */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold text-foreground flex items-center gap-3">
+            <h1 className="text-2xl sm:text-3xl font-bold text-foreground flex items-center gap-3">
               <Activity className="h-8 w-8 text-indigo-500" />
               Analytics & Reports
             </h1>
@@ -144,7 +144,7 @@ export default function AnalyticsPage() {
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-sm text-muted-foreground">Loading...</p>
-                      <p className="text-3xl font-bold mt-1"><Loader2 className="h-8 w-8 animate-spin" /></p>
+                      <p className="text-2xl sm:text-3xl font-bold mt-1"><Loader2 className="h-8 w-8 animate-spin" /></p>
                     </div>
                   </div>
                 </CardContent>
@@ -157,7 +157,7 @@ export default function AnalyticsPage() {
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-sm text-muted-foreground">Total Patients</p>
-                      <p className="text-3xl font-bold text-blue-600 dark:text-blue-400">{stats.totalPatients.toLocaleString()}</p>
+                      <p className="text-2xl sm:text-3xl font-bold text-blue-600 dark:text-blue-400">{stats.totalPatients.toLocaleString()}</p>
                       <p className={`text-sm flex items-center gap-1 ${stats.patientsChange >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
                         {stats.patientsChange >= 0 ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
                         {Math.abs(stats.patientsChange)}% vs last period
@@ -172,7 +172,7 @@ export default function AnalyticsPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Total Visits</p>
-                  <p className="text-3xl font-bold text-emerald-600 dark:text-emerald-400">{stats.totalVisits.toLocaleString()}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-emerald-600 dark:text-emerald-400">{stats.totalVisits.toLocaleString()}</p>
                   <p className={`text-sm flex items-center gap-1 ${stats.visitsChange >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
                     {stats.visitsChange >= 0 ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
                     {Math.abs(stats.visitsChange)}% vs last period
@@ -187,7 +187,7 @@ export default function AnalyticsPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Avg Wait Time</p>
-                  <p className="text-3xl font-bold text-amber-600 dark:text-amber-400">{stats.avgWaitTime} min</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-amber-600 dark:text-amber-400">{stats.avgWaitTime} min</p>
                   <p className={`text-sm flex items-center gap-1 ${stats.waitTimeChange <= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
                     {stats.waitTimeChange <= 0 ? <TrendingDown className="h-4 w-4" /> : <TrendingUp className="h-4 w-4" />}
                     {Math.abs(stats.waitTimeChange)}% vs last period
@@ -202,7 +202,7 @@ export default function AnalyticsPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Satisfaction</p>
-                  <p className="text-3xl font-bold text-purple-600 dark:text-purple-400">{stats.satisfaction}%</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-purple-600 dark:text-purple-400">{stats.satisfaction}%</p>
                   <p className={`text-sm flex items-center gap-1 ${stats.satisfactionChange >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
                     {stats.satisfactionChange >= 0 ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
                     {Math.abs(stats.satisfactionChange)}% vs last period
@@ -452,7 +452,7 @@ export default function AnalyticsPage() {
                   ) : (
                     <div className="grid grid-cols-2 gap-4">
                       <div className="p-4 bg-muted/50 rounded-lg text-center">
-                        <p className="text-3xl font-bold text-emerald-600">
+                        <p className="text-2xl sm:text-3xl font-bold text-emerald-600">
                           {consultationMetrics?.completed_today || consultationMetrics?.active_sessions || '0'}
                         </p>
                         <p className="text-sm text-muted-foreground">
@@ -460,15 +460,15 @@ export default function AnalyticsPage() {
                         </p>
                       </div>
                       <div className="p-4 bg-muted/50 rounded-lg text-center">
-                        <p className="text-3xl font-bold text-amber-600">22 min</p>
+                        <p className="text-2xl sm:text-3xl font-bold text-amber-600">22 min</p>
                         <p className="text-sm text-muted-foreground">Avg Duration</p>
                       </div>
                       <div className="p-4 bg-muted/50 rounded-lg text-center">
-                        <p className="text-3xl font-bold text-blue-600">{stats.avgWaitTime || '18'} min</p>
+                        <p className="text-2xl sm:text-3xl font-bold text-blue-600">{stats.avgWaitTime || '18'} min</p>
                         <p className="text-sm text-muted-foreground">Avg Wait Time</p>
                       </div>
                       <div className="p-4 bg-muted/50 rounded-lg text-center">
-                        <p className="text-3xl font-bold text-purple-600">
+                        <p className="text-2xl sm:text-3xl font-bold text-purple-600">
                           {consultationMetrics?.active_sessions ? `${(60 / (stats.avgWaitTime || 22)).toFixed(1)}` : '4.5'}
                         </p>
                         <p className="text-sm text-muted-foreground">Patients/Doctor/Hour</p>
@@ -533,25 +533,25 @@ export default function AnalyticsPage() {
                   ) : (
                     <div className="grid grid-cols-2 gap-4">
                       <div className="p-4 bg-muted/50 rounded-lg text-center">
-                        <p className="text-3xl font-bold text-blue-600">
+                        <p className="text-2xl sm:text-3xl font-bold text-blue-600">
                           {labPerformance?.tests_this_month?.toLocaleString() || '1,315'}
                         </p>
                         <p className="text-sm text-muted-foreground">Tests This Month</p>
                       </div>
                       <div className="p-4 bg-muted/50 rounded-lg text-center">
-                        <p className="text-3xl font-bold text-amber-600">
+                        <p className="text-2xl sm:text-3xl font-bold text-amber-600">
                           {labPerformance?.avg_turnaround_hours ? `${labPerformance.avg_turnaround_hours} hrs` : '4.2 hrs'}
                         </p>
                         <p className="text-sm text-muted-foreground">Avg Turnaround</p>
                       </div>
                       <div className="p-4 bg-muted/50 rounded-lg text-center">
-                        <p className="text-3xl font-bold text-emerald-600">
+                        <p className="text-2xl sm:text-3xl font-bold text-emerald-600">
                           {labPerformance?.completion_rate ? `${labPerformance.completion_rate}%` : '98.5%'}
                         </p>
                         <p className="text-sm text-muted-foreground">Completion Rate</p>
                       </div>
                       <div className="p-4 bg-muted/50 rounded-lg text-center">
-                        <p className="text-3xl font-bold text-rose-600">
+                        <p className="text-2xl sm:text-3xl font-bold text-rose-600">
                           {labPerformance?.critical_values || '12'}
                         </p>
                         <p className="text-sm text-muted-foreground">Critical Values</p>
@@ -609,25 +609,25 @@ export default function AnalyticsPage() {
                   ) : (
                     <div className="grid grid-cols-2 gap-4">
                       <div className="p-4 bg-muted/50 rounded-lg text-center">
-                        <p className="text-3xl font-bold text-violet-600">
+                        <p className="text-2xl sm:text-3xl font-bold text-violet-600">
                           {pharmacyPerformance?.dispensed_this_month?.toLocaleString() || '2,980'}
                         </p>
                         <p className="text-sm text-muted-foreground">Dispensed This Month</p>
                       </div>
                       <div className="p-4 bg-muted/50 rounded-lg text-center">
-                        <p className="text-3xl font-bold text-amber-600">
+                        <p className="text-2xl sm:text-3xl font-bold text-amber-600">
                           {pharmacyPerformance?.pending_prescriptions || '42'}
                         </p>
                         <p className="text-sm text-muted-foreground">Pending Orders</p>
                       </div>
                       <div className="p-4 bg-muted/50 rounded-lg text-center">
-                        <p className="text-3xl font-bold text-emerald-600">
+                        <p className="text-2xl sm:text-3xl font-bold text-emerald-600">
                           {pharmacyPerformance?.avg_wait_minutes ? `${Math.round(pharmacyPerformance.avg_wait_minutes)} min` : '15 min'}
                         </p>
                         <p className="text-sm text-muted-foreground">Avg Wait Time</p>
                       </div>
                       <div className="p-4 bg-muted/50 rounded-lg text-center">
-                        <p className="text-3xl font-bold text-rose-600">
+                        <p className="text-2xl sm:text-3xl font-bold text-rose-600">
                           {pharmacyPerformance?.low_stock_items || '8'}
                         </p>
                         <p className="text-sm text-muted-foreground">Low Stock Items</p>

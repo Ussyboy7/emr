@@ -225,6 +225,56 @@ class PrescriptionItem(models.Model):
     
     def __str__(self):
         return f"{self.medication.name} - {self.quantity} {self.unit}"
+    
+    def recalculate_quantity(self):
+        """Recalculate quantity based on dosage, frequency, and duration."""
+        import re
+        from decimal import Decimal
+        
+        # Frequency mapping (same as frontend)
+        frequency_map = {
+            'Once daily (OD)': 1,
+            'Twice daily (BD)': 2,
+            'Three times daily (TDS)': 3,
+            'Four times daily (QDS)': 4,
+            'Every 6 hours (Q6H)': 4,
+            'Every 8 hours (Q8H)': 3,
+            'Every 12 hours (Q12H)': 2,
+            'At bedtime (Nocte)': 1,
+            'As needed (PRN)': 2,
+            'Weekly': 0.14,
+            'STAT (Single dose)': 0,
+        }
+        
+        # Extract numeric dosage value (e.g., "2" or "2 tablets" -> 2)
+        dosage_value = 1
+        if self.dosage:
+            dosage_match = re.search(r'(\d+(?:\.\d+)?)', str(self.dosage))
+            if dosage_match:
+                dosage_value = float(dosage_match.group(1))
+        
+        # Get frequency multiplier
+        frequency = self.frequency or ''
+        daily_doses = frequency_map.get(frequency, 1)
+        
+        # Extract duration in days
+        duration_days = 1
+        if self.duration:
+            duration_match = re.search(r'(\d+)', str(self.duration))
+            if duration_match:
+                duration_days = int(duration_match.group(1))
+        
+        # Calculate quantity
+        if frequency == 'STAT (Single dose)':
+            new_quantity = Decimal(str(dosage_value))
+        else:
+            new_quantity = Decimal(str(dosage_value * daily_doses * duration_days))
+        
+        # Only update if not dispensed or if dispensed quantity is less than new quantity
+        if self.dispensed_quantity == 0 or self.dispensed_quantity < new_quantity:
+            self.quantity = new_quantity
+            return True
+        return False
 
 
 class Dispense(models.Model):

@@ -34,7 +34,7 @@ import {
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { NPA_LOGO_URL, NPA_BRAND_NAME, NPA_EMR_TITLE, NPA_EMR_FULL_TITLE, NPA_EMR_CONTACT_EMAIL } from "@/lib/branding";
-import { login, clearTokens } from "@/lib/api-client";
+import { login, clearTokens, apiFetch } from "@/lib/api-client";
 import { getStoredRedirectPath } from "@/hooks/use-auth-redirect";
 
 
@@ -48,6 +48,44 @@ const modules = [
   { name: "Radiology", icon: ScanLine, color: "text-cyan-400" },
   { name: "Physiotherapy", icon: Activity, color: "text-orange-400" },
 ];
+
+// Map department names to dashboard routes
+const getDepartmentDashboardRoute = (departmentName: string | null | undefined): string | null => {
+  if (!departmentName) return null;
+  
+  const departmentLower = departmentName.toLowerCase().trim();
+  
+  // Map common department name variations to routes
+  const departmentRouteMap: Record<string, string> = {
+    'medical records': '/medical-records',
+    'medical record': '/medical-records',
+    'records': '/medical-records',
+    'nursing': '/nursing',
+    'consultation': '/consultation',
+    'laboratory': '/laboratory',
+    'lab': '/laboratory',
+    'pharmacy': '/pharmacy',
+    'radiology': '/radiology',
+    'physiotherapy': '/physiotherapy',
+    'physio': '/physiotherapy',
+    'administration': '/admin',
+    'admin': '/admin',
+  };
+  
+  // Check exact match first
+  if (departmentRouteMap[departmentLower]) {
+    return departmentRouteMap[departmentLower];
+  }
+  
+  // Check partial matches
+  for (const [key, route] of Object.entries(departmentRouteMap)) {
+    if (departmentLower.includes(key) || key.includes(departmentLower)) {
+      return route;
+    }
+  }
+  
+  return null;
+};
 
 export default function LoginPage() {
   const router = useRouter();
@@ -79,9 +117,26 @@ export default function LoginPage() {
 
       toast.success("Signed in successfully");
       
-      // Check if there's a stored redirect path
-      const redirectPath = getStoredRedirectPath();
-      router.push(redirectPath || "/dashboard");
+      // Fetch current user to get department for role-based redirect
+      try {
+        interface AuthMeResponse { department_name?: string }
+        const userResponse = await apiFetch<AuthMeResponse>("/accounts/auth/me/");
+        const departmentName = userResponse.department_name;
+        
+        // Get department-specific dashboard route
+        const departmentRoute = getDepartmentDashboardRoute(departmentName);
+        
+        // Priority: stored redirect > department dashboard > default dashboard
+        const storedRedirect = getStoredRedirectPath();
+        const finalRedirect = storedRedirect || departmentRoute || "/dashboard";
+        
+        router.push(finalRedirect);
+      } catch (userError) {
+        // If fetching user fails, fall back to default redirect
+        console.warn("Failed to fetch user for department-based redirect:", userError);
+        const redirectPath = getStoredRedirectPath();
+        router.push(redirectPath || "/dashboard");
+      }
     } catch (error) {
       logError(error);
       clearTokens();

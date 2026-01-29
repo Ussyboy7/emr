@@ -16,7 +16,7 @@ import {
   FileText, Syringe, ScanLine
 } from 'lucide-react';
 import { consultationService } from '@/lib/services/consultation-service';
-import { labService } from '@/lib/services/lab-service';
+import labService from '@/lib/services/lab-service';
 import { pharmacyService } from '@/lib/services/pharmacy-service';
 import { patientService } from '@/lib/services/patient-service';
 import { visitService } from '@/lib/services/visit-service';
@@ -154,7 +154,7 @@ export default function DashboardPage() {
   if (loading) {
     return (
       <DashboardLayout>
-        <div className="container mx-auto p-6">
+        <div className="container mx-auto p-4 sm:p-6">
           <div className="flex items-center justify-center min-h-[400px]">
             <div className="text-center">
               <Loader2 className="h-12 w-12 mx-auto mb-4 animate-spin text-muted-foreground" />
@@ -169,7 +169,7 @@ export default function DashboardPage() {
   if (error) {
     return (
       <DashboardLayout>
-        <div className="container mx-auto p-6">
+        <div className="container mx-auto p-4 sm:p-6">
           <Card className="border-red-500/50">
             <CardContent className="p-8 text-center">
               <AlertTriangle className="h-12 w-12 mx-auto mb-4 text-red-500" />
@@ -184,11 +184,11 @@ export default function DashboardPage() {
 
   return (
     <DashboardLayout>
-      <div className="container mx-auto p-6 space-y-6">
+      <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
         {/* Welcome Header */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold text-foreground">EMR Dashboard</h1>
+            <h1 className="text-2xl sm:text-3xl font-bold text-foreground">EMR Dashboard</h1>
             <p className="text-muted-foreground mt-1">
               {new Date().toLocaleDateString('en-NG', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
             </p>
@@ -240,7 +240,7 @@ export default function DashboardPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Patients Today</p>
-                  <p className="text-3xl font-bold text-blue-600 dark:text-blue-400">{todayStats.patientsToday}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-blue-600 dark:text-blue-400">{todayStats.patientsToday}</p>
                   <p className={`text-sm flex items-center gap-1 ${todayStats.patientsChange >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
                     {todayStats.patientsChange >= 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
                     {Math.abs(todayStats.patientsChange)}% vs yesterday
@@ -255,7 +255,7 @@ export default function DashboardPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Consultations</p>
-                  <p className="text-3xl font-bold text-emerald-600 dark:text-emerald-400">{todayStats.consultations}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-emerald-600 dark:text-emerald-400">{todayStats.consultations}</p>
                   <p className={`text-sm flex items-center gap-1 ${todayStats.consultationsChange >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
                     {todayStats.consultationsChange >= 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
                     {Math.abs(todayStats.consultationsChange)}% vs yesterday
@@ -270,7 +270,7 @@ export default function DashboardPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Lab Tests</p>
-                  <p className="text-3xl font-bold text-amber-600 dark:text-amber-400">{todayStats.labTests}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-amber-600 dark:text-amber-400">{todayStats.labTests}</p>
                   <p className={`text-sm flex items-center gap-1 ${todayStats.labTestsChange >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
                     {todayStats.labTestsChange >= 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
                     {Math.abs(todayStats.labTestsChange)}% vs yesterday
@@ -285,7 +285,7 @@ export default function DashboardPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Prescriptions</p>
-                  <p className="text-3xl font-bold text-violet-600 dark:text-violet-400">{todayStats.prescriptions}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-violet-600 dark:text-violet-400">{todayStats.prescriptions}</p>
                   <p className={`text-sm flex items-center gap-1 ${todayStats.prescriptionsChange >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
                     {todayStats.prescriptionsChange >= 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
                     {Math.abs(todayStats.prescriptionsChange)}% vs yesterday

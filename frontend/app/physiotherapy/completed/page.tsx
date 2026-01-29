@@ -328,11 +328,11 @@ export default function PhysioCompletedPage() {
   return (
     <TooltipProvider>
       <DashboardLayout>
-        <div className="container mx-auto p-6 space-y-6">
+        <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
         {/* Header */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold text-foreground flex items-center gap-3">
+            <h1 className="text-2xl sm:text-3xl font-bold text-foreground flex items-center gap-3">
               <CheckCircle2 className="h-8 w-8 text-emerald-500" />
               Completed Sessions
             </h1>
@@ -351,7 +351,7 @@ export default function PhysioCompletedPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Total Sessions</p>
-                  <p className="text-3xl font-bold text-emerald-600 dark:text-emerald-400">{stats.total}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-emerald-600 dark:text-emerald-400">{stats.total}</p>
                 </div>
                 <CheckCircle2 className="h-8 w-8 text-emerald-500 opacity-50" />
               </div>
@@ -363,7 +363,7 @@ export default function PhysioCompletedPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">With Recommendations</p>
-                  <p className="text-3xl font-bold text-blue-600 dark:text-blue-400">{stats.withRecommendations}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-blue-600 dark:text-blue-400">{stats.withRecommendations}</p>
                 </div>
                 <Lightbulb className="h-8 w-8 text-blue-500 opacity-50" />
               </div>
@@ -375,7 +375,7 @@ export default function PhysioCompletedPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Pain Reduction</p>
-                  <p className="text-3xl font-bold text-green-600 dark:text-green-400">{stats.painReduction}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-green-600 dark:text-green-400">{stats.painReduction}</p>
                 </div>
                 <Heart className="h-8 w-8 text-green-500 opacity-50" />
               </div>
@@ -387,7 +387,7 @@ export default function PhysioCompletedPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Avg Improvement</p>
-                  <p className="text-3xl font-bold text-purple-600 dark:text-purple-400">{stats.avgImprovement.toFixed(1)}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-purple-600 dark:text-purple-400">{stats.avgImprovement.toFixed(1)}</p>
                 </div>
                 <TrendingUp className="h-8 w-8 text-purple-500 opacity-50" />
               </div>

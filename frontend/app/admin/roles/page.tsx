@@ -380,20 +380,20 @@ export default function RolesPermissionsPage() {
 
   return (
     <DashboardLayout>
-      <div className="container mx-auto p-6 space-y-6">
+      <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold text-foreground flex items-center gap-3"><Shield className="h-8 w-8 text-purple-500" />Roles & Permissions</h1>
+            <h1 className="text-2xl sm:text-3xl font-bold text-foreground flex items-center gap-3"><Shield className="h-8 w-8 text-purple-500" />Roles & Permissions</h1>
             <p className="text-muted-foreground mt-1">Define access levels and clinical privileges</p>
           </div>
           <Button onClick={openCreate} className="bg-purple-600 hover:bg-purple-700 text-white"><Plus className="h-4 w-4 mr-2" />Create Role</Button>
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <Card className="border-l-4 border-l-purple-500"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">Total Roles</p><p className="text-3xl font-bold text-purple-600 dark:text-purple-400">{stats.total}</p></div><Shield className="h-8 w-8 text-purple-500 opacity-50" /></div></CardContent></Card>
-          <Card className="border-l-4 border-l-emerald-500"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">Active Roles</p><p className="text-3xl font-bold text-emerald-600 dark:text-emerald-400">{stats.active}</p></div><CheckCircle2 className="h-8 w-8 text-emerald-500 opacity-50" /></div></CardContent></Card>
-          <Card className="border-l-4 border-l-teal-500"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">Clinical Roles</p><p className="text-3xl font-bold text-teal-600 dark:text-teal-400">{stats.clinical}</p></div><Stethoscope className="h-8 w-8 text-teal-500 opacity-50" /></div></CardContent></Card>
-          <Card className="border-l-4 border-l-blue-500"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">Users with Roles</p><p className="text-3xl font-bold text-blue-600 dark:text-blue-400">{stats.totalUsers}</p></div><Users className="h-8 w-8 text-blue-500 opacity-50" /></div></CardContent></Card>
+          <Card className="border-l-4 border-l-purple-500"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">Total Roles</p><p className="text-2xl sm:text-3xl font-bold text-purple-600 dark:text-purple-400">{stats.total}</p></div><Shield className="h-8 w-8 text-purple-500 opacity-50" /></div></CardContent></Card>
+          <Card className="border-l-4 border-l-emerald-500"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">Active Roles</p><p className="text-2xl sm:text-3xl font-bold text-emerald-600 dark:text-emerald-400">{stats.active}</p></div><CheckCircle2 className="h-8 w-8 text-emerald-500 opacity-50" /></div></CardContent></Card>
+          <Card className="border-l-4 border-l-teal-500"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">Clinical Roles</p><p className="text-2xl sm:text-3xl font-bold text-teal-600 dark:text-teal-400">{stats.clinical}</p></div><Stethoscope className="h-8 w-8 text-teal-500 opacity-50" /></div></CardContent></Card>
+          <Card className="border-l-4 border-l-blue-500"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">Users with Roles</p><p className="text-2xl sm:text-3xl font-bold text-blue-600 dark:text-blue-400">{stats.totalUsers}</p></div><Users className="h-8 w-8 text-blue-500 opacity-50" /></div></CardContent></Card>
         </div>
 
         <Card><CardContent className="p-4"><div className="flex flex-col md:flex-row gap-3"><div className="relative flex-1"><Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" /><Input placeholder="Search roles..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-10" /></div>

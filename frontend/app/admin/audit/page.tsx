@@ -70,7 +70,7 @@ export default function AuditTrailPage() {
             // Convert module names to display format
             const moduleName = log.module
               .split('_')
-              .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+              .map((word: string) => word.charAt(0).toUpperCase() + word.slice(1))
               .join(' ');
             uniqueModules.add(moduleName);
           }
@@ -109,7 +109,7 @@ export default function AuditTrailPage() {
       if (moduleFilter !== 'all') {
         const backendModule = moduleFilter
           .split(' ')
-          .map(word => word.toLowerCase())
+          .map((word: string) => word.toLowerCase())
           .join('_');
         params.module = backendModule;
       }
@@ -145,7 +145,7 @@ export default function AuditTrailPage() {
         role: '', // Would need to get from user
         action: log.action.toUpperCase() as AuditLog['action'],
         module: log.module 
-          ? log.module.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')
+          ? log.module.split('_').map((word: string) => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')
           : 'System',
         resource: log.object_type || '',
         resourceId: log.object_id?.toString() || log.object_repr || '',
@@ -305,10 +305,10 @@ export default function AuditTrailPage() {
 
   return (
     <DashboardLayout>
-      <div className="container mx-auto p-6 space-y-6">
+      <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold text-foreground flex items-center gap-3">
+            <h1 className="text-2xl sm:text-3xl font-bold text-foreground flex items-center gap-3">
               <ClipboardList className="h-8 w-8 text-violet-500" />
               Audit Trail
             </h1>
@@ -331,7 +331,7 @@ export default function AuditTrailPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Total Events</p>
-                  <p className="text-3xl font-bold text-violet-600 dark:text-violet-400">{stats.total}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-violet-600 dark:text-violet-400">{stats.total}</p>
                 </div>
                 <div className="p-3 rounded-full bg-violet-500/10"><Activity className="h-5 w-5 text-violet-500" /></div>
               </div>
@@ -342,7 +342,7 @@ export default function AuditTrailPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Today</p>
-                  <p className="text-3xl font-bold text-blue-600 dark:text-blue-400">{stats.today}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-blue-600 dark:text-blue-400">{stats.today}</p>
                 </div>
                 <div className="p-3 rounded-full bg-blue-500/10"><Calendar className="h-5 w-5 text-blue-500" /></div>
               </div>
@@ -353,7 +353,7 @@ export default function AuditTrailPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Successful</p>
-                  <p className="text-3xl font-bold text-emerald-600 dark:text-emerald-400">{stats.success}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-emerald-600 dark:text-emerald-400">{stats.success}</p>
                 </div>
                 <div className="p-3 rounded-full bg-emerald-500/10"><CheckCircle className="h-5 w-5 text-emerald-500" /></div>
               </div>
@@ -364,7 +364,7 @@ export default function AuditTrailPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Failed</p>
-                  <p className="text-3xl font-bold text-rose-600 dark:text-rose-400">{stats.failed}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-rose-600 dark:text-rose-400">{stats.failed}</p>
                 </div>
                 <div className="p-3 rounded-full bg-rose-500/10"><XCircle className="h-5 w-5 text-rose-500" /></div>
               </div>

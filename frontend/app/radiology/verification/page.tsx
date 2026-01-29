@@ -492,10 +492,10 @@ export default function RadiologyVerificationPage() {
 
   return (
     <DashboardLayout>
-      <div className="container mx-auto p-6 space-y-6">
+      <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold text-foreground flex items-center gap-3">
+            <h1 className="text-2xl sm:text-3xl font-bold text-foreground flex items-center gap-3">
               <ShieldCheck className="h-8 w-8 text-amber-500" />
               Results Verification
             </h1>
@@ -717,7 +717,7 @@ export default function RadiologyVerificationPage() {
           <TabsContent value="verified" className="space-y-6">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
               <div>
-                <h1 className="text-3xl font-bold text-foreground flex items-center gap-3">
+                <h1 className="text-2xl sm:text-3xl font-bold text-foreground flex items-center gap-3">
                   <CheckCircle2 className="h-8 w-8 text-emerald-500" />
                   Completed Reports
                 </h1>
@@ -735,7 +735,7 @@ export default function RadiologyVerificationPage() {
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-sm text-muted-foreground">Total Completed</p>
-                      <p className="text-3xl font-bold text-blue-600 dark:text-blue-400">{verifiedStats.verified}</p>
+                      <p className="text-2xl sm:text-3xl font-bold text-blue-600 dark:text-blue-400">{verifiedStats.verified}</p>
                     </div>
                     <Stethoscope className="h-8 w-8 text-blue-400" />
                   </div>
@@ -746,7 +746,7 @@ export default function RadiologyVerificationPage() {
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-sm text-muted-foreground">X-Ray</p>
-                      <p className="text-3xl font-bold text-emerald-600 dark:text-emerald-400">{verifiedStats.xray}</p>
+                      <p className="text-2xl sm:text-3xl font-bold text-emerald-600 dark:text-emerald-400">{verifiedStats.xray}</p>
                     </div>
                     <CheckCircle2 className="h-8 w-8 text-emerald-400" />
                   </div>
@@ -757,7 +757,7 @@ export default function RadiologyVerificationPage() {
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-sm text-muted-foreground">CT/MRI</p>
-                      <p className="text-3xl font-bold text-amber-600 dark:text-amber-400">{verifiedStats.ctmri}</p>
+                      <p className="text-2xl sm:text-3xl font-bold text-amber-600 dark:text-amber-400">{verifiedStats.ctmri}</p>
                     </div>
                     <AlertTriangle className="h-8 w-8 text-amber-400" />
                   </div>
@@ -768,7 +768,7 @@ export default function RadiologyVerificationPage() {
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-sm text-muted-foreground">Critical</p>
-                      <p className="text-3xl font-bold text-rose-600 dark:text-rose-400">{verifiedStats.critical}</p>
+                      <p className="text-2xl sm:text-3xl font-bold text-rose-600 dark:text-rose-400">{verifiedStats.critical}</p>
                     </div>
                     <AlertTriangle className="h-8 w-8 text-rose-400" />
                   </div>

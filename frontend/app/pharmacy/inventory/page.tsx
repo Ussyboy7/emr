@@ -434,11 +434,11 @@ export default function InventoryPage() {
 
   return (
     <DashboardLayout>
-      <div className="container mx-auto p-6 space-y-6">
+      <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
         {/* Header */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold text-foreground flex items-center gap-3">
+            <h1 className="text-2xl sm:text-3xl font-bold text-foreground flex items-center gap-3">
               <Database className="h-8 w-8 text-violet-500" />
               Drug Inventory
             </h1>
@@ -463,7 +463,7 @@ export default function InventoryPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Total Items</p>
-                  <p className="text-3xl font-bold text-violet-600">{stats.total}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-violet-600">{stats.total}</p>
                 </div>
                 <Package className="h-6 w-6 text-violet-500" />
               </div>
@@ -474,7 +474,7 @@ export default function InventoryPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Out of Stock</p>
-                  <p className="text-3xl font-bold text-red-600">{stats.outOfStock}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-red-600">{stats.outOfStock}</p>
                 </div>
                 <XCircle className="h-6 w-6 text-red-500" />
               </div>
@@ -488,7 +488,7 @@ export default function InventoryPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Low Stock</p>
-                  <p className="text-3xl font-bold text-amber-600">{stats.lowStock}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-amber-600">{stats.lowStock}</p>
                 </div>
                 <AlertTriangle className="h-6 w-6 text-amber-500" />
               </div>
@@ -502,7 +502,7 @@ export default function InventoryPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Total Units</p>
-                  <p className="text-3xl font-bold text-emerald-600">{stats.totalValue.toLocaleString()}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-emerald-600">{stats.totalValue.toLocaleString()}</p>
                 </div>
                 <TrendingUp className="h-6 w-6 text-emerald-500" />
               </div>
@@ -972,7 +972,7 @@ export default function InventoryPage() {
               <div className="space-y-4">
                 <div className="bg-muted/50 rounded-lg p-4 text-sm text-center">
                   <p className="text-muted-foreground">Current Stock</p>
-                  <p className="text-3xl font-bold">{selectedMedication.currentStock.toLocaleString()}</p>
+                  <p className="text-2xl sm:text-3xl font-bold">{selectedMedication.currentStock.toLocaleString()}</p>
                 </div>
 
                 <div className="grid grid-cols-2 gap-2">

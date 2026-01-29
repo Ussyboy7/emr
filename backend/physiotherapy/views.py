@@ -111,6 +111,10 @@ class PhysioSessionViewSet(viewsets.ModelViewSet):
         session.save()
         order = session.order
         order.sessions_completed = order.sessions.filter(status='completed').count()
+        # Mark order as completed when any session is completed
+        if order.status != 'completed':
+            order.status = 'completed'
+            order.completed_at = timezone.now()
         order.save()
         return Response(self.get_serializer(session).data)
 

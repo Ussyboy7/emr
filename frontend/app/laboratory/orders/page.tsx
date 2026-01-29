@@ -1277,10 +1277,10 @@ export default function LabOrdersPage() {
   return (
     <TooltipProvider>
     <DashboardLayout>
-      <div className="container mx-auto p-6 space-y-6">
+      <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold text-foreground flex items-center gap-3">
+            <h1 className="text-2xl sm:text-3xl font-bold text-foreground flex items-center gap-3">
               <TestTube className="h-8 w-8 text-amber-500" />
               Lab Orders
             </h1>
@@ -1300,7 +1300,7 @@ export default function LabOrdersPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Pending Samples</p>
-                  <p className="text-3xl font-bold text-gray-600 dark:text-gray-400">{stats.pendingSamples}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-gray-600 dark:text-gray-400">{stats.pendingSamples}</p>
                 </div>
                 <Beaker className="h-8 w-8 text-gray-400" />
               </div>
@@ -1318,7 +1318,7 @@ export default function LabOrdersPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Processing</p>
-                  <p className="text-3xl font-bold text-blue-600 dark:text-blue-400">{stats.processing}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-blue-600 dark:text-blue-400">{stats.processing}</p>
                 </div>
                 <Activity className="h-8 w-8 text-blue-400" />
               </div>
@@ -1336,7 +1336,7 @@ export default function LabOrdersPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Results Ready</p>
-                  <p className="text-3xl font-bold text-amber-600 dark:text-amber-400">{stats.resultsReady}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-amber-600 dark:text-amber-400">{stats.resultsReady}</p>
                 </div>
                 <FileText className="h-8 w-8 text-amber-400" />
               </div>
@@ -1354,7 +1354,7 @@ export default function LabOrdersPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Rejected</p>
-                  <p className="text-3xl font-bold text-rose-600 dark:text-rose-400">{stats.rejected}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-rose-600 dark:text-rose-400">{stats.rejected}</p>
                 </div>
                 <XCircle className="h-8 w-8 text-rose-400" />
               </div>
@@ -1370,7 +1370,7 @@ export default function LabOrdersPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">STAT Orders</p>
-                  <p className="text-3xl font-bold text-rose-600 dark:text-rose-400">{stats.stat}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-rose-600 dark:text-rose-400">{stats.stat}</p>
                 </div>
                 <AlertTriangle className="h-8 w-8 text-rose-400" />
               </div>

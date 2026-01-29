@@ -125,23 +125,23 @@ export default function NursingDashboardPage() {
 
   return (
     <DashboardLayout>
-      <div className="container mx-auto p-6 space-y-6">
+      <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
         {/* Header */}
         <Card className="bg-gradient-to-r from-rose-500 to-pink-600 text-white border-0">
-          <CardContent className="p-6">
+          <CardContent className="p-4 sm:p-6">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div className="flex items-center gap-4">
-                <div className="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center">
-                  <Heart className="h-8 w-8 text-white" />
+              <div className="flex items-center gap-3 sm:gap-4">
+                <div className="w-12 h-12 sm:w-16 sm:h-16 bg-white/20 rounded-full flex items-center justify-center flex-shrink-0">
+                  <Heart className="h-6 w-6 sm:h-8 sm:w-8 text-white" />
                 </div>
-                <div>
-                  <h1 className="text-2xl font-bold">Nursing Department</h1>
-                  <p className="text-rose-100">Digital nursing documentation and patient care management</p>
+                <div className="min-w-0">
+                  <h1 className="text-xl sm:text-2xl font-bold">Nursing Department</h1>
+                  <p className="text-sm sm:text-base text-rose-100">Digital nursing documentation and patient care management</p>
                 </div>
               </div>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <Button
-                  className="bg-white text-rose-600 hover:bg-rose-50"
+                  className="bg-white text-rose-600 hover:bg-rose-50 shadow-md"
                   onClick={() => router.push('/nursing/patient-vitals')}
                 >
                   <Activity className="h-4 w-4 mr-2" />
@@ -149,7 +149,7 @@ export default function NursingDashboardPage() {
                 </Button>
                 <Button
                   variant="outline"
-                  className="border-white text-white hover:bg-white/20"
+                  className="border-2 border-white/90 text-white hover:bg-white/30 hover:border-white dark:border-white dark:text-white dark:hover:bg-white/20 shadow-md backdrop-blur-sm bg-white/10"
                   onClick={() => router.push('/nursing/pool-queue')}
                 >
                   <Users className="h-4 w-4 mr-2" />
@@ -176,7 +176,7 @@ export default function NursingDashboardPage() {
                         <p className="text-sm text-muted-foreground">Loading...</p>
                         <div className="flex items-center gap-2 mt-1">
                           <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                          <p className="text-3xl font-bold text-muted-foreground">--</p>
+                          <p className="text-2xl sm:text-3xl font-bold text-muted-foreground">--</p>
                         </div>
                       </div>
                     </div>
@@ -192,7 +192,7 @@ export default function NursingDashboardPage() {
                         <p className="text-sm text-muted-foreground">Active Patients</p>
                         <div className="flex items-center gap-2 mt-1">
                           <Users className={`h-5 w-5 ${stats.activePatients > 0 ? 'text-rose-500 dark:text-rose-400' : 'text-green-500 dark:text-green-400'}`} />
-                          <p className={`text-3xl font-bold ${stats.activePatients > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-green-600 dark:text-green-400'}`}>{stats.activePatients}</p>
+                          <p className={`text-2xl sm:text-3xl font-bold ${stats.activePatients > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-green-600 dark:text-green-400'}`}>{stats.activePatients}</p>
                         </div>
                         {stats.activePatients === 0 ? (
                           <p className="text-xs text-green-600 dark:text-green-400 mt-1">All caught up!</p>
@@ -213,7 +213,7 @@ export default function NursingDashboardPage() {
                         <p className="text-sm text-muted-foreground">Vitals Pending</p>
                         <div className="flex items-center gap-2 mt-1">
                           <Thermometer className={`h-5 w-5 ${stats.pendingVitals === 0 ? 'text-green-500 dark:text-green-400' : 'text-amber-500 dark:text-amber-400'}`} />
-                          <p className={`text-3xl font-bold ${stats.pendingVitals === 0 ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'}`}>{stats.pendingVitals}</p>
+                          <p className={`text-2xl sm:text-3xl font-bold ${stats.pendingVitals === 0 ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'}`}>{stats.pendingVitals}</p>
                         </div>
                         {stats.pendingVitals === 0 ? (
                           <p className="text-xs text-green-600 dark:text-green-400 mt-1">All vitals recorded</p>
@@ -234,7 +234,7 @@ export default function NursingDashboardPage() {
                         <p className="text-sm text-muted-foreground">Medications Due</p>
                         <div className="flex items-center gap-2 mt-1">
                           <Syringe className={`h-5 w-5 ${stats.medicationsDue === 0 ? 'text-green-500 dark:text-green-400' : 'text-blue-500 dark:text-blue-400'}`} />
-                          <p className={`text-3xl font-bold ${stats.medicationsDue === 0 ? 'text-green-600 dark:text-green-400' : 'text-blue-600 dark:text-blue-400'}`}>{stats.medicationsDue}</p>
+                          <p className={`text-2xl sm:text-3xl font-bold ${stats.medicationsDue === 0 ? 'text-green-600 dark:text-green-400' : 'text-blue-600 dark:text-blue-400'}`}>{stats.medicationsDue}</p>
                         </div>
                         {stats.medicationsDue === 0 ? (
                           <p className="text-xs text-green-600 dark:text-green-400 mt-1">All medications administered</p>
@@ -255,7 +255,7 @@ export default function NursingDashboardPage() {
                         <p className="text-sm text-muted-foreground">Assessments Due</p>
                         <div className="flex items-center gap-2 mt-1">
                           <ClipboardList className={`h-5 w-5 ${stats.assessmentsToday === 0 ? 'text-green-500 dark:text-green-400' : 'text-emerald-500 dark:text-emerald-400'}`} />
-                          <p className={`text-3xl font-bold ${stats.assessmentsToday === 0 ? 'text-green-600 dark:text-green-400' : 'text-emerald-600 dark:text-emerald-400'}`}>{stats.assessmentsToday}</p>
+                          <p className={`text-2xl sm:text-3xl font-bold ${stats.assessmentsToday === 0 ? 'text-green-600 dark:text-green-400' : 'text-emerald-600 dark:text-emerald-400'}`}>{stats.assessmentsToday}</p>
                         </div>
                         {stats.assessmentsToday === 0 ? (
                           <p className="text-xs text-green-600 dark:text-green-400 mt-1">All assessments completed</p>
@@ -314,39 +314,39 @@ export default function NursingDashboardPage() {
             Quick Actions
           </h2>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <Button onClick={() => router.push('/nursing/pool-queue')} className="h-auto py-6 flex flex-col items-center gap-3 bg-gradient-to-br from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 text-white border-l-4 border-l-white/20">
+            <Button onClick={() => router.push('/nursing/pool-queue')} className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 bg-gradient-to-br from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 text-white border-l-4 border-l-white/20">
               <div className="flex items-center gap-2">
-                <Users className="h-6 w-6" />
+                <Users className="h-5 w-5 sm:h-6 sm:w-6" />
                 {poolQueueCount > 0 && (
                   <Badge variant="secondary" className="bg-white/20 text-white text-xs px-2 py-0.5">
                     {poolQueueCount}
                   </Badge>
                 )}
               </div>
-              <span className="text-sm font-medium">Pool Queue</span>
-              <span className="text-xs opacity-90">Patient assignments</span>
+              <span className="text-xs sm:text-sm font-medium">Pool Queue</span>
+              <span className="text-[10px] sm:text-xs opacity-90">Patient assignments</span>
             </Button>
-            <Button onClick={() => router.push('/nursing/patient-vitals')} variant="outline" className="h-auto py-6 flex flex-col items-center gap-3 border-rose-500/30 hover:bg-rose-500/10 border-l-4 border-l-rose-500">
-              <Thermometer className="h-6 w-6 text-rose-500 dark:text-rose-400" />
-              <span className="text-sm font-medium">Record Vitals</span>
-              <span className="text-xs text-muted-foreground">Patient monitoring</span>
+            <Button onClick={() => router.push('/nursing/patient-vitals')} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-rose-500/30 hover:bg-rose-500/10 border-l-4 border-l-rose-500">
+              <Thermometer className="h-5 w-5 sm:h-6 sm:w-6 text-rose-500 dark:text-rose-400" />
+              <span className="text-xs sm:text-sm font-medium">Record Vitals</span>
+              <span className="text-[10px] sm:text-xs text-muted-foreground">Patient monitoring</span>
             </Button>
-            <Button onClick={() => router.push('/nursing/procedures')} variant="outline" className="h-auto py-6 flex flex-col items-center gap-3 border-rose-500/30 hover:bg-rose-500/10 border-l-4 border-l-blue-500">
-              <Syringe className="h-6 w-6 text-blue-500 dark:text-blue-400" />
-              <span className="text-sm font-medium">Administer Meds</span>
-              <span className="text-xs text-muted-foreground">Medication tasks</span>
+            <Button onClick={() => router.push('/nursing/procedures')} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-rose-500/30 hover:bg-rose-500/10 border-l-4 border-l-blue-500">
+              <Syringe className="h-5 w-5 sm:h-6 sm:w-6 text-blue-500 dark:text-blue-400" />
+              <span className="text-xs sm:text-sm font-medium">Administer Meds</span>
+              <span className="text-[10px] sm:text-xs text-muted-foreground">Medication tasks</span>
             </Button>
-            <Button onClick={() => router.push('/nursing/room-queue')} variant="outline" className="h-auto py-6 flex flex-col items-center gap-3 border-rose-500/30 hover:bg-rose-500/10 border-l-4 border-l-emerald-500">
+            <Button onClick={() => router.push('/nursing/room-queue')} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-rose-500/30 hover:bg-rose-500/10 border-l-4 border-l-emerald-500">
               <div className="flex items-center gap-2">
-                <ClipboardList className="h-6 w-6 text-emerald-500 dark:text-emerald-400" />
+                <ClipboardList className="h-5 w-5 sm:h-6 sm:w-6 text-emerald-500 dark:text-emerald-400" />
                 {roomQueueCount > 0 && (
                   <Badge variant="outline" className="text-xs px-2 py-0.5">
                     {roomQueueCount}
                   </Badge>
                 )}
               </div>
-              <span className="text-sm font-medium">Room Queue</span>
-              <span className="text-xs text-muted-foreground">Room assignments</span>
+              <span className="text-xs sm:text-sm font-medium">Room Queue</span>
+              <span className="text-[10px] sm:text-xs text-muted-foreground">Room assignments</span>
             </Button>
           </div>
         </div>

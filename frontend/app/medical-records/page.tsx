@@ -127,7 +127,7 @@ export default function MedicalRecordsPage() {
 
   return (
     <DashboardLayout>
-      <div className="container mx-auto p-6 space-y-6">
+      <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
         {/* Error Alert */}
         {error && (
           <Card className="border-red-500/50 bg-red-500/10">
@@ -143,20 +143,20 @@ export default function MedicalRecordsPage() {
 
         {/* Header */}
         <Card className="bg-gradient-to-r from-blue-500 to-indigo-600 text-white border-0">
-          <CardContent className="p-6">
+          <CardContent className="p-4 sm:p-6">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div className="flex items-center gap-4">
-                <div className="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center">
-                  <FileText className="h-8 w-8 text-white" />
+              <div className="flex items-center gap-3 sm:gap-4">
+                <div className="w-12 h-12 sm:w-16 sm:h-16 bg-white/20 rounded-full flex items-center justify-center flex-shrink-0">
+                  <FileText className="h-6 w-6 sm:h-8 sm:w-8 text-white" />
                 </div>
-                <div>
-                  <h1 className="text-2xl font-bold">Medical Records Department</h1>
-                  <p className="text-blue-100 dark:text-blue-200">Digital medical records management and patient documentation</p>
+                <div className="min-w-0">
+                  <h1 className="text-xl sm:text-2xl font-bold">Medical Records Department</h1>
+                  <p className="text-sm sm:text-base text-blue-100 dark:text-blue-200">Digital medical records management and patient documentation</p>
                 </div>
               </div>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <Button
-                  className="bg-white text-blue-600 hover:bg-blue-50 dark:bg-white dark:text-blue-600 dark:hover:bg-blue-50"
+                  className="bg-white text-blue-600 hover:bg-blue-50 dark:bg-white dark:text-blue-600 dark:hover:bg-blue-50 shadow-md"
                   onClick={() => window.location.href = '/medical-records/patients/new'}
                 >
                   <Plus className="h-4 w-4 mr-2" />
@@ -164,7 +164,7 @@ export default function MedicalRecordsPage() {
                 </Button>
                 <Button
                   variant="outline"
-                  className="border-white text-white hover:bg-white/20 dark:border-white dark:text-white dark:hover:bg-white/20"
+                  className="border-2 border-white/90 text-white hover:bg-white/30 hover:border-white dark:border-white dark:text-white dark:hover:bg-white/20 shadow-md backdrop-blur-sm bg-white/10"
                   onClick={() => window.location.href = '/medical-records/patients'}
                 >
                   <Search className="h-4 w-4 mr-2" />
@@ -191,7 +191,7 @@ export default function MedicalRecordsPage() {
                         <p className="text-sm text-muted-foreground">Loading...</p>
                         <div className="flex items-center gap-2 mt-1">
                           <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                          <p className="text-3xl font-bold text-muted-foreground">--</p>
+                          <p className="text-2xl sm:text-3xl font-bold text-muted-foreground">--</p>
                         </div>
                       </div>
                     </div>
@@ -207,7 +207,7 @@ export default function MedicalRecordsPage() {
                         <p className="text-sm text-muted-foreground">Total Patients</p>
                         <div className="flex items-center gap-2 mt-1">
                           <Users className={`h-5 w-5 ${totalPatients > 0 ? 'text-blue-500 dark:text-blue-400' : 'text-green-500 dark:text-green-400'}`} />
-                          <p className={`text-3xl font-bold ${totalPatients > 0 ? 'text-blue-600 dark:text-blue-400' : 'text-green-600 dark:text-green-400'}`}>{totalPatients}</p>
+                          <p className={`text-2xl sm:text-3xl font-bold ${totalPatients > 0 ? 'text-blue-600 dark:text-blue-400' : 'text-green-600 dark:text-green-400'}`}>{totalPatients}</p>
                         </div>
                         {totalPatients === 0 ? (
                           <p className="text-xs text-green-600 dark:text-green-400 mt-1">No patients registered</p>
@@ -224,7 +224,7 @@ export default function MedicalRecordsPage() {
                         <p className="text-sm text-muted-foreground">Active Visits</p>
                         <div className="flex items-center gap-2 mt-1">
                           <Activity className={`h-5 w-5 ${activeVisitsToday === 0 ? 'text-green-500 dark:text-green-400' : 'text-blue-500 dark:text-blue-400'}`} />
-                          <p className={`text-3xl font-bold ${activeVisitsToday === 0 ? 'text-green-600 dark:text-green-400' : 'text-blue-600 dark:text-blue-400'}`}>{activeVisitsToday}</p>
+                          <p className={`text-2xl sm:text-3xl font-bold ${activeVisitsToday === 0 ? 'text-green-600 dark:text-green-400' : 'text-blue-600 dark:text-blue-400'}`}>{activeVisitsToday}</p>
                         </div>
                         {activeVisitsToday === 0 ? (
                           <p className="text-xs text-green-600 dark:text-green-400 mt-1">No active visits</p>
@@ -241,7 +241,7 @@ export default function MedicalRecordsPage() {
                         <p className="text-sm text-muted-foreground">Scheduled Today</p>
                         <div className="flex items-center gap-2 mt-1">
                           <Clock className={`h-5 w-5 ${scheduledToday === 0 ? 'text-green-500 dark:text-green-400' : 'text-amber-500 dark:text-amber-400'}`} />
-                          <p className={`text-3xl font-bold ${scheduledToday === 0 ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'}`}>{scheduledToday}</p>
+                          <p className={`text-2xl sm:text-3xl font-bold ${scheduledToday === 0 ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'}`}>{scheduledToday}</p>
                         </div>
                         {scheduledToday === 0 ? (
                           <p className="text-xs text-green-600 dark:text-green-400 mt-1">No scheduled visits</p>
@@ -258,7 +258,7 @@ export default function MedicalRecordsPage() {
                         <p className="text-sm text-muted-foreground">Completed Today</p>
                         <div className="flex items-center gap-2 mt-1">
                           <CheckCircle2 className={`h-5 w-5 ${completedToday === 0 ? 'text-green-500 dark:text-green-400' : 'text-emerald-500 dark:text-emerald-400'}`} />
-                          <p className={`text-3xl font-bold ${completedToday === 0 ? 'text-green-600 dark:text-green-400' : 'text-emerald-600 dark:text-emerald-400'}`}>{completedToday}</p>
+                          <p className={`text-2xl sm:text-3xl font-bold ${completedToday === 0 ? 'text-green-600 dark:text-green-400' : 'text-emerald-600 dark:text-emerald-400'}`}>{completedToday}</p>
                         </div>
                         {completedToday === 0 ? (
                           <p className="text-xs text-green-600 dark:text-green-400 mt-1">No completed visits</p>
@@ -279,27 +279,27 @@ export default function MedicalRecordsPage() {
             Quick Actions
           </h2>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <Button onClick={() => window.location.href = '/medical-records/patients/new'} className="h-auto py-6 flex flex-col items-center gap-3 bg-gradient-to-br from-blue-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600 text-white border-l-4 border-l-white/20">
+            <Button onClick={() => window.location.href = '/medical-records/patients/new'} className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 bg-gradient-to-br from-blue-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600 text-white border-l-4 border-l-white/20">
               <div className="flex items-center gap-2">
-                <UserCheck className="h-6 w-6" />
+                <UserCheck className="h-5 w-5 sm:h-6 sm:w-6" />
               </div>
-              <span className="text-sm font-medium">Register Patient</span>
-              <span className="text-xs opacity-90">Create new patient records</span>
+              <span className="text-xs sm:text-sm font-medium">Register Patient</span>
+              <span className="text-[10px] sm:text-xs opacity-90">Create new patient records</span>
             </Button>
-            <Button onClick={() => window.location.href = '/medical-records/patients'} variant="outline" className="h-auto py-6 flex flex-col items-center gap-3 border-blue-500/30 hover:bg-blue-500/10 border-l-4 border-l-blue-500">
-              <Search className="h-6 w-6 text-blue-500 dark:text-blue-400" />
-              <span className="text-sm font-medium">Patient Search</span>
-              <span className="text-xs text-muted-foreground">Find patients by name/ID</span>
+            <Button onClick={() => window.location.href = '/medical-records/patients'} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-blue-500/30 hover:bg-blue-500/10 border-l-4 border-l-blue-500">
+              <Search className="h-5 w-5 sm:h-6 sm:w-6 text-blue-500 dark:text-blue-400" />
+              <span className="text-xs sm:text-sm font-medium">Patient Search</span>
+              <span className="text-[10px] sm:text-xs text-muted-foreground">Find patients by name/ID</span>
             </Button>
-            <Button onClick={() => window.location.href = '/medical-records/visits/new'} variant="outline" className="h-auto py-6 flex flex-col items-center gap-3 border-green-500/30 hover:bg-green-500/10 border-l-4 border-l-green-500">
-              <Plus className="h-6 w-6 text-green-500 dark:text-green-400" />
-              <span className="text-sm font-medium">Start New Visit</span>
-              <span className="text-xs text-muted-foreground">Create patient consultations</span>
+            <Button onClick={() => window.location.href = '/medical-records/visits/new'} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-green-500/30 hover:bg-green-500/10 border-l-4 border-l-green-500">
+              <Plus className="h-5 w-5 sm:h-6 sm:w-6 text-green-500 dark:text-green-400" />
+              <span className="text-xs sm:text-sm font-medium">Start New Visit</span>
+              <span className="text-[10px] sm:text-xs text-muted-foreground">Create patient consultations</span>
             </Button>
-            <Button onClick={() => window.location.href = '/medical-records/visits'} variant="outline" className="h-auto py-6 flex flex-col items-center gap-3 border-purple-500/30 hover:bg-purple-500/10 border-l-4 border-l-purple-500">
-              <Activity className="h-6 w-6 text-purple-500 dark:text-purple-400" />
-              <span className="text-sm font-medium">View Reports</span>
-              <span className="text-xs text-muted-foreground">Medical certificates & reports</span>
+            <Button onClick={() => window.location.href = '/medical-records/visits'} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-purple-500/30 hover:bg-purple-500/10 border-l-4 border-l-purple-500">
+              <Activity className="h-5 w-5 sm:h-6 sm:w-6 text-purple-500 dark:text-purple-400" />
+              <span className="text-xs sm:text-sm font-medium">View Reports</span>
+              <span className="text-[10px] sm:text-xs text-muted-foreground">Medical certificates & reports</span>
             </Button>
           </div>
         </div>

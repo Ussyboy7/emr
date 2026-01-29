@@ -739,10 +739,10 @@ export default function NewPatientPage() {
 
   return (
     <DashboardLayout>
-      <div className="container mx-auto p-6 space-y-6">
+      <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
         {/* Header */}
         <div>
-          <h1 className="text-3xl font-bold text-foreground">Register Patient</h1>
+          <h1 className="text-2xl sm:text-3xl font-bold text-foreground">Register Patient</h1>
           <p className="text-muted-foreground mt-1">
             Create a new patient record for NPA staff, retirees, dependents, or non-NPA visitors
           </p>

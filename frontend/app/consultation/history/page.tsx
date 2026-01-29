@@ -21,14 +21,14 @@ import {
 import Link from "next/link";
 import { apiFetch } from '@/lib/api-client';
 import { patientService, consultationService } from '@/lib/services';
+import { loadConsultationReportSession, type ConsultationReportSession } from '@/lib/consultation-report';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { useCurrentUser } from '@/hooks/use-current-user';
 import { CLINICS } from '@/lib/constants/clinics';
 import { clinicMatches } from '@/lib/utils/clinic-utils';
 import { ConsultationRecord } from '@/components/consultation/ConsultationDetailModal';
-
-const ConsultationDetailModal = lazy(() => import('@/components/consultation/ConsultationDetailModal').then(module => ({ default: module.ConsultationDetailModal })));
+import { ConsultationReportModal } from '@/components/consultation/ConsultationReportModal';
 
 // Simple doctor name resolution without fallbacks
 const resolveDoctorName = async (
@@ -258,6 +258,8 @@ export default function ConsultationHistoryPage() {
   // Modal states
   const [selectedConsultation, setSelectedConsultation] = useState<ConsultationRecordWithGender | null>(null);
   const [showViewModal, setShowViewModal] = useState(false);
+  const [reportSession, setReportSession] = useState<ConsultationReportSession | null>(null);
+  const [loadingReport, setLoadingReport] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showAddDiagnosisInEdit, setShowAddDiagnosisInEdit] = useState(false);
   const [diagnosisSearch, setDiagnosisSearch] = useState('');
@@ -596,8 +598,34 @@ export default function ConsultationHistoryPage() {
 
   const openViewModal = (consultation: ConsultationRecord) => {
     setSelectedConsultation(consultation);
+    setReportSession(null);
+    setLoadingReport(true);
     setShowViewModal(true);
   };
+
+  // Load full report session when View modal opens (same as Patient Medical Records View Report)
+  useEffect(() => {
+    if (!showViewModal || !selectedConsultation) return;
+    const id = Number(selectedConsultation.id);
+    if (Number.isNaN(id)) {
+      setLoadingReport(false);
+      return;
+    }
+    let cancelled = false;
+    loadConsultationReportSession(id)
+      .then((session) => {
+        if (!cancelled) setReportSession(session);
+      })
+      .catch(() => {
+        if (!cancelled) toast.error('Failed to load consultation report');
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingReport(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [showViewModal, selectedConsultation?.id]);
 
   const canEditConsultation = (consultation: ConsultationRecord): boolean => {
     // Allow editing if within 48 hours of the consultation date/time
@@ -740,11 +768,11 @@ export default function ConsultationHistoryPage() {
 
   return (
     <DashboardLayout>
-      <div className="container mx-auto p-6 space-y-6">
+      <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
         {/* Header */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold text-foreground">Consultation History</h1>
+            <h1 className="text-2xl sm:text-3xl font-bold text-foreground">Consultation History</h1>
             <p className="text-muted-foreground mt-1">View and manage all consultation records</p>
           </div>
           <div className="flex items-center gap-2">
@@ -1249,20 +1277,13 @@ export default function ConsultationHistoryPage() {
           </Card>
         )}
 
-        {/* Consultation Detail Modal */}
-        <Suspense fallback={<div className="flex items-center justify-center p-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div></div>}>
-          <ConsultationDetailModal
-            open={showViewModal}
-            onOpenChange={setShowViewModal}
-            consultation={selectedConsultation}
-            onEdit={(consultation) => {
-              setShowViewModal(false);
-              openEditModal(consultation);
-            }}
-            onComplete={handleComplete}
-            isSubmitting={isSubmitting}
-          />
-        </Suspense>
+        {/* Consultation Report modal (same as Patient Medical Records View Report) */}
+        <ConsultationReportModal
+          open={showViewModal}
+          onOpenChange={setShowViewModal}
+          session={reportSession}
+          loading={loadingReport}
+        />
 
         {/* Edit Modal */}
         <Dialog open={showEditModal} onOpenChange={setShowEditModal}>

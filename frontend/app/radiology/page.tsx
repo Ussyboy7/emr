@@ -19,23 +19,23 @@ export default function RadiologyPage() {
 
   return (
     <DashboardLayout>
-      <div className="container mx-auto p-6 space-y-6">
+      <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
         {/* Header */}
         <Card className="bg-gradient-to-r from-cyan-500 to-blue-600 text-white border-0">
-          <CardContent className="p-6">
+          <CardContent className="p-4 sm:p-6">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div className="flex items-center gap-4">
-                <div className="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center">
-                  <ScanLine className="h-8 w-8 text-white" />
+              <div className="flex items-center gap-3 sm:gap-4">
+                <div className="w-12 h-12 sm:w-16 sm:h-16 bg-white/20 rounded-full flex items-center justify-center flex-shrink-0">
+                  <ScanLine className="h-6 w-6 sm:h-8 sm:w-8 text-white" />
                 </div>
-                <div>
-                  <h1 className="text-2xl font-bold">Radiology Department</h1>
-                  <p className="text-cyan-100">Medical imaging, study processing, and radiologist reporting</p>
+                <div className="min-w-0">
+                  <h1 className="text-xl sm:text-2xl font-bold">Radiology Department</h1>
+                  <p className="text-sm sm:text-base text-cyan-100">Medical imaging, study processing, and radiologist reporting</p>
                 </div>
               </div>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <Button
-                  className="bg-white text-cyan-600 hover:bg-cyan-50"
+                  className="bg-white text-cyan-600 hover:bg-cyan-50 shadow-md"
                   onClick={() => window.location.href = '/radiology/orders'}
                 >
                   <ClipboardList className="h-4 w-4 mr-2" />
@@ -43,7 +43,7 @@ export default function RadiologyPage() {
                 </Button>
                 <Button
                   variant="outline"
-                  className="border-white text-white hover:bg-white/20"
+                  className="border-2 border-white/90 text-white hover:bg-white/30 hover:border-white dark:border-white dark:text-white dark:hover:bg-white/20 shadow-md backdrop-blur-sm bg-white/10"
                   onClick={() => window.location.reload()}
                 >
                   <RefreshCw className="h-4 w-4 mr-2" />
@@ -70,7 +70,7 @@ export default function RadiologyPage() {
                         <p className="text-sm text-muted-foreground">Loading...</p>
                         <div className="flex items-center gap-2 mt-1">
                           <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                          <p className="text-3xl font-bold text-muted-foreground">--</p>
+                          <p className="text-2xl sm:text-3xl font-bold text-muted-foreground">--</p>
                         </div>
                       </div>
                     </div>
@@ -86,7 +86,7 @@ export default function RadiologyPage() {
                         <p className="text-sm text-muted-foreground">Pending Orders</p>
                         <div className="flex items-center gap-2 mt-1">
                           <Clock className={`h-5 w-5 ${0 > 0 ? 'text-amber-500 dark:text-amber-400' : 'text-green-500 dark:text-green-400'}`} />
-                          <p className={`text-3xl font-bold ${0 > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-green-600 dark:text-green-400'}`}>{0}</p>
+                          <p className={`text-2xl sm:text-3xl font-bold ${0 > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-green-600 dark:text-green-400'}`}>{0}</p>
                         </div>
                         {0 === 0 ? (
                           <p className="text-xs text-green-600 dark:text-green-400 mt-1">All caught up!</p>
@@ -103,7 +103,7 @@ export default function RadiologyPage() {
                         <p className="text-sm text-muted-foreground">In Progress</p>
                         <div className="flex items-center gap-2 mt-1">
                           <ScanLine className={`h-5 w-5 ${0 === 0 ? 'text-green-500 dark:text-green-400' : 'text-blue-500 dark:text-blue-400'}`} />
-                          <p className={`text-3xl font-bold ${0 === 0 ? 'text-green-600 dark:text-green-400' : 'text-blue-600 dark:text-blue-400'}`}>{0}</p>
+                          <p className={`text-2xl sm:text-3xl font-bold ${0 === 0 ? 'text-green-600 dark:text-green-400' : 'text-blue-600 dark:text-blue-400'}`}>{0}</p>
                         </div>
                         {0 === 0 ? (
                           <p className="text-xs text-green-600 dark:text-green-400 mt-1">No studies in progress</p>
@@ -120,7 +120,7 @@ export default function RadiologyPage() {
                         <p className="text-sm text-muted-foreground">Awaiting Report</p>
                         <div className="flex items-center gap-2 mt-1">
                           <FileSearch className={`h-5 w-5 ${0 === 0 ? 'text-green-500 dark:text-green-400' : 'text-emerald-500 dark:text-emerald-400'}`} />
-                          <p className={`text-3xl font-bold ${0 === 0 ? 'text-green-600 dark:text-green-400' : 'text-emerald-600 dark:text-emerald-400'}`}>{0}</p>
+                          <p className={`text-2xl sm:text-3xl font-bold ${0 === 0 ? 'text-green-600 dark:text-green-400' : 'text-emerald-600 dark:text-emerald-400'}`}>{0}</p>
                         </div>
                         {0 === 0 ? (
                           <p className="text-xs text-green-600 dark:text-green-400 mt-1">All reports completed</p>
@@ -137,7 +137,7 @@ export default function RadiologyPage() {
                         <p className="text-sm text-muted-foreground">Critical Findings</p>
                         <div className="flex items-center gap-2 mt-1">
                           <AlertTriangle className={`h-5 w-5 ${0 === 0 ? 'text-green-500 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`} />
-                          <p className={`text-3xl font-bold ${0 === 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>{0}</p>
+                          <p className={`text-2xl sm:text-3xl font-bold ${0 === 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>{0}</p>
                         </div>
                         {0 === 0 ? (
                           <p className="text-xs text-green-600 dark:text-green-400 mt-1">No critical findings</p>
@@ -158,27 +158,27 @@ export default function RadiologyPage() {
             Quick Actions
           </h2>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <Button onClick={() => window.location.href = '/radiology/orders'} className="h-auto py-6 flex flex-col items-center gap-3 bg-gradient-to-br from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 text-white border-l-4 border-l-white/20">
+            <Button onClick={() => window.location.href = '/radiology/orders'} className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 bg-gradient-to-br from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 text-white border-l-4 border-l-white/20">
               <div className="flex items-center gap-2">
-                <ClipboardList className="h-6 w-6" />
+                <ClipboardList className="h-5 w-5 sm:h-6 sm:w-6" />
               </div>
-              <span className="text-sm font-medium">Orders Queue</span>
-              <span className="text-xs opacity-90">Process incoming orders</span>
+              <span className="text-xs sm:text-sm font-medium">Orders Queue</span>
+              <span className="text-[10px] sm:text-xs opacity-90">Process incoming orders</span>
             </Button>
-            <Button onClick={() => window.location.href = '/radiology/verification'} variant="outline" className="h-auto py-6 flex flex-col items-center gap-3 border-cyan-500/30 hover:bg-cyan-500/10 border-l-4 border-l-cyan-500">
-              <FileSearch className="h-6 w-6 text-cyan-500 dark:text-cyan-400" />
-              <span className="text-sm font-medium">Verification</span>
-              <span className="text-xs text-muted-foreground">Verify radiology reports</span>
+            <Button onClick={() => window.location.href = '/radiology/verification'} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-cyan-500/30 hover:bg-cyan-500/10 border-l-4 border-l-cyan-500">
+              <FileSearch className="h-5 w-5 sm:h-6 sm:w-6 text-cyan-500 dark:text-cyan-400" />
+              <span className="text-xs sm:text-sm font-medium">Verification</span>
+              <span className="text-[10px] sm:text-xs text-muted-foreground">Verify radiology reports</span>
             </Button>
-            <Button onClick={() => window.location.href = '/radiology/reports'} variant="outline" className="h-auto py-6 flex flex-col items-center gap-3 border-cyan-500/30 hover:bg-cyan-500/10 border-l-4 border-l-blue-500">
-              <FileImage className="h-6 w-6 text-blue-500 dark:text-blue-400" />
-              <span className="text-sm font-medium">Reports</span>
-              <span className="text-xs text-muted-foreground">View completed reports</span>
+            <Button onClick={() => window.location.href = '/radiology/reports'} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-cyan-500/30 hover:bg-cyan-500/10 border-l-4 border-l-blue-500">
+              <FileImage className="h-5 w-5 sm:h-6 sm:w-6 text-blue-500 dark:text-blue-400" />
+              <span className="text-xs sm:text-sm font-medium">Reports</span>
+              <span className="text-[10px] sm:text-xs text-muted-foreground">View completed reports</span>
             </Button>
-            <Button onClick={() => window.location.href = '/radiology/templates'} variant="outline" className="h-auto py-6 flex flex-col items-center gap-3 border-cyan-500/30 hover:bg-cyan-500/10 border-l-4 border-l-emerald-500">
-              <UserCheck className="h-6 w-6 text-emerald-500 dark:text-emerald-400" />
-              <span className="text-sm font-medium">Templates</span>
-              <span className="text-xs text-muted-foreground">Manage study templates</span>
+            <Button onClick={() => window.location.href = '/radiology/templates'} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-cyan-500/30 hover:bg-cyan-500/10 border-l-4 border-l-emerald-500">
+              <UserCheck className="h-5 w-5 sm:h-6 sm:w-6 text-emerald-500 dark:text-emerald-400" />
+              <span className="text-xs sm:text-sm font-medium">Templates</span>
+              <span className="text-[10px] sm:text-xs text-muted-foreground">Manage study templates</span>
             </Button>
           </div>
         </div>

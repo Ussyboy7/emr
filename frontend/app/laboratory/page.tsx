@@ -19,23 +19,23 @@ export default function LaboratoryPage() {
 
   return (
     <DashboardLayout>
-      <div className="container mx-auto p-6 space-y-6">
+      <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
         {/* Header */}
         <Card className="bg-gradient-to-r from-amber-500 to-orange-600 text-white border-0">
-          <CardContent className="p-6">
+          <CardContent className="p-4 sm:p-6">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div className="flex items-center gap-4">
-                <div className="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center">
-                  <FlaskConical className="h-8 w-8 text-white" />
+              <div className="flex items-center gap-3 sm:gap-4">
+                <div className="w-12 h-12 sm:w-16 sm:h-16 bg-white/20 rounded-full flex items-center justify-center flex-shrink-0">
+                  <FlaskConical className="h-6 w-6 sm:h-8 sm:w-8 text-white" />
                 </div>
-                <div>
-                  <h1 className="text-2xl font-bold">Laboratory Department</h1>
-                  <p className="text-amber-100">Lab test ordering, specimen tracking, and results management</p>
+                <div className="min-w-0">
+                  <h1 className="text-xl sm:text-2xl font-bold">Laboratory Department</h1>
+                  <p className="text-sm sm:text-base text-amber-100">Lab test ordering, specimen tracking, and results management</p>
                 </div>
               </div>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <Button
-                  className="bg-white text-amber-600 hover:bg-amber-50"
+                  className="bg-white text-amber-600 hover:bg-amber-50 shadow-md"
                   onClick={() => window.location.href = '/laboratory/orders'}
                 >
                   <TestTube className="h-4 w-4 mr-2" />
@@ -43,7 +43,7 @@ export default function LaboratoryPage() {
                 </Button>
                 <Button
                   variant="outline"
-                  className="border-white text-white hover:bg-white/20"
+                  className="border-2 border-white/90 text-white hover:bg-white/30 hover:border-white dark:border-white dark:text-white dark:hover:bg-white/20 shadow-md backdrop-blur-sm bg-white/10"
                   onClick={() => window.location.href = '/laboratory/results'}
                 >
                   <FileSearch className="h-4 w-4 mr-2" />
@@ -70,7 +70,7 @@ export default function LaboratoryPage() {
                         <p className="text-sm text-muted-foreground">Loading...</p>
                         <div className="flex items-center gap-2 mt-1">
                           <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                          <p className="text-3xl font-bold text-muted-foreground">--</p>
+                          <p className="text-2xl sm:text-3xl font-bold text-muted-foreground">--</p>
                         </div>
                       </div>
                     </div>
@@ -86,7 +86,7 @@ export default function LaboratoryPage() {
                         <p className="text-sm text-muted-foreground">Pending Tests</p>
                         <div className="flex items-center gap-2 mt-1">
                           <Clock className={`h-5 w-5 ${0 > 0 ? 'text-amber-500 dark:text-amber-400' : 'text-green-500 dark:text-green-400'}`} />
-                          <p className={`text-3xl font-bold ${0 > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-green-600 dark:text-green-400'}`}>{0}</p>
+                          <p className={`text-2xl sm:text-3xl font-bold ${0 > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-green-600 dark:text-green-400'}`}>{0}</p>
                         </div>
                         {0 === 0 ? (
                           <p className="text-xs text-green-600 dark:text-green-400 mt-1">All caught up!</p>
@@ -103,7 +103,7 @@ export default function LaboratoryPage() {
                         <p className="text-sm text-muted-foreground">In Progress</p>
                         <div className="flex items-center gap-2 mt-1">
                           <FlaskConical className={`h-5 w-5 ${0 === 0 ? 'text-green-500 dark:text-green-400' : 'text-blue-500 dark:text-blue-400'}`} />
-                          <p className={`text-3xl font-bold ${0 === 0 ? 'text-green-600 dark:text-green-400' : 'text-blue-600 dark:text-blue-400'}`}>{0}</p>
+                          <p className={`text-2xl sm:text-3xl font-bold ${0 === 0 ? 'text-green-600 dark:text-green-400' : 'text-blue-600 dark:text-blue-400'}`}>{0}</p>
                         </div>
                         {0 === 0 ? (
                           <p className="text-xs text-green-600 dark:text-green-400 mt-1">No tests in progress</p>
@@ -120,7 +120,7 @@ export default function LaboratoryPage() {
                         <p className="text-sm text-muted-foreground">Results Ready</p>
                         <div className="flex items-center gap-2 mt-1">
                           <CheckCircle2 className={`h-5 w-5 ${0 === 0 ? 'text-green-500 dark:text-green-400' : 'text-emerald-500 dark:text-emerald-400'}`} />
-                          <p className={`text-3xl font-bold ${0 === 0 ? 'text-green-600 dark:text-green-400' : 'text-emerald-600 dark:text-emerald-400'}`}>{0}</p>
+                          <p className={`text-2xl sm:text-3xl font-bold ${0 === 0 ? 'text-green-600 dark:text-green-400' : 'text-emerald-600 dark:text-emerald-400'}`}>{0}</p>
                         </div>
                         {0 === 0 ? (
                           <p className="text-xs text-green-600 dark:text-green-400 mt-1">All results verified</p>
@@ -137,7 +137,7 @@ export default function LaboratoryPage() {
                         <p className="text-sm text-muted-foreground">Critical</p>
                         <div className="flex items-center gap-2 mt-1">
                           <AlertTriangle className={`h-5 w-5 ${0 === 0 ? 'text-green-500 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`} />
-                          <p className={`text-3xl font-bold ${0 === 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>{0}</p>
+                          <p className={`text-2xl sm:text-3xl font-bold ${0 === 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>{0}</p>
                         </div>
                         {0 === 0 ? (
                           <p className="text-xs text-green-600 dark:text-green-400 mt-1">No critical alerts</p>
@@ -158,27 +158,27 @@ export default function LaboratoryPage() {
             Quick Actions
           </h2>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <Button onClick={() => window.location.href = '/laboratory/orders'} className="h-auto py-6 flex flex-col items-center gap-3 bg-gradient-to-br from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white border-l-4 border-l-white/20">
+            <Button onClick={() => window.location.href = '/laboratory/orders'} className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 bg-gradient-to-br from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white border-l-4 border-l-white/20">
               <div className="flex items-center gap-2">
-                <TestTube className="h-6 w-6" />
+                <TestTube className="h-5 w-5 sm:h-6 sm:w-6" />
               </div>
-              <span className="text-sm font-medium">Lab Orders</span>
-              <span className="text-xs opacity-90">Test ordering</span>
+              <span className="text-xs sm:text-sm font-medium">Lab Orders</span>
+              <span className="text-[10px] sm:text-xs opacity-90">Test ordering</span>
             </Button>
-            <Button onClick={() => window.location.href = '/laboratory/results'} variant="outline" className="h-auto py-6 flex flex-col items-center gap-3 border-amber-500/30 hover:bg-amber-500/10 border-l-4 border-l-amber-500">
-              <FileSearch className="h-6 w-6 text-amber-500 dark:text-amber-400" />
-              <span className="text-sm font-medium">Verify Results</span>
-              <span className="text-xs text-muted-foreground">Result validation</span>
+            <Button onClick={() => window.location.href = '/laboratory/results'} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-amber-500/30 hover:bg-amber-500/10 border-l-4 border-l-amber-500">
+              <FileSearch className="h-5 w-5 sm:h-6 sm:w-6 text-amber-500 dark:text-amber-400" />
+              <span className="text-xs sm:text-sm font-medium">Verify Results</span>
+              <span className="text-[10px] sm:text-xs text-muted-foreground">Result validation</span>
             </Button>
-            <Button onClick={() => window.location.href = '/laboratory/queue'} variant="outline" className="h-auto py-6 flex flex-col items-center gap-3 border-amber-500/30 hover:bg-amber-500/10 border-l-4 border-l-blue-500">
-              <ClipboardList className="h-6 w-6 text-blue-500 dark:text-blue-400" />
-              <span className="text-sm font-medium">Test Queue</span>
-              <span className="text-xs text-muted-foreground">Pending tests</span>
+            <Button onClick={() => window.location.href = '/laboratory/queue'} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-amber-500/30 hover:bg-amber-500/10 border-l-4 border-l-blue-500">
+              <ClipboardList className="h-5 w-5 sm:h-6 sm:w-6 text-blue-500 dark:text-blue-400" />
+              <span className="text-xs sm:text-sm font-medium">Test Queue</span>
+              <span className="text-[10px] sm:text-xs text-muted-foreground">Pending tests</span>
             </Button>
-            <Button onClick={() => window.location.href = '/laboratory/reports'} variant="outline" className="h-auto py-6 flex flex-col items-center gap-3 border-amber-500/30 hover:bg-amber-500/10 border-l-4 border-l-emerald-500">
-              <UserCheck className="h-6 w-6 text-emerald-500 dark:text-emerald-400" />
-              <span className="text-sm font-medium">Quality Control</span>
-              <span className="text-xs text-muted-foreground">QC management</span>
+            <Button onClick={() => window.location.href = '/laboratory/reports'} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-amber-500/30 hover:bg-amber-500/10 border-l-4 border-l-emerald-500">
+              <UserCheck className="h-5 w-5 sm:h-6 sm:w-6 text-emerald-500 dark:text-emerald-400" />
+              <span className="text-xs sm:text-sm font-medium">Quality Control</span>
+              <span className="text-[10px] sm:text-xs text-muted-foreground">QC management</span>
             </Button>
           </div>
         </div>

@@ -23,6 +23,8 @@ import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { PatientAvatar } from '@/components/PatientAvatar';
 import { VitalsDetailModal } from '@/components/VitalsDetailModal';
+import { ConsultationReportModal } from '@/components/consultation/ConsultationReportModal';
+import { loadConsultationReportSession, type ConsultationReportSession } from '@/lib/consultation-report';
 import { getOrganizationHeader } from '@/lib/constants/organization';
 
 // Utility functions
@@ -79,9 +81,10 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
   const [authError, setAuthError] = useState<unknown | null>(null);
   useAuthRedirect(authError);
 
-  // Consultation Report state
-  const [selectedSession, setSelectedSession] = useState<any>(null);
+  // Consultation Report state (shared modal used by View Report)
+  const [selectedSession, setSelectedSession] = useState<ConsultationReportSession | null>(null);
   const [showConsultationReport, setShowConsultationReport] = useState(false);
+  const [loadingReport, setLoadingReport] = useState(false);
 
   // Prescription view dialog
   const [selectedPrescription, setSelectedPrescription] = useState<any>(null);
@@ -212,424 +215,27 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
     }
   };
 
-  // Generate consultation report HTML
-  const generateConsultationReportHTML = (session: any) => {
-    const vitals = session.vitals || {};
-    const prescriptions = session.prescriptions || [];
-    const labOrders = session.labOrders || [];
-    const radiologyOrders = session.radiologyOrders || [];
-    const physioOrders = session.physioOrders || [];
-    const diagnoses = session.diagnoses || [];
-
-    return `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>Consultation Report - Session ${session.id}</title>
-        <style>
-          body { font-family: Arial, sans-serif; margin: 20px; }
-          .header { text-align: center; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; }
-          .section { margin-bottom: 20px; }
-          .section h3 { color: #333; border-bottom: 1px solid #ccc; padding-bottom: 5px; }
-          table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
-          th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-          th { background-color: #f5f5f5; }
-          .vitals-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
-          .vital-item { padding: 10px; border: 1px solid #ddd; text-align: center; }
-          .footer { margin-top: 30px; text-align: center; font-size: 12px; color: #666; }
-        </style>
-      </head>
-      <body>
-        <div class="header">
-          <h1>Nigerian Ports Authority</h1>
-          <h2>Medical Services Department</h2>
-          <h3>Consultation Report</h3>
-          <p>Session ID: ${session.id}</p>
-        </div>
-
-        <div class="section">
-          <h3>PATIENT INFORMATION</h3>
-          <p><strong>Name:</strong> ${session.patient_name ?? ''}</p>
-          <p><strong>Patient ID:</strong> ${session.patient_id ?? ''}</p>
-          <p><strong>Age:</strong> ${session.patient_age ?? ''} years</p>
-          <p><strong>Gender:</strong> ${session.patient_gender ?? ''}</p>
-        </div>
-
-        <div class="section">
-          <h3>CONSULTATION DETAILS</h3>
-          <p><strong>Doctor:</strong> ${session.doctor_name ?? ''}</p>
-          <p><strong>Clinic:</strong> ${session.clinic_name ?? ''}</p>
-          <p><strong>Room:</strong> ${session.room_name ?? ''}</p>
-          <p><strong>Date & Time:</strong> ${formatDate(session.started_at)} ${formatTime(session.started_at)}</p>
-          <p><strong>Duration:</strong> ${session.ended_at ? Math.round((new Date(session.ended_at).getTime() - new Date(session.started_at).getTime()) / (1000 * 60)) + ' minutes' : ''}</p>
-        </div>
-
-        ${Object.keys(vitals).length > 0 ? `
-        <div class="section">
-          <h3>VITAL SIGNS</h3>
-          <div class="vitals-grid">
-            ${Object.entries(vitals).map(([key, value]: [string, any]) =>
-              `<div class="vital-item"><strong>${vitalLabel(key)}</strong><br>${formatVitalDisplay(key, value)}</div>`
-            ).join('')}
-          </div>
-        </div>
-        ` : ''}
-
-        <div class="section">
-          <h3>CLINICAL NOTES</h3>
-          ${session.presentation_complaint ? `<p><strong>Presentation Complaint:</strong> ${session.presentation_complaint}</p>` : ''}
-          ${session.history_of_presenting_illness ? `<p><strong>History of Present Illness:</strong> ${session.history_of_presenting_illness.replace(/\n/g, '<br>')}</p>` : ''}
-          ${session.physical_examination ? `<p><strong>Physical Examination:</strong> ${session.physical_examination.replace(/\n/g, '<br>')}</p>` : ''}
-          ${session.assessment ? `<p><strong>Assessment:</strong> ${session.assessment}</p>` : ''}
-          ${session.plan ? `<p><strong>Treatment Plan:</strong> ${session.plan}</p>` : ''}
-        </div>
-
-        ${diagnoses.length > 0 ? `
-        <div class="section">
-          <h3>DIAGNOSES</h3>
-          <table>
-            <thead>
-              <tr>
-                <th>ICD-10 Code</th>
-                <th>Diagnosis</th>
-                <th>Diagnosis Type</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${diagnoses.map((dx: any) => `
-                <tr>
-                  <td>${dx.code ?? ''}</td>
-                  <td>${dx.name ?? ''}</td>
-                  <td>${dx.type ?? ''}</td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-        </div>
-        ` : ''}
-
-        ${prescriptions.length > 0 ? `
-        <div class="section">
-          <h3>PRESCRIPTIONS</h3>
-          <table>
-            <thead>
-              <tr>
-                <th>Medication</th>
-                <th>Dosage</th>
-                <th>Frequency</th>
-                <th>Duration</th>
-                <th>Quantity</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${prescriptions.map((rx: any) => `
-                <tr>
-                  <td>${rx.medication ?? ''}</td>
-                  <td>${rx.dosage ?? ''}</td>
-                  <td>${rx.frequency ?? ''}</td>
-                  <td>${rx.duration ?? ''}</td>
-                  <td>${rx.quantity ?? ''}</td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-        </div>
-        ` : ''}
-
-        ${labOrders.length > 0 ? `
-        <div class="section">
-          <h3>LABORATORY ORDERS</h3>
-          <table>
-            <thead>
-              <tr>
-                <th>Test</th>
-                <th>Priority</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${labOrders.map((lab: any) => `
-                <tr>
-                  <td>${lab.test ?? ''}</td>
-                  <td>${formatPriority(lab.priority)}</td>
-                  <td>${lab.status ?? ''}</td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-        </div>
-        ` : ''}
-
-        ${radiologyOrders.length > 0 ? `
-        <div class="section">
-          <h3>RADIOLOGY ORDERS</h3>
-          <table>
-            <thead>
-              <tr>
-                <th>Procedure</th>
-                <th>Priority</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${radiologyOrders.map((rad: any) => `
-                <tr>
-                  <td>${rad.procedure ?? ''}</td>
-                  <td>${formatPriority(rad.priority)}</td>
-                  <td>${rad.status ?? ''}</td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-        </div>
-        ` : ''}
-
-        ${physioOrders.length > 0 ? `
-        <div class="section">
-          <h3>PHYSIOTHERAPY ORDERS</h3>
-          <table>
-            <thead>
-              <tr>
-                <th>Diagnosis / Chief Complaint</th>
-                <th>Priority</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${physioOrders.map((p: any) => `
-                <tr>
-                  <td>${p.diagnosis ?? ''}</td>
-                  <td>${formatPriority(p.priority)}</td>
-                  <td>${p.status ?? ''}</td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-        </div>
-        ` : ''}
-
-        <div class="section">
-          <h3>SESSION OUTCOME</h3>
-          <p><strong>Status:</strong> ${session.status === 'completed' ? 'Completed' : (session.status ?? '')}</p>
-        </div>
-
-        <div class="footer">
-          <p>Generated: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTimeString()}</p>
-          <p>Document ID: ${session.id}</p>
-          <p>${getOrganizationHeader()}</p>
-        </div>
-      </body>
-      </html>
-    `;
-  };
-
-  // Download consultation report
-  const downloadConsultationReport = async (session: any) => {
-    try {
-      toast.loading('Generating PDF report...', { id: 'pdf-generation' });
-      const printWindow = window.open('', '_blank');
-      if (!printWindow) {
-        toast.error('Unable to open report window. Please allow popups.', { id: 'pdf-generation' });
-        return;
-      }
-
-      const reportHTML = `
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <title>Consultation Report - Session ${session.id}</title>
-          <style>
-            @media print {
-              @page { size: A4; margin: 20mm; }
-              body { print-color-adjust: exact; }
-            }
-            body { font-family: 'Times New Roman', serif; margin: 0; padding: 20px; font-size: 12pt; line-height: 1.4; color: #000; background: white; }
-            .header { text-align: center; border-bottom: 2px solid #000; padding-bottom: 15px; margin-bottom: 25px; }
-            .header h1 { margin: 0; font-size: 18pt; font-weight: bold; }
-            .header h2 { margin: 5px 0; font-size: 14pt; }
-            .header h3 { margin: 5px 0; font-size: 12pt; }
-            .section { margin-bottom: 20px; page-break-inside: avoid; }
-            .section h3 { color: #000; border-bottom: 1px solid #000; padding-bottom: 5px; margin-bottom: 10px; font-size: 14pt; font-weight: bold; }
-            table { width: 100%; border-collapse: collapse; margin-bottom: 15px; font-size: 11pt; }
-            th, td { border: 1px solid #000; padding: 6px; text-align: left; vertical-align: top; }
-            th { background-color: #f0f0f0; font-weight: bold; }
-            .vitals-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin-bottom: 15px; }
-            .vital-item { padding: 8px; border: 1px solid #000; text-align: center; font-size: 11pt; }
-            .footer { margin-top: 30px; text-align: center; font-size: 10pt; color: #666; border-top: 1px solid #ccc; padding-top: 10px; }
-            .no-break { page-break-inside: avoid; }
-          </style>
-        </head>
-        <body>
-          ${generateConsultationReportHTML(session).replace('<html>', '').replace('</html>', '').replace('<head>', '').replace('</head>', '').replace('<body>', '').replace('</body>', '').replace(/<title>.*?<\/title>/, '')}
-        </body>
-        </html>
-      `;
-
-      printWindow.document.write(reportHTML);
-      printWindow.document.close();
-
-      printWindow.onload = () => {
-        setTimeout(() => {
-          printWindow.print();
-          printWindow.close();
-          toast.success('PDF report generated and sent to printer', { id: 'pdf-generation' });
-        }, 500);
-      };
-    } catch (error) {
-      console.error('Error generating PDF:', error);
-      toast.error('Failed to generate PDF report', { id: 'pdf-generation' });
-    }
-  };
-
-  // Print consultation report
-  const printConsultationReport = (session: any) => {
-    const reportHTML = generateConsultationReportHTML(session);
-    const printWindow = window.open('', '_blank');
-    if (printWindow) {
-      printWindow.document.write(reportHTML);
-      printWindow.document.close();
-      printWindow.onload = () => {
-        printWindow.print();
-        printWindow.close();
-      };
-      toast.success('Consultation report opened for printing');
-    } else {
-      toast.error('Unable to open report window. Please allow popups.');
-    }
-  };
-
-  // View consultation details
+  // View consultation report (shared Consultation Report modal)
   const viewSessionDetails = async (session: any) => {
     try {
-      // Load full session data with related information (augment with prescriptions, labOrders, vitals, diagnoses)
-      const fullSession = (await consultationService.getSession(session.id)) as unknown as Record<string, unknown>;
-      
-      // Load related data
-      if (fullSession.visit) {
-        try {
-          const prescriptionsResult = await apiFetch<{ results: any[] }>(`/pharmacy/prescriptions/?visit=${fullSession.visit}&page_size=100`);
-          // Flatten: support p.medications[] and top-level p.medication_name/p.medication (single-med per rx)
-          fullSession.prescriptions = (prescriptionsResult.results || []).flatMap((p: any) => {
-            const items = (p.medications && p.medications.length) ? p.medications : (p.medication_name || p.medication ? [p] : []);
-            return items.map((m: any) => ({
-              id: String(p.id) + (m.id != null ? '-' + m.id : ''),
-              medication: (m.medication_name || m.medication_details?.name || m.medication?.name || p.medication_name || p.medication) ?? '',
-              dosage: m.dosage || p.dosage || '',
-              frequency: m.frequency || p.frequency || '',
-              duration: m.duration || p.duration || '',
-              quantity: m.quantity ?? p.quantity ?? '',
-            }));
-          });
-        } catch (err) {
-          console.warn('Could not load prescriptions:', err);
-          fullSession.prescriptions = [];
-        }
-
-        try {
-          const labOrders = await apiFetch<{ results: any[] }>(`/laboratory/orders/?visit=${fullSession.visit}&page_size=100`);
-          fullSession.labOrders = (labOrders.results || []).flatMap((order: any) => {
-            const tests = order.tests || [];
-            if (!tests.length) return [];
-            return tests.map((t: any) => ({
-              test: (t.name || t.test_name || t.template_name || '').trim(),
-              priority: order.priority ?? '',
-              status: t.status ?? order.status ?? '',
-            }));
-          });
-        } catch (err) {
-          console.warn('Could not load lab orders:', err);
-          fullSession.labOrders = [];
-        }
-
-        try {
-          const radiologyOrders = await apiFetch<{ results: any[] }>(`/radiology/orders/?visit=${fullSession.visit}&page_size=100`);
-          fullSession.radiologyOrders = (radiologyOrders.results || []).flatMap((order: any) => {
-            const studies = order.studies || [];
-            if (studies.length) {
-              return studies.map((s: any) => ({
-                procedure: (s.procedure ?? order.procedure_name ?? order.procedure ?? '').toString().trim(),
-                priority: order.priority ?? '',
-                status: s.status ?? order.status ?? '',
-              }));
-            }
-            const proc = (order.procedure_name ?? order.procedure ?? '').toString().trim();
-            if (!proc) return [];
-            return [{ procedure: proc, priority: order.priority ?? '', status: order.status ?? '' }];
-          });
-        } catch (err) {
-          console.warn('Could not load radiology orders:', err);
-          fullSession.radiologyOrders = [];
-        }
-
-        try {
-          const vitals = await apiFetch<{ results: any[] }>(`/vitals/?visit=${fullSession.visit}&page_size=1`);
-          if (vitals.results && vitals.results.length > 0) {
-            const v = vitals.results[0];
-            fullSession.vitals = {
-              temperature: v.temperature || '',
-              bloodPressure: v.blood_pressure_systolic && v.blood_pressure_diastolic
-                ? `${v.blood_pressure_systolic}/${v.blood_pressure_diastolic}`
-                : '',
-              heartRate: v.heart_rate || '',
-              respiratoryRate: v.respiratory_rate || '',
-              oxygenSaturation: v.oxygen_saturation || '',
-              weight: v.weight || '',
-              height: v.height || '',
-              recordedAt: v.recorded_at || '',
-            };
-          }
-        } catch (err) {
-          console.warn('Could not load vitals:', err);
-        }
-      } else {
-        fullSession.prescriptions = [];
-        fullSession.labOrders = [];
-        fullSession.radiologyOrders = [];
-      }
-
-      // Physio orders are keyed by consultation_session (always available)
-      try {
-        const physioOrders = await physioService.getOrders({
-          consultation_session: fullSession.id as number,
-          patient: fullSession.patient != null ? String(fullSession.patient) : undefined,
-          page_size: 100,
-        });
-        fullSession.physioOrders = (physioOrders.results || []).map((o: any) => ({
-          diagnosis: (o.diagnosis ?? o.chief_complaint ?? '').toString().trim(),
-          priority: o.priority ?? '',
-          status: o.status ?? '',
-        }));
-      } catch (err) {
-        console.warn('Could not load physio orders:', err);
-        fullSession.physioOrders = [];
-      }
-
-      try {
-        const diagnosesResult = await consultationService.getDiagnoses({ session: fullSession.id as number, page_size: 100 });
-        fullSession.diagnoses = (diagnosesResult.results || []).map((d: any) => ({
-          id: String(d.id),
-          code: d.icd10_code_details?.code ?? '',
-          name: (d.icd10_code_details?.description || d.diagnosis_text) ?? '',
-          type: d.certainty === 'confirmed' ? 'Primary' : d.certainty === 'probable' ? 'Secondary' : (d.certainty ?? ''),
-          notes: d.notes || d.diagnosis_text || '',
-        }));
-      } catch (err) {
-        console.warn('Could not load diagnoses:', err);
-        fullSession.diagnoses = [];
-      }
-
-      setSelectedSession(fullSession);
+      setLoadingReport(true);
+      setSelectedSession(null);
       setShowConsultationReport(true);
+      const fullSession = await loadConsultationReportSession(session.id);
+      setSelectedSession(fullSession);
     } catch (err: any) {
       console.error('Error loading session details:', err);
       toast.error('Failed to load consultation details');
+      setShowConsultationReport(false);
+    } finally {
+      setLoadingReport(false);
     }
   };
 
   if (loading) {
     return (
       <DashboardLayout>
-        <div className="container mx-auto p-6">
+        <div className="container mx-auto p-4 sm:p-6">
           <Card>
             <CardContent className="flex items-center justify-center py-12">
               <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -644,7 +250,7 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
   if (error || !patient) {
     return (
       <DashboardLayout>
-        <div className="container mx-auto p-6">
+        <div className="container mx-auto p-4 sm:p-6">
           <Card className="border-red-500/20 bg-red-500/5">
             <CardContent className="p-4">
               <div className="flex items-center gap-3">
@@ -669,7 +275,7 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
 
   return (
     <DashboardLayout>
-      <div className="container mx-auto p-6 space-y-6">
+      <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
@@ -677,7 +283,7 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
               <ArrowLeft className="h-4 w-4 mr-2" />Back
             </Button>
             <div>
-              <h1 className="text-3xl font-bold text-foreground">Patient Medical Records</h1>
+              <h1 className="text-2xl sm:text-3xl font-bold text-foreground">Patient Medical Records</h1>
               <p className="text-muted-foreground mt-1">Complete medical history and consultation records</p>
             </div>
           </div>
@@ -701,304 +307,12 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
           </CardContent>
         </Card>
 
-        {/* Consultation Report Dialog */}
-        <Dialog open={showConsultationReport} onOpenChange={setShowConsultationReport}>
-          <DialogContent className="w-[95vw] sm:max-w-[1000px] max-h-[90vh] overflow-y-auto">
-            {selectedSession && (
-              <>
-                <DialogHeader>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <DialogTitle className="flex items-center gap-3">
-                        <FileText className="h-5 w-5 text-blue-500" />
-                        Consultation Report
-                        <Badge variant="outline">{selectedSession.id}</Badge>
-                      </DialogTitle>
-                      <DialogDescription>
-                        {formatDate(selectedSession.started_at)} • {formatTime(selectedSession.started_at)} • {selectedSession.room_name ?? ''}
-                      </DialogDescription>
-                    </div>
-                    <div className="flex gap-2">
-                      <Button variant="outline" size="sm" onClick={() => downloadConsultationReport(selectedSession)}>
-                        <Download className="h-4 w-4 mr-1" />
-                        Download
-                      </Button>
-                      <Button variant="outline" size="sm" onClick={() => printConsultationReport(selectedSession)}>
-                        <Printer className="h-4 w-4 mr-1" />
-                        Print
-                      </Button>
-                    </div>
-                  </div>
-                </DialogHeader>
-
-                <div className="space-y-6 py-4">
-                  {/* Patient Info */}
-                  <div className="grid md:grid-cols-2 gap-4 p-4 bg-muted/30 rounded-lg">
-                    <div>
-                      <h4 className="text-sm font-semibold text-muted-foreground mb-2">PATIENT INFORMATION</h4>
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <User className="h-4 w-4 text-muted-foreground" />
-                          <span className="font-medium">{selectedSession.patient_name ?? ''}</span>
-                        </div>
-                        <div className="text-sm text-muted-foreground">
-                          Patient ID: {selectedSession.patient_id ?? ''} • Age: {selectedSession.patient_age ?? ''} • Gender: {selectedSession.patient_gender ?? ''}
-                        </div>
-                      </div>
-                    </div>
-                    <div>
-                      <h4 className="text-sm font-semibold text-muted-foreground mb-2">CONSULTATION DETAILS</h4>
-                      <div className="space-y-1 text-sm">
-                        <div><strong>Doctor:</strong> {selectedSession.doctor_name ?? ''}</div>
-                        <div><strong>Clinic:</strong> {selectedSession.clinic_name ?? ''}</div>
-                        <div><strong>Duration:</strong> {selectedSession.ended_at ? Math.round((new Date(selectedSession.ended_at).getTime() - new Date(selectedSession.started_at).getTime()) / (1000 * 60)) + ' min' : ''}</div>
-                        <div><strong>Room:</strong> {selectedSession.room_name ?? ''}</div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Vitals */}
-                  {selectedSession.vitals && Object.keys(selectedSession.vitals).length > 0 && (
-                    <div>
-                      <h4 className="text-sm font-semibold text-blue-600 mb-2">VITAL SIGNS</h4>
-                      <div className="grid grid-cols-3 md:grid-cols-6 gap-3">
-                        {Object.entries(selectedSession.vitals).map(([key, value]: [string, unknown]) => (
-                          <div key={key} className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-center border border-blue-200 dark:border-blue-800">
-                            <div className="text-xs text-muted-foreground">{vitalLabel(key)}</div>
-                            <div className="font-medium">{formatVitalDisplay(key, value)}</div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Clinical Notes */}
-                  <div className="space-y-4">
-                    <h4 className="text-sm font-semibold text-amber-600">CLINICAL NOTES</h4>
-                    
-                    {selectedSession.presentation_complaint && (
-                      <div>
-                        <label className="text-xs font-medium text-muted-foreground">Presentation Complaint</label>
-                        <p className="mt-1 p-3 bg-muted/30 rounded-lg text-sm">{selectedSession.presentation_complaint}</p>
-                      </div>
-                    )}
-
-                    {selectedSession.history_of_presenting_illness && (
-                      <div>
-                        <label className="text-xs font-medium text-muted-foreground">History of Present Illness</label>
-                        <p className="mt-1 p-3 bg-muted/30 rounded-lg text-sm">{selectedSession.history_of_presenting_illness}</p>
-                      </div>
-                    )}
-
-                    {selectedSession.physical_examination && (
-                      <div>
-                        <label className="text-xs font-medium text-muted-foreground">Physical Examination</label>
-                        <p className="mt-1 p-3 bg-muted/30 rounded-lg text-sm">{selectedSession.physical_examination}</p>
-                      </div>
-                    )}
-
-                    {selectedSession.assessment && (
-                      <div>
-                        <label className="text-xs font-medium text-muted-foreground">Assessment</label>
-                        <p className="mt-1 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-sm border border-blue-200 dark:border-blue-800">
-                          {selectedSession.assessment}
-                        </p>
-                      </div>
-                    )}
-
-                    {selectedSession.plan && (
-                      <div>
-                        <label className="text-xs font-medium text-muted-foreground">Treatment Plan</label>
-                        <p className="mt-1 p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg text-sm border border-emerald-200 dark:border-emerald-800 whitespace-pre-line">
-                          {selectedSession.plan}
-                        </p>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Diagnoses */}
-                  {selectedSession.diagnoses && selectedSession.diagnoses.length > 0 && (
-                    <div>
-                      <h4 className="text-sm font-semibold text-red-600 mb-2 flex items-center gap-2">
-                        <Stethoscope className="h-4 w-4" />
-                        DIAGNOSES
-                      </h4>
-                      <div className="border rounded-lg overflow-hidden">
-                        <table className="w-full text-sm">
-                          <thead className="bg-red-50 dark:bg-red-900/20">
-                            <tr>
-                              <th className="px-3 py-2 text-left font-medium">ICD-10 Code</th>
-                              <th className="px-3 py-2 text-left font-medium">Diagnosis</th>
-                              <th className="px-3 py-2 text-center font-medium">Diagnosis Type</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y">
-                            {selectedSession.diagnoses.map((diagnosis: any, index: number) => (
-                              <tr key={diagnosis.id || index} className="hover:bg-muted/50">
-                                <td className="px-3 py-2 font-mono text-xs">{diagnosis.code}</td>
-                                <td className="px-3 py-2">
-                                  <div className="font-medium text-sm">{diagnosis.name}</div>
-                                  {diagnosis.notes && (
-                                    <div className="text-xs text-muted-foreground mt-1">{diagnosis.notes}</div>
-                                  )}
-                                </td>
-                                <td className="px-3 py-2 text-center">
-                                  <Badge variant="outline" className={`text-xs ${
-                                    diagnosis.type === 'Primary' ? 'bg-red-500/10 text-red-600 border-red-500/30' :
-                                    diagnosis.type === 'Secondary' ? 'bg-amber-500/10 text-amber-600 border-amber-500/30' :
-                                    'bg-blue-500/10 text-blue-600 border-blue-500/30'
-                                  }`}>
-                                    {diagnosis.type}
-                                  </Badge>
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Prescriptions */}
-                  {selectedSession.prescriptions && selectedSession.prescriptions.length > 0 && (
-                    <div>
-                      <h4 className="text-sm font-semibold text-violet-600 mb-2 flex items-center gap-2">
-                        <Pill className="h-4 w-4" />
-                        PRESCRIPTIONS
-                      </h4>
-                      <div className="border rounded-lg overflow-hidden">
-                        <table className="w-full text-sm">
-                          <thead className="bg-violet-50 dark:bg-violet-900/20">
-                            <tr>
-                              <th className="px-3 py-2 text-left font-medium">Medication</th>
-                              <th className="px-3 py-2 text-left font-medium">Dosage</th>
-                              <th className="px-3 py-2 text-left font-medium">Frequency</th>
-                              <th className="px-3 py-2 text-left font-medium">Duration</th>
-                              <th className="px-3 py-2 text-center font-medium">Qty</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y">
-                            {selectedSession.prescriptions.map((rx: any, index: number) => (
-                              <tr key={index}>
-                                <td className="px-3 py-2 font-medium">{(rx.medication_name || rx.medication) ?? ''}</td>
-                                <td className="px-3 py-2">{rx.dosage ?? ''}</td>
-                                <td className="px-3 py-2">{rx.frequency ?? ''}</td>
-                                <td className="px-3 py-2">{rx.duration ?? ''}</td>
-                                <td className="px-3 py-2 text-center">{rx.quantity ?? ''}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Laboratory Orders */}
-                  {selectedSession.labOrders && selectedSession.labOrders.length > 0 && (
-                    <div>
-                      <h4 className="text-sm font-semibold text-amber-600 mb-2 flex items-center gap-2">
-                        <TestTube className="h-4 w-4" />
-                        LABORATORY ORDERS
-                      </h4>
-                      <div className="border rounded-lg overflow-hidden">
-                        <table className="w-full text-sm">
-                          <thead className="bg-amber-50 dark:bg-amber-900/20">
-                            <tr>
-                              <th className="px-3 py-2 text-left font-medium">Test</th>
-                              <th className="px-3 py-2 text-left font-medium">Priority</th>
-                              <th className="px-3 py-2 text-left font-medium">Status</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y">
-                            {selectedSession.labOrders.map((lab: any, idx: number) => (
-                              <tr key={idx}>
-                                <td className="px-3 py-2 font-medium">{lab.test ?? ''}</td>
-                                <td className="px-3 py-2">{formatPriority(lab.priority)}</td>
-                                <td className="px-3 py-2">{lab.status ?? ''}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Radiology Orders */}
-                  {selectedSession.radiologyOrders && selectedSession.radiologyOrders.length > 0 && (
-                    <div>
-                      <h4 className="text-sm font-semibold text-sky-600 mb-2 flex items-center gap-2">
-                        <ScanLine className="h-4 w-4" />
-                        RADIOLOGY ORDERS
-                      </h4>
-                      <div className="border rounded-lg overflow-hidden">
-                        <table className="w-full text-sm">
-                          <thead className="bg-sky-50 dark:bg-sky-900/20">
-                            <tr>
-                              <th className="px-3 py-2 text-left font-medium">Procedure</th>
-                              <th className="px-3 py-2 text-left font-medium">Priority</th>
-                              <th className="px-3 py-2 text-left font-medium">Status</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y">
-                            {selectedSession.radiologyOrders.map((rad: any, idx: number) => (
-                              <tr key={idx}>
-                                <td className="px-3 py-2 font-medium">{rad.procedure ?? ''}</td>
-                                <td className="px-3 py-2">{formatPriority(rad.priority)}</td>
-                                <td className="px-3 py-2">{rad.status ?? ''}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Physiotherapy Orders */}
-                  {selectedSession.physioOrders && selectedSession.physioOrders.length > 0 && (
-                    <div>
-                      <h4 className="text-sm font-semibold text-emerald-600 mb-2 flex items-center gap-2">
-                        <Activity className="h-4 w-4" />
-                        PHYSIOTHERAPY ORDERS
-                      </h4>
-                      <div className="border rounded-lg overflow-hidden">
-                        <table className="w-full text-sm">
-                          <thead className="bg-emerald-50 dark:bg-emerald-900/20">
-                            <tr>
-                              <th className="px-3 py-2 text-left font-medium">Diagnosis / Chief Complaint</th>
-                              <th className="px-3 py-2 text-left font-medium">Priority</th>
-                              <th className="px-3 py-2 text-left font-medium">Status</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y">
-                            {selectedSession.physioOrders.map((p: any, idx: number) => (
-                              <tr key={idx}>
-                                <td className="px-3 py-2 font-medium">{p.diagnosis ?? ''}</td>
-                                <td className="px-3 py-2">{formatPriority(p.priority)}</td>
-                                <td className="px-3 py-2">{p.status ?? ''}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Footer */}
-                  <div className="border-t pt-4 text-xs text-muted-foreground">
-                    <div className="flex justify-between">
-                      <span>Generated: {new Date().toLocaleDateString()} at {new Date().toLocaleTimeString()}</span>
-                      <span>Document ID: {selectedSession.id}</span>
-                    </div>
-                    <div className="mt-2 text-center">
-                      {getOrganizationHeader()}
-                    </div>
-                  </div>
-                </div>
-              </>
-            )}
-          </DialogContent>
-        </Dialog>
-
+        <ConsultationReportModal
+          open={showConsultationReport}
+          onOpenChange={setShowConsultationReport}
+          session={selectedSession}
+          loading={loadingReport}
+        />
         {/* Prescription View Dialog */}
         <Dialog open={showPrescriptionView} onOpenChange={setShowPrescriptionView}>
           <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -1135,7 +449,7 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
               {selectedPhysio && (
                 <DialogDescription>
                   {selectedPhysioSession 
-                    ? `${selectedPhysioSession.patient_name || patient?.name || 'Patient'} · PHY-${String(selectedPhysioSession.id || '').padStart(6, '0')} · Session ${selectedPhysioSession.session_number ?? '—'}`
+                    ? `${selectedPhysioSession.patient_name || (patient?.full_name || (patient ? [patient.first_name, patient.surname].filter(Boolean).join(' ') : '')) || 'Patient'} · PHY-${String(selectedPhysioSession.id || '').padStart(6, '0')} · Session ${selectedPhysioSession.session_number ?? '—'}`
                     : `PHY-${String(selectedPhysio.id || '').padStart(6, '0')} · ${formatDate(selectedPhysio.ordered_at)}`
                   }
                 </DialogDescription>
@@ -1200,7 +514,7 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
                       <div className="space-y-2">
                         <h3 className="font-medium text-sm text-muted-foreground uppercase tracking-wide">Patient Information</h3>
                         <div className="space-y-1">
-                          <p><span className="font-medium">Name:</span> {selectedPhysioSession.patient_name || patient?.name || 'Unknown'}</p>
+                          <p><span className="font-medium">Name:</span> {selectedPhysioSession.patient_name || (patient?.full_name || (patient ? [patient.first_name, patient.surname].filter(Boolean).join(' ') : '')) || 'Unknown'}</p>
                           <p><span className="font-medium">ID:</span> {selectedPhysioSession.patient_id || patient?.patient_id || '—'}</p>
                           <p><span className="font-medium">Physiotherapist:</span> {selectedPhysioSession.physiotherapist_name || 'Not specified'}</p>
                         </div>

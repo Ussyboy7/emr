@@ -1,10 +1,12 @@
+"use client";
+
 /**
  * Analytics and Reports API service
  */
 import { apiFetch, buildQueryString } from '../api-client';
 import { patientService } from './patient-service';
 import { visitService } from './visit-service';
-import { labService } from './lab-service';
+import labService from './lab-service';
 import { pharmacyService } from './pharmacy-service';
 import { radiologyService } from './radiology-service';
 import { normalizeClinicName } from '../utils/clinic-utils';

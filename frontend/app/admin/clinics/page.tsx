@@ -426,10 +426,10 @@ export default function ClinicDepartmentPage() {
 
   return (
     <DashboardLayout>
-      <div className="container mx-auto p-6 space-y-6">
+      <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold text-foreground flex items-center gap-3"><Building2 className="h-8 w-8 text-teal-500" />Clinics & Departments</h1>
+            <h1 className="text-2xl sm:text-3xl font-bold text-foreground flex items-center gap-3"><Building2 className="h-8 w-8 text-teal-500" />Clinics & Departments</h1>
             <p className="text-muted-foreground mt-1">Manage clinics and organizational structure</p>
           </div>
           <Button onClick={activeTab === 'clinics' ? openCreateClinic : openCreateDept} className="bg-teal-600 hover:bg-teal-700 text-white">
@@ -438,11 +438,11 @@ export default function ClinicDepartmentPage() {
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-          <Card className="border-l-4 border-l-teal-500"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">Total Clinics</p><p className="text-3xl font-bold text-teal-600 dark:text-teal-400">{stats.totalClinics}</p></div><Building2 className="h-8 w-8 text-teal-500 opacity-50" /></div></CardContent></Card>
-          <Card className="border-l-4 border-l-emerald-500"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">Active Clinics</p><p className="text-3xl font-bold text-emerald-600 dark:text-emerald-400">{stats.activeClinics}</p></div><CheckCircle2 className="h-8 w-8 text-emerald-500 opacity-50" /></div></CardContent></Card>
-          <Card className="border-l-4 border-l-blue-500"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">Departments</p><p className="text-3xl font-bold text-blue-600 dark:text-blue-400">{stats.totalDepartments}</p></div><Activity className="h-8 w-8 text-blue-500 opacity-50" /></div></CardContent></Card>
-          <Card className="border-l-4 border-l-purple-500"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">Total Staff</p><p className="text-3xl font-bold text-purple-600 dark:text-purple-400">{stats.totalStaff}</p></div><Users className="h-8 w-8 text-purple-500 opacity-50" /></div></CardContent></Card>
-          <Card className="border-l-4 border-l-amber-500"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">Total Rooms</p><p className="text-3xl font-bold text-amber-600 dark:text-amber-400">{stats.totalRooms}</p></div><DoorOpen className="h-8 w-8 text-amber-500 opacity-50" /></div></CardContent></Card>
+          <Card className="border-l-4 border-l-teal-500"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">Total Clinics</p><p className="text-2xl sm:text-3xl font-bold text-teal-600 dark:text-teal-400">{stats.totalClinics}</p></div><Building2 className="h-8 w-8 text-teal-500 opacity-50" /></div></CardContent></Card>
+          <Card className="border-l-4 border-l-emerald-500"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">Active Clinics</p><p className="text-2xl sm:text-3xl font-bold text-emerald-600 dark:text-emerald-400">{stats.activeClinics}</p></div><CheckCircle2 className="h-8 w-8 text-emerald-500 opacity-50" /></div></CardContent></Card>
+          <Card className="border-l-4 border-l-blue-500"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">Departments</p><p className="text-2xl sm:text-3xl font-bold text-blue-600 dark:text-blue-400">{stats.totalDepartments}</p></div><Activity className="h-8 w-8 text-blue-500 opacity-50" /></div></CardContent></Card>
+          <Card className="border-l-4 border-l-purple-500"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">Total Staff</p><p className="text-2xl sm:text-3xl font-bold text-purple-600 dark:text-purple-400">{stats.totalStaff}</p></div><Users className="h-8 w-8 text-purple-500 opacity-50" /></div></CardContent></Card>
+          <Card className="border-l-4 border-l-amber-500"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">Total Rooms</p><p className="text-2xl sm:text-3xl font-bold text-amber-600 dark:text-amber-400">{stats.totalRooms}</p></div><DoorOpen className="h-8 w-8 text-amber-500 opacity-50" /></div></CardContent></Card>
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab}>

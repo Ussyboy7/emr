@@ -136,7 +136,7 @@ export default function ConsultationPage() {
 
   return (
     <DashboardLayout>
-      <div className="container mx-auto p-6 space-y-6">
+      <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
         {/* Error Alert */}
         {error && (
           <Card className="border-red-500/50 bg-red-500/10">
@@ -152,20 +152,20 @@ export default function ConsultationPage() {
 
         {/* Header */}
         <Card className="bg-gradient-to-r from-emerald-500 to-teal-600 text-white border-0">
-          <CardContent className="p-6">
+          <CardContent className="p-4 sm:p-6">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div className="flex items-center gap-4">
-                <div className="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center">
-                  <Stethoscope className="h-8 w-8 text-white" />
+              <div className="flex items-center gap-3 sm:gap-4">
+                <div className="w-12 h-12 sm:w-16 sm:h-16 bg-white/20 rounded-full flex items-center justify-center flex-shrink-0">
+                  <Stethoscope className="h-6 w-6 sm:h-8 sm:w-8 text-white" />
                 </div>
-                <div>
-                  <h1 className="text-2xl font-bold">Consultation Department</h1>
-                  <p className="text-emerald-100">Digital consultation and patient management</p>
+                <div className="min-w-0">
+                  <h1 className="text-xl sm:text-2xl font-bold">Consultation Department</h1>
+                  <p className="text-sm sm:text-base text-emerald-100">Digital consultation and patient management</p>
                 </div>
               </div>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <Button
-                  className="bg-white text-emerald-600 hover:bg-emerald-50"
+                  className="bg-white text-emerald-600 hover:bg-emerald-50 shadow-md"
                   onClick={() => window.location.href = '/consultation/start'}
                 >
                   <Plus className="h-4 w-4 mr-2" />
@@ -173,7 +173,7 @@ export default function ConsultationPage() {
                 </Button>
                 <Button
                   variant="outline"
-                  className="border-white text-white hover:bg-white/20"
+                  className="border-2 border-white/90 text-white hover:bg-white/30 hover:border-white dark:border-white dark:text-white dark:hover:bg-white/20 shadow-md backdrop-blur-sm bg-white/10"
                   onClick={() => window.location.href = '/consultation/history'}
                 >
                   <Eye className="h-4 w-4 mr-2" />
@@ -200,7 +200,7 @@ export default function ConsultationPage() {
                         <p className="text-sm text-muted-foreground">Loading...</p>
                         <div className="flex items-center gap-2 mt-1">
                           <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                          <p className="text-3xl font-bold text-muted-foreground">--</p>
+                          <p className="text-2xl sm:text-3xl font-bold text-muted-foreground">--</p>
                         </div>
                       </div>
                     </div>
@@ -216,7 +216,7 @@ export default function ConsultationPage() {
                         <p className="text-sm text-muted-foreground">Consultations</p>
                         <div className="flex items-center gap-2 mt-1">
                           <Stethoscope className={`h-5 w-5 ${stats.totalConsultations > 0 ? 'text-emerald-500 dark:text-emerald-400' : 'text-green-500 dark:text-green-400'}`} />
-                          <p className={`text-3xl font-bold ${stats.totalConsultations > 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-green-600 dark:text-green-400'}`}>{stats.totalConsultations}</p>
+                          <p className={`text-2xl sm:text-3xl font-bold ${stats.totalConsultations > 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-green-600 dark:text-green-400'}`}>{stats.totalConsultations}</p>
                         </div>
                         {stats.totalConsultations === 0 ? (
                           <p className="text-xs text-green-600 dark:text-green-400 mt-1">No consultations</p>
@@ -233,7 +233,7 @@ export default function ConsultationPage() {
                         <p className="text-sm text-muted-foreground">Patients Seen</p>
                         <div className="flex items-center gap-2 mt-1">
                           <Users className={`h-5 w-5 ${stats.patientsSeen === 0 ? 'text-green-500 dark:text-green-400' : 'text-blue-500 dark:text-blue-400'}`} />
-                          <p className={`text-3xl font-bold ${stats.patientsSeen === 0 ? 'text-green-600 dark:text-green-400' : 'text-blue-600 dark:text-blue-400'}`}>{stats.patientsSeen}</p>
+                          <p className={`text-2xl sm:text-3xl font-bold ${stats.patientsSeen === 0 ? 'text-green-600 dark:text-green-400' : 'text-blue-600 dark:text-blue-400'}`}>{stats.patientsSeen}</p>
                         </div>
                         {stats.patientsSeen === 0 ? (
                           <p className="text-xs text-green-600 dark:text-green-400 mt-1">No patients seen</p>
@@ -250,7 +250,7 @@ export default function ConsultationPage() {
                         <p className="text-sm text-muted-foreground">Prescriptions</p>
                         <div className="flex items-center gap-2 mt-1">
                           <Pill className={`h-5 w-5 ${stats.prescriptions === 0 ? 'text-green-500 dark:text-green-400' : 'text-purple-500 dark:text-purple-400'}`} />
-                          <p className={`text-3xl font-bold ${stats.prescriptions === 0 ? 'text-green-600 dark:text-green-400' : 'text-purple-600 dark:text-purple-400'}`}>{stats.prescriptions}</p>
+                          <p className={`text-2xl sm:text-3xl font-bold ${stats.prescriptions === 0 ? 'text-green-600 dark:text-green-400' : 'text-purple-600 dark:text-purple-400'}`}>{stats.prescriptions}</p>
                         </div>
                         {stats.prescriptions === 0 ? (
                           <p className="text-xs text-green-600 dark:text-green-400 mt-1">No prescriptions</p>
@@ -267,7 +267,7 @@ export default function ConsultationPage() {
                         <p className="text-sm text-muted-foreground">Lab Orders</p>
                         <div className="flex items-center gap-2 mt-1">
                           <FlaskConical className={`h-5 w-5 ${stats.labOrders === 0 ? 'text-green-500 dark:text-green-400' : 'text-amber-500 dark:text-amber-400'}`} />
-                          <p className={`text-3xl font-bold ${stats.labOrders === 0 ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'}`}>{stats.labOrders}</p>
+                          <p className={`text-2xl sm:text-3xl font-bold ${stats.labOrders === 0 ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'}`}>{stats.labOrders}</p>
                         </div>
                         {stats.labOrders === 0 ? (
                           <p className="text-xs text-green-600 dark:text-green-400 mt-1">No lab orders</p>
@@ -288,24 +288,24 @@ export default function ConsultationPage() {
             Quick Actions
           </h2>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <Button onClick={() => window.location.href = '/consultation/start'} className="h-auto py-6 flex flex-col items-center gap-3 bg-gradient-to-br from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white border-l-4 border-l-white/20">
+            <Button onClick={() => window.location.href = '/consultation/start'} className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 bg-gradient-to-br from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white border-l-4 border-l-white/20">
               <div className="flex items-center gap-2">
-                <Plus className="h-6 w-6" />
+                <Plus className="h-5 w-5 sm:h-6 sm:w-6" />
               </div>
-              <span className="text-sm font-medium">Start New Consultation</span>
-              <span className="text-xs opacity-90">Begin patient consultation</span>
+              <span className="text-xs sm:text-sm font-medium">Start New Consultation</span>
+              <span className="text-[10px] sm:text-xs opacity-90">Begin patient consultation</span>
             </Button>
-            <Button onClick={() => window.location.href = '/consultation/history'} variant="outline" className="h-auto py-6 flex flex-col items-center gap-3 border-emerald-500/30 hover:bg-emerald-500/10 border-l-4 border-l-emerald-500">
-              <Eye className="h-6 w-6 text-emerald-500 dark:text-emerald-400" />
-              <span className="text-sm font-medium">View My Sessions</span>
-              <span className="text-xs text-muted-foreground">Review completed consultations</span>
+            <Button onClick={() => window.location.href = '/consultation/history'} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-emerald-500/30 hover:bg-emerald-500/10 border-l-4 border-l-emerald-500">
+              <Eye className="h-5 w-5 sm:h-6 sm:w-6 text-emerald-500 dark:text-emerald-400" />
+              <span className="text-xs sm:text-sm font-medium">View My Sessions</span>
+              <span className="text-[10px] sm:text-xs text-muted-foreground">Review completed consultations</span>
             </Button>
-            <Button onClick={() => window.location.href = '/consultation/wards'} variant="outline" className="h-auto py-6 flex flex-col items-center gap-3 border-blue-500/30 hover:bg-blue-500/10 border-l-4 border-l-blue-500">
-              <ClipboardList className="h-6 w-6 text-blue-500 dark:text-blue-400" />
-              <span className="text-sm font-medium">Patient Queue</span>
-              <span className="text-xs text-muted-foreground">Manage waiting patients</span>
+            <Button onClick={() => window.location.href = '/consultation/wards'} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-blue-500/30 hover:bg-blue-500/10 border-l-4 border-l-blue-500">
+              <ClipboardList className="h-5 w-5 sm:h-6 sm:w-6 text-blue-500 dark:text-blue-400" />
+              <span className="text-xs sm:text-sm font-medium">Patient Queue</span>
+              <span className="text-[10px] sm:text-xs text-muted-foreground">Manage waiting patients</span>
             </Button>
-            <Button onClick={() => window.location.href = '/consultation/referrals'} variant="outline" className="h-auto py-6 flex flex-col items-center gap-3 border-purple-500/30 hover:bg-purple-500/10 border-l-4 border-l-purple-500">
+            <Button onClick={() => window.location.href = '/consultation/referrals'} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-purple-500/30 hover:bg-purple-500/10 border-l-4 border-l-purple-500">
               <Hospital className="h-6 w-6 text-purple-500 dark:text-purple-400" />
               <span className="text-sm font-medium">Clinical Reports</span>
               <span className="text-xs text-muted-foreground">Access patient reports</span>

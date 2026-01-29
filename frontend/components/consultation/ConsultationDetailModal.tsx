@@ -11,7 +11,7 @@ import {
   Stethoscope, Printer, Edit, CheckCircle2, Loader2, User, Activity, FlaskConical, Syringe, Pill, Download, Calendar, FileText, ScanLine, AlertTriangle
 } from "lucide-react";
 import { apiFetch } from '@/lib/api-client';
-import { patientService, wardService } from '@/lib/services';
+import { patientService, wardService, physioService } from '@/lib/services';
 
 // ==========================================
 // TYPE DEFINITIONS
@@ -138,6 +138,13 @@ export interface ConsultationRecord {
     orderedBy: string;
     createdAt: string;
     result?: string;
+  }[];
+  physioOrders?: {
+    id: string;
+    diagnosis: string;
+    chiefComplaint?: string;
+    priority: string;
+    status: string;
   }[];
   nursingOrders: NursingOrder[]; // Properly typed
   timeline: TimelineEvent[]; // Properly typed
@@ -342,10 +349,16 @@ const WardAdmissionStatus = ({ patientId }: { patientId: string }) => {
 
   useEffect(() => {
     const fetchAdmissions = async () => {
+      const patientNum = Number(patientId);
+      if (!patientId || Number.isNaN(patientNum) || patientNum < 1) {
+        setAdmissions([]);
+        setLoading(false);
+        return;
+      }
       try {
         setLoading(true);
         setError(null);
-        const response = await wardService.getAdmissions({ patient: parseInt(patientId) });
+        const response = await wardService.getAdmissions({ patient: patientNum });
         setAdmissions(response.results || []);
       } catch (error) {
         console.warn('Could not fetch ward admissions:', error);
@@ -356,9 +369,7 @@ const WardAdmissionStatus = ({ patientId }: { patientId: string }) => {
       }
     };
 
-    if (patientId) {
-      fetchAdmissions();
-    }
+    fetchAdmissions();
   }, [patientId]);
 
   if (loading) {
@@ -865,6 +876,22 @@ const loadConsultationFromVisit = async (visitId: string | number): Promise<Cons
     } catch (err) {
       console.warn('Could not load nursing orders:', err);
     }
+
+    let physioOrders: ConsultationRecord['physioOrders'] = [];
+    if (consultationSessionId) {
+      try {
+        const physioResult = await physioService.getOrders({ consultation_session: Number(consultationSessionId), page_size: 100 });
+        physioOrders = (physioResult.results || []).map((o: any) => ({
+          id: String(o.id),
+          diagnosis: (o.diagnosis ?? o.chief_complaint ?? '').toString().trim(),
+          chiefComplaint: o.chief_complaint ?? '',
+          priority: o.priority === 'stat' ? 'STAT' : o.priority === 'urgent' ? 'Urgent' : String(o.priority || 'Routine'),
+          status: o.status ?? 'pending',
+        }));
+      } catch (err) {
+        console.warn('Could not load physio orders:', err);
+      }
+    }
     
     // Get vitals - filter by consultation session if available, otherwise by visit
     let vitals: ConsultationRecord['vitals'] = [];
@@ -1015,6 +1042,7 @@ const loadConsultationFromVisit = async (visitId: string | number): Promise<Cons
       prescriptions,
       labOrders,
       radiologyOrders,
+      physioOrders,
       nursingOrders,
       timeline: generateTimeline(
         { ...visit, ...consultationSession, type: 'visit', visitId: visit.visit_id },
@@ -1219,6 +1247,20 @@ const loadConsultationFromSession = async (sessionId: string | number): Promise<
     } catch (err) {
       console.warn('Could not load nursing orders:', err);
     }
+
+    let physioOrders: ConsultationRecord['physioOrders'] = [];
+    try {
+      const physioResult = await physioService.getOrders({ consultation_session: Number(sessionId), page_size: 100 });
+      physioOrders = (physioResult.results || []).map((o: any) => ({
+        id: String(o.id),
+        diagnosis: (o.diagnosis ?? o.chief_complaint ?? '').toString().trim(),
+        chiefComplaint: o.chief_complaint ?? '',
+        priority: o.priority === 'stat' ? 'STAT' : o.priority === 'urgent' ? 'Urgent' : String(o.priority || 'Routine'),
+        status: o.status ?? 'pending',
+      }));
+    } catch (err) {
+      console.warn('Could not load physio orders:', err);
+    }
     
     // Get vitals - filter by consultation session (fallback to visit if session filter not supported)
     let vitals: ConsultationRecord['vitals'] = [];
@@ -1371,6 +1413,7 @@ const loadConsultationFromSession = async (sessionId: string | number): Promise<
       prescriptions,
       labOrders,
       radiologyOrders,
+      physioOrders,
       nursingOrders,
       timeline: generateTimeline(session, vitals, prescriptions, labOrders, nursingOrders),
       type: 'consultation',
@@ -1441,6 +1484,7 @@ export const ConsultationDetailModal = React.memo(function ConsultationDetailMod
       prescriptions: displayConsultation.prescriptions || [],
       labOrders: displayConsultation.labOrders || [],
       radiologyOrders: displayConsultation.radiologyOrders || [],
+      physioOrders: displayConsultation.physioOrders || [],
       nursingOrders: displayConsultation.nursingOrders || [],
       timeline: displayConsultation.timeline || [],
     };
@@ -1478,10 +1522,13 @@ export const ConsultationDetailModal = React.memo(function ConsultationDetailMod
         aria-labelledby="consultation-modal-title"
         aria-describedby="consultation-modal-description"
       >
-        <DialogTitle id="consultation-modal-title" className="flex items-center gap-2">
-          <Stethoscope className="h-5 w-5 text-emerald-500" aria-hidden="true" />
+        <VisuallyHidden>
+          <DialogTitle id="consultation-modal-title">{loading ? 'Loading Consultation Details' : (safeConsultation?.type === 'visit' ? 'Visit Details' : 'Consultation Details')}</DialogTitle>
+        </VisuallyHidden>
+        <div className="flex items-center gap-2 text-lg font-semibold leading-none tracking-tight" aria-hidden="true">
+          <Stethoscope className="h-5 w-5 text-emerald-500" />
           {loading ? 'Loading Consultation Details...' : (safeConsultation?.type === 'visit' ? 'Visit Details' : 'Consultation Details')}
-        </DialogTitle>
+        </div>
         <DialogDescription id="consultation-modal-description">
           {loading
             ? 'Loading consultation details...'
@@ -1563,7 +1610,7 @@ export const ConsultationDetailModal = React.memo(function ConsultationDetailMod
                 <div className="border-b pb-4">
                   <h3 className="text-lg font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
                     <Stethoscope className="h-5 w-5 text-blue-500" />
-                    SESSION INFORMATION
+                    CONSULTATION DETAILS
                   </h3>
                   <div className="grid grid-cols-2 gap-4 text-sm">
                     <div>
@@ -1853,6 +1900,40 @@ export const ConsultationDetailModal = React.memo(function ConsultationDetailMod
                   </div>
                 )}
 
+                {/* Physiotherapy Orders */}
+                {(safeConsultation.physioOrders || []).length > 0 && (
+                  <div className="border-b pb-4">
+                    <h3 className="text-lg font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
+                      <Activity className="h-5 w-5 text-emerald-500" />
+                      PHYSIOTHERAPY ORDERS
+                    </h3>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm border-collapse">
+                        <thead>
+                          <tr className="border-b border-gray-300 dark:border-gray-700">
+                            <th className="text-left py-2 px-3 font-semibold text-gray-700 dark:text-gray-300">Diagnosis / Chief Complaint</th>
+                            <th className="text-left py-2 px-3 font-semibold text-gray-700 dark:text-gray-300">Priority</th>
+                            <th className="text-left py-2 px-3 font-semibold text-gray-700 dark:text-gray-300">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(safeConsultation.physioOrders || []).map((p) => (
+                            <tr key={p.id} className="border-b border-gray-200 dark:border-gray-800">
+                              <td className="py-2 px-3 font-medium text-gray-800 dark:text-gray-200">{p.diagnosis || p.chiefComplaint || '—'}</td>
+                              <td className="py-2 px-3 text-gray-600 dark:text-gray-400">{p.priority}</td>
+                              <td className="py-2 px-3">
+                                <Badge variant="outline" className={p.status === 'completed' || p.status?.toLowerCase() === 'completed' ? 'bg-green-100 text-green-800 border-green-300 dark:bg-green-900/30 dark:text-green-400' : ''}>
+                                  {p.status}
+                                </Badge>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
                 {/* Nursing Orders/Interventions */}
                 {(safeConsultation.nursingOrders || []).length > 0 && (
                   <div className="border-b pb-4">
@@ -2010,7 +2091,7 @@ export const ConsultationDetailModal = React.memo(function ConsultationDetailMod
                 {/* Footer */}
                 <div className="mt-8 pt-4 border-t text-xs text-gray-500 dark:text-gray-600 text-center print:block">
                   <p>Generated: {new Date().toLocaleDateString()} at {new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}</p>
-                  <p className="mt-1">Document ID: CONS-{new Date().getFullYear()}-{String(safeConsultation.id).padStart(6, '0')}</p>
+                  <p className="mt-1">Document ID: {safeConsultation.id}</p>
                   <p className="mt-1">Nigerian Ports Authority • Medical Services Department</p>
                 </div>
               </div>

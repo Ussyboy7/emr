@@ -365,10 +365,10 @@ export default function RadiologyTemplatesPage() {
 
   return (
     <DashboardLayout>
-      <div className="container mx-auto p-6 space-y-6">
+      <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold text-foreground flex items-center gap-3">
+            <h1 className="text-2xl sm:text-3xl font-bold text-foreground flex items-center gap-3">
               <Radio className="h-8 w-8 text-blue-500" />
               Study Templates
             </h1>
@@ -386,7 +386,7 @@ export default function RadiologyTemplatesPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Total Templates</p>
-                  <p className="text-3xl font-bold text-blue-600 dark:text-blue-400">{stats.total}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-blue-600 dark:text-blue-400">{stats.total}</p>
                 </div>
                 <FileText className="h-8 w-8 text-blue-400" />
               </div>
@@ -397,7 +397,7 @@ export default function RadiologyTemplatesPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Active</p>
-                  <p className="text-3xl font-bold text-emerald-600 dark:text-emerald-400">{stats.active}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-emerald-600 dark:text-emerald-400">{stats.active}</p>
                 </div>
                 <CheckCircle2 className="h-8 w-8 text-emerald-400" />
               </div>
@@ -408,7 +408,7 @@ export default function RadiologyTemplatesPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">X-Ray</p>
-                  <p className="text-3xl font-bold text-blue-600 dark:text-blue-400">{stats.xray}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-blue-600 dark:text-blue-400">{stats.xray}</p>
                 </div>
                 <Radio className="h-8 w-8 text-blue-400" />
               </div>
@@ -419,7 +419,7 @@ export default function RadiologyTemplatesPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">CT Scan</p>
-                  <p className="text-3xl font-bold text-red-600 dark:text-red-400">{stats.ct}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-red-600 dark:text-red-400">{stats.ct}</p>
                 </div>
                 <Scan className="h-8 w-8 text-red-400" />
               </div>
@@ -430,7 +430,7 @@ export default function RadiologyTemplatesPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">MRI</p>
-                  <p className="text-3xl font-bold text-indigo-600 dark:text-indigo-400">{stats.mri}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-indigo-600 dark:text-indigo-400">{stats.mri}</p>
                 </div>
                 <Activity className="h-8 w-8 text-indigo-400" />
               </div>
@@ -441,7 +441,7 @@ export default function RadiologyTemplatesPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Ultrasound</p>
-                  <p className="text-3xl font-bold text-green-600 dark:text-green-400">{stats.ultrasound}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-green-600 dark:text-green-400">{stats.ultrasound}</p>
                 </div>
                 <Scan className="h-8 w-8 text-green-400" />
               </div>

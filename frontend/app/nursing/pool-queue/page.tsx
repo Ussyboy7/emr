@@ -737,7 +737,7 @@ export default function NursingPoolQueuePage() {
   if (loading) {
     return (
       <DashboardLayout>
-        <div className="container mx-auto p-6 space-y-6">
+        <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
           <Card>
             <CardContent className="flex items-center justify-center py-12">
               <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -753,7 +753,7 @@ export default function NursingPoolQueuePage() {
   if (error) {
     return (
       <DashboardLayout>
-        <div className="container mx-auto p-6 space-y-6">
+        <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
           <Card>
             <CardContent className="flex flex-col items-center justify-center py-12">
               <AlertTriangle className="h-12 w-12 text-destructive mb-4" />
@@ -769,11 +769,11 @@ export default function NursingPoolQueuePage() {
 
   return (
     <DashboardLayout>
-      <div className="container mx-auto p-6 space-y-6">
+      <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
         {/* Header */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold text-foreground flex items-center gap-2">
+            <h1 className="text-2xl sm:text-3xl font-bold text-foreground flex items-center gap-2">
               <Users className="h-8 w-8 text-rose-500" />
               Today's Visits
             </h1>
@@ -794,7 +794,7 @@ export default function NursingPoolQueuePage() {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm text-muted-foreground">{stat.label}</p>
-                    <p className={`text-3xl font-bold ${stat.color} mt-1`}>{stat.value}</p>
+                    <p className={`text-2xl sm:text-3xl font-bold ${stat.color} mt-1`}>{stat.value}</p>
                   </div>
                   <div className={`p-3 rounded-full ${stat.bg}`}>
                     <stat.icon className={`h-5 w-5 ${stat.color}`} />

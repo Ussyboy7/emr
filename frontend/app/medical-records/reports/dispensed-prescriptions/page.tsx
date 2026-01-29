@@ -79,7 +79,7 @@ export default function DispensedPrescriptionsReport() {
 
   return (
     <DashboardLayout>
-      <div className="container mx-auto p-6 space-y-6">
+      <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
         {/* Header */}
         <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
           <Link href="/medical-records" className="hover:text-primary">Medical Records</Link>
@@ -91,7 +91,7 @@ export default function DispensedPrescriptionsReport() {
 
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold text-foreground flex items-center gap-3">
+            <h1 className="text-2xl sm:text-3xl font-bold text-foreground flex items-center gap-3">
               <Pill className="h-8 w-8 text-purple-500" />
               Dispensed Prescriptions Report
             </h1>

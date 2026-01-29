@@ -372,7 +372,14 @@ class RadiologyService {
    * Update study status (individual study processing like lab tests)
    */
   async updateStudyStatus(studyId: number, status: string, data?: { processing_method?: string; outsourced_lab?: string | null }): Promise<any> {
-    const requestData = { status, ...data };
+    const requestData: any = { status };
+    if (data?.processing_method) {
+      requestData.processing_method = data.processing_method;
+    }
+    // Backend expects 'outsourced_facility', not 'outsourced_lab'
+    if (data?.outsourced_lab !== undefined && data?.outsourced_lab !== null) {
+      requestData.outsourced_facility = data.outsourced_lab;
+    }
     return apiFetch<any>(`/radiology/studies/${studyId}/update_status/`, {
       method: 'POST',
       body: JSON.stringify(requestData),

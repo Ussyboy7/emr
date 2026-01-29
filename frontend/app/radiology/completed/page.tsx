@@ -39,6 +39,8 @@ interface CompletedReport {
   verifiedAt: string;
   clinic: string;
   turnaroundTime: string;
+  findings?: string;
+  impression?: string;
   reportFile?: { name: string; url: string; };
 }
 
@@ -168,8 +170,10 @@ export default function CompletedReportsPage() {
           verifiedAt: apiReport.study_details?.verified_at || '',
           clinic: apiReport.order_details?.clinic || '',
           turnaroundTime: calculateTurnaroundTime(apiReport.study_details?.created_at, apiReport.study_details?.verified_at),
+          findings: apiReport.study_details?.findings || '',
+          impression: apiReport.study_details?.impression || '',
           reportFile: apiReport.study_details?.report_file_url ? {
-            name: apiReport.study_details.report_file.split('/').pop() || 'Report File',
+            name: (typeof apiReport.study_details.report_file === 'string' ? apiReport.study_details.report_file.split('/').pop() : null) || 'Report File',
             url: apiReport.study_details.report_file_url
           } : undefined
         };
@@ -302,6 +306,14 @@ export default function CompletedReportsPage() {
             <div class="timeline-item"><span class="label">Turnaround Time:</span> ${report.turnaroundTime}</div>
           </div>
 
+          ${(report.findings || report.impression) ? `
+          <div class="patient-info" style="margin-top: 20px;">
+            <h3>Report Content</h3>
+            ${report.findings ? `<div style="margin: 10px 0;"><div class="label">Findings:</div><div style="white-space: pre-wrap;">${report.findings}</div></div>` : ''}
+            ${report.impression ? `<div style="margin: 10px 0;"><div class="label">Impression:</div><div style="white-space: pre-wrap;">${report.impression}</div></div>` : ''}
+          </div>
+          ` : ''}
+
           <div class="signatures">
             <h3>Signatures</h3>
             <div class="signature-item">
@@ -349,10 +361,10 @@ export default function CompletedReportsPage() {
 
   return (
     <DashboardLayout>
-      <div className="container mx-auto p-6 space-y-6">
+      <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold text-foreground flex items-center gap-3">
+            <h1 className="text-2xl sm:text-3xl font-bold text-foreground flex items-center gap-3">
               <CheckCircle2 className="h-8 w-8 text-emerald-500" />
               Completed Studies
             </h1>
@@ -370,7 +382,7 @@ export default function CompletedReportsPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Total Completed</p>
-                  <p className="text-3xl font-bold text-blue-600 dark:text-blue-400">{stats.total}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-blue-600 dark:text-blue-400">{stats.total}</p>
                 </div>
                 <Stethoscope className="h-8 w-8 text-blue-400" />
               </div>
@@ -381,7 +393,7 @@ export default function CompletedReportsPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Normal</p>
-                  <p className="text-3xl font-bold text-emerald-600 dark:text-emerald-400">{stats.normal}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-emerald-600 dark:text-emerald-400">{stats.normal}</p>
                 </div>
                 <CheckCircle2 className="h-8 w-8 text-emerald-400" />
               </div>
@@ -392,7 +404,7 @@ export default function CompletedReportsPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Abnormal</p>
-                  <p className="text-3xl font-bold text-amber-600 dark:text-amber-400">{stats.abnormal}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-amber-600 dark:text-amber-400">{stats.abnormal}</p>
                 </div>
                 <AlertTriangle className="h-8 w-8 text-amber-400" />
               </div>
@@ -403,7 +415,7 @@ export default function CompletedReportsPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Critical</p>
-                  <p className="text-3xl font-bold text-rose-600 dark:text-rose-400">{stats.critical}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-rose-600 dark:text-rose-400">{stats.critical}</p>
                 </div>
                 <AlertTriangle className="h-8 w-8 text-rose-400" />
               </div>
@@ -669,6 +681,73 @@ export default function CompletedReportsPage() {
                     <p className="text-xs text-muted-foreground mt-1">Category: {selectedReport.category} | Status: {selectedReport.overallStatus}</p>
                   </div>
                 </div>
+
+                {/* Findings & Impression */}
+                {(selectedReport.findings || selectedReport.impression) && (
+                  <div>
+                    <h3 className="font-semibold mb-3 flex items-center gap-2">
+                      <FileText className="h-4 w-4 text-amber-500" />
+                      Report Content
+                    </h3>
+                    <div className="space-y-3 p-4 rounded-lg bg-muted/50 border">
+                      {selectedReport.findings && (
+                        <div>
+                          <p className="text-xs text-muted-foreground font-medium mb-1">Findings</p>
+                          <p className="text-sm whitespace-pre-wrap">{selectedReport.findings}</p>
+                        </div>
+                      )}
+                      {selectedReport.impression && (
+                        <div>
+                          <p className="text-xs text-muted-foreground font-medium mb-1">Impression</p>
+                          <p className="text-sm whitespace-pre-wrap">{selectedReport.impression}</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Report File (uploaded document) - show even if no findings/impression */}
+                {selectedReport.reportFile && (
+                  <div>
+                    <h3 className="font-semibold mb-2 flex items-center gap-2">
+                      <FileText className="h-4 w-4 text-blue-500" />
+                      Attached Report
+                    </h3>
+                    <div className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium text-blue-800 dark:text-blue-200">{selectedReport.reportFile.name}</span>
+                        <div className="flex gap-2">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              if (selectedReport.reportFile?.url) {
+                                const link = document.createElement('a');
+                                link.href = selectedReport.reportFile.url;
+                                link.target = '_blank';
+                                link.rel = 'noopener noreferrer';
+                                document.body.appendChild(link);
+                                link.click();
+                                document.body.removeChild(link);
+                              }
+                            }}
+                            className="text-blue-600 hover:text-blue-800"
+                          >
+                            <Eye className="h-3 w-3 mr-1" />View
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleDownload(selectedReport)}
+                            className="text-blue-600 hover:text-blue-800"
+                          >
+                            <Download className="h-3 w-3 mr-1" />Download
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* Timeline */}
                 <div className="grid grid-cols-2 gap-4 text-sm">

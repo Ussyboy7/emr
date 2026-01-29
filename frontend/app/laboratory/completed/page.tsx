@@ -387,10 +387,10 @@ export default function CompletedTestsPage() {
 
   return (
     <DashboardLayout>
-      <div className="container mx-auto p-6 space-y-6">
+      <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold text-foreground flex items-center gap-3">
+            <h1 className="text-2xl sm:text-3xl font-bold text-foreground flex items-center gap-3">
               <CheckCircle2 className="h-8 w-8 text-emerald-500" />
               Completed Tests
             </h1>
@@ -408,7 +408,7 @@ export default function CompletedTestsPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Total Completed</p>
-                  <p className="text-3xl font-bold text-blue-600 dark:text-blue-400">{stats.total}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-blue-600 dark:text-blue-400">{stats.total}</p>
                 </div>
                 <FlaskConical className="h-8 w-8 text-blue-400" />
               </div>
@@ -419,7 +419,7 @@ export default function CompletedTestsPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Normal</p>
-                  <p className="text-3xl font-bold text-emerald-600 dark:text-emerald-400">{stats.normal}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-emerald-600 dark:text-emerald-400">{stats.normal}</p>
                 </div>
                 <CheckCircle2 className="h-8 w-8 text-emerald-400" />
               </div>
@@ -430,7 +430,7 @@ export default function CompletedTestsPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Abnormal</p>
-                  <p className="text-3xl font-bold text-amber-600 dark:text-amber-400">{stats.abnormal}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-amber-600 dark:text-amber-400">{stats.abnormal}</p>
                 </div>
                 <AlertTriangle className="h-8 w-8 text-amber-400" />
               </div>
@@ -441,7 +441,7 @@ export default function CompletedTestsPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Critical</p>
-                  <p className="text-3xl font-bold text-rose-600 dark:text-rose-400">{stats.critical}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-rose-600 dark:text-rose-400">{stats.critical}</p>
                 </div>
                 <AlertTriangle className="h-8 w-8 text-rose-400" />
               </div>

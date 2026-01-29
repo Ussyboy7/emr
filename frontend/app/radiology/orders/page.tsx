@@ -164,7 +164,15 @@ export default function RadiologyOrdersPage() {
 
       toast.success('Study processing started successfully');
       setIsProcessDialogOpen(false);
-      loadOrders();
+      
+      // Reload orders to get updated data
+      await loadOrders();
+      
+      // Update selectedOrder if view dialog is still open (like lab orders)
+      if (isViewDialogOpen && selectedOrder) {
+        const updatedOrder = await radiologyService.getOrder(selectedOrder.id);
+        setSelectedOrder(updatedOrder);
+      }
     } catch (error: any) {
       console.error('Error starting study processing:', error);
       toast.error(error.message || 'Failed to start study processing');
@@ -332,9 +340,18 @@ export default function RadiologyOrdersPage() {
 
       toast.success('Study results submitted successfully');
       setIsResultsDialogOpen(false);
-      setSelectedStudy(null);
-      setSelectedOrder(null);
-      loadOrders(); // Refresh the orders list
+      
+      // Reload orders to get updated data
+      await loadOrders();
+      
+      // Update selectedOrder if view dialog is still open (like lab orders)
+      if (isViewDialogOpen && selectedOrder) {
+        const updatedOrder = await radiologyService.getOrder(selectedOrder.id);
+        setSelectedOrder(updatedOrder);
+      } else {
+        setSelectedStudy(null);
+        setSelectedOrder(null);
+      }
     } catch (error: any) {
       toast.error(error.message || 'Failed to submit study results');
     } finally {
@@ -362,11 +379,11 @@ export default function RadiologyOrdersPage() {
 
   return (
     <DashboardLayout>
-      <div className="container mx-auto p-6 space-y-6">
+      <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
         {/* Header */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold text-foreground flex items-center gap-3">
+            <h1 className="text-2xl sm:text-3xl font-bold text-foreground flex items-center gap-3">
               <ClipboardList className="h-8 w-8 text-blue-500" />
               Study Orders
             </h1>
@@ -389,7 +406,7 @@ export default function RadiologyOrdersPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Pending Samples</p>
-                  <p className="text-3xl font-bold text-gray-600 dark:text-gray-400">{stats.pendingSamples}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-gray-600 dark:text-gray-400">{stats.pendingSamples}</p>
                 </div>
                 <TestTube className="h-8 w-8 text-gray-400" />
               </div>
@@ -407,7 +424,7 @@ export default function RadiologyOrdersPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Processing</p>
-                  <p className="text-3xl font-bold text-blue-600 dark:text-blue-400">{stats.processing}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-blue-600 dark:text-blue-400">{stats.processing}</p>
                 </div>
                 <Activity className="h-8 w-8 text-blue-400" />
               </div>
@@ -425,7 +442,7 @@ export default function RadiologyOrdersPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Results Ready</p>
-                  <p className="text-3xl font-bold text-amber-600 dark:text-amber-400">{stats.resultsReady}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-amber-600 dark:text-amber-400">{stats.resultsReady}</p>
                 </div>
                 <FileText className="h-8 w-8 text-amber-400" />
               </div>
@@ -443,7 +460,7 @@ export default function RadiologyOrdersPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Rejected</p>
-                  <p className="text-3xl font-bold text-rose-600 dark:text-rose-400">{stats.rejected}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-rose-600 dark:text-rose-400">{stats.rejected}</p>
                 </div>
                 <XCircle className="h-8 w-8 text-rose-400" />
               </div>
@@ -459,7 +476,7 @@ export default function RadiologyOrdersPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">STAT Orders</p>
-                  <p className="text-3xl font-bold text-red-600 dark:text-red-400">{stats.stat}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-red-600 dark:text-red-400">{stats.stat}</p>
                 </div>
                 <AlertTriangle className="h-8 w-8 text-red-400" />
               </div>
@@ -999,8 +1016,15 @@ export default function RadiologyOrdersPage() {
 
                       {/* Show Results if available */}
                       {(study.status === 'reported' || study.status === 'verified') && (
-                        <div className="mt-2 p-2 rounded bg-emerald-50 dark:bg-emerald-900/20 text-xs">
-                          <p className="font-medium text-emerald-700 dark:text-emerald-400 mb-1">Results:</p>
+                        <div className={`mt-2 p-2 rounded text-xs ${study.critical ? 'bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800' : 'bg-emerald-50 dark:bg-emerald-900/20'}`}>
+                          <div className="flex items-center justify-between mb-1">
+                            <p className={`font-medium ${study.critical ? 'text-rose-700 dark:text-rose-400' : 'text-emerald-700 dark:text-emerald-400'}`}>Results:</p>
+                            {study.critical && (
+                              <Badge className="text-[10px] px-1.5 py-0 bg-rose-500 text-white">
+                                <AlertTriangle className="h-2 w-2 mr-0.5" />Critical
+                              </Badge>
+                            )}
+                          </div>
                           <div className="space-y-1">
                             {study.findings && (
                               <div><span className="text-muted-foreground">Findings:</span> <span className="font-medium">{study.findings}</span></div>
@@ -1012,6 +1036,38 @@ export default function RadiologyOrdersPage() {
                               <div><span className="text-muted-foreground">Status:</span> <span className="font-medium">Normal study</span></div>
                             )}
                           </div>
+                          {/* Show uploaded report file if available */}
+                          {(study.report_file_url || study.report_file) && (
+                            <div className="mt-2 p-2 rounded bg-blue-50 dark:bg-blue-900/20 flex items-center justify-between border border-blue-200 dark:border-blue-800">
+                              <div className="flex items-center gap-2">
+                                <FileText className="h-4 w-4 text-blue-600" />
+                                <span className="text-xs font-medium text-blue-800 dark:text-blue-200">
+                                  {study.report_file ? (typeof study.report_file === 'string' ? study.report_file.split('/').pop() : 'Report File') : 'Report File'}
+                                </span>
+                              </div>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 px-2 text-xs text-blue-600 hover:text-blue-700"
+                                onClick={() => {
+                                  const fileUrl = study.report_file_url || (study.report_file && typeof study.report_file === 'string' ? study.report_file : null);
+                                  if (fileUrl) {
+                                    const link = document.createElement('a');
+                                    link.href = fileUrl;
+                                    link.target = '_blank';
+                                    link.rel = 'noopener noreferrer';
+                                    document.body.appendChild(link);
+                                    link.click();
+                                    document.body.removeChild(link);
+                                  } else {
+                                    toast.error('File URL not available');
+                                  }
+                                }}
+                              >
+                                <Eye className="h-3 w-3 mr-1" />View
+                              </Button>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>

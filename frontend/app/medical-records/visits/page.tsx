@@ -307,11 +307,11 @@ export default function VisitsPage() {
 
   return (
     <DashboardLayout>
-      <div className="container mx-auto p-6 space-y-6">
+      <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
         {/* Header */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold text-foreground">Manage Visits</h1>
+            <h1 className="text-2xl sm:text-3xl font-bold text-foreground">Manage Visits</h1>
             <p className="text-muted-foreground mt-1">Create visits and forward patients to nursing for vitals</p>
           </div>
           <Button className="bg-gradient-to-r from-teal-500 to-cyan-500 hover:from-teal-600 hover:to-cyan-600 text-white" asChild>
@@ -350,7 +350,7 @@ export default function VisitsPage() {
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-sm text-muted-foreground">{stat.label}</p>
-                      <p className={`text-3xl font-bold ${stat.color} mt-1`}>{stat.value}</p>
+                      <p className={`text-2xl sm:text-3xl font-bold ${stat.color} mt-1`}>{stat.value}</p>
                     </div>
                     <div className={`p-3 rounded-full ${stat.bg}`}>
                       <stat.icon className={`h-5 w-5 ${stat.color}`} />

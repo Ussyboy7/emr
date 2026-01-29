@@ -62,7 +62,7 @@ export default function PatientRecordsPage() {
 
   return (
     <DashboardLayout>
-      <div className="container mx-auto p-6 max-w-3xl">
+      <div className="container mx-auto p-4 sm:p-6 max-w-3xl">
         <div className="mb-8">
           <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
             <FileBarChart className="h-7 w-7 text-blue-500" />

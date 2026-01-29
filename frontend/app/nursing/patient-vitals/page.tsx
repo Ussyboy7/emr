@@ -401,10 +401,10 @@ export default function PatientVitalsPage() {
 
   return (
     <DashboardLayout>
-      <div className="container mx-auto p-6 space-y-6">
+      <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
         {/* Header */}
         <div>
-          <h1 className="text-3xl font-bold text-foreground flex items-center gap-2">
+          <h1 className="text-2xl sm:text-3xl font-bold text-foreground flex items-center gap-2">
             <Activity className="h-8 w-8 text-rose-500" />
             Patient Vitals
           </h1>
@@ -447,7 +447,7 @@ export default function PatientVitalsPage() {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm text-muted-foreground">{stat.label}</p>
-                    <p className={`text-3xl font-bold ${stat.color} mt-1`}>{stat.value}</p>
+                    <p className={`text-2xl sm:text-3xl font-bold ${stat.color} mt-1`}>{stat.value}</p>
                   </div>
                   <div className={`p-3 rounded-full ${stat.bg}`}>
                     <stat.icon className={`h-5 w-5 ${stat.color}`} />

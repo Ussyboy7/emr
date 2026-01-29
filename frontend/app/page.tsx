@@ -232,7 +232,7 @@ export default function LandingPage() {
       {/* Modules Section */}
       <section id="modules" className="mx-auto mt-32 w-full max-w-7xl px-6">
         <div className="mb-16 text-center">
-          <h2 className="text-3xl font-bold tracking-tight text-white sm:text-4xl">
+          <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-white sm:text-4xl">
             Clinical Modules
           </h2>
           <p className="mt-4 max-w-2xl mx-auto text-slate-400">
@@ -274,7 +274,7 @@ export default function LandingPage() {
       <section id="features" className="mx-auto mt-32 w-full max-w-7xl px-6">
         <div className="rounded-3xl border border-slate-800 bg-gradient-to-b from-slate-900/80 to-slate-950/80 p-12 backdrop-blur">
         <div className="mb-12 text-center">
-          <h2 className="text-3xl font-bold tracking-tight text-white sm:text-4xl">
+          <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-white sm:text-4xl">
             Enterprise Healthcare Platform
           </h2>
           <p className="mt-4 max-w-2xl mx-auto text-slate-400">
@@ -302,7 +302,7 @@ export default function LandingPage() {
           <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-teal-500/10 via-transparent to-transparent" />
           <div className="relative">
             <Building2 className="mx-auto h-16 w-16 text-teal-400/50 mb-6" />
-            <h2 className="text-3xl font-bold tracking-tight text-white sm:text-4xl">
+            <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-white sm:text-4xl">
               Supporting Efficient, Secure, and Coordinated Healthcare Delivery
             </h2>
             <p className="mt-4 text-slate-400 max-w-xl mx-auto">

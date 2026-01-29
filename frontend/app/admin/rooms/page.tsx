@@ -376,10 +376,10 @@ export default function RoomManagementPage() {
 
   return (
     <DashboardLayout>
-      <div className="container mx-auto p-6 space-y-6">
+      <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold text-foreground flex items-center gap-3">
+            <h1 className="text-2xl sm:text-3xl font-bold text-foreground flex items-center gap-3">
               <DoorOpen className="h-8 w-8 text-blue-500" />
               Room Management
             </h1>
@@ -397,7 +397,7 @@ export default function RoomManagementPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Total Rooms</p>
-                  <p className="text-3xl font-bold text-blue-600 dark:text-blue-400">{stats.total}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-blue-600 dark:text-blue-400">{stats.total}</p>
                 </div>
                 <div className="p-3 rounded-full bg-blue-500/10"><DoorOpen className="h-5 w-5 text-blue-500" /></div>
               </div>
@@ -408,7 +408,7 @@ export default function RoomManagementPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Active</p>
-                  <p className="text-3xl font-bold text-emerald-600 dark:text-emerald-400">{stats.active}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-emerald-600 dark:text-emerald-400">{stats.active}</p>
                 </div>
                 <div className="p-3 rounded-full bg-emerald-500/10"><CheckCircle2 className="h-5 w-5 text-emerald-500" /></div>
               </div>
@@ -419,7 +419,7 @@ export default function RoomManagementPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Inactive</p>
-                  <p className="text-3xl font-bold text-gray-600 dark:text-gray-400">{stats.inactive}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-gray-600 dark:text-gray-400">{stats.inactive}</p>
                 </div>
                 <div className="p-3 rounded-full bg-gray-500/10"><XCircle className="h-5 w-5 text-gray-500" /></div>
               </div>
@@ -430,7 +430,7 @@ export default function RoomManagementPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Maintenance</p>
-                  <p className="text-3xl font-bold text-amber-600 dark:text-amber-400">{stats.maintenance}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-amber-600 dark:text-amber-400">{stats.maintenance}</p>
                 </div>
                 <div className="p-3 rounded-full bg-amber-500/10"><Settings className="h-5 w-5 text-amber-500" /></div>
               </div>
