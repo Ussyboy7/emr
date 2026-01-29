@@ -611,11 +611,9 @@ export default function NursingPoolQueuePage() {
       // The visit_type was selected when the visit was created, and we use it to determine
       // queue priority automatically. Lower number = higher priority (0 = Emergency, 1 = High, 2 = Medium, 3 = Low)
       const priority = getPriorityFromVisitType(selectedPatient.visitType);
-      
-      // Update visit status to "in_progress"
-      await visitService.updateVisit(visitId, {
-        status: 'in_progress',
-      });
+      // Note: visits shown on this page are already `in_progress` (see loadData filter),
+      // so we don't PATCH the visit status again here. Re-patching can fail if the patient
+      // has legacy duplicate open visits in the system.
       
       // Check if patient is already in queue for this room
       try {
