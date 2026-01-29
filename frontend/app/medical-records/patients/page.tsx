@@ -57,7 +57,16 @@ const formatTime = (dateString: string | undefined): string => {
 const titles = ['Mr', 'Mrs', 'Ms', 'Dr', 'Chief', 'Engr', 'Prof', 'Alhaji', 'Hajia'];
 const maritalStatuses = ['Single', 'Married', 'Divorced', 'Widowed'];
 const religions = ['Christianity', 'Islam', 'Traditional', 'Other', 'None'];
-const tribes = ['Hausa', 'Yoruba', 'Igbo', 'Fulani', 'Ibibio', 'Tiv', 'Kanuri', 'Ijaw', 'Nupe', 'Efik', 'Urhobo', 'Edo', 'Itsekiri', 'Other'];
+const tribes = [
+  'Hausa', 'Fulani', 'Yoruba', 'Igbo',
+  'Ijaw', 'Urhobo', 'Isoko', 'Itsekiri', 'Edo (Bini)', 'Esan', 'Anioma',
+  'Ibibio', 'Efik', 'Annang', 'Ikwerre', 'Ogoni', 'Kalabari',
+  'Tiv', 'Idoma', 'Igala', 'Ebira', 'Nupe', 'Gbagyi (Gwari)',
+  'Jukun', 'Tarok', 'Berom', 'Bachama', 'Angas', 'Atyap (Kataf)',
+  'Mumuye', 'Kuteb',
+  'Kanuri', 'Shuwa Arab', 'Higgi (Kamwe)', 'Margi', 'Bura',
+  'Other',
+];
 const NOK_RELATIONSHIPS = ['Spouse', 'Parent', 'Child', 'Sibling', 'Relative', 'Friend', 'Other'];
 
 // NPA Divisions

@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { apiFetch } from '@/lib/api-client';
-import { patientService, consultationService } from '@/lib/services';
+import { patientService, consultationService, pharmacyService, labService, radiologyService, physioService } from '@/lib/services';
 import { loadConsultationReportSession, type ConsultationReportSession } from '@/lib/consultation-report';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
@@ -266,6 +266,26 @@ export default function ConsultationHistoryPage() {
   const [selectedDiagnosisType, setSelectedDiagnosisType] = useState<'Primary' | 'Secondary' | 'Differential'>('Primary');
   const [diagnosisNotes, setDiagnosisNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // Orders loaded for Edit modal (by consultation_session)
+  const [editPrescriptions, setEditPrescriptions] = useState<any[]>([]);
+  const [editLabOrders, setEditLabOrders] = useState<any[]>([]);
+  const [editRadiologyOrders, setEditRadiologyOrders] = useState<any[]>([]);
+  const [editPhysioOrders, setEditPhysioOrders] = useState<any[]>([]);
+  const [loadingOrders, setLoadingOrders] = useState(false);
+  const [editActiveTab, setEditActiveTab] = useState('notes');
+  // Add-order dialogs and form state
+  const [showAddPrescription, setShowAddPrescription] = useState(false);
+  const [showAddLabOrder, setShowAddLabOrder] = useState(false);
+  const [showAddRadiologyOrder, setShowAddRadiologyOrder] = useState(false);
+  const [showAddPhysioOrder, setShowAddPhysioOrder] = useState(false);
+  const [addPrescriptionForm, setAddPrescriptionForm] = useState({ medicationId: 0, medicationName: '', dosage: '', frequency: '', duration: '', quantity: 1, instructions: '', unit: 'tablet' });
+  const [addLabForm, setAddLabForm] = useState({ templateId: 0, testName: '', testCode: '', priority: 'routine' as 'routine' | 'urgent' | 'stat', clinicalNotes: '' });
+  const [addRadiologyForm, setAddRadiologyForm] = useState({ procedure: '', bodyPart: '', modality: 'X-Ray', priority: 'routine' as 'routine' | 'urgent' | 'stat', clinicalNotes: '' });
+  const [addPhysioForm, setAddPhysioForm] = useState({ diagnosis: '', chiefComplaint: '', treatmentGoal: '', specialInstructions: '', priority: 'routine' });
+  const [labTemplates, setLabTemplates] = useState<any[]>([]);
+  const [radiologyTemplates, setRadiologyTemplates] = useState<any[]>([]);
+  const [medications, setMedications] = useState<any[]>([]);
+  const [submittingOrder, setSubmittingOrder] = useState(false);
   const [editForm, setEditForm] = useState<{
     diagnosis: string;
     presentationComplaint: string;
@@ -292,7 +312,6 @@ export default function ConsultationHistoryPage() {
 
   // Function to refresh consultations
   const refreshConsultations = () => {
-    setCurrentPage(1);
     setRefreshTrigger(prev => prev + 1);
   };
 
@@ -475,6 +494,8 @@ export default function ConsultationHistoryPage() {
               id: String(session.id),
               patient: patient.full_name || `${patient.first_name} ${patient.surname}`,
               patientId: patient.patient_id || String(patient.id),
+              patientIdNumeric: patient.id,
+              visitId: session.visit,
               patientGender: patient.gender || undefined, // Store gender for filtering
               doctor: doctorName,
               doctorId: doctorId,
@@ -659,6 +680,207 @@ export default function ConsultationHistoryPage() {
       }))
     });
     setShowEditModal(true);
+  };
+
+  // Load orders for Edit modal when it opens (by consultation_session)
+  useEffect(() => {
+    if (!showEditModal || !selectedConsultation) return;
+    const sessionId = parseInt(selectedConsultation.id, 10);
+    if (isNaN(sessionId)) return;
+
+    const loadOrders = async () => {
+      setLoadingOrders(true);
+      try {
+        const [rxRes, labRes, radRes, physioRes] = await Promise.all([
+          pharmacyService.getPrescriptions({ consultation_session: sessionId, page_size: 100 }),
+          labService.getOrders({ consultation_session: sessionId, page_size: 100 }),
+          radiologyService.getOrders({ consultation_session: sessionId, page_size: 100 }),
+          physioService.getOrders({ consultation_session: sessionId, page_size: 100 }),
+        ]);
+        setEditPrescriptions(rxRes.results || []);
+        setEditLabOrders(labRes.results || []);
+        setEditRadiologyOrders(radRes.results || []);
+        setEditPhysioOrders(physioRes.results || []);
+      } catch (err) {
+        console.error('Error loading orders for edit:', err);
+        toast.error('Failed to load prescriptions and orders');
+      } finally {
+        setLoadingOrders(false);
+      }
+    };
+    loadOrders();
+  }, [showEditModal, selectedConsultation?.id]);
+
+  const loadEditOrdersRefetch = async () => {
+    if (!selectedConsultation) return;
+    const sessionId = parseInt(selectedConsultation.id, 10);
+    if (isNaN(sessionId)) return;
+    try {
+      const [rxRes, labRes, radRes, physioRes] = await Promise.all([
+        pharmacyService.getPrescriptions({ consultation_session: sessionId, page_size: 100 }),
+        labService.getOrders({ consultation_session: sessionId, page_size: 100 }),
+        radiologyService.getOrders({ consultation_session: sessionId, page_size: 100 }),
+        physioService.getOrders({ consultation_session: sessionId, page_size: 100 }),
+      ]);
+      setEditPrescriptions(rxRes.results || []);
+      setEditLabOrders(labRes.results || []);
+      setEditRadiologyOrders(radRes.results || []);
+      setEditPhysioOrders(physioRes.results || []);
+    } catch (err) {
+      console.error('Error refetching orders:', err);
+    }
+  };
+
+  const handleAddPrescription = async () => {
+    if (!selectedConsultation || !addPrescriptionForm.medicationId || !addPrescriptionForm.medicationName) {
+      toast.error('Select a medication');
+      return;
+    }
+    const patientId = selectedConsultation.patientIdNumeric ?? parseInt(selectedConsultation.patientId, 10);
+    if (!patientId || isNaN(patientId)) {
+      toast.error('Invalid patient');
+      return;
+    }
+    const sessionId = parseInt(selectedConsultation.id, 10);
+    setSubmittingOrder(true);
+    try {
+      await pharmacyService.createPrescription({
+        patient: patientId,
+        visit: selectedConsultation.visitId,
+        consultation_session: sessionId,
+        notes: undefined,
+        items: [{
+          medication: addPrescriptionForm.medicationId,
+          quantity: addPrescriptionForm.quantity,
+          unit: addPrescriptionForm.unit,
+          dosage: addPrescriptionForm.dosage,
+          frequency: addPrescriptionForm.frequency,
+          duration: addPrescriptionForm.duration,
+          instructions: addPrescriptionForm.instructions,
+        }],
+      } as any);
+      toast.success('Prescription added');
+      setShowAddPrescription(false);
+      setAddPrescriptionForm({ medicationId: 0, medicationName: '', dosage: '', frequency: '', duration: '', quantity: 1, instructions: '', unit: 'tablet' });
+      await loadEditOrdersRefetch();
+      refreshConsultations();
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to add prescription');
+    } finally {
+      setSubmittingOrder(false);
+    }
+  };
+
+  const handleAddLabOrder = async () => {
+    if (!selectedConsultation || !addLabForm.templateId || !addLabForm.testName) {
+      toast.error('Select a test');
+      return;
+    }
+    const patientId = selectedConsultation.patientIdNumeric ?? parseInt(selectedConsultation.patientId, 10);
+    if (!patientId || isNaN(patientId)) {
+      toast.error('Invalid patient');
+      return;
+    }
+    const sessionId = parseInt(selectedConsultation.id, 10);
+    setSubmittingOrder(true);
+    try {
+      await labService.createOrder({
+        patient: patientId as any,
+        visit: selectedConsultation.visitId,
+        consultation_session: sessionId,
+        priority: addLabForm.priority,
+        clinical_notes: addLabForm.clinicalNotes || undefined,
+        tests_data: [{
+          name: addLabForm.testName,
+          code: addLabForm.testCode || addLabForm.testName.substring(0, 10).toUpperCase().replace(/\s/g, '_'),
+          sample_type: 'Blood',
+          template: addLabForm.templateId,
+          status: 'pending',
+          notes: addLabForm.clinicalNotes || '',
+        }],
+      } as any);
+      toast.success('Lab order added');
+      setShowAddLabOrder(false);
+      setAddLabForm({ templateId: 0, testName: '', testCode: '', priority: 'routine', clinicalNotes: '' });
+      await loadEditOrdersRefetch();
+      refreshConsultations();
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to add lab order');
+    } finally {
+      setSubmittingOrder(false);
+    }
+  };
+
+  const handleAddRadiologyOrder = async () => {
+    if (!selectedConsultation || !addRadiologyForm.procedure) {
+      toast.error('Enter procedure');
+      return;
+    }
+    const patientId = selectedConsultation.patientIdNumeric ?? parseInt(selectedConsultation.patientId, 10);
+    if (!patientId || isNaN(patientId)) {
+      toast.error('Invalid patient');
+      return;
+    }
+    const sessionId = parseInt(selectedConsultation.id, 10);
+    setSubmittingOrder(true);
+    try {
+      await radiologyService.createOrder({
+        patient: patientId,
+        visit: selectedConsultation.visitId,
+        consultation_session: sessionId,
+        priority: addRadiologyForm.priority,
+        clinical_notes: addRadiologyForm.clinicalNotes || undefined,
+        studies_data: [{
+          procedure: addRadiologyForm.procedure,
+          body_part: addRadiologyForm.bodyPart || '',
+          modality: addRadiologyForm.modality || 'X-Ray',
+          status: 'pending',
+        }],
+      } as any);
+      toast.success('Radiology order added');
+      setShowAddRadiologyOrder(false);
+      setAddRadiologyForm({ procedure: '', bodyPart: '', modality: 'X-Ray', priority: 'routine', clinicalNotes: '' });
+      await loadEditOrdersRefetch();
+      refreshConsultations();
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to add radiology order');
+    } finally {
+      setSubmittingOrder(false);
+    }
+  };
+
+  const handleAddPhysioOrder = async () => {
+    if (!selectedConsultation || !addPhysioForm.diagnosis.trim()) {
+      toast.error('Diagnosis is required');
+      return;
+    }
+    const patientId = selectedConsultation.patientIdNumeric ?? parseInt(selectedConsultation.patientId, 10);
+    if (!patientId || isNaN(patientId)) {
+      toast.error('Invalid patient');
+      return;
+    }
+    const sessionId = parseInt(selectedConsultation.id, 10);
+    setSubmittingOrder(true);
+    try {
+      await physioService.createOrder({
+        patient: patientId,
+        consultation_session: sessionId,
+        diagnosis: addPhysioForm.diagnosis.trim(),
+        chief_complaint: addPhysioForm.chiefComplaint || undefined,
+        treatment_goal: addPhysioForm.treatmentGoal || undefined,
+        special_instructions: addPhysioForm.specialInstructions || undefined,
+        priority: addPhysioForm.priority,
+      } as any);
+      toast.success('Physiotherapy order added');
+      setShowAddPhysioOrder(false);
+      setAddPhysioForm({ diagnosis: '', chiefComplaint: '', treatmentGoal: '', specialInstructions: '', priority: 'routine' });
+      await loadEditOrdersRefetch();
+      refreshConsultations();
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to add physio order');
+    } finally {
+      setSubmittingOrder(false);
+    }
   };
 
   const handleSaveEdit = async () => {
@@ -1290,74 +1512,186 @@ export default function ConsultationHistoryPage() {
           <DialogContent className="w-[95vw] sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2"><Edit className="h-5 w-5 text-emerald-500" />Edit Consultation</DialogTitle>
-              <DialogDescription>Update consultation details for {selectedConsultation?.patient}</DialogDescription>
+              <DialogDescription>Update consultation details and add prescriptions or investigations for {selectedConsultation?.patient}</DialogDescription>
             </DialogHeader>
             {selectedConsultation && (
-              <div className="space-y-4">
-                <div className="p-3 bg-muted/50 rounded-lg text-sm">
-                  <span className="text-muted-foreground">ID:</span> <span className="font-medium">{selectedConsultation.id}</span>
-                  <span className="ml-4 text-muted-foreground">Date:</span> <span className="font-medium">{selectedConsultation.date}</span>
-                </div>
-
-                {/* ICD-10 Diagnosis Section */}
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <Label className="text-base font-semibold">Diagnosis (ICD-10)</Label>
-                    <Button variant="outline" size="sm" onClick={() => setShowAddDiagnosisInEdit(true)}>
-                      <Plus className="h-4 w-4 mr-1" />Add Diagnosis
-                    </Button>
+              <Tabs value={editActiveTab} onValueChange={setEditActiveTab} className="w-full">
+                <TabsList className="grid w-full grid-cols-5">
+                  <TabsTrigger value="notes" className="text-xs">Notes</TabsTrigger>
+                  <TabsTrigger value="prescriptions" className="text-xs">Prescriptions</TabsTrigger>
+                  <TabsTrigger value="lab" className="text-xs">Lab</TabsTrigger>
+                  <TabsTrigger value="radiology" className="text-xs">Radiology</TabsTrigger>
+                  <TabsTrigger value="physio" className="text-xs">Physio</TabsTrigger>
+                </TabsList>
+                <TabsContent value="notes" className="space-y-4 mt-4">
+                  <div className="p-3 bg-muted/50 rounded-lg text-sm">
+                    <span className="text-muted-foreground">ID:</span> <span className="font-medium">{selectedConsultation.id}</span>
+                    <span className="ml-4 text-muted-foreground">Date:</span> <span className="font-medium">{selectedConsultation.date}</span>
                   </div>
-
-                  {editForm.diagnosisCodes.length === 0 ? (
-                    <div className="p-4 rounded-lg border border-dashed text-center text-muted-foreground">
-                      <Stethoscope className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                      <p className="text-sm">No diagnoses added yet</p>
-                      <p className="text-xs">Click "Add Diagnosis" to add ICD-10 codes</p>
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-base font-semibold">Diagnosis (ICD-10)</Label>
+                      <Button variant="outline" size="sm" onClick={() => setShowAddDiagnosisInEdit(true)}>
+                        <Plus className="h-4 w-4 mr-1" />Add Diagnosis
+                      </Button>
                     </div>
-                  ) : (
-                    <div className="space-y-2">
-                      {editForm.diagnosisCodes.map((dx, index) => (
-                        <div key={dx.id} className={`p-3 rounded-lg border flex items-start justify-between gap-3 ${
-                          dx.type === 'Primary' ? 'bg-rose-50 dark:bg-rose-900/20 border-rose-200 dark:border-rose-800' :
-                          dx.type === 'Secondary' ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800' :
-                          'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800'
-                        }`}>
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2 mb-1">
-                              <Badge variant="outline" className={`text-xs ${
-                                dx.type === 'Primary' ? 'bg-rose-500/10 text-rose-600 border-rose-500/30' :
-                                dx.type === 'Secondary' ? 'bg-amber-500/10 text-amber-600 border-amber-500/30' :
-                                'bg-blue-500/10 text-blue-600 border-blue-500/30'
-                              }`}>{dx.type}</Badge>
-                              <span className="font-mono text-sm font-medium">{dx.code}</span>
+                    {editForm.diagnosisCodes.length === 0 ? (
+                      <div className="p-4 rounded-lg border border-dashed text-center text-muted-foreground">
+                        <Stethoscope className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                        <p className="text-sm">No diagnoses added yet</p>
+                        <p className="text-xs">Click "Add Diagnosis" to add ICD-10 codes</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {editForm.diagnosisCodes.map((dx) => (
+                          <div key={dx.id} className={`p-3 rounded-lg border flex items-start justify-between gap-3 ${
+                            dx.type === 'Primary' ? 'bg-rose-50 dark:bg-rose-900/20 border-rose-200 dark:border-rose-800' :
+                            dx.type === 'Secondary' ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800' :
+                            'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800'
+                          }`}>
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2 mb-1">
+                                <Badge variant="outline" className={`text-xs ${
+                                  dx.type === 'Primary' ? 'bg-rose-500/10 text-rose-600 border-rose-500/30' :
+                                  dx.type === 'Secondary' ? 'bg-amber-500/10 text-amber-600 border-amber-500/30' :
+                                  'bg-blue-500/10 text-blue-600 border-blue-500/30'
+                                }`}>{dx.type}</Badge>
+                                <span className="font-mono text-sm font-medium">{dx.code}</span>
+                              </div>
+                              <p className="text-sm font-medium">{dx.name}</p>
+                              {dx.notes && <p className="text-xs text-muted-foreground mt-1">{dx.notes}</p>}
                             </div>
-                            <p className="text-sm font-medium">{dx.name}</p>
-                            {dx.notes && <p className="text-xs text-muted-foreground mt-1">{dx.notes}</p>}
+                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setEditForm(prev => ({ ...prev, diagnosisCodes: prev.diagnosisCodes.filter(d => d.id !== dx.id) }))}>
+                              <X className="h-4 w-4" />
+                            </Button>
                           </div>
-                          <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setEditForm(prev => ({ ...prev, diagnosisCodes: prev.diagnosisCodes.filter(d => d.id !== dx.id) }))}>
-                            <X className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      ))}
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div><Label>Presentation Complaint</Label><Textarea value={editForm.presentationComplaint} onChange={(e) => setEditForm(prev => ({ ...prev, presentationComplaint: e.target.value }))} placeholder="Chief complaint or presenting symptoms..." rows={2} className="mt-1" /></div>
+                  <div><Label>History of Present Illness</Label><Textarea value={editForm.historyOfPresentIllness} onChange={(e) => setEditForm(prev => ({ ...prev, historyOfPresentIllness: e.target.value }))} placeholder="Detailed history..." rows={3} className="mt-1" /></div>
+                  <div><Label>Physical Examination</Label><Textarea value={editForm.physicalExamination} onChange={(e) => setEditForm(prev => ({ ...prev, physicalExamination: e.target.value }))} placeholder="Examination findings..." rows={3} className="mt-1" /></div>
+                  <div><Label>Assessment</Label><Textarea value={editForm.assessment} onChange={(e) => setEditForm(prev => ({ ...prev, assessment: e.target.value }))} placeholder="Clinical assessment and reasoning..." rows={3} className="mt-1" /></div>
+                  <div><Label>Plan</Label><Textarea value={editForm.plan} onChange={(e) => setEditForm(prev => ({ ...prev, plan: e.target.value }))} rows={3} className="mt-1" /></div>
+                  <div><Label>Status</Label>
+                    <Select value={editForm.status} onValueChange={(v) => setEditForm(prev => ({ ...prev, status: v as "Completed" | "In Progress" }))}>
+                      <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="In Progress">In Progress</SelectItem>
+                        <SelectItem value="Completed">Completed</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </TabsContent>
+                <TabsContent value="prescriptions" className="mt-4">
+                  {loadingOrders ? (
+                    <div className="flex items-center justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+                  ) : (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-base font-semibold">Prescriptions (this session)</Label>
+                        <Button variant="outline" size="sm" onClick={() => setShowAddPrescription(true)}><Plus className="h-4 w-4 mr-1" />Add prescription</Button>
+                      </div>
+                      {editPrescriptions.length === 0 ? (
+                        <div className="p-4 rounded-lg border border-dashed text-center text-muted-foreground text-sm">No prescriptions for this consultation. Click Add prescription to create one.</div>
+                      ) : (
+                        <ul className="space-y-2">
+                          {editPrescriptions.map((rx: any) => {
+                            const items = rx.medications || rx.items || [];
+                            return (
+                              <li key={rx.id} className="p-3 rounded-lg border bg-muted/30 text-sm">
+                                <span className="font-medium">{rx.prescription_id || `#${rx.id}`}</span>
+                                {items.length ? (
+                                  <ul className="mt-1 text-muted-foreground">
+                                    {items.map((m: any, i: number) => (
+                                      <li key={i}>{m.medication_name || m.name} — {m.dosage} {m.frequency} {m.duration}</li>
+                                    ))}
+                                  </ul>
+                                ) : (
+                                  <p className="mt-1 text-muted-foreground">—</p>
+                                )}
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      )}
                     </div>
                   )}
-                </div>
-
-                <div><Label>Presentation Complaint</Label><Textarea value={editForm.presentationComplaint} onChange={(e) => setEditForm(prev => ({ ...prev, presentationComplaint: e.target.value }))} placeholder="Chief complaint or presenting symptoms..." rows={2} className="mt-1" /></div>
-                <div><Label>History of Present Illness</Label><Textarea value={editForm.historyOfPresentIllness} onChange={(e) => setEditForm(prev => ({ ...prev, historyOfPresentIllness: e.target.value }))} placeholder="Detailed history..." rows={3} className="mt-1" /></div>
-                <div><Label>Physical Examination</Label><Textarea value={editForm.physicalExamination} onChange={(e) => setEditForm(prev => ({ ...prev, physicalExamination: e.target.value }))} placeholder="Examination findings..." rows={3} className="mt-1" /></div>
-                <div><Label>Assessment</Label><Textarea value={editForm.assessment} onChange={(e) => setEditForm(prev => ({ ...prev, assessment: e.target.value }))} placeholder="Clinical assessment and reasoning..." rows={3} className="mt-1" /></div>
-                <div><Label>Plan</Label><Textarea value={editForm.plan} onChange={(e) => setEditForm(prev => ({ ...prev, plan: e.target.value }))} rows={3} className="mt-1" /></div>
-                <div><Label>Status</Label>
-                  <Select value={editForm.status} onValueChange={(v) => setEditForm(prev => ({ ...prev, status: v as "Completed" | "In Progress" }))}>
-                    <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="In Progress">In Progress</SelectItem>
-                      <SelectItem value="Completed">Completed</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
+                </TabsContent>
+                <TabsContent value="lab" className="mt-4">
+                  {loadingOrders ? (
+                    <div className="flex items-center justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+                  ) : (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-base font-semibold">Lab orders (this session)</Label>
+                        <Button variant="outline" size="sm" onClick={() => setShowAddLabOrder(true)}><Plus className="h-4 w-4 mr-1" />Add lab order</Button>
+                      </div>
+                      {editLabOrders.length === 0 ? (
+                        <div className="p-4 rounded-lg border border-dashed text-center text-muted-foreground text-sm">No lab orders. Click Add lab order to create one.</div>
+                      ) : (
+                        <ul className="space-y-2">
+                          {editLabOrders.map((order: any) => (
+                            <li key={order.id} className="p-3 rounded-lg border bg-muted/30 text-sm">
+                              <span className="font-medium">{order.order_id || `#${order.id}`}</span>
+                              <p className="text-muted-foreground mt-1">{order.tests?.map((t: any) => t.name || t.template?.name).filter(Boolean).join(', ') || '—'}</p>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  )}
+                </TabsContent>
+                <TabsContent value="radiology" className="mt-4">
+                  {loadingOrders ? (
+                    <div className="flex items-center justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+                  ) : (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-base font-semibold">Radiology orders (this session)</Label>
+                        <Button variant="outline" size="sm" onClick={() => setShowAddRadiologyOrder(true)}><Plus className="h-4 w-4 mr-1" />Add radiology order</Button>
+                      </div>
+                      {editRadiologyOrders.length === 0 ? (
+                        <div className="p-4 rounded-lg border border-dashed text-center text-muted-foreground text-sm">No radiology orders. Click Add radiology order to create one.</div>
+                      ) : (
+                        <ul className="space-y-2">
+                          {editRadiologyOrders.map((order: any) => (
+                            <li key={order.id} className="p-3 rounded-lg border bg-muted/30 text-sm">
+                              <span className="font-medium">{order.order_id || `#${order.id}`}</span>
+                              <p className="text-muted-foreground mt-1">{order.studies?.map((s: any) => s.procedure).filter(Boolean).join(', ') || '—'}</p>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  )}
+                </TabsContent>
+                <TabsContent value="physio" className="mt-4">
+                  {loadingOrders ? (
+                    <div className="flex items-center justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+                  ) : (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-base font-semibold">Physiotherapy orders (this session)</Label>
+                        <Button variant="outline" size="sm" onClick={() => setShowAddPhysioOrder(true)}><Plus className="h-4 w-4 mr-1" />Add physio order</Button>
+                      </div>
+                      {editPhysioOrders.length === 0 ? (
+                        <div className="p-4 rounded-lg border border-dashed text-center text-muted-foreground text-sm">No physio orders. Click Add physio order to create one.</div>
+                      ) : (
+                        <ul className="space-y-2">
+                          {editPhysioOrders.map((order: any) => (
+                            <li key={order.id} className="p-3 rounded-lg border bg-muted/30 text-sm">
+                              <span className="font-medium">{order.diagnosis || 'Physio order'}</span>
+                              {order.chief_complaint && <p className="text-muted-foreground mt-1">{order.chief_complaint}</p>}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  )}
+                </TabsContent>
+              </Tabs>
             )}
             <DialogFooter>
               <Button variant="outline" onClick={() => setShowEditModal(false)}>Cancel</Button>
@@ -1477,6 +1811,190 @@ export default function ConsultationHistoryPage() {
 
             <DialogFooter>
               <Button variant="outline" onClick={() => setShowAddDiagnosisInEdit(false)}>Cancel</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Add Prescription Dialog (from Edit modal) */}
+        <Dialog open={showAddPrescription} onOpenChange={(open) => {
+          setShowAddPrescription(open);
+          if (open) pharmacyService.getMedications({ page_size: 200 }).then(r => setMedications(r.results || []));
+          if (!open) setAddPrescriptionForm({ medicationId: 0, medicationName: '', dosage: '', frequency: '', duration: '', quantity: 1, instructions: '', unit: 'tablet' });
+        }}>
+          <DialogContent className="sm:max-w-[500px]">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2"><Pill className="h-5 w-5 text-purple-500" />Add Prescription</DialogTitle>
+              <DialogDescription>Add a medication to this consultation session</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              <div>
+                <Label>Medication *</Label>
+                <Select
+                  value={addPrescriptionForm.medicationId ? String(addPrescriptionForm.medicationId) : ''}
+                  onValueChange={(v) => {
+                    const id = parseInt(v, 10);
+                    const med = medications.find((m: any) => m.id === id);
+                    setAddPrescriptionForm(prev => ({ ...prev, medicationId: id, medicationName: med?.name || '', unit: med?.unit || 'tablet' }));
+                  }}
+                >
+                  <SelectTrigger className="mt-1"><SelectValue placeholder="Select medication" /></SelectTrigger>
+                  <SelectContent>
+                    {medications.slice(0, 100).map((m: any) => (
+                      <SelectItem key={m.id} value={String(m.id)}>{m.name}{m.strength ? ` (${m.strength})` : ''}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div><Label>Dosage</Label><Input value={addPrescriptionForm.dosage} onChange={(e) => setAddPrescriptionForm(prev => ({ ...prev, dosage: e.target.value }))} placeholder="e.g. 500mg" /></div>
+                <div><Label>Frequency</Label><Input value={addPrescriptionForm.frequency} onChange={(e) => setAddPrescriptionForm(prev => ({ ...prev, frequency: e.target.value }))} placeholder="e.g. BD" /></div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div><Label>Duration</Label><Input value={addPrescriptionForm.duration} onChange={(e) => setAddPrescriptionForm(prev => ({ ...prev, duration: e.target.value }))} placeholder="e.g. 5 days" /></div>
+                <div><Label>Quantity</Label><Input type="number" min={1} value={addPrescriptionForm.quantity} onChange={(e) => setAddPrescriptionForm(prev => ({ ...prev, quantity: parseInt(e.target.value, 10) || 1 }))} /></div>
+              </div>
+              <div><Label>Instructions</Label><Textarea value={addPrescriptionForm.instructions} onChange={(e) => setAddPrescriptionForm(prev => ({ ...prev, instructions: e.target.value }))} placeholder="Optional" rows={2} className="mt-1" /></div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowAddPrescription(false)}>Cancel</Button>
+              <Button onClick={handleAddPrescription} disabled={submittingOrder || !addPrescriptionForm.medicationId}>
+                {submittingOrder ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Adding...</> : <>Add</>}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Add Lab Order Dialog */}
+        <Dialog open={showAddLabOrder} onOpenChange={(open) => {
+          setShowAddLabOrder(open);
+          if (open) labService.getTemplates({ page_size: 100 }).then(r => setLabTemplates(r.results || []));
+          if (!open) setAddLabForm({ templateId: 0, testName: '', testCode: '', priority: 'routine', clinicalNotes: '' });
+        }}>
+          <DialogContent className="sm:max-w-[500px]">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2"><FlaskConical className="h-5 w-5 text-amber-500" />Add Lab Order</DialogTitle>
+              <DialogDescription>Add a lab test to this consultation session</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              <div>
+                <Label>Test *</Label>
+                <Select
+                  value={addLabForm.templateId ? String(addLabForm.templateId) : ''}
+                  onValueChange={(v) => {
+                    const id = parseInt(v, 10);
+                    const t = labTemplates.find((x: any) => x.id === id);
+                    setAddLabForm(prev => ({ ...prev, templateId: id, testName: t?.name || '', testCode: t?.code || '' }));
+                  }}
+                >
+                  <SelectTrigger className="mt-1"><SelectValue placeholder="Select test" /></SelectTrigger>
+                  <SelectContent>
+                    {(labTemplates || []).slice(0, 100).map((t: any) => (
+                      <SelectItem key={t.id} value={String(t.id)}>{t.name} {t.code ? `(${t.code})` : ''}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Priority</Label>
+                <Select value={addLabForm.priority} onValueChange={(v) => setAddLabForm(prev => ({ ...prev, priority: v as 'routine' | 'urgent' | 'stat' }))}>
+                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="routine">Routine</SelectItem>
+                    <SelectItem value="urgent">Urgent</SelectItem>
+                    <SelectItem value="stat">STAT</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div><Label>Clinical notes</Label><Textarea value={addLabForm.clinicalNotes} onChange={(e) => setAddLabForm(prev => ({ ...prev, clinicalNotes: e.target.value }))} placeholder="Optional" rows={2} className="mt-1" /></div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowAddLabOrder(false)}>Cancel</Button>
+              <Button onClick={handleAddLabOrder} disabled={submittingOrder || !addLabForm.templateId}>
+                {submittingOrder ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Adding...</> : <>Add</>}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Add Radiology Order Dialog */}
+        <Dialog open={showAddRadiologyOrder} onOpenChange={(open) => { setShowAddRadiologyOrder(open); if (open) radiologyService.getTemplates({ page_size: 100 }).then(r => setRadiologyTemplates(r.results || [])); if (!open) setAddRadiologyForm({ procedure: '', bodyPart: '', modality: 'X-Ray', priority: 'routine', clinicalNotes: '' }); }}>
+          <DialogContent className="sm:max-w-[500px]">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2"><Activity className="h-5 w-5 text-blue-500" />Add Radiology Order</DialogTitle>
+              <DialogDescription>Add a radiology study to this consultation session</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              <div>
+                <Label>Procedure *</Label>
+                <Select
+                  value={addRadiologyForm.procedure || ''}
+                  onValueChange={(v) => {
+                    const t = radiologyTemplates.find((x: any) => x.name === v);
+                    setAddRadiologyForm(prev => ({ ...prev, procedure: v, bodyPart: t?.body_part || '', modality: t?.modality || 'X-Ray' }));
+                  }}
+                >
+                  <SelectTrigger className="mt-1"><SelectValue placeholder="Select procedure" /></SelectTrigger>
+                  <SelectContent>
+                    {(radiologyTemplates || []).map((t: any) => (
+                      <SelectItem key={t.id} value={t.name}>{t.name} {t.modality ? `(${t.modality})` : ''}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div><Label>Body part</Label><Input value={addRadiologyForm.bodyPart} onChange={(e) => setAddRadiologyForm(prev => ({ ...prev, bodyPart: e.target.value }))} placeholder="Optional" /></div>
+                <div><Label>Modality</Label><Input value={addRadiologyForm.modality} onChange={(e) => setAddRadiologyForm(prev => ({ ...prev, modality: e.target.value }))} placeholder="X-Ray" /></div>
+              </div>
+              <div>
+                <Label>Priority</Label>
+                <Select value={addRadiologyForm.priority} onValueChange={(v) => setAddRadiologyForm(prev => ({ ...prev, priority: v as 'routine' | 'urgent' | 'stat' }))}>
+                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="routine">Routine</SelectItem>
+                    <SelectItem value="urgent">Urgent</SelectItem>
+                    <SelectItem value="stat">STAT</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div><Label>Clinical notes</Label><Textarea value={addRadiologyForm.clinicalNotes} onChange={(e) => setAddRadiologyForm(prev => ({ ...prev, clinicalNotes: e.target.value }))} placeholder="Optional" rows={2} className="mt-1" /></div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowAddRadiologyOrder(false)}>Cancel</Button>
+              <Button onClick={handleAddRadiologyOrder} disabled={submittingOrder || !addRadiologyForm.procedure}>
+                {submittingOrder ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Adding...</> : <>Add</>}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Add Physio Order Dialog */}
+        <Dialog open={showAddPhysioOrder} onOpenChange={(open) => { setShowAddPhysioOrder(open); if (!open) setAddPhysioForm({ diagnosis: '', chiefComplaint: '', treatmentGoal: '', specialInstructions: '', priority: 'routine' }); }}>
+          <DialogContent className="sm:max-w-[500px]">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2"><Stethoscope className="h-5 w-5 text-emerald-500" />Add Physiotherapy Order</DialogTitle>
+              <DialogDescription>Add a physiotherapy order to this consultation session</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              <div><Label>Diagnosis / Indication *</Label><Textarea value={addPhysioForm.diagnosis} onChange={(e) => setAddPhysioForm(prev => ({ ...prev, diagnosis: e.target.value }))} placeholder="e.g. Low back pain" rows={2} className="mt-1" /></div>
+              <div><Label>Chief complaint</Label><Input value={addPhysioForm.chiefComplaint} onChange={(e) => setAddPhysioForm(prev => ({ ...prev, chiefComplaint: e.target.value }))} placeholder="Optional" /></div>
+              <div><Label>Treatment goal</Label><Input value={addPhysioForm.treatmentGoal} onChange={(e) => setAddPhysioForm(prev => ({ ...prev, treatmentGoal: e.target.value }))} placeholder="Optional" /></div>
+              <div><Label>Special instructions</Label><Textarea value={addPhysioForm.specialInstructions} onChange={(e) => setAddPhysioForm(prev => ({ ...prev, specialInstructions: e.target.value }))} placeholder="Optional" rows={2} className="mt-1" /></div>
+              <div>
+                <Label>Priority</Label>
+                <Select value={addPhysioForm.priority} onValueChange={(v) => setAddPhysioForm(prev => ({ ...prev, priority: v }))}>
+                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="routine">Routine</SelectItem>
+                    <SelectItem value="urgent">Urgent</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowAddPhysioOrder(false)}>Cancel</Button>
+              <Button onClick={handleAddPhysioOrder} disabled={submittingOrder || !addPhysioForm.diagnosis.trim()}>
+                {submittingOrder ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Adding...</> : <>Add</>}
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

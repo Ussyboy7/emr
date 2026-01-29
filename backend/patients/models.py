@@ -154,6 +154,11 @@ class Patient(models.Model):
     
     def get_full_name(self):
         """Return the patient's full name."""
+        # Retiree records (per provided source data) should display the raw surname as-is.
+        # This avoids confusion caused by previously "cleaned"/split names.
+        if self.category == "retiree" and self.surname:
+            return self.surname.strip()
+
         # Capitalize title properly (handle common abbreviations)
         title_str = ''
         if self.title:

@@ -88,6 +88,10 @@ export interface ConsultationRecord {
   type?: 'visit' | 'consultation';
   patient: string;
   patientId: string;
+  /** Numeric patient id for API (e.g. create prescription/orders). */
+  patientIdNumeric?: number;
+  /** Visit id for API when adding orders from Edit modal. */
+  visitId?: number;
   patientAge?: number;
   patientGender?: string;
   doctor: string;

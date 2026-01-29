@@ -53,8 +53,22 @@ const titles = ['Mr', 'Mrs', 'Ms', 'Dr', 'Chief', 'Engr', 'Prof', 'Alhaji', 'Haj
 // Religions
 const religions = ['Christianity', 'Islam', 'Traditional', 'Other', 'None'];
 
-// Tribes (Major Nigerian tribes)
-const tribes = ['Hausa', 'Yoruba', 'Igbo', 'Fulani', 'Ibibio', 'Tiv', 'Kanuri', 'Ijaw', 'Nupe', 'Efik', 'Urhobo', 'Edo', 'Itsekiri', 'Other'];
+// Tribes (Nigerian ethnic groups) — expanded to reduce "Other" usage
+const tribes = [
+  // Major
+  'Hausa', 'Fulani', 'Yoruba', 'Igbo',
+  // South-South / Niger Delta
+  'Ijaw', 'Urhobo', 'Isoko', 'Itsekiri', 'Edo (Bini)', 'Esan', 'Anioma',
+  'Ibibio', 'Efik', 'Annang', 'Ikwerre', 'Ogoni', 'Kalabari',
+  // Middle Belt
+  'Tiv', 'Idoma', 'Igala', 'Ebira', 'Nupe', 'Gbagyi (Gwari)',
+  'Jukun', 'Tarok', 'Berom', 'Bachama', 'Angas', 'Atyap (Kataf)',
+  'Mumuye', 'Kuteb',
+  // North-East / North-West
+  'Kanuri', 'Shuwa Arab', 'Higgi (Kamwe)', 'Margi', 'Bura',
+  // General
+  'Other',
+];
 
 // Nigeria States and LGAs
 type StateWithLGAs = { name: string; lgas: string[] };

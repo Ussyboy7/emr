@@ -99,6 +99,33 @@ class VisitSerializer(serializers.ModelSerializer):
             from common.clinic_utils import normalize_clinic_name
             return normalize_clinic_name(value)
         return value
+
+    def validate(self, attrs):
+        """
+        Prevent duplicate *open* visits for same patient on same date.
+
+        "Open" = scheduled or in_progress. Completed/cancelled are allowed to have another visit.
+        """
+        attrs = super().validate(attrs)
+
+        patient = attrs.get('patient') or (self.instance.patient if self.instance else None)
+        date = attrs.get('date') or (self.instance.date if self.instance else None)
+        status = attrs.get('status') or (self.instance.status if self.instance else None)
+
+        # Only enforce on create, or when patient/date/status is changing.
+        if patient and date:
+            open_statuses = ['scheduled', 'in_progress']
+            # If the incoming status is closed, allow it.
+            if status in open_statuses:
+                qs = Visit.objects.filter(patient=patient, date=date, status__in=open_statuses)
+                if self.instance:
+                    qs = qs.exclude(pk=self.instance.pk)
+                if qs.exists():
+                    raise serializers.ValidationError({
+                        'non_field_errors': ['This patient already has an open visit for this date. Please complete or cancel the existing visit first.']
+                    })
+
+        return attrs
     
     class Meta:
         model = Visit

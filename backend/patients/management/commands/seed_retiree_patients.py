@@ -143,6 +143,8 @@ def _load_csv(path):
                 # Use col 1 (Name) as the source of truth. Col 5 (NAME) in the raw CSV
                 # often contains repeated placeholder values that do not match this row.
                 parts = (name_col1 or "").split(None, 2)
+                if len(parts) == 0:
+                    continue
                 if len(parts) == 1:
                     surname, first, middle = parts[0], "", ""
                 elif len(parts) == 2:
@@ -212,11 +214,11 @@ class Command(BaseCommand):
                 cnt = Patient.objects.filter(category="retiree", personal_number__in=pns).count()
                 self.stdout.write(self.style.WARNING(f"Would remove {cnt} existing retiree(s)."))
 
-            created, skipped = self._seed(rows, dry_run)
+            created, updated, skipped = self._seed(rows, dry_run)
 
         self.stdout.write(
             self.style.SUCCESS(
-                f"Seed complete: {created} created, {skipped} skipped (duplicate, missing/invalid gender, or invalid)."
+                f"Seed complete: {created} created, {updated} updated, {skipped} skipped (missing/invalid gender or invalid)."
             )
         )
 
@@ -226,6 +228,7 @@ class Command(BaseCommand):
             or User.objects.filter(is_staff=True).first()
         )
         created = 0
+        updated = 0
         skipped = 0
 
         for r in rows:
@@ -241,13 +244,15 @@ class Command(BaseCommand):
                 skipped += 1
                 continue
 
-            if Patient.objects.filter(category="retiree", personal_number=pn).exists():
-                skipped += 1
-                continue
+            existing = Patient.objects.filter(category="retiree", personal_number=pn).first()
 
             if dry_run:
-                self.stdout.write(f"  [DRY] R-{pn} {surname} dob={dob} gender={gender}")
-                created += 1
+                if existing:
+                    self.stdout.write(f"  [DRY] UPDATE R-{pn} {surname} dob={dob} gender={gender}")
+                    updated += 1
+                else:
+                    self.stdout.write(f"  [DRY] CREATE R-{pn} {surname} dob={dob} gender={gender}")
+                    created += 1
                 continue
 
             first = _clean(r.get("first_name") or "")
@@ -256,19 +261,32 @@ class Command(BaseCommand):
                 first = "-"
 
             try:
-                Patient.objects.create(
-                    category="retiree",
-                    personal_number=pn,
-                    surname=surname,
-                    first_name=first,
-                    middle_name=middle,
-                    gender=gender,
-                    date_of_birth=dob,
-                    created_by=created_by,
-                )
-                created += 1
+                if existing:
+                    existing.surname = surname
+                    existing.first_name = first
+                    existing.middle_name = middle
+                    existing.gender = gender
+                    existing.date_of_birth = dob
+                    if existing.created_by_id is None and created_by is not None:
+                        existing.created_by = created_by
+                    existing.save(update_fields=[
+                        "surname", "first_name", "middle_name", "gender", "date_of_birth", "created_by", "updated_at"
+                    ])
+                    updated += 1
+                else:
+                    Patient.objects.create(
+                        category="retiree",
+                        personal_number=pn,
+                        surname=surname,
+                        first_name=first,
+                        middle_name=middle,
+                        gender=gender,
+                        date_of_birth=dob,
+                        created_by=created_by,
+                    )
+                    created += 1
             except Exception as e:
                 self.stdout.write(self.style.ERROR(f"Failed {pn} {surname}: {e}"))
                 skipped += 1
 
-        return created, skipped
+        return created, updated, skipped

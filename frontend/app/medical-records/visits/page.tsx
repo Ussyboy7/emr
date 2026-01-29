@@ -19,7 +19,7 @@ import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { 
   Search, Plus, Calendar, Clock, CheckCircle2, MapPin,
-  Edit, Send, AlertTriangle, Loader2, Eye
+  Edit, Send, AlertTriangle, Loader2, Eye, X
 } from 'lucide-react';
 import { StandardPagination } from '@/components/StandardPagination';
 import { getAllClinicsWithAll, CLINICS } from '@/lib/constants/clinics';
@@ -37,7 +37,7 @@ const locations = [
 // Simplified visit statuses for Medical Records
 // Scheduled = Created, waiting to be sent to nursing
 // Sent to Nursing = Confirmed and forwarded (completed from Medical Records perspective)
-type VisitStatus = 'Scheduled' | 'In Progress'| 'Completed';
+type VisitStatus = 'Scheduled' | 'In Progress'| 'Completed' | 'Cancelled';
 
 // Visits data will be loaded from API
 
@@ -58,8 +58,10 @@ export default function VisitsPage() {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [isForwardModalOpen, setIsForwardModalOpen] = useState(false);
+  const [isCancelModalOpen, setIsCancelModalOpen] = useState(false);
   type TransformedVisit = ReturnType<typeof transformVisit>;
   const [selectedVisit, setSelectedVisit] = useState<TransformedVisit | null>(null);
+  const [visitToCancel, setVisitToCancel] = useState<TransformedVisit | null>(null);
   
   // Edit form state
   const [editForm, setEditForm] = useState({ type: '', clinic: '', location: '', notes: '' });
@@ -261,6 +263,32 @@ export default function VisitsPage() {
         setAuthError(err);
       } else {
         toast.error(err.message || 'Failed to forward visit. Please try again.');
+      }
+    }
+  };
+
+  const handleCancelVisit = (visit: TransformedVisit) => {
+    setVisitToCancel(visit);
+    setIsCancelModalOpen(true);
+  };
+
+  const confirmCancelVisit = async () => {
+    if (!visitToCancel) return;
+    try {
+      const visitId = visitToCancel.numericId || Number(visitToCancel.id);
+      await visitService.updateVisit(visitId, { status: 'cancelled' });
+      await loadVisits();
+      setIsCancelModalOpen(false);
+      setVisitToCancel(null);
+      toast.success('Visit cancelled', {
+        description: `${visitToCancel.patient} will not be sent to nursing.`,
+      });
+    } catch (err: any) {
+      console.error('Error cancelling visit:', err);
+      if (isAuthenticationError(err)) {
+        setAuthError(err);
+      } else {
+        toast.error(err.message || 'Failed to cancel visit. Please try again.');
       }
     }
   };
@@ -487,6 +515,15 @@ export default function VisitsPage() {
                         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleEditVisit(visit)} title="Edit Visit">
                           <Edit className="h-3.5 w-3.5" />
                         </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 hover:bg-red-50 hover:text-red-600"
+                          onClick={() => handleCancelVisit(visit)}
+                          title="Cancel Visit"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </Button>
                         <Button 
                           size="sm"
                           className="h-7 px-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs"
@@ -693,6 +730,37 @@ export default function VisitsPage() {
               <Button variant="outline" onClick={() => setIsForwardModalOpen(false)}>Cancel</Button>
               <Button onClick={confirmForwardToNursing} className="bg-emerald-600 hover:bg-emerald-700 text-white">
                 <Send className="h-4 w-4 mr-2" />Confirm & Send
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Cancel Visit Confirmation Modal */}
+        <Dialog open={isCancelModalOpen} onOpenChange={setIsCancelModalOpen}>
+          <DialogContent className="w-[95vw] sm:max-w-[400px] max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5 text-red-500" />
+                Cancel Visit
+              </DialogTitle>
+              <DialogDescription>
+                Cancel <strong>{visitToCancel?.patient}</strong>’s visit (<strong>{visitToCancel?.visitId}</strong>). This will prevent sending to nursing.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="py-4">
+              <div className="p-4 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
+                <p className="text-sm text-red-700 dark:text-red-300">
+                  This visit will be marked as <strong>Cancelled</strong>.
+                </p>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => { setIsCancelModalOpen(false); setVisitToCancel(null); }}>
+                Keep Visit
+              </Button>
+              <Button className="bg-red-600 hover:bg-red-700 text-white" onClick={confirmCancelVisit} disabled={!visitToCancel}>
+                <X className="h-4 w-4 mr-2" />
+                Confirm Cancel
               </Button>
             </DialogFooter>
           </DialogContent>

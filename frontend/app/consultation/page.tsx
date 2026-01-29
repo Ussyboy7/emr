@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Loader2, Stethoscope, Users, Pill, FlaskConical, Heart, Calendar, Clock, CheckCircle2, ArrowRight, UserCheck, Activity, Plus, Eye, Hospital, ClipboardList, AlertCircle } from 'lucide-react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { consultationService, pharmacyService, labService } from '@/lib/services';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
@@ -21,6 +22,7 @@ interface ConsultationStats {
 }
 
 export default function ConsultationPage() {
+  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [authError, setAuthError] = useState<unknown | null>(null);
@@ -166,7 +168,7 @@ export default function ConsultationPage() {
               <div className="flex flex-wrap gap-2">
                 <Button
                   className="bg-white text-emerald-600 hover:bg-emerald-50 shadow-md"
-                  onClick={() => window.location.href = '/consultation/start'}
+                  onClick={() => router.push('/consultation/start')}
                 >
                   <Plus className="h-4 w-4 mr-2" />
                   Start Consultation
@@ -174,7 +176,7 @@ export default function ConsultationPage() {
                 <Button
                   variant="outline"
                   className="border-2 border-white/90 text-white hover:bg-white/30 hover:border-white dark:border-white dark:text-white dark:hover:bg-white/20 shadow-md backdrop-blur-sm bg-white/10"
-                  onClick={() => window.location.href = '/consultation/history'}
+                  onClick={() => router.push('/consultation/history')}
                 >
                   <Eye className="h-4 w-4 mr-2" />
                   My Sessions
@@ -288,24 +290,24 @@ export default function ConsultationPage() {
             Quick Actions
           </h2>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <Button onClick={() => window.location.href = '/consultation/start'} className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 bg-gradient-to-br from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white border-l-4 border-l-white/20">
+            <Button onClick={() => router.push('/consultation/start')} className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 bg-gradient-to-br from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white border-l-4 border-l-white/20">
               <div className="flex items-center gap-2">
                 <Plus className="h-5 w-5 sm:h-6 sm:w-6" />
               </div>
               <span className="text-xs sm:text-sm font-medium">Start New Consultation</span>
               <span className="text-[10px] sm:text-xs opacity-90">Begin patient consultation</span>
             </Button>
-            <Button onClick={() => window.location.href = '/consultation/history'} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-emerald-500/30 hover:bg-emerald-500/10 border-l-4 border-l-emerald-500">
+            <Button onClick={() => router.push('/consultation/history')} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-emerald-500/30 hover:bg-emerald-500/10 border-l-4 border-l-emerald-500">
               <Eye className="h-5 w-5 sm:h-6 sm:w-6 text-emerald-500 dark:text-emerald-400" />
               <span className="text-xs sm:text-sm font-medium">View My Sessions</span>
               <span className="text-[10px] sm:text-xs text-muted-foreground">Review completed consultations</span>
             </Button>
-            <Button onClick={() => window.location.href = '/consultation/wards'} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-blue-500/30 hover:bg-blue-500/10 border-l-4 border-l-blue-500">
+            <Button onClick={() => router.push('/consultation/wards')} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-blue-500/30 hover:bg-blue-500/10 border-l-4 border-l-blue-500">
               <ClipboardList className="h-5 w-5 sm:h-6 sm:w-6 text-blue-500 dark:text-blue-400" />
               <span className="text-xs sm:text-sm font-medium">Patient Queue</span>
               <span className="text-[10px] sm:text-xs text-muted-foreground">Manage waiting patients</span>
             </Button>
-            <Button onClick={() => window.location.href = '/consultation/referrals'} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-purple-500/30 hover:bg-purple-500/10 border-l-4 border-l-purple-500">
+            <Button onClick={() => router.push('/consultation/referrals')} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-purple-500/30 hover:bg-purple-500/10 border-l-4 border-l-purple-500">
               <Hospital className="h-6 w-6 text-purple-500 dark:text-purple-400" />
               <span className="text-sm font-medium">Clinical Reports</span>
               <span className="text-xs text-muted-foreground">Access patient reports</span>
@@ -351,9 +353,9 @@ export default function ConsultationPage() {
                   </div>
                 ) : (
                   <div className="text-center py-8">
-                    <CheckCircle2 className="h-8 w-8 mx-auto mb-2 text-green-500" />
-                    <p className="text-muted-foreground text-sm mb-2">All tasks completed!</p>
-                    <p className="text-xs text-muted-foreground">Great work staying on top of patient care.</p>
+                    <Stethoscope className="h-8 w-8 mx-auto mb-2 text-muted-foreground/60" />
+                    <p className="text-muted-foreground text-sm mb-2">No consultations today</p>
+                    <p className="text-xs text-muted-foreground">Start a consultation from the queue or when a patient is sent to your room.</p>
                   </div>
                 )}
               </CardContent>
