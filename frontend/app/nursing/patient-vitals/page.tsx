@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { apiFetch } from '@/lib/api-client';
-import { patientService, consultationService } from '@/lib/services';
+import { patientService, consultationService, visitService } from '@/lib/services';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { PatientAvatar } from "@/components/PatientAvatar";
@@ -78,8 +78,34 @@ export default function PatientVitalsPage() {
 
         // Fetch visits that should be processed by nursing (similar to pool queue)
         console.log('[Patient Vitals] Fetching visits for nursing...');
-        const visitsResult = await patientService.getPatientVisits(0); // Get all visits, we'll filter client-side
-        const allVisits = visitsResult || [];
+        // NOTE: `patientService.getPatientVisits(id)` fetches visits for a single patient.
+        // Passing `0` causes a 404 on backends that don't have a patient with ID 0.
+        // Use the visits endpoint instead.
+        let dateParam: string | undefined = undefined;
+        let startDate: string | undefined = undefined;
+        let endDate: string | undefined = undefined;
+        if (dateFilter === 'today') {
+          dateParam = new Date().toISOString().split('T')[0];
+        } else if (dateFilter === 'week') {
+          const today = new Date();
+          const weekStart = new Date(today);
+          weekStart.setDate(today.getDate() - today.getDay());
+          startDate = weekStart.toISOString().split('T')[0];
+          endDate = today.toISOString().split('T')[0];
+        } else if (dateFilter === 'month') {
+          const today = new Date();
+          const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+          startDate = monthStart.toISOString().split('T')[0];
+          endDate = today.toISOString().split('T')[0];
+        }
+
+        const visitsResponse = await visitService.getVisits({
+          page_size: 1000,
+          date: dateParam,
+          start_date: startDate,
+          end_date: endDate,
+        });
+        const allVisits = visitsResponse.results || [];
         console.log('[Patient Vitals] Fetched visits:', allVisits.length, 'records');
 
         // Get all visit IDs that have consultation sessions
@@ -122,8 +148,20 @@ export default function PatientVitalsPage() {
           return;
         }
 
-        // Get unique patient IDs from nursing visits
-        const patientIds = [...new Set(nursingVisits.map((v: any) => String(v.patient?.id || v.patient_id || v.patient)))].filter(id => id && id !== 'null' && id !== 'undefined');
+        // Get unique *numeric* patient IDs from nursing visits.
+        // IMPORTANT: `visit.patient_id` is the human-readable patient identifier (e.g. "9852"),
+        // not the DB primary key, and will 404 if used with `/patients/:id/`.
+        const patientIds = [
+          ...new Set(
+            nursingVisits
+              .map((v: any) => {
+                if (typeof v.patient === 'number') return String(v.patient);
+                if (v.patient && typeof v.patient === 'object' && v.patient.id) return String(v.patient.id);
+                return null;
+              })
+              .filter((id: string | null): id is string => Boolean(id))
+          ),
+        ];
 
         console.log('[Patient Vitals] Unique patient IDs:', patientIds.length);
         
@@ -269,7 +307,7 @@ export default function PatientVitalsPage() {
     };
     
     loadPatients();
-  }, []);
+  }, [dateFilter]);
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);

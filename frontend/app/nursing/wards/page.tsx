@@ -68,10 +68,14 @@ export default function WardManagementPage() {
       setAdmissions(admissionsResponse.results || []);
 
       // Fetch assignments for current nurse (only if user has nurse role)
-      if (currentUser?.id) {
+      const nurseId = Number(currentUser?.id);
+      const roleName = (currentUser as any)?.systemRole ?? "";
+      const isNurseRole = typeof roleName === "string" && /(nurse|midwife)/i.test(roleName);
+
+      if (Number.isFinite(nurseId) && isNurseRole) {
         try {
           const assignmentsResponse = await wardService.getAssignments({
-            nurse: Number(currentUser.id),
+            nurse: nurseId,
             status: 'active'
           });
           setAssignments(assignmentsResponse.results || []);
@@ -80,6 +84,8 @@ export default function WardManagementPage() {
           console.warn('Could not fetch ward assignments for current user:', assignmentError);
           setAssignments([]);
         }
+      } else {
+        setAssignments([]);
       }
     } catch (error: any) {
       console.error('Error fetching ward data:', error);

@@ -426,10 +426,15 @@ export default function AnalyticsPage() {
                   ) : (
                     <div className="space-y-3">
                       {topDiagnoses.map((d, i) => (
-                      <div key={d.diagnosis} className="flex items-center gap-3">
+                      <div key={d.code || d.diagnosis || i} className="flex items-center gap-3">
                         <span className="w-6 h-6 rounded-full bg-emerald-500/10 text-emerald-600 flex items-center justify-center text-sm font-medium">{i + 1}</span>
                         <div className="flex-1">
-                          <div className="flex justify-between"><span className="text-sm font-medium">{d.diagnosis}</span><span className="text-sm text-muted-foreground">{d.count} cases</span></div>
+                          <div className="flex justify-between">
+                            <span className="text-sm font-medium">
+                              {d.code ? `${d.code}${d.description ? ` - ${d.description}` : ''}` : d.diagnosis}
+                            </span>
+                            <span className="text-sm text-muted-foreground">{d.count} cases</span>
+                          </div>
                           <Progress value={d.percentage} className="h-1.5 mt-1" />
                         </div>
                       </div>

@@ -51,6 +51,8 @@ export interface DailyTrend {
 
 export interface TopDiagnosis {
   diagnosis: string;
+  code?: string;
+  description?: string;
   count: number;
   percentage: number;
 }

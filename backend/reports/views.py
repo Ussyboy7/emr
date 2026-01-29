@@ -166,46 +166,46 @@ class TopDiagnosesReportView(views.APIView):
         limit = int(request.query_params.get('limit', 10))
         start_date = request.query_params.get('start_date')
         end_date = request.query_params.get('end_date')
-        
-        from consultation.models import ConsultationSession
-        
-        queryset = ConsultationSession.objects.filter(status='completed')
+
+        # Use structured diagnoses (ICD-10) instead of parsing free-text assessment.
+        from consultation.models import Diagnosis
+
+        qs = Diagnosis.objects.filter(
+            session__status='completed',
+            icd10_code__isnull=False,
+        )
+
+        # Filter by consultation session period (ended_at), if supplied.
         if start_date:
-            queryset = queryset.filter(ended_at__gte=start_date)
+            qs = qs.filter(session__ended_at__gte=start_date)
         if end_date:
-            queryset = queryset.filter(ended_at__lte=end_date)
-        
-        # Extract diagnoses from assessment field (assuming ICD codes or diagnosis text)
-        # For now, we'll look for common patterns in the assessment field
-        diagnosis_counts = {}
-        total_sessions = 0
-        
-        for session in queryset:
-            if session.assessment:
-                # Try to extract diagnosis from assessment field
-                # This is a simplified approach - in production, you'd have a dedicated diagnosis field
-                assessment_text = session.assessment.lower()
-                # Look for common diagnosis patterns (this is a placeholder)
-                # In a real system, you'd parse ICD codes or structured diagnosis data
-                diagnosis = assessment_text[:100] if assessment_text else 'Unspecified'
-                # For demo, group by first few words of assessment
-                words = assessment_text.split()[:3]
-                diagnosis_key = ' '.join(words).title() if words else 'Unspecified'
-                diagnosis_counts[diagnosis_key] = diagnosis_counts.get(diagnosis_key, 0) + 1
-                total_sessions += 1
-        
-        # Sort by count and take top N
-        sorted_diagnoses = sorted(diagnosis_counts.items(), key=lambda x: x[1], reverse=True)[:limit]
-        
+            qs = qs.filter(session__ended_at__lte=end_date)
+
+        total = qs.count()
+        aggregated = (
+            qs.values(
+                code=F('icd10_code__code'),
+                description=F('icd10_code__description'),
+            )
+            .annotate(count=Count('id'))
+            .order_by('-count')[:limit]
+        )
+
         results = []
-        for diagnosis, count in sorted_diagnoses:
-            percentage = (count / total_sessions * 100) if total_sessions > 0 else 0
+        for row in aggregated:
+            code = row.get('code') or 'UNSPECIFIED'
+            description = row.get('description') or ''
+            count = row.get('count') or 0
+            percentage = (count / total * 100) if total > 0 else 0
             results.append({
-                'diagnosis': diagnosis,
+                # Keep `diagnosis` for backward compatibility with existing frontend code.
+                'diagnosis': f"{code} - {description}" if description else code,
+                'code': code,
+                'description': description,
                 'count': count,
                 'percentage': round(percentage, 1),
             })
-        
+
         return Response(results)
 
 

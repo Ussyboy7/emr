@@ -252,7 +252,8 @@ class WardService {
     assignment_type: string;
     responsibilities?: string;
   }): Promise<WardAssignment> {
-    return apiFetch<WardAssignment>('/wards/assignments/', {
+    // Backend exposes assignments at `/assignments/` (see `backend/wards/urls.py`)
+    return apiFetch<WardAssignment>('/assignments/', {
       method: 'POST',
       body: JSON.stringify(data),
     });
