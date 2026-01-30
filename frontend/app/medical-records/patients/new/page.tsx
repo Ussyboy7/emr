@@ -944,15 +944,6 @@ export default function NewPatientPage() {
                           </SelectContent>
                         </Select>
                       </div>
-                      <div className="space-y-2">
-                        <Label>Tribe</Label>
-                        <Select value={formData.tribe} onValueChange={(v) => handleInputChange('tribe', v)}>
-                          <SelectTrigger><SelectValue placeholder="Select tribe" /></SelectTrigger>
-                          <SelectContent>
-                            {tribes.map(tribe => <SelectItem key={tribe} value={tribe}>{tribe}</SelectItem>)}
-                          </SelectContent>
-                        </Select>
-                      </div>
                       {(patientCategory === 'dependent' || patientCategory === 'retiree') && (
                         <div className="space-y-2">
                           <Label>Occupation</Label>
@@ -1137,6 +1128,19 @@ export default function NewPatientPage() {
                           <SelectTrigger><SelectValue placeholder="Select state" /></SelectTrigger>
                           <SelectContent className="max-h-[200px]">
                             {NIGERIA_STATES_AND_LGAS.map(state => <SelectItem key={state.name} value={state.name}>{state.name}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Tribe</Label>
+                        <Select value={formData.tribe} onValueChange={(v) => handleInputChange('tribe', v)}>
+                          <SelectTrigger><SelectValue placeholder="Select tribe" /></SelectTrigger>
+                          <SelectContent className="max-h-[200px]">
+                            {tribes.map((tribe) => (
+                              <SelectItem key={tribe} value={tribe}>
+                                {tribe}
+                              </SelectItem>
+                            ))}
                           </SelectContent>
                         </Select>
                       </div>
