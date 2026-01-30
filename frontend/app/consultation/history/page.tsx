@@ -246,13 +246,10 @@ export default function ConsultationHistoryPage() {
   const [consultations, setConsultations] = useState<ConsultationRecordWithGender[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
-  const [scopeFilter, setScopeFilter] = useState<"all" | "my">("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [dateFilter, setDateFilter] = useState("all");
   const [clinicFilter, setClinicFilter] = useState("all");
   const [genderFilter, setGenderFilter] = useState("all");
-  const [viewMode, setViewMode] = useState<"table" | "cards">("table");
-  const [groupByPatient, setGroupByPatient] = useState(false);
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -304,25 +301,16 @@ export default function ConsultationHistoryPage() {
   });
 
   const [authError, setAuthError] = useState<unknown | null>(null);
-  const [refreshTrigger, setRefreshTrigger] = useState(0);
   useAuthRedirect(authError);
-
-  // Function to refresh consultations
-  const refreshConsultations = () => {
-    setRefreshTrigger(prev => prev + 1);
-  };
 
   useEffect(() => {
     const loadConsultations = async () => {
       try {
         setLoading(true);
         
-        // When grouped by patient, load up to 1000 to group client-side; otherwise use server pagination
-        const page = groupByPatient ? 1 : currentPage;
-        const pageSize = groupByPatient ? 1000 : itemsPerPage;
         const sessionsResult = await consultationService.getSessions({
-          page,
-          page_size: pageSize,
+          page: currentPage,
+          page_size: itemsPerPage,
           search: searchQuery || undefined,
           status: statusFilter !== 'all' ? statusFilter : undefined,
           // Note: clinicFilter, genderFilter not yet implemented in backend
@@ -542,54 +530,19 @@ export default function ConsultationHistoryPage() {
     };
     
     loadConsultations();
-  }, [currentPage, itemsPerPage, refreshTrigger, groupByPatient, searchQuery, statusFilter]);
-
-  // Client-side filtering only for scope (my consultations)
-  const filteredConsultations = useMemo(() => {
-    const currentUserId = currentUser?.id ? String(currentUser.id) : '';
-    return consultations.filter((c) => {
-      // Scope filtering (client-side for user-specific filtering)
-      const matchesScope = scopeFilter === "all" || (scopeFilter === "my" && c.doctorId === currentUserId);
-      return matchesScope;
-    });
-  }, [consultations, scopeFilter, currentUser]);
+  }, [currentPage, itemsPerPage, searchQuery, statusFilter]);
 
   // With server-side pagination, consultations array contains only current page results
-  const paginatedConsultations = filteredConsultations;
-
-  // Group by patient: one entry per patientId, consultations sorted by date desc (most recent first)
-  const patientGroups = useMemo(() => {
-    const byId = new Map<string, ConsultationRecordWithGender[]>();
-    for (const c of filteredConsultations) {
-      const key = c.patientId || `${c.patient}-${c.id}`;
-      if (!byId.has(key)) byId.set(key, []);
-      byId.get(key)!.push(c);
-    }
-    return Array.from(byId.entries()).map(([patientId, list]) => {
-      const sorted = [...list].sort((a, b) => {
-        const da = new Date(a.date + 'T' + (a.time || '00:00:00')).getTime();
-        const db = new Date(b.date + 'T' + (b.time || '00:00:00')).getTime();
-        return db - da;
-      });
-      const latest = sorted[0];
-      return { patientId, patientName: latest.patient, consultations: sorted };
-    });
-  }, [filteredConsultations]);
-
-  const paginatedPatientGroups = useMemo(() => {
-    const start = (currentPage - 1) * itemsPerPage;
-    return patientGroups.slice(start, start + itemsPerPage);
-  }, [patientGroups, currentPage, itemsPerPage]);
+  const paginatedConsultations = consultations;
 
   // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [currentPage, itemsPerPage, searchQuery, scopeFilter, statusFilter]);
+  }, [itemsPerPage, searchQuery, statusFilter]);
 
   // Stats
   const stats = useMemo(() => {
-    const currentUserId = currentUser?.id ? String(currentUser.id) : '';
-    const filtered = scopeFilter === "my" ? consultations.filter(c => c.doctorId === currentUserId) : consultations;
+    const filtered = consultations;
 
     // Fix today calculation with proper date comparison
     const today = new Date();
@@ -612,7 +565,7 @@ export default function ConsultationHistoryPage() {
       completed: filtered.filter(c => c.status === "Completed").length,
       inProgress: filtered.filter(c => c.status === "In Progress").length,
     };
-  }, [consultations, scopeFilter, currentUser]);
+  }, [consultations]);
 
   const openViewModal = (consultation: ConsultationRecord) => {
     setSelectedConsultation(consultation);
@@ -784,7 +737,6 @@ export default function ConsultationHistoryPage() {
     } as any);
     toast.success("Prescription added");
     await loadEditOrdersRefetch();
-    refreshConsultations();
   };
 
   const handleSubmitLabOrder = async (payload: LabOrderSubmitInput) => {
@@ -811,7 +763,6 @@ export default function ConsultationHistoryPage() {
     } as any);
     toast.success("Lab order added");
     await loadEditOrdersRefetch();
-    refreshConsultations();
   };
 
   const handleSubmitRadiologyOrder = async (payload: RadiologyOrderSubmitInput) => {
@@ -844,7 +795,6 @@ export default function ConsultationHistoryPage() {
     } as any);
     toast.success("Radiology order added");
     await loadEditOrdersRefetch();
-    refreshConsultations();
   };
 
   const handleSubmitPhysioOrder = async (payload: PhysioOrderSubmitInput) => {
@@ -865,7 +815,6 @@ export default function ConsultationHistoryPage() {
     } as any);
     toast.success("Physiotherapy order added");
     await loadEditOrdersRefetch();
-    refreshConsultations();
   };
 
   const handleSaveEdit = async () => {
@@ -983,15 +932,6 @@ export default function ConsultationHistoryPage() {
             <p className="text-muted-foreground mt-1">View and manage all consultation records</p>
           </div>
           <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={refreshConsultations}
-              disabled={loading}
-            >
-              <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-              Refresh
-            </Button>
             <Link href="/consultation">
               <Button variant="outline" size="sm">
                 <TrendingUp className="h-4 w-4 mr-2" />
@@ -1006,48 +946,6 @@ export default function ConsultationHistoryPage() {
             </Link>
           </div>
         </div>
-
-        {/* Scope Toggle */}
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div className="flex items-center gap-2">
-                <Button variant={scopeFilter === "all" ? "default" : "outline"} size="sm" onClick={() => setScopeFilter("all")} className={scopeFilter === "all" ? "bg-emerald-600 hover:bg-emerald-700" : ""}>
-                  <Users className="h-4 w-4 mr-2" />
-                  All Consultations
-                </Button>
-                <Button variant={scopeFilter === "my" ? "default" : "outline"} size="sm" onClick={() => setScopeFilter("my")} className={scopeFilter === "my" ? "bg-emerald-600 hover:bg-emerald-700" : ""}>
-                  <User className="h-4 w-4 mr-2" />
-                  My Sessions
-                </Button>
-              </div>
-              <div className="flex items-center gap-4 flex-wrap">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-muted-foreground">Show:</span>
-                  <Button variant={!groupByPatient ? "default" : "outline"} size="sm" onClick={() => { setGroupByPatient(false); setCurrentPage(1); }} className={!groupByPatient ? "bg-emerald-600 hover:bg-emerald-700" : ""}>
-                    <FileText className="h-4 w-4 mr-2" />
-                    By visit
-                  </Button>
-                  <Button variant={groupByPatient ? "default" : "outline"} size="sm" onClick={() => { setGroupByPatient(true); setCurrentPage(1); }} className={groupByPatient ? "bg-emerald-600 hover:bg-emerald-700" : ""}>
-                    <Users className="h-4 w-4 mr-2" />
-                    By patient
-                  </Button>
-                </div>
-                {!groupByPatient && (
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm text-muted-foreground">View:</span>
-                    <Button variant={viewMode === "table" ? "default" : "ghost"} size="icon" onClick={() => setViewMode("table")} className={viewMode === "table" ? "bg-emerald-600 hover:bg-emerald-700" : ""}>
-                      <List className="h-4 w-4" />
-                    </Button>
-                    <Button variant={viewMode === "cards" ? "default" : "ghost"} size="icon" onClick={() => setViewMode("cards")} className={viewMode === "cards" ? "bg-emerald-600 hover:bg-emerald-700" : ""}>
-                      <LayoutGrid className="h-4 w-4" />
-                    </Button>
-                  </div>
-                )}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
 
         {/* Stats */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -1151,122 +1049,58 @@ export default function ConsultationHistoryPage() {
         </Card>
 
         {/* Results */}
-        {(viewMode === "table" || groupByPatient) ? (
-          <Card>
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b bg-muted/50">
-                    {groupByPatient ? (
-                      <>
-                        <th className="text-left p-4 text-sm font-medium text-muted-foreground">Patient</th>
-                        <th className="text-left p-4 text-sm font-medium text-muted-foreground">Visits</th>
-                        <th className="text-left p-4 text-sm font-medium text-muted-foreground">Last Date</th>
-                        <th className="text-left p-4 text-sm font-medium text-muted-foreground">Last Diagnosis</th>
-                        <th className="text-left p-4 text-sm font-medium text-muted-foreground">Last Doctor</th>
-                        <th className="text-left p-4 text-sm font-medium text-muted-foreground">Actions</th>
-                      </>
-                    ) : (
-                      <>
-                        <th className="text-left p-4 text-sm font-medium text-muted-foreground">ID</th>
-                        <th className="text-left p-4 text-sm font-medium text-muted-foreground">Patient</th>
-                        <th className="text-left p-4 text-sm font-medium text-muted-foreground">Doctor</th>
-                        <th className="text-left p-4 text-sm font-medium text-muted-foreground">Date/Time</th>
-                        <th className="text-left p-4 text-sm font-medium text-muted-foreground">Clinic</th>
-                        <th className="text-left p-4 text-sm font-medium text-muted-foreground">Diagnosis</th>
-                        <th className="text-left p-4 text-sm font-medium text-muted-foreground">Status</th>
-                        <th className="text-left p-4 text-sm font-medium text-muted-foreground">Actions</th>
-                      </>
-                    )}
-                  </tr>
-                </thead>
-                <tbody>
-                  {(groupByPatient ? paginatedPatientGroups.length === 0 : filteredConsultations.length === 0) ? (
-                    <tr>
-                      <td colSpan={groupByPatient ? 6 : 8} className="p-8 text-center">
-                        <div className="flex flex-col items-center gap-3">
-                          <History className="h-12 w-12 text-muted-foreground/50" />
-                          <div>
-                            {searchQuery ? (
-                              <>
-                                <p className="text-muted-foreground font-medium">No consultations found for "{searchQuery}"</p>
-                                <p className="text-sm text-muted-foreground mt-1">Try adjusting your search terms or filters</p>
-                              </>
-                            ) : scopeFilter === "my" ? (
-                              <>
-                                <p className="text-muted-foreground font-medium">No consultations assigned to you</p>
-                                <p className="text-sm text-muted-foreground mt-1">Consultations you handle will appear here</p>
-                              </>
-                            ) : statusFilter !== "all" ? (
-                              <>
-                                <p className="text-muted-foreground font-medium">No {statusFilter.replace('-', ' ')} consultations</p>
-                                <p className="text-sm text-muted-foreground mt-1">Try selecting "All Status" to see all consultations</p>
-                              </>
-                            ) : dateFilter !== "all" ? (
-                              <>
-                                <p className="text-muted-foreground font-medium">No consultations for {dateFilter}</p>
-                                <p className="text-sm text-muted-foreground mt-1">Try selecting "All Time" to see all consultations</p>
-                              </>
-                            ) : (
-                              <>
-                                <p className="text-muted-foreground font-medium">No consultations found</p>
-                                <p className="text-sm text-muted-foreground mt-1">Consultations will appear here once patients are seen</p>
-                              </>
-                            )}
-                          </div>
+        <Card>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b bg-muted/50">
+                  <th className="text-left p-4 text-sm font-medium text-muted-foreground">ID</th>
+                  <th className="text-left p-4 text-sm font-medium text-muted-foreground">Patient</th>
+                  <th className="text-left p-4 text-sm font-medium text-muted-foreground">Doctor</th>
+                  <th className="text-left p-4 text-sm font-medium text-muted-foreground">Date/Time</th>
+                  <th className="text-left p-4 text-sm font-medium text-muted-foreground">Clinic</th>
+                  <th className="text-left p-4 text-sm font-medium text-muted-foreground">Diagnosis</th>
+                  <th className="text-left p-4 text-sm font-medium text-muted-foreground">Status</th>
+                  <th className="text-left p-4 text-sm font-medium text-muted-foreground">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {paginatedConsultations.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="p-8 text-center">
+                      <div className="flex flex-col items-center gap-3">
+                        <History className="h-12 w-12 text-muted-foreground/50" />
+                        <div>
+                          {searchQuery ? (
+                            <>
+                              <p className="text-muted-foreground font-medium">No consultations found for "{searchQuery}"</p>
+                              <p className="text-sm text-muted-foreground mt-1">Try adjusting your search terms or filters</p>
+                            </>
+                          ) : statusFilter !== "all" ? (
+                            <>
+                              <p className="text-muted-foreground font-medium">No {statusFilter.replace('-', ' ')} consultations</p>
+                              <p className="text-sm text-muted-foreground mt-1">Try selecting "All Status" to see all consultations</p>
+                            </>
+                          ) : dateFilter !== "all" ? (
+                            <>
+                              <p className="text-muted-foreground font-medium">No consultations for {dateFilter}</p>
+                              <p className="text-sm text-muted-foreground mt-1">Try selecting "All Time" to see all consultations</p>
+                            </>
+                          ) : (
+                            <>
+                              <p className="text-muted-foreground font-medium">No consultations found</p>
+                              <p className="text-sm text-muted-foreground mt-1">Consultations will appear here once patients are seen</p>
+                            </>
+                          )}
                         </div>
-                      </td>
-                    </tr>
-                  ) : groupByPatient ? (
-                    paginatedPatientGroups.map((gr) => {
-                      const latest = gr.consultations[0];
-                      const isEditable = canEditConsultation(latest);
-                      return (
-                        <tr key={gr.patientId} className={`border-b hover:bg-muted/30 transition-colors ${isEditable ? 'bg-emerald-50/30 dark:bg-emerald-900/10 border-l-4 border-l-emerald-500' : ''}`}>
-                        <td className="p-4">
-                          <p className="font-medium">{gr.patientName}</p>
-                          <p className="text-xs text-muted-foreground">{gr.patientId}</p>
-                        </td>
-                        <td className="p-4">{gr.consultations.length}</td>
-                        <td className="p-4">
-                          <p>{new Date(latest.date + 'T' + latest.time).toLocaleDateString()}</p>
-                          <p className="text-xs text-muted-foreground">{new Date(latest.date + 'T' + latest.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
-                        </td>
-                        <td className="p-4 max-w-[200px]">
-                          <div className="flex flex-col gap-1">
-                            {latest.diagnosisCodes && latest.diagnosisCodes.length > 0 ? (
-                              <div className="flex flex-wrap gap-1">
-                                {latest.diagnosisCodes.slice(0, 2).map((dx, idx) => (
-                                  <Badge key={idx} variant="outline" className="text-xs font-mono bg-blue-50 text-blue-700 border-blue-200">{dx.code}</Badge>
-                                ))}
-                                {latest.diagnosisCodes.length > 2 && <Badge variant="outline" className="text-xs bg-gray-100">+{latest.diagnosisCodes.length - 2}</Badge>}
-                              </div>
-                            ) : latest.diagnosis && latest.diagnosis.trim() ? (
-                              <span className="truncate text-sm">{latest.diagnosis}</span>
-                            ) : (
-                              <span className="truncate text-sm text-amber-600">No diagnosis recorded</span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="p-4">
-                          <span className={latest.doctor === 'Unknown' ? 'text-amber-600' : ''}>{latest.doctor}</span>
-                          {latest.doctor === 'Unknown' && <AlertTriangle className="h-3 w-3 text-amber-500 inline ml-1" />}
-                        </td>
-                        <td className="p-4">
-                          <div className="flex items-center gap-1 min-w-[100px]">
-                            <Button variant="ghost" size="sm" onClick={() => openViewModal(latest)} title="View latest consultation" className="hover:bg-blue-50 hover:text-blue-600"><Eye className="h-4 w-4" /></Button>
-                            <Button variant="ghost" size="sm" onClick={() => openEditModal(latest)} title={canEditConsultation(latest) ? "Edit latest consultation" : "Editable within 48h"} className="hover:bg-amber-50 hover:text-amber-600" disabled={!isEditable}><Edit className="h-4 w-4" /></Button>
-                            {isEditable && <div className="w-2 h-2 bg-emerald-500 rounded-full" title="Editable" />}
-                          </div>
-                        </td>
-                        </tr>
-                      );
-                    })
-                  ) : (
-                    paginatedConsultations.map((c) => {
-                      const isEditable = canEditConsultation(c);
-                      return (
-                        <tr key={c.id} className={`border-b hover:bg-muted/30 transition-colors ${isEditable ? 'bg-emerald-50/30 dark:bg-emerald-900/10 border-l-4 border-l-emerald-500' : ''}`}>
+                      </div>
+                    </td>
+                  </tr>
+                ) : (
+                  paginatedConsultations.map((c) => {
+                    const isEditable = canEditConsultation(c);
+                    return (
+                      <tr key={c.id} className={`border-b hover:bg-muted/30 transition-colors ${isEditable ? 'bg-emerald-50/30 dark:bg-emerald-900/10 border-l-4 border-l-emerald-500' : ''}`}>
                         <td className="p-4 font-medium">{c.id}</td>
                         <td className="p-4">
                           <p className="font-medium">{c.patient}</p>
@@ -1350,136 +1184,24 @@ export default function ConsultationHistoryPage() {
                           </div>
                         </td>
                       </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </Card>
-        ) : (
-          <div className="space-y-4">
-            {filteredConsultations.length === 0 ? (
-              <Card>
-                <CardContent className="p-8 text-center">
-                  <div className="flex flex-col items-center gap-3">
-                    <History className="h-12 w-12 text-muted-foreground/50" />
-                    <div>
-                      {searchQuery ? (
-                        <>
-                          <p className="text-muted-foreground font-medium">No consultations found for "{searchQuery}"</p>
-                          <p className="text-sm text-muted-foreground mt-1">Try adjusting your search terms or filters</p>
-                        </>
-                      ) : scopeFilter === "my" ? (
-                        <>
-                          <p className="text-muted-foreground font-medium">No consultations assigned to you</p>
-                          <p className="text-sm text-muted-foreground mt-1">Consultations you handle will appear here</p>
-                        </>
-                      ) : statusFilter !== "all" ? (
-                        <>
-                          <p className="text-muted-foreground font-medium">No {statusFilter.replace('-', ' ')} consultations</p>
-                          <p className="text-sm text-muted-foreground mt-1">Try selecting "All Status" to see all consultations</p>
-                        </>
-                      ) : dateFilter !== "all" ? (
-                        <>
-                          <p className="text-muted-foreground font-medium">No consultations for {dateFilter}</p>
-                          <p className="text-sm text-muted-foreground mt-1">Try selecting "All Time" to see all consultations</p>
-                        </>
-                      ) : (
-                        <>
-                          <p className="text-muted-foreground font-medium">No consultations found</p>
-                          <p className="text-sm text-muted-foreground mt-1">Consultations will appear here once patients are seen</p>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ) : (
-              paginatedConsultations.map((c) => (
-                <Card key={c.id} className={`hover:shadow-lg transition-shadow border-l-4 ${c.status === "Completed" ? "border-l-emerald-500" : "border-l-blue-500"}`}>
-                  <CardContent className="p-6">
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-3 mb-3 flex-wrap">
-                          <span className="font-semibold text-lg">{c.patient}</span>
-                          <Badge variant="outline">{c.patientId}</Badge>
-                          <Badge className={getPriorityColor(c.priority)}>{c.priority}</Badge>
-                          <Badge className={getStatusBadge(c.status)}>{c.status}</Badge>
-                        </div>
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm text-muted-foreground mb-4">
-                          <span className="flex items-center gap-1">
-                            <Calendar className="h-4 w-4" />
-                            {new Date(c.date + 'T' + c.time).toLocaleDateString()}
-                          </span>
-                          <span className="flex items-center gap-1">
-                            <Clock className="h-4 w-4" />
-                            {new Date(c.date + 'T' + c.time).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}
-                            {c.sessionDuration > 0 && ` (${c.sessionDuration}min)`}
-                          </span>
-                          <span className={`flex items-center gap-1 ${c.doctor === 'Unknown' ? 'text-amber-600' : ''}`}>
-                            <Stethoscope className="h-4 w-4" />
-                            {c.doctor}
-                            {c.doctor === 'Unknown' && <AlertTriangle className="h-3 w-3 text-amber-500 ml-1" />}
-                          </span>
-                          <span className="flex items-center gap-1"><Activity className="h-4 w-4" />{c.clinic}</span>
-                        </div>
-                        <div className={`p-3 rounded-lg mb-3 ${(!c.diagnosis && (!c.diagnosisCodes || c.diagnosisCodes.length === 0)) ? 'bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800' : 'bg-muted/50'}`}>
-                          <div className="flex items-center gap-2">
-                            <span className="font-medium text-sm">Diagnosis:</span>
-                            <div className="flex-1">
-                              {c.diagnosisCodes && c.diagnosisCodes.length > 0 ? (
-                                <div className="flex flex-wrap gap-1 mt-1">
-                                  {c.diagnosisCodes.slice(0, 3).map((dx, idx) => (
-                                    <Badge key={idx} variant="outline" className="text-xs font-mono">
-                                      {dx.code}
-                                    </Badge>
-                                  ))}
-                                  {c.diagnosisCodes.length > 3 && (
-                                    <Badge variant="outline" className="text-xs">
-                                      +{c.diagnosisCodes.length - 3}
-                                    </Badge>
-                                  )}
-                                </div>
-                              ) : (
-                                <span className={`text-sm ${(!c.diagnosis || c.diagnosis.length < 3) ? 'text-amber-700 dark:text-amber-300' : ''}`}>
-                                  {c.diagnosis || 'No diagnosis recorded'}
-                                </span>
-                              )}
-                            </div>
-                            {(!c.diagnosis && (!c.diagnosisCodes || c.diagnosisCodes.length === 0)) && (
-                              <AlertTriangle className="h-3 w-3 text-amber-500" />
-                            )}
-                          </div>
-                        </div>
-                        <div className="flex gap-4 text-sm flex-wrap">
-                          <span className="flex items-center gap-1 text-red-600 dark:text-red-400"><Activity className="h-4 w-4" />{c.vitals.length} Vitals</span>
-                          <span className="flex items-center gap-1 text-pink-600 dark:text-pink-400"><FlaskConical className="h-4 w-4" />{c.labOrders.length} Labs</span>
-                          <span className="flex items-center gap-1 text-blue-600 dark:text-blue-400"><Pill className="h-4 w-4" />{c.prescriptions.length} Rx</span>
-                          <span className="flex items-center gap-1 text-orange-600 dark:text-orange-400"><Syringe className="h-4 w-4" />{c.nursingOrders.length} Nursing</span>
-                        </div>
-                      </div>
-                      <Button size="sm" onClick={() => openViewModal(c)} className="bg-emerald-600 hover:bg-emerald-700 ml-4">
-                        <Eye className="h-4 w-4 mr-2" />View
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))
-            )}
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
           </div>
-        )}
+        </Card>
 
         {/* Pagination */}
-        {(groupByPatient ? patientGroups.length : filteredConsultations.length) > 0 && (
+        {paginatedConsultations.length > 0 && (
           <Card className="p-4">
             <StandardPagination
               currentPage={currentPage}
-              totalItems={groupByPatient ? patientGroups.length : totalCount}
+              totalItems={totalCount}
               itemsPerPage={itemsPerPage}
               onPageChange={setCurrentPage}
               onItemsPerPageChange={setItemsPerPage}
-              itemName={groupByPatient ? "patients" : "consultations"}
+              itemName={"consultations"}
             />
           </Card>
         )}

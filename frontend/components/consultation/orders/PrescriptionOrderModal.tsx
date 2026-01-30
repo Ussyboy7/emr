@@ -131,8 +131,19 @@ export function PrescriptionOrderModal({
       const isSelected = next.has(medId);
       if (isSelected) {
         next.delete(medId);
+        // remove config when deselecting (match consultation session behavior)
+        setMedicationConfigs((prevConfigs) => {
+          const nextConfigs = new Map(prevConfigs);
+          nextConfigs.delete(medId);
+          return nextConfigs;
+        });
       } else {
         next.add(medId);
+
+        // Close dropdown and clear search when medication is selected
+        setShowMedicationDropdown(false);
+        setMedicationSearch("");
+
         // ensure config exists
         setMedicationConfigs((prevConfigs) => {
           const nextConfigs = new Map(prevConfigs);
@@ -346,7 +357,15 @@ export function PrescriptionOrderModal({
                       );
                     })}
                 </div>
-                <Button variant="ghost" size="sm" onClick={() => setSelectedMedications(new Set())} className="text-xs">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setSelectedMedications(new Set());
+                    setMedicationConfigs(new Map());
+                  }}
+                  className="text-xs"
+                >
                   Clear All
                 </Button>
               </div>

@@ -92,8 +92,14 @@ export function LabOrderModal({
   const toggle = (t: LabTemplateLike) => {
     setSelected((prev) => {
       const next = new Set(prev);
-      if (next.has(t.id)) next.delete(t.id);
-      else next.add(t.id);
+      if (next.has(t.id)) {
+        next.delete(t.id);
+      } else {
+        next.add(t.id);
+        // Match consultation session behavior: clear search + close dropdown on select
+        setShowDropdown(false);
+        setSearch("");
+      }
       return next;
     });
   };
