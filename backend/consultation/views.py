@@ -297,12 +297,29 @@ class ConsultationQueueViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     serializer_class = ConsultationQueueSerializer
     filter_backends = [DjangoFilterBackend, OrderingFilter]
-    filterset_fields = ['room', 'patient', 'is_active']
-    ordering_fields = ['priority', 'queued_at']
+    filterset_fields = ['room', 'patient', 'is_active', 'visit']
+    ordering_fields = ['priority', 'queued_at', 'called_at']
     ordering = ['priority', 'queued_at']
     
     def get_queryset(self):
-        return ConsultationQueue.objects.all().select_related('room', 'patient', 'visit')
+        qs = ConsultationQueue.objects.all().select_related('room', 'patient', 'visit')
+
+        # Date filtering (match VisitViewSet pattern) but based on queued_at
+        # because queued_at represents "Sent to Room".
+        date = self.request.query_params.get('date')
+        start_date = self.request.query_params.get('start_date')
+        end_date = self.request.query_params.get('end_date')
+
+        if date:
+            qs = qs.filter(queued_at__date=date)
+        elif start_date:
+            qs = qs.filter(queued_at__date__gte=start_date)
+            if end_date:
+                qs = qs.filter(queued_at__date__lte=end_date)
+        elif end_date:
+            qs = qs.filter(queued_at__date__lte=end_date)
+
+        return qs
     
     def perform_create(self, serializer):
         """Create queue item with duplicate prevention."""

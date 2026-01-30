@@ -22,7 +22,7 @@ import { PatientAvatar } from "@/components/PatientAvatar";
 import { apiFetch } from '@/lib/api-client';
 
 import {
-  Users, Search, Stethoscope, Calendar, Clock, CheckCircle,
+  Users, Search, Stethoscope, Calendar, Clock, CheckCircle, CheckCircle2,
   Eye, Play, AlertTriangle, Loader2, Activity, RefreshCw, XCircle,
   FileText, Target, ClipboardList, Plus, User, Lightbulb, Heart, Pencil
 } from 'lucide-react';
@@ -773,6 +773,11 @@ export default function PhysioPoolQueuePage() {
                             )}
                           </div>
                           <div className="flex items-center gap-1 flex-shrink-0">
+                            {order.status === 'completed' && (
+                              <div className="h-8 w-8 flex items-center justify-center rounded border border-emerald-500/50 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10">
+                                <CheckCircle2 className="h-4 w-4" />
+                              </div>
+                            )}
                             <Tooltip>
                               <TooltipTrigger asChild>
                                 <Button variant="ghost" size="sm" className="h-8 w-8 p-0 hover:bg-muted" onClick={(e) => { e.stopPropagation(); openViewDialog(order); }}>

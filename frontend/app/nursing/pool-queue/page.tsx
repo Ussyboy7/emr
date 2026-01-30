@@ -167,6 +167,54 @@ export default function NursingPoolQueuePage() {
           !completedConsultationVisits.has(visit.id)
         );
 
+        // When status filter is "all" or "sent-to-room", also load consultation queue
+        // history for the selected date range so "Sent to Room" can be shown for
+        // Today/Week/Month/All Time (including inactive queue items).
+        type QueueItem = {
+          visit?: number | null;
+          patient?: number | null;
+          patient_name?: string;
+          room_name?: string;
+          queued_at?: string;
+          is_active?: boolean;
+          visit_display_id?: string | null;
+          visit_date?: string | null;
+          visit_time?: string | null;
+          visit_type?: string | null;
+          visit_status?: string | null;
+          visit_clinic?: string | null;
+        };
+
+        let sentVisitToRoom = new Map<number, { roomName: string; sentAt?: string; queueActive?: boolean; queueItem?: QueueItem }>();
+        if (statusFilter === 'all' || statusFilter === 'sent-to-room') {
+          try {
+            const qs = new URLSearchParams();
+            // NOTE: backend now supports `date/start_date/end_date` based on queued_at.
+            if (dateParam) qs.set('date', dateParam);
+            if (startDate) qs.set('start_date', startDate);
+            if (endDate) qs.set('end_date', endDate);
+            qs.set('ordering', '-queued_at');
+            qs.set('page_size', '5000');
+
+            const queueResult = await apiFetch<{ results: QueueItem[] }>(`/consultation/queue/?${qs.toString()}`);
+            (queueResult.results || []).forEach((item) => {
+              const visitId = typeof item.visit === 'number' ? item.visit : item.visit ? parseInt(String(item.visit), 10) : null;
+              if (!visitId || !item.room_name) return;
+              // Because we request ordering=-queued_at, the first time we see a visit is the latest send-to-room record.
+              if (!sentVisitToRoom.has(visitId)) {
+                sentVisitToRoom.set(visitId, {
+                  roomName: item.room_name,
+                  sentAt: item.queued_at || undefined,
+                  queueActive: item.is_active,
+                  queueItem: item,
+                });
+              }
+            });
+          } catch (err) {
+            console.error('Error fetching consultation queue history:', err);
+          }
+        }
+
         console.log('All visits loaded:', result.results.length);
         console.log('Filtered nursing visits:', nursingVisits.length);
         console.log('Visit statuses found:', [...new Set(result.results.map(v => v.status))]);
@@ -183,8 +231,40 @@ export default function NursingPoolQueuePage() {
           time: v.time
         })));
         
-        // Fetch vitals for all nursing visits in parallel
-        const vitalsPromises = nursingVisits.map(async (visit: Visit) => {
+        // Build a combined visit list:
+        // - nursingVisits: in_progress visits needing nursing work
+        // - sent-to-room visits: visits referenced by consultation queue in the selected date range
+        const combinedVisits: Visit[] = [...nursingVisits];
+        const existingVisitIds = new Set<number>(combinedVisits.map(v => v.id));
+        sentVisitToRoom.forEach((meta, visitId) => {
+          if (existingVisitIds.has(visitId)) return;
+          const qi = meta.queueItem;
+          if (!qi) return;
+          const patientId = typeof qi.patient === 'number' ? qi.patient : qi.patient ? parseInt(String(qi.patient), 10) : undefined;
+          if (!patientId) return;
+
+          // Create a minimal Visit-like object sufficient for display and vitals lookup.
+          // We prefer visit fields included in the queue serializer; fall back to queued_at date/time.
+          const queuedAt = qi.queued_at ? new Date(qi.queued_at) : null;
+          const fallbackDate = queuedAt ? queuedAt.toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
+          const fallbackTime = queuedAt ? queuedAt.toTimeString().slice(0, 8) : '00:00:00';
+
+          combinedVisits.push({
+            id: visitId,
+            visit_id: qi.visit_display_id || `VIS-${visitId}`,
+            patient: patientId,
+            patient_name: qi.patient_name || `Patient ${patientId}`,
+            visit_type: qi.visit_type || 'consultation',
+            status: qi.visit_status || 'completed',
+            date: qi.visit_date || fallbackDate,
+            time: (qi.visit_time as any) || fallbackTime,
+            clinic: qi.visit_clinic || 'GOPD',
+            clinical_notes: '',
+          } as Visit);
+        });
+
+        // Fetch vitals for all relevant visits in parallel
+        const vitalsPromises = combinedVisits.map(async (visit: Visit) => {
           try {
             const vitalsResult = await apiFetch<{ results: any[] }>(`/vitals/?visit=${visit.id}&ordering=-recorded_at`);
             console.log(`Vitals for visit ${visit.id}:`, vitalsResult.results[0] || 'No vitals');
@@ -197,25 +277,32 @@ export default function NursingPoolQueuePage() {
         const vitalsResults = await Promise.all(vitalsPromises);
         const vitalsMap = new Map(vitalsResults.map(r => [r.visitId, r.vitals]));
 
-        // Fetch consultation queue to check which visits have been sent to rooms
-        // Patients sent to rooms should still appear but with "Sent to Room" status
-        // Note: We use visit ID to map to room names
-        let queueVisitToRoom = new Map<number, string>(); // Map visit ID to room name
-        try {
-          const queueResult = await apiFetch<{ results: any[] }>(`/consultation/queue/?is_active=true&page_size=1000`);
-          queueResult.results.forEach((item: any) => {
-            if (item.visit && item.room_name) {
-              queueVisitToRoom.set(item.visit, item.room_name);
-            }
+        // Build visit -> room mapping for "Sent to Room" status.
+        // If we did not load history (because statusFilter isn't all/sent-to-room),
+        // fall back to active queue only to mark current sent-to-room visits.
+        let queueVisitToRoom = new Map<number, string>();
+        let queueVisitToSentAt = new Map<number, string>();
+        if (sentVisitToRoom.size > 0) {
+          sentVisitToRoom.forEach((meta, visitId) => {
+            queueVisitToRoom.set(visitId, meta.roomName);
+            if (meta.sentAt) queueVisitToSentAt.set(visitId, meta.sentAt);
           });
-          console.log('Consultation queue items:', queueResult.results.length);
-          console.log('Queue visit to room map:', Array.from(queueVisitToRoom.entries()));
-        } catch (err) {
-          console.error('Error fetching consultation queue:', err);
+        } else {
+          try {
+            const queueResult = await apiFetch<{ results: any[] }>(`/consultation/queue/?is_active=true&page_size=1000`);
+            (queueResult.results || []).forEach((item: any) => {
+              if (item.visit && item.room_name) {
+                const vid = typeof item.visit === 'number' ? item.visit : parseInt(String(item.visit), 10);
+                queueVisitToRoom.set(vid, item.room_name);
+              }
+            });
+          } catch (err) {
+            console.error('Error fetching consultation queue:', err);
+          }
         }
         
         // Don't filter out visits - show all visits, but mark those in queue as "Sent to Room"
-        const visitsNeedingNursing = nursingVisits; // Show all visits
+        const visitsNeedingNursing = combinedVisits; // Include queue-history visits when loaded
         
         // Transform visits to NursingPatient format
         console.log('Starting transformation of', visitsNeedingNursing.length, 'visits to nursing patients');
@@ -274,6 +361,7 @@ export default function NursingPoolQueuePage() {
             patientNumericId: visit.patient, // Store the actual patient ID from backend
             visitNumericId: visit.id, // Store the actual visit ID from backend
             visitNotes: visit.clinical_notes, // Clinical notes from the visit
+            sentAt: queueVisitToSentAt.get(visit.id),
           };
         });
 
@@ -322,6 +410,7 @@ export default function NursingPoolQueuePage() {
     visitNotes?: string;
     age?: number;
     gender?: string;
+    sentAt?: string;
   }
 
   const [selectedPatient, setSelectedPatient] = useState<NursingPatient | null>(null);
@@ -358,13 +447,14 @@ export default function NursingPoolQueuePage() {
 
   // Filter patients
   const filteredPatients = patients.filter(p => {
+    const normalizeStatus = (s: string) => s.toLowerCase().trim().replace(/\s+/g, '-');
     const searchLower = searchQuery.toLowerCase();
     const matchesSearch = !searchQuery ||
                          p.name.toLowerCase().includes(searchLower) ||
                          p.patientId.toLowerCase().includes(searchLower) ||
                          (p.visitId && p.visitId.toLowerCase().includes(searchLower)) ||
                          (p.personalNumber && p.personalNumber.toLowerCase().includes(searchLower));
-    const matchesStatus = statusFilter === 'all' || p.nursingStatus.toLowerCase().replace(' ', '-') === statusFilter;
+    const matchesStatus = statusFilter === 'all' || normalizeStatus(p.nursingStatus) === statusFilter;
     const matchesType = typeFilter === 'all' || p.visitType.toLowerCase() === typeFilter.toLowerCase();
     const matchesClinic = clinicFilter === 'all' || clinicMatches(p.clinic, clinicFilter);
 
@@ -385,7 +475,9 @@ export default function NursingPoolQueuePage() {
     
     // Date filter
     if (dateFilter !== 'all') {
-      const visitDate = new Date(p.visitDate);
+      // For "Sent to Room", filter by the send timestamp (queued_at) when available.
+      const dateSource = (p.nursingStatus === 'Sent to Room' && p.sentAt) ? p.sentAt : p.visitDate;
+      const visitDate = new Date(dateSource);
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       
@@ -834,6 +926,7 @@ export default function NursingPoolQueuePage() {
                     <SelectItem value="pending">Pending Vitals</SelectItem>
                     <SelectItem value="vitals-recorded">Vitals Recorded</SelectItem>
                     <SelectItem value="ready-for-consultation">Ready for Consultation</SelectItem>
+                    <SelectItem value="sent-to-room">Sent to Room</SelectItem>
                   </SelectContent>
                 </Select>
                 <Select value={typeFilter} onValueChange={setTypeFilter}>
@@ -923,9 +1016,9 @@ export default function NursingPoolQueuePage() {
                             </Button>
                           )}
                           {patient.nursingStatus === 'Sent to Room' && (
-                            <Badge variant="outline" className="h-7 px-2 border-violet-500/50 text-violet-600 dark:text-violet-400 bg-violet-500/10 text-xs">
-                              In Queue
-                            </Badge>
+                            <div className="h-7 w-7 flex items-center justify-center rounded border border-violet-500/50 text-violet-600 dark:text-violet-400 bg-violet-500/10">
+                              <CheckCircle2 className="h-4 w-4" />
+                            </div>
                           )}
                         </div>
                       </div>

@@ -57,6 +57,18 @@ const getTypeConfig = (type: string) => {
   return configs[type] || configs['medication'];
 };
 
+const getCompletedIconStyle = (type: string) => {
+  switch (type) {
+    case 'injection':
+      return 'border-emerald-500/50 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10';
+    case 'dressing':
+      return 'border-violet-500/50 text-violet-600 dark:text-violet-400 bg-violet-500/10';
+    case 'medication':
+    default:
+      return 'border-blue-500/50 text-blue-600 dark:text-blue-400 bg-blue-500/10';
+  }
+};
+
 const formatDateTime = (dateString: string) => {
   const date = new Date(dateString);
   return {
@@ -434,9 +446,14 @@ export default function ProceduresHistoryPage() {
                           <p className="text-xs text-muted-foreground">{time}</p>
                         </td>
                         <td className="p-4">
-                          <Button variant="ghost" size="sm" onClick={() => openViewDialog(procedure)}>
-                            <Eye className="h-4 w-4 mr-1" />View
-                          </Button>
+                          <div className="flex items-center gap-2">
+                            <div className={`h-7 w-7 flex items-center justify-center rounded border ${getCompletedIconStyle(procedure.type)}`}>
+                              <CheckCircle2 className="h-4 w-4" />
+                            </div>
+                            <Button variant="ghost" size="sm" onClick={() => openViewDialog(procedure)}>
+                              <Eye className="h-4 w-4 mr-1" />View
+                            </Button>
+                          </div>
                         </td>
                       </tr>
                     );

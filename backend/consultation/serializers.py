@@ -56,6 +56,12 @@ class ConsultationQueueSerializer(serializers.ModelSerializer):
     
     patient_name = serializers.CharField(source='patient.get_full_name', read_only=True)
     room_name = serializers.CharField(source='room.name', read_only=True)
+    visit_display_id = serializers.CharField(source='visit.visit_id', read_only=True, allow_null=True)
+    visit_date = serializers.DateField(source='visit.date', read_only=True, allow_null=True)
+    visit_time = serializers.TimeField(source='visit.time', read_only=True, allow_null=True)
+    visit_type = serializers.CharField(source='visit.visit_type', read_only=True, allow_null=True)
+    visit_status = serializers.CharField(source='visit.status', read_only=True, allow_null=True)
+    visit_clinic = serializers.CharField(source='visit.clinic', read_only=True, allow_null=True)
     
     class Meta:
         model = ConsultationQueue

@@ -27,6 +27,7 @@ import {
 interface Procedure {
   id: string;
   type: 'injection' | 'dressing' | 'medication' | 'ward_admission';
+  status: 'pending' | 'completed';
   patientName: string;
   patientId: string;
   personalNumber: string;
@@ -34,6 +35,7 @@ interface Procedure {
   gender: string;
   ward: string;
   orderedAt: string;
+  completedAt?: string;
   orderedBy: string;
   priority: 'Emergency' | 'High' | 'Medium' | 'Low';
   allergies: string[];
@@ -98,6 +100,7 @@ export default function ProceduresQueuePage() {
   useAuthRedirect(authError);
   const { currentUser } = useCurrentUser();
   const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'completed'>('pending');
   const [typeFilter, setTypeFilter] = useState('all');
   const [priorityFilter, setPriorityFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('today');
@@ -141,114 +144,8 @@ export default function ProceduresQueuePage() {
           ]);
         }
         
-        // Fetch pending nursing orders
-        const ordersResult = await apiFetch<{ results: any[] }>('/nursing/orders/?status=pending&page_size=1000');
-        const orders = ordersResult.results || [];
-        
-        // Transform orders to procedures format
-        const transformedProcedures = await Promise.all(orders.map(async (order: any) => {
-          try {
-            // Get patient details
-            const patient = await patientService.getPatient(order.patient);
-            
-            // Load patient allergies from medical history
-            let allergies: string[] = [];
-            try {
-              const history = await patientService.getPatientHistory(order.patient);
-              if (history && history.allergies) {
-                allergies = Array.isArray(history.allergies) 
-                  ? history.allergies 
-                  : typeof history.allergies === 'string' 
-                    ? history.allergies.split(/[,\n]/).map((a: string) => a.trim()).filter((a: string) => a)
-                    : [];
-              }
-            } catch (historyErr) {
-              // If history fetch fails, continue without allergies
-              console.warn(`Could not load allergies for patient ${order.patient}:`, historyErr);
-            }
-            
-            // Map backend order_type to frontend type
-            const typeMap: Record<string, Procedure['type']> = {
-              'injection': 'injection',
-              'dressing': 'dressing',
-              'wound_care': 'dressing',
-              'medication': 'medication',
-              'ward admission': 'ward_admission',
-            };
-
-            const procedureType = typeMap[order.order_type?.toLowerCase()] || 'medication';
-            
-            // Map backend priority to frontend priority
-            const priorityMap: Record<string, Procedure['priority']> = {
-              'urgent': 'Emergency',
-              'high': 'High',
-              'medium': 'Medium',
-              'low': 'Low',
-            };
-            
-            const orderedAt = new Date(order.ordered_at);
-            
-            // Parse order description to extract details
-            const details: Procedure['details'] = {};
-            const description = order.description || '';
-            const instructions = order.instructions || '';
-            
-            // Try to extract medication, dosage, route, frequency from description
-            if (procedureType === 'injection' || procedureType === 'medication') {
-              // Look for patterns like "Medication Name - Dosage" or "Medication (Route)"
-              const medMatch = description.match(/([^-•]+?)(?:\s*[-•]\s*([^•]+))?/);
-              if (medMatch) {
-                details.medication = medMatch[1].trim();
-                if (medMatch[2]) {
-                  const rest = medMatch[2].trim();
-                  // Try to extract dosage, route, frequency
-                  const parts = rest.split(/[•,]/).map((p: string) => p.trim());
-                  details.dosage = parts[0] || '';
-                  details.route = parts.find((p: string) => /oral|im|iv|sc|sublingual|topical/i.test(p)) || '';
-                  details.frequency = order.frequency || parts.find((p: string) => /daily|bd|tds|qds|prn/i.test(p)) || '';
-                }
-              }
-              if (order.frequency) details.frequency = order.frequency;
-            } else if (procedureType === 'dressing') {
-              // Look for wound type and location in description
-              const woundMatch = description.match(/([^-•]+?)(?:\s*[-•]\s*([^•]+))?/);
-              if (woundMatch) {
-                details.woundType = woundMatch[1].trim();
-                details.woundLocation = woundMatch[2]?.trim() || '';
-              }
-              details.instructions = instructions || description;
-            }
-            
-            // Extract ward name for ward admission orders
-            let wardName = '';
-            if (procedureType === 'ward_admission') {
-              const wardMatch = description.match(/Ward admission to ([^.]+)\./);
-              wardName = wardMatch ? wardMatch[1] : '';
-            }
-
-            return {
-              id: String(order.id),
-              type: procedureType,
-              patientName: patient.full_name || `${patient.surname} ${patient.first_name}`,
-              patientId: patient.patient_id || String(patient.id),
-              personalNumber: patient.personal_number || '',
-              age: patient.age || 0,
-              gender: patient.gender || '',
-              ward: wardName,
-              orderedAt: order.ordered_at,
-              orderedBy: order.ordered_by_name || 'Unknown',
-              priority: priorityMap[order.priority] || 'Medium',
-              allergies,
-              details,
-            } as Procedure;
-          } catch (err) {
-            console.error(`Error loading order ${order.id}:`, err);
-            return null;
-          }
-        }));
-        
-        const validProcedures = transformedProcedures.filter((p): p is Procedure => p !== null);
-        setProcedures(validProcedures);
+        // Load orders for selected status (pending/completed/all)
+        await loadOrders();
       } catch (err) {
         console.error('Error loading nursing orders:', err);
         if (isAuthenticationError(err)) {
@@ -261,12 +158,13 @@ export default function ProceduresQueuePage() {
       }
     };
     
-    loadOrders();
-  }, []);
+    loadData();
+  }, [statusFilter]);
 
   // ==================== STATS ====================
   const stats = useMemo(() => ({
-    total: procedures.length,
+    pending: procedures.filter(p => p.status === 'pending').length,
+    completed: procedures.filter(p => p.status === 'completed').length,
     emergency: procedures.filter(p => p.priority === 'Emergency').length,
     injections: procedures.filter(p => p.type === 'injection').length,
     dressings: procedures.filter(p => p.type === 'dressing').length,
@@ -274,19 +172,36 @@ export default function ProceduresQueuePage() {
     wardAdmissions: procedures.filter(p => p.type === 'ward_admission').length,
   }), [procedures]);
 
+  const getCompletedIconStyle = (type: Procedure['type']) => {
+    // Use module/type colors (same as typeConfig palettes)
+    switch (type) {
+      case 'injection':
+        return 'border-emerald-500/50 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10';
+      case 'dressing':
+        return 'border-violet-500/50 text-violet-600 dark:text-violet-400 bg-violet-500/10';
+      case 'ward_admission':
+        return 'border-amber-500/50 text-amber-600 dark:text-amber-400 bg-amber-500/10';
+      case 'medication':
+      default:
+        return 'border-blue-500/50 text-blue-600 dark:text-blue-400 bg-blue-500/10';
+    }
+  };
+
   // ==================== FILTERING & SORTING ====================
   const filteredProcedures = useMemo(() => {
     return procedures
       .filter(p => {
         const matchesSearch = p.patientName.toLowerCase().includes(searchQuery.toLowerCase()) ||
                              p.patientId.toLowerCase().includes(searchQuery.toLowerCase());
+        const matchesStatus = statusFilter === 'all' || p.status === statusFilter;
         const matchesType = typeFilter === 'all' || p.type === typeFilter;
         const matchesPriority = priorityFilter === 'all' || p.priority === priorityFilter;
         const matchesGender = genderFilter === 'all' || p.gender.toLowerCase() === genderFilter.toLowerCase();
         
         // Date filter (filter by ordered date)
         if (dateFilter !== 'all') {
-          const orderedDate = new Date(p.orderedAt);
+          const dateSource = (p.status === 'completed' && p.completedAt) ? p.completedAt : p.orderedAt;
+          const orderedDate = new Date(dateSource);
           const today = new Date();
           today.setHours(0, 0, 0, 0);
           
@@ -303,7 +218,7 @@ export default function ProceduresQueuePage() {
           }
         }
         
-        return matchesSearch && matchesType && matchesPriority && matchesGender;
+        return matchesSearch && matchesStatus && matchesType && matchesPriority && matchesGender;
       })
       .sort((a, b) => {
         // Sort by priority first
@@ -312,9 +227,11 @@ export default function ProceduresQueuePage() {
           return order[a.priority] - order[b.priority];
         }
         // Then by time (oldest first)
-        return new Date(a.orderedAt).getTime() - new Date(b.orderedAt).getTime();
+        const aTime = new Date((a.status === 'completed' && a.completedAt) ? a.completedAt : a.orderedAt).getTime();
+        const bTime = new Date((b.status === 'completed' && b.completedAt) ? b.completedAt : b.orderedAt).getTime();
+        return aTime - bTime;
       });
-  }, [procedures, searchQuery, typeFilter, priorityFilter, dateFilter, genderFilter]);
+  }, [procedures, searchQuery, statusFilter, typeFilter, priorityFilter, dateFilter, genderFilter]);
 
   // Paginated procedures
   const paginatedProcedures = useMemo(() => {
@@ -330,7 +247,10 @@ export default function ProceduresQueuePage() {
   // ==================== HANDLERS ====================
   const loadOrders = async () => {
     try {
-      const ordersResult = await apiFetch<{ results: any[] }>('/nursing/orders/?status=pending&page_size=1000');
+      const qs = new URLSearchParams();
+      if (statusFilter !== 'all') qs.set('status', statusFilter);
+      qs.set('page_size', '1000');
+      const ordersResult = await apiFetch<{ results: any[] }>(`/nursing/orders/?${qs.toString()}`);
       const orders = ordersResult.results || [];
       
           const transformedProcedures = await Promise.all(orders.map(async (order: any) => {
@@ -403,6 +323,7 @@ export default function ProceduresQueuePage() {
           return {
             id: String(order.id),
             type: procedureType,
+            status: (order.status === 'completed' ? 'completed' : 'pending'),
             patientName: patient.full_name || `${patient.surname} ${patient.first_name}`,
             patientId: patient.patient_id || String(patient.id),
             personalNumber: patient.personal_number || '',
@@ -410,6 +331,7 @@ export default function ProceduresQueuePage() {
             gender: patient.gender || '',
             ward: '',
             orderedAt: order.ordered_at,
+            completedAt: order.completed_at || order.updated_at || undefined,
             orderedBy: order.ordered_by_name || 'Unknown',
             priority: priorityMap[order.priority] || 'Medium',
             allergies,
@@ -666,16 +588,16 @@ export default function ProceduresQueuePage() {
               </div>
               Procedures Queue
             </h1>
-            <p className="text-muted-foreground mt-1">All pending procedures ordered by doctors</p>
+            <p className="text-muted-foreground mt-1">View and manage nursing procedures (pending and completed)</p>
           </div>
         </div>
 
         {/* Stats Row */}
         <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
-          <Card className={`${stats.total > 0 ? 'bg-gradient-to-br from-rose-500/10 to-pink-500/10 border-rose-500/20' : ''}`}>
+          <Card className={`${stats.pending > 0 ? 'bg-gradient-to-br from-rose-500/10 to-pink-500/10 border-rose-500/20' : ''}`}>
             <CardContent className="p-4 text-center">
               <p className="text-xs text-muted-foreground uppercase tracking-wider">Pending</p>
-              <p className={`text-2xl sm:text-3xl font-bold ${stats.total > 0 ? 'text-rose-500' : 'text-muted-foreground'}`}>{stats.total}</p>
+              <p className={`text-2xl sm:text-3xl font-bold ${stats.pending > 0 ? 'text-rose-500' : 'text-muted-foreground'}`}>{stats.pending}</p>
             </CardContent>
           </Card>
           <Card className={stats.emergency > 0 ? 'border-rose-500/50 bg-rose-500/5' : ''}>
@@ -743,6 +665,14 @@ export default function ProceduresQueuePage() {
                     <SelectItem value="month">This Month</SelectItem>
                   </SelectContent>
                 </Select>
+                <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as 'all' | 'pending' | 'completed')}>
+                  <SelectTrigger className="w-[140px]"><SelectValue placeholder="Status" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Status</SelectItem>
+                    <SelectItem value="pending">Pending</SelectItem>
+                    <SelectItem value="completed">Completed</SelectItem>
+                  </SelectContent>
+                </Select>
                 <Select value={typeFilter} onValueChange={setTypeFilter}>
                   <SelectTrigger className="w-[160px]"><SelectValue placeholder="Procedure Type" /></SelectTrigger>
                   <SelectContent>
@@ -780,11 +710,13 @@ export default function ProceduresQueuePage() {
           <Card>
             <CardContent className="flex flex-col items-center justify-center py-16">
               <CheckCircle2 className="h-16 w-16 text-emerald-500 mb-4" />
-              <h3 className="text-xl font-semibold text-foreground mb-2">All caught up!</h3>
+              <h3 className="text-xl font-semibold text-foreground mb-2">
+                {statusFilter === 'pending' ? 'All caught up!' : 'No records found'}
+              </h3>
               <p className="text-muted-foreground text-center">
-                {procedures.length === 0 
-                  ? "No pending procedures in the queue"
-                  : "No procedures match your current filters"}
+                {procedures.length === 0
+                  ? (statusFilter === 'completed' ? 'No completed procedures found' : 'No procedures found')
+                  : 'No procedures match your current filters'}
               </p>
             </CardContent>
           </Card>
@@ -815,6 +747,11 @@ export default function ProceduresQueuePage() {
                             <span className="font-semibold text-foreground truncate">{procedure.patientName}</span>
                             <Badge className={`text-[10px] px-1.5 py-0 ${getPriorityColor(procedure.priority)}`}>{procedure.priority}</Badge>
                             <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${typeConfig.bgColor} ${typeConfig.color}`}>{typeConfig.label}</Badge>
+                            {procedure.status === 'completed' && (
+                              <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-emerald-500/50 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10">
+                                Completed
+                              </Badge>
+                            )}
                             {procedure.allergies.length > 0 && (
                               <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-rose-500 text-rose-500">⚠️</Badge>
                             )}
@@ -826,20 +763,27 @@ export default function ProceduresQueuePage() {
                             </span>
                           </div>
                           <div className="flex items-center gap-1 flex-shrink-0">
-                            <Button 
-                              size="sm"
-                              onClick={() => openPerformDialog(procedure)} 
-                              className={`h-7 px-2 text-xs text-white ${
-                                procedure.type === 'injection' ? 'bg-emerald-500 hover:bg-emerald-600' :
-                                procedure.type === 'dressing' ? 'bg-violet-500 hover:bg-violet-600' :
-                                'bg-blue-500 hover:bg-blue-600'
-                              }`}
-                            >
-                              <TypeIcon className="h-3 w-3 mr-1" />
-                              {procedure.type === 'injection' ? 'Give' :
-                               procedure.type === 'dressing' ? 'Do' :
-                               procedure.type === 'ward_admission' ? 'Admit' : 'Give'}
-                            </Button>
+                            {procedure.status === 'completed' ? (
+                              <div className={`h-7 w-7 flex items-center justify-center rounded border ${getCompletedIconStyle(procedure.type)}`}>
+                                <CheckCircle2 className="h-4 w-4" />
+                              </div>
+                            ) : (
+                              <Button 
+                                size="sm"
+                                onClick={() => openPerformDialog(procedure)} 
+                                className={`h-7 px-2 text-xs text-white ${
+                                  procedure.type === 'injection' ? 'bg-emerald-500 hover:bg-emerald-600' :
+                                  procedure.type === 'dressing' ? 'bg-violet-500 hover:bg-violet-600' :
+                                  procedure.type === 'ward_admission' ? 'bg-amber-500 hover:bg-amber-600' :
+                                  'bg-blue-500 hover:bg-blue-600'
+                                }`}
+                              >
+                                <TypeIcon className="h-3 w-3 mr-1" />
+                                {procedure.type === 'injection' ? 'Give' :
+                                 procedure.type === 'dressing' ? 'Do' :
+                                 procedure.type === 'ward_admission' ? 'Admit' : 'Give'}
+                              </Button>
+                            )}
                           </div>
                         </div>
                         

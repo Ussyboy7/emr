@@ -785,6 +785,8 @@ export default function LabOrdersPage() {
 
   // Get overall order status
   const getOrderStatus = (tests: LabTest[]) => {
+    // Completed = all tests verified (final)
+    if (tests.length > 0 && tests.every(t => t.status === 'Verified')) return 'Completed';
     if (tests.every(t => t.status === 'Results Ready' || t.status === 'Verified')) return 'Results Ready';
     if (tests.some(t => t.status === 'Processing')) return 'Processing';
     if (tests.some(t => t.status === 'Sample Collected')) return 'In Progress';
@@ -943,6 +945,7 @@ export default function LabOrdersPage() {
       case 'In Progress': return 'bg-blue-500/10 text-blue-600 border-blue-500/50';
       case 'Processing': return 'bg-violet-500/10 text-violet-600 border-violet-500/50';
       case 'Results Ready': return 'bg-emerald-500/10 text-emerald-600 border-emerald-500/50';
+      case 'Completed': return 'bg-emerald-500/10 text-emerald-600 border-emerald-500/50';
       default: return 'bg-gray-500/10 text-gray-600 border-gray-500/50';
     }
   };
@@ -1211,6 +1214,7 @@ export default function LabOrdersPage() {
   const OrderCard = ({ order }: { order: LabOrder }) => {
     const orderProgressDisplay = getOrderProgressDisplay(order.tests);
     const orderStatus = getOrderStatus(order.tests);
+    const isCompleted = orderStatus === 'Completed';
     
     return (
       <Card 
@@ -1243,9 +1247,16 @@ export default function LabOrdersPage() {
                     <Badge key={test.id} variant="secondary" className="text-[10px] px-1.5 py-0">{test.code}</Badge>
                   ))}
                 </div>
-                <Button variant="ghost" size="sm" className="h-7 w-7 p-0 flex-shrink-0" onClick={(e) => { e.stopPropagation(); openViewDialog(order); }}>
-                  <Eye className="h-4 w-4 text-muted-foreground hover:text-primary" />
-                </Button>
+                <div className="flex items-center gap-1 flex-shrink-0">
+                  {isCompleted && (
+                    <div className="h-7 w-7 flex items-center justify-center rounded border border-emerald-500/50 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10">
+                      <CheckCircle2 className="h-4 w-4" />
+                    </div>
+                  )}
+                  <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={(e) => { e.stopPropagation(); openViewDialog(order); }}>
+                    <Eye className="h-4 w-4 text-muted-foreground hover:text-primary" />
+                  </Button>
+                </div>
               </div>
               
               {/* Row 2: Details */}

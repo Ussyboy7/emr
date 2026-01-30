@@ -64,6 +64,10 @@ export default function RadiologyOrdersPage() {
   // Order Card Component (like lab orders)
   const OrderCard = ({ order }: { order: any }) => {
     const orderStatus = getOrderStatus(order);
+    const isCompleted = orderStatus === 'completed';
+    const statusLabel = orderStatus === 'completed'
+      ? 'Completed'
+      : orderStatus.replace('_', ' ').replace('results ready', 'Results Ready');
 
     return (
       <Card
@@ -89,7 +93,7 @@ export default function RadiologyOrdersPage() {
                     {getPriorityLabel(order.priority)}
                   </Badge>
                   <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${getStatusColor(orderStatus)}`}>
-                    {orderStatus.replace('_', ' ').replace('results ready', 'Results Ready')}
+                    {statusLabel}
                   </Badge>
                   {order.studies?.slice(0, 2).map((study: any, idx: number) => (
                     <Badge key={idx} variant="secondary" className="text-[10px] px-1.5 py-0">
@@ -98,9 +102,16 @@ export default function RadiologyOrdersPage() {
                   ))}
                   {order.studies?.length > 2 && <span className="text-[10px] text-muted-foreground">+{order.studies.length - 2}</span>}
                 </div>
-                <Button variant="ghost" size="sm" className="h-7 w-7 p-0 flex-shrink-0" onClick={(e) => { e.stopPropagation(); openViewDialog(order); }}>
-                  <Eye className="h-4 w-4 text-muted-foreground hover:text-primary" />
-                </Button>
+                <div className="flex items-center gap-1 flex-shrink-0">
+                  {isCompleted && (
+                    <div className="h-7 w-7 flex items-center justify-center rounded border border-emerald-500/50 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10">
+                      <CheckCircle2 className="h-4 w-4" />
+                    </div>
+                  )}
+                  <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={(e) => { e.stopPropagation(); openViewDialog(order); }}>
+                    <Eye className="h-4 w-4 text-muted-foreground hover:text-primary" />
+                  </Button>
+                </div>
               </div>
 
               {/* Row 2: Details */}
@@ -296,6 +307,7 @@ export default function RadiologyOrdersPage() {
       case 'processing': return 'bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-900/30 dark:text-blue-400';
       case 'reported': return 'bg-violet-100 text-violet-800 border-violet-200 dark:bg-violet-900/30 dark:text-violet-400';
       case 'verified': return 'bg-emerald-100 text-emerald-800 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400';
+      case 'completed': return 'bg-emerald-100 text-emerald-800 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400';
       case 'rejected': return 'bg-rose-100 text-rose-800 border-rose-200 dark:bg-rose-900/30 dark:text-rose-400';
       default: return 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400';
     }
