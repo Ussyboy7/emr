@@ -29,6 +29,10 @@ import { CLINICS } from '@/lib/constants/clinics';
 import { clinicMatches } from '@/lib/utils/clinic-utils';
 import { ConsultationRecord } from '@/components/consultation/ConsultationDetailModal';
 import { ConsultationReportModal } from '@/components/consultation/ConsultationReportModal';
+import { PrescriptionOrderModal, type PrescriptionOrderSubmitInput } from "@/components/consultation/orders/PrescriptionOrderModal";
+import { LabOrderModal, type LabOrderSubmitInput } from "@/components/consultation/orders/LabOrderModal";
+import { RadiologyOrderModal, type RadiologyOrderSubmitInput } from "@/components/consultation/orders/RadiologyOrderModal";
+import { PhysioOrderModal, type PhysioOrderSubmitInput } from "@/components/consultation/orders/PhysioOrderModal";
 
 // Simple doctor name resolution without fallbacks
 const resolveDoctorName = async (
@@ -273,19 +277,12 @@ export default function ConsultationHistoryPage() {
   const [editPhysioOrders, setEditPhysioOrders] = useState<any[]>([]);
   const [loadingOrders, setLoadingOrders] = useState(false);
   const [editActiveTab, setEditActiveTab] = useState('notes');
-  // Add-order dialogs and form state
+  // Add-order dialogs (Option A: use session-style modals, submit immediately)
   const [showAddPrescription, setShowAddPrescription] = useState(false);
   const [showAddLabOrder, setShowAddLabOrder] = useState(false);
   const [showAddRadiologyOrder, setShowAddRadiologyOrder] = useState(false);
   const [showAddPhysioOrder, setShowAddPhysioOrder] = useState(false);
-  const [addPrescriptionForm, setAddPrescriptionForm] = useState({ medicationId: 0, medicationName: '', dosage: '', frequency: '', duration: '', quantity: 1, instructions: '', unit: 'tablet' });
-  const [addLabForm, setAddLabForm] = useState({ templateId: 0, testName: '', testCode: '', priority: 'routine' as 'routine' | 'urgent' | 'stat', clinicalNotes: '' });
-  const [addRadiologyForm, setAddRadiologyForm] = useState({ procedure: '', bodyPart: '', modality: 'X-Ray', priority: 'routine' as 'routine' | 'urgent' | 'stat', clinicalNotes: '' });
-  const [addPhysioForm, setAddPhysioForm] = useState({ diagnosis: '', chiefComplaint: '', treatmentGoal: '', specialInstructions: '', priority: 'routine' });
-  const [labTemplates, setLabTemplates] = useState<any[]>([]);
-  const [radiologyTemplates, setRadiologyTemplates] = useState<any[]>([]);
-  const [medications, setMedications] = useState<any[]>([]);
-  const [submittingOrder, setSubmittingOrder] = useState(false);
+  const [editOrderAllergies, setEditOrderAllergies] = useState<string[]>([]);
   const [editForm, setEditForm] = useState<{
     diagnosis: string;
     presentationComplaint: string;
@@ -731,156 +728,144 @@ export default function ConsultationHistoryPage() {
     }
   };
 
-  const handleAddPrescription = async () => {
-    if (!selectedConsultation || !addPrescriptionForm.medicationId || !addPrescriptionForm.medicationName) {
-      toast.error('Select a medication');
-      return;
-    }
-    const patientId = selectedConsultation.patientIdNumeric ?? parseInt(selectedConsultation.patientId, 10);
-    if (!patientId || isNaN(patientId)) {
-      toast.error('Invalid patient');
-      return;
-    }
-    const sessionId = parseInt(selectedConsultation.id, 10);
-    setSubmittingOrder(true);
-    try {
-      await pharmacyService.createPrescription({
-        patient: patientId,
-        visit: selectedConsultation.visitId,
-        consultation_session: sessionId,
-        notes: undefined,
-        items: [{
-          medication: addPrescriptionForm.medicationId,
-          quantity: addPrescriptionForm.quantity,
-          unit: addPrescriptionForm.unit,
-          dosage: addPrescriptionForm.dosage,
-          frequency: addPrescriptionForm.frequency,
-          duration: addPrescriptionForm.duration,
-          instructions: addPrescriptionForm.instructions,
-        }],
-      } as any);
-      toast.success('Prescription added');
-      setShowAddPrescription(false);
-      setAddPrescriptionForm({ medicationId: 0, medicationName: '', dosage: '', frequency: '', duration: '', quantity: 1, instructions: '', unit: 'tablet' });
-      await loadEditOrdersRefetch();
-      refreshConsultations();
-    } catch (err: any) {
-      toast.error(err?.message || 'Failed to add prescription');
-    } finally {
-      setSubmittingOrder(false);
-    }
+  const getSelectedPatientId = (): number | null => {
+    if (!selectedConsultation) return null;
+    const pid = selectedConsultation.patientIdNumeric ?? parseInt(selectedConsultation.patientId, 10);
+    return pid && !isNaN(pid) ? pid : null;
   };
 
-  const handleAddLabOrder = async () => {
-    if (!selectedConsultation || !addLabForm.templateId || !addLabForm.testName) {
-      toast.error('Select a test');
-      return;
-    }
-    const patientId = selectedConsultation.patientIdNumeric ?? parseInt(selectedConsultation.patientId, 10);
-    if (!patientId || isNaN(patientId)) {
-      toast.error('Invalid patient');
-      return;
-    }
-    const sessionId = parseInt(selectedConsultation.id, 10);
-    setSubmittingOrder(true);
-    try {
-      await labService.createOrder({
-        patient: patientId as any,
-        visit: selectedConsultation.visitId,
-        consultation_session: sessionId,
-        priority: addLabForm.priority,
-        clinical_notes: addLabForm.clinicalNotes || undefined,
-        tests_data: [{
-          name: addLabForm.testName,
-          code: addLabForm.testCode || addLabForm.testName.substring(0, 10).toUpperCase().replace(/\s/g, '_'),
-          sample_type: 'Blood',
-          template: addLabForm.templateId,
-          status: 'pending',
-          notes: addLabForm.clinicalNotes || '',
-        }],
-      } as any);
-      toast.success('Lab order added');
-      setShowAddLabOrder(false);
-      setAddLabForm({ templateId: 0, testName: '', testCode: '', priority: 'routine', clinicalNotes: '' });
-      await loadEditOrdersRefetch();
-      refreshConsultations();
-    } catch (err: any) {
-      toast.error(err?.message || 'Failed to add lab order');
-    } finally {
-      setSubmittingOrder(false);
-    }
+  const getSelectedSessionId = (): number | null => {
+    if (!selectedConsultation) return null;
+    const sid = parseInt(selectedConsultation.id, 10);
+    return sid && !isNaN(sid) ? sid : null;
   };
 
-  const handleAddRadiologyOrder = async () => {
-    if (!selectedConsultation || !addRadiologyForm.procedure) {
-      toast.error('Enter procedure');
+  // Load allergies when opening prescription modal (best-effort)
+  useEffect(() => {
+    const pid = getSelectedPatientId();
+    if (!showAddPrescription || !pid) return;
+
+    const loadAllergies = async () => {
+      try {
+        const history = await patientService.getPatientHistory(pid);
+        const raw = (history as any)?.allergies;
+        let allergies: string[] = [];
+        if (Array.isArray(raw)) allergies = raw;
+        else if (typeof raw === "string") allergies = raw.split(/[,\n]/).map((a) => a.trim()).filter(Boolean);
+        setEditOrderAllergies(allergies);
+      } catch (err) {
+        setEditOrderAllergies([]);
+      }
+    };
+    loadAllergies();
+  }, [showAddPrescription, selectedConsultation?.id]);
+
+  const handleSubmitPrescription = async (payload: PrescriptionOrderSubmitInput) => {
+    const patientId = getSelectedPatientId();
+    const sessionId = getSelectedSessionId();
+    if (!selectedConsultation || !patientId || !sessionId) {
+      toast.error("Invalid consultation/patient");
       return;
     }
-    const patientId = selectedConsultation.patientIdNumeric ?? parseInt(selectedConsultation.patientId, 10);
-    if (!patientId || isNaN(patientId)) {
-      toast.error('Invalid patient');
-      return;
-    }
-    const sessionId = parseInt(selectedConsultation.id, 10);
-    setSubmittingOrder(true);
-    try {
-      await radiologyService.createOrder({
-        patient: patientId,
-        visit: selectedConsultation.visitId,
-        consultation_session: sessionId,
-        priority: addRadiologyForm.priority,
-        clinical_notes: addRadiologyForm.clinicalNotes || undefined,
-        studies_data: [{
-          procedure: addRadiologyForm.procedure,
-          body_part: addRadiologyForm.bodyPart || '',
-          modality: addRadiologyForm.modality || 'X-Ray',
-          status: 'pending',
-        }],
-      } as any);
-      toast.success('Radiology order added');
-      setShowAddRadiologyOrder(false);
-      setAddRadiologyForm({ procedure: '', bodyPart: '', modality: 'X-Ray', priority: 'routine', clinicalNotes: '' });
-      await loadEditOrdersRefetch();
-      refreshConsultations();
-    } catch (err: any) {
-      toast.error(err?.message || 'Failed to add radiology order');
-    } finally {
-      setSubmittingOrder(false);
-    }
+    await pharmacyService.createPrescription({
+      patient: patientId,
+      visit: selectedConsultation.visitId,
+      consultation_session: sessionId,
+      notes: payload.clinicalIndication || undefined,
+      items: payload.items.map((i) => ({
+        medication: i.medicationId,
+        quantity: i.quantity,
+        unit: i.unit,
+        dosage: i.dosage,
+        frequency: i.frequency,
+        duration: i.duration,
+        instructions: i.instructions,
+      })),
+    } as any);
+    toast.success("Prescription added");
+    await loadEditOrdersRefetch();
+    refreshConsultations();
   };
 
-  const handleAddPhysioOrder = async () => {
-    if (!selectedConsultation || !addPhysioForm.diagnosis.trim()) {
-      toast.error('Diagnosis is required');
+  const handleSubmitLabOrder = async (payload: LabOrderSubmitInput) => {
+    const patientId = getSelectedPatientId();
+    const sessionId = getSelectedSessionId();
+    if (!selectedConsultation || !patientId || !sessionId) {
+      toast.error("Invalid consultation/patient");
       return;
     }
-    const patientId = selectedConsultation.patientIdNumeric ?? parseInt(selectedConsultation.patientId, 10);
-    if (!patientId || isNaN(patientId)) {
-      toast.error('Invalid patient');
+    await labService.createOrder({
+      patient: patientId as any,
+      visit: selectedConsultation.visitId,
+      consultation_session: sessionId,
+      priority: payload.priority,
+      clinical_notes: payload.clinicalNotes || undefined,
+      tests_data: payload.templates.map((t) => ({
+        name: t.name,
+        code: t.code || t.name.substring(0, 10).toUpperCase().replace(/\s/g, "_"),
+        sample_type: t.sample_type || "Blood",
+        template: t.id,
+        status: "pending",
+        notes: payload.clinicalNotes || "",
+      })),
+    } as any);
+    toast.success("Lab order added");
+    await loadEditOrdersRefetch();
+    refreshConsultations();
+  };
+
+  const handleSubmitRadiologyOrder = async (payload: RadiologyOrderSubmitInput) => {
+    const patientId = getSelectedPatientId();
+    const sessionId = getSelectedSessionId();
+    if (!selectedConsultation || !patientId || !sessionId) {
+      toast.error("Invalid consultation/patient");
       return;
     }
-    const sessionId = parseInt(selectedConsultation.id, 10);
-    setSubmittingOrder(true);
-    try {
-      await physioService.createOrder({
-        patient: patientId,
-        consultation_session: sessionId,
-        diagnosis: addPhysioForm.diagnosis.trim(),
-        chief_complaint: addPhysioForm.chiefComplaint || undefined,
-        treatment_goal: addPhysioForm.treatmentGoal || undefined,
-        special_instructions: addPhysioForm.specialInstructions || undefined,
-        priority: addPhysioForm.priority,
-      } as any);
-      toast.success('Physiotherapy order added');
-      setShowAddPhysioOrder(false);
-      setAddPhysioForm({ diagnosis: '', chiefComplaint: '', treatmentGoal: '', specialInstructions: '', priority: 'routine' });
-      await loadEditOrdersRefetch();
-      refreshConsultations();
-    } catch (err: any) {
-      toast.error(err?.message || 'Failed to add physio order');
-    } finally {
-      setSubmittingOrder(false);
+    const clinicalNotes = [
+      payload.clinicalIndication?.trim(),
+      payload.specialInstructions?.trim() ? `Special Instructions: ${payload.specialInstructions.trim()}` : "",
+      payload.contrastRequired ? "Contrast Required: Yes" : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    await radiologyService.createOrder({
+      patient: patientId,
+      visit: selectedConsultation.visitId,
+      consultation_session: sessionId,
+      priority: payload.priority,
+      clinical_notes: clinicalNotes || undefined,
+      studies_data: payload.templates.map((t) => ({
+        procedure: t.name,
+        body_part: t.body_part || "",
+        modality: t.modality || "X-Ray",
+        status: "pending",
+      })),
+    } as any);
+    toast.success("Radiology order added");
+    await loadEditOrdersRefetch();
+    refreshConsultations();
+  };
+
+  const handleSubmitPhysioOrder = async (payload: PhysioOrderSubmitInput) => {
+    const patientId = getSelectedPatientId();
+    const sessionId = getSelectedSessionId();
+    if (!selectedConsultation || !patientId || !sessionId) {
+      toast.error("Invalid consultation/patient");
+      return;
     }
+    await physioService.createOrder({
+      patient: patientId,
+      consultation_session: sessionId,
+      diagnosis: payload.diagnosis.trim(),
+      chief_complaint: payload.chiefComplaint || undefined,
+      treatment_goal: payload.treatmentGoal || undefined,
+      special_instructions: payload.specialInstructions || undefined,
+      priority: payload.priority,
+    } as any);
+    toast.success("Physiotherapy order added");
+    await loadEditOrdersRefetch();
+    refreshConsultations();
   };
 
   const handleSaveEdit = async () => {
@@ -1815,189 +1800,34 @@ export default function ConsultationHistoryPage() {
           </DialogContent>
         </Dialog>
 
-        {/* Add Prescription Dialog (from Edit modal) */}
-        <Dialog open={showAddPrescription} onOpenChange={(open) => {
-          setShowAddPrescription(open);
-          if (open) pharmacyService.getMedications({ page_size: 200 }).then(r => setMedications(r.results || []));
-          if (!open) setAddPrescriptionForm({ medicationId: 0, medicationName: '', dosage: '', frequency: '', duration: '', quantity: 1, instructions: '', unit: 'tablet' });
-        }}>
-          <DialogContent className="sm:max-w-[500px]">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2"><Pill className="h-5 w-5 text-purple-500" />Add Prescription</DialogTitle>
-              <DialogDescription>Add a medication to this consultation session</DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4 py-2">
-              <div>
-                <Label>Medication *</Label>
-                <Select
-                  value={addPrescriptionForm.medicationId ? String(addPrescriptionForm.medicationId) : ''}
-                  onValueChange={(v) => {
-                    const id = parseInt(v, 10);
-                    const med = medications.find((m: any) => m.id === id);
-                    setAddPrescriptionForm(prev => ({ ...prev, medicationId: id, medicationName: med?.name || '', unit: med?.unit || 'tablet' }));
-                  }}
-                >
-                  <SelectTrigger className="mt-1"><SelectValue placeholder="Select medication" /></SelectTrigger>
-                  <SelectContent>
-                    {medications.slice(0, 100).map((m: any) => (
-                      <SelectItem key={m.id} value={String(m.id)}>{m.name}{m.strength ? ` (${m.strength})` : ''}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div><Label>Dosage</Label><Input value={addPrescriptionForm.dosage} onChange={(e) => setAddPrescriptionForm(prev => ({ ...prev, dosage: e.target.value }))} placeholder="e.g. 500mg" /></div>
-                <div><Label>Frequency</Label><Input value={addPrescriptionForm.frequency} onChange={(e) => setAddPrescriptionForm(prev => ({ ...prev, frequency: e.target.value }))} placeholder="e.g. BD" /></div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div><Label>Duration</Label><Input value={addPrescriptionForm.duration} onChange={(e) => setAddPrescriptionForm(prev => ({ ...prev, duration: e.target.value }))} placeholder="e.g. 5 days" /></div>
-                <div><Label>Quantity</Label><Input type="number" min={1} value={addPrescriptionForm.quantity} onChange={(e) => setAddPrescriptionForm(prev => ({ ...prev, quantity: parseInt(e.target.value, 10) || 1 }))} /></div>
-              </div>
-              <div><Label>Instructions</Label><Textarea value={addPrescriptionForm.instructions} onChange={(e) => setAddPrescriptionForm(prev => ({ ...prev, instructions: e.target.value }))} placeholder="Optional" rows={2} className="mt-1" /></div>
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setShowAddPrescription(false)}>Cancel</Button>
-              <Button onClick={handleAddPrescription} disabled={submittingOrder || !addPrescriptionForm.medicationId}>
-                {submittingOrder ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Adding...</> : <>Add</>}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+        {/* Session-style order modals (submit immediately) */}
+        <PrescriptionOrderModal
+          open={showAddPrescription}
+          onOpenChange={setShowAddPrescription}
+          patientAllergies={editOrderAllergies}
+          onSubmit={handleSubmitPrescription}
+          confirmLabel="Submit prescription order"
+        />
 
-        {/* Add Lab Order Dialog */}
-        <Dialog open={showAddLabOrder} onOpenChange={(open) => {
-          setShowAddLabOrder(open);
-          if (open) labService.getTemplates({ page_size: 100 }).then(r => setLabTemplates(r.results || []));
-          if (!open) setAddLabForm({ templateId: 0, testName: '', testCode: '', priority: 'routine', clinicalNotes: '' });
-        }}>
-          <DialogContent className="sm:max-w-[500px]">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2"><FlaskConical className="h-5 w-5 text-amber-500" />Add Lab Order</DialogTitle>
-              <DialogDescription>Add a lab test to this consultation session</DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4 py-2">
-              <div>
-                <Label>Test *</Label>
-                <Select
-                  value={addLabForm.templateId ? String(addLabForm.templateId) : ''}
-                  onValueChange={(v) => {
-                    const id = parseInt(v, 10);
-                    const t = labTemplates.find((x: any) => x.id === id);
-                    setAddLabForm(prev => ({ ...prev, templateId: id, testName: t?.name || '', testCode: t?.code || '' }));
-                  }}
-                >
-                  <SelectTrigger className="mt-1"><SelectValue placeholder="Select test" /></SelectTrigger>
-                  <SelectContent>
-                    {(labTemplates || []).slice(0, 100).map((t: any) => (
-                      <SelectItem key={t.id} value={String(t.id)}>{t.name} {t.code ? `(${t.code})` : ''}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label>Priority</Label>
-                <Select value={addLabForm.priority} onValueChange={(v) => setAddLabForm(prev => ({ ...prev, priority: v as 'routine' | 'urgent' | 'stat' }))}>
-                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="routine">Routine</SelectItem>
-                    <SelectItem value="urgent">Urgent</SelectItem>
-                    <SelectItem value="stat">STAT</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div><Label>Clinical notes</Label><Textarea value={addLabForm.clinicalNotes} onChange={(e) => setAddLabForm(prev => ({ ...prev, clinicalNotes: e.target.value }))} placeholder="Optional" rows={2} className="mt-1" /></div>
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setShowAddLabOrder(false)}>Cancel</Button>
-              <Button onClick={handleAddLabOrder} disabled={submittingOrder || !addLabForm.templateId}>
-                {submittingOrder ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Adding...</> : <>Add</>}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+        <LabOrderModal
+          open={showAddLabOrder}
+          onOpenChange={setShowAddLabOrder}
+          onSubmit={handleSubmitLabOrder}
+          confirmLabel="Submit lab order"
+        />
 
-        {/* Add Radiology Order Dialog */}
-        <Dialog open={showAddRadiologyOrder} onOpenChange={(open) => { setShowAddRadiologyOrder(open); if (open) radiologyService.getTemplates({ page_size: 100 }).then(r => setRadiologyTemplates(r.results || [])); if (!open) setAddRadiologyForm({ procedure: '', bodyPart: '', modality: 'X-Ray', priority: 'routine', clinicalNotes: '' }); }}>
-          <DialogContent className="sm:max-w-[500px]">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2"><Activity className="h-5 w-5 text-blue-500" />Add Radiology Order</DialogTitle>
-              <DialogDescription>Add a radiology study to this consultation session</DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4 py-2">
-              <div>
-                <Label>Procedure *</Label>
-                <Select
-                  value={addRadiologyForm.procedure || ''}
-                  onValueChange={(v) => {
-                    const t = radiologyTemplates.find((x: any) => x.name === v);
-                    setAddRadiologyForm(prev => ({ ...prev, procedure: v, bodyPart: t?.body_part || '', modality: t?.modality || 'X-Ray' }));
-                  }}
-                >
-                  <SelectTrigger className="mt-1"><SelectValue placeholder="Select procedure" /></SelectTrigger>
-                  <SelectContent>
-                    {(radiologyTemplates || []).map((t: any) => (
-                      <SelectItem key={t.id} value={t.name}>{t.name} {t.modality ? `(${t.modality})` : ''}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div><Label>Body part</Label><Input value={addRadiologyForm.bodyPart} onChange={(e) => setAddRadiologyForm(prev => ({ ...prev, bodyPart: e.target.value }))} placeholder="Optional" /></div>
-                <div><Label>Modality</Label><Input value={addRadiologyForm.modality} onChange={(e) => setAddRadiologyForm(prev => ({ ...prev, modality: e.target.value }))} placeholder="X-Ray" /></div>
-              </div>
-              <div>
-                <Label>Priority</Label>
-                <Select value={addRadiologyForm.priority} onValueChange={(v) => setAddRadiologyForm(prev => ({ ...prev, priority: v as 'routine' | 'urgent' | 'stat' }))}>
-                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="routine">Routine</SelectItem>
-                    <SelectItem value="urgent">Urgent</SelectItem>
-                    <SelectItem value="stat">STAT</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div><Label>Clinical notes</Label><Textarea value={addRadiologyForm.clinicalNotes} onChange={(e) => setAddRadiologyForm(prev => ({ ...prev, clinicalNotes: e.target.value }))} placeholder="Optional" rows={2} className="mt-1" /></div>
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setShowAddRadiologyOrder(false)}>Cancel</Button>
-              <Button onClick={handleAddRadiologyOrder} disabled={submittingOrder || !addRadiologyForm.procedure}>
-                {submittingOrder ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Adding...</> : <>Add</>}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+        <RadiologyOrderModal
+          open={showAddRadiologyOrder}
+          onOpenChange={setShowAddRadiologyOrder}
+          onSubmit={handleSubmitRadiologyOrder}
+          confirmLabel="Submit radiology order"
+        />
 
-        {/* Add Physio Order Dialog */}
-        <Dialog open={showAddPhysioOrder} onOpenChange={(open) => { setShowAddPhysioOrder(open); if (!open) setAddPhysioForm({ diagnosis: '', chiefComplaint: '', treatmentGoal: '', specialInstructions: '', priority: 'routine' }); }}>
-          <DialogContent className="sm:max-w-[500px]">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2"><Stethoscope className="h-5 w-5 text-emerald-500" />Add Physiotherapy Order</DialogTitle>
-              <DialogDescription>Add a physiotherapy order to this consultation session</DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4 py-2">
-              <div><Label>Diagnosis / Indication *</Label><Textarea value={addPhysioForm.diagnosis} onChange={(e) => setAddPhysioForm(prev => ({ ...prev, diagnosis: e.target.value }))} placeholder="e.g. Low back pain" rows={2} className="mt-1" /></div>
-              <div><Label>Chief complaint</Label><Input value={addPhysioForm.chiefComplaint} onChange={(e) => setAddPhysioForm(prev => ({ ...prev, chiefComplaint: e.target.value }))} placeholder="Optional" /></div>
-              <div><Label>Treatment goal</Label><Input value={addPhysioForm.treatmentGoal} onChange={(e) => setAddPhysioForm(prev => ({ ...prev, treatmentGoal: e.target.value }))} placeholder="Optional" /></div>
-              <div><Label>Special instructions</Label><Textarea value={addPhysioForm.specialInstructions} onChange={(e) => setAddPhysioForm(prev => ({ ...prev, specialInstructions: e.target.value }))} placeholder="Optional" rows={2} className="mt-1" /></div>
-              <div>
-                <Label>Priority</Label>
-                <Select value={addPhysioForm.priority} onValueChange={(v) => setAddPhysioForm(prev => ({ ...prev, priority: v }))}>
-                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="routine">Routine</SelectItem>
-                    <SelectItem value="urgent">Urgent</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setShowAddPhysioOrder(false)}>Cancel</Button>
-              <Button onClick={handleAddPhysioOrder} disabled={submittingOrder || !addPhysioForm.diagnosis.trim()}>
-                {submittingOrder ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Adding...</> : <>Add</>}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+        <PhysioOrderModal
+          open={showAddPhysioOrder}
+          onOpenChange={setShowAddPhysioOrder}
+          onSubmit={handleSubmitPhysioOrder}
+        />
       </div>
     </DashboardLayout>
   );

@@ -865,7 +865,7 @@ export default function NursingPoolQueuePage() {
           <div>
             <h1 className="text-2xl sm:text-3xl font-bold text-foreground flex items-center gap-2">
               <Users className="h-8 w-8 text-rose-500" />
-              Today's Visits
+              Nursing Pool Queue
             </h1>
             <p className="text-muted-foreground mt-1">View all patients processed by nursing - record vitals and send to consultation rooms</p>
           </div>
