@@ -185,10 +185,30 @@ export default function NewPatientPage() {
   }, [patientCategory]);
 
   const handleInputChange = (field: string, value: string) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
-    if (field === 'stateOfOrigin') {
-      setFormData(prev => ({ ...prev, lga: '' }));
-    }
+    setFormData((prev) => {
+      const next = { ...prev, [field]: value };
+
+      if (field === 'stateOfOrigin') {
+        next.lga = '';
+      }
+
+      // Convenience: infer gender from title when possible
+      if (field === 'title') {
+        const normalized = (value || '').toLowerCase().trim();
+        const inferredGender =
+          normalized === 'mr' || normalized === 'alhaji' || normalized === 'mallam'
+            ? 'male'
+            : normalized === 'mrs' || normalized === 'ms' || normalized === 'miss' || normalized === 'hajia' || normalized === 'lady'
+              ? 'female'
+              : '';
+
+        if (inferredGender) {
+          next.gender = inferredGender;
+        }
+      }
+
+      return next;
+    });
   };
 
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
