@@ -6,6 +6,7 @@ from typing import Optional, List
 from django.utils import timezone
 from django.db import transaction
 from django.contrib.auth import get_user_model
+from common.services import EmailService
 from .models import Notification, NotificationPreferences
 
 logger = logging.getLogger(__name__)
@@ -22,15 +23,15 @@ class NotificationService:
         return preferences
     
     @staticmethod
-    def should_send_notification(user, notification_type: str, priority: str) -> bool:
-        """Check if notification should be sent based on user preferences."""
+    def _passes_filters(user, notification_type: str, priority: str) -> bool:
+        """
+        Check if a notification passes user filters (module/priority/quiet-hours).
+
+        Note: this does NOT check channel toggles (in-app/email).
+        """
         try:
             prefs = NotificationService.get_or_create_preferences(user)
-            
-            # Check if in-app notifications are enabled
-            if not prefs.in_app_enabled:
-                return False
-            
+
             # Check module filter
             if notification_type == 'lab_result' and not prefs.lab_results_enabled:
                 return False
@@ -69,6 +70,30 @@ class NotificationService:
         except Exception as e:
             logger.error(f"Error checking notification preferences: {str(e)}")
             return True  # Default to sending if error
+
+    @staticmethod
+    def should_send_in_app(user, notification_type: str, priority: str) -> bool:
+        """Check if an in-app notification should be created."""
+        try:
+            prefs = NotificationService.get_or_create_preferences(user)
+            return bool(prefs.in_app_enabled) and NotificationService._passes_filters(user, notification_type, priority)
+        except Exception as e:
+            logger.error(f"Error checking in-app notification preferences: {str(e)}")
+            return True
+
+    @staticmethod
+    def should_send_email(user, notification_type: str, priority: str) -> bool:
+        """Check if an email notification should be sent."""
+        try:
+            prefs = NotificationService.get_or_create_preferences(user)
+            if not prefs.email_enabled:
+                return False
+            if not getattr(user, 'email', None):
+                return False
+            return NotificationService._passes_filters(user, notification_type, priority)
+        except Exception as e:
+            logger.error(f"Error checking email notification preferences: {str(e)}")
+            return False
     
     @staticmethod
     def create_notification(
@@ -82,25 +107,56 @@ class NotificationService:
         object_id: str = '',
         metadata: dict = None,
     ) -> Optional[Notification]:
-        """Create a notification for a user."""
+        """
+        Create an in-app notification (if enabled) and/or send email (if enabled).
+
+        Returns the created in-app Notification instance, or None if none was created.
+        """
         try:
-            if not NotificationService.should_send_notification(user, notification_type, priority):
+            create_in_app = NotificationService.should_send_in_app(user, notification_type, priority)
+            send_email = NotificationService.should_send_email(user, notification_type, priority)
+
+            notification: Optional[Notification] = None
+
+            if create_in_app:
+                notification = Notification.objects.create(
+                    user=user,
+                    title=title,
+                    message=message,
+                    type=notification_type,
+                    priority=priority,
+                    action_url=action_url,
+                    object_type=object_type,
+                    object_id=object_id,
+                    metadata=metadata or {},
+                )
+                logger.info(f"In-app notification created for {user.username}: {title}")
+
+            if send_email:
+                if notification is not None:
+                    EmailService.send_notification_email(user, notification)
+                else:
+                    # Email-only delivery (user disabled in-app)
+                    subject = f"EMR Notification: {title}"
+                    html_message = f"""
+                    <html>
+                    <body>
+                        <h2>{title}</h2>
+                        <p>{message}</p>
+                        {f'<p><a href="{action_url}">View Details</a></p>' if action_url else ''}
+                    </body>
+                    </html>
+                    """
+                    EmailService.send_email(
+                        recipient_email=user.email,
+                        subject=subject,
+                        message=message,
+                        html_message=html_message,
+                    )
+
+            if not create_in_app and not send_email:
                 logger.info(f"Notification skipped for {user.username} due to preferences")
-                return None
-            
-            notification = Notification.objects.create(
-                user=user,
-                title=title,
-                message=message,
-                type=notification_type,
-                priority=priority,
-                action_url=action_url,
-                object_type=object_type,
-                object_id=object_id,
-                metadata=metadata or {},
-            )
-            
-            logger.info(f"Notification created for {user.username}: {title}")
+
             return notification
         except Exception as e:
             logger.error(f"Error creating notification: {str(e)}")

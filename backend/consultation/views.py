@@ -344,6 +344,29 @@ class ConsultationQueueViewSet(viewsets.ModelViewSet):
             },
             request=self.request,
         )
+
+        # Notify doctors (Nursing -> Consultation)
+        try:
+            from notifications.services import NotificationService
+
+            patient_name = queue_item.patient.get_full_name()
+            room_name = queue_item.room.name
+            title = "Patient sent to Consultation"
+            message = f"{patient_name} has been sent to {room_name} for consultation."
+
+            NotificationService.notify_role(
+                role_name='Medical Doctor',  # For now: notify all doctors
+                title=title,
+                message=message,
+                notification_type='workflow',
+                priority='normal',
+                action_url=f"/consultation/room/{queue_item.room.id}",
+                object_type='consultation_queue',
+                object_id=str(queue_item.id),
+            )
+        except Exception:
+            # Notifications must never break queue operations
+            pass
     
     @action(detail=True, methods=['post'])
     def call(self, request, pk=None):

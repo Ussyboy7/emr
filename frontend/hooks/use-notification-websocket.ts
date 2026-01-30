@@ -4,7 +4,7 @@ import { logError, logInfo, logWarn } from '@/lib/client-logger';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useCurrentUser } from './use-current-user';
 import { getStoredAccessToken } from '@/lib/api-client';
-import { getUnreadNotificationCount, type Notification } from '@/lib/notifications-storage';
+import { getUnreadNotificationCount, normalizeNotificationFromWs, type Notification } from '@/lib/notifications-storage';
 import {
   NOTIFICATION_WS_MAX_RECONNECT_ATTEMPTS,
   NOTIFICATION_WS_PING_INTERVAL_MS,
@@ -34,6 +34,14 @@ export const useNotificationWebSocket = (options: UseNotificationWebSocketOption
   const reconnectDelay = NOTIFICATION_WS_RECONNECT_DELAY_MS;
 
   const getWebSocketUrl = useCallback(() => {
+    // If an explicit WS URL is provided, prefer it.
+    // Example: ws://172.16.0.46:8047/ws/
+    const explicitWs = process.env.NEXT_PUBLIC_WS_URL;
+    if (explicitWs) {
+      const base = explicitWs.endsWith("/") ? explicitWs.slice(0, -1) : explicitWs;
+      return `${base}/notifications/`;
+    }
+
     // Get base URL from environment or window location
     let baseUrl = process.env.NEXT_PUBLIC_API_URL;
     if (!baseUrl && typeof window !== 'undefined') {
@@ -61,16 +69,6 @@ export const useNotificationWebSocket = (options: UseNotificationWebSocketOption
     // Ensure we have a valid host
     if (!host || host === '') {
       host = typeof window !== 'undefined' ? window.location.host : 'localhost:8000';
-    }
-
-    // WebSocket URL format: ws://host:port/ws/notifications/
-    // For staging server (172.16.0.46:4646), ensure port is included
-    if (host.includes('172.16.0.46')) {
-      if (!host.includes(':')) {
-        host = '172.16.0.46:4646';
-      } else if (host === '172.16.0.46') {
-        host = '172.16.0.46:4646';
-      }
     }
 
     // Construct WebSocket URL - ensure protocol:// is always present
@@ -128,7 +126,10 @@ export const useNotificationWebSocket = (options: UseNotificationWebSocketOption
           switch (data.type) {
             case 'notification':
               if (data.notification && onNotification) {
-                onNotification(data.notification as Notification);
+                const mapped = normalizeNotificationFromWs(data.notification);
+                if (mapped) {
+                  onNotification(mapped);
+                }
               }
               // Refresh unread count
               getUnreadNotificationCount().then(setUnreadCount);

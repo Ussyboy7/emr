@@ -27,7 +27,7 @@ const formatDateTime = (dateString: string): string => {
   });
 };
 import { Check, CheckCheck, Archive, ExternalLink, Settings } from 'lucide-react';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import Link from 'next/link';
 import { usePolling } from '@/hooks/use-polling';
@@ -39,6 +39,8 @@ interface NotificationListProps {
 
 export const NotificationList = ({ onClose }: NotificationListProps) => {
   const router = useRouter();
+  const pathname = usePathname();
+  const isNotificationsPage = pathname === '/notifications';
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -199,7 +201,10 @@ export const NotificationList = ({ onClose }: NotificationListProps) => {
         </div>
       </div>
 
-      <ScrollArea className="flex-1" style={{ maxHeight: '500px' }}>
+      <ScrollArea
+        className="flex-1"
+        style={isNotificationsPage ? undefined : { maxHeight: '500px' }}
+      >
         {notifications.length === 0 ? (
           <div className="p-8 text-center text-sm text-muted-foreground">
             <p>No notifications</p>
@@ -270,7 +275,7 @@ export const NotificationList = ({ onClose }: NotificationListProps) => {
         )}
       </ScrollArea>
 
-      {notifications.length > 0 && (
+      {notifications.length > 0 && !isNotificationsPage && (
         <div className="p-2 border-t">
           <Button variant="ghost" size="sm" className="w-full text-xs" asChild>
             <Link href="/notifications">View all notifications</Link>

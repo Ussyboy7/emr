@@ -6,27 +6,17 @@ import { apiFetch, hasTokens } from './api-client';
 
 export interface Notification {
   id: string;
-  recipient: string;
-  recipientName: string;
-  sender?: string;
-  senderName?: string;
-  senderEmail?: string;
   title: string;
   message: string;
-  notificationType: 'workflow' | 'document' | 'correspondence' | 'system' | 'alert' | 'reminder';
+  notificationType: 'workflow' | 'lab_result' | 'radiology_result' | 'prescription' | 'appointment' | 'system' | 'alert' | 'reminder';
   priority: 'low' | 'normal' | 'high' | 'urgent';
   status: 'unread' | 'read' | 'archived';
-  module: string;
-  relatedObjectType?: string;
-  relatedObjectId?: string;
   actionUrl?: string;
-  actionRequired: boolean;
-  emailSent: boolean;
-  emailSentAt?: string;
   readAt?: string;
-  expiresAt?: string;
   createdAt: string;
-  updatedAt: string;
+  metadata?: Record<string, unknown>;
+  objectType?: string;
+  objectId?: string;
 }
 
 export interface NotificationPreferences {
@@ -60,19 +50,35 @@ export interface NotificationPreferences {
 }
 
 export interface CreateNotificationPayload {
-  recipient: string;
   title: string;
   message: string;
   notificationType?: Notification['notificationType'];
   priority?: Notification['priority'];
-  sender?: string;
-  module?: string;
-  relatedObjectType?: string;
-  relatedObjectId?: string;
   actionUrl?: string;
-  actionRequired?: boolean;
-  expiresInHours?: number;
+  objectType?: string;
+  objectId?: string;
 }
+
+const toUiNotification = (raw: any): Notification | null => {
+  if (!raw || typeof raw !== 'object') return null;
+  const createdAt = raw.created_at || raw.createdAt;
+  const id = raw.id;
+  if (!id || !createdAt) return null;
+  return {
+    id: String(id),
+    title: String(raw.title ?? ''),
+    message: String(raw.message ?? ''),
+    notificationType: (raw.type ?? raw.notificationType ?? 'system') as Notification['notificationType'],
+    priority: (raw.priority ?? 'normal') as Notification['priority'],
+    status: (raw.status ?? 'unread') as Notification['status'],
+    actionUrl: raw.action_url ?? raw.actionUrl ?? undefined,
+    readAt: raw.read_at ?? raw.readAt ?? undefined,
+    createdAt: String(createdAt),
+    metadata: raw.metadata ?? undefined,
+    objectType: raw.object_type ?? undefined,
+    objectId: raw.object_id ? String(raw.object_id) : undefined,
+  };
+};
 
 /**
  * Get all notifications for the current user.
@@ -81,7 +87,6 @@ export const getNotifications = async (params?: {
   status?: string;
   notificationType?: string;
   priority?: string;
-  module?: string;
 }): Promise<Notification[]> => {
   if (!hasTokens()) return [];
 
@@ -89,7 +94,6 @@ export const getNotifications = async (params?: {
   if (params?.status) queryParams.append('status', params.status);
   if (params?.notificationType) queryParams.append('notification_type', params.notificationType);
   if (params?.priority) queryParams.append('priority', params.priority);
-  if (params?.module) queryParams.append('module', params.module);
 
   const query = queryParams.toString();
   // The router registers 'notifications' under api/notifications/, and the viewset is also 'notifications'
@@ -103,11 +107,11 @@ export const getNotifications = async (params?: {
     
     // Handle paginated response (DRF returns {count, next, previous, results: [...]})
     if (response && typeof response === 'object' && 'results' in response && Array.isArray(response.results)) {
-      return response.results as Notification[];
+      return (response.results as any[]).map(toUiNotification).filter((n): n is Notification => Boolean(n));
     }
     
     // Handle direct array response (fallback)
-    return Array.isArray(response) ? response : [];
+    return Array.isArray(response) ? response.map(toUiNotification).filter((n): n is Notification => Boolean(n)) : [];
   } catch (error) {
     console.error('[notifications-storage] Error fetching notifications:', error);
     throw error;
@@ -155,7 +159,7 @@ export const markNotificationAsRead = async (notificationId: string): Promise<vo
 export const markNotificationAsArchived = async (notificationId: string): Promise<void> => {
   if (!hasTokens()) throw new Error('Authentication required');
 
-  await apiFetch(`/notifications/notifications/${notificationId}/mark_archived/`, {
+  await apiFetch(`/notifications/notifications/${notificationId}/archive/`, {
     method: 'POST',
   });
 };
@@ -166,10 +170,13 @@ export const markNotificationAsArchived = async (notificationId: string): Promis
 export const markAllNotificationsAsRead = async (): Promise<number> => {
   if (!hasTokens()) throw new Error('Authentication required');
 
-  const response = await apiFetch<{ count: number }>('/notifications/notifications/mark_all_read/', {
+  const response = await apiFetch<{ message?: string }>('/notifications/notifications/mark_all_read/', {
     method: 'POST',
   });
-  return response.count || 0;
+  // Backend returns: {"message": "X notifications marked as read"}
+  const msg = response?.message || '';
+  const match = msg.match(/(\d+)/);
+  return match ? Number(match[1]) : 0;
 };
 
 /**
@@ -210,9 +217,15 @@ export const createNotification = async (
 ): Promise<Notification> => {
   if (!hasTokens()) throw new Error('Authentication required');
 
-  const response = await apiFetch<Notification>('/notifications/notifications/', {
+  const response = await apiFetch<any>('/notifications/notifications/', {
     method: 'POST',
     body: JSON.stringify(payload),
   });
-  return response;
+  const mapped = toUiNotification(response);
+  if (!mapped) {
+    throw new Error('Invalid notification response');
+  }
+  return mapped;
 };
+
+export const normalizeNotificationFromWs = (raw: any): Notification | null => toUiNotification(raw);

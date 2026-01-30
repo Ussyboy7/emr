@@ -52,7 +52,29 @@ class PhysioOrderViewSet(viewsets.ModelViewSet):
         return PhysioOrderSerializer
 
     def perform_create(self, serializer):
-        serializer.save(ordered_by=self.request.user, sessions_completed=0)
+        order = serializer.save(ordered_by=self.request.user, sessions_completed=0)
+
+        # Notify Physiotherapy (doctor -> physiotherapy)
+        try:
+            from notifications.services import NotificationService
+
+            patient_name = order.patient.get_full_name() if getattr(order, 'patient', None) else 'Patient'
+            title = "New physiotherapy order"
+            message = f"Physiotherapy order for {patient_name} has been created."
+
+            NotificationService.notify_role(
+                role_name='Physiotherapist',
+                title=title,
+                message=message,
+                notification_type='workflow',
+                priority='normal',
+                action_url="/physiotherapy/pool-queue",
+                object_type='physio_order',
+                object_id=str(order.id),
+            )
+        except Exception:
+            # Notifications must never break physio order creation
+            pass
 
     @action(detail=True, methods=['post'])
     def schedule(self, request, pk=None):

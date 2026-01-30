@@ -227,6 +227,28 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
             description=f'Created prescription {prescription.prescription_id} for patient {prescription.patient.get_full_name()}',
             request=self.request,
         )
+
+        # Notify Pharmacy (doctor -> pharmacy)
+        try:
+            from notifications.services import NotificationService
+
+            patient_name = prescription.patient.get_full_name()
+            title = "New prescription order"
+            message = f"Prescription {prescription.prescription_id} for {patient_name} is ready for Pharmacy."
+
+            NotificationService.notify_role(
+                role_name='Pharmacist',
+                title=title,
+                message=message,
+                notification_type='prescription',
+                priority='normal',
+                action_url="/pharmacy/prescriptions",
+                object_type='prescription',
+                object_id=str(prescription.id),
+            )
+        except Exception:
+            # Notifications must never break prescription creation
+            pass
     
     @action(detail=False, methods=['post'])
     def check_interactions(self, request):

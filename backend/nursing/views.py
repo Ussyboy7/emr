@@ -41,6 +41,28 @@ class NursingOrderViewSet(viewsets.ModelViewSet):
             request=self.request,
         )
 
+        # Notify Nursing (doctor -> nursing tasks)
+        try:
+            from notifications.services import NotificationService
+
+            patient_name = order.patient.get_full_name()
+            title = "New nursing task"
+            message = f"Nursing order {order.order_id} for {patient_name} has been created."
+
+            NotificationService.notify_role(
+                role_name='Nursing Officer',
+                title=title,
+                message=message,
+                notification_type='workflow',
+                priority='normal',
+                action_url="/nursing/procedures",
+                object_type='nursing_order',
+                object_id=str(order.id),
+            )
+        except Exception:
+            # Notifications must never break order creation
+            pass
+
 
 class ProcedureViewSet(viewsets.ModelViewSet):
     """ViewSet for managing procedures."""

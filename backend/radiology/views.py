@@ -189,6 +189,28 @@ class RadiologyOrderViewSet(viewsets.ModelViewSet):
             request=self.request,
             )
 
+        # Notify Radiology (doctor -> radiology)
+        try:
+            from notifications.services import NotificationService
+
+            patient_name = order.patient.get_full_name()
+            title = "New radiology order"
+            message = f"Radiology order {order.order_id} for {patient_name} is ready for Radiology."
+
+            NotificationService.notify_role(
+                role_name='Radiologist',
+                title=title,
+                message=message,
+                notification_type='radiology_result',
+                priority='normal',
+                action_url="/radiology/orders",
+                object_type='radiology_order',
+                object_id=str(order.id),
+            )
+        except Exception:
+            # Notifications must never break radiology order creation
+            pass
+
     @action(detail=True, methods=['post'])
     def schedule(self, request, pk=None):
         """Schedule a study."""

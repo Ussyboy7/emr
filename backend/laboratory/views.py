@@ -61,6 +61,43 @@ class LabOrderViewSet(viewsets.ModelViewSet):
 
         order = serializer.save(created_by=self.request.user, **data)
 
+        # Log audit
+        try:
+            doctor_name = order.doctor.get_full_name() if order.doctor else 'Unknown'
+            AuditService.log_lab_action(
+                user=self.request.user,
+                action='create',
+                lab_order=order,
+                module='laboratory',
+                description=f'Created lab order {order.order_id} for patient {order.patient.get_full_name()} by Dr. {doctor_name}',
+                request=self.request,
+            )
+        except Exception:
+            # Audit logging must never block order creation
+            pass
+
+        # Notify Laboratory (doctor -> laboratory)
+        try:
+            from notifications.services import NotificationService
+
+            patient_name = order.patient.get_full_name()
+            title = "New lab order"
+            message = f"Lab order {order.order_id} for {patient_name} is ready for Laboratory."
+
+            NotificationService.notify_role(
+                role_name='Laboratory Scientist',
+                title=title,
+                message=message,
+                notification_type='lab_result',
+                priority='normal',
+                action_url="/laboratory/orders",
+                object_type='lab_order',
+                object_id=str(order.id),
+            )
+        except Exception:
+            # Notifications must never break lab order creation
+            pass
+
     def _find_doctor_for_order(self, data):
         """Find appropriate doctor for lab order using multiple strategies."""
         from accounts.models import User

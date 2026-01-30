@@ -199,6 +199,41 @@ class VisitViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(date__lte=end_date)
         
         return queryset
+
+    def perform_update(self, serializer):
+        """
+        Update visit and emit workflow notifications when status changes.
+
+        - Medical Records -> Nursing Pool: when a visit is moved to `in_progress`,
+          notify all Nursing Officers to take vitals.
+        """
+        old_instance = self.get_object()
+        old_status = old_instance.status
+
+        visit = serializer.save()
+
+        try:
+            new_status = visit.status
+            if old_status != new_status and new_status == 'in_progress':
+                from notifications.services import NotificationService
+
+                patient_name = visit.patient.get_full_name()
+                title = "Patient sent to Nursing"
+                message = f"{patient_name} ({visit.visit_id}) has been sent to Nursing for vitals."
+
+                NotificationService.notify_role(
+                    role_name='Nursing Officer',
+                    title=title,
+                    message=message,
+                    notification_type='workflow',
+                    priority='normal',
+                    action_url='/nursing/pool-queue',
+                    object_type='visit',
+                    object_id=str(visit.id),
+                )
+        except Exception:
+            # Notifications must never break core workflow actions
+            pass
     
     def perform_create(self, serializer):
         """Set created_by when creating a visit and log audit."""

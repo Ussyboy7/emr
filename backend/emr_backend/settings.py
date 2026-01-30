@@ -82,7 +82,7 @@ LOCAL_APPS = [
     "nursing",
     "wards",
     "audit",
-    "notifications",
+    "notifications.apps.NotificationsConfig",
     "permissions",
     "dashboard",
     "reports",
