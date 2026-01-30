@@ -367,6 +367,68 @@ class ConsultationQueueViewSet(viewsets.ModelViewSet):
         except Exception:
             # Notifications must never break queue operations
             pass
+
+    def perform_update(self, serializer):
+        """
+        Update queue item safely.
+
+        Staging issue: reassigning a patient to another room triggers a DB unique constraint
+        (`unique_active_queue_item`) and bubbles up as 500. We convert that into a 400 with a
+        clear message (and also pre-check to avoid IntegrityError where possible).
+        """
+        from django.db import IntegrityError, transaction
+        from rest_framework.exceptions import ValidationError
+
+        instance = self.get_object()
+        old_room = instance.room
+
+        new_room = serializer.validated_data.get('room', instance.room)
+        new_patient = serializer.validated_data.get('patient', instance.patient)
+        new_is_active = serializer.validated_data.get('is_active', instance.is_active)
+
+        # If the item will be active, ensure there isn't another active queue item
+        # for the same patient in the target room.
+        if new_is_active:
+            existing = ConsultationQueue.objects.filter(
+                room=new_room,
+                patient=new_patient,
+                is_active=True,
+            ).exclude(pk=instance.pk).first()
+            if existing:
+                raise ValidationError({
+                    'non_field_errors': [f'Patient is already in the queue for {new_room.name}']
+                })
+
+        try:
+            with transaction.atomic():
+                updated = serializer.save()
+        except IntegrityError:
+            # Fallback if DB constraint still triggers (race conditions)
+            raise ValidationError({
+                'non_field_errors': [f'Patient is already in the queue for {new_room.name}']
+            })
+
+        # If room changed, notify doctors again (reassignment).
+        try:
+            if old_room.id != updated.room.id:
+                from notifications.services import NotificationService
+
+                patient_name = updated.patient.get_full_name()
+                title = "Patient reassigned to Consultation room"
+                message = f"{patient_name} has been reassigned to {updated.room.name}."
+
+                NotificationService.notify_role(
+                    role_name='Medical Doctor',
+                    title=title,
+                    message=message,
+                    notification_type='workflow',
+                    priority='normal',
+                    action_url=f"/consultation/room/{updated.room.id}",
+                    object_type='consultation_queue',
+                    object_id=str(updated.id),
+                )
+        except Exception:
+            pass
     
     @action(detail=True, methods=['post'])
     def call(self, request, pk=None):
