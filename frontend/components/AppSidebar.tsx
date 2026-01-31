@@ -65,6 +65,7 @@ import { Badge } from "@/components/ui/badge";
 import { TooltipProvider, Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { useCurrentUser } from "@/hooks/use-current-user";
+import { getHomeRouteForUser } from "@/lib/home-route";
 
 // Types for menu structure
 interface MenuItem {
@@ -92,7 +93,7 @@ const menuSections: MenuSection[] = [
     activeColor: "data-[active=true]:bg-blue-500/10 data-[active=true]:text-blue-400",
     basePath: "/medical-records",
     items: [
-      { label: "Dashboard", href: "/medical-records", icon: LayoutDashboard },
+      { label: "Home", href: "/medical-records", icon: LayoutDashboard },
       { label: "Register Patient", href: "/medical-records/patients/new", icon: UserPlus },
       { label: "Manage Patients", href: "/medical-records/patients", icon: Users },
       { label: "Patient Records", href: "/medical-records/patient-records", icon: FileBarChart },
@@ -110,7 +111,7 @@ const menuSections: MenuSection[] = [
     activeColor: "data-[active=true]:bg-rose-500/10 data-[active=true]:text-rose-400",
     basePath: "/nursing",
     items: [
-      { label: "Dashboard", href: "/nursing", icon: LayoutDashboard },
+      { label: "Home", href: "/nursing", icon: LayoutDashboard },
       { label: "Pool Queue", href: "/nursing/pool-queue", icon: Users },
       { label: "Room Queue", href: "/nursing/room-queue", icon: DoorOpen },
       { label: "Patient Vitals", href: "/nursing/patient-vitals", icon: Activity },
@@ -126,7 +127,7 @@ const menuSections: MenuSection[] = [
     activeColor: "data-[active=true]:bg-emerald-500/10 data-[active=true]:text-emerald-400",
     basePath: "/consultation",
     items: [
-      { label: "My Dashboard", href: "/consultation", icon: LayoutDashboard },
+      { label: "Home", href: "/consultation", icon: LayoutDashboard },
       { label: "Start Consultation", href: "/consultation/start", icon: Play },
       { label: "Consultation History", href: "/consultation/history", icon: History },
       { label: "Ward Overview", href: "/consultation/wards", icon: Building2 },
@@ -140,7 +141,7 @@ const menuSections: MenuSection[] = [
     activeColor: "data-[active=true]:bg-amber-500/10 data-[active=true]:text-amber-400",
     basePath: "/laboratory",
     items: [
-      { label: "Dashboard", href: "/laboratory", icon: LayoutDashboard },
+      { label: "Home", href: "/laboratory", icon: LayoutDashboard },
       { label: "Lab Orders", href: "/laboratory/orders", icon: TestTube },
       { label: "Results Verification", href: "/laboratory/verification", icon: ShieldCheck },
       { label: "Completed Tests", href: "/laboratory/completed", icon: CheckCircle },
@@ -154,7 +155,7 @@ const menuSections: MenuSection[] = [
     activeColor: "data-[active=true]:bg-violet-500/10 data-[active=true]:text-violet-400",
     basePath: "/pharmacy",
     items: [
-      { label: "Dashboard", href: "/pharmacy", icon: LayoutDashboard },
+      { label: "Home", href: "/pharmacy", icon: LayoutDashboard },
       { label: "Prescriptions", href: "/pharmacy/prescriptions", icon: ClipboardList },
       { label: "Dispense History", href: "/pharmacy/history", icon: History },
       { label: "Inventory", href: "/pharmacy/inventory", icon: Database },
@@ -167,7 +168,7 @@ const menuSections: MenuSection[] = [
     activeColor: "data-[active=true]:bg-cyan-500/10 data-[active=true]:text-cyan-400",
     basePath: "/radiology",
     items: [
-      { label: "Dashboard", href: "/radiology", icon: LayoutDashboard },
+      { label: "Home", href: "/radiology", icon: LayoutDashboard },
       { label: "Study Orders", href: "/radiology/orders", icon: ClipboardList },
       { label: "Results Verification", href: "/radiology/verification", icon: ShieldCheck },
       { label: "Completed Studies", href: "/radiology/completed", icon: FileBarChart },
@@ -182,7 +183,7 @@ const menuSections: MenuSection[] = [
     activeColor: "data-[active=true]:bg-emerald-500/10 data-[active=true]:text-emerald-400",
     basePath: "/physiotherapy",
     items: [
-      { label: "Dashboard", href: "/physiotherapy", icon: LayoutDashboard },
+      { label: "Home", href: "/physiotherapy", icon: LayoutDashboard },
       { label: "Pool Queue", href: "/physiotherapy/pool-queue", icon: Users },
       { label: "Completed Sessions", href: "/physiotherapy/completed", icon: CheckCircle },
     ],
@@ -204,7 +205,7 @@ const menuSections: MenuSection[] = [
     activeColor: "data-[active=true]:bg-slate-500/10 data-[active=true]:text-slate-300",
     basePath: "/admin",
     items: [
-      { label: "Dashboard", href: "/admin", icon: LayoutDashboard },
+      { label: "Home", href: "/admin", icon: LayoutDashboard },
       { label: "User Management", href: "/admin/users", icon: UserCog },
       { label: "Roles & Permissions", href: "/admin/roles", icon: Shield },
       { label: "Clinics & Departments", href: "/admin/clinics", icon: Building2 },
@@ -220,6 +221,9 @@ export function AppSidebar() {
   const pathname = usePathname();
   const isCollapsed = state === "collapsed";
   const { currentUser, hydrated } = useCurrentUser();
+  const homeRoute = getHomeRouteForUser(currentUser) || "/no-access";
+  const canViewOverviewDashboard =
+    Boolean(currentUser?.isSuperuser) || Boolean(currentUser?.permissions?.includes("/dashboard"));
 
 
   // Track which sections are open
@@ -312,7 +316,7 @@ export function AppSidebar() {
         <SidebarHeader className="border-b border-sidebar-border px-2 py-3">
           <div className={`flex items-center w-full min-w-0 ${isCollapsed ? 'flex-col gap-2' : 'justify-between'}`}>
             <Link 
-              href="/dashboard" 
+              href={homeRoute}
               className="flex items-center gap-2.5 min-w-0 group"
             >
               <div className="relative h-9 w-9 flex-shrink-0 overflow-hidden rounded-lg shadow-md ring-1 ring-sidebar-primary/20 bg-white transition-transform group-hover:scale-105">
@@ -353,22 +357,33 @@ export function AppSidebar() {
         </SidebarHeader>
 
         <SidebarContent className="bg-sidebar">
-          {/* Overview - Always visible */}
-          <SidebarGroup>
-            {!isCollapsed && <SidebarGroupLabel className="text-sidebar-foreground/50 text-xs uppercase tracking-wider">Overview</SidebarGroupLabel>}
-            <SidebarGroupContent>
-              <SidebarMenu>
-                <SidebarMenuItem>
-                  <SidebarMenuButton asChild isActive={isActive("/dashboard")} tooltip="Dashboard" className="text-sidebar-foreground/80 hover:text-sidebar-foreground hover:bg-sidebar-accent data-[active=true]:bg-sidebar-primary/10 data-[active=true]:text-sidebar-primary">
-                    <Link href="/dashboard">
-                      <LayoutDashboard className="h-4 w-4" />
-                      {!isCollapsed && <span>Dashboard</span>}
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
+          {/* Overview Dashboard (global) - permission-gated */}
+          {hydrated && currentUser && canViewOverviewDashboard && (
+            <SidebarGroup>
+              {!isCollapsed && (
+                <SidebarGroupLabel className="text-sidebar-foreground/50 text-xs uppercase tracking-wider">
+                  Overview
+                </SidebarGroupLabel>
+              )}
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      asChild
+                      isActive={isActive("/dashboard")}
+                      tooltip="Overview Dashboard"
+                      className="text-sidebar-foreground/80 hover:text-sidebar-foreground hover:bg-sidebar-accent data-[active=true]:bg-sidebar-primary/10 data-[active=true]:text-sidebar-primary"
+                    >
+                      <Link href="/dashboard">
+                        <LayoutDashboard className="h-4 w-4" />
+                        {!isCollapsed && <span>Overview Dashboard</span>}
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+          )}
 
           {/* Module Sections */}
           {filteredMenuSections.map((section) => {

@@ -204,7 +204,7 @@ class Command(BaseCommand):
                 'permissions': [
                     "/admin", "/admin/audit", "/admin/clinics", "/admin/roles", "/admin/rooms", "/admin/settings", "/admin/users",
                     "/analytics", "/analytics/executive",
-                    "/consultation/dashboard", "/consultation/history", "/consultation/referrals", "/consultation/start", "/consultation/wards",
+                    "/consultation", "/consultation/history", "/consultation/referrals", "/consultation/start", "/consultation/wards",
                     "/laboratory", "/laboratory/completed", "/laboratory/orders", "/laboratory/templates", "/laboratory/verification",
                     "/medical-records", "/medical-records/appointments", "/medical-records/dependents", "/medical-records/patients", "/medical-records/patients/new", "/medical-records/reports", "/medical-records/visits", "/medical-records/visits/new",
                     "/nursing", "/nursing/patient-vitals", "/nursing/pool-queue", "/nursing/procedures", "/nursing/procedures/history", "/nursing/room-queue", "/nursing/wards",
@@ -229,7 +229,7 @@ class Command(BaseCommand):
                     '/medical-records/visits/new', '/medical-records/visits', '/medical-records/appointments',
                     '/medical-records/dependents', '/medical-records/reports',
                     # Consultation - All pages
-                    '/consultation/dashboard', '/consultation/start', '/consultation/history',
+                    '/consultation', '/consultation/start', '/consultation/history',
                     '/consultation/wards', '/consultation/referrals',
                     # Nursing - Limited access
                     '/nursing', '/nursing/patient-vitals', '/nursing/pool-queue', '/nursing/room-queue',
@@ -263,7 +263,7 @@ class Command(BaseCommand):
                     '/medical-records/visits',  # NEW: Manage Visits - visit_view
 
                     # Consultation - Selected pages only
-                    '/consultation/dashboard',  # My Dashboard - consultation_view
+                    '/consultation',  # My Dashboard - consultation_view
 
                     # Nursing - All permissions (add explicit permissions for UI display)
                     '/nursing/patient-vitals',  # nursing_vitals

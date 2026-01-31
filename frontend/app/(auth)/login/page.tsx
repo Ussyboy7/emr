@@ -1,7 +1,7 @@
 "use client";
 
 import { logError } from '@/lib/client-logger';
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -34,8 +34,10 @@ import {
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { NPA_LOGO_URL, NPA_BRAND_NAME, NPA_EMR_TITLE, NPA_EMR_FULL_TITLE, NPA_EMR_CONTACT_EMAIL } from "@/lib/branding";
-import { login, clearTokens, apiFetch } from "@/lib/api-client";
+import { hasTokens, login, clearTokens, apiFetch } from "@/lib/api-client";
 import { getStoredRedirectPath } from "@/hooks/use-auth-redirect";
+import { getHomeRouteForUser, getHomeRouteFromAllowedPages, isPathAllowedByPages } from "@/lib/home-route";
+import { useCurrentUser } from "@/hooks/use-current-user";
 
 
 
@@ -49,52 +51,25 @@ const modules = [
   { name: "Physiotherapy", icon: Activity, color: "text-orange-400" },
 ];
 
-// Map department names to dashboard routes
-const getDepartmentDashboardRoute = (departmentName: string | null | undefined): string | null => {
-  if (!departmentName) return null;
-  
-  const departmentLower = departmentName.toLowerCase().trim();
-  
-  // Map common department name variations to routes
-  const departmentRouteMap: Record<string, string> = {
-    'medical records': '/medical-records',
-    'medical record': '/medical-records',
-    'records': '/medical-records',
-    'nursing': '/nursing',
-    'consultation': '/consultation',
-    'laboratory': '/laboratory',
-    'lab': '/laboratory',
-    'pharmacy': '/pharmacy',
-    'radiology': '/radiology',
-    'physiotherapy': '/physiotherapy',
-    'physio': '/physiotherapy',
-    'administration': '/admin',
-    'admin': '/admin',
-  };
-  
-  // Check exact match first
-  if (departmentRouteMap[departmentLower]) {
-    return departmentRouteMap[departmentLower];
-  }
-  
-  // Check partial matches
-  for (const [key, route] of Object.entries(departmentRouteMap)) {
-    if (departmentLower.includes(key) || key.includes(departmentLower)) {
-      return route;
-    }
-  }
-  
-  return null;
-};
-
 export default function LoginPage() {
   const router = useRouter();
+  const { currentUser, hydrated } = useCurrentUser();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showForgotPassword, setShowForgotPassword] = useState(false);
+
+  const homeRoute = useMemo(() => getHomeRouteForUser(currentUser), [currentUser]);
+
+  // If already authenticated, don't let users "stick" on /login.
+  useEffect(() => {
+    if (!hasTokens()) return;
+    if (!hydrated) return;
+    if (!currentUser) return;
+    router.replace(homeRoute || "/no-access");
+  }, [currentUser, hydrated, homeRoute, router]);
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -110,32 +85,41 @@ export default function LoginPage() {
       await login(username, password);
 
       if (rememberMe) {
-        localStorage.setItem("npa_emr_remember_me", JSON.stringify({ username }));
+        localStorage.setItem("emr_remember_me", JSON.stringify({ username }));
       } else {
-        localStorage.removeItem("npa_emr_remember_me");
+        localStorage.removeItem("emr_remember_me");
       }
 
       toast.success("Signed in successfully");
       
-      // Fetch current user to get department for role-based redirect
+      // Fetch current user to get permissions for role-based redirect (permission-only).
       try {
-        interface AuthMeResponse { department_name?: string }
+        interface AuthMeResponse { permissions?: { pages?: string[] }; is_superuser?: boolean }
         const userResponse = await apiFetch<AuthMeResponse>("/accounts/auth/me/");
-        const departmentName = userResponse.department_name;
+        const allowedPages = userResponse.permissions?.pages || [];
+        const isSuperuser = Boolean(userResponse.is_superuser);
         
-        // Get department-specific dashboard route
-        const departmentRoute = getDepartmentDashboardRoute(departmentName);
-        
-        // Priority: stored redirect > department dashboard > default dashboard
         const storedRedirect = getStoredRedirectPath();
-        const finalRedirect = storedRedirect || departmentRoute || "/dashboard";
-        
-        router.push(finalRedirect);
+
+        // Super admin can access everything and keeps the global dashboard.
+        if (isSuperuser) {
+          router.push(storedRedirect || "/dashboard");
+          return;
+        }
+
+        // Only honor stored redirect if it's permitted by pages.
+        if (storedRedirect && isPathAllowedByPages(storedRedirect, allowedPages)) {
+          router.push(storedRedirect);
+          return;
+        }
+
+        const home = getHomeRouteFromAllowedPages(allowedPages);
+        router.push(home || "/no-access");
       } catch (userError) {
-        // If fetching user fails, fall back to default redirect
-        console.warn("Failed to fetch user for department-based redirect:", userError);
-        const redirectPath = getStoredRedirectPath();
-        router.push(redirectPath || "/dashboard");
+        // Permission-only routing: do not send users to a generic dashboard if we can't
+        // verify their permissions.
+        console.warn("Failed to fetch user for permission-based redirect:", userError);
+        router.push("/no-access");
       }
     } catch (error) {
       logError(error);

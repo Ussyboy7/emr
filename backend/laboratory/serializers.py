@@ -20,11 +20,35 @@ class LabTestSerializer(serializers.ModelSerializer):
     template_name = serializers.CharField(source='template.name', read_only=True, allow_null=True)
     template_category = serializers.CharField(source='template.category', read_only=True, allow_null=True)
     template_sample_type = serializers.CharField(source='template.sample_type', read_only=True, allow_null=True)
+    template_normal_range = serializers.SerializerMethodField()
     collected_by_name = serializers.SerializerMethodField()
     processed_by_name = serializers.SerializerMethodField()
     verified_by_name = serializers.SerializerMethodField()
     rejected_by_name = serializers.SerializerMethodField()
     order_details = serializers.SerializerMethodField()
+
+    def get_template_normal_range(self, obj):
+        """
+        Return template normal ranges in a UI-friendly shape.
+
+        Some single-analyte tests store results under a generic key like "Result",
+        while the template may define a single field like "C-Peptide". To ensure
+        unit/range always displays, alias the single template entry to "Result".
+        """
+        template = getattr(obj, "template", None)
+        normal_range = getattr(template, "normal_range", None) if template else None
+
+        if not isinstance(normal_range, dict):
+            return normal_range
+
+        # Copy so we don't mutate model-backed dicts in memory.
+        normalized = dict(normal_range)
+
+        if "Result" not in normalized and len(normalized) == 1:
+            only_key = next(iter(normalized.keys()))
+            normalized["Result"] = normalized.get(only_key)
+
+        return normalized
     
     def get_collected_by_name(self, obj):
         """Get collected by user full name."""

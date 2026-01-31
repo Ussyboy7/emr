@@ -66,6 +66,7 @@ interface LabTest {
   processedBy?: string;
   processedAt?: string;
   results?: Record<string, string>;
+  templateNormalRange?: Record<string, any> | null;
   resultFile?: { name: string; type: string; uploadedAt: string };
   template?: string;
   rejectedBy?: string;
@@ -151,6 +152,7 @@ const transformTest = (apiTest: ApiLabTest): LabTest => {
     processedBy: apiTest.processed_by_name || apiTest.processed_by?.toString(),
     processedAt: apiTest.processed_at,
     results: apiTest.results as Record<string, string>,
+    templateNormalRange: (apiTest as any).template_normal_range || null,
     resultFile: apiTest.result_file ? {
       name: typeof apiTest.result_file === 'string' ? apiTest.result_file : apiTest.result_file.name || '',
       type: typeof apiTest.result_file === 'string' ? 'application/pdf' : apiTest.result_file.type || 'application/pdf',
@@ -703,9 +705,26 @@ export default function LabOrdersPage() {
   // Templates from API for result entry (params from Test Templates / normal_range)
   const [apiTemplatesByCode, setApiTemplatesByCode] = useState<Record<string, { name: string; fields: { name: string; unit: string; normalRange: string }[] }>>({});
 
-  // Resolve template for result entry: API (from Test Templates) first, then hardcoded fallback
-  const getTemplateForCode = (code: string): { name: string; fields: { name: string; unit: string; normalRange: string }[] } | undefined =>
-    apiTemplatesByCode[code] || testTemplates[code];
+  const templateFromNormalRange = (code: string, nr: any) => {
+    if (!nr || typeof nr !== 'object') return undefined;
+    const fields = Object.entries(nr).map(([name, v]: [string, any]) => {
+      let normalRange = v?.range || v?.normal_range || v?.normalRange || v?.normalRangeText || '';
+      if (!normalRange && v?.min != null && v?.max != null) normalRange = `${v.min}-${v.max}`;
+      if (!normalRange && v?.normalRangeMin != null && v?.normalRangeMax != null) normalRange = `${v.normalRangeMin}-${v.normalRangeMax}`;
+      return { name, unit: v?.unit || '', normalRange };
+    });
+    return fields.length ? { name: code, fields } : undefined;
+  };
+
+  // Resolve template for result entry:
+  // 1) test-specific `template_normal_range` (best: always matches backend)
+  // 2) templates list from API
+  // 3) hardcoded fallback
+  const getTemplateForTest = (test: LabTest): { name: string; fields: { name: string; unit: string; normalRange: string }[] } | undefined => {
+    const fromTest = templateFromNormalRange(test.code, test.templateNormalRange);
+    if (fromTest) return fromTest;
+    return apiTemplatesByCode[test.code] || testTemplates[test.code];
+  };
 
   // Calculate order progress percentage
   const getOrderProgress = (tests: LabTest[]) => {
@@ -1076,7 +1095,7 @@ export default function LabOrdersPage() {
     if (!selectedOrder || !selectedTest) return;
     
     if (resultEntryMode === 'values') {
-      const template = getTemplateForCode(selectedTest.code);
+      const template = getTemplateForTest(selectedTest);
       if (template) {
         const allFieldsFilled = template.fields.every(f => resultValues[f.name]);
         if (!allFieldsFilled) {
@@ -1186,16 +1205,17 @@ export default function LabOrdersPage() {
     
     // Initialize result values - pre-fill existing results if reworking a rejected test
     const initial: Record<string, string> = {};
-    const template = getTemplateForCode(test.code);
+    const template = getTemplateForTest(test);
     
+    if (template) {
+      // Start with template fields (ensures multi-parameter tests like FBC never fall back to single "Result")
+      template.fields.forEach(field => { initial[field.name] = ''; });
+    }
     if (isRework && test.results) {
-      // Pre-fill with existing results for rework
+      // Overlay existing results for rework (only matching keys; preserves full template shape)
       Object.entries(test.results).forEach(([key, value]) => {
         initial[key] = String(value);
       });
-    } else if (template) {
-      // Start fresh with template fields
-      template.fields.forEach(field => { initial[field.name] = ''; });
     }
     
     setResultValues(initial);
@@ -2034,7 +2054,7 @@ export default function LabOrdersPage() {
                     </CardHeader>
                     <CardContent className="space-y-3">
                       {(() => {
-                        const tpl = getTemplateForCode(selectedTest.code);
+                        const tpl = getTemplateForTest(selectedTest);
                         return tpl ? tpl.fields.map(field => {
                           const value = resultValues[field.name] || '';
                           const numValue = parseFloat(value);

@@ -629,13 +629,13 @@ export default function PatientsListPage() {
       // Handle photo upload if a new photo was selected
       if (photoFile) {
         // Get valid access token using the same method as apiFetch
-        const { getStoredAccessToken } = await import('@/lib/api-client');
+        const { getStoredAccessToken, getStoredRefreshToken, storeTokens } = await import('@/lib/api-client');
         let token = getStoredAccessToken();
         
         // If token is expired or missing, try to refresh it
         if (!token) {
           // Try to get refresh token and refresh
-          const refreshToken = localStorage.getItem('npa_ecm_refresh_token');
+          const refreshToken = getStoredRefreshToken();
           if (refreshToken) {
             const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001/api';
             const baseUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
@@ -648,10 +648,7 @@ export default function PatientsListPage() {
             if (refreshResponse.ok) {
               const data = await refreshResponse.json();
               token = data.access;
-              localStorage.setItem('npa_ecm_access_token', data.access);
-              if (data.refresh) {
-                localStorage.setItem('npa_ecm_refresh_token', data.refresh);
-              }
+              storeTokens(data.access, data.refresh ?? refreshToken, data.expires_in);
             }
           }
         }

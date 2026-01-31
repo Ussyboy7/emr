@@ -30,16 +30,44 @@ export const useNotificationWebSocket = (options: UseNotificationWebSocketOption
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const reconnectAttemptsRef = useRef(0);
+  const permanentFailureRef = useRef(false);
   const maxReconnectAttempts = NOTIFICATION_WS_MAX_RECONNECT_ATTEMPTS;
   const reconnectDelay = NOTIFICATION_WS_RECONNECT_DELAY_MS;
 
   const getWebSocketUrl = useCallback(() => {
+    const normalizeWsUrl = (raw: string) => {
+      let url = raw.trim();
+      if (!url) return '';
+
+      // Allow http(s) URLs in env and convert to ws(s)
+      if (url.startsWith('http://')) url = `ws://${url.slice('http://'.length)}`;
+      if (url.startsWith('https://')) url = `wss://${url.slice('https://'.length)}`;
+
+      // If a full notifications endpoint is provided, just normalize trailing slash
+      if (url.includes('/ws/notifications')) {
+        return url.endsWith('/') ? url : `${url}/`;
+      }
+
+      // If a /ws base is provided, append notifications
+      if (url.endsWith('/ws') || url.endsWith('/ws/')) {
+        const base = url.endsWith('/') ? url.slice(0, -1) : url;
+        return `${base}/notifications/`;
+      }
+
+      // Otherwise treat it as a host base and append /ws/notifications
+      const base = url.endsWith('/') ? url.slice(0, -1) : url;
+      return `${base}/ws/notifications/`;
+    };
+
     // If an explicit WS URL is provided, prefer it.
-    // Example: ws://172.16.0.46:8047/ws/
+    // Accept either:
+    // - ws(s)://host:port/ws/notifications/
+    // - ws(s)://host:port/ws/
+    // - ws(s)://host:port
     const explicitWs = process.env.NEXT_PUBLIC_WS_URL;
     if (explicitWs) {
-      const base = explicitWs.endsWith("/") ? explicitWs.slice(0, -1) : explicitWs;
-      return `${base}/notifications/`;
+      const normalized = normalizeWsUrl(explicitWs);
+      if (normalized) return normalized;
     }
 
     // Get base URL from environment or window location
@@ -89,7 +117,12 @@ export const useNotificationWebSocket = (options: UseNotificationWebSocketOption
   }, []);
 
   const connect = useCallback(() => {
-    if (!isWsEnabled || !currentUser || wsRef.current?.readyState === WebSocket.OPEN) {
+    if (
+      permanentFailureRef.current ||
+      !isWsEnabled ||
+      !currentUser ||
+      wsRef.current?.readyState === WebSocket.OPEN
+    ) {
       return;
     }
 
@@ -97,6 +130,11 @@ export const useNotificationWebSocket = (options: UseNotificationWebSocketOption
       let url = getWebSocketUrl();
       // Add JWT token to query string for authentication
       const token = getStoredAccessToken();
+      if (!token) {
+        // No valid token available; rely on polling instead.
+        setIsConnected(false);
+        return;
+      }
       if (token) {
         const separator = url.includes('?') ? '&' : '?';
         url = `${url}${separator}token=${encodeURIComponent(token)}`;
@@ -107,6 +145,7 @@ export const useNotificationWebSocket = (options: UseNotificationWebSocketOption
         logInfo('WebSocket connected for notifications');
         setIsConnected(true);
         reconnectAttemptsRef.current = 0;
+        permanentFailureRef.current = false;
 
         // Send authentication token if available
         const token = getStoredAccessToken();
@@ -166,10 +205,17 @@ export const useNotificationWebSocket = (options: UseNotificationWebSocketOption
         setIsConnected(false);
       };
 
-      ws.onclose = () => {
+      ws.onclose = (event) => {
         logInfo('WebSocket disconnected');
         setIsConnected(false);
         wsRef.current = null;
+
+        // If auth fails, stop retrying until user logs in again / token refresh happens.
+        if (event?.code === 4401 || event?.code === 4403) {
+          permanentFailureRef.current = true;
+          logWarn('Notifications WebSocket unauthorized; continuing with polling only.');
+          return;
+        }
 
         // Attempt to reconnect
         if (isWsEnabled && reconnectAttemptsRef.current < maxReconnectAttempts) {

@@ -237,22 +237,30 @@ SIMPLE_JWT = {
 # Channels
 # ---------------------------------------------------------------------------
 
-CHANNEL_LAYERS = {
-    "default": {
-        "BACKEND": "channels_redis.core.RedisChannelLayer",
-        "CONFIG": {
-            "hosts": [
-                {
-                    "address": (
-                        os.getenv("REDIS_HOST", "localhost"),
-                        int(os.getenv("REDIS_PORT", "6379")),
-                    ),
-                    "password": os.getenv("REDIS_PASSWORD", None),
-                }
-            ]
-        },
+USE_REDIS_CHANNEL_LAYER = os.getenv("USE_REDIS_CHANNEL_LAYER", "").lower() == "true"
+
+# In local dev, default to in-memory channel layer so WebSockets work without Redis.
+# In staging/production, Redis should be enabled via USE_REDIS_CHANNEL_LAYER=true.
+if DJANGO_ENV == "local" and not USE_REDIS_CHANNEL_LAYER:
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels.layers.InMemoryChannelLayer",
+        }
     }
-}
+else:
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels_redis.core.RedisChannelLayer",
+            "CONFIG": {
+                "hosts": [
+                    {
+                        "address": f"redis://{os.getenv('REDIS_HOST', 'localhost')}:{os.getenv('REDIS_PORT', '6379')}/0",
+                        "password": os.getenv("REDIS_PASSWORD", None),
+                    }
+                ]
+            },
+        }
+    }
 
 
 # ---------------------------------------------------------------------------

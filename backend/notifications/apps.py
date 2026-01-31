@@ -8,4 +8,3 @@ class NotificationsConfig(AppConfig):
     def ready(self):
         # Register signals
         from . import signals  # noqa: F401
-

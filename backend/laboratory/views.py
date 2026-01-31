@@ -8,6 +8,7 @@ from rest_framework.permissions import IsAuthenticated
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django.utils import timezone
+from django.db.models import Count, Q
 
 from .models import LabTemplate, LabOrder, LabTest, LabResult
 from .serializers import (
@@ -329,6 +330,48 @@ class LabOrderViewSet(viewsets.ModelViewSet):
         try:
             test = order.tests.get(id=test_id)
             
+            # Basic validation: results must be a dict when submitted as JSON.
+            if results is None:
+                results = {}
+            if not isinstance(results, dict):
+                return Response({'error': 'Invalid results payload. Expected an object of {parameter: value}.'}, status=status.HTTP_400_BAD_REQUEST)
+
+            # If the test has a template with defined parameters, enforce required keys.
+            # This prevents multi-parameter tests (e.g. FBC) from being saved as a single generic "Result".
+            template = getattr(test, 'template', None)
+            normal_range = getattr(template, 'normal_range', None) if template else None
+            if isinstance(normal_range, dict) and normal_range:
+                # Determine required keys if present; otherwise treat all template keys as required.
+                required_keys = [
+                    k for k, v in normal_range.items()
+                    if isinstance(v, dict) and v.get('required') is True
+                ]
+                if not required_keys:
+                    required_keys = list(normal_range.keys())
+
+                # Special-case: single-analyte templates may store results under "Result".
+                if len(normal_range) == 1 and "Result" not in normal_range:
+                    required_keys = list(set(required_keys + ["Result"]))
+
+                # For multi-parameter templates, block the common bad shape: {"Result": "..."} only.
+                if len(normal_range) > 1 and set(results.keys()) == {"Result"}:
+                    return Response(
+                        {
+                            'error': (
+                                f'Incomplete results for {test.code}. This test requires parameterized results '
+                                f'({len(normal_range)} fields), not a single "Result" value.'
+                            )
+                        },
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+
+                missing = [k for k in required_keys if not str(results.get(k, '')).strip()]
+                if missing and not result_file:
+                    return Response(
+                        {'error': f'Missing required result field(s): {", ".join(missing)}'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+
             # Check if this was a rejected test being resubmitted
             was_rejected = test.status == 'rejected' or test.rejected_by is not None
             
@@ -459,16 +502,34 @@ class LabResultViewSet(viewsets.ReadOnlyModelViewSet):
     
     permission_classes = [IsAuthenticated]
     serializer_class = LabResultSerializer
-    filter_backends = [DjangoFilterBackend, OrderingFilter]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['patient', 'overall_status', 'priority']
-    ordering_fields = ['created_at']
+    search_fields = [
+        'order__order_id',
+        'patient__patient_id',
+        'patient__surname',
+        'patient__first_name',
+        'patient__middle_name',
+        'test__code',
+        'test__name',
+        'test__template__name',
+    ]
+    ordering_fields = ['created_at', 'test__verified_at']
     ordering = ['-created_at']
     
     def get_queryset(self):
         # Filter by status if provided, default to 'results_ready' for pending verifications
         status_filter = self.request.query_params.get('status', 'results_ready')
 
-        queryset = LabResult.objects.select_related('test', 'order', 'order__patient', 'order__doctor', 'patient')
+        # Include test template to avoid N+1 queries when serializing template fields (normal_range/unit/etc).
+        queryset = LabResult.objects.select_related(
+            'test',
+            'test__template',
+            'order',
+            'order__patient',
+            'order__doctor',
+            'patient',
+        )
 
         if status_filter == 'results_ready':
             # Only show results that are ready for verification (exclude rejected)
@@ -480,7 +541,53 @@ class LabResultViewSet(viewsets.ReadOnlyModelViewSet):
             # Show all results (both pending and verified)
             queryset = queryset.filter(test__status__in=['results_ready', 'verified'])
 
+        # Date filtering (match Manage Visits style query params)
+        # For verified history we filter by the verification date.
+        date = self.request.query_params.get('date')
+        start_date = self.request.query_params.get('start_date')
+        end_date = self.request.query_params.get('end_date')
+        if date:
+            queryset = queryset.filter(test__verified_at__date=date)
+        elif start_date:
+            queryset = queryset.filter(test__verified_at__date__gte=start_date)
+            if end_date:
+                queryset = queryset.filter(test__verified_at__date__lte=end_date)
+        elif end_date:
+            queryset = queryset.filter(test__verified_at__date__lte=end_date)
+
+        # Clinic filtering (stored on LabOrder.clinic as a string)
+        clinic = self.request.query_params.get('clinic')
+        if clinic:
+            queryset = queryset.filter(order__clinic=clinic)
+
+        # Gender filtering (stored on Patient.gender)
+        gender = self.request.query_params.get('gender')
+        if gender:
+            queryset = queryset.filter(order__patient__gender=gender)
+
         return queryset
+
+    @action(detail=False, methods=['get'])
+    def stats(self, request):
+        """
+        Stats for verification history/completed tests.
+        Respects the same filters as list endpoint (status/date/clinic/gender/search/etc).
+        """
+        qs = self.filter_queryset(self.get_queryset())
+
+        total = qs.count()
+        by_status = qs.aggregate(
+            normal=Count('id', filter=Q(overall_status='normal')),
+            abnormal=Count('id', filter=Q(overall_status='abnormal')),
+            critical=Count('id', filter=Q(overall_status='critical')),
+        )
+
+        return Response({
+            'total': total,
+            'normal': by_status.get('normal', 0) or 0,
+            'abnormal': by_status.get('abnormal', 0) or 0,
+            'critical': by_status.get('critical', 0) or 0,
+        })
     
     @action(detail=True, methods=['post'])
     def verify(self, request, pk=None):

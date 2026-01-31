@@ -51,13 +51,35 @@ class ConsultationSessionViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     serializer_class = ConsultationSessionSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['room', 'patient', 'doctor', 'status']
+    filterset_fields = ['room', 'patient', 'doctor', 'status', 'visit']
     search_fields = ['session_id', 'notes']
-    ordering_fields = ['started_at']
+    ordering_fields = ['started_at', 'ended_at']
     ordering = ['-started_at']
     
     def get_queryset(self):
-        return ConsultationSession.objects.all().select_related('room', 'patient', 'doctor', 'visit', 'created_by')
+        qs = ConsultationSession.objects.all().select_related('room', 'patient', 'doctor', 'visit', 'created_by')
+
+        # Match VisitViewSet-style date filtering for history views.
+        # We filter by started_at because it represents the actual consultation time.
+        date = self.request.query_params.get('date')
+        start_date = self.request.query_params.get('start_date')
+        end_date = self.request.query_params.get('end_date')
+
+        if date:
+            qs = qs.filter(started_at__date=date)
+        elif start_date:
+            qs = qs.filter(started_at__date__gte=start_date)
+            if end_date:
+                qs = qs.filter(started_at__date__lte=end_date)
+        elif end_date:
+            qs = qs.filter(started_at__date__lte=end_date)
+
+        # Clinic filtering (stored on Visit.clinic as a string; see serializer clinic_name source='visit.clinic')
+        clinic = self.request.query_params.get('clinic')
+        if clinic:
+            qs = qs.filter(visit__clinic=clinic)
+
+        return qs
     
     def perform_create(self, serializer):
         """Create consultation session and log audit."""

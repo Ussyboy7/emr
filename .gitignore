@@ -34,3 +34,13 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+
+# TypeScript incremental build info
+*.tsbuildinfo
+
+# Next.js build output
+frontend/.next/
+.next/
+
+# Celery beat schedule artifacts (runtime files)
+backend/celerybeat-schedule*

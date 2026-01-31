@@ -85,6 +85,21 @@ const emptyVitals: VitalsData = {
 };
 
 export default function NursingPoolQueuePage() {
+  // Debug logging (off by default). Enable in browser console:
+  //   localStorage.setItem('debug_nursing_pool', '1')
+  // Disable:
+  //   localStorage.removeItem('debug_nursing_pool')
+  const debugLog = (...args: any[]) => {
+    if (typeof window === 'undefined') return;
+    try {
+      if (window.localStorage?.getItem('debug_nursing_pool') === '1') {
+        // eslint-disable-next-line no-console
+        console.log(...args);
+      }
+    } catch {
+      // ignore
+    }
+  };
   const [patients, setPatients] = useState<NursingPatient[]>([]);
   const [rooms, setRooms] = useState<ConsultationRoom[]>([]);
   const [loading, setLoading] = useState(true);
@@ -215,14 +230,14 @@ export default function NursingPoolQueuePage() {
           }
         }
 
-        console.log('All visits loaded:', result.results.length);
+        debugLog('All visits loaded:', result.results.length);
         console.log('Filtered nursing visits:', nursingVisits.length);
-        console.log('Visit statuses found:', [...new Set(result.results.map(v => v.status))]);
+        debugLog('Visit statuses found:', [...new Set(result.results.map(v => v.status))]);
 
         // Use filtered results
         const filteredResult = { ...result, results: nursingVisits };
 
-        console.log('Nursing pool queue - loaded visits:', filteredResult.results.length);
+        debugLog('Nursing pool queue - loaded visits:', filteredResult.results.length);
         console.log('Visit details:', filteredResult.results.map(v => ({
           id: v.id,
           patient: v.patient_name,
@@ -267,7 +282,7 @@ export default function NursingPoolQueuePage() {
         const vitalsPromises = combinedVisits.map(async (visit: Visit) => {
           try {
             const vitalsResult = await apiFetch<{ results: any[] }>(`/vitals/?visit=${visit.id}&ordering=-recorded_at`);
-            console.log(`Vitals for visit ${visit.id}:`, vitalsResult.results[0] || 'No vitals');
+            debugLog(`Vitals for visit ${visit.id}:`, vitalsResult.results[0] || 'No vitals');
             return { visitId: visit.id, vitals: vitalsResult.results[0] || null };
           } catch (err) {
             console.error(`Error fetching vitals for visit ${visit.id}:`, err);
@@ -305,7 +320,7 @@ export default function NursingPoolQueuePage() {
         const visitsNeedingNursing = combinedVisits; // Include queue-history visits when loaded
         
         // Transform visits to NursingPatient format
-        console.log('Starting transformation of', visitsNeedingNursing.length, 'visits to nursing patients');
+        debugLog('Starting transformation of', visitsNeedingNursing.length, 'visits to nursing patients');
         const transformedPatients: NursingPatient[] = visitsNeedingNursing.map((visit: Visit) => {
           // Calculate wait time (minutes since visit was created)
           const visitDateTime = new Date(`${visit.date}T${visit.time}`);
@@ -365,7 +380,7 @@ export default function NursingPoolQueuePage() {
           };
         });
 
-        console.log('Nursing patients created:', transformedPatients.length);
+        debugLog('Nursing patients created:', transformedPatients.length);
         console.log('Sample patient:', transformedPatients[0]);
 
         setPatients(transformedPatients);
@@ -508,14 +523,14 @@ export default function NursingPoolQueuePage() {
 
   // Paginated patients
   const paginatedPatients = useMemo(() => {
-    console.log('Total patients:', patients.length);
-    console.log('Filtered patients:', filteredPatients.length);
-    console.log('Sorted patients:', sortedPatients.length);
-    console.log('Current filters:', { statusFilter, typeFilter, clinicFilter, dateFilter, searchQuery });
+    debugLog('Total patients:', patients.length);
+    debugLog('Filtered patients:', filteredPatients.length);
+    debugLog('Sorted patients:', sortedPatients.length);
+    debugLog('Current filters:', { statusFilter, typeFilter, clinicFilter, dateFilter, searchQuery });
 
     const startIndex = (currentPage - 1) * itemsPerPage;
     const result = sortedPatients.slice(startIndex, startIndex + itemsPerPage);
-    console.log('Paginated patients:', result.length);
+    debugLog('Paginated patients:', result.length);
     return result;
   }, [patients, filteredPatients, sortedPatients, currentPage, itemsPerPage, statusFilter, typeFilter, clinicFilter, dateFilter, searchQuery]);
 

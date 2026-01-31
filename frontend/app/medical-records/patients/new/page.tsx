@@ -570,11 +570,11 @@ export default function NewPatientPage() {
         formData.append('photo', photoFile);
         
         // Get access token
-        const { getStoredAccessToken } = await import('@/lib/api-client');
+        const { getStoredAccessToken, getStoredRefreshToken, storeTokens } = await import('@/lib/api-client');
         let token = getStoredAccessToken();
         
         if (!token) {
-          const refreshToken = localStorage.getItem('npa_ecm_refresh_token');
+          const refreshToken = getStoredRefreshToken();
           if (refreshToken) {
             const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001/api';
             const baseUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
@@ -587,10 +587,7 @@ export default function NewPatientPage() {
             if (refreshResponse.ok) {
               const data = await refreshResponse.json();
               token = data.access;
-              localStorage.setItem('npa_ecm_access_token', data.access);
-              if (data.refresh) {
-                localStorage.setItem('npa_ecm_refresh_token', data.refresh);
-              }
+              storeTokens(data.access, data.refresh ?? refreshToken, data.expires_in);
             }
           }
         }

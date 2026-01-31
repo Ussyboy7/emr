@@ -43,7 +43,7 @@ import {
   CheckCircle2, Search, Eye, Clock, AlertTriangle, Calendar,
   User, FileText, Stethoscope, RefreshCw, Download, Printer, FlaskConical, Loader2
 } from 'lucide-react';
-import { normalizeClinicName, clinicMatches } from '@/lib/utils/clinic-utils';
+import { CLINICS } from '@/lib/constants/clinics';
 
 interface TestResult {
   parameter: string;
@@ -78,10 +78,17 @@ export default function CompletedTestsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [dateFilter, setDateFilter] = useState('all');
+  const [dateFilter, setDateFilter] = useState('today');
   const [clinicFilter, setClinicFilter] = useState('all');
   const [genderFilter, setGenderFilter] = useState('all');
+  const [stats, setStats] = useState<{ total: number; normal: number; abnormal: number; critical: number }>({
+    total: 0,
+    normal: 0,
+    abnormal: 0,
+    critical: 0,
+  });
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -92,20 +99,128 @@ export default function CompletedTestsPage() {
   const [selectedTest, setSelectedTest] = useState<CompletedTest | null>(null);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
 
+  // Debounce search to prevent firing API calls per keystroke
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearchQuery(searchQuery), 300);
+    return () => clearTimeout(t);
+  }, [searchQuery]);
+
   // Load completed tests function - memoized to prevent infinite loops
   const loadTests = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
-      const response = await labService.getCompletedTests({
-        page: currentPage,
-        page_size: itemsPerPage,
-        status: statusFilter !== 'all' ? statusFilter : undefined,
-        // Note: searchQuery, dateFilter, genderFilter not yet implemented in backend
-      });
-      setTotalCount(response.count || response.results.length);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const yyyyMmDd = (d: Date) => d.toISOString().split('T')[0];
+      let date: string | undefined;
+      let start_date: string | undefined;
+      let end_date: string | undefined;
+
+      if (dateFilter === 'today') {
+        date = yyyyMmDd(today);
+      } else if (dateFilter === 'week') {
+        const weekAgo = new Date(today);
+        weekAgo.setDate(weekAgo.getDate() - 7);
+        start_date = yyyyMmDd(weekAgo);
+        end_date = yyyyMmDd(today);
+      } else if (dateFilter === 'month') {
+        const monthAgo = new Date(today);
+        monthAgo.setMonth(monthAgo.getMonth() - 1);
+        start_date = yyyyMmDd(monthAgo);
+        end_date = yyyyMmDd(today);
+      }
+
+      const baseParams = {
+        search: debouncedSearchQuery || undefined,
+        overall_status: statusFilter !== 'all' ? statusFilter : undefined,
+        clinic: clinicFilter !== 'all' ? clinicFilter : undefined,
+        gender: genderFilter !== 'all' ? genderFilter : undefined,
+        date,
+        start_date,
+        end_date,
+      } as const;
+
+      // Primary data source: verification history endpoint (LabResultViewSet).
+      // Some deployments don't expose it; if it 404s we fall back to /laboratory/tests/?status=verified
+      // to keep the Completed Tests page working.
+      let listMode: 'verification' | 'tests' = 'verification';
+      let listResult:
+        | { results: any[]; count: number }
+        | { results: any[]; count: number; next?: string; previous?: string };
+
+      try {
+        listResult = await labService.getVerifiedResults({
+          ...baseParams,
+          page: currentPage,
+          page_size: itemsPerPage,
+        });
+      } catch (e: any) {
+        if (typeof e?.status === 'number' && e.status === 404) {
+          listMode = 'tests';
+          listResult = await labService.getCompletedTests({
+            page: currentPage,
+            page_size: itemsPerPage,
+            status: 'verified',
+          });
+        } else {
+          throw e;
+        }
+      }
+
+      setTotalCount(listResult.count || (listResult.results || []).length);
+
+      // Stats: avoid calling a dedicated stats endpoint because some deployments don't expose it,
+      // and apiFetch logs 404s to console even if caught. Instead, derive counts via lightweight
+      // filtered requests (page_size=1) to read `count`.
+      if (listMode === 'verification') {
+        try {
+          // If user picked a specific status, don't do 3 extra count calls.
+          if (statusFilter !== 'all') {
+            setStats({
+              total: listResult.count || 0,
+              normal: statusFilter === 'normal' ? (listResult.count || 0) : 0,
+              abnormal: statusFilter === 'abnormal' ? (listResult.count || 0) : 0,
+              critical: statusFilter === 'critical' ? (listResult.count || 0) : 0,
+            });
+          } else {
+            const [normalRes, abnormalRes, criticalRes] = await Promise.all([
+              labService.getVerifiedResults({ ...baseParams, overall_status: 'normal', page: 1, page_size: 1 }),
+              labService.getVerifiedResults({ ...baseParams, overall_status: 'abnormal', page: 1, page_size: 1 }),
+              labService.getVerifiedResults({ ...baseParams, overall_status: 'critical', page: 1, page_size: 1 }),
+            ]);
+
+            const normal = normalRes.count || 0;
+            const abnormal = abnormalRes.count || 0;
+            const critical = criticalRes.count || 0;
+            setStats({
+              total: (normal + abnormal + critical),
+              normal,
+              abnormal,
+              critical,
+            });
+          }
+        } catch {
+          setStats({ total: listResult.count || 0, normal: 0, abnormal: 0, critical: 0 });
+        }
+      } else {
+        // Fallback mode: we only know accurate total (count). Breakdown is best-effort from current page.
+        const pageStats = (listResult.results || []).reduce(
+          (acc: { total: number; normal: number; abnormal: number; critical: number }, test: any) => {
+            const overall = String(test?.overall_status || '').toLowerCase();
+            if (overall === 'abnormal') acc.abnormal += 1;
+            else if (overall === 'critical') acc.critical += 1;
+            else acc.normal += 1;
+            return acc;
+          },
+          { total: listResult.count || 0, normal: 0, abnormal: 0, critical: 0 }
+        );
+        setStats(pageStats);
+      }
+
       // Transform API data to frontend format
-      const transformed = await Promise.all(response.results.map(async (test: any) => {
+      const transformed = await Promise.all((listResult.results || []).map(async (row: any) => {
+        const test: any = listMode === 'verification' ? (row.test_details || row.test || {}) : row;
         // Extract patient data from test.order_details (added to LabTestSerializer)
         // The order_details field includes patient_details, doctor_details, order_id, etc.
         const orderDetails = test.order_details || {};
@@ -136,27 +251,63 @@ export default function CompletedTestsPage() {
         const turnaroundTime = turnaroundHours > 0 ? `${turnaroundHours}h ${turnaroundMins}m` : `${turnaroundMins}m`;
         
         // Process results first to determine individual statuses
-        console.log('Processing test results for test:', test.code, 'results:', test.results, 'result_file:', test.result_file);
 
         // Process result_file URL if it exists
         const resultFileUrl = test.result_file ? (
           test.result_file.startsWith('http') ? test.result_file :
           `${window.location.origin}${test.result_file}`
         ) : null;
+
+        const resolveTemplateMeta = (parameterName: string) => {
+          const normalRangeObj: Record<string, any> | undefined =
+            (test as any)?.template_normal_range || (test as any)?.template?.normal_range;
+          if (!normalRangeObj || typeof normalRangeObj !== 'object') return null;
+          const wanted = String(parameterName || '').trim().toLowerCase();
+          if (!wanted) return null;
+          for (const [k, v] of Object.entries(normalRangeObj)) {
+            if (String(k).trim().toLowerCase() === wanted) return { key: k, meta: v as any };
+          }
+          return null;
+        };
+
+        const formatTemplateRange = (meta: any) => {
+          if (!meta) return '';
+          if (typeof meta.range === 'string' && meta.range.trim()) return meta.range.trim();
+          const min = meta.min ?? meta.normalRangeMin;
+          const max = meta.max ?? meta.normalRangeMax;
+          if (min !== undefined && max !== undefined && String(min).trim() && String(max).trim()) {
+            return `${min}-${max}`;
+          }
+          return '';
+        };
+
         const processedResults = Object.entries(test.results || {}).map(([key, value]) => {
           const valueStr = String(value);
           const valueNum = parseFloat(valueStr);
 
-          // Get template data for this test code
-          const template = testTemplates[test.code];
-          const field = template?.fields?.find(f => f.name.toLowerCase() === key.toLowerCase());
-
-          let unit = field?.unit || '';
-          let normalRange = field?.normalRange || '';
+          // No hardcoded fallbacks: unit/range comes from template metadata only.
+          let unit = '';
+          let normalRange = '';
           let status: 'Normal' | 'Abnormal' | 'Critical' = 'Normal';
 
-          // Apply validation logic based on parameter and test type
-          if (!isNaN(valueNum) && valueStr.trim() !== '') {
+          // Prefer template-defined unit/range (source of truth).
+          const templateMatch = resolveTemplateMeta(key);
+          if (templateMatch) {
+            unit = String((templateMatch.meta?.unit ?? '') || '');
+            normalRange = formatTemplateRange(templateMatch.meta);
+
+            const minRaw = templateMatch.meta?.min ?? templateMatch.meta?.normalRangeMin;
+            const maxRaw = templateMatch.meta?.max ?? templateMatch.meta?.normalRangeMax;
+            const min = minRaw !== undefined && String(minRaw).trim() !== '' ? Number(minRaw) : undefined;
+            const max = maxRaw !== undefined && String(maxRaw).trim() !== '' ? Number(maxRaw) : undefined;
+            if (!isNaN(valueNum) && valueStr.trim() !== '' && (min !== undefined || max !== undefined)) {
+              if (min !== undefined && !isNaN(min) && valueNum < min) status = 'Abnormal';
+              if (max !== undefined && !isNaN(max) && valueNum > max) status = 'Abnormal';
+            }
+          }
+
+          // Hardcoded validation logic disabled (template metadata is source of truth).
+          if (false && !templateMatch && !isNaN(valueNum) && valueStr.trim() !== '') {
             // Liver Function Test validations
             if (test.code === 'LFT') {
               if (key.toLowerCase().includes('alt') || key.toLowerCase().includes('sgpt')) {
@@ -235,8 +386,10 @@ export default function CompletedTestsPage() {
           overallStatus = statusMap[test.overall_status.toLowerCase()] || 'Normal';
         } else {
           // Determine from individual results
-          if (processedResults.some(r => r.status === 'Critical')) overallStatus = 'Critical';
-          else if (processedResults.some(r => r.status === 'Abnormal')) overallStatus = 'Abnormal';
+          // Note: this page derives per-parameter status from template min/max only,
+          // which currently supports "Normal" and "Abnormal". "Critical" is sourced
+          // from the backend overall_status when available.
+          if (processedResults.some(r => r.status === 'Abnormal')) overallStatus = 'Abnormal';
           else overallStatus = 'Normal';
         }
         
@@ -279,69 +432,20 @@ export default function CompletedTestsPage() {
     } finally {
       setLoading(false);
     }
-  }, [currentPage]);
+  }, [currentPage, itemsPerPage, debouncedSearchQuery, statusFilter, clinicFilter, genderFilter, dateFilter]);
 
   // Load completed tests from API when page changes
   useEffect(() => {
     loadTests();
   }, [loadTests]);
 
-  // Normalize clinic names and get unique list
-  const clinics = [...new Set(tests.map(t => normalizeClinicName(t.clinic)).filter(c => c && c.trim() !== ''))].sort();
-
-  const filteredTests = useMemo(() => {
-    let filtered = tests.filter(test => {
-      const matchesSearch = test.patient.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        test.orderId.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        test.testName.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesStatus = statusFilter === 'all' || test.overallStatus.toLowerCase() === statusFilter;
-      const matchesClinic = clinicFilter === 'all' || clinicMatches(test.clinic, clinicFilter);
-      const matchesGender = genderFilter === 'all' || test.patient.gender.toLowerCase() === genderFilter.toLowerCase();
-      return matchesSearch && matchesStatus && matchesClinic && matchesGender;
-    });
-
-    // Apply date filter
-    if (dateFilter !== 'all') {
-      const now = new Date();
-      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-      const weekAgo = new Date(today);
-      weekAgo.setDate(weekAgo.getDate() - 7);
-      const monthAgo = new Date(today);
-      monthAgo.setMonth(monthAgo.getMonth() - 1);
-
-      filtered = filtered.filter(test => {
-        const completedDate = new Date(test.completedAt);
-        switch (dateFilter) {
-          case 'today':
-            return completedDate >= today;
-          case 'week':
-            return completedDate >= weekAgo;
-          case 'month':
-            return completedDate >= monthAgo;
-          default:
-            return true;
-        }
-      });
-    }
-
-    return filtered;
-  }, [tests, searchQuery, statusFilter, clinicFilter, dateFilter, genderFilter]);
-
-  // Use filtered tests directly (server-side pagination when no client-side filters)
-  const paginatedTests = filteredTests;
+  // Server-side filtered list (already matches current filters)
+  const paginatedTests = tests;
 
   // Reset to page 1 when filters change or items per page changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, statusFilter, clinicFilter, dateFilter, genderFilter, itemsPerPage]);
-
-  // Use filteredTests so stats match the visible list (date, search, clinic, gender, status)
-  const stats = {
-    total: filteredTests.length,
-    normal: filteredTests.filter(t => t.overallStatus === 'Normal').length,
-    abnormal: filteredTests.filter(t => t.overallStatus === 'Abnormal').length,
-    critical: filteredTests.filter(t => t.overallStatus === 'Critical').length,
-  };
+  }, [debouncedSearchQuery, statusFilter, clinicFilter, dateFilter, genderFilter, itemsPerPage]);
 
   const getOverallStatusBadge = (status: string) => {
     switch (status) {
@@ -479,7 +583,7 @@ export default function CompletedTestsPage() {
                 <SelectTrigger className="w-[160px]"><SelectValue placeholder="Clinic" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Clinics</SelectItem>
-                  {clinics.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                  {CLINICS.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
                 </SelectContent>
               </Select>
               <Select value={genderFilter} onValueChange={setGenderFilter}>
@@ -511,7 +615,7 @@ export default function CompletedTestsPage() {
                 <Button variant="outline" className="mt-4" onClick={loadTests}>Retry</Button>
               </CardContent>
             </Card>
-          ) : filteredTests.length === 0 ? (
+          ) : totalCount === 0 ? (
             <Card><CardContent className="p-8 text-center text-muted-foreground">No completed tests found</CardContent></Card>
           ) : (
             paginatedTests.map(test => {
@@ -547,12 +651,6 @@ export default function CompletedTestsPage() {
                             <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openViewDialog(test)}>
                               <Eye className="h-4 w-4 text-muted-foreground hover:text-primary" />
                             </Button>
-                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => handlePrint(test)}>
-                              <Printer className="h-4 w-4 text-muted-foreground hover:text-blue-500" />
-                            </Button>
-                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => handleDownload(test)}>
-                              <Download className="h-4 w-4 text-muted-foreground hover:text-emerald-500" />
-                            </Button>
                           </div>
                         </div>
                         
@@ -580,11 +678,11 @@ export default function CompletedTestsPage() {
         </div>
 
         {/* Pagination */}
-        {filteredTests.length > 0 && (
+        {totalCount > 0 && (
           <Card className="p-4">
             <StandardPagination
               currentPage={currentPage}
-              totalItems={filteredTests.length}
+              totalItems={totalCount}
               itemsPerPage={itemsPerPage}
               onPageChange={setCurrentPage}
               onItemsPerPageChange={setItemsPerPage}

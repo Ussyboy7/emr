@@ -45,6 +45,11 @@ export interface LabTest {
   results?: Record<string, string>;
   result_file?: { name: string; type: string; uploaded_at: string };
   template?: string;
+  // Provided by backend serializer for UI use
+  template_name?: string | null;
+  template_category?: string | null;
+  template_sample_type?: string | null;
+  template_normal_range?: Record<string, any> | null;
   rejected_by?: string | number;
   rejected_by_name?: string;
   rejected_at?: string;
@@ -214,6 +219,7 @@ class LabService {
     search?: string;
     category?: string;
     is_active?: boolean;
+    code?: string;
     page?: number;
     page_size?: number;
   }): Promise<{ results: LabTemplate[]; count: number }> {
@@ -315,12 +321,53 @@ class LabService {
     patient?: string;
     overall_status?: string;
     priority?: string;
+    clinic?: string;
+    gender?: string;
+    search?: string;
+    date?: string;
+    start_date?: string;
+    end_date?: string;
     page?: number;
     page_size?: number;
+    status?: string;
   }): Promise<{ results: LabResult[]; count: number }> {
-    const queryParams = { ...params, status: 'verified' };
+    const queryParams = { ...params, status: params?.status || 'verified' };
     const query = buildQueryString(queryParams);
     return apiFetch<{ results: LabResult[]; count: number }>(`/laboratory/verification/${query}`);
+  }
+
+  /**
+   * Stats for verified results / completed tests (counts across filters)
+   */
+  async getVerifiedResultsStats(params?: {
+    patient?: string;
+    overall_status?: string;
+    priority?: string;
+    clinic?: string;
+    gender?: string;
+    search?: string;
+    date?: string;
+    start_date?: string;
+    end_date?: string;
+    status?: string;
+  }): Promise<{ total: number; normal: number; abnormal: number; critical: number }> {
+    // Some deployments do not expose a dedicated stats endpoint.
+    // Derive stats via lightweight filtered list calls (page_size=1) and read `count`.
+    const base = { ...(params || {}), status: params?.status || 'verified' };
+
+    const [allRes, normalRes, abnormalRes, criticalRes] = await Promise.all([
+      this.getVerifiedResults({ ...base, page: 1, page_size: 1, overall_status: base.overall_status || undefined }),
+      this.getVerifiedResults({ ...base, page: 1, page_size: 1, overall_status: 'normal' }),
+      this.getVerifiedResults({ ...base, page: 1, page_size: 1, overall_status: 'abnormal' }),
+      this.getVerifiedResults({ ...base, page: 1, page_size: 1, overall_status: 'critical' }),
+    ]);
+
+    return {
+      total: allRes.count || 0,
+      normal: normalRes.count || 0,
+      abnormal: abnormalRes.count || 0,
+      critical: criticalRes.count || 0,
+    };
   }
 
   /**
@@ -376,5 +423,6 @@ class LabService {
   }
 }
 
-export default new LabService();
+export const labService = new LabService();
+export default labService;
 

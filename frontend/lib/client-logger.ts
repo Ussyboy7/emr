@@ -6,9 +6,17 @@ interface ClientLogEntryPayload {
 }
 
 const isBrowser = typeof window !== 'undefined';
-const shouldPrint =
-  process.env.NEXT_PUBLIC_DEBUG_LOGS === 'true' ||
-  process.env.NODE_ENV !== 'production';
+const shouldPrintVerbose = () => {
+  // Only print debug/info logs when explicitly enabled.
+  // This keeps dev console clean and avoids performance hits from log spam.
+  if (process.env.NEXT_PUBLIC_DEBUG_LOGS === 'true') return true;
+  if (!isBrowser) return false;
+  try {
+    return window.localStorage?.getItem('debug_client') === '1';
+  } catch {
+    return false;
+  }
+};
 
 // Disable client logging if explicitly set
 const CLIENT_LOGGING_DISABLED =
@@ -113,7 +121,8 @@ const log = (level: LogLevel, args: unknown[]) => {
   }
 
   if (isBrowser) {
-    if (shouldPrint) {
+    // Always print warnings/errors. Only print debug/info when explicitly enabled.
+    if (level === 'warn' || level === 'error' || shouldPrintVerbose()) {
       logToConsole(level, args);
     }
     return;

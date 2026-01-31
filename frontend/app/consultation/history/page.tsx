@@ -34,31 +34,8 @@ import { LabOrderModal, type LabOrderSubmitInput } from "@/components/consultati
 import { RadiologyOrderModal, type RadiologyOrderSubmitInput } from "@/components/consultation/orders/RadiologyOrderModal";
 import { PhysioOrderModal, type PhysioOrderSubmitInput } from "@/components/consultation/orders/PhysioOrderModal";
 
-// Simple doctor name resolution without fallbacks
-const resolveDoctorName = async (
-  doctorName: string | undefined,
-  doctorId: string | number | undefined
-): Promise<string> => {
-  // First try the provided doctor name
-  if (doctorName && doctorName !== 'Unknown' && doctorName.trim()) {
-    return doctorName;
-  }
-
-  // If no name but we have an ID, try to fetch the doctor
-  if (doctorId && !doctorName) {
-    try {
-      const doctor = await apiFetch(`/accounts/users/${doctorId}/`) as any;
-      const name = doctor.full_name || doctor.username;
-      if (name && name.trim()) {
-        return name;
-      }
-    } catch (err) {
-      console.warn(`Could not load doctor details for ID ${doctorId}:`, err);
-    }
-  }
-
-  return 'Unknown';
-};
+// NOTE: doctor name is now taken directly from the session serializer (doctor_name)
+// to avoid per-row API calls in large lists.
 
 // ICD-10 Codes for diagnosis
 const icd10Codes = [
@@ -145,6 +122,7 @@ const cleanClinicalText = (text: string): string => {
 // Extended type for local use (includes patientGender for filtering)
 interface ConsultationRecordWithGender extends ConsultationRecord {
   patientGender?: string;
+  visitDisplayId?: string;
 }
 
 // Consultation history data will be loaded from API
@@ -247,9 +225,8 @@ export default function ConsultationHistoryPage() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [dateFilter, setDateFilter] = useState("all");
+  const [dateFilter, setDateFilter] = useState("today");
   const [clinicFilter, setClinicFilter] = useState("all");
-  const [genderFilter, setGenderFilter] = useState("all");
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -307,13 +284,38 @@ export default function ConsultationHistoryPage() {
     const loadConsultations = async () => {
       try {
         setLoading(true);
+
+        // Date filter (server-side) - match Manage Visits/Nursing Pool concepts
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const yyyyMmDd = (d: Date) => d.toISOString().split("T")[0];
+        let date: string | undefined;
+        let start_date: string | undefined;
+        let end_date: string | undefined;
+
+        if (dateFilter === "today") {
+          date = yyyyMmDd(today);
+        } else if (dateFilter === "week") {
+          const weekAgo = new Date(today);
+          weekAgo.setDate(weekAgo.getDate() - 7);
+          start_date = yyyyMmDd(weekAgo);
+          end_date = yyyyMmDd(today);
+        } else if (dateFilter === "month") {
+          const monthAgo = new Date(today);
+          monthAgo.setMonth(monthAgo.getMonth() - 1);
+          start_date = yyyyMmDd(monthAgo);
+          end_date = yyyyMmDd(today);
+        }
         
         const sessionsResult = await consultationService.getSessions({
           page: currentPage,
           page_size: itemsPerPage,
           search: searchQuery || undefined,
           status: statusFilter !== 'all' ? statusFilter : undefined,
-          // Note: clinicFilter, genderFilter not yet implemented in backend
+          clinic: clinicFilter !== "all" ? clinicFilter : undefined,
+          date,
+          start_date,
+          end_date,
         });
         setTotalCount(sessionsResult.count || sessionsResult.results.length);
         const sessions = sessionsResult.results || [];
@@ -321,49 +323,17 @@ export default function ConsultationHistoryPage() {
         // Transform sessions to consultation records
         const transformedConsultations = await Promise.all(sessions.map(async (session: any) => {
           try {
-            // Get patient details
-            const patient = await patientService.getPatient(session.patient);
-            
-            // Get visit details if available
-            let visitDate = session.started_at ? new Date(session.started_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
-            let visitTime = session.started_at ? new Date(session.started_at).toTimeString().slice(0, 5) : '';
-            let diagnosis = '';
-            let assessment = '';
-            let plan = '';
-            let diagnosisCodes: { code: string; description: string }[] = [];
+            // IMPORTANT: keep this list page light.
+            // Avoid N+1 requests (patients, visits, diagnoses, orders, vitals).
+            const startedAt = session.started_at ? new Date(session.started_at) : new Date();
+            const visitDate = startedAt.toISOString().split('T')[0];
+            const visitTime = startedAt.toTimeString().slice(0, 5);
+            const visitDisplayId: string | undefined = undefined;
 
-            if (session.visit) {
-              try {
-                const visit = await apiFetch(`/visits/${session.visit}/`) as {
-                  date?: string;
-                  time?: string;
-                  clinical_notes?: string;
-                };
-                visitDate = visit.date || visitDate;
-                visitTime = visit.time || visitTime;
-              } catch (visitErr) {
-                console.warn('Could not load visit details:', visitErr);
-              }
-            }
-
-            // Load diagnoses from the diagnoses API (ICD-10), not from assessment
-            try {
-              const dxResult = await consultationService.getDiagnoses({ session: session.id, page_size: 100 });
-              const list = dxResult.results || [];
-              diagnosisCodes = list.map((d: any) => ({
-                code: d.icd10_code_details?.code || '',
-                description: d.icd10_code_details?.description || d.diagnosis_text || '',
-                type: (d.certainty === 'confirmed' ? 'Primary' : d.certainty === 'probable' ? 'Secondary' : 'Differential') as 'Primary' | 'Secondary' | 'Differential'
-              })).filter((d: any) => d.code || d.description);
-              diagnosis = diagnosisCodes.length > 0
-                ? (diagnosisCodes[0].code ? `${diagnosisCodes[0].code} – ${diagnosisCodes[0].description}` : diagnosisCodes[0].description)
-                : '';
-            } catch (dxErr) {
-              console.warn('Could not load diagnoses for session:', session.id, dxErr);
-            }
-
-            assessment = cleanClinicalText(session.assessment || '');
-            plan = cleanClinicalText(session.plan || '');
+            const diagnosis = '';
+            const diagnosisCodes: { code: string; description: string; type: 'Primary' | 'Secondary' | 'Differential' }[] = [];
+            const assessment = cleanClinicalText(session.assessment || '');
+            const plan = cleanClinicalText(session.plan || '');
             const historyOfPresentIllness = session.history_of_presenting_illness || '';
             const physicalExamination = session.physical_examination || '';
             
@@ -372,121 +342,27 @@ export default function ConsultationHistoryPage() {
             if (session.started_at && session.ended_at) {
               sessionDuration = Math.floor((new Date(session.ended_at).getTime() - new Date(session.started_at).getTime()) / (1000 * 60));
             }
-            
-            // Get prescriptions, lab orders, and nursing orders
-            let prescriptions: ConsultationRecord['prescriptions'] = [];
-            let labOrders: ConsultationRecord['labOrders'] = [];
-            let nursingOrders: ConsultationRecord['nursingOrders'] = [];
-            
-            if (session.visit) {
-              try {
-                const prescriptionsResult = await apiFetch<{ results: any[] }>(`/pharmacy/prescriptions/?visit=${session.visit}&page_size=100`);
-                prescriptions = (prescriptionsResult.results || []).map((p: any) => ({
-                  id: String(p.id),
-                  medication: p.medication_name || p.medication || 'Unknown',
-                  strength: p.strength || '',
-                  form: p.form || '',
-                  dosage: p.dosage || '',
-                  frequency: p.frequency || '',
-                  duration: p.duration || '',
-                  instructions: p.instructions || '',
-                }));
-              } catch (err) {
-                console.warn('Could not load prescriptions:', err);
-              }
-              
-              try {
-                const labOrdersResult = await apiFetch<{ results: any[] }>(`/laboratory/orders/?visit=${session.visit}&page_size=100`);
-                // Flatten lab orders - each test in an order should be a separate entry
-                labOrders = (labOrdersResult.results || []).flatMap((l: any) => {
-                  // If order has tests array, create an entry for each test
-                  if (l.tests && Array.isArray(l.tests) && l.tests.length > 0) {
-                    return l.tests.map((test: any) => ({
-                      id: `LAB-${l.id}-${test.id}`,
-                      test: test.name || test.test_name || test.template?.name || 'Unknown Test',
-                      priority: l.priority === 'stat' ? 'STAT' : l.priority === 'urgent' ? 'Urgent' : l.priority === 'routine' ? 'Routine' : String(l.priority || 'Routine'),
-                      instructions: test.notes || l.clinical_notes || '',
-                      status: test.status || 'pending',
-                      orderedBy: l.doctor_name || l.created_by_name || 'Unknown',
-                      createdAt: test.created_at || l.ordered_at || new Date().toISOString(),
-                    }));
-                  }
-                  // Fallback: single test entry from order-level fields
-                  return [{
-                    id: String(l.id),
-                    test: l.test_name || l.test || 'Unknown Test',
-                    priority: l.priority === 'stat' ? 'STAT' : l.priority === 'urgent' ? 'Urgent' : l.priority === 'routine' ? 'Routine' : String(l.priority || 'Routine'),
-                    instructions: l.clinical_notes || '',
-                    status: l.status || 'pending',
-                    orderedBy: l.doctor_name || l.created_by_name || 'Unknown',
-                    createdAt: l.ordered_at || l.created_at || new Date().toISOString(),
-                  }];
-                });
-              } catch (err) {
-                console.warn('Could not load lab orders:', err);
-              }
-              
-              try {
-                const nursingOrdersResult = await apiFetch<{ results: any[] }>(`/nursing/orders/?visit=${session.visit}&page_size=100`, { retryOnFailure: false });
-                nursingOrders = (nursingOrdersResult.results || []).map((n: any) => ({
-                  id: String(n.id),
-                  type: n.order_type || n.type || 'General',
-                  instructions: n.instructions || '',
-                  status: n.status || 'pending',
-                  priority: n.priority === 'urgent' ? 'Urgent' : n.priority === 'high' ? 'High' : n.priority === 'medium' ? 'Medium' : n.priority === 'low' ? 'Low' : String(n.priority || 'Medium'),
-                  orderedBy: n.ordered_by_name || 'Unknown',
-                  createdAt: n.created_at || new Date().toISOString(),
-                }));
-              } catch (err) {
-                console.warn('Could not load nursing orders:', err);
-              }
-            }
-            
-            // Get vitals
-            let vitals: ConsultationRecord['vitals'] = [];
-            try {
-              const vitalsResult = await apiFetch<{ results: any[]; count?: number }>(`/vitals/?visit=${session.visit || ''}&page_size=10`);
-              vitals = (vitalsResult.results || []).map((v: any) => ({
-                id: String(v.id),
-                date: v.recorded_at ? new Date(v.recorded_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
-                time: v.recorded_at ? new Date(v.recorded_at).toISOString().split('T')[1].substring(0, 8) : '00:00:00',
-                systolic: v.blood_pressure_systolic || 0,
-                diastolic: v.blood_pressure_diastolic || 0,
-                heartRate: v.heart_rate || 0,
-                temperature: parseFloat(v.temperature) || 0,
-                respiratoryRate: v.respiratory_rate || 0,
-                weight: parseFloat(v.weight) || 0,
-                height: parseFloat(v.height) || 0,
-                oxygenSaturation: parseFloat(v.oxygen_saturation) || 0,
-                bloodSugar: 0, // Not in backend model
-                painScale: 0, // Not in backend model
-                recordedBy: v.recorded_by_name || 'Unknown',
-                notes: v.notes || '',
-              }));
-            } catch (err) {
-              // Ignore
-            }
-            
-            // Get doctor information
-            const doctor = await resolveDoctorName(
-              session.doctor_name,
-              session.doctor
-            );
-            const doctorName = doctor;
+            const vitals: ConsultationRecord['vitals'] = [];
+            const prescriptions: ConsultationRecord['prescriptions'] = [];
+            const labOrders: ConsultationRecord['labOrders'] = [];
+            const nursingOrders: ConsultationRecord['nursingOrders'] = [];
+
+            const doctorName = (session.doctor_name && String(session.doctor_name).trim()) ? String(session.doctor_name).trim() : 'Unknown';
             const doctorId = String(session.doctor || '');
 
             return {
               id: String(session.id),
-              patient: patient.full_name || `${patient.first_name} ${patient.surname}`,
-              patientId: patient.patient_id || String(patient.id),
-              patientIdNumeric: patient.id,
+              patient: session.patient_name || 'Unknown',
+              patientId: session.patient_id || '',
+              patientIdNumeric: session.patient,
               visitId: session.visit,
-              patientGender: patient.gender || undefined, // Store gender for filtering
+              visitDisplayId,
+              patientGender: session.patient_gender || undefined, // Store gender for filtering
               doctor: doctorName,
               doctorId: doctorId,
               date: visitDate,
               time: visitTime,
-              clinic: session.clinic || 'GOPD',
+              clinic: session.clinic_name || 'GOPD',
               room: session.room_name || 'Unknown',
               diagnosis,
               diagnosisCodes,
@@ -530,7 +406,7 @@ export default function ConsultationHistoryPage() {
     };
     
     loadConsultations();
-  }, [currentPage, itemsPerPage, searchQuery, statusFilter]);
+  }, [currentPage, itemsPerPage, searchQuery, statusFilter, dateFilter, clinicFilter]);
 
   // With server-side pagination, consultations array contains only current page results
   const paginatedConsultations = consultations;
@@ -538,7 +414,7 @@ export default function ConsultationHistoryPage() {
   // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [itemsPerPage, searchQuery, statusFilter]);
+  }, [itemsPerPage, searchQuery, statusFilter, dateFilter, clinicFilter]);
 
   // Stats
   const stats = useMemo(() => {
@@ -1009,7 +885,7 @@ export default function ConsultationHistoryPage() {
                 />
               </div>
               <div className="flex flex-wrap gap-2">
-                <Select value={dateFilter} onValueChange={setDateFilter} disabled>
+                <Select value={dateFilter} onValueChange={setDateFilter}>
                   <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Time</SelectItem>
@@ -1026,7 +902,7 @@ export default function ConsultationHistoryPage() {
                     <SelectItem value="completed">Completed</SelectItem>
                   </SelectContent>
                 </Select>
-                <Select value={clinicFilter} onValueChange={setClinicFilter} disabled>
+                <Select value={clinicFilter} onValueChange={setClinicFilter}>
                   <SelectTrigger className="w-[140px]"><SelectValue placeholder="Clinic" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Clinics</SelectItem>
@@ -1035,162 +911,154 @@ export default function ConsultationHistoryPage() {
                     ))}
                   </SelectContent>
                 </Select>
-                <Select value={genderFilter} onValueChange={setGenderFilter} disabled>
-                  <SelectTrigger className="w-[120px]"><SelectValue placeholder="Gender" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Gender</SelectItem>
-                    <SelectItem value="male">Male</SelectItem>
-                    <SelectItem value="female">Female</SelectItem>
-                  </SelectContent>
-                </Select>
               </div>
             </div>
           </CardContent>
         </Card>
 
         {/* Results */}
-        <Card>
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b bg-muted/50">
-                  <th className="text-left p-4 text-sm font-medium text-muted-foreground">ID</th>
-                  <th className="text-left p-4 text-sm font-medium text-muted-foreground">Patient</th>
-                  <th className="text-left p-4 text-sm font-medium text-muted-foreground">Doctor</th>
-                  <th className="text-left p-4 text-sm font-medium text-muted-foreground">Date/Time</th>
-                  <th className="text-left p-4 text-sm font-medium text-muted-foreground">Clinic</th>
-                  <th className="text-left p-4 text-sm font-medium text-muted-foreground">Diagnosis</th>
-                  <th className="text-left p-4 text-sm font-medium text-muted-foreground">Status</th>
-                  <th className="text-left p-4 text-sm font-medium text-muted-foreground">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {paginatedConsultations.length === 0 ? (
-                  <tr>
-                    <td colSpan={8} className="p-8 text-center">
-                      <div className="flex flex-col items-center gap-3">
-                        <History className="h-12 w-12 text-muted-foreground/50" />
-                        <div>
-                          {searchQuery ? (
-                            <>
-                              <p className="text-muted-foreground font-medium">No consultations found for "{searchQuery}"</p>
-                              <p className="text-sm text-muted-foreground mt-1">Try adjusting your search terms or filters</p>
-                            </>
-                          ) : statusFilter !== "all" ? (
-                            <>
-                              <p className="text-muted-foreground font-medium">No {statusFilter.replace('-', ' ')} consultations</p>
-                              <p className="text-sm text-muted-foreground mt-1">Try selecting "All Status" to see all consultations</p>
-                            </>
-                          ) : dateFilter !== "all" ? (
-                            <>
-                              <p className="text-muted-foreground font-medium">No consultations for {dateFilter}</p>
-                              <p className="text-sm text-muted-foreground mt-1">Try selecting "All Time" to see all consultations</p>
-                            </>
-                          ) : (
-                            <>
-                              <p className="text-muted-foreground font-medium">No consultations found</p>
-                              <p className="text-sm text-muted-foreground mt-1">Consultations will appear here once patients are seen</p>
-                            </>
-                          )}
-                        </div>
+        {paginatedConsultations.length === 0 ? (
+          <Card>
+            <CardContent className="py-12 text-center">
+              <History className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+              {searchQuery ? (
+                <>
+                  <p className="text-lg font-medium mb-1">No consultations found for "{searchQuery}"</p>
+                  <p className="text-sm text-muted-foreground">Try adjusting your search terms or filters</p>
+                </>
+              ) : statusFilter !== "all" ? (
+                <>
+                  <p className="text-lg font-medium mb-1">No {statusFilter.replace("-", " ")} consultations</p>
+                  <p className="text-sm text-muted-foreground">Try selecting "All Status" to see all consultations</p>
+                </>
+              ) : dateFilter !== "all" ? (
+                <>
+                  <p className="text-lg font-medium mb-1">No consultations for {dateFilter}</p>
+                  <p className="text-sm text-muted-foreground">Try selecting "All Time" to see all consultations</p>
+                </>
+              ) : (
+                <>
+                  <p className="text-lg font-medium mb-1">No consultations found</p>
+                  <p className="text-sm text-muted-foreground">Consultations will appear here once patients are seen</p>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="space-y-2">
+            {paginatedConsultations.map((c) => {
+              const isEditable = canEditConsultation(c);
+              const isCompleted = c.status === "Completed";
+              const borderColor = isEditable
+                ? "border-l-emerald-500"
+                : isCompleted
+                  ? "border-l-emerald-500"
+                  : "border-l-amber-500";
+              const avatarBg = isCompleted ? "bg-emerald-100 dark:bg-emerald-900/30" : "bg-amber-100 dark:bg-amber-900/30";
+              const avatarText = isCompleted ? "text-emerald-600 dark:text-emerald-400" : "text-amber-700 dark:text-amber-300";
+
+              const initials = (c.patient || "P")
+                .split(" ")
+                .filter(Boolean)
+                .slice(0, 2)
+                .map((n) => n[0]!)
+                .join("")
+                .toUpperCase();
+
+              const diagnosisSummary = (() => {
+                if (c.diagnosisCodes && c.diagnosisCodes.length > 0) {
+                  const codes = c.diagnosisCodes.map((dx) => dx.code).filter(Boolean);
+                  const shown = codes.slice(0, 3).join(", ");
+                  const extra = codes.length > 3 ? ` (+${codes.length - 3})` : "";
+                  return `${shown}${extra}`.trim();
+                }
+                if (c.diagnosis && c.diagnosis.trim()) return c.diagnosis.trim();
+                return "";
+              })();
+
+              return (
+                <Card
+                  key={c.id}
+                  className={`border-l-4 ${borderColor} hover:shadow-md transition-shadow ${
+                    isEditable ? "bg-emerald-50/30 dark:bg-emerald-900/10" : ""
+                  }`}
+                >
+                  <CardContent className="py-3 px-4">
+                    <div className="flex items-center gap-3">
+                      {/* Avatar (Manage Visits pattern) */}
+                      <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${avatarBg}`}>
+                        <span className={`font-semibold text-xs ${avatarText}`}>{initials}</span>
                       </div>
-                    </td>
-                  </tr>
-                ) : (
-                  paginatedConsultations.map((c) => {
-                    const isEditable = canEditConsultation(c);
-                    return (
-                      <tr key={c.id} className={`border-b hover:bg-muted/30 transition-colors ${isEditable ? 'bg-emerald-50/30 dark:bg-emerald-900/10 border-l-4 border-l-emerald-500' : ''}`}>
-                        <td className="p-4 font-medium">{c.id}</td>
-                        <td className="p-4">
-                          <p className="font-medium">{c.patient}</p>
-                          <p className="text-xs text-muted-foreground">{c.patientId}</p>
-                        </td>
-                        <td className="p-4">
-                          <div className="flex items-center gap-2">
-                            <span className={c.doctor === 'Unknown' ? 'text-amber-600' : ''}>
-                              {c.doctor}
-                            </span>
-                            {c.doctor === 'Unknown' && (
-                              <AlertTriangle className="h-3 w-3 text-amber-500 flex-shrink-0" />
-                            )}
-                          </div>
-                        </td>
-                        <td className="p-4">
-                          <p>{new Date(c.date + 'T' + c.time).toLocaleDateString()}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {new Date(c.date + 'T' + c.time).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}
+
+                      {/* Details (Manage Visits pattern) */}
+                      <div className="flex-1 min-w-0 overflow-hidden">
+                        {/* Row 1: Name + Badges */}
+                        <div className="flex items-center gap-2">
+                          <h3 className="font-medium text-foreground text-sm truncate">{c.patient}</h3>
+                          <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-5">
+                            {c.clinic}
+                          </Badge>
+                          <Badge variant="outline" className={`text-[10px] px-1.5 py-0 h-5 ${getStatusBadge(c.status)}`}>
+                            {c.status}
+                          </Badge>
+                        </div>
+
+                        {/* Row 2: IDs + Room + Doctor + Date/Time */}
+                        <p className="text-xs text-muted-foreground mt-0.5 truncate">
+                          {c.patientId}
+                          {c.visitDisplayId ? ` • ${c.visitDisplayId}` : ""}
+                          {c.room ? ` • ${c.room}` : ""}
+                          {c.doctor ? ` • ${c.doctor}` : ""}
+                          {c.date ? ` • ${c.date}${c.time ? ` ${c.time}` : ""}` : ""}
+                        </p>
+
+                        {/* Row 3: Diagnosis summary (like Notes in Manage Visits) */}
+                        {(diagnosisSummary || true) && (
+                          <p className="text-xs text-muted-foreground mt-1 line-clamp-1">
+                            <span className="font-medium">Diagnosis:</span>{" "}
+                            {diagnosisSummary ? diagnosisSummary : <span className="text-amber-600">No diagnosis recorded</span>}
                           </p>
-                        </td>
-                        <td className="p-4"><Badge variant="outline">{c.clinic}</Badge></td>
-                        <td className="p-4 max-w-[200px]">
-                          <div className="flex flex-col gap-1">
-                            {c.diagnosisCodes && c.diagnosisCodes.length > 0 ? (
-                              <div className="flex flex-wrap gap-1">
-                                {c.diagnosisCodes.slice(0, 2).map((dx, idx) => (
-                                  <Badge key={idx} variant="outline" className="text-xs font-mono bg-blue-50 text-blue-700 border-blue-200">
-                                    {dx.code}
-                                  </Badge>
-                                ))}
-                                {c.diagnosisCodes.length > 2 && (
-                                  <Badge variant="outline" className="text-xs bg-gray-100">
-                                    +{c.diagnosisCodes.length - 2}
-                                  </Badge>
-                                )}
-                              </div>
-                            ) : c.diagnosis && c.diagnosis.trim() ? (
-                              <div className="flex items-center gap-2">
-                                <span className="truncate text-sm">
-                                  {c.diagnosis}
-                                </span>
-                              </div>
-                            ) : (
-                              <div className="flex items-center gap-2">
-                                <span className="truncate text-sm text-amber-600">
-                                  No diagnosis recorded
-                                </span>
-                                <AlertTriangle className="h-3 w-3 text-amber-500 flex-shrink-0" />
-                              </div>
-                            )}
+                        )}
+                      </div>
+
+                      {/* Actions (Manage Visits pattern) */}
+                      <div className="flex items-center gap-1 flex-shrink-0">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          onClick={() => openViewModal(c)}
+                          title="View Consultation"
+                        >
+                          <Eye className="h-3.5 w-3.5" />
+                        </Button>
+
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          onClick={() => openEditModal(c)}
+                          title={isEditable ? "Edit Consultation" : "Consultation can only be edited within 48 hours"}
+                          disabled={!isEditable}
+                        >
+                          <Edit className="h-3.5 w-3.5" />
+                        </Button>
+
+                        {isCompleted && (
+                          <div className="h-7 w-7 flex items-center justify-center rounded bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400">
+                            <CheckCircle2 className="h-4 w-4" />
                           </div>
-                        </td>
-                        <td className="p-4"><Badge className={getStatusBadge(c.status)}>{c.status}</Badge></td>
-                        <td className="p-4">
-                          <div className="flex items-center gap-1 min-w-[100px]">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => openViewModal(c)}
-                              title="View consultation details"
-                              className="hover:bg-blue-50 hover:text-blue-600"
-                            >
-                              <Eye className="h-4 w-4" />
-                            </Button>
-                            <div className="flex items-center gap-1">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => openEditModal(c)}
-                                title={canEditConsultation(c) ? "Edit consultation notes" : "Consultation can only be edited within 48 hours"}
-                                className="hover:bg-amber-50 hover:text-amber-600"
-                                disabled={!canEditConsultation(c)}
-                              >
-                                <Edit className="h-4 w-4" />
-                              </Button>
-                              {canEditConsultation(c) && (
-                                <div className="w-2 h-2 bg-emerald-500 rounded-full" title="Editable (within 48 hours)" />
-                              )}
-                            </div>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
+                        )}
+
+                        {isEditable && <div className="w-2 h-2 bg-emerald-500 rounded-full" title="Editable (within 48 hours)" />}
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
           </div>
-        </Card>
+        )}
 
         {/* Pagination */}
         {paginatedConsultations.length > 0 && (

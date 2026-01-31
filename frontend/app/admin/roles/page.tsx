@@ -48,6 +48,9 @@ interface PagePermission {
 }
 
 const allPagePermissions: PagePermission[] = [
+  // Overview (Global EMR)
+  { id: '/dashboard', name: 'Overview Dashboard', description: 'Global EMR overview dashboard', module: 'Overview' },
+
   // Medical Records
   { id: '/medical-records', name: 'Dashboard', description: 'Medical Records Dashboard', module: 'Medical Records' },
   { id: '/medical-records/patients/new', name: 'Register Patient', description: 'Register new patients', module: 'Medical Records' },

@@ -2,12 +2,22 @@
 
 import { logError, logWarn } from '@/lib/client-logger';
 import { AuthenticationError, AuthenticationExpiredError } from './auth-errors';
-const ACCESS_TOKEN_KEY = "npa_ecm_access_token";
-const REFRESH_TOKEN_KEY = "npa_ecm_refresh_token";
-const ACCESS_TOKEN_EXP_KEY = "npa_ecm_access_exp";
-const ORIGINAL_ACCESS_TOKEN_KEY = "npa_ecm_original_access";
-const ORIGINAL_REFRESH_TOKEN_KEY = "npa_ecm_original_refresh";
-const ORIGINAL_ACCESS_EXP_KEY = "npa_ecm_original_access_exp";
+import {
+  ACCESS_TOKEN_COOKIE as ACCESS_TOKEN_KEY,
+  REFRESH_TOKEN_COOKIE as REFRESH_TOKEN_KEY,
+  ACCESS_TOKEN_EXP_COOKIE as ACCESS_TOKEN_EXP_KEY,
+  AUTH_SESSION_COOKIE,
+  LEGACY_ACCESS_TOKEN_COOKIE,
+  LEGACY_REFRESH_TOKEN_COOKIE,
+  LEGACY_ACCESS_TOKEN_EXP_COOKIE,
+  LEGACY_AUTH_SESSION_COOKIE,
+} from "@/lib/auth-cookie-names";
+const ORIGINAL_ACCESS_TOKEN_KEY = "emr_original_access";
+const ORIGINAL_REFRESH_TOKEN_KEY = "emr_original_refresh";
+const ORIGINAL_ACCESS_EXP_KEY = "emr_original_access_exp";
+const LEGACY_ORIGINAL_ACCESS_TOKEN_KEY = "npa_ecm_original_access";
+const LEGACY_ORIGINAL_REFRESH_TOKEN_KEY = "npa_ecm_original_refresh";
+const LEGACY_ORIGINAL_ACCESS_EXP_KEY = "npa_ecm_original_access_exp";
 
 const getBaseUrl = () => {
   const base = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8001/api";
@@ -15,6 +25,88 @@ const getBaseUrl = () => {
 };
 
 const isBrowser = () => typeof window !== "undefined";
+
+const getCookie = (name: string): string | null => {
+  if (!isBrowser()) return null;
+  const escaped = name.replace(/[$()*+.?[\\\]^{|}-]/g, "\\$&");
+  const match = document.cookie.match(new RegExp(`(?:^|; )${escaped}=([^;]*)`));
+  return match ? decodeURIComponent(match[1]) : null;
+};
+
+const setCookie = (name: string, value: string, maxAgeSeconds?: number) => {
+  if (!isBrowser()) return;
+  const maxAge = typeof maxAgeSeconds === "number" ? `; Max-Age=${Math.max(0, Math.floor(maxAgeSeconds))}` : "";
+  document.cookie = `${name}=${encodeURIComponent(value)}; Path=/; SameSite=Lax${maxAge}`;
+};
+
+const clearCookie = (name: string) => {
+  if (!isBrowser()) return;
+  document.cookie = `${name}=; Path=/; SameSite=Lax; Max-Age=0`;
+};
+
+let didMigrateStorageKeys = false;
+const migrateLegacyStorageKeysIfNeeded = () => {
+  if (!isBrowser()) return;
+  if (didMigrateStorageKeys) return;
+  didMigrateStorageKeys = true;
+
+  // Migrate auth tokens (npa_ecm_* -> emr_*)
+  const newAccess = localStorage.getItem(ACCESS_TOKEN_KEY) ?? getCookie(ACCESS_TOKEN_KEY);
+  const newRefresh = localStorage.getItem(REFRESH_TOKEN_KEY) ?? getCookie(REFRESH_TOKEN_KEY);
+  const newExp = localStorage.getItem(ACCESS_TOKEN_EXP_KEY) ?? getCookie(ACCESS_TOKEN_EXP_KEY);
+
+  const legacyAccess = localStorage.getItem(LEGACY_ACCESS_TOKEN_COOKIE) ?? getCookie(LEGACY_ACCESS_TOKEN_COOKIE);
+  const legacyRefresh = localStorage.getItem(LEGACY_REFRESH_TOKEN_COOKIE) ?? getCookie(LEGACY_REFRESH_TOKEN_COOKIE);
+  const legacyExp = localStorage.getItem(LEGACY_ACCESS_TOKEN_EXP_COOKIE) ?? getCookie(LEGACY_ACCESS_TOKEN_EXP_COOKIE);
+
+  if ((!newAccess || !newRefresh) && legacyAccess && legacyRefresh) {
+    // Prefer legacy expiry if present; otherwise default to 1h.
+    const expiresAt = legacyExp ? Number(legacyExp) : undefined;
+    const remainingSeconds =
+      typeof expiresAt === "number" && Number.isFinite(expiresAt)
+        ? Math.max(0, Math.floor((expiresAt - Date.now()) / 1000))
+        : 60 * 60;
+
+    localStorage.setItem(ACCESS_TOKEN_KEY, legacyAccess);
+    localStorage.setItem(REFRESH_TOKEN_KEY, legacyRefresh);
+    if (typeof expiresAt === "number" && Number.isFinite(expiresAt)) {
+      localStorage.setItem(ACCESS_TOKEN_EXP_KEY, `${expiresAt}`);
+    }
+
+    setCookie(ACCESS_TOKEN_KEY, legacyAccess, remainingSeconds);
+    setCookie(REFRESH_TOKEN_KEY, legacyRefresh, 60 * 60 * 24 * 7);
+    if (typeof expiresAt === "number" && Number.isFinite(expiresAt)) {
+      setCookie(ACCESS_TOKEN_EXP_KEY, `${expiresAt}`, remainingSeconds);
+    }
+    setCookie(AUTH_SESSION_COOKIE, "1", 60 * 60 * 24 * 7);
+
+    // Cleanup legacy keys
+    localStorage.removeItem(LEGACY_ACCESS_TOKEN_COOKIE);
+    localStorage.removeItem(LEGACY_REFRESH_TOKEN_COOKIE);
+    localStorage.removeItem(LEGACY_ACCESS_TOKEN_EXP_COOKIE);
+    clearCookie(LEGACY_ACCESS_TOKEN_COOKIE);
+    clearCookie(LEGACY_REFRESH_TOKEN_COOKIE);
+    clearCookie(LEGACY_ACCESS_TOKEN_EXP_COOKIE);
+  }
+
+  // Migrate impersonation originals (npa_ecm_original_* -> emr_original_*)
+  const newOrigAccess = localStorage.getItem(ORIGINAL_ACCESS_TOKEN_KEY);
+  const newOrigRefresh = localStorage.getItem(ORIGINAL_REFRESH_TOKEN_KEY);
+  const legacyOrigAccess = localStorage.getItem(LEGACY_ORIGINAL_ACCESS_TOKEN_KEY);
+  const legacyOrigRefresh = localStorage.getItem(LEGACY_ORIGINAL_REFRESH_TOKEN_KEY);
+  const legacyOrigExp = localStorage.getItem(LEGACY_ORIGINAL_ACCESS_EXP_KEY);
+
+  if ((!newOrigAccess || !newOrigRefresh) && legacyOrigAccess && legacyOrigRefresh) {
+    localStorage.setItem(ORIGINAL_ACCESS_TOKEN_KEY, legacyOrigAccess);
+    localStorage.setItem(ORIGINAL_REFRESH_TOKEN_KEY, legacyOrigRefresh);
+    if (legacyOrigExp) {
+      localStorage.setItem(ORIGINAL_ACCESS_EXP_KEY, legacyOrigExp);
+    }
+    localStorage.removeItem(LEGACY_ORIGINAL_ACCESS_TOKEN_KEY);
+    localStorage.removeItem(LEGACY_ORIGINAL_REFRESH_TOKEN_KEY);
+    localStorage.removeItem(LEGACY_ORIGINAL_ACCESS_EXP_KEY);
+  }
+};
 
 type FetchOptions = RequestInit & {
   skipAuth?: boolean;
@@ -26,8 +118,9 @@ type FetchOptions = RequestInit & {
 
 export const getStoredAccessToken = () => {
   if (!isBrowser()) return null;
-  const token = localStorage.getItem(ACCESS_TOKEN_KEY);
-  const expiresAtRaw = localStorage.getItem(ACCESS_TOKEN_EXP_KEY);
+  migrateLegacyStorageKeysIfNeeded();
+  const token = localStorage.getItem(ACCESS_TOKEN_KEY) ?? getCookie(ACCESS_TOKEN_KEY);
+  const expiresAtRaw = localStorage.getItem(ACCESS_TOKEN_EXP_KEY) ?? getCookie(ACCESS_TOKEN_EXP_KEY);
   if (!token || !expiresAtRaw) return null;
   const expiresAt = Number(expiresAtRaw);
   if (Number.isNaN(expiresAt) || Date.now() > expiresAt) {
@@ -38,16 +131,35 @@ export const getStoredAccessToken = () => {
 
 export const getStoredRefreshToken = () => {
   if (!isBrowser()) return null;
-  return localStorage.getItem(REFRESH_TOKEN_KEY);
+  migrateLegacyStorageKeysIfNeeded();
+  return localStorage.getItem(REFRESH_TOKEN_KEY) ?? getCookie(REFRESH_TOKEN_KEY);
 };
 
 export const storeTokens = (accessToken: string, refreshToken: string, expiresInSeconds?: number) => {
   if (!isBrowser()) return;
+  migrateLegacyStorageKeysIfNeeded();
   localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
   localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
   const effectiveExpires = typeof expiresInSeconds === "number" ? expiresInSeconds : 60 * 60;
   const expiresAt = Date.now() + effectiveExpires * 1000 - 30 * 1000; // refresh a little early
   localStorage.setItem(ACCESS_TOKEN_EXP_KEY, `${expiresAt}`);
+
+  // Mirror tokens into cookies so middleware can enforce auth on first request.
+  setCookie(ACCESS_TOKEN_KEY, accessToken, effectiveExpires);
+  // Refresh tokens are typically longer-lived; keep it for a week by default.
+  setCookie(REFRESH_TOKEN_KEY, refreshToken, 60 * 60 * 24 * 7);
+  // Store expiry as epoch ms so client can validate even when reading from cookies.
+  setCookie(ACCESS_TOKEN_EXP_KEY, `${expiresAt}`, effectiveExpires);
+  // Lightweight auth flag for middleware.
+  setCookie(AUTH_SESSION_COOKIE, "1", 60 * 60 * 24 * 7);
+
+  // Cleanup legacy token keys so we don't keep duplicates around.
+  localStorage.removeItem(LEGACY_ACCESS_TOKEN_COOKIE);
+  localStorage.removeItem(LEGACY_REFRESH_TOKEN_COOKIE);
+  localStorage.removeItem(LEGACY_ACCESS_TOKEN_EXP_COOKIE);
+  clearCookie(LEGACY_ACCESS_TOKEN_COOKIE);
+  clearCookie(LEGACY_REFRESH_TOKEN_COOKIE);
+  clearCookie(LEGACY_ACCESS_TOKEN_EXP_COOKIE);
 };
 
 export const clearTokens = () => {
@@ -56,6 +168,20 @@ export const clearTokens = () => {
   localStorage.removeItem(REFRESH_TOKEN_KEY);
   localStorage.removeItem(ACCESS_TOKEN_EXP_KEY);
   localStorage.removeItem('demo_user'); // Clear demo user on logout
+
+  clearCookie(ACCESS_TOKEN_KEY);
+  clearCookie(REFRESH_TOKEN_KEY);
+  clearCookie(ACCESS_TOKEN_EXP_KEY);
+  clearCookie(AUTH_SESSION_COOKIE);
+  clearCookie(LEGACY_AUTH_SESSION_COOKIE);
+
+  // Also clear legacy token keys.
+  localStorage.removeItem(LEGACY_ACCESS_TOKEN_COOKIE);
+  localStorage.removeItem(LEGACY_REFRESH_TOKEN_COOKIE);
+  localStorage.removeItem(LEGACY_ACCESS_TOKEN_EXP_COOKIE);
+  clearCookie(LEGACY_ACCESS_TOKEN_COOKIE);
+  clearCookie(LEGACY_REFRESH_TOKEN_COOKIE);
+  clearCookie(LEGACY_ACCESS_TOKEN_EXP_COOKIE);
 };
 
 const storeOriginalTokenValues = (accessToken: string, refreshToken: string, expiresInSeconds?: number) => {
@@ -70,6 +196,7 @@ const storeOriginalTokenValues = (accessToken: string, refreshToken: string, exp
 
 export const storeOriginalTokens = () => {
   if (!isBrowser()) return;
+  migrateLegacyStorageKeysIfNeeded();
   if (localStorage.getItem(ORIGINAL_ACCESS_TOKEN_KEY)) return;
   const access = localStorage.getItem(ACCESS_TOKEN_KEY);
   const refresh = localStorage.getItem(REFRESH_TOKEN_KEY);
@@ -83,6 +210,7 @@ export const storeOriginalTokens = () => {
 
 export const getOriginalTokens = () => {
   if (!isBrowser()) return null;
+  migrateLegacyStorageKeysIfNeeded();
   const access = localStorage.getItem(ORIGINAL_ACCESS_TOKEN_KEY);
   const refresh = localStorage.getItem(ORIGINAL_REFRESH_TOKEN_KEY);
   if (!access || !refresh) return null;
@@ -101,6 +229,11 @@ export const clearOriginalTokens = () => {
   localStorage.removeItem(ORIGINAL_ACCESS_TOKEN_KEY);
   localStorage.removeItem(ORIGINAL_REFRESH_TOKEN_KEY);
   localStorage.removeItem(ORIGINAL_ACCESS_EXP_KEY);
+
+  // Cleanup legacy originals too.
+  localStorage.removeItem(LEGACY_ORIGINAL_ACCESS_TOKEN_KEY);
+  localStorage.removeItem(LEGACY_ORIGINAL_REFRESH_TOKEN_KEY);
+  localStorage.removeItem(LEGACY_ORIGINAL_ACCESS_EXP_KEY);
 };
 
 const refreshWithToken = async (refreshToken: string): Promise<LoginResponse | null> => {
@@ -198,7 +331,18 @@ export const apiFetch = async <T = unknown>(path: string, options: FetchOptions 
     try {
       let response: Response;
       const fullUrl = `${getBaseUrl()}${path}`;
-      console.log(`🔍 API Call: ${rest.method || 'GET'} ${fullUrl}`);
+      // Keep API logging opt-in; it can be extremely noisy and slow in dev.
+      // Enable by running in the browser console:
+      //   localStorage.setItem('debug_api', '1')
+      // Disable:
+      //   localStorage.removeItem('debug_api')
+      const shouldLogApi =
+        typeof window !== 'undefined' &&
+        typeof window.localStorage !== 'undefined' &&
+        window.localStorage.getItem('debug_api') === '1';
+      if (shouldLogApi) {
+        console.log(`🔍 API Call: ${rest.method || 'GET'} ${fullUrl}`);
+      }
 
       try {
         response = await fetch(fullUrl, {
@@ -385,7 +529,10 @@ export const logout = async () => {
 
 export const hasTokens = () => {
   if (!isBrowser()) return false;
-  return Boolean(localStorage.getItem(ACCESS_TOKEN_KEY) && localStorage.getItem(REFRESH_TOKEN_KEY));
+  migrateLegacyStorageKeysIfNeeded();
+  const access = localStorage.getItem(ACCESS_TOKEN_KEY) ?? getCookie(ACCESS_TOKEN_KEY);
+  const refresh = localStorage.getItem(REFRESH_TOKEN_KEY) ?? getCookie(REFRESH_TOKEN_KEY);
+  return Boolean(access && refresh);
 };
 
 export const buildQueryString = (params: Record<string, string | number | boolean | undefined>) => {

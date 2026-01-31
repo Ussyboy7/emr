@@ -5,6 +5,15 @@ import { useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { User } from "@/lib/npa-structure";
 import { OrganizationContext } from "@/contexts/OrganizationContext";
 import { apiFetch, hasOriginalTokens, hasTokens } from "@/lib/api-client";
+import {
+  AUTH_ALLOWED_PAGES_COOKIE,
+  AUTH_HOME_ROUTE_COOKIE,
+  AUTH_IS_SUPERUSER_COOKIE,
+  LEGACY_AUTH_ALLOWED_PAGES_COOKIE,
+  LEGACY_AUTH_HOME_ROUTE_COOKIE,
+  LEGACY_AUTH_IS_SUPERUSER_COOKIE,
+} from "@/lib/auth-cookie-names";
+import { getHomeRouteForUser } from "@/lib/home-route";
 
 const toOptionalString = (value: unknown): string | undefined => {
   if (value === null || value === undefined) return undefined;
@@ -38,6 +47,17 @@ const mapApiUserToUser = (data: any): User => {
     active: data.is_active ?? true,
     isSuperuser: data.is_superuser ?? false,
   };
+};
+
+const setCookie = (name: string, value: string, maxAgeSeconds?: number) => {
+  if (typeof document === "undefined") return;
+  const maxAge = typeof maxAgeSeconds === "number" ? `; Max-Age=${Math.max(0, Math.floor(maxAgeSeconds))}` : "";
+  document.cookie = `${name}=${encodeURIComponent(value)}; Path=/; SameSite=Lax${maxAge}`;
+};
+
+const clearCookie = (name: string) => {
+  if (typeof document === "undefined") return;
+  document.cookie = `${name}=; Path=/; SameSite=Lax; Max-Age=0`;
 };
 
 export const useCurrentUser = () => {
@@ -86,7 +106,23 @@ export const useCurrentUser = () => {
 
     try {
       const response = await apiFetch("/accounts/auth/me/");
-      setRemoteUser(mapApiUserToUser(response));
+      const mapped = mapApiUserToUser(response);
+      setRemoteUser(mapped);
+
+      // Mirror authorization context into cookies for middleware (best-effort).
+      try {
+        setCookie(AUTH_ALLOWED_PAGES_COOKIE, JSON.stringify(mapped.permissions || []), 60 * 60 * 24 * 7);
+        setCookie(AUTH_IS_SUPERUSER_COOKIE, mapped.isSuperuser ? "1" : "0", 60 * 60 * 24 * 7);
+        const home = getHomeRouteForUser(mapped);
+        if (home) setCookie(AUTH_HOME_ROUTE_COOKIE, home, 60 * 60 * 24 * 7);
+
+        // Cleanup legacy cookie names to avoid confusion / stale state.
+        clearCookie(LEGACY_AUTH_ALLOWED_PAGES_COOKIE);
+        clearCookie(LEGACY_AUTH_IS_SUPERUSER_COOKIE);
+        clearCookie(LEGACY_AUTH_HOME_ROUTE_COOKIE);
+      } catch {
+        // ignore cookie write errors
+      }
     } catch (error) {
       logWarn("Failed to hydrate current user from API", error);
       setRemoteUser(null);

@@ -1525,7 +1525,12 @@ class Command(BaseCommand):
                 'sample_type': 'EDTA Blood',
                 'description': 'Malaria detection',
                 'normal_range': {
-                    'Malaria Parasite': {'unit': '', 'range': 'Not detected', 'dataType': 'text', 'required': True},
+                    # Some workflows store this test as a single "Result" plus optional details.
+                    'Result': {'unit': '', 'range': 'Not detected', 'dataType': 'text', 'required': True},
+                    'Species': {'unit': '', 'range': 'N/A', 'dataType': 'text', 'required': False},
+                    'Parasite Count': {'unit': '', 'range': 'N/A', 'dataType': 'text', 'required': False},
+                    # Keep the explicit name too (in case results are stored with this key)
+                    'Malaria Parasite': {'unit': '', 'range': 'Not detected', 'dataType': 'text', 'required': False},
                 }
             },
             {
@@ -1682,7 +1687,7 @@ class Command(BaseCommand):
                 'sample_type': 'Blood',
                 'description': 'Hepatitis C virus antibody test',
                 'normal_range': {
-                    'Anti-HCV': {'unit': '', 'min': '', 'max': 'Negative', 'dataType': 'text', 'required': True},
+                    'Anti-HCV': {'unit': '', 'range': 'Negative', 'dataType': 'text', 'required': True},
                 }
             },
             {
@@ -1691,9 +1696,9 @@ class Command(BaseCommand):
                 'sample_type': 'Ascitic Fluid',
                 'description': 'Analysis of peritoneal fluid',
                 'normal_range': {
-                    'Appearance': {'unit': '', 'min': '', 'max': 'Clear', 'dataType': 'text', 'required': True},
+                    'Appearance': {'unit': '', 'range': 'Clear', 'dataType': 'text', 'required': True},
                     'Protein': {'unit': 'g/dL', 'min': '0', 'max': '2.5', 'dataType': 'numeric', 'required': True},
-                    'SAAG': {'unit': 'g/dL', 'min': '1.1', 'max': '', 'dataType': 'numeric', 'required': True},
+                    'SAAG': {'unit': 'g/dL', 'range': '>=1.1', 'dataType': 'numeric', 'required': True},
                 }
             },
             {
@@ -1712,8 +1717,8 @@ class Command(BaseCommand):
                 'sample_type': 'Blood',
                 'description': 'Blood culture for microbial identification',
                 'normal_range': {
-                    'Organism': {'unit': '', 'min': '', 'max': 'No growth', 'dataType': 'text', 'required': True},
-                    'Time to Positivity': {'unit': 'hours', 'min': '', 'max': '', 'dataType': 'numeric', 'required': False},
+                    'Organism': {'unit': '', 'range': 'No growth', 'dataType': 'text', 'required': True},
+                    'Time to Positivity': {'unit': 'hours', 'range': 'Varies', 'dataType': 'numeric', 'required': False},
                 }
             },
             {
@@ -1722,7 +1727,7 @@ class Command(BaseCommand):
                 'sample_type': 'Blood',
                 'description': 'Microscopic examination for malaria parasites',
                 'normal_range': {
-                    'Malaria Parasite': {'unit': '', 'min': '', 'max': 'Not seen', 'dataType': 'text', 'required': True},
+                    'Malaria Parasite': {'unit': '', 'range': 'Not seen', 'dataType': 'text', 'required': True},
                     'Parasitemia': {'unit': '%', 'min': '0', 'max': '0', 'dataType': 'numeric', 'required': True},
                 }
             },
@@ -1732,8 +1737,8 @@ class Command(BaseCommand):
                 'sample_type': 'Bone Marrow',
                 'description': 'Bone marrow examination for hematological disorders',
                 'normal_range': {
-                    'Cellularity': {'unit': '', 'min': '', 'max': 'Normal', 'dataType': 'text', 'required': True},
-                    'Myeloid:Erythroid Ratio': {'unit': '', 'min': '', 'max': '2-4:1', 'dataType': 'text', 'required': True},
+                    'Cellularity': {'unit': '', 'range': 'Normal', 'dataType': 'text', 'required': True},
+                    'Myeloid:Erythroid Ratio': {'unit': '', 'range': '2-4:1', 'dataType': 'text', 'required': True},
                 }
             },
             {
@@ -1742,7 +1747,7 @@ class Command(BaseCommand):
                 'sample_type': 'CSF',
                 'description': 'Cerebrospinal fluid examination',
                 'normal_range': {
-                    'Appearance': {'unit': '', 'min': '', 'max': 'Clear', 'dataType': 'text', 'required': True},
+                    'Appearance': {'unit': '', 'range': 'Clear', 'dataType': 'text', 'required': True},
                     'Protein': {'unit': 'mg/dL', 'min': '15', 'max': '45', 'dataType': 'numeric', 'required': True},
                     'Glucose': {'unit': 'mg/dL', 'min': '40', 'max': '80', 'dataType': 'numeric', 'required': True},
                 }
@@ -1783,7 +1788,7 @@ class Command(BaseCommand):
                 'sample_type': 'Blood',
                 'description': 'Folic acid (folate) level assessment',
                 'normal_range': {
-                    'Folic Acid': {'unit': 'ng/mL', 'min': '4.0', 'max': '', 'dataType': 'numeric', 'required': True},
+                    'Folic Acid': {'unit': 'ng/mL', 'range': '>=4.0', 'dataType': 'numeric', 'required': True},
                 }
             },
             {
@@ -1812,7 +1817,7 @@ class Command(BaseCommand):
                 'sample_type': 'Cervical Smear',
                 'description': 'Cervical cytology screening',
                 'normal_range': {
-                    'Result': {'unit': '', 'min': '', 'max': 'Negative for malignancy', 'dataType': 'text', 'required': True},
+                    'Result': {'unit': '', 'range': 'Negative for malignancy', 'dataType': 'text', 'required': True},
                 }
             },
             {
@@ -1839,8 +1844,8 @@ class Command(BaseCommand):
                 'sample_type': 'Pleural Fluid',
                 'description': 'Pleural effusion examination',
                 'normal_range': {
-                    'Appearance': {'unit': '', 'min': '', 'max': 'Clear', 'dataType': 'text', 'required': True},
-                    'Protein': {'unit': 'g/dL', 'min': '', 'max': '3.0', 'dataType': 'numeric', 'required': True},
+                    'Appearance': {'unit': '', 'range': 'Clear', 'dataType': 'text', 'required': True},
+                    'Protein': {'unit': 'g/dL', 'range': '<=3.0', 'dataType': 'numeric', 'required': True},
                 }
             },
             {
@@ -1849,7 +1854,7 @@ class Command(BaseCommand):
                 'sample_type': 'Blood',
                 'description': 'Blood glucose level 2 hours after meal',
                 'normal_range': {
-                    'Glucose': {'unit': 'mg/dL', 'min': '', 'max': '140', 'dataType': 'numeric', 'required': True},
+                    'Glucose': {'unit': 'mg/dL', 'range': '<=140', 'dataType': 'numeric', 'required': True},
                 }
             },
             {
@@ -1858,7 +1863,7 @@ class Command(BaseCommand):
                 'sample_type': 'Blood',
                 'description': 'Progesterone hormone level',
                 'normal_range': {
-                    'Progesterone': {'unit': 'ng/mL', 'min': '', 'max': '1.5', 'dataType': 'numeric', 'required': True},
+                    'Progesterone': {'unit': 'ng/mL', 'range': '<=1.5', 'dataType': 'numeric', 'required': True},
                 }
             },
             {
@@ -1867,7 +1872,7 @@ class Command(BaseCommand):
                 'sample_type': 'Blood',
                 'description': 'Rheumatoid arthritis screening',
                 'normal_range': {
-                    'Rheumatoid Factor': {'unit': 'IU/mL', 'min': '', 'max': '15', 'dataType': 'numeric', 'required': True},
+                    'Rheumatoid Factor': {'unit': 'IU/mL', 'range': '<=15', 'dataType': 'numeric', 'required': True},
                 }
             },
             {
@@ -1878,7 +1883,7 @@ class Command(BaseCommand):
                 'normal_range': {
                     'Volume': {'unit': 'mL', 'min': '2', 'max': '5', 'dataType': 'numeric', 'required': True},
                     'Count': {'unit': 'million/mL', 'min': '15', 'max': '200', 'dataType': 'numeric', 'required': True},
-                    'Motility': {'unit': '%', 'min': '50', 'max': '', 'dataType': 'numeric', 'required': True},
+                    'Motility': {'unit': '%', 'range': '>=50', 'dataType': 'numeric', 'required': True},
                 }
             },
             {
@@ -1887,8 +1892,8 @@ class Command(BaseCommand):
                 'sample_type': 'Sputum',
                 'description': 'Tuberculosis screening',
                 'normal_range': {
-                    'AFB': {'unit': '', 'min': '', 'max': 'Negative', 'dataType': 'text', 'required': True},
-                    'ZN Stain': {'unit': '', 'min': '', 'max': 'Negative', 'dataType': 'text', 'required': True},
+                    'AFB': {'unit': '', 'range': 'Negative', 'dataType': 'text', 'required': True},
+                    'ZN Stain': {'unit': '', 'range': 'Negative', 'dataType': 'text', 'required': True},
                 }
             },
             {
@@ -1897,7 +1902,7 @@ class Command(BaseCommand):
                 'sample_type': 'Stool',
                 'description': 'Stool culture for pathogen identification',
                 'normal_range': {
-                    'Organism': {'unit': '', 'min': '', 'max': 'No pathogen', 'dataType': 'text', 'required': True},
+                    'Organism': {'unit': '', 'range': 'No pathogen', 'dataType': 'text', 'required': True},
                 }
             },
             {
@@ -1906,8 +1911,8 @@ class Command(BaseCommand):
                 'sample_type': 'Stool',
                 'description': 'Microscopic examination of stool',
                 'normal_range': {
-                    'Ova': {'unit': '', 'min': '', 'max': 'Not seen', 'dataType': 'text', 'required': True},
-                    'Cysts': {'unit': '', 'min': '', 'max': 'Not seen', 'dataType': 'text', 'required': True},
+                    'Ova': {'unit': '', 'range': 'Not seen', 'dataType': 'text', 'required': True},
+                    'Cysts': {'unit': '', 'range': 'Not seen', 'dataType': 'text', 'required': True},
                 }
             },
             {
@@ -1916,8 +1921,8 @@ class Command(BaseCommand):
                 'sample_type': 'Synovial Fluid',
                 'description': 'Joint fluid examination',
                 'normal_range': {
-                    'WBC': {'unit': '/μL', 'min': '', 'max': '200', 'dataType': 'numeric', 'required': True},
-                    'PMN': {'unit': '%', 'min': '', 'max': '25', 'dataType': 'numeric', 'required': True},
+                    'WBC': {'unit': '/μL', 'range': '<=200', 'dataType': 'numeric', 'required': True},
+                    'PMN': {'unit': '%', 'range': '<=25', 'dataType': 'numeric', 'required': True},
                 }
             },
             {
@@ -1945,7 +1950,7 @@ class Command(BaseCommand):
                 'sample_type': 'Swab',
                 'description': 'Throat culture for infection',
                 'normal_range': {
-                    'Organism': {'unit': '', 'min': '', 'max': 'Normal flora', 'dataType': 'text', 'required': True},
+                    'Organism': {'unit': '', 'range': 'Normal flora', 'dataType': 'text', 'required': True},
                 }
             },
             {
@@ -1963,8 +1968,8 @@ class Command(BaseCommand):
                 'sample_type': 'Urine',
                 'description': 'Urine culture for urinary tract infection',
                 'normal_range': {
-                    'Organism': {'unit': '', 'min': '', 'max': 'No growth', 'dataType': 'text', 'required': True},
-                    'Colony Count': {'unit': 'CFU/mL', 'min': '', 'max': '10,000', 'dataType': 'numeric', 'required': True},
+                    'Organism': {'unit': '', 'range': 'No growth', 'dataType': 'text', 'required': True},
+                    'Colony Count': {'unit': 'CFU/mL', 'range': '<=10,000', 'dataType': 'numeric', 'required': True},
                 }
             },
             {
@@ -1973,8 +1978,8 @@ class Command(BaseCommand):
                 'sample_type': 'Urine',
                 'description': 'Urine microscopic examination',
                 'normal_range': {
-                    'WBC': {'unit': '/hpf', 'min': '', 'max': '5', 'dataType': 'numeric', 'required': True},
-                    'RBC': {'unit': '/hpf', 'min': '', 'max': '2', 'dataType': 'numeric', 'required': True},
+                    'WBC': {'unit': '/hpf', 'range': '<=5', 'dataType': 'numeric', 'required': True},
+                    'RBC': {'unit': '/hpf', 'range': '<=2', 'dataType': 'numeric', 'required': True},
                 }
             },
             {
@@ -1983,8 +1988,8 @@ class Command(BaseCommand):
                 'sample_type': 'Urine',
                 'description': 'Routine urine analysis',
                 'normal_range': {
-                    'Protein': {'unit': '', 'min': '', 'max': 'Negative', 'dataType': 'text', 'required': True},
-                    'Glucose': {'unit': '', 'min': '', 'max': 'Negative', 'dataType': 'text', 'required': True},
+                    'Protein': {'unit': '', 'range': 'Negative', 'dataType': 'text', 'required': True},
+                    'Glucose': {'unit': '', 'range': 'Negative', 'dataType': 'text', 'required': True},
                 }
             },
             {
@@ -2011,8 +2016,8 @@ class Command(BaseCommand):
                 'sample_type': 'Blood',
                 'description': 'Typhoid fever diagnosis',
                 'normal_range': {
-                    'S. Typhi O': {'unit': '', 'min': '', 'max': '1:80', 'dataType': 'text', 'required': True},
-                    'S. Typhi H': {'unit': '', 'min': '', 'max': '1:160', 'dataType': 'text', 'required': True},
+                    'S. Typhi O': {'unit': '', 'range': '<=1:80', 'dataType': 'text', 'required': True},
+                    'S. Typhi H': {'unit': '', 'range': '<=1:160', 'dataType': 'text', 'required': True},
                 }
             },
             {
@@ -2021,7 +2026,7 @@ class Command(BaseCommand):
                 'sample_type': 'Swab',
                 'description': 'Wound culture for infection',
                 'normal_range': {
-                    'Organism': {'unit': '', 'min': '', 'max': 'No growth', 'dataType': 'text', 'required': True},
+                    'Organism': {'unit': '', 'range': 'No growth', 'dataType': 'text', 'required': True},
                 }
             },
 
@@ -3269,7 +3274,7 @@ class Command(BaseCommand):
                 'description': 'Rubella virus IgG antibodies',
                 'turnaround_time': '48 hours',
                 'normal_range': {
-                    'Rubella IgG': {'unit': 'IU/mL', 'min': '10', 'max': '', 'dataType': 'numeric', 'required': True},
+                    'Rubella IgG': {'unit': 'IU/mL', 'range': '>=10', 'dataType': 'numeric', 'required': True},
                 }
             },
             {

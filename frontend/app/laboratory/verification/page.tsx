@@ -53,7 +53,10 @@ interface LabResult {
 }
 
 // Transform backend LabResult to frontend format
-const transformResult = (apiResult: ApiLabResult): LabResult => {
+const transformResult = (
+  apiResult: ApiLabResult,
+  templateNormalRangesByCode?: Record<string, any>
+): LabResult => {
   // Prioritize test_details over test (test might just be an ID)
   const test = (apiResult as any).test_details || apiResult.test;
   const results: TestResult[] = [];
@@ -61,6 +64,44 @@ const transformResult = (apiResult: ApiLabResult): LabResult => {
   // Get test details early to avoid temporal dead zone
   const testDetails = (apiResult as any).test_details || (test && typeof test === 'object' ? test : null);
   const testName = testDetails?.name || test?.name || '';
+
+  const testCodeForTemplate = (testDetails as any)?.code || (test as any)?.code || '';
+
+  const resolveTemplateMeta = (parameterName: string) => {
+    const normalRangeObj: Record<string, any> | undefined =
+      (testDetails as any)?.template_normal_range ||
+      (testDetails as any)?.template?.normal_range ||
+      (testCodeForTemplate ? templateNormalRangesByCode?.[testCodeForTemplate] : undefined);
+    if (!normalRangeObj || typeof normalRangeObj !== 'object') return null;
+
+    const normalizeKey = (s: string) =>
+      s
+        .replace(/[\s\u00A0]+/g, ' ')
+        .trim()
+        .toLowerCase();
+
+    const wanted = normalizeKey(String(parameterName || ''));
+    if (!wanted) return null;
+
+    // Match template keys case-insensitively.
+    for (const [k, v] of Object.entries(normalRangeObj)) {
+      if (normalizeKey(String(k)) === wanted) {
+        return { key: k, meta: v as any };
+      }
+    }
+    return null;
+  };
+
+  const formatTemplateRange = (meta: any) => {
+    if (!meta) return '';
+    if (typeof meta.range === 'string' && meta.range.trim()) return meta.range.trim();
+    const min = meta.min ?? meta.normalRangeMin;
+    const max = meta.max ?? meta.normalRangeMax;
+    if (min !== undefined && max !== undefined && String(min).trim() && String(max).trim()) {
+      return `${min}-${max}`;
+    }
+    return '';
+  };
   
   // Debug: Log the structure to help identify issues
   if (process.env.NODE_ENV === 'development') {
@@ -118,8 +159,28 @@ const transformResult = (apiResult: ApiLabResult): LabResult => {
       let normalRange = '';
       let unit = '';
 
+      // Prefer template-defined unit/range (source of truth).
+      const templateMatch = resolveTemplateMeta(key);
+      if (templateMatch) {
+        unit = String((templateMatch.meta?.unit ?? '') || '');
+        normalRange = formatTemplateRange(templateMatch.meta);
+
+        // If numeric and we have min/max, classify status from template ranges.
+        const minRaw = templateMatch.meta?.min ?? templateMatch.meta?.normalRangeMin;
+        const maxRaw = templateMatch.meta?.max ?? templateMatch.meta?.normalRangeMax;
+        const min = minRaw !== undefined && String(minRaw).trim() !== '' ? Number(minRaw) : undefined;
+        const max = maxRaw !== undefined && String(maxRaw).trim() !== '' ? Number(maxRaw) : undefined;
+        if (!isNaN(valueNum) && valueStr.trim() !== '' && (min !== undefined || max !== undefined)) {
+          if (min !== undefined && !isNaN(min) && valueNum < min) status = 'Abnormal';
+          if (max !== undefined && !isNaN(max) && valueNum > max) status = 'Abnormal';
+        }
+      }
+
       // Parameter-specific validation with normal ranges
-      if (key.toLowerCase().includes('glucose') || key.toLowerCase().includes('blood sugar') || key.toLowerCase().includes('fbs')) {
+      // Fallback to heuristic rules only when the template doesn't provide metadata.
+      // NOTE: per requirement, we do NOT use hardcoded fallbacks anymore.
+      if (false && !templateMatch) {
+      if (!templateMatch && (key.toLowerCase().includes('glucose') || key.toLowerCase().includes('blood sugar') || key.toLowerCase().includes('fbs'))) {
         unit = 'mg/dL';
         normalRange = '70-140';
         if (!isNaN(valueNum)) {
@@ -127,7 +188,7 @@ const transformResult = (apiResult: ApiLabResult): LabResult => {
           else if (valueNum < 70 || valueNum > 200) status = 'Abnormal';  // Borderline
           else status = 'Normal';
         }
-      } else if (key.toLowerCase().includes('hemoglobin') || key.toLowerCase().includes('hb')) {
+      } else if (!templateMatch && (key.toLowerCase().includes('hemoglobin') || key.toLowerCase().includes('hb'))) {
         unit = 'g/dL';
         normalRange = '12-16 (F), 14-18 (M)';
         if (!isNaN(valueNum)) {
@@ -135,7 +196,7 @@ const transformResult = (apiResult: ApiLabResult): LabResult => {
           else if (valueNum < 11 || valueNum > 18) status = 'Abnormal';
           else status = 'Normal';
         }
-      } else if (key.toLowerCase().includes('wbc') || key.toLowerCase().includes('white blood cell')) {
+      } else if (!templateMatch && (key.toLowerCase().includes('wbc') || key.toLowerCase().includes('white blood cell'))) {
         unit = '×10³/μL';
         normalRange = '4.0-11.0';
         if (!isNaN(valueNum)) {
@@ -143,7 +204,7 @@ const transformResult = (apiResult: ApiLabResult): LabResult => {
           else if (valueNum < 4.0 || valueNum > 11.0) status = 'Abnormal';
           else status = 'Normal';
         }
-      } else if (key.toLowerCase().includes('platelet')) {
+      } else if (!templateMatch && key.toLowerCase().includes('platelet')) {
         unit = '×10³/μL';
         normalRange = '150-450';
         if (!isNaN(valueNum)) {
@@ -151,7 +212,7 @@ const transformResult = (apiResult: ApiLabResult): LabResult => {
           else if (valueNum < 150 || valueNum > 450) status = 'Abnormal';
           else status = 'Normal';
         }
-      } else if (key.toLowerCase().includes('creatinine')) {
+      } else if (!templateMatch && key.toLowerCase().includes('creatinine')) {
         unit = 'mg/dL';
         normalRange = '0.6-1.2';
         if (!isNaN(valueNum)) {
@@ -159,7 +220,7 @@ const transformResult = (apiResult: ApiLabResult): LabResult => {
           else if (valueNum > 1.2) status = 'Abnormal';
           else status = 'Normal';
         }
-      } else if (key.toLowerCase().includes('cholesterol') || key.toLowerCase().includes('total cholesterol')) {
+      } else if (!templateMatch && (key.toLowerCase().includes('cholesterol') || key.toLowerCase().includes('total cholesterol'))) {
         unit = 'mg/dL';
         normalRange = '<200';
         if (!isNaN(valueNum)) {
@@ -167,7 +228,7 @@ const transformResult = (apiResult: ApiLabResult): LabResult => {
           else if (valueNum > 240) status = 'Abnormal';
           else status = 'Normal';
         }
-      } else if (key.toLowerCase().includes('hba1c') || key.toLowerCase().includes('glycated hemoglobin')) {
+      } else if (!templateMatch && (key.toLowerCase().includes('hba1c') || key.toLowerCase().includes('glycated hemoglobin'))) {
         unit = '%';
         normalRange = '<5.7';
         if (!isNaN(valueNum)) {
@@ -175,7 +236,7 @@ const transformResult = (apiResult: ApiLabResult): LabResult => {
           else if (valueNum > 6.5) status = 'Abnormal';
           else status = 'Normal';
         }
-      } else if (key.toLowerCase() === 'result' && testName && testName.toLowerCase().includes('24 hour') && testName.toLowerCase().includes('protein')) {
+      } else if (!templateMatch && key.toLowerCase() === 'result' && testName && testName.toLowerCase().includes('24 hour') && testName.toLowerCase().includes('protein')) {
         unit = 'mg/day';
         normalRange = '<150';
         if (!isNaN(valueNum)) {
@@ -183,7 +244,7 @@ const transformResult = (apiResult: ApiLabResult): LabResult => {
           else if (valueNum > 300) status = 'Abnormal';
           else status = 'Normal';
         }
-      } else if (key.toLowerCase().includes('esr')) {
+      } else if (!templateMatch && key.toLowerCase().includes('esr')) {
         unit = 'mm/hr';
         normalRange = '0-30';
         if (!isNaN(valueNum)) {
@@ -191,7 +252,7 @@ const transformResult = (apiResult: ApiLabResult): LabResult => {
           else if (valueNum > 30) status = 'Abnormal';
           else status = 'Normal';
         }
-      } else if (key.toLowerCase().includes('reticulocyte')) {
+      } else if (!templateMatch && key.toLowerCase().includes('reticulocyte')) {
         if (key.toLowerCase().includes('absolute')) {
           unit = '×10⁶/μL';
           normalRange = '25-85';
@@ -210,7 +271,7 @@ const transformResult = (apiResult: ApiLabResult): LabResult => {
             else status = 'Normal';
           }
         }
-      } else if (key.toLowerCase().includes('pt')) {
+      } else if (!templateMatch && key.toLowerCase().includes('pt')) {
         unit = 'seconds';
         normalRange = '11-13';
         if (!isNaN(valueNum)) {
@@ -218,7 +279,7 @@ const transformResult = (apiResult: ApiLabResult): LabResult => {
           else if (valueNum < 11 || valueNum > 13) status = 'Abnormal';
           else status = 'Normal';
         }
-      } else if (key.toLowerCase().includes('inr')) {
+      } else if (!templateMatch && key.toLowerCase().includes('inr')) {
         unit = '';
         normalRange = '0.8-1.1';
         if (!isNaN(valueNum)) {
@@ -226,7 +287,7 @@ const transformResult = (apiResult: ApiLabResult): LabResult => {
           else if (valueNum < 0.8 || valueNum > 1.1) status = 'Abnormal';
           else status = 'Normal';
         }
-      } else if (key.toLowerCase().includes('ptt') || key.toLowerCase().includes('aptt')) {
+      } else if (!templateMatch && (key.toLowerCase().includes('ptt') || key.toLowerCase().includes('aptt'))) {
         unit = 'seconds';
         normalRange = '25-35';
         if (!isNaN(valueNum)) {
@@ -234,7 +295,7 @@ const transformResult = (apiResult: ApiLabResult): LabResult => {
           else if (valueNum < 25 || valueNum > 35) status = 'Abnormal';
           else status = 'Normal';
         }
-      } else if (key.toLowerCase().includes('fibrinogen')) {
+      } else if (!templateMatch && key.toLowerCase().includes('fibrinogen')) {
         unit = 'mg/dL';
         normalRange = '200-400';
         if (!isNaN(valueNum)) {
@@ -242,7 +303,7 @@ const transformResult = (apiResult: ApiLabResult): LabResult => {
           else if (valueNum < 200 || valueNum > 400) status = 'Abnormal';
           else status = 'Normal';
         }
-      } else if (key.toLowerCase().includes('bleeding time')) {
+      } else if (!templateMatch && key.toLowerCase().includes('bleeding time')) {
         unit = 'minutes';
         normalRange = '2-7';
         if (!isNaN(valueNum)) {
@@ -250,7 +311,7 @@ const transformResult = (apiResult: ApiLabResult): LabResult => {
           else if (valueNum < 2 || valueNum > 7) status = 'Abnormal';
           else status = 'Normal';
         }
-      } else if (key.toLowerCase().includes('clotting time')) {
+      } else if (!templateMatch && key.toLowerCase().includes('clotting time')) {
         unit = 'minutes';
         normalRange = '5-15';
         if (!isNaN(valueNum)) {
@@ -458,6 +519,7 @@ const transformResult = (apiResult: ApiLabResult): LabResult => {
         status = 'Abnormal';
         }
       }
+      }
       
       results.push({
         parameter: key,
@@ -557,6 +619,7 @@ const transformResult = (apiResult: ApiLabResult): LabResult => {
 export default function ResultsVerificationPage() {
   const [results, setResults] = useState<LabResult[]>([]);
   const [verifiedResults, setVerifiedResults] = useState<LabResult[]>([]);
+  const [templateNormalRangesByCode, setTemplateNormalRangesByCode] = useState<Record<string, any>>({});
   const [loading, setLoading] = useState(true);
   const [verifiedLoading, setVerifiedLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -679,6 +742,24 @@ export default function ResultsVerificationPage() {
     try {
       setLoading(true);
       setError(null);
+
+      // Ensure we have template normal ranges available for unit/range display.
+      let templatesMap = templateNormalRangesByCode;
+      if (!templatesMap || Object.keys(templatesMap).length === 0) {
+        try {
+          const templatesRes = await labService.getTemplates({ page_size: 500 });
+          const map: Record<string, any> = {};
+          for (const t of templatesRes.results || []) {
+            const code = (t as any)?.code;
+            if (code) map[String(code)] = (t as any)?.normal_range || {};
+          }
+          templatesMap = map;
+          setTemplateNormalRangesByCode(map);
+        } catch {
+          // Ignore template loading errors; the UI will fall back to heuristic rules.
+        }
+      }
+
       const params: any = {
         page: currentPage,
         page_size: itemsPerPage,
@@ -693,7 +774,7 @@ export default function ResultsVerificationPage() {
       
       const response = await labService.getPendingVerifications(params);
       setTotalCount(response.count || response.results.length);
-      const transformedResults = response.results.map(transformResult);
+      const transformedResults = response.results.map((r) => transformResult(r, templatesMap));
       setResults(transformedResults);
     } catch (err: any) {
       setError(err.message || 'Failed to load results');
@@ -708,6 +789,24 @@ export default function ResultsVerificationPage() {
     try {
       setVerifiedLoading(true);
       setVerifiedError(null);
+
+      // Ensure we have template normal ranges available for unit/range display.
+      let templatesMap = templateNormalRangesByCode;
+      if (!templatesMap || Object.keys(templatesMap).length === 0) {
+        try {
+          const templatesRes = await labService.getTemplates({ page_size: 500 });
+          const map: Record<string, any> = {};
+          for (const t of templatesRes.results || []) {
+            const code = (t as any)?.code;
+            if (code) map[String(code)] = (t as any)?.normal_range || {};
+          }
+          templatesMap = map;
+          setTemplateNormalRangesByCode(map);
+        } catch {
+          // Ignore template loading errors; the UI will fall back to heuristic rules.
+        }
+      }
+
       const params: any = {
         page: verifiedCurrentPage,
         page_size: itemsPerPage,
@@ -722,7 +821,7 @@ export default function ResultsVerificationPage() {
 
       const response = await labService.getVerifiedResults(params);
       setVerifiedTotalCount(response.count || response.results.length);
-      const transformedResults = response.results.map(transformResult);
+      const transformedResults = response.results.map((r) => transformResult(r, templatesMap));
       setVerifiedResults(transformedResults);
     } catch (err: any) {
       setVerifiedError(err.message || 'Failed to load verified results');

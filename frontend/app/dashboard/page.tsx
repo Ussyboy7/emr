@@ -20,8 +20,28 @@ import labService from '@/lib/services/lab-service';
 import { pharmacyService } from '@/lib/services/pharmacy-service';
 import { patientService } from '@/lib/services/patient-service';
 import { visitService } from '@/lib/services/visit-service';
+import { useRouter } from 'next/navigation';
+import { useCurrentUser } from '@/hooks/use-current-user';
+import { getHomeRouteForUser } from '@/lib/home-route';
 
 export default function DashboardPage() {
+  const router = useRouter();
+  const { currentUser, hydrated } = useCurrentUser();
+  const homeRoute = getHomeRouteForUser(currentUser);
+
+  // Super admin can view global dashboard.
+  // Non-superusers can view it only if '/dashboard' is explicitly granted in their pages permissions.
+  useEffect(() => {
+    if (!hydrated) return;
+    if (!currentUser) {
+      router.replace("/login");
+      return;
+    }
+    if (currentUser.isSuperuser) return;
+    if (currentUser.permissions?.includes("/dashboard")) return;
+    router.replace(homeRoute || "/no-access");
+  }, [currentUser, hydrated, homeRoute, router]);
+
   const [todayStats, setTodayStats] = useState({
     patientsToday: 0,
     patientsChange: 0,

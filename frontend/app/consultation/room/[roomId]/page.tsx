@@ -68,6 +68,18 @@ import { safeAsync, logError } from '@/lib/utils/error-handling';
 // UTILITY FUNCTIONS
 // ==========================================
 
+const debugConsultationRoom = (...args: any[]) => {
+  if (typeof window === 'undefined') return;
+  try {
+    if (window.localStorage?.getItem('debug_consultation_room') === '1') {
+      // eslint-disable-next-line no-console
+      console.log(...args);
+    }
+  } catch {
+    // ignore
+  }
+};
+
 // Helper to safely access extended session properties
 const getSessionProperty = (session: ExtendedConsultationSession | null, property: keyof ExtendedConsultationSession): any[] => {
   if (!session) return [];
@@ -320,7 +332,7 @@ const processVitals = (vitalsData: any) => {
   if (!vitalsData) return undefined;
 
   // Debug: Log raw vitals data
-  console.log('🩺 Processing vitals data:', {
+  debugConsultationRoom('🩺 Processing vitals data:', {
     temperature: vitalsData.temperature,
     blood_pressure_systolic: vitalsData.blood_pressure_systolic,
     blood_pressure_diastolic: vitalsData.blood_pressure_diastolic,
@@ -349,7 +361,7 @@ const processVitals = (vitalsData: any) => {
     recordedAt: vitalsData.recorded_at || new Date().toISOString(),
   };
 
-  console.log('✅ Processed vitals result:', processedVitals);
+  debugConsultationRoom('✅ Processed vitals result:', processedVitals);
   return processedVitals;
 };
 
@@ -1781,9 +1793,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         page_size: 20  // Limit results for performance
       });
       setIcd10SearchResults(response.results || []);
-      console.log(`[ICD-10 API Search] "${searchTerm}" found ${response.results?.length || 0} matches`);
+      debugConsultationRoom(`[ICD-10 API Search] "${searchTerm}" found ${response.results?.length || 0} matches`);
     } catch (err: any) {
-      console.error('Failed to search ICD-10 codes:', err);
+      debugConsultationRoom('Failed to search ICD-10 codes:', err);
       setIcd10SearchResults([]);
     } finally {
       setIsSearchingICD10(false);
@@ -1798,14 +1810,17 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         const response = await pharmacyService.getMedications({ page_size: 200 });
         const loadedMeds = response.results || [];
         setMedications(loadedMeds);
-        console.log(`[Consultation] Loaded ${loadedMeds.length} medications from API`);
+        debugConsultationRoom(`[Consultation] Loaded ${loadedMeds.length} medications from API`);
         // Debug: Check if paracetamol is in the list
         const paracetamolMeds = loadedMeds.filter((m: any) => m.name?.toLowerCase().includes('paracetamol'));
         if (paracetamolMeds.length > 0) {
-          console.log(`[Consultation] Found ${paracetamolMeds.length} paracetamol medications:`, paracetamolMeds.map((m: any) => m.name));
+          debugConsultationRoom(
+            `[Consultation] Found ${paracetamolMeds.length} paracetamol medications:`,
+            paracetamolMeds.map((m: any) => m.name)
+          );
         }
       } catch (err) {
-        console.error('Failed to load medications:', err);
+        debugConsultationRoom('Failed to load medications:', err);
         toast.error('Failed to load medications. Using fallback list.');
         // Keep medications as empty array if loading fails
       } finally {
@@ -1817,34 +1832,34 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       try {
         // Add a small delay to ensure authentication is ready
         await new Promise(resolve => setTimeout(resolve, 100));
-        console.log('[Consultation] Loading ICD-10 codes...');
+        debugConsultationRoom('[Consultation] Loading ICD-10 codes...');
         const response = await consultationService.getICD10Codes({ page_size: 100 });
         // Security: Removed console.log to prevent API response data leakage
       // console.log('[Consultation] API Response:', response);
         const loadedCodes = response.results || [];
-        console.log(`[Consultation] Loaded ${loadedCodes.length} ICD-10 codes from API`);
+        debugConsultationRoom(`[Consultation] Loaded ${loadedCodes.length} ICD-10 codes from API`);
 
         // Check for specific codes
         const malariaCodes = loadedCodes.filter((code: any) => code.code?.startsWith('B5'));
         const headacheCodes = loadedCodes.filter((code: any) => code.code === 'R51' || code.description?.toLowerCase().includes('headache'));
 
-        console.log(`[Consultation] Malaria codes found: ${malariaCodes.length}`, malariaCodes.slice(0, 3));
-        console.log(`[Consultation] Headache codes found: ${headacheCodes.length}`, headacheCodes.slice(0, 3));
+        debugConsultationRoom(`[Consultation] Malaria codes found: ${malariaCodes.length}`, malariaCodes.slice(0, 3));
+        debugConsultationRoom(`[Consultation] Headache codes found: ${headacheCodes.length}`, headacheCodes.slice(0, 3));
 
         setIcd10Codes(loadedCodes);
       } catch (err: any) {
-        console.error('Failed to load ICD-10 codes:', err);
+        debugConsultationRoom('Failed to load ICD-10 codes:', err);
         // Check if it's an authentication error
         if (err.message?.includes('401') || err.message?.includes('Authentication')) {
-          console.warn('ICD-10 codes failed to load due to authentication - will retry later');
+          debugConsultationRoom('ICD-10 codes failed to load due to authentication - will retry later');
           // Try again after a longer delay
           setTimeout(() => {
             loadICD10Codes().catch(e => {
-              console.warn('Retry also failed for ICD-10 codes:', e);
+              debugConsultationRoom('Retry also failed for ICD-10 codes:', e);
             });
           }, 2000);
         } else {
-          console.warn('ICD-10 codes failed to load - diagnosis search may not work');
+          debugConsultationRoom('ICD-10 codes failed to load - diagnosis search may not work');
         }
         // Keep ICD-10 codes as empty array if loading fails
       }
@@ -1861,9 +1876,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         setLoadingLabTemplates(true);
         const response = await labService.getTemplates({ page_size: 200 });
         setLabTemplates(response.results || []);
-        console.log(`[Consultation] Loaded ${response.results?.length || 0} lab templates from API`);
+        debugConsultationRoom(`[Consultation] Loaded ${response.results?.length || 0} lab templates from API`);
       } catch (err) {
-        console.error('Failed to load lab templates:', err);
+        debugConsultationRoom('Failed to load lab templates:', err);
           toast.error('Failed to load lab templates. Some tests may not be available.');
       } finally {
         setLoadingLabTemplates(false);
@@ -1878,32 +1893,32 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     const loadRadiologyTemplates = async () => {
       try {
         setLoadingRadiologyTemplates(true);
-        console.log('[Consultation] Loading radiology templates...');
-        console.log('[Consultation] About to call radiologyService.getTemplates()');
+        debugConsultationRoom('[Consultation] Loading radiology templates...');
+        debugConsultationRoom('[Consultation] About to call radiologyService.getTemplates()');
         const templates = await radiologyService.getTemplates();
-        console.log('[Consultation] Radiology API full response:', templates);
-        console.log(`[Consultation] Loaded ${templates.results?.length || 0} radiology templates from API`);
-        console.log('[Consultation] Response type:', typeof templates);
-        console.log('[Consultation] Response keys:', Object.keys(templates || {}));
+        debugConsultationRoom('[Consultation] Radiology API full response:', templates);
+        debugConsultationRoom(`[Consultation] Loaded ${templates.results?.length || 0} radiology templates from API`);
+        debugConsultationRoom('[Consultation] Response type:', typeof templates);
+        debugConsultationRoom('[Consultation] Response keys:', Object.keys(templates || {}));
         if (templates && templates.results) {
-            console.log('[Consultation] First 3 templates:', templates.results.slice(0, 3));
+            debugConsultationRoom('[Consultation] First 3 templates:', templates.results.slice(0, 3));
         } else {
-            console.warn('[Consultation] No results array in response');
+            debugConsultationRoom('[Consultation] No results array in response');
         }
         setRadiologyTemplates(templates.results || []);
         if (!templates.results || templates.results.length === 0) {
-          console.warn('[Consultation] No radiology templates found - this might be an authentication issue');
+          debugConsultationRoom('[Consultation] No radiology templates found - this might be an authentication issue');
         }
       } catch (err: any) {
-        console.error('Failed to load radiology templates:', err);
-        console.error('Error details:', err.message, err.status, err.response);
+        debugConsultationRoom('Failed to load radiology templates:', err);
+        debugConsultationRoom('Error details:', err?.message, err?.status, err?.response);
 
         // Check for authentication errors
         if (err.status === 401 || err.status === 403) {
-          console.error('[Consultation] Authentication error loading radiology templates');
+          debugConsultationRoom('[Consultation] Authentication error loading radiology templates');
           toast.error('Authentication required. Please log in again.');
         } else if (err.status === 500) {
-          console.error('[Consultation] Server error loading radiology templates');
+          debugConsultationRoom('[Consultation] Server error loading radiology templates');
           toast.error('Server error. Please try again later.');
         } else {
           // Show error toast to inform user

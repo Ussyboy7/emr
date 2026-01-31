@@ -294,3 +294,4 @@ class WardService {
 }
 
 export const wardService = new WardService();
+export default wardService;

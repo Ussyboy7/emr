@@ -9,6 +9,7 @@ import { ThemeToggle } from "./ThemeToggle";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { NPA_LOGO_URL, NPA_EMR_TITLE } from "@/lib/branding";
 import { hasTokens, logout } from "@/lib/api-client";
+import { getHomeRouteForUser } from "@/lib/home-route";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -20,7 +21,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { SidebarTrigger } from "@/components/ui/sidebar";
-import { LogOut, Shield, Clock, Calendar, Bell, HelpCircle, Settings, Stethoscope, User } from "lucide-react";
+import { LogOut, Shield, Clock, Calendar, Bell, HelpCircle, Settings, Stethoscope, LayoutDashboard } from "lucide-react";
 
 export const TopBar = () => {
   const router = useRouter();
@@ -28,6 +29,9 @@ export const TopBar = () => {
   const [authenticated, setAuthenticated] = useState(false);
   const [currentTime, setCurrentTime] = useState<Date | null>(null);
   const [mounted, setMounted] = useState(false);
+  const homeRoute = getHomeRouteForUser(currentUser) || "/no-access";
+  const canViewOverviewDashboard =
+    Boolean(currentUser?.isSuperuser) || Boolean(currentUser?.permissions?.includes("/dashboard"));
 
   useEffect(() => {
     setAuthenticated(hasTokens());
@@ -93,7 +97,7 @@ export const TopBar = () => {
         <SidebarTrigger className="md:hidden h-8 w-8 text-sidebar-foreground hover:bg-sidebar-accent" />
 
         {/* Logo & Title - Only show on mobile */}
-        <Link href="/dashboard" className="flex items-center gap-2 md:hidden min-w-0">
+        <Link href={homeRoute} className="flex items-center gap-2 md:hidden min-w-0">
           <div className="relative h-8 w-8 flex-shrink-0 overflow-hidden rounded-lg shadow-sm ring-1 ring-sidebar-primary/30 bg-white">
             <Image
               src={NPA_LOGO_URL}
@@ -185,11 +189,19 @@ export const TopBar = () => {
                 
                 {/* Quick Actions */}
                 <DropdownMenuItem asChild>
-                  <Link href="/dashboard" className="flex items-center cursor-pointer">
+                  <Link href={homeRoute} className="flex items-center cursor-pointer">
                     <Stethoscope className="h-4 w-4 mr-2" />
-                    EMR Dashboard
+                    Home
                   </Link>
                 </DropdownMenuItem>
+                {canViewOverviewDashboard && (
+                  <DropdownMenuItem asChild>
+                    <Link href="/dashboard" className="flex items-center cursor-pointer">
+                      <LayoutDashboard className="h-4 w-4 mr-2" />
+                      Overview Dashboard
+                    </Link>
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuItem asChild>
                   <Link href="/notifications" className="flex items-center cursor-pointer">
                     <Bell className="h-4 w-4 mr-2" />

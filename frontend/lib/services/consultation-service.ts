@@ -123,6 +123,10 @@ class ConsultationService {
     doctor?: number;
     status?: string;
     search?: string;
+    clinic?: string;
+    date?: string;
+    start_date?: string;
+    end_date?: string;
     page?: number;
     page_size?: number;
   }): Promise<{ results: ConsultationSession[]; count: number }> {

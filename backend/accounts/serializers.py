@@ -66,7 +66,7 @@ class UserSerializer(serializers.ModelSerializer):
                     '/nursing/wards': 'nursing_vitals',
 
                     # Consultation
-                    '/consultation/dashboard': 'consultation_view',
+                    '/consultation': 'consultation_view',
                     '/consultation/start': 'consultation_start',
                     '/consultation/history': 'consultation_view',
                     '/consultation/wards': 'consultation_view',
