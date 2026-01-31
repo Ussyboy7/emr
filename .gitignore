@@ -38,9 +38,11 @@ venv.bak/
 # TypeScript incremental build info
 *.tsbuildinfo
 
-# Next.js build output
-frontend/.next/
-.next/
+# Environment files (never commit real envs)
+.env
+.env.*
+frontend/.env.*
+!frontend/.env.*.example
 
-# Celery beat schedule artifacts (runtime files)
+# Celery beat schedule (runtime artifact)
 backend/celerybeat-schedule*
