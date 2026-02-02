@@ -1904,9 +1904,9 @@ export default function PatientsListPage() {
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogAction variant="outline" onClick={() => setIsRetireeConversionOpen(false)}>
+              <AlertDialogCancel onClick={() => setIsRetireeConversionOpen(false)}>
                 Cancel
-              </AlertDialogAction>
+              </AlertDialogCancel>
               <AlertDialogAction
                 onClick={handleRetireeConversion}
                 disabled={convertingToRetiree}
