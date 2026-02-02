@@ -385,7 +385,7 @@ export default function PatientsListPage() {
     setConvertingToRetiree(true);
     try {
       // Get the full patient data to update
-      const fullPatient = await patientService.getPatient(patientToConvert.numericId || patientToConvert.id);
+      const fullPatient = await patientService.getPatient(Number(patientToConvert.numericId || patientToConvert.id));
 
       // Update patient category to retiree
       // Note: The backend will automatically regenerate the patient ID when category changes
