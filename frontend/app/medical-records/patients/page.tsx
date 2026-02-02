@@ -11,6 +11,7 @@ import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -235,6 +236,11 @@ export default function PatientsListPage() {
     nokAddress: '',
   });
   const [editFormLoading, setEditFormLoading] = useState(false);
+
+  // Retiree conversion state
+  const [isRetireeConversionOpen, setIsRetireeConversionOpen] = useState(false);
+  const [convertingToRetiree, setConvertingToRetiree] = useState(false);
+  const [patientToConvert, setPatientToConvert] = useState<Patient | null>(null);
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   
@@ -366,6 +372,41 @@ export default function PatientsListPage() {
   const openOverviewModal = (patient: Patient) => {
     setSelectedPatient(patient);
     setIsOverviewModalOpen(true);
+  };
+
+  const openRetireeConversion = (patient: Patient) => {
+    setPatientToConvert(patient);
+    setIsRetireeConversionOpen(true);
+  };
+
+  const handleRetireeConversion = async () => {
+    if (!patientToConvert) return;
+
+    setConvertingToRetiree(true);
+    try {
+      // Get the full patient data to update
+      const fullPatient = await patientService.getPatient(patientToConvert.numericId || patientToConvert.id);
+
+      // Update patient category to retiree
+      // Note: The backend will automatically regenerate the patient ID when category changes
+      await patientService.updatePatient(fullPatient.id, {
+        category: 'retiree'
+      });
+
+      toast.success(`Patient ${patientToConvert.name} has been converted to retiree status`);
+
+      // Close modal and refresh data
+      setIsRetireeConversionOpen(false);
+      setPatientToConvert(null);
+
+      // Refresh the patient list
+      await loadPatients();
+
+    } catch (error: any) {
+      toast.error(error?.message || 'Failed to convert patient to retiree');
+    } finally {
+      setConvertingToRetiree(false);
+    }
   };
 
   const openEditModal = async (patient: Patient) => {
@@ -894,6 +935,11 @@ export default function PatientsListPage() {
                               <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openEditModal(patient)} title="Edit Patient">
                                 <Edit className="h-4 w-4 text-muted-foreground hover:text-blue-500" />
                               </Button>
+                              {patient.category === 'Employee' && (
+                                <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openRetireeConversion(patient)} title="Convert to Retiree">
+                                  <UserCheck className="h-4 w-4 text-muted-foreground hover:text-orange-500" />
+                                </Button>
+                              )}
                               <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => router.push(`/medical-records/visits/new?patient=${patient.id}`)} title="Create Visit">
                                 <Calendar className="h-4 w-4 text-muted-foreground hover:text-teal-500" />
                               </Button>
@@ -1824,6 +1870,63 @@ export default function PatientsListPage() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        {/* Retiree Conversion Confirmation Dialog */}
+        <AlertDialog open={isRetireeConversionOpen} onOpenChange={setIsRetireeConversionOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle className="flex items-center gap-2">
+                <UserCheck className="h-5 w-5 text-orange-500" />
+                Convert to Retiree Status
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                {patientToConvert && (
+                  <div className="space-y-3">
+                    <p>
+                      Are you sure you want to convert <strong>{patientToConvert.name}</strong> from Employee to Retiree status?
+                    </p>
+                    <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3">
+                      <p className="text-sm text-amber-800 dark:text-amber-200">
+                        <strong>What happens:</strong>
+                      </p>
+                      <ul className="text-sm text-amber-700 dark:text-amber-300 mt-2 space-y-1">
+                        <li>• Patient category changes from "Employee" to "Retiree"</li>
+                        <li>• Patient ID will be updated (E-XXX → R-XXX format)</li>
+                        <li>• All existing medical records and history are preserved</li>
+                        <li>• Employee dependents become retiree dependents</li>
+                      </ul>
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      This action maintains data integrity and prevents duplicate patient records.
+                    </p>
+                  </div>
+                )}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogAction variant="outline" onClick={() => setIsRetireeConversionOpen(false)}>
+                Cancel
+              </AlertDialogAction>
+              <AlertDialogAction
+                onClick={handleRetireeConversion}
+                disabled={convertingToRetiree}
+                className="bg-orange-600 hover:bg-orange-700"
+              >
+                {convertingToRetiree ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Converting...
+                  </>
+                ) : (
+                  <>
+                    <UserCheck className="h-4 w-4 mr-2" />
+                    Convert to Retiree
+                  </>
+                )}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </DashboardLayout>
   );

@@ -141,6 +141,9 @@ export default function NewPatientPage() {
     patient?: any;
   }>({ isValidating: false, isValid: null, message: '' });
 
+  // Track if NOK auto-population has occurred to prevent it being overwritten
+  const [nokAutoPopulated, setNokAutoPopulated] = useState(false);
+
   // Timeout ref for debouncing validation
   const validationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -190,6 +193,23 @@ export default function NewPatientPage() {
 
       if (field === 'stateOfOrigin') {
         next.lga = '';
+      }
+
+      // If principal staff ID is being changed, reset auto-population
+      if (field === 'principalStaffId') {
+        if (!value || value !== prev.principalStaffId) {
+          setNokAutoPopulated(false);
+          setPrincipalValidation({ isValidating: false, isValid: null, message: '' });
+          // Clear NOK fields if principal is being cleared
+          if (!value) {
+            next.nokSurname = '';
+            next.nokFirstName = '';
+            next.nokMiddleName = '';
+            next.nokRelationship = '';
+            next.nokPhone = '';
+            next.nokAddress = '';
+          }
+        }
       }
 
       // Convenience: infer gender from title when possible
@@ -302,31 +322,50 @@ export default function NewPatientPage() {
 
     try {
       // First, try to find by patient_id (like E-A2000 or R-A2000)
-      let patient = await patientService.getPatients({ search: trimmedId }).then(
-        result => result.results.find(p => p.patient_id === trimmedId)
-      ).catch(() => null);
+      let foundPatient: any = null;
+      let numericId: number | null = null;
 
-      // If not found by patient_id, try by personal_number (like A2000)
-      if (!patient) {
-        const searchResult = await patientService.getPatients({ search: trimmedId });
-        patient = searchResult.results.find(p => p.personal_number === trimmedId);
+      // Try to find patient by various methods and get their numeric ID
+      const searchResult = await patientService.getPatients({ search: trimmedId }).catch(() => ({ results: [] }));
+
+      // Look for patient by patient_id
+      foundPatient = searchResult.results.find(p => p.patient_id === trimmedId);
+      if (foundPatient) {
+        numericId = foundPatient.id;
+      }
+
+      // If not found by patient_id, try by personal_number
+      if (!foundPatient) {
+        foundPatient = searchResult.results.find(p => p.personal_number === trimmedId);
+        if (foundPatient) {
+          numericId = foundPatient.id;
+        }
       }
 
       // If still not found, try by employee_id
-      if (!patient) {
-        const searchResult = await patientService.getPatients({ search: trimmedId });
-        patient = searchResult.results.find(p => p.employee_id === trimmedId);
+      if (!foundPatient) {
+        foundPatient = searchResult.results.find(p => p.employee_id === trimmedId);
+        if (foundPatient) {
+          numericId = foundPatient.id;
+        }
       }
 
-      // Finally, try by database ID as fallback
-      if (!patient) {
+      // If still not found, try direct numeric ID
+      if (!foundPatient) {
         const parsedId = parseInt(trimmedId, 10);
         if (!isNaN(parsedId) && parsedId > 0) {
-          try {
-            patient = await patientService.getPatient(parsedId);
-          } catch (err) {
-            // Ignore error, patient not found
-          }
+          numericId = parsedId;
+        }
+      }
+
+      // Now get the full patient details using the numeric ID
+      let patient = null;
+      if (numericId) {
+        try {
+          patient = await patientService.getPatient(numericId);
+          console.log('Full patient details retrieved:', patient);
+        } catch (err) {
+          console.error('Failed to get full patient details:', err);
         }
       }
 
@@ -355,6 +394,40 @@ export default function NewPatientPage() {
         message: `Valid: ${patient.full_name || `${patient.first_name} ${patient.surname}`} (${patient.category})`,
         patient
       });
+
+      // Auto-populate next of kin fields for dependents (only once to prevent overwrites)
+      if (patientCategory === 'dependent' && !nokAutoPopulated) {
+        console.log('🔄 Auto-populating NOK for patient:', patient);
+        console.log('Patient fields:', {
+          surname: patient.surname,
+          first_name: patient.first_name,
+          phone: patient.phone,
+          residential_address: patient.residential_address,
+          category: patient.category
+        });
+
+        setFormData(prev => {
+          const updated = {
+            ...prev,
+            nokSurname: patient.surname || patient.first_name?.split(' ')[1] || prev.nokSurname || '',
+            nokFirstName: patient.first_name || patient.surname?.split(' ')[0] || prev.nokFirstName || '',
+            nokMiddleName: patient.middle_name || prev.nokMiddleName || '',
+            nokRelationship: patient.category === 'employee' ? 'Employee' : 'Retiree',
+            nokPhone: patient.phone || prev.nokPhone || '',
+            nokAddress: patient.residential_address || prev.nokAddress || '',
+          };
+
+          console.log('Updated NOK fields:', {
+            nokSurname: updated.nokSurname,
+            nokFirstName: updated.nokFirstName,
+            nokPhone: updated.nokPhone,
+            nokAddress: updated.nokAddress,
+          });
+
+          return updated;
+        });
+        setNokAutoPopulated(true);
+      }
 
     } catch (error) {
       setPrincipalValidation({
@@ -693,6 +766,8 @@ export default function NewPatientPage() {
       nokSurname: '', nokFirstName: '', nokMiddleName: '', nokRelationship: '', nokAddress: '', nokPhone: '',
     });
     setPhotoPreview(null);
+    setNokAutoPopulated(false); // Reset auto-population flag
+    setPrincipalValidation({ isValidating: false, isValid: null, message: '' }); // Reset validation
     toast.info('Draft cleared');
   };
 
@@ -1641,6 +1716,17 @@ export default function NewPatientPage() {
                         <Users className="h-4 w-4 text-cyan-500" />
                         Next of Kin
                       </h4>
+
+                      {patientCategory === 'dependent' && principalValidation.patient && (
+                        <div className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg mb-4">
+                          <p className="text-sm text-blue-800 dark:text-blue-200 flex items-center gap-2">
+                            <Users className="h-4 w-4" />
+                            Next of kin fields have been auto-populated from the principal staff member.
+                            All fields can still be edited if needed.
+                          </p>
+                        </div>
+                      )}
+
                       <div className="space-y-4">
                         <div className="space-y-2">
                           <Label>Surname</Label>

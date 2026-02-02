@@ -53,7 +53,7 @@ class ConsultationSessionSerializer(serializers.ModelSerializer):
 
 class ConsultationQueueSerializer(serializers.ModelSerializer):
     """Serializer for ConsultationQueue model."""
-    
+
     patient_name = serializers.CharField(source='patient.get_full_name', read_only=True)
     room_name = serializers.CharField(source='room.name', read_only=True)
     visit_display_id = serializers.CharField(source='visit.visit_id', read_only=True, allow_null=True)
@@ -62,11 +62,19 @@ class ConsultationQueueSerializer(serializers.ModelSerializer):
     visit_type = serializers.CharField(source='visit.visit_type', read_only=True, allow_null=True)
     visit_status = serializers.CharField(source='visit.status', read_only=True, allow_null=True)
     visit_clinic = serializers.CharField(source='visit.clinic', read_only=True, allow_null=True)
-    
+
     class Meta:
         model = ConsultationQueue
-        fields = '__all__'
-        # Note: queued_at is not in read_only_fields to allow manual reordering
+        fields = [
+            'id', 'room', 'patient', 'visit', 'priority', 'notes', 'queued_at',
+            'called_at', 'is_active',
+            # Read-only fields
+            'patient_name', 'room_name', 'visit_display_id', 'visit_date',
+            'visit_time', 'visit_type', 'visit_status', 'visit_clinic'
+        ]
+        read_only_fields = ['queued_at', 'id']
+        # Disable model validators - we handle unique constraints manually in perform_update
+        validators = []
 
 
 class ReferralSerializer(serializers.ModelSerializer):

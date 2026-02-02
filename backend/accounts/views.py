@@ -4,6 +4,7 @@ Views for the Accounts app.
 from rest_framework import viewsets, status, permissions
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.tokens import RefreshToken
 from django_filters.rest_framework import DjangoFilterBackend
@@ -13,6 +14,7 @@ from django.contrib.auth import update_session_auth_hash
 from .models import User
 from .serializers import (
     UserSerializer,
+    UserDirectorySerializer,
     UserCreateSerializer,
     UserUpdateSerializer,
     ChangePasswordSerializer,
@@ -34,17 +36,43 @@ class UserViewSet(viewsets.ModelViewSet):
     
     permission_classes = [permissions.IsAuthenticated]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['system_role', 'is_active', 'is_staff', 'is_management']
+    filterset_fields = ['system_role', 'is_active', 'is_staff', 'is_management', 'clinic', 'department']
     search_fields = ['username', 'email', 'first_name', 'last_name', 'employee_id']
     ordering_fields = ['username', 'date_joined', 'last_name']
     ordering = ['username']
     
     def get_queryset(self):
-        """Return queryset of all users."""
-        return User.objects.all().select_related()
+        """
+        Return queryset of users.
+
+        Department scoping:
+        - Superusers: can list/manage all users.
+        - Everyone else: user-management operations (list + modifications) are restricted to the
+          requester's department, so module admins only see/manage users in their module.
+
+        Note: We keep `retrieve` unscoped so other parts of the app (e.g., displaying the ordering
+        doctor's name) can look up staff across modules. Mutations remain protected below.
+        """
+        qs = User.objects.all().select_related('clinic', 'department')
+
+        if not getattr(self.request, "user", None) or not self.request.user.is_authenticated:
+            return qs.none()
+
+        if self.request.user.is_superuser:
+            return qs
+
+        # Scope user-management surfaces to department only.
+        if self.action in ['list', 'create', 'update', 'partial_update', 'destroy', 'reset_password']:
+            if self.request.user.department_id is None:
+                return qs.none()
+            return qs.filter(department_id=self.request.user.department_id)
+
+        return qs
     
     def get_serializer_class(self):
         """Use appropriate serializer based on action."""
+        if self.action in ['directory', 'public']:
+            return UserDirectorySerializer
         if self.action == 'create':
             return UserCreateSerializer
         elif self.action in ['update', 'partial_update']:
@@ -52,13 +80,53 @@ class UserViewSet(viewsets.ModelViewSet):
         return UserSerializer
     
     def get_permissions(self):
-        """Only staff can create/update/delete users."""
-        if self.action in ['create', 'update', 'partial_update', 'destroy']:
+        """
+        Permissions:
+        - Admin-only: list/retrieve + all mutations on /accounts/users/*
+        - Authenticated: /auth/me, /auth/me patch, change_password, staff directory lookups
+        """
+        if self.action in ['me', 'update_me', 'change_password', 'directory', 'public']:
+            return [permissions.IsAuthenticated()]
+        if self.action in ['list', 'retrieve', 'create', 'update', 'partial_update', 'destroy', 'reset_password']:
             return [permissions.IsAdminUser()]
         return [permissions.IsAuthenticated()]
+
+    @action(detail=False, methods=['get'], permission_classes=[permissions.IsAuthenticated])
+    def directory(self, request):
+        """
+        Staff directory endpoint for cross-department lookups.
+
+        Returns a minimal user representation. Supports search/filter/order/pagination.
+        """
+        qs = User.objects.filter(is_active=True).select_related('clinic', 'department')
+        qs = self.filter_queryset(qs)
+        page = self.paginate_queryset(qs)
+        if page is not None:
+            serializer = UserDirectorySerializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        serializer = UserDirectorySerializer(qs, many=True)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['get'], permission_classes=[permissions.IsAuthenticated])
+    def public(self, request, pk=None):
+        """Minimal user profile for cross-department display (e.g., doctor name)."""
+        user = User.objects.select_related('clinic', 'department').get(pk=pk)
+        return Response(UserDirectorySerializer(user).data)
     
     def perform_create(self, serializer):
         """Create user and log audit."""
+        # Enforce department scoping for non-superusers creating users.
+        if not self.request.user.is_superuser:
+            if self.request.user.department_id is None:
+                raise ValidationError({"department": ["Your account has no department assigned. Contact an administrator."]})
+            requested_dept = serializer.validated_data.get("department")
+            if requested_dept is not None and requested_dept.id != self.request.user.department_id:
+                raise PermissionDenied("You can only create users within your department.")
+
+            # Force department to the requester's department if omitted.
+            if requested_dept is None:
+                serializer.validated_data["department"] = self.request.user.department
+
         user = serializer.save()
         AuditService.log_activity(
             user=self.request.user,
@@ -75,6 +143,24 @@ class UserViewSet(viewsets.ModelViewSet):
     def perform_update(self, serializer):
         """Update user and log audit."""
         old_instance = self.get_object()
+
+        # Enforce department scoping for non-superusers updating users.
+        if not self.request.user.is_superuser:
+            if self.request.user.department_id is None:
+                raise PermissionDenied("Your account has no department assigned.")
+            if old_instance.department_id != self.request.user.department_id:
+                raise PermissionDenied("You can only update users within your department.")
+            # Prevent cross-department reassignment.
+            if "department" in serializer.validated_data:
+                new_dept = serializer.validated_data.get("department")
+                if new_dept is not None and new_dept.id != self.request.user.department_id:
+                    raise PermissionDenied("You cannot change a user to another department.")
+            # Prevent clinic reassignment across departments (optional safeguard).
+            if "clinic" in serializer.validated_data:
+                new_clinic = serializer.validated_data.get("clinic")
+                if new_clinic is not None and self.request.user.clinic_id is not None and new_clinic.id != self.request.user.clinic_id:
+                    raise PermissionDenied("You cannot change a user to another clinic.")
+
         old_values = {
             'username': old_instance.username,
             'email': old_instance.email,
@@ -103,6 +189,12 @@ class UserViewSet(viewsets.ModelViewSet):
     
     def perform_destroy(self, instance):
         """Delete user and log audit."""
+        if not self.request.user.is_superuser:
+            if self.request.user.department_id is None:
+                raise PermissionDenied("Your account has no department assigned.")
+            if instance.department_id != self.request.user.department_id:
+                raise PermissionDenied("You can only delete users within your department.")
+
         user_id = instance.id
         user_repr = instance.get_full_name() or instance.username
         AuditService.log_activity(
@@ -181,6 +273,14 @@ class UserViewSet(viewsets.ModelViewSet):
     def reset_password(self, request, pk=None):
         """Admin action to reset a user's password."""
         user = self.get_object()
+
+        # Enforce department scoping for non-superusers resetting passwords.
+        if not request.user.is_superuser:
+            if request.user.department_id is None:
+                raise PermissionDenied("Your account has no department assigned.")
+            if user.department_id != request.user.department_id:
+                raise PermissionDenied("You can only reset passwords for users within your department.")
+
         new_password = request.data.get('new_password')
         
         if not new_password:

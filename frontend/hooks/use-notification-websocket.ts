@@ -17,12 +17,14 @@ interface UseNotificationWebSocketOptions {
   onUnreadCountChange?: (count: number) => void;
 }
 
-const WS_DISABLED =
-  typeof process !== 'undefined' &&
-  process.env.NEXT_PUBLIC_NOTIFICATIONS_WS_DISABLED === 'true';
+const getWsDisabled = () => {
+  if (typeof process === 'undefined') return false;
+  return process.env.NEXT_PUBLIC_NOTIFICATIONS_WS_DISABLED === 'true';
+};
 
 export const useNotificationWebSocket = (options: UseNotificationWebSocketOptions = {}) => {
   const { enabled = true, onNotification, onUnreadCountChange } = options;
+  const WS_DISABLED = getWsDisabled();
   const isWsEnabled = enabled && !WS_DISABLED;
   const { currentUser } = useCurrentUser();
   const [isConnected, setIsConnected] = useState(false);
@@ -236,7 +238,7 @@ export const useNotificationWebSocket = (options: UseNotificationWebSocketOption
       logWarn('Failed to create WebSocket connection; continuing with polling only.', error);
       setIsConnected(false);
     }
-  }, [isWsEnabled, currentUser, getWebSocketUrl, onNotification, onUnreadCountChange, maxReconnectAttempts, reconnectDelay]);
+  }, [isWsEnabled, currentUser, onNotification, onUnreadCountChange, maxReconnectAttempts, reconnectDelay]);
 
   const disconnect = useCallback(() => {
     if (reconnectTimeoutRef.current) {
@@ -282,14 +284,14 @@ export const useNotificationWebSocket = (options: UseNotificationWebSocketOption
       return;
     }
 
-    if (currentUser) {
+    if (currentUser && !wsRef.current) {
       connect();
     }
 
     return () => {
       disconnect();
     };
-  }, [isWsEnabled, enabled, currentUser, connect, disconnect]);
+  }, [isWsEnabled, enabled, currentUser]);
 
   // Load initial unread count
   useEffect(() => {

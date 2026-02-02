@@ -408,15 +408,37 @@ export const apiFetch = async <T = unknown>(path: string, options: FetchOptions 
           responseBody = 'Could not read response body';
         }
 
-        // Security: Never expose raw HTTP status codes to prevent information leakage
-        console.error(`API request failed with status ${response.status}`, {
-          url: response.url,
-          status: response.status,
-          statusText: response.statusText,
-          body: responseBody
-        });
-        const err = new Error('Request failed. Please try again');
+        // Extract a safe, user-friendly message from API responses (if present).
+        // This avoids leaking HTTP status codes while still surfacing why something failed.
+        let apiMessage: string | undefined;
+        try {
+          const parsed = JSON.parse(responseBody);
+          if (parsed && typeof parsed === "object") {
+            apiMessage =
+              (typeof (parsed as any).error === "string" && (parsed as any).error) ||
+              (typeof (parsed as any).detail === "string" && (parsed as any).detail) ||
+              undefined;
+          }
+        } catch {
+          // Not JSON (could be HTML); ignore.
+        }
+
+        // NOTE:
+        // - Some parts of the app intentionally probe optional endpoints and treat 404 as "not supported".
+        // - Avoid spamming console.error for 404s; callers can still branch on (err as any).status.
+        if (response.status !== 404) {
+          // Security: Never expose raw HTTP status codes to prevent information leakage
+          console.error(`API request failed with status ${response.status}`, {
+            url: response.url,
+            status: response.status,
+            statusText: response.statusText,
+            body: responseBody
+          });
+        }
+        const err = new Error(apiMessage || 'Request failed. Please try again');
         (err as any).status = response.status;
+        (err as any).apiMessage = apiMessage;
+        (err as any).body = responseBody;
         throw err;
       }
 

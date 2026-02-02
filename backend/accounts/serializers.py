@@ -84,6 +84,8 @@ class UserSerializer(serializers.ModelSerializer):
                     '/pharmacy/prescriptions': 'pharmacy_view',
                     '/pharmacy/history': 'pharmacy_view',
                     '/pharmacy/inventory': 'pharmacy_inventory',
+                    '/pharmacy/requests': 'pharmacy_inventory',
+                    '/pharmacy/store': 'pharmacy_inventory',
 
                     # Radiology
                     '/radiology': 'radiology_view',
@@ -172,6 +174,44 @@ class UserSerializer(serializers.ModelSerializer):
             'pages': list(allowed_pages),
             'actions': permission_counts
         }
+
+
+class UserDirectorySerializer(serializers.ModelSerializer):
+    """
+    Minimal, safe serializer for staff directory lookups.
+
+    Used by non-admin pages to resolve staff names across departments without exposing
+    the full user profile/permissions payload.
+    """
+
+    full_name = serializers.SerializerMethodField()
+    clinic_name = serializers.CharField(source='clinic.name', read_only=True)
+    department_name = serializers.CharField(source='department.name', read_only=True)
+    # Frontend expects `system_role_name` in some places.
+    system_role_name = serializers.CharField(source='system_role', read_only=True)
+
+    class Meta:
+        model = User
+        fields = [
+            'id',
+            'username',
+            'email',
+            'first_name',
+            'last_name',
+            'full_name',
+            'employee_id',
+            'grade_level',
+            'system_role_name',
+            'clinic',
+            'clinic_name',
+            'department',
+            'department_name',
+            'is_active',
+        ]
+        read_only_fields = fields
+
+    def get_full_name(self, obj):
+        return obj.get_full_name()
 
 
 class UserCreateSerializer(serializers.ModelSerializer):

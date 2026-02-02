@@ -83,13 +83,26 @@ class PatientViewSet(viewsets.ModelViewSet):
             'surname': old_instance.surname,
             'first_name': old_instance.first_name,
             'category': old_instance.category,
+            'patient_id': old_instance.patient_id,
             'is_active': old_instance.is_active,
         }
+
+        # Check if category is changing and regenerate patient ID if needed
+        category_changed = 'category' in serializer.validated_data and serializer.validated_data['category'] != old_instance.category
+
         patient = serializer.save()
+
+        # Regenerate patient ID if category changed
+        if category_changed:
+            id_changed = patient.regenerate_patient_id()
+            if id_changed:
+                patient.save()  # Save the new patient ID
+
         new_values = {
             'surname': patient.surname,
             'first_name': patient.first_name,
             'category': patient.category,
+            'patient_id': patient.patient_id,
             'is_active': patient.is_active,
         }
         AuditService.log_patient_action(

@@ -20,6 +20,10 @@ export type {
   MedicationInventory,
   Dispense,
   DrugInteraction,
+  StockRequest,
+  StockRequestItem,
+  StockIssue,
+  StockIssueLine,
 } from './pharmacy-service';
 export type {
   RadiologyOrder,

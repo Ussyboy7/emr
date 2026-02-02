@@ -385,26 +385,6 @@ export default function RoomQueuePage() {
     }
   };
 
-  const handleRemoveFromQueue = async (patient: QueuedPatient) => {
-    try {
-      const queueItemId = parseInt(patient.id);
-      if (isNaN(queueItemId)) {
-        toast.error('Invalid queue item ID');
-        return;
-      }
-      
-      // Deactivate queue item using the 'call' action endpoint
-      await apiFetch(`/consultation/queue/${queueItemId}/call/`, {
-        method: 'POST',
-      });
-      
-      setPatients(prev => prev.filter(p => p.id !== patient.id));
-      toast.success(`${patient.name} removed from queue`);
-    } catch (err) {
-      console.error('Error removing patient from queue:', err);
-      toast.error('Failed to remove patient from queue. Please try again.');
-    }
-  };
 
 
   const getPriorityColor = (priority: string) => {
@@ -606,9 +586,6 @@ export default function RoomQueuePage() {
                               </Button>
                               <Button variant="ghost" size="icon" className="h-6 w-6 text-blue-500" onClick={() => openReassignDialog(patient)} title="Reassign to another room">
                                 <ArrowLeftRight className="h-3 w-3" />
-                              </Button>
-                              <Button variant="ghost" size="icon" className="h-6 w-6 text-rose-500" onClick={() => handleRemoveFromQueue(patient)} title="Remove from queue">
-                                <X className="h-3 w-3" />
                               </Button>
                             </div>
                           </div>

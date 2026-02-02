@@ -53,6 +53,11 @@ export interface Medication {
   unit: string;
   strength?: string;
   form?: string;
+  category?: string;
+  manufacturer?: string;
+  pack_size?: number;
+  prescription_required?: boolean;
+  min_stock_level?: number;
   is_active: boolean;
 }
 
@@ -67,8 +72,28 @@ export interface MedicationInventory {
   min_stock_level: number;
   location?: string;
   supplier?: string;
+  received_unit_type?: string;
+  received_unit_quantity?: number;
   is_low_stock?: boolean;
   is_expired?: boolean;
+}
+
+export interface BatchAdjustmentHistory {
+  id: number;
+  batch_inventory: number;
+  medication_name?: string;
+  batch_number?: string;
+  quantity_before: number;
+  quantity_after: number;
+  quantity_unit: string;
+  adjustment_reason: string;
+  reason_display?: string;
+  adjustment_notes?: string;
+  received_unit_type?: string;
+  received_unit_quantity?: number;
+  created_by?: number;
+  created_by_name?: string;
+  created_at: string;
 }
 
 export interface Dispense {
@@ -83,6 +108,55 @@ export interface Dispense {
   dispensed_by?: number;
   dispensed_by_name?: string;
   dispensed_at: string;
+}
+
+export interface StockRequestItem {
+  id?: number;
+  request?: number;
+  medication: number;
+  medication_name?: string;
+  quantity: number;
+  unit?: string;
+  fulfilled_quantity?: number;
+  notes?: string;
+}
+
+export interface StockRequest {
+  id: number;
+  request_id: string;
+  status: 'pending' | 'approved' | 'partially_fulfilled' | 'fulfilled' | 'rejected' | 'cancelled';
+  from_location: string;
+  to_location: string;
+  requested_by?: number;
+  requested_by_name?: string;
+  notes?: string;
+  created_at: string;
+  updated_at: string;
+  items: StockRequestItem[];
+}
+
+export interface StockIssueLine {
+  id: number;
+  issue: number;
+  medication: number;
+  medication_name?: string;
+  source_inventory_item: number;
+  destination_inventory_item: number;
+  source_batch?: string;
+  source_expiry?: string;
+  quantity: number;
+  unit?: string;
+}
+
+export interface StockIssue {
+  id: number;
+  issue_id: string;
+  request?: number;
+  issued_by?: number;
+  issued_by_name?: string;
+  issued_at: string;
+  notes?: string;
+  lines: StockIssueLine[];
 }
 
 class PharmacyService {
@@ -195,6 +269,76 @@ class PharmacyService {
   }
 
   /**
+   * Get medications for prescription (from Store master list)
+   * Doctor sees all available medications in the hospital
+   */
+  async getMedicationsForPrescription(params?: {
+    search?: string;
+    page?: number;
+    page_size?: number;
+  }): Promise<{ results: Medication[]; count: number }> {
+    const query = buildQueryString(params || {});
+    // Get inventory from Store location (the master list)
+    const inventory = await this.getInventory({
+      location: "Store",
+      page_size: params?.page_size || 500,
+      ...params,
+    });
+    
+    // Extract unique medications and return
+    // Since each medication may have multiple batches, deduplicate
+    const medicationMap = new Map<number, Medication>();
+    
+    inventory.results.forEach((item: MedicationInventory) => {
+      const med = item as any;
+      if (med.medication && typeof med.medication === 'object') {
+        medicationMap.set(med.medication.id, med.medication);
+      }
+    });
+    
+    return {
+      results: Array.from(medicationMap.values()),
+      count: medicationMap.size,
+    };
+  }
+
+  /**
+   * Create a medication (master data)
+   */
+  async createMedication(data: {
+    name: string;
+    generic_name?: string;
+    code: string;
+    unit: string;
+    strength?: string;
+    form?: string;
+    category?: string;
+    manufacturer?: string;
+    pack_size?: number;
+    prescription_required?: boolean;
+    min_stock_level?: number;
+    is_active?: boolean;
+  }): Promise<Medication> {
+    return apiFetch<Medication>('/pharmacy/medications/', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: data.name,
+        generic_name: data.generic_name || '',
+        code: data.code,
+        unit: data.unit,
+        strength: data.strength || '',
+        form: data.form || '',
+        category: data.category || '',
+        manufacturer: data.manufacturer || '',
+        pack_size: data.pack_size ?? null,
+        prescription_required: !!data.prescription_required,
+        min_stock_level: data.min_stock_level ?? 0,
+        is_active: data.is_active ?? true,
+      }),
+    });
+  }
+
+  /**
    * Update a medication
    */
   async updateMedication(id: number, data: Partial<Medication>): Promise<Medication> {
@@ -247,6 +391,46 @@ class PharmacyService {
       method: 'PATCH',
       body: JSON.stringify(data),
     });
+  }
+
+  /**
+   * Get adjustment history for a batch
+   */
+  async getBatchAdjustmentHistory(inventoryId: number): Promise<BatchAdjustmentHistory[]> {
+    return apiFetch<BatchAdjustmentHistory[]>(
+      `/pharmacy/inventory/${inventoryId}/adjustment_history/`
+    );
+  }
+
+  /**
+   * Record a quantity adjustment for a batch
+   */
+  async recordBatchAdjustment(
+    inventoryId: number,
+    data: {
+      quantity_after: number;
+      adjustment_reason: string;
+      adjustment_notes?: string;
+    }
+  ): Promise<BatchAdjustmentHistory> {
+    return apiFetch<BatchAdjustmentHistory>(
+      `/pharmacy/inventory/${inventoryId}/record_adjustment/`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }
+    );
+  }
+
+  /**
+   * Get medication field choices (dropdowns)
+   */
+  async getMedicationChoices(): Promise<{
+    strength: Record<string, string>;
+    form: Record<string, string>;
+    category: Record<string, string>;
+  }> {
+    return apiFetch<any>('/pharmacy/medications/choices/');
   }
 
   /**
@@ -329,10 +513,69 @@ class PharmacyService {
   }
 
   /**
+   * Stock requests (Inventory -> Store)
+   */
+  async getStockRequests(params?: {
+    status?: string;
+    search?: string;
+    page?: number;
+    page_size?: number;
+  }): Promise<{ results: StockRequest[]; count: number }> {
+    const query = buildQueryString(params || {});
+    return apiFetch<{ results: StockRequest[]; count: number }>(`/pharmacy/stock-requests/${query}`);
+  }
+
+  async createStockRequest(data: {
+    notes?: string;
+    items: Array<{
+      medication: number;
+      quantity: number;
+      unit?: string;
+      notes?: string;
+    }>;
+  }): Promise<StockRequest> {
+    return apiFetch<StockRequest>('/pharmacy/stock-requests/', {
+      method: 'POST',
+      body: JSON.stringify({
+        from_location: 'Store',
+        to_location: 'Dispensary',
+        notes: data.notes || '',
+        items: data.items.map((i) => ({
+          medication: i.medication,
+          quantity: i.quantity,
+          unit: i.unit || 'unit',
+          notes: i.notes || '',
+        })),
+      }),
+    });
+  }
+
+  async approveStockRequest(id: number): Promise<StockRequest> {
+    return apiFetch<StockRequest>(`/pharmacy/stock-requests/${id}/approve/`, { method: 'POST' });
+  }
+
+  async rejectStockRequest(id: number): Promise<StockRequest> {
+    return apiFetch<StockRequest>(`/pharmacy/stock-requests/${id}/reject/`, { method: 'POST' });
+  }
+
+  async cancelStockRequest(id: number): Promise<StockRequest> {
+    return apiFetch<StockRequest>(`/pharmacy/stock-requests/${id}/cancel/`, { method: 'POST' });
+  }
+
+  async fulfillStockRequest(id: number): Promise<{ request: StockRequest; issue: StockIssue }> {
+    return apiFetch<{ request: StockRequest; issue: StockIssue }>(`/pharmacy/stock-requests/${id}/fulfill/`, {
+      method: 'POST',
+    });
+  }
+
+  /**
    * Get medication batches for a medication
    */
   async getMedicationBatches(medicationId: number): Promise<MedicationBatch[]> {
-    const inventory = await this.getInventory({ medication: medicationId.toString() });
+    const inventory = await this.getInventory({
+      medication: medicationId.toString(),
+      location: "Dispensary"  // Get dispensary stock for dispensing
+    });
     return inventory.results.map((item: MedicationInventory) => ({
       id: item.id.toString(),
       batchNumber: item.batch_number,

@@ -251,7 +251,72 @@ class Patient(models.Model):
                 self.patient_id = f"{parent_id}-{sequence}"
             else:
                 raise ValueError(f"Invalid patient category: {self.category}")
-    
+
+    def regenerate_patient_id(self):
+        """
+        Regenerate patient ID when category changes (e.g., Employee → Retiree).
+        This method updates the patient_id for existing records.
+        """
+        old_patient_id = self.patient_id
+
+        if self.category == 'employee':
+            if not self.personal_number:
+                raise ValueError("Personal number is required for Employee patients")
+            self.patient_id = f"E-{self.personal_number.strip().upper()}"
+
+        elif self.category == 'retiree':
+            if not self.personal_number:
+                raise ValueError("Personal number is required for Retiree patients")
+            self.patient_id = f"R-{self.personal_number.strip().upper()}"
+
+        elif self.category == 'nonnpa':
+            if not self.nonnpa_type:
+                raise ValueError("Non-NPA type is required for Non-NPA patients")
+            # For existing records, try to preserve the sequence if possible
+            if old_patient_id and old_patient_id.startswith('NN-'):
+                # Keep existing sequence
+                parts = old_patient_id.split('-')
+                if len(parts) >= 3:
+                    sequence = parts[-1]
+                    self.patient_id = f"NN-{self.nonnpa_type.strip().upper()}-{sequence}"
+                else:
+                    # Generate new sequence
+                    count = Patient.objects.filter(
+                        category='nonnpa',
+                        nonnpa_type__iexact=self.nonnpa_type.strip()
+                    ).count()
+                    sequence = str(count + 1).zfill(2)
+                    self.patient_id = f"NN-{self.nonnpa_type.strip().upper()}-{sequence}"
+            else:
+                # Generate new sequence
+                count = Patient.objects.filter(
+                    category='nonnpa',
+                    nonnpa_type__iexact=self.nonnpa_type.strip()
+                ).count()
+                sequence = str(count + 1).zfill(2)
+                self.patient_id = f"NN-{self.nonnpa_type.strip().upper()}-{sequence}"
+
+        elif self.category == 'dependent':
+            if not self.principal_staff:
+                raise ValueError("Principal staff is required for Dependent patients")
+            # For existing dependents, regenerate based on current principal
+            parent_id = self.principal_staff.patient_id
+            # Find the sequence for this dependent among siblings
+            siblings = Patient.objects.filter(
+                category='dependent',
+                principal_staff=self.principal_staff
+            ).order_by('created_at')
+
+            sequence = 1
+            for sibling in siblings:
+                if sibling.pk == self.pk:
+                    break
+                sequence += 1
+
+            self.patient_id = f"{parent_id}-{str(sequence).zfill(2)}"
+
+        return old_patient_id != self.patient_id  # Return True if ID changed
+
     def save(self, *args, **kwargs):
         """Override save to auto-generate patient_id for new patients."""
         # Generate patient_id only for new records

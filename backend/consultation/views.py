@@ -1,6 +1,7 @@
 """
 Views for the Consultation app.
 """
+import logging
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -9,6 +10,8 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django.utils import timezone
 from laboratory.pagination import FlexiblePageNumberPagination
+
+logger = logging.getLogger(__name__)
 
 from .models import ConsultationRoom, ConsultationSession, ConsultationQueue, Referral, Diagnosis, ICD10Code
 from .serializers import (
@@ -421,16 +424,13 @@ class ConsultationQueueViewSet(viewsets.ModelViewSet):
         instance = self.get_object()
         old_room = instance.room
 
-        new_room = serializer.validated_data.get('room', instance.room)
-        new_patient = serializer.validated_data.get('patient', instance.patient)
-        new_is_active = serializer.validated_data.get('is_active', instance.is_active)
-
-        # If the item will be active, ensure there isn't another active queue item
-        # for the same patient in the target room.
-        if new_is_active:
+        # Check if room is being changed
+        new_room = serializer.validated_data.get('room')
+        if new_room and new_room != instance.room:
+            # If reassigning to a different room, ensure no duplicate active queue item
             existing = ConsultationQueue.objects.filter(
                 room=new_room,
-                patient=new_patient,
+                patient=instance.patient,
                 is_active=True,
             ).exclude(pk=instance.pk).first()
             if existing:
@@ -443,9 +443,34 @@ class ConsultationQueueViewSet(viewsets.ModelViewSet):
                 updated = serializer.save()
         except IntegrityError:
             # Fallback if DB constraint still triggers (race conditions)
+            new_room = serializer.validated_data.get('room', instance.room)
             raise ValidationError({
                 'non_field_errors': [f'Patient is already in the queue for {new_room.name}']
             })
+
+        # Log audit
+        try:
+            AuditService.log_activity(
+                user=self.request.user,
+                action='update',
+                object_type='consultation_queue',
+                object_id=str(updated.id),
+                module='consultation',
+                object_repr=f'Queue item {updated.id} reassigned',
+                description=f'Queue item reassigned from {old_room.name} to {updated.room.name}',
+                old_values={
+                    'room': old_room.name,
+                    'priority': instance.priority,
+                },
+                new_values={
+                    'room': updated.room.name,
+                    'priority': updated.priority,
+                },
+                request=self.request,
+            )
+        except Exception as audit_error:
+            # Audit logging should never break the main operation
+            logger.warning(f"Failed to log audit for queue update {updated.id}: {audit_error}")
 
         # If room changed, notify doctors again (reassignment).
         try:

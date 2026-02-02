@@ -90,6 +90,8 @@ const allPagePermissions: PagePermission[] = [
   { id: '/pharmacy/prescriptions', name: 'Prescriptions', description: 'View and manage prescriptions', module: 'Pharmacy' },
   { id: '/pharmacy/history', name: 'Dispense History', description: 'View dispense history', module: 'Pharmacy' },
   { id: '/pharmacy/inventory', name: 'Inventory', description: 'Manage drug inventory', module: 'Pharmacy' },
+  { id: '/pharmacy/requests', name: 'Requests', description: 'Request stock from Central Store', module: 'Pharmacy' },
+  { id: '/pharmacy/store', name: 'Central Store', description: 'Manage central store receipts and fulfillments', module: 'Pharmacy' },
 
   // Radiology
   { id: '/radiology', name: 'Dashboard', description: 'Radiology Dashboard', module: 'Radiology' },

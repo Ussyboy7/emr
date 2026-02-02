@@ -435,7 +435,7 @@ export const OrganizationProvider: React.FC<{ children: ReactNode }> = ({ childr
         usersDataRaw,
         departmentsRaw,
       ] = await Promise.all([
-        safeApiFetch('/accounts/users/'),
+        safeApiFetch('/accounts/users/directory/?page_size=500'),
         safeApiFetch('/organization/departments/?ordering=name&page_size=500'),
       ]);
 
