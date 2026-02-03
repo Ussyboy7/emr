@@ -71,6 +71,14 @@ export default function VisitsPage() {
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [totalCount, setTotalCount] = useState(0);
 
+  // Stats state (separate from pagination)
+  const [statsData, setStatsData] = useState({
+    total: 0,
+    scheduled: 0,
+    inProgress: 0,
+    completed: 0,
+  });
+
   // Helper function to transform visit from API to frontend format
   const transformVisit = (visit: Visit) => ({
     id: String(visit.id), // Always use numeric ID for API calls
@@ -91,50 +99,89 @@ export default function VisitsPage() {
     location: visit.location || '',
   });
 
+  // Helper function to build date filter parameters
+  const buildDateParams = useCallback(() => {
+    let dateParam: string | undefined = undefined;
+    let startDate: string | undefined = undefined;
+    let endDate: string | undefined = undefined;
+    
+    if (dateFilter === 'today') {
+      const today = new Date().toISOString().split('T')[0];
+      dateParam = today;
+    } else if (dateFilter === 'week') {
+      const today = new Date();
+      const weekStart = new Date(today);
+      weekStart.setDate(today.getDate() - today.getDay()); // Start of week (Sunday)
+      startDate = weekStart.toISOString().split('T')[0];
+      endDate = today.toISOString().split('T')[0];
+    } else if (dateFilter === 'month') {
+      const today = new Date();
+      const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+      startDate = monthStart.toISOString().split('T')[0];
+      endDate = today.toISOString().split('T')[0];
+    }
+    // 'all' means no date filter
+
+    return { dateParam, startDate, endDate };
+  }, [dateFilter]);
+
+  // Load stats - separate from pagination to get accurate counts
+  const loadStats = useCallback(async () => {
+    try {
+      const { dateParam, startDate, endDate } = buildDateParams();
+      
+      // Build base params for stats (without pagination, without status filter)
+      const baseParams = {
+        page: 1,
+        page_size: 1, // We only need the count, not the data
+        search: searchQuery || undefined,
+        visit_type: typeFilter !== 'all' ? typeFilter : undefined,
+        clinic: clinicFilter !== 'all' ? clinicFilter : undefined,
+        date: dateParam,
+        start_date: startDate,
+        end_date: endDate,
+      };
+
+      // Fetch counts for each status in parallel
+      const [totalResult, scheduledResult, inProgressResult, completedResult] = await Promise.all([
+        visitService.getVisits({ ...baseParams }),
+        visitService.getVisits({ ...baseParams, status: 'scheduled' }),
+        visitService.getVisits({ ...baseParams, status: 'in_progress' }),
+        visitService.getVisits({ ...baseParams, status: 'completed' }),
+      ]);
+
+      setStatsData({
+        total: totalResult.count || 0,
+        scheduled: scheduledResult.count || 0,
+        inProgress: inProgressResult.count || 0,
+        completed: completedResult.count || 0,
+      });
+    } catch (err) {
+      console.error('Error loading stats:', err);
+      // Don't set error state for stats - visits will still load
+    }
+  }, [searchQuery, typeFilter, clinicFilter, buildDateParams]);
+
   // Load visits from API - extracted as a reusable function
   const loadVisits = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
 
-      // Helper function to build filter parameters (inside loadVisits to access current state)
-      const buildFilterParams = () => {
-        // Build date filter based on dateFilter selection
-        let dateParam: string | undefined = undefined;
-        let startDate: string | undefined = undefined;
-        let endDate: string | undefined = undefined;
-        
-        if (dateFilter === 'today') {
-          const today = new Date().toISOString().split('T')[0];
-          dateParam = today;
-        } else if (dateFilter === 'week') {
-          const today = new Date();
-          const weekStart = new Date(today);
-          weekStart.setDate(today.getDate() - today.getDay()); // Start of week (Sunday)
-          startDate = weekStart.toISOString().split('T')[0];
-          endDate = today.toISOString().split('T')[0];
-        } else if (dateFilter === 'month') {
-          const today = new Date();
-          const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
-          startDate = monthStart.toISOString().split('T')[0];
-          endDate = today.toISOString().split('T')[0];
-        }
-        // 'all' means no date filter
+      const { dateParam, startDate, endDate } = buildDateParams();
 
-        return {
-          page: currentPage,
-          page_size: itemsPerPage,
-          search: searchQuery || undefined,
-          status: statusFilter !== 'all' ? statusFilter : undefined,
-          visit_type: typeFilter !== 'all' ? typeFilter : undefined,
-          clinic: clinicFilter !== 'all' ? clinicFilter : undefined,
-          date: dateParam,
-          start_date: startDate,
-          end_date: endDate,
-        };
+      const filterParams = {
+        page: currentPage,
+        page_size: itemsPerPage,
+        search: searchQuery || undefined,
+        status: statusFilter !== 'all' ? statusFilter : undefined,
+        visit_type: typeFilter !== 'all' ? typeFilter : undefined,
+        clinic: clinicFilter !== 'all' ? clinicFilter : undefined,
+        date: dateParam,
+        start_date: startDate,
+        end_date: endDate,
       };
 
-      const filterParams = buildFilterParams();
       const result = await visitService.getVisits(filterParams);
       setTotalCount(result.count || result.results.length);
       
@@ -151,12 +198,17 @@ export default function VisitsPage() {
     } finally {
       setLoading(false);
     }
-  }, [currentPage, itemsPerPage, searchQuery, statusFilter, typeFilter, clinicFilter, dateFilter]);
+  }, [currentPage, itemsPerPage, searchQuery, statusFilter, typeFilter, clinicFilter, buildDateParams]);
 
   // Load visits when filters change
   useEffect(() => {
     loadVisits();
   }, [loadVisits]);
+
+  // Load stats when filters change (except status filter and pagination)
+  useEffect(() => {
+    loadStats();
+  }, [loadStats]);
 
   // With server-side pagination, visits array contains only current page results
   const paginatedVisits = visits;
@@ -166,19 +218,15 @@ export default function VisitsPage() {
     setCurrentPage(1);
   }, [searchQuery, statusFilter, typeFilter, clinicFilter, dateFilter]);
 
-  // Stats - 4 cards with useful metrics
-  // Note: Stats are calculated from current page results only
-  // For accurate stats across all visits, we'd need a separate stats endpoint
+  // Stats - 4 cards with useful metrics (now from separate API calls for accuracy)
   const stats = useMemo(() => {
-    const today = new Date().toISOString().split('T')[0];
-    const todayVisits = visits.filter(v => v.date === today);
     return [
-      { label: "Today's Visits", value: todayVisits.length, icon: Calendar, color: 'text-blue-500', bg: 'bg-blue-500/10' },
-      { label: 'Scheduled', value: visits.filter(v => v.status === 'Scheduled').length, icon: Clock, color: 'text-amber-500', bg: 'bg-amber-500/10' },
-      { label: 'In Progress', value: visits.filter(v => v.status === 'In Progress').length, icon: CheckCircle2, color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
-      { label: 'Completed', value: visits.filter(v => v.status === 'Completed').length, icon: CheckCircle2, color: 'text-violet-500', bg: 'bg-violet-500/10' },
+      { label: dateFilter === 'today' ? "Today's Visits" : dateFilter === 'week' ? "This Week" : dateFilter === 'month' ? "This Month" : "All Visits", value: statsData.total, icon: Calendar, color: 'text-blue-500', bg: 'bg-blue-500/10' },
+      { label: 'Scheduled', value: statsData.scheduled, icon: Clock, color: 'text-amber-500', bg: 'bg-amber-500/10' },
+      { label: 'In Progress', value: statsData.inProgress, icon: CheckCircle2, color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
+      { label: 'Completed', value: statsData.completed, icon: CheckCircle2, color: 'text-violet-500', bg: 'bg-violet-500/10' },
     ];
-  }, [visits]);
+  }, [statsData, dateFilter]);
 
   const handleEditVisit = (visit: typeof visits[0]) => {
     setSelectedVisit(visit);
