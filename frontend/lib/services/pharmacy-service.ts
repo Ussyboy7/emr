@@ -124,11 +124,15 @@ export interface StockRequestItem {
 export interface StockRequest {
   id: number;
   request_id: string;
-  status: 'pending' | 'approved' | 'partially_fulfilled' | 'fulfilled' | 'rejected' | 'cancelled';
+  status: 'pending' | 'approved' | 'partially_fulfilled' | 'fulfilled' | 'received' | 'rejected' | 'cancelled';
   from_location: string;
   to_location: string;
   requested_by?: number;
   requested_by_name?: string;
+  confirmed_by?: number;
+  confirmed_by_name?: string;
+  confirmed_at?: string;
+  confirmed_notes?: string;
   notes?: string;
   created_at: string;
   updated_at: string;
@@ -565,6 +569,13 @@ class PharmacyService {
   async fulfillStockRequest(id: number): Promise<{ request: StockRequest; issue: StockIssue }> {
     return apiFetch<{ request: StockRequest; issue: StockIssue }>(`/pharmacy/stock-requests/${id}/fulfill/`, {
       method: 'POST',
+    });
+  }
+
+  async confirmStockRequest(id: number, confirmedNotes?: string): Promise<{ message: string; request: StockRequest }> {
+    return apiFetch<{ message: string; request: StockRequest }>(`/pharmacy/stock-requests/${id}/confirm_receipt/`, {
+      method: 'POST',
+      body: JSON.stringify({ confirmed_notes: confirmedNotes || '' }),
     });
   }
 

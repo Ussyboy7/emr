@@ -44,6 +44,8 @@ import {
   FileBarChart,
   Target,
   LucideIcon,
+  Send,
+  Package,
 } from "lucide-react";
 import {
   Sidebar,
@@ -158,7 +160,9 @@ const menuSections: MenuSection[] = [
       { label: "Home", href: "/pharmacy", icon: LayoutDashboard },
       { label: "Prescriptions", href: "/pharmacy/prescriptions", icon: ClipboardList },
       { label: "Dispense History", href: "/pharmacy/history", icon: History },
-      { label: "Inventory", href: "/pharmacy/inventory", icon: Database },
+      { label: "Dispensary", href: "/pharmacy/inventory", icon: Database },
+      { label: "Stock Requests", href: "/pharmacy/requests", icon: Send },
+      { label: "Warehouse", href: "/pharmacy/store", icon: Package },
     ],
   },
   {

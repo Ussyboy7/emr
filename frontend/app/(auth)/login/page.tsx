@@ -60,25 +60,33 @@ export default function LoginPage() {
   const [rememberMe, setRememberMe] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [isRedirecting, setIsRedirecting] = useState(false);
 
   const homeRoute = useMemo(() => getHomeRouteForUser(currentUser), [currentUser]);
 
   // If already authenticated, don't let users "stick" on /login.
   useEffect(() => {
+    // Don't redirect if we're already handling a login redirect
+    if (isSubmitting || isRedirecting) return;
     if (!hasTokens()) return;
     if (!hydrated) return;
     if (!currentUser) return;
+    setIsRedirecting(true);
     router.replace(homeRoute || "/no-access");
-  }, [currentUser, hydrated, homeRoute, router]);
+  }, [currentUser, hydrated, homeRoute, router, isSubmitting, isRedirecting]);
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
+    // Prevent double submission and useEffect redirects
+    if (isSubmitting || isRedirecting) return;
+    
     setIsSubmitting(true);
 
     try {
       if (!username || !password) {
         toast.error("Enter your username and password.");
+        setIsSubmitting(false);
         return;
       }
 
@@ -92,6 +100,10 @@ export default function LoginPage() {
 
       toast.success("Signed in successfully");
       
+      // Mark as redirecting BEFORE any async operations to prevent race conditions
+      // Do NOT reset isSubmitting - keep it true until we leave the page
+      setIsRedirecting(true);
+      
       // Fetch current user to get permissions for role-based redirect (permission-only).
       try {
         interface AuthMeResponse { permissions?: { pages?: string[] }; is_superuser?: boolean }
@@ -103,32 +115,33 @@ export default function LoginPage() {
 
         // Super admin can access everything and keeps the global dashboard.
         if (isSuperuser) {
-          router.push(storedRedirect || "/dashboard");
+          window.location.href = storedRedirect || "/dashboard";
           return;
         }
 
         // Only honor stored redirect if it's permitted by pages.
         if (storedRedirect && isPathAllowedByPages(storedRedirect, allowedPages)) {
-          router.push(storedRedirect);
+          window.location.href = storedRedirect;
           return;
         }
 
         const home = getHomeRouteFromAllowedPages(allowedPages);
-        router.push(home || "/no-access");
+        window.location.href = home || "/no-access";
       } catch (userError) {
         // Permission-only routing: do not send users to a generic dashboard if we can't
         // verify their permissions.
         console.warn("Failed to fetch user for permission-based redirect:", userError);
-        router.push("/no-access");
+        window.location.href = "/no-access";
       }
+      // Don't reset isSubmitting on success - we're navigating away
     } catch (error) {
       logError(error);
       clearTokens();
+      setIsRedirecting(false);
+      setIsSubmitting(false);
       toast.error(
         error instanceof Error ? error.message : "Unable to sign in. Please check your credentials."
       );
-    } finally {
-      setIsSubmitting(false);
     }
   };
 
