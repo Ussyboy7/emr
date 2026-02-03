@@ -1113,15 +1113,22 @@ export default function NursingPoolQueuePage() {
               </div>
             )}
             <form onSubmit={handleSaveVitals} className="py-4 space-y-6">
+              {/* Required fields notice */}
+              <p className="text-xs text-muted-foreground"><span className="text-rose-500">*</span> indicates required fields</p>
+              
               {/* Basic Vitals */}
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                 <div className="space-y-2">
-                  <Label className="flex items-center gap-1"><Thermometer className="h-3 w-3" />Temperature (°C)</Label>
-                  <Input type="number" step="0.1" placeholder="36.5" value={vitalsForm.temperature} onChange={(e) => setVitalsForm(prev => ({ ...prev, temperature: e.target.value }))} />
+                  <Label className="flex items-center gap-1">
+                    <Thermometer className="h-3 w-3" />Temperature (°C) <span className="text-rose-500">*</span>
+                  </Label>
+                  <Input type="number" step="0.1" placeholder="36.5" value={vitalsForm.temperature} onChange={(e) => setVitalsForm(prev => ({ ...prev, temperature: e.target.value }))} required />
                 </div>
                 <div className="space-y-2">
-                  <Label className="flex items-center gap-1"><Heart className="h-3 w-3" />Pulse (bpm)</Label>
-                  <Input type="number" placeholder="72" value={vitalsForm.pulse} onChange={(e) => setVitalsForm(prev => ({ ...prev, pulse: e.target.value }))} />
+                  <Label className="flex items-center gap-1">
+                    <Heart className="h-3 w-3" />Pulse (bpm) <span className="text-rose-500">*</span>
+                  </Label>
+                  <Input type="number" placeholder="72" value={vitalsForm.pulse} onChange={(e) => setVitalsForm(prev => ({ ...prev, pulse: e.target.value }))} required />
                 </div>
                 <div className="space-y-2">
                   <Label className="flex items-center gap-1"><Wind className="h-3 w-3" />Respiratory Rate</Label>
@@ -1131,7 +1138,9 @@ export default function NursingPoolQueuePage() {
 
               {/* Blood Pressure */}
               <div className="space-y-2">
-                <Label className="flex items-center gap-1"><Activity className="h-3 w-3" />Blood Pressure (mmHg)</Label>
+                <Label className="flex items-center gap-1">
+                  <Activity className="h-3 w-3" />Blood Pressure (mmHg)
+                </Label>
                 <div className="flex items-center gap-2">
                   <Input type="number" placeholder="120" value={vitalsForm.bloodPressureSystolic} onChange={(e) => setVitalsForm(prev => ({ ...prev, bloodPressureSystolic: e.target.value }))} className="w-24" />
                   <span className="text-muted-foreground">/</span>
@@ -1146,7 +1155,9 @@ export default function NursingPoolQueuePage() {
                   <Input type="number" placeholder="98" value={vitalsForm.oxygenSaturation} onChange={(e) => setVitalsForm(prev => ({ ...prev, oxygenSaturation: e.target.value }))} />
                 </div>
                 <div className="space-y-2">
-                  <Label className="flex items-center gap-1"><Scale className="h-3 w-3" />Weight (kg)</Label>
+                  <Label className="flex items-center gap-1">
+                    <Scale className="h-3 w-3" />Weight (kg)
+                  </Label>
                   <Input type="number" step="0.1" placeholder="70" value={vitalsForm.weight} onChange={(e) => setVitalsForm(prev => ({ ...prev, weight: e.target.value }))} />
                 </div>
                 <div className="space-y-2">

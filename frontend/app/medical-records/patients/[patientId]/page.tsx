@@ -292,15 +292,61 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
         {/* Patient Information */}
         <Card>
           <CardContent className="p-6">
-            <div className="flex items-start gap-6">
+            <div className="flex flex-col md:flex-row items-start gap-6">
               <PatientAvatar name={(patient.full_name || `${patient.first_name || ''} ${patient.surname || ''}`.trim()) || ''} photoUrl={patient.photo} size="lg" />
               <div className="flex-1">
                 <h2 className="text-2xl font-bold">{patient.full_name || `${patient.first_name} ${patient.surname}`}</h2>
-                <div className="mt-2 space-y-1 text-sm text-muted-foreground">
-                  <p>Patient ID: {patient.patient_id} • Age: {patient.age ?? ''} • Gender: {patient.gender ?? ''}</p>
-                  {patient.blood_group && <p>Blood Group: {patient.blood_group} {patient.genotype ? `• Genotype: ${patient.genotype}` : ''}</p>}
-                  {patient.phone && <p>Phone: {patient.phone}</p>}
-                  {patient.email && <p>Email: {patient.email}</p>}
+                <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div>
+                    <p className="text-xs text-muted-foreground">Patient ID</p>
+                    <p className="font-semibold text-blue-600">{patient.patient_id}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Age</p>
+                    <p className="font-medium">{patient.age ?? '—'} years</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Gender</p>
+                    <p className="font-medium">{patient.gender === 'male' ? 'Male' : patient.gender === 'female' ? 'Female' : patient.gender ?? '—'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Category</p>
+                    <Badge className={`text-xs ${
+                      patient.category === 'employee' ? 'bg-blue-100 text-blue-800' :
+                      patient.category === 'retiree' ? 'bg-amber-100 text-amber-800' :
+                      patient.category === 'dependent' ? 'bg-violet-100 text-violet-800' :
+                      'bg-emerald-100 text-emerald-800'
+                    }`}>
+                      {patient.category === 'employee' ? 'Employee' :
+                       patient.category === 'retiree' ? 'Retiree' :
+                       patient.category === 'dependent' ? 'Dependent' :
+                       patient.category === 'nonnpa' ? 'NonNPA' : patient.category}
+                    </Badge>
+                  </div>
+                  {patient.blood_group && (
+                    <div>
+                      <p className="text-xs text-muted-foreground">Blood Group</p>
+                      <p className="font-medium">{patient.blood_group}</p>
+                    </div>
+                  )}
+                  {patient.genotype && (
+                    <div>
+                      <p className="text-xs text-muted-foreground">Genotype</p>
+                      <p className="font-medium">{patient.genotype}</p>
+                    </div>
+                  )}
+                  {patient.phone && (
+                    <div>
+                      <p className="text-xs text-muted-foreground">Phone</p>
+                      <p className="font-medium">{patient.phone}</p>
+                    </div>
+                  )}
+                  {patient.email && (
+                    <div>
+                      <p className="text-xs text-muted-foreground">Email</p>
+                      <p className="font-medium truncate">{patient.email}</p>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
