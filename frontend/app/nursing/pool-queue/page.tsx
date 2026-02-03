@@ -337,8 +337,8 @@ export default function NursingPoolQueuePage() {
             // Patient has been sent to a room
             nursingStatus = 'Sent to Room';
           } else if (vitalsData) {
-            // Check if vitals are complete (have essential measurements)
-            const hasCompleteVitals = vitalsData.temperature && vitalsData.blood_pressure_systolic && vitalsData.heart_rate;
+            // Check if vitals are complete (have essential measurements - only temp and pulse required)
+            const hasCompleteVitals = vitalsData.temperature && vitalsData.heart_rate;
             nursingStatus = hasCompleteVitals ? 'Ready for Consultation' : 'Vitals Recorded';
           }
           
@@ -1025,7 +1025,7 @@ export default function NursingPoolQueuePage() {
                               </Button>
                             </>
                           )}
-                          {patient.nursingStatus === 'Ready for Consultation' && (
+                          {(patient.nursingStatus === 'Vitals Recorded' || patient.nursingStatus === 'Ready for Consultation') && (
                             <Button size="sm" onClick={() => openRoomPicker(patient)} className="h-7 px-2 bg-emerald-500 hover:bg-emerald-600 text-white text-xs">
                               <ArrowRight className="h-3 w-3 mr-1" />Send
                             </Button>
