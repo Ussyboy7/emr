@@ -1,0 +1,248 @@
+Brand_ID,Brand_Name,Generic_ID,Generic_Name,Product_Code,Unit,Strength,Form,Category,Manufacturer,Pack_Size
+1,Acipep Chewable,G035,Antacid,ACI-T,Tablet,Alginic acid 400mg + Magnesium hydroxide 185mg + Aluminium hydroxide 195mg + Simethicone 25mg,Tablet,,,10
+2,Acipep Suspension,G035,Antacid,ACI-S,Bottle,Aluminium hydroxide 200mg/5ml + Magnesium hydroxide 200mg/5ml + Simethicone 25mg/5ml,Suspension,,,1
+3,Advant 16mg,G108,Candesartan,ADV16T,Tablet,16mg,Tablet,Antihypertensives,,10
+4,Advant 8mg,G108,Candesartan,ADV8,Tablet,8mg,Tablet,Antihypertensives,,10
+5,Advantec 16/12.5mg,G107,Candesartan/Hydrochlorothiazide,ADV16,Tablet,16/12.5mg,Tablet,Antihypertensives,,10
+6,Aldactone 25mg,G102,Spironolactone,ALD25,Tablet,25mg,Tablet,Diuretics,Pfizer,10
+7,Alfuzosin 10mg,G145,Alfuzosin,ALF10,Tablet,10mg,Tablet,Urological,,10
+8,Alphabetic Caplets,G016,Multivitamins,ALPH,Caplet,Vit A 5000IU + Vit C 75mg,Caplet,Vitamins,,10
+9,Alphagan Eye Drop,G065,Brimonidine,ALP-E,Bottle,0.2%,Eye Drops,,Allergan,1
+10,Amatem Softgel 20/120mg,G009,Artemether/Lumefantrine,AMA20120,Capsule,20/120mg,Softgel Capsule,Antimalarials,,10
+11,Amatem Softgel 80/480mg,G009,Artemether/Lumefantrine,AMA80480,Capsule,80/480mg,Softgel Capsule,Antimalarials,,10
+12,Amlong 10mg,G105,Amlodipine,AML10,Tablet,10mg,Tablet,Antihypertensives,,10
+13,Amlong 5mg,G105,Amlodipine,AML5,Tablet,5mg,Tablet,Antihypertensives,,10
+14,Amoxil 250mg Capsules,G003,Amoxicillin,AMX250,Capsule,250mg,Capsule,Antibiotics,GSK,10
+15,Ampiclox Suspension,G005,Ampicillin/Cloxacillin,AMP250S,Bottle,250mg/5ml,Suspension,Antibiotics,,1
+16,Anorol,G026,Paracetamol/Orphenadrine,ANO,Tablet,450/35mg,Tablet,Analgesics,,10
+17,Aprovasc 300/10mg,G106,Irbesartan/Amlodipine,APR300,Tablet,300/10mg,Tablet,Antihypertensives,Sanofi,10
+18,Artesun 30mg,G080,Artesunate,ART30,Vial,30mg,Injection,Antimalarials,,1
+19,Artesun 60mg,G080,Artesunate,ART60,Vial,60mg,Injection,Antimalarials,,1
+20,Arthocare Forte,G016,Multivitamins,ATH-F,Capsule,Vit A 5000IU + Vit C 75mg,Capsule,Vitamins,,10
+21,Arthrotec 75mg,G013,Diclofenac/Misoprostol,ART75,Tablet,75mg,Tablet,,Pfizer,10
+22,Astyfer Capsules,G019,Iron Containing Multivitamin,ATF-C,Capsule,Fe 18mg + Multivitamins,Capsule,Haematinics,,10
+23,Astyfer Syrup,G019,Iron Containing Multivitamin,ATF-S,Bottle,Fe 18mg + Multivitamins,Syrup,Haematinics,,1
+24,Astymin Capsules,G016,Multivitamins,AST-C,Capsule,Vit A 5000IU + Vit C 75mg,Capsule,Vitamins,,10
+25,Astymin Syrup,G016,Multivitamins,AST-S,Bottle,Vit A 5000IU + Vit C 75mg,Syrup,Vitamins,,1
+26,Atacand 16mg,G108,Candesartan,ATA16,Tablet,16mg,Tablet,Antihypertensives,AstraZeneca,10
+27,Atacand 32mg,G108,Candesartan,ATA32,Tablet,32mg,Tablet,Antihypertensives,AstraZeneca,10
+28,Atacand 8mg,G108,Candesartan,ATA8,Tablet,8mg,Tablet,Antihypertensives,AstraZeneca,10
+29,Atenolol 100mg,G152,Atenolol,ATE100,Tablet,100mg,Tablet,,,10
+30,Atenolol 50mg,G152,Atenolol,ATE50,Tablet,50mg,Tablet,,,10
+31,Atorvastatin 10mg,G109,Atorvastatin,ATO10,Tablet,10mg,Tablet,LipidLowering,,10
+32,Atorvastatin 20mg,G109,Atorvastatin,ATO20,Tablet,20mg,Tablet,LipidLowering,,10
+33,Augmentin ES Suspension,G006,Amoxicillin/Clavulanic Acid,AUG642,Bottle,642.9mg/5ml,Suspension,Antibiotics,GSK,1
+34,Avamys Nasal Spray,G002,Fluticasone,AVA-NS,Spray,27.5mcg/spray,Nasal Spray,,GSK,10
+35,Avro C Syrup,G039,Vitamin C,AVRC-S,Bottle,300mg/5ml,Syrup,Vitamins,Avro,1
+36,Avrobalm,G038,Methyl Salicylate,AVR-B,Tube,25%,Liniment,Analgesics,Avro,10
+37,Avrocid Suspension,G035,Antacid,AVR-S,Bottle,Aluminium hydroxide 200mg/5ml + Magnesium hydroxide 200mg/5ml + Simethicone 25mg/5ml,Suspension,,Avro,1
+38,Avrofen Gel,G036,Ibuprofen,AVRF-G,Tube,"100mg/5ml, 400mg",Gel,NSAIDs,Avro,1
+39,Avrofen Suspension,G036,Ibuprofen,AVRF-S,Bottle,"100mg/5ml, 400mg",Suspension,NSAIDs,Avro,1
+40,Avsar 160/10mg,G121,Amlodipine/Valsartan,AVS16010,Tablet,160/10mg,Tablet,Antihypertensives,,10
+41,Barole Injection,G020,Rabeprazole,BAR20,Vial,20mg,Injection,AntiUlcer,,1
+42,Bendroflumethiazide 2.5mg,G111,Bendroflumethiazide,BEN2.5,Tablet,2.5mg,Tablet,Diuretics,,10
+43,Benylin 4Flu,G098,Paracetamol/Diphenhydramine/Pseudoephedrine,BEN4F,Bottle,125mg/5ml + 12.5mg/5ml + 15mg/5ml,Syrup,,Johnson & Johnson,1
+44,Benylin Original,G099,Diphenhydramine,BEN-O,Bottle,12.5mg/5ml,Syrup,Antitussives,Johnson & Johnson,1
+45,Beoptic-N Eye Ointment,G067,Betamethasone/Neomycin,BEO-O,Tube,0.1%/0.5%,Ointment,,,1
+46,Beoptic-N Eye/Ear Drop,G067,Betamethasone/Neomycin,BEO-E,Bottle,0.1%/0.5%,Eye/Ear Drops,,,1
+47,Bicalutamide 150mg,G154,Bicalutamide,BIC150,Tablet,150mg,Tablet,,,10
+48,Bicalutamide 50mg,G154,Bicalutamide,BIC50,Tablet,50mg,Tablet,,,10
+49,Biopentin 300/50mcg,G078,Gabapentin/Methylcobalamin,BIO300,Tablet,300/50mcg,Tablet,Analgesics,,10
+50,Bisoprolol 2.5mg,G113,Bisoprolol,BIS2.5,Tablet,2.5mg,Tablet,,,10
+51,Bone Flex,G016,Multivitamins,BNFX,Capsule,Vit A 5000IU + Vit C 75mg,Capsule,Vitamins,,10
+52,Brimonidine Eye Drops,G065,Brimonidine,BRI-E,Bottle,0.2%,Eye Drops,,,1
+53,Buscopan 10mg,G069,Hyoscine,BUS10,Tablet,10mg,Tablet,,Boehringer,10
+54,CAC 1000,G039,Vitamin C,CAC1000,Tablet,1000mg,Effervescent Tablet,Vitamins,,10
+55,Cafergot,G086,Ergotamine/Caffeine,CAF1100,Tablet,1/100mg,Tablet,AntiMigraine,Novartis,10
+56,Calcimax,G082,Calcium,CAL-M,Tablet,500mg,Tablet,Vitamins,,10
+57,Carvedilol 6.25mg,G143,Carvedilol,CAR6.25,Tablet,6.25mg,Tablet,,,10
+58,Cataflam 50mg,G010,Diclofenac,CAT50,Tablet,50mg,Tablet,NSAIDs,Novartis,10
+59,Cefuroxime Suspension,G018,Cefuroxime,CEF125S,Bottle,125mg/5ml,Suspension,Antibiotics,,1
+60,Cefuroxime Tab 500mg,G018,Cefuroxime,CEF500,Tablet,500mg,Tablet,Antibiotics,,10
+61,Chloramphenicol Eye Drop,G060,Chloramphenicol,CHL-E,Bottle,0.5%,Eye Drops,Antibiotics,,1
+62,Chlorpheniramine Syrup,G046,Chlorpheniramine,CHL2S,Bottle,2mg/5ml,Syrup,Antihistamines,,1
+63,Ciprotab 500mg,G017,Ciprofloxacin,CIP500,Tablet,500mg,Tablet,Antibiotics,,10
+64,Clofenac SR 100mg,G010,Diclofenac,CLO100SR,Tablet,100mg,SR Tablet,NSAIDs,,10
+65,Clotrimazole Cream,G033,Clotrimazole,CLT-C,Tube,1%,Cream,Antifungals,,1
+66,Co-Codamol 8/500mg,G071,Codeine/Paracetamol,COC8500,Tablet,8/500mg,Tablet,Analgesics,,10
+67,Co-Diovan 160/12.5mg,G115,Valsartan/Hydrochlorothiazide,COD160,Tablet,160/12.5mg,Tablet,Antihypertensives,Novartis,10
+68,Co-Micardis 80/12.5mg,G116,Telmisartan/Hydrochlorothiazide,COM80,Tablet,80/12.5mg,Tablet,Antihypertensives,Boehringer,10
+69,Coartem DS,G009,Artemether/Lumefantrine,COA80480,Tablet,80/480mg,Tablet,Antimalarials,Novartis,10
+70,Coenzyme Q10 100mg,G053,Coenzyme Q10,COQ100,Capsule,100mg,Capsule,Vitamins,,10
+71,Coloseal 2mg,G029,Loperamide,COL2,Capsule,2mg,Capsule,,,10
+72,Cotozal TZ Plus,G075,Fluconazole/Tinidazole/Azithromycin,COT-TZ,Tablet,150/1000/1000mg,Tablet,Other,,10
+73,Coveram 10/10mg,G117,Perindopril/Amlodipine,COV1010,Tablet,10/10mg,Tablet,Antihypertensives,Servier,10
+74,Coveram 5/5mg,G117,Perindopril/Amlodipine,COV55,Tablet,5/5mg,Tablet,Antihypertensives,Servier,10
+75,Coveram Plus 10/2.5/10mg,G118,Perindopril/Indapamide/Amlodipine,COVP10,Tablet,10/2.5/10mg,Tablet,Antihypertensives,Servier,10
+76,Coveram Plus 5/1.25/5mg,G118,Perindopril/Indapamide/Amlodipine,COVP5,Tablet,5/1.25/5mg,Tablet,Antihypertensives,Servier,10
+77,Coxiget 200mg,G047,Celecoxib,COX200,Capsule,200mg,Capsule,NSAIDs,,10
+78,Daravit Forte,G016,Multivitamins,DAR-F,Capsule,Vit A 5000IU + Vit C 75mg,Capsule,Vitamins,,10
+79,Diabetmin 500mg,G110,Metformin,DIA500,Tablet,500mg,Tablet,Antidiabetics,,10
+80,Diamicron MR 60mg,G119,Gliclazide,DIM60,Tablet,60mg,MR Tablet,Antidiabetics,Servier,10
+81,Diovan 160mg,G114,Valsartan,DIO160,Tablet,160mg,Tablet,Antihypertensives,Novartis,10
+82,Diovan 80mg,G114,Valsartan,DIO80,Tablet,80mg,Tablet,Antihypertensives,Novartis,10
+83,Dopatab 250mg,G104,Methyldopa,DOP250,Tablet,250mg,Tablet,Antihypertensives,,10
+84,Doxazosin 4mg,G144,Doxazosin,DOX4,Tablet,4mg,Tablet,,,10
+85,Duostam Capsules,G007,Dutasteride/Tamsulosin,DUO-CAP,Capsule,0.5mg/0.4mg,Capsule,Urological,,30
+86,E-Nat 400IU,G058,Vitamin E,ENAT400,Capsule,400IU,Capsule,Vitamins,,10
+87,EmVit C 100mg,G039,Vitamin C,EMC100,Tablet,100mg,Tablet,Vitamins,Emzor,10
+88,Emal Injection,G076,Arteether,EMA150,Ampoule,150mg/2ml,Injection,Antimalarials,,1
+89,Emcap Paracetamol,G043,Paracetamol,EMP500,Caplet,500mg,Caplet,Analgesics,Emzor,10
+90,Emgyl Suspension,G037,Metronidazole,EMG200S,Bottle,200mg/5ml,Suspension,Antibiotics,Emzor,1
+91,Empirin 75mg,G120,Acetylsalicylic Acid,EMP75,Tablet,75mg,Tablet,Antiplatelet,,10
+92,Emprofen Suspension,G036,Ibuprofen,EMP100S,Bottle,100mg/5ml,Suspension,NSAIDs,Emzor,1
+93,Emzolyn Adult,G045,Diphenhydramine Compound,EMZA,Bottle,14mg/5ml + 125mg/5ml + 125mg/5ml + 0.5mg/5ml,Syrup,Antitussives,Emzor,1
+94,Emzolyn Children,G045,Diphenhydramine Compound,EMZC,Bottle,14mg/5ml + 125mg/5ml + 125mg/5ml + 0.5mg/5ml,Syrup,Antitussives,Emzor,1
+95,Entecavir 0.5mg,G148,Entecavir,ENT0.5,Tablet,0.5mg,Tablet,,,10
+96,Epilim Chrono 500mg,G015,Sodium Valproate,EPI500,Tablet,500mg,CR Tablet,,Sanofi,10
+97,Escitalopram 10mg,G092,Escitalopram,ESC10,Tablet,10mg,Tablet,Antidepressants,,10
+98,Exforge 10/320mg,G121,Amlodipine/Valsartan,EXF10320,Tablet,10/320mg,Tablet,Antihypertensives,Novartis,10
+99,Exforge HCT 10/160/12.5mg,G122,Amlodipine/Valsartan/Hydrochlorothiazide,EXFH,Tablet,10/160/12.5mg,Tablet,Antihypertensives,Novartis,10
+100,Eyecap,G054,Probiotic,EYE-C,Capsule,2e9 CFU/Capsule,Capsule,Vitamins,,10
+101,Fanymox Eye Drops,G048,Moxifloxacin,MOX-E,Bottle,0.5%,Eye Drops,Antibiotics,,1
+102,Fastum Gel,G022,Ketoprofen,FAS-G,Tube,200mg,Gel,NSAIDs,Menarini,1
+103,Febo-G 40mg,G049,Febuxostat,FEB40,Tablet,40mg,Tablet,Antigout,,10
+104,Febo-G 80mg,G049,Febuxostat,FEB80,Tablet,80mg,Tablet,Antigout,,10
+105,Fenofibrate 160mg,G084,Fenofibrate,FEN160,Tablet,160mg,Tablet,LipidLowering,,10
+106,Fexet 120mg,G051,Fexofenadine,FEX120,Tablet,120mg,Tablet,Antihistamines,,10
+107,Fluconazole 50mg,G030,Fluconazole,FLU50,Capsule,50mg,Capsule,Antifungals,,10
+108,Flucox 150mg,G030,Fluconazole,FLU150,Capsule,150mg,Capsule,Antifungals,,10
+109,Folic Acid 5mg,G044,Folic Acid,FOL5,Tablet,5mg,Tablet,Vitamins,,10
+110,Fortide Inhaler,G050,Budesonide/Formoterol,FOR-I,Inhaler,200/6mcg,Inhaler,AntiAsthmatics,,1
+111,Forxiga 10mg,G123,Dapagliflozin,FOR10,Tablet,10mg,Tablet,Antidiabetics,AstraZeneca,10
+112,Fosfolag 3g,G097,Fosfomycin,FOS3G,Sachet,3g,Granules,Antibiotics,,10
+113,Fungusol Powder,G024,Miconazole,FUN-P,Container,2%,Powder,Antifungals,,1
+114,Furosemide 20mg,G151,Furosemide,FUR20,Tablet,20mg,Tablet,Diuretics,,10
+115,Furosemide 40mg,G151,Furosemide,FUR40,Tablet,40mg,Tablet,Diuretics,,10
+116,Galcipro-TN,G034,Ciprofloxacin/Tinidazole,GAL-TN,Tablet,500/600mg,Tablet,Antibiotics,,10
+117,Galvus 50mg,G132,Vildagliptin,GAL50,Tablet,50mg,Tablet,Antidiabetics,Novartis,10
+118,Galvus/Met 50/1000mg,G140,Vildagliptin/Metformin,GALM501000,Tablet,50/1000mg,Tablet,Antidiabetics,Novartis,10
+119,Getzome 20mg,G052,Omeprazole,GTZ20,Capsule,20mg,Capsule,AntiUlcer,,10
+120,Getzome 40mg,G052,Omeprazole,GTZ40,Vial,40mg,Powder,AntiUlcer,,1
+121,Glucophage 850mg,G110,Metformin,GLU850,Tablet,850mg,Tablet,Antidiabetics,Merck,10
+122,Glucophage XR 1000mg,G129,Metformin Extended Release,GLUXR1000,Tablet,1000mg,XR Tablet,Antidiabetics,Merck,10
+123,Glucophage XR 750mg,G129,Metformin Extended Release,GLUXR750,Tablet,750mg,XR Tablet,Antidiabetics,Merck,10
+124,Gynocare Ovules,G100,Nystatin/Neomycin/Polymyxin,GYN-O,Ovule,100000U/3.5mg/1000U per ovule,Ovules,Antifungals,,10
+125,Homtamin Ginseng,G016,Multivitamins,HOM-G,Capsule,Vit A 5000IU + Vit C 75mg,Capsule,Vitamins,,10
+126,Hydrex 25mg,G124,Hydrochlorothiazide,HYD25,Tablet,25mg,Tablet,Diuretics,,10
+127,Hypromellose Eye Drop,G062,Hypromellose,HYP-E,Bottle,0.3%,Eye Drops,,,1
+128,Ibunova 400mg,G036,Ibuprofen,IBU400,Capsule,400mg,Capsule,NSAIDs,,10
+129,Inderal 40mg,G112,Propranolol,IND40,Tablet,40mg,Tablet,,AstraZeneca,10
+130,Jardiance 10mg,G126,Empagliflozin,JAR10,Tablet,10mg,Tablet,Antidiabetics,Boehringer,10
+131,Keppra 500mg,G150,Levetiracetam,KEP500,Tablet,500mg,Tablet,,UCB,10
+132,Ketosteril,G074,Keto-Analogue of Amino Acids,KET-A,Tablet,Total nitrogen 36mg/tablet,Tablet,Other,Fresenius,10
+133,Ketovail 200mg,G022,Ketoprofen,KET200,Tablet,200mg,Tablet,NSAIDs,,10
+134,King's Tonic,G019,Iron Containing Multivitamin,KNG-T,Bottle,Fe 18mg + Multivitamins,Syrup,Haematinics,,1
+135,Lantus 1.2g,G125,Insulin Glargine,LAN-I,Pen,1.2g,Injection,Antidiabetics,Sanofi,1
+136,Latanoprost Eye Drops,G063,Latanoprost,LAT-E,Bottle,0.005%,Eye Drops,,,1
+137,Levothyroxine 100mcg,G153,Levothyroxine,LEV100,Tablet,100mcg,Tablet,,,10
+138,Levothyroxine 25mcg,G153,Levothyroxine,LEV25,Tablet,25mcg,Tablet,,,10
+139,Levothyroxine 50mcg,G153,Levothyroxine,LEV50,Tablet,50mcg,Tablet,,,10
+140,Ligaba 75mg,G059,Pregabalin,LIG75,Capsule,75mg,Capsule,Analgesics,,10
+141,Linagliptin 5mg,G127,Linagliptin,LIN5,Tablet,5mg,Tablet,Antidiabetics,,10
+142,Lipitor 10mg,G109,Atorvastatin,LIP10,Tablet,10mg,Tablet,LipidLowering,Pfizer,10
+143,Lipitor 20mg,G109,Atorvastatin,LIP20,Tablet,20mg,Tablet,LipidLowering,Pfizer,10
+144,Lipitor 40mg,G109,Atorvastatin,LIP40,Tablet,40mg,Tablet,LipidLowering,Pfizer,10
+145,Liquid Paraffin,G085,Liquid Paraffin,LIQ-P,Bottle,100%,Syrup,,,1
+146,Lirapyn 75mg,G059,Pregabalin,LIR75,Capsule,75mg,Capsule,Analgesics,,10
+147,Lisinopril 10mg,G128,Lisinopril,LIS10,Tablet,10mg,Tablet,Antihypertensives,,10
+148,Lisinopril 5mg,G128,Lisinopril,LIS5,Tablet,5mg,Tablet,Antihypertensives,,10
+149,Livolin Forte,G057,Phospholipids with Vitamins,LIV-F,Capsule,Phospholipids 300mg + Vitamins,Capsule,Hepatoprotective,,10
+150,Lokmal QS,G009,Artemether/Lumefantrine,LOK80480,Tablet,80/480mg,Tablet,Antimalarials,,10
+151,Lokmal Suspension,G009,Artemether/Lumefantrine,LOKS20,Bottle,20/120mg,Suspension,Antimalarials,,1
+152,Lonart DS Tab,G009,Artemether/Lumefantrine,LON80480,Tablet,80/480mg,Tablet,Antimalarials,Bliss GVS,10
+153,Lonart Suspension,G009,Artemether/Lumefantrine,LONS20,Bottle,20/120mg/5ml,Suspension,Antimalarials,Bliss GVS,1
+154,Loratyn 10mg,G027,Loratadine,LOR10,Tablet,10mg,Tablet,Antihistamines,,10
+155,Losartan 50mg,G130,Losartan,LOS50,Tablet,50mg,Tablet,Antihypertensives,,10
+156,Loxagyl 200mg,G037,Metronidazole,LOX200,Tablet,200mg,Tablet,Antibiotics,,10
+157,Loxagyl 400mg,G037,Metronidazole,LOX400,Tablet,400mg,Tablet,Antibiotics,,10
+158,Lyntriaxone 1g,G073,Ceftriaxone,LYN1G,Vial,1g,Injection,Antibiotics,,1
+159,Maxivision,G063,Latanoprost,MAX-E,Capsule,0.005%,Capsule,Vitamins,,10
+160,Menthodex Cough Syrup,G045,Diphenhydramine Compound,MEN-S,Bottle,14mg/5ml + 125mg/5ml + 125mg/5ml + 0.5mg/5ml,Syrup,Antitussives,,1
+161,Mepiryl 4mg,G131,Glimepiride,MEP4,Tablet,4mg,Tablet,Antidiabetics,,10
+162,Metformin 1000mg,G110,Metformin,MET1000,Tablet,1000mg,Tablet,Antidiabetics,,10
+163,Micardis 40mg,G103,Telmisartan,MIC40,Tablet,40mg,Tablet,Antihypertensives,Boehringer,10
+164,Micardis 80mg,G103,Telmisartan,MIC80,Tablet,80mg,Tablet,Antihypertensives,Boehringer,10
+165,Micropirin 75mg,G120,Acetylsalicylic Acid,MIC75,Tablet,75mg,Tablet,Antiplatelet,,10
+166,Misopt Eye Drops,G066,Dorzolamide/Timolol,MIS-E,Bottle,2%/0.5%,Eye Drops,,,1
+167,Moxiget 400mg,G048,Moxifloxacin,MOX400,Tablet,400mg,Tablet,Antibiotics,,10
+168,Nasodyne Adults,G090,Carbocisteine,NAS-A,Bottle,125mg/5ml,Syrup,,,1
+169,Nasodyne Children,G091,Carbocisteine/Promethazine,NAS-C,Bottle,125mg/5ml + 2.5mg/5ml,Syrup,,,1
+170,Nat-B,G058,Vitamin E,NAT-B,Tablet,400IU,Tablet,Vitamins,,10
+171,Natrilix SR 1.5mg,G133,Indapamide,NAT1.5,Tablet,1.5mg,SR Tablet,Diuretics,Servier,10
+172,Neuracalm 75/750mcg,G087,Pregabalin/Methylcobalamin,NEU75,Tablet,75/750mcg,Tablet,Analgesics,,10
+173,Neurogesic Extra,G010,Diclofenac,NEU-G,Tube,"50mg, 100mg",Liniment,Analgesics,,10
+174,Neurotex Forte,G025,Vitamin B Complex,NEU-F,Caplet,Thiamine 50mg + Pyridoxine 50mg + Cyanocobalamin 1mg,Caplet,Vitamins,,10
+175,Nexium 40mg,G041,Esomeprazole,NEX40,Capsule,40mg,Capsule,AntiUlcer,AstraZeneca,10
+176,Nifecard XL 30mg,G134,Nifedipine,NIF30,Tablet,30mg,XL Tablet,Antihypertensives,,10
+177,Nifedipine Dexcel 20mg,G134,Nifedipine,NIF20,Tablet,20mg,Tablet,Antihypertensives,,10
+178,Normoretic 5/25mg,G139,Amiloride/Hydrochlorothiazide,NRM525,Tablet,5/25mg,Tablet,Diuretics,,10
+179,Norvasc 10mg,G105,Amlodipine,NOR10,Tablet,10mg,Tablet,Antihypertensives,Pfizer,10
+180,Norvasc 5mg,G105,Amlodipine,NOR5,Tablet,5mg,Tablet,Antihypertensives,Pfizer,10
+181,Novomix,G135,Insulin Aspart/Protamine Insulin,NOV-M,Pen,100IU/ml,Injection,Antidiabetics,Novo Nordisk,1
+182,Novorapid,G136,Insulin Aspart,NOV-R,Pen,100IU/ml,Injection,Antidiabetics,Novo Nordisk,1
+183,Nucard 160mg,G114,Valsartan,NUC160,Tablet,160mg,Tablet,Antihypertensives,,10
+184,Nucard 80mg,G114,Valsartan,NUC80,Tablet,80mg,Tablet,Antihypertensives,,10
+185,Nurofen Express 400mg,G036,Ibuprofen,NUR400,Capsule,400mg,Capsule,NSAIDs,Reckitt,10
+186,Orelox 200mg,G014,Cefpodoxime,ORE200,Tablet,200mg,Tablet,Antibiotics,Sanofi,10
+187,Otomed Ear Drop,G079,Otic Combination,OTO-E,Bottle,0.1% + 3.5mg/g + 1000U/g + 2%,Ear Drops,Otic,,1
+188,P-Alaxin Suspension,G077,Dihydroartemisinin/Piperaquine,PAL80640,Bottle,80/640mg,Suspension,Antimalarials,,1
+189,Patanol Eye Drops,G056,Olopatadine,PAT-E,Bottle,0.1%,Eye Drops,Ophthalmic,Alcon,1
+190,Perilon 5mg,G028,Prednisolone,PER5,Tablet,5mg,Tablet,,,10
+191,Pradaxa 110mg,G138,Dabigatran,PRA110,Capsule,110mg,Capsule,,Boehringer,10
+192,Pradaxa 150mg,G138,Dabigatran,PRA150,Capsule,150mg,Capsule,,Boehringer,10
+193,Probiotic,G054,Probiotic,PRO-C,Capsule,2e9 CFU/Capsule,Capsule,Vitamins,,10
+194,Pyrox 20mg,G020,Rabeprazole,PYR20,Tablet,20mg,Tablet,AntiUlcer,,10
+195,Pyrox-Combi,G021,Rabeprazole/Clarithromycin/Amoxicillin,PYR-C,Tablet,20/500mg/1g,Tablet,,,10
+196,Quadriclear Cream,G068,Betamethasone/Gentamicin/Tolnaftate/Clioquinol,QUA-C,Tube,0.05%/0.1%/1%/3%,Cream,,,1
+197,Reichamox 500mg Capsules,G003,Amoxicillin,RCH500,Capsule,500mg,Capsule,Antibiotics,Reichen,10
+198,Reichlox Capsules,G005,Ampicillin/Cloxacillin,RCL500,Capsule,500mg,Capsule,Antibiotics,Reichen,10
+199,Reload Men 50+,G016,Multivitamins,RLM50,Capsule,Vit A 5000IU + Vit C 75mg,Capsule,Vitamins,,10
+200,Reload Men's Formula,G016,Multivitamins,RLM,Capsule,Vit A 5000IU + Vit C 75mg,Capsule,Vitamins,,10
+201,Reload Women 50+,G016,Multivitamins,RLW50,Capsule,Vit A 5000IU + Vit C 75mg,Capsule,Vitamins,,10
+202,Reload Women's Formula,G016,Multivitamins,RLW,Capsule,Vit A 5000IU + Vit C 75mg,Capsule,Vitamins,,10
+203,Reludrine 100mg,G070,Proguanil,REL100,Tablet,100mg,Tablet,Antimalarials,,10
+204,Renerve Plus,G101,Methylcobalamin/Alpha-Lipoic Acid,REN-P,Capsule,1500mcg/100mg,Capsule,Analgesics,,10
+205,Robinax 500mg,G093,Methocarbamol,ROB500,Tablet,500mg,Tablet,,,10
+206,Rocephin 1g,G073,Ceftriaxone,ROC1G,Vial,1g,Injection,Antibiotics,Roche,1
+207,Rosuvastatin 20mg,G141,Rosuvastatin,ROS20,Tablet,20mg,Tablet,LipidLowering,,10
+208,Seretide Diskus,G004,Fluticasone/Salmeterol,SER50250,Diskus,50/250mcg,Diskus Inhaler,AntiAsthmatics,GSK,1
+209,Silotrif 8mg,G094,Silodosin,SIL8,Tablet,8mg,Tablet,Urological,,10
+210,Sinemet 25/250mg,G147,Carbidopa/Levodopa,SIN25250,Tablet,25/250mg,Tablet,,MSD,10
+211,Sinufed,G031,Triprolidine/Pseudoephedrine,SIN-T,Tablet,2.5/60mg,Tablet,NasalDecongestants,,10
+212,Sirdalud 2mg,G011,Tizanidine,SIR2,Tablet,2mg,Tablet,,Novartis,10
+213,Strepsils Intensive,G042,Flurbiprofen,STR-I,Lozenge,8.75mg,Lozenge,NSAIDs,Reckitt,10
+214,Stugeron 25mg,G083,Cinnarizine,STU25,Tablet,25mg,Tablet,,Janssen,10
+215,Sulfasalazine 500mg,G088,Sulfasalazine,SUL500,Tablet,500mg,Tablet,Other,,10
+216,Sumatriptan 50mg,G072,Sumatriptan,SUM50,Tablet,50mg,Tablet,AntiMigraine,,10
+217,Swiclone 7.5mg,G095,Zopiclone,SWI7.5,Tablet,7.5mg,Tablet,Sedatives,,10
+218,Tavanic 500mg,G089,Levofloxacin,TAV500,Tablet,500mg,Tablet,Antibiotics,Sanofi,10
+219,Tegretol 200mg,G081,Carbamazepine,TEG200,Tablet,200mg,Tablet,,Novartis,10
+220,Tegretol 400mg CR,G081,Carbamazepine,TEG400,Tablet,400mg,CR Tablet,,Novartis,10
+221,Telmisartan 80mg,G103,Telmisartan,TEL80,Tablet,80mg,Tablet,Antihypertensives,,10
+222,Tenofovir 300mg,G061,Tenofovir,TEN300,Capsule,300mg,Capsule,,,10
+223,Tot'hema,G096,Copper/Iron/Manganese,TOT-H,Bottle,0.5mg/5ml + 50mg/5ml + 2mg/5ml,Oral Solution,Haematinics,,10
+224,Tricuten Cream,G032,Clotrimazole/Gentamicin/Dexamethasone,TRI-C,Tube,1%/0.1%/0.05%,Cream,,,1
+225,Twynsta 80/10mg,G142,Telmisartan/Amlodipine,TWY8010,Tablet,80/10mg,Tablet,Antihypertensives,Boehringer,10
+226,Ventolin Inhaler,G008,Salbutamol,VEN200,Inhaler,200 doses,Inhaler,,GSK,1
+227,Victoza 6mg/ml,G137,Liraglutide,VIC6,Pen,6mg/ml,Injection,Antidiabetics,Novo Nordisk,1
+228,Vildagliptin 50mg,G132,Vildagliptin,VIL50,Tablet,50mg,Tablet,Antidiabetics,,10
+229,Vildagliptin/Metformin 50/1000mg,G140,Vildagliptin/Metformin,VILM501000,Tablet,50/1000mg,Tablet,Antidiabetics,,10
+230,Vitamin C 1000mg,G039,Vitamin C,VTC1000,Capsule,1000mg,Capsule,Vitamins,,10
+231,Vitamin D 5000IU,G055,Vitamin D,VTD5000,Capsule,5000IU,Capsule,Vitamins,,10
+232,Voltaren SR 100mg,G010,Diclofenac,VOL100SR,Tablet,100mg,SR Tablet,NSAIDs,Novartis,10
+233,Wellman,G016,Multivitamins,WLM,Capsule,Vit A 5000IU + Vit C 75mg,Capsule,Vitamins,Vitabiotics,10
+234,Wellman 50+,G016,Multivitamins,WLM50,Capsule,Vit A 5000IU + Vit C 75mg,Capsule,Vitamins,Vitabiotics,10
+235,Wellwoman,G016,Multivitamins,WLW,Capsule,Vit A 5000IU + Vit C 75mg,Capsule,Vitamins,Vitabiotics,10
+236,Wellwoman 50+,G016,Multivitamins,WLW50,Capsule,Vit A 5000IU + Vit C 75mg,Capsule,Vitamins,Vitabiotics,10
+237,Xalacom Eye Drop,G064,Latanoprost/Timolol,XAL-C,Bottle,0.005%/0.5%,Eye Drops,,Pfizer,1
+238,Xalatan Eye Drops,G063,Latanoprost,XAL-E,Bottle,0.005%,Eye Drops,,Pfizer,1
+239,Xarelto 20mg,G149,Rivaroxaban,XAR20,Tablet,20mg,Tablet,,Bayer,10
+240,Zeben Tablets,G001,Albendazole,ZEB200,Tablet,200mg,Tablet,,,10
+241,Zetro 500mg,G012,Azithromycin,ZET500,Tablet,500mg,Tablet,Antibiotics,,10
+242,Zithromax 250mg,G012,Azithromycin,ZIT250,Capsule,250mg,Capsule,Antibiotics,Pfizer,10
+243,Zoladex 10.8mg,G040,Goserelin,ZOL10.8,Syringe,10.8mg,Injection,,AstraZeneca,1
+244,Zyloric 100mg,G146,Allopurinol,ZYL100,Tablet,100mg,Tablet,Antigout,GSK,10
+245,Zyloric 300mg,G146,Allopurinol,ZYL300,Tablet,300mg,Tablet,Antigout,GSK,10
+246,Zyncef Syrup,G023,Cetirizine,ZYN5S,Bottle,5mg/5ml,Syrup,Antihistamines,,1
+247,Zyncef Tablets,G023,Cetirizine,ZYN10,Tablet,10mg,Tablet,Antihistamines,,10

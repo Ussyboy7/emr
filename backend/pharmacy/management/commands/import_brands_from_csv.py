@@ -99,7 +99,7 @@ class Command(BaseCommand):
                 except ValueError:
                     pack_size = None
 
-                category = CATEGORY_MAP.get(category_raw, "")
+                category = CATEGORY_MAP.get(category_raw, category_raw)
 
                 generic = None
                 if generic_id:

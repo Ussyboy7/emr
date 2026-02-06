@@ -21,7 +21,7 @@ class Command(BaseCommand):
             .order_by("name")
         )
 
-        if limit:
+        if limit and limit > 0:
             meds = meds[:limit]
 
         moved_total = 0
