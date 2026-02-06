@@ -345,8 +345,11 @@ export const apiFetch = async <T = unknown>(path: string, options: FetchOptions 
       }
 
       try {
+        const method = (rest.method || "GET").toUpperCase();
+        const cache = rest.cache ?? (method === "GET" ? "no-store" : undefined);
         response = await fetch(fullUrl, {
           ...rest,
+          cache,
           headers: requestHeaders,
           credentials: "include",
         });
@@ -371,8 +374,11 @@ export const apiFetch = async <T = unknown>(path: string, options: FetchOptions 
         const refreshed = await refreshAccessToken();
         if (refreshed) {
           requestHeaders.set("Authorization", `Bearer ${refreshed}`);
+          const method = (rest.method || "GET").toUpperCase();
+          const cache = rest.cache ?? (method === "GET" ? "no-store" : undefined);
           const retryResponse = await fetch(`${getBaseUrl()}${path}`, {
             ...rest,
+            cache,
             headers: requestHeaders,
             credentials: "include",
           });

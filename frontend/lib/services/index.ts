@@ -17,6 +17,7 @@ export type {
   Prescription,
   PrescriptionItem,
   Medication,
+  GenericMedication,
   MedicationInventory,
   Dispense,
   DrugInteraction,
@@ -65,5 +66,4 @@ export { nursingService } from './nursing-service';
 
 // Export utility functions
 export { sanitizePatientForRendering } from './patient-service';
-
 

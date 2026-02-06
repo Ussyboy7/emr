@@ -60,12 +60,21 @@ export default function HandleRequestsPage() {
   const handleFulfillRequest = async (requestId: number) => {
     try {
       setIsProcessing(true);
-      await pharmacyService.fulfillStockRequest(requestId);
+      const response = await pharmacyService.fulfillStockRequest(requestId);
+      
+      // Additional check to ensure status actually changed
+      if (response && response.request && response.request.status === 'approved') {
+        throw new Error("Failed to issue stock: No stock available in Store inventory.");
+      }
+
       toast.success("Request issued - awaiting dispensary confirmation");
       setShowDetailsModal(false);
       await loadRequests();
     } catch (err: any) {
-      toast.error(err?.message || "Failed to issue request");
+      // If the backend returns 400 with a specific error message, use it.
+      // Otherwise fallback to generic error.
+      const errorMessage = err?.message || "Failed to issue request";
+      toast.error(errorMessage);
     } finally {
       setIsProcessing(false);
     }
@@ -111,7 +120,7 @@ export default function HandleRequestsPage() {
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold text-foreground flex items-center gap-3">
             <Send className="h-8 w-8 text-violet-500" />
-            Handle Dispensary Requests
+            Store Requests
           </h1>
           <p className="text-muted-foreground mt-1">Review, approve, and issue stock to dispensary</p>
         </div>

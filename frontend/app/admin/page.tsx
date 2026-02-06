@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { adminService } from "@/lib/services";
 import { toast } from "sonner";
+import { GenericMedicationsModal } from "@/components/admin/GenericMedicationsModal";
 import {
   Users,
   Shield,
@@ -30,6 +31,7 @@ import {
   ChevronRight,
   AlertCircle,
   Loader2,
+  Pill,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -38,6 +40,7 @@ export default function AdminDashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<string>('');
+  const [showGenericsModal, setShowGenericsModal] = useState(false);
   const [systemStats, setSystemStats] = useState({
     totalUsers: 0,
     activeUsers: 0,
@@ -640,6 +643,15 @@ export default function AdminDashboardPage() {
                           <span className="text-xs">Clinics</span>
                         </Button>
                       </Link>
+                      <Button 
+                        variant="outline" 
+                        className="w-full h-auto py-3 flex flex-col items-center gap-1" 
+                        onClick={() => setShowGenericsModal(true)}
+                      >
+                        <Pill className="h-5 w-5 text-violet-500" />
+                        <span className="text-xs">Generics</span>
+                      </Button>
+                      <div></div> {/* Empty div to maintain grid layout */}
                     </div>
                   </div>
 
@@ -667,6 +679,10 @@ export default function AdminDashboardPage() {
           </div>
         </div>
       </div>
+      <GenericMedicationsModal 
+        open={showGenericsModal} 
+        onOpenChange={setShowGenericsModal} 
+      />
     </DashboardLayout>
   );
 }

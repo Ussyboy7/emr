@@ -2,15 +2,65 @@
 Serializers for the Pharmacy app.
 """
 from rest_framework import serializers
-from .models import Medication, MedicationInventory, Prescription, PrescriptionItem, Dispense
+from .models import GenericMedication, Medication, MedicationInventory, Prescription, PrescriptionItem, Dispense, StockRequest, StockRequestItem, StockIssue, StockIssueLine
+
+
+class GenericMedicationSerializer(serializers.ModelSerializer):
+    """Serializer for GenericMedication model."""
+
+    def validate_atc_code(self, value):
+        if value is None:
+            return None
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
+    class Meta:
+        model = GenericMedication
+        fields = '__all__'
 
 
 class MedicationSerializer(serializers.ModelSerializer):
     """Serializer for Medication model."""
     
+    generic = GenericMedicationSerializer(read_only=True)
+    generic_id = serializers.PrimaryKeyRelatedField(
+        queryset=GenericMedication.objects.all(),
+        source='generic',
+        write_only=True,
+        required=False
+    )
+
+    def validate(self, attrs):
+        generic = attrs.get('generic') or getattr(self.instance, 'generic', None)
+        if not generic and not self.instance:
+            raise serializers.ValidationError({'detail': 'generic_id is required for brand medications'})
+        # Enforce unique brand per generic gracefully
+        name = attrs.get('name') or (self.instance and self.instance.name)
+        if name and generic:
+            qs = Medication.objects.filter(name=name, generic=generic)
+            if self.instance:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                raise serializers.ValidationError({'detail': 'Brand name must be unique per generic.'})
+        # Enforce unique code gracefully
+        code = attrs.get('code') or (self.instance and self.instance.code)
+        if code:
+            qs_code = Medication.objects.filter(code=code)
+            if self.instance:
+                qs_code = qs_code.exclude(pk=self.instance.pk)
+            if qs_code.exists():
+                raise serializers.ValidationError({'detail': 'Medication code must be unique.'})
+        return attrs
+
     class Meta:
         model = Medication
-        fields = '__all__'
+        fields = [
+            'id', 'name', 'generic', 'generic_id', 'code', 'unit',
+            'strength', 'form',
+            'category', 'manufacturer', 'pack_size', 'min_stock_level', 'prescription_required', 'description',
+            'is_active', 'created_at', 'updated_at'
+        ]
         read_only_fields = ['created_at', 'updated_at']
 
 
@@ -20,6 +70,7 @@ class MedicationInventorySerializer(serializers.ModelSerializer):
     medication_name = serializers.CharField(source='medication.name', read_only=True)
     is_low_stock = serializers.ReadOnlyField()
     is_expired = serializers.ReadOnlyField()
+    medication = MedicationSerializer(read_only=True)
     
     class Meta:
         model = MedicationInventory
@@ -34,12 +85,30 @@ class PrescriptionItemSerializer(serializers.ModelSerializer):
     medication_code = serializers.SerializerMethodField()
     medication_details = serializers.SerializerMethodField()
     prescription = serializers.PrimaryKeyRelatedField(read_only=True)  # Make prescription read-only for nested writes
+    
+    generic = serializers.PrimaryKeyRelatedField(
+        queryset=GenericMedication.objects.all(),
+        required=True
+    )
+    medication = serializers.PrimaryKeyRelatedField(
+        queryset=Medication.objects.all(),
+        required=False,
+        allow_null=True
+    )
+
+    def validate(self, attrs):
+        # Generic is now required
+        if not attrs.get('generic'):
+            raise serializers.ValidationError("Generic medication is required.")
+        return attrs
 
     def get_medication_name(self, obj):
-        """Get medication name safely."""
+        """Get medication name safely (Brand or Generic)."""
         try:
-            if hasattr(obj, 'medication') and obj.medication:
-                return getattr(obj.medication, 'name', None)
+            if obj.medication:
+                return obj.medication.name
+            if obj.generic:
+                return obj.generic.name
             return None
         except (AttributeError, TypeError):
             return None
@@ -47,8 +116,11 @@ class PrescriptionItemSerializer(serializers.ModelSerializer):
     def get_medication_code(self, obj):
         """Get medication code safely."""
         try:
-            if hasattr(obj, 'medication') and obj.medication:
-                return getattr(obj.medication, 'code', None)
+            if obj.medication:
+                return obj.medication.code
+            # Generics don't have a stock code, but maybe ATC?
+            if obj.generic:
+                return obj.generic.atc_code
             return None
         except (AttributeError, TypeError):
             return None
@@ -56,37 +128,49 @@ class PrescriptionItemSerializer(serializers.ModelSerializer):
     def get_medication_details(self, obj):
         """Get medication details including current stock."""
         try:
-            if not hasattr(obj, 'medication') or not obj.medication:
-                return None
-            
-            medication = obj.medication
-            
-            # Calculate total available stock from inventory
-            from .models import MedicationInventory
-            from django.db.models import Sum
-            from django.utils import timezone
-            
-            total_stock = MedicationInventory.objects.filter(
-                medication=medication,
-                expiry_date__gt=timezone.now().date()
-            ).aggregate(total=Sum('quantity'))['total'] or 0
-            
-            return {
-                'id': getattr(medication, 'id', None),
-                'name': getattr(medication, 'name', None),
-                'code': getattr(medication, 'code', None),
-                'current_stock': float(total_stock),
-                'unit': getattr(medication, 'unit', None),
-                'strength': getattr(medication, 'strength', None),
-                'form': getattr(medication, 'form', None),
-            }
+            if obj.medication:
+                medication = obj.medication
+                # Calculate total available stock from inventory
+                from .models import MedicationInventory
+                from django.db.models import Sum
+                from django.utils import timezone
+                
+                total_stock = MedicationInventory.objects.filter(
+                    medication=medication,
+                    expiry_date__gt=timezone.now().date()
+                ).aggregate(total=Sum('quantity'))['total'] or 0
+                
+                return {
+                    'id': getattr(medication, 'id', None),
+                    'name': getattr(medication, 'name', None),
+                    'code': getattr(medication, 'code', None),
+                    'current_stock': float(total_stock),
+                    'unit': getattr(medication, 'unit', None),
+                    'strength': getattr(medication, 'strength', None),
+                    'form': getattr(medication, 'form', None),
+                    'type': 'brand',
+                    'medication_id': getattr(medication, 'id', None)  # Include medication_id for reference
+                }
+            elif obj.generic:
+                generic = obj.generic
+                return {
+                    'id': generic.id,
+                    'name': generic.name,
+                    'code': generic.atc_code,
+                    'unit': generic.dosage_form, # Approximate
+                    'strength': generic.strength,
+                    'form': generic.dosage_form,
+                    'type': 'generic',
+                    'generic_id': generic.id  # Include generic_id for frontend detection
+                }
+            return None
         except (AttributeError, TypeError, ValueError):
             return None
     
     class Meta:
         model = PrescriptionItem
         fields = [
-            'id', 'prescription', 'medication', 'medication_name', 'medication_code',
+            'id', 'prescription', 'medication', 'generic', 'medication_name', 'medication_code',
             'medication_details', 'quantity', 'unit', 'dosage_form', 'dosage', 'frequency', 'duration',
             'instructions', 'dispensed_quantity', 'is_dispensed',
         ]
@@ -189,3 +273,51 @@ class DispenseSerializer(serializers.ModelSerializer):
         fields = '__all__'
         read_only_fields = ['dispense_id', 'dispensed_at']
 
+
+class StockRequestItemSerializer(serializers.ModelSerializer):
+    medication_name = serializers.CharField(source='medication.name', read_only=True)
+    
+    class Meta:
+        model = StockRequestItem
+        fields = '__all__'
+        read_only_fields = ['request']
+
+
+class StockRequestSerializer(serializers.ModelSerializer):
+    items = StockRequestItemSerializer(many=True)
+    requested_by_name = serializers.CharField(source='requested_by.get_full_name', read_only=True)
+    confirmed_by_name = serializers.CharField(source='confirmed_by.get_full_name', read_only=True)
+    
+    class Meta:
+        model = StockRequest
+        fields = '__all__'
+        read_only_fields = ['request_id', 'created_at', 'updated_at', 'requested_by']
+
+    def create(self, validated_data):
+        items_data = validated_data.pop('items', [])
+        # Assign requester from context if available
+        if 'request' in self.context and self.context['request'].user.is_authenticated:
+            validated_data['requested_by'] = self.context['request'].user
+            
+        request = StockRequest.objects.create(**validated_data)
+        for item_data in items_data:
+            StockRequestItem.objects.create(request=request, **item_data)
+        return request
+
+
+class StockIssueLineSerializer(serializers.ModelSerializer):
+    medication_name = serializers.CharField(source='medication.name', read_only=True)
+    
+    class Meta:
+        model = StockIssueLine
+        fields = '__all__'
+
+
+class StockIssueSerializer(serializers.ModelSerializer):
+    lines = StockIssueLineSerializer(many=True, read_only=True)
+    issued_by_name = serializers.CharField(source='issued_by.get_full_name', read_only=True)
+    
+    class Meta:
+        model = StockIssue
+        fields = '__all__'
+        read_only_fields = ['issue_id', 'issued_at', 'issued_by']

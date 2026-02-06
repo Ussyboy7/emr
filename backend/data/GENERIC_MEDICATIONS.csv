@@ -1,0 +1,155 @@
+Generic_ID,Generic_Name,Active_Ingredient,Category,Strengths_Available,Dosage_Forms,Route
+G001,Albendazole,Albendazole,Anthelmintic,200mg,Tablet,Oral
+G002,Fluticasone,Fluticasone,Corticosteroid,-,Nasal Spray,Nasal
+G003,Amoxicillin,Amoxicillin,Antibiotic,"250mg, 500mg",Capsule,Oral
+G004,Fluticasone/Salmeterol,Fluticasone + Salmeterol,Respiratory (Corticosteroid/LABA),50/250mcg,Diskus Inhaler,Inhalation
+G005,Ampicillin/Cloxacillin,Ampicillin + Cloxacillin,Antibiotic,"250mg/5ml, 500mg","Suspension, Capsule",Oral
+G006,Amoxicillin/Clavulanic Acid,Amoxicillin + Clavulanic Acid,Antibiotic,"228mg/5ml, 625mg, 642.9mg/5ml, 1g","Suspension, Tablet",Oral
+G007,Dutasteride/Tamsulosin,Dutasteride + Tamsulosin,Urology (BPH),0.5mg/0.4mg,Capsule,Oral
+G008,Salbutamol,Salbutamol,Bronchodilator,-,Inhaler,Inhalation
+G009,Artemether/Lumefantrine,Artemether + Lumefantrine,Antimalarial,"20/120mg, 80/480mg","Tablet, Capsule, Suspension",Oral
+G010,Diclofenac,Diclofenac,NSAID/Analgesic,"50mg, 100mg",Tablet,Oral
+G011,Tizanidine,Tizanidine,Muscle Relaxant,2mg,Tablet,Oral
+G012,Azithromycin,Azithromycin,Antibiotic (Macrolide),"250mg, 500mg","Capsule, Tablet",Oral
+G013,Diclofenac/Misoprostol,Diclofenac + Misoprostol,NSAID with GI Protection,75mg,Tablet,Oral
+G014,Cefpodoxime,Cefpodoxime,Antibiotic (Cephalosporin),200mg,Tablet,Oral
+G015,Sodium Valproate,Sodium Valproate,Anticonvulsant,500mg,Tablet,Oral
+G016,Multivitamins,Multivitamins,Supplements,-,"Capsule, Syrup",Oral
+G017,Ciprofloxacin,Ciprofloxacin,Antibiotic (Fluoroquinolone),500mg,Tablet,Oral
+G018,Cefuroxime,Cefuroxime,Antibiotic (Cephalosporin),"125mg/5ml, 500mg","Suspension, Tablet",Oral
+G019,Iron Containing Multivitamin,Iron + Multivitamins,Supplements/Haematinics,-,"Syrup, Capsule",Oral
+G020,Rabeprazole,Rabeprazole,PPI (GI),20mg,"Tablet, Injection","Oral, IV"
+G021,Rabeprazole/Clarithromycin/Amoxicillin,Rabeprazole + Clarithromycin + Amoxicillin,H. Pylori Eradication,20mg/500mg/1g,Tablet,Oral
+G022,Ketoprofen,Ketoprofen,NSAID,200mg,"Tablet, Gel","Oral, Topical"
+G023,Cetirizine,Cetirizine,Antihistamine,"5mg/5ml, 10mg","Syrup, Tablet",Oral
+G024,Miconazole,Miconazole,Antifungal,-,Powder,Topical
+G025,Vitamin B Complex,Thiamine + Pyridoxine + Cyanocobalamin,Supplements,-,Caplets,Oral
+G026,Paracetamol/Orphenadrine,Paracetamol + Orphenadrine,Analgesic/Muscle Relaxant,450mg/35mg,Tablet,Oral
+G027,Loratadine,Loratadine,Antihistamine,10mg,Tablet,Oral
+G028,Prednisolone,Prednisolone,Corticosteroid,5mg,Tablet,Oral
+G029,Loperamide,Loperamide,Antidiarrheal,2mg,Capsule,Oral
+G030,Fluconazole,Fluconazole,Antifungal,"50mg, 150mg",Capsule,Oral
+G031,Triprolidine/Pseudoephedrine,Triprolidine + Pseudoephedrine,Decongestant/Antihistamine,2.5mg/60mg,Tablet,Oral
+G032,Clotrimazole/Gentamicin/Dexamethasone,Clotrimazole + Gentamicin + Dexamethasone,Topical Antifungal/Antibiotic/Steroid,-,Cream,Topical
+G033,Clotrimazole,Clotrimazole,Antifungal,-,Cream,Topical
+G034,Ciprofloxacin/Tinidazole,Ciprofloxacin + Tinidazole,Antibiotic/Antiprotozoal,500mg/600mg,Tablet,Oral
+G035,Antacid,Aluminum/Magnesium Hydroxide,GI (Antacid),-,"Suspension, Tablet",Oral
+G036,Ibuprofen,Ibuprofen,NSAID,"100mg/5ml, 400mg","Suspension, Capsule, Gel","Oral, Topical"
+G037,Metronidazole,Metronidazole,Antibiotic/Antiprotozoal,"200mg, 400mg, 200mg/5ml","Tablet, Suspension",Oral
+G038,Methyl Salicylate,Methyl Salicylate,Topical Analgesic,-,Liniment,Topical
+G039,Vitamin C,Ascorbic Acid,Supplements,"100mg, 300mg/5ml, 1000mg","Tablet, Syrup, Capsule",Oral
+G040,Goserelin,Goserelin,Hormonal (GnRH Agonist),10.8mg,Injection,SC
+G041,Esomeprazole,Esomeprazole,PPI (GI),40mg,Capsule,Oral
+G042,Flurbiprofen,Flurbiprofen,NSAID,-,Lozenges,Oral
+G043,Paracetamol,Paracetamol,Analgesic/Antipyretic,500mg,"Caplet, Tablet",Oral
+G044,Folic Acid,Folic Acid,Supplements,5mg,Tablet,Oral
+G045,Diphenhydramine Compound,Diphenhydramine + Ammonium Chloride + Sodium Citrate + Menthol,Cough Suppressant,-,Syrup,Oral
+G046,Chlorpheniramine,Chlorpheniramine,Antihistamine,2mg/5ml,Syrup,Oral
+G047,Celecoxib,Celecoxib,NSAID (COX-2 Inhibitor),200mg,Capsule,Oral
+G048,Moxifloxacin,Moxifloxacin,Antibiotic (Fluoroquinolone),"400mg, 0.5%","Tablet, Eye Drops","Oral, Ophthalmic"
+G049,Febuxostat,Febuxostat,Antigout,"40mg, 80mg",Tablet,Oral
+G050,Budesonide/Formoterol,Budesonide + Formoterol,Respiratory (ICS/LABA),200mcg/6mcg,Inhaler,Inhalation
+G051,Fexofenadine,Fexofenadine,Antihistamine,120mg,Tablet,Oral
+G052,Omeprazole,Omeprazole,PPI (GI),"20mg, 40mg","Capsule, Powder","Oral, IV"
+G053,Coenzyme Q10,Ubiquinone,Supplements,100mg,Capsule,Oral
+G054,Probiotic,Lactobacillus/Bifidobacterium,Supplements,-,Capsule,Oral
+G055,Vitamin D,Cholecalciferol,Supplements,5000IU,Capsule,Oral
+G056,Olopatadine,Olopatadine,Ophthalmic Antihistamine,-,Eye Drops,Ophthalmic
+G057,Phospholipids with Vitamins,Phospholipids + Vitamins,Hepatoprotective,-,Capsule,Oral
+G058,Vitamin E,Tocopherol,Supplements,400IU,Capsule,Oral
+G059,Pregabalin,Pregabalin,Anticonvulsant/Neuropathic Pain,75mg,Capsule,Oral
+G060,Chloramphenicol,Chloramphenicol,Antibiotic (Ophthalmic),0.5%,Eye Drops,Ophthalmic
+G061,Tenofovir,Tenofovir Disoproxil,Antiviral (HIV/HBV),300mg,Capsule,Oral
+G062,Hypromellose,Hydroxypropyl Methylcellulose,Ophthalmic Lubricant,-,Eye Drops,Ophthalmic
+G063,Latanoprost,Latanoprost,Antiglaucoma,-,Eye Drops,Ophthalmic
+G064,Latanoprost/Timolol,Latanoprost + Timolol,Antiglaucoma,-,Eye Drops,Ophthalmic
+G065,Brimonidine,Brimonidine,Antiglaucoma,-,Eye Drops,Ophthalmic
+G066,Dorzolamide/Timolol,Dorzolamide + Timolol,Antiglaucoma,-,Eye Drops,Ophthalmic
+G067,Betamethasone/Neomycin,Betamethasone + Neomycin,Corticosteroid/Antibiotic,-,"Eye/Ear Drops, Ointment","Ophthalmic, Otic"
+G068,Betamethasone/Gentamicin/Tolnaftate/Clioquinol,Betamethasone + Gentamicin + Tolnaftate + Clioquinol,Topical Combination,-,Cream,Topical
+G069,Hyoscine,Hyoscine Butylbromide,Antispasmodic,10mg,Tablet,Oral
+G070,Proguanil,Proguanil,Antimalarial (Prophylaxis),100mg,Tablet,Oral
+G071,Codeine/Paracetamol,Codeine + Paracetamol,Analgesic (Opioid Combination),8mg/500mg,Tablet,Oral
+G072,Sumatriptan,Sumatriptan,Antimigraine (Triptan),50mg,Tablet,Oral
+G073,Ceftriaxone,Ceftriaxone,Antibiotic (Cephalosporin),1g,Injection,"IV, IM"
+G074,Keto-Analogue of Amino Acids,Keto-Analogues,Renal Supplements,-,Tablet,Oral
+G075,Fluconazole/Tinidazole/Azithromycin,Fluconazole + Tinidazole + Azithromycin,Antifungal/Antibiotic Combination,150mg/1000mg/1000mg,Tablet,Oral
+G076,Arteether,Arteether,Antimalarial,150mg/2ml,Injection,IM
+G077,Dihydroartemisinin/Piperaquine,Dihydroartemisinin + Piperaquine,Antimalarial,80/640mg,Suspension,Oral
+G078,Gabapentin/Methylcobalamin,Gabapentin + Methylcobalamin,Neuropathic Pain,300mg/50mcg,Tablet,Oral
+G079,Otic Combination,Fludrocortisone + Neomycin + Polymyxin B + Lidocaine,Otic Anti-infective,-,Ear Drops,Otic
+G080,Artesunate,Artesunate,Antimalarial,"30mg, 60mg",Injection,"IV, IM"
+G081,Carbamazepine,Carbamazepine,Anticonvulsant,"200mg, 400mg",Tablet,Oral
+G082,Calcium,Calcium Carbonate/Citrate,Supplements,-,Tablet,Oral
+G083,Cinnarizine,Cinnarizine,Antivertigo,25mg,Tablet,Oral
+G084,Fenofibrate,Fenofibrate,Lipid Lowering,160mg,Tablet,Oral
+G085,Liquid Paraffin,Liquid Paraffin,Laxative,-,Syrup,Oral
+G086,Ergotamine/Caffeine,Ergotamine + Caffeine,Antimigraine,1mg/100mg,Tablet,Oral
+G087,Pregabalin/Methylcobalamin,Pregabalin + Methylcobalamin,Neuropathic Pain,75mg/750mcg,Tablet,Oral
+G088,Sulfasalazine,Sulfasalazine,DMARD/Anti-inflammatory,500mg,Tablet,Oral
+G089,Levofloxacin,Levofloxacin,Antibiotic (Fluoroquinolone),500mg,Tablet,Oral
+G090,Carbocisteine,Carbocisteine,Mucolytic,-,Syrup,Oral
+G091,Carbocisteine/Promethazine,Carbocisteine + Promethazine,Mucolytic/Antihistamine,-,Syrup,Oral
+G092,Escitalopram,Escitalopram,Antidepressant (SSRI),10mg,Tablet,Oral
+G093,Methocarbamol,Methocarbamol,Muscle Relaxant,500mg,Tablet,Oral
+G094,Silodosin,Silodosin,Urology (Alpha Blocker),8mg,Tablet,Oral
+G095,Zopiclone,Zopiclone,Hypnotic/Sedative,7.5mg,Tablet,Oral
+G096,Copper/Iron/Manganese,Copper + Iron + Manganese,Haematinics,-,Oral Solution,Oral
+G097,Fosfomycin,Fosfomycin,Antibiotic (UTI),3g,Granules,Oral
+G098,Paracetamol/Diphenhydramine/Pseudoephedrine,Paracetamol + Diphenhydramine + Pseudoephedrine,Cold & Flu,-,Syrup,Oral
+G099,Diphenhydramine,Diphenhydramine,Antihistamine/Cough,-,Syrup,Oral
+G100,Nystatin/Neomycin/Polymyxin,Nystatin + Neomycin + Polymyxin,Antifungal/Antibiotic (Vaginal),-,Ovules,Vaginal
+G101,Methylcobalamin/Alpha-Lipoic Acid,Methylcobalamin + Alpha-Lipoic Acid,Neuropathic Supplements,-,Capsule,Oral
+G102,Spironolactone,Spironolactone,Diuretic (Potassium-sparing),25mg,Tablet,Oral
+G103,Telmisartan,Telmisartan,Antihypertensive (ARB),"40mg, 80mg",Tablet,Oral
+G104,Methyldopa,Methyldopa,Antihypertensive,250mg,Tablet,Oral
+G105,Amlodipine,Amlodipine,Antihypertensive (CCB),"5mg, 10mg",Tablet,Oral
+G106,Irbesartan/Amlodipine,Irbesartan + Amlodipine,Antihypertensive,300mg/10mg,Tablet,Oral
+G107,Candesartan/Hydrochlorothiazide,Candesartan + Hydrochlorothiazide,Antihypertensive,16mg/12.5mg,Tablet,Oral
+G108,Candesartan,Candesartan,Antihypertensive (ARB),"8mg, 16mg, 32mg",Tablet,Oral
+G109,Atorvastatin,Atorvastatin,Lipid Lowering (Statin),"10mg, 20mg, 40mg",Tablet,Oral
+G110,Metformin,Metformin,Antidiabetic (Biguanide),"500mg, 850mg, 1000mg",Tablet,Oral
+G111,Bendroflumethiazide,Bendroflumethiazide,Diuretic (Thiazide),2.5mg,Tablet,Oral
+G112,Propranolol,Propranolol,Antihypertensive (Beta Blocker),40mg,Tablet,Oral
+G113,Bisoprolol,Bisoprolol,Antihypertensive (Beta Blocker),2.5mg,Tablet,Oral
+G114,Valsartan,Valsartan,Antihypertensive (ARB),"80mg, 160mg",Tablet,Oral
+G115,Valsartan/Hydrochlorothiazide,Valsartan + Hydrochlorothiazide,Antihypertensive,160mg/12.5mg,Tablet,Oral
+G116,Telmisartan/Hydrochlorothiazide,Telmisartan + Hydrochlorothiazide,Antihypertensive,80mg/12.5mg,Tablet,Oral
+G117,Perindopril/Amlodipine,Perindopril + Amlodipine,Antihypertensive,"5mg/5mg, 10mg/10mg",Tablet,Oral
+G118,Perindopril/Indapamide/Amlodipine,Perindopril + Indapamide + Amlodipine,Antihypertensive,"5mg/1.25mg/5mg, 10mg/2.5mg/10mg",Tablet,Oral
+G119,Gliclazide,Gliclazide,Antidiabetic (Sulfonylurea),60mg,Tablet,Oral
+G120,Acetylsalicylic Acid,Aspirin,Antiplatelet,75mg,Tablet,Oral
+G121,Amlodipine/Valsartan,Amlodipine + Valsartan,Antihypertensive,"10mg/160mg, 10mg/320mg",Tablet,Oral
+G122,Amlodipine/Valsartan/Hydrochlorothiazide,Amlodipine + Valsartan + HCTZ,Antihypertensive,10mg/160mg/12.5mg,Tablet,Oral
+G123,Dapagliflozin,Dapagliflozin,Antidiabetic (SGLT2 Inhibitor),10mg,Tablet,Oral
+G124,Hydrochlorothiazide,Hydrochlorothiazide,Diuretic (Thiazide),25mg,Tablet,Oral
+G125,Insulin Glargine,Insulin Glargine,Antidiabetic (Long-acting Insulin),-,Injection,SC
+G126,Empagliflozin,Empagliflozin,Antidiabetic (SGLT2 Inhibitor),10mg,Tablet,Oral
+G127,Linagliptin,Linagliptin,Antidiabetic (DPP-4 Inhibitor),5mg,Tablet,Oral
+G128,Lisinopril,Lisinopril,Antihypertensive (ACE Inhibitor),"5mg, 10mg",Tablet,Oral
+G129,Metformin Extended Release,Metformin XR,Antidiabetic,"750mg, 1000mg",Tablet,Oral
+G130,Losartan,Losartan,Antihypertensive (ARB),50mg,Tablet,Oral
+G131,Glimepiride,Glimepiride,Antidiabetic (Sulfonylurea),4mg,Tablet,Oral
+G132,Vildagliptin,Vildagliptin,Antidiabetic (DPP-4 Inhibitor),50mg,Tablet,Oral
+G133,Indapamide,Indapamide,Diuretic,1.5mg,Tablet,Oral
+G134,Nifedipine,Nifedipine,Antihypertensive (CCB),"20mg, 30mg",Tablet,Oral
+G135,Insulin Aspart/Protamine Insulin,Biphasic Insulin Aspart,Antidiabetic (Insulin),100IU/ml,Injection,SC
+G136,Insulin Aspart,Insulin Aspart,Antidiabetic (Rapid-acting Insulin),100IU/ml,Injection,SC
+G137,Liraglutide,Liraglutide,Antidiabetic (GLP-1 Agonist),6mg/ml,Injection,SC
+G138,Dabigatran,Dabigatran,Anticoagulant,"110mg, 150mg",Capsule,Oral
+G139,Amiloride/Hydrochlorothiazide,Amiloride + Hydrochlorothiazide,Diuretic,5mg/25mg,Tablet,Oral
+G140,Vildagliptin/Metformin,Vildagliptin + Metformin,Antidiabetic,50mg/1000mg,Tablet,Oral
+G141,Rosuvastatin,Rosuvastatin,Lipid Lowering (Statin),20mg,Tablet,Oral
+G142,Telmisartan/Amlodipine,Telmisartan + Amlodipine,Antihypertensive,80mg/10mg,Tablet,Oral
+G143,Carvedilol,Carvedilol,Antihypertensive (Beta Blocker),6.25mg,Tablet,Oral
+G144,Doxazosin,Doxazosin,Antihypertensive (Alpha Blocker),4mg,Tablet,Oral
+G145,Alfuzosin,Alfuzosin,Urology (Alpha Blocker),10mg,Tablet,Oral
+G146,Allopurinol,Allopurinol,Antigout,"100mg, 300mg",Tablet,Oral
+G147,Carbidopa/Levodopa,Carbidopa + Levodopa,Antiparkinson,25mg/250mg,Tablet,Oral
+G148,Entecavir,Entecavir,Antiviral (Hepatitis B),0.5mg,Tablet,Oral
+G149,Rivaroxaban,Rivaroxaban,Anticoagulant,20mg,Tablet,Oral
+G150,Levetiracetam,Levetiracetam,Anticonvulsant,500mg,Tablet,Oral
+G151,Furosemide,Furosemide,Diuretic (Loop),"20mg, 40mg",Tablet,Oral
+G152,Atenolol,Atenolol,Antihypertensive (Beta Blocker),"50mg, 100mg",Tablet,Oral
+G153,Levothyroxine,Levothyroxine,Thyroid Hormone,"25mcg, 50mcg, 100mcg",Tablet,Oral
+G154,Bicalutamide,Bicalutamide,Anticancer (Antiandrogen),"50mg, 150mg",Tablet,Oral

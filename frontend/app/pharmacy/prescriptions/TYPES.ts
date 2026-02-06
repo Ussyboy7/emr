@@ -25,6 +25,11 @@ export interface MedicationItem {
   instructions: string;
   status: 'Available' | 'Low Stock' | 'Out of Stock' | 'Dispensed' | 'Pending';
   stockLevel: number;
+  generic?: number; // Generic medication ID if this is a generic prescription
+  medication?: number; // Selected brand medication ID
+  generic_name?: string; // Generic medication name
+  substitution?: boolean; // Whether this is a substituted medication
+  originalMedication?: string; // Original medication name if substituted
 }
 
 export interface Prescription {

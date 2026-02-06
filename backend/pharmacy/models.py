@@ -6,6 +6,34 @@ from django.core.validators import MinValueValidator
 from django.utils import timezone
 
 
+class GenericMedication(models.Model):
+    """
+    Parent generic medication representing active ingredient(s) and core identity.
+    Variations in strength/form/route are distinct generics.
+    """
+    name = models.CharField(max_length=200, db_index=True)
+    active_ingredient = models.CharField(max_length=200, blank=True)
+    category = models.CharField(max_length=100, blank=True, default='Other')
+    strength = models.CharField(max_length=100, blank=True)
+    dosage_form = models.CharField(max_length=50, blank=True)
+    route = models.CharField(max_length=50, blank=True)
+    atc_code = models.CharField(max_length=20, blank=True, null=True, unique=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'generic_medications'
+        ordering = ['name']
+        indexes = [
+            models.Index(fields=['name']),
+            models.Index(fields=['atc_code']),
+        ]
+
+    def __str__(self):
+        return f"{self.name} {self.strength} {self.dosage_form}".strip()
+
+
 class Medication(models.Model):
     """
     Medication/drug master data.
@@ -13,39 +41,169 @@ class Medication(models.Model):
     
     CATEGORY_CHOICES = [
         ('Antibiotics', 'Antibiotics'),
-        ('Analgesics', 'Analgesics'),
         ('Antimalarials', 'Antimalarials'),
+        ('Antihypertensives', 'Antihypertensives'),
+        ('Antidiabetics', 'Antidiabetics'),
+        ('Analgesics', 'Analgesics (painkillers)'),
+        ('Antipyretics', 'Antipyretics'),
+        ('NSAIDs', 'Anti-inflammatory drugs (NSAIDs)'),
+        ('Antidepressants', 'Antidepressants'),
+        ('Antipsychotics', 'Antipsychotics'),
+        ('Anxiolytics', 'Anxiolytics'),
+        ('Sedatives', 'Sedatives & hypnotics'),
+        ('Anticonvulsants', 'Anticonvulsants (antiepileptics)'),
+        ('Antiemetics', 'Antiemetics'),
+        ('Antihistamines', 'Antihistamines'),
+        ('AntiAsthmatics', 'Anti-asthmatics / bronchodilators'),
+        ('Antitussives', 'Antitussives (cough suppressants)'),
+        ('Expectorants', 'Expectorants'),
+        ('Antacids', 'Antacids'),
+        ('AntiUlcer', 'Anti-ulcer drugs'),
+        ('Laxatives', 'Laxatives'),
+        ('Antidiarrhoeals', 'Antidiarrhoeals'),
+        ('Anthelmintics', 'Anthelmintics (anti-worm)'),
         ('Antifungals', 'Antifungals'),
         ('Antivirals', 'Antivirals'),
-        ('Anticonvulsants', 'Anticonvulsants'),
-        ('Antipsychotics', 'Antipsychotics'),
-        ('Antidepressants', 'Antidepressants'),
-        ('Antihistamines', 'Antihistamines'),
-        ('Cardiovascular', 'Cardiovascular'),
+        ('Antiprotozoals', 'Antiprotozoals'),
+        ('Antitubercular', 'Antitubercular drugs'),
+        ('Antiretrovirals', 'Antiretrovirals (HIV drugs)'),
+        ('Immunosuppressants', 'Immunosuppressants'),
+        ('Vaccines', 'Vaccines & immunologicals'),
+        ('Vitamins', 'Vitamins'),
+        ('Minerals', 'Minerals & supplements'),
+        ('Hormonal', 'Hormonal drugs'),
+        ('Contraceptives', 'Contraceptives'),
         ('Corticosteroids', 'Corticosteroids'),
-        ('Dermatology', 'Dermatology'),
-        ('Diabetes', 'Diabetes'),
         ('Diuretics', 'Diuretics'),
-        ('Emergency/Critical Care', 'Emergency/Critical Care'),
-        ('Gastrointestinal', 'Gastrointestinal'),
-        ('Hormones', 'Hormones'),
-        ('Ophthalmology', 'Ophthalmology'),
-        ('Oncology', 'Oncology'),
-        ('Pediatrics', 'Pediatrics'),
-        ('Respiratory', 'Respiratory'),
-        ('Vitamins & Supplements', 'Vitamins & Supplements'),
+        ('Cardiac', 'Cardiac drugs (anti-arrhythmics, etc.)'),
+        ('LipidLowering', 'Lipid-lowering agents'),
+        ('Haematinics', 'Haematinics (iron, folic acid)'),
+        ('Anticoagulants', 'Anticoagulants'),
+        ('Antiplatelet', 'Antiplatelet drugs'),
+        ('Antigout', 'Antigout drugs'),
+        ('MuscleRelaxants', 'Muscle relaxants'),
+        ('LocalAnaesthetics', 'Local anaesthetics'),
+        ('GeneralAnaesthetics', 'General anaesthetics'),
+        ('Ophthalmic', 'Ophthalmic preparations'),
+        ('Dermatological', 'Dermatological agents'),
+        ('ENT', 'ENT preparations'),
+        ('Urological', 'Urological drugs'),
+        ('Obstetric', 'Obstetric & gynaecological drugs'),
+        ('Emergency', 'Emergency / resuscitation drugs'),
+        ('AntiParkinson', 'Anti-Parkinson’s drugs'),
+        ('AntiAlzheimer', 'Anti-Alzheimer’s drugs'),
+        ('AntiMigraine', 'Anti-migraine drugs'),
+        ('Antispasmodics', 'Antispasmodics'),
+        ('Anticholinergics', 'Anticholinergics'),
+        ('Cholinergic', 'Cholinergic agents'),
+        ('Antifibrinolytics', 'Antifibrinolytics'),
+        ('Thrombolytics', 'Thrombolytics'),
+        ('PlasmaExpanders', 'Plasma expanders'),
+        ('BloodProducts', 'Blood products'),
+        ('Erythropoiesis', 'Erythropoiesis-stimulating agents'),
+        ('GrowthHormones', 'Growth hormones'),
+        ('Thyroid', 'Thyroid & antithyroid drugs'),
+        ('Osteoporosis', 'Osteoporosis drugs'),
+        ('CalciumRegulators', 'Calcium regulators'),
+        ('Bisphosphonates', 'Bisphosphonates'),
+        ('AntiObesity', 'Anti-obesity drugs'),
+        ('AppetiteStimulants', 'Appetite stimulants'),
+        ('ChemoAntiemetics', 'Anti-emetics (chemo-related)'),
+        ('Cytotoxic', 'Cytotoxic / anticancer drugs'),
+        ('TargetedCancer', 'Targeted cancer therapies'),
+        ('Radiopharmaceuticals', 'Radiopharmaceuticals'),
+        ('Antidotes', 'Antidotes & chelating agents'),
+        ('AntiSnakeVenom', 'Anti-snake venom & antisera'),
+        ('Immunostimulants', 'Immunostimulants'),
+        ('Biologicals', 'Biologicals / monoclonal antibodies'),
+        ('EnzymeReplacement', 'Enzyme replacement therapies'),
+        ('Fertility', 'Fertility drugs'),
+        ('Tocolytics', 'Tocolytics'),
+        ('Uterotonics', 'Uterotonics'),
+        ('ErectileDysfunction', 'Erectile dysfunction drugs'),
+        ('BPH', 'Benign prostatic hyperplasia (BPH) drugs'),
+        ('UrinaryAlkalinisers', 'Urinary alkalinisers'),
+        ('UrinaryAcidifiers', 'Urinary acidifiers'),
+        ('RespiratoryStimulants', 'Respiratory stimulants'),
+        ('PulmonaryHypertension', 'Pulmonary hypertension drugs'),
+        ('SmokingCessation', 'Smoking cessation drugs'),
+        ('AlcoholDependence', 'Alcohol dependence drugs'),
+        ('OpioidDependence', 'Opioid dependence drugs'),
+        ('AntiGlaucoma', 'Anti-glaucoma drugs'),
+        ('Mydriatics', 'Mydriatics & miotics'),
+        ('Otic', 'Otic (ear) preparations'),
+        ('NasalDecongestants', 'Nasal decongestants'),
+        ('Photosensitising', 'Photosensitising agents'),
+        ('Sunscreens', 'Sunscreens & photoprotectives'),
+        ('WoundCare', 'Wound-care agents'),
+        ('Antiseptics', 'Antiseptics & disinfectants'),
+        ('Diagnostic', 'Diagnostic agents'),
+        ('ContrastMedia', 'Contrast media'),
+        ('Nutritional', 'Nutritional formulas / enteral feeds'),
+        ('AntiLeprosy', 'Anti-leprosy drugs'),
+        ('AntiAmoebic', 'Anti-amoebic drugs'),
+        ('AntiGiardial', 'Anti-giardial drugs'),
+        ('AntiTrypanosomal', 'Anti-trypanosomal drugs'),
+        ('AntiToxoplasmosis', 'Anti-toxoplasmosis drugs'),
+        ('AntiCryptosporidial', 'Anti-cryptosporidial drugs'),
+        ('AntiOpportunistic', 'Anti-opportunistic infection drugs'),
+        ('Antifilarial', 'Antifilarial drugs'),
+        ('Antischistosomal', 'Antischistosomal drugs'),
+        ('Antiscabies', 'Antiscabies drugs'),
+        ('Antipediculosis', 'Antipediculosis drugs'),
+        ('AntiPruritic', 'Anti-pruritic drugs'),
+        ('AntiPsoriatic', 'Anti-psoriatic drugs'),
+        ('AntiAcne', 'Anti-acne drugs'),
+        ('SkinDepigmenting', 'Skin depigmenting agents'),
+        ('Keratolytic', 'Keratolytic agents'),
+        ('Emollients', 'Emollients & moisturisers'),
+        ('AntiDandruff', 'Anti-dandruff agents'),
+        ('Dental', 'Dental & oral care drugs'),
+        ('SalivaSubstitutes', 'Saliva substitutes'),
+        ('ArtificialTears', 'Artificial tears'),
+        ('ContactLens', 'Contact-lens solutions'),
+        ('NasalSaline', 'Nasal saline preparations'),
+        ('ThroatLozenges', 'Throat lozenges & sprays'),
+        ('Probiotics', 'Probiotics'),
+        ('Prebiotics', 'Prebiotics'),
+        ('DigestiveEnzymes', 'Digestive enzymes'),
+        ('BileAcid', 'Bile acid sequestrants'),
+        ('Gallstone', 'Gallstone dissolution drugs'),
+        ('Hepatoprotective', 'Hepatoprotective agents'),
+        ('PancreaticEnzymes', 'Pancreatic enzyme replacements'),
+        ('AntiEmeticRehydration', 'Anti-emetic rehydration agents'),
+        ('OralRehydration', 'Oral rehydration solutions'),
+        ('ParenteralNutrition', 'Parenteral nutrition products'),
+        ('Dialysis', 'Dialysis solutions'),
+        ('PeritonealDialysis', 'Peritoneal dialysis fluids'),
+        ('IVFluids', 'Intravenous fluids'),
+        ('Electrolytes', 'Electrolyte preparations'),
+        ('AcidBase', 'Acid-base correcting agents'),
+        ('Oxygen', 'Oxygen & medical gases'),
+        ('PlasmaSubstitutes', 'Plasma substitutes'),
+        ('VaccinationAdjuvants', 'Vaccination adjuvants'),
+        ('ColdChain', 'Cold-chain biologicals'),
+        ('VeterinaryCrossover', 'Veterinary-human crossover drugs'),
+        ('EmergencyAntidotal', 'Emergency antidotal kits'),
+        ('DisasterResponse', 'Disaster-response medicines'),
+        ('TravelMedicine', 'Travel-medicine drugs'),
+        ('OccupationalHealth', 'Occupational-health medicines'),
+        ('Geriatric', 'Geriatric-specific medicines'),
+        ('Paediatric', 'Paediatric-specific medicines'),
         ('Other', 'Other'),
     ]
     
     name = models.CharField(max_length=200)
+    generic = models.ForeignKey(GenericMedication, on_delete=models.SET_NULL, null=True, blank=True, related_name='brands')
     generic_name = models.CharField(max_length=200, blank=True)
     code = models.CharField(max_length=50, unique=True, db_index=True)
     unit = models.CharField(max_length=50, help_text="tablet, capsule, ml, etc.")
     strength = models.CharField(max_length=100, blank=True, help_text="e.g., 500mg")
     form = models.CharField(max_length=50, blank=True, help_text="tablet, syrup, injection, etc.")
-    category = models.CharField(max_length=50, choices=CATEGORY_CHOICES, blank=True, help_text="Medication category")
+    category = models.CharField(max_length=100, choices=CATEGORY_CHOICES, blank=True, help_text="Medication category")
     manufacturer = models.CharField(max_length=200, blank=True, help_text="Manufacturer name")
     pack_size = models.IntegerField(null=True, blank=True, help_text="Number of units per pack")
+    min_stock_level = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     prescription_required = models.BooleanField(default=False, help_text="Requires prescription")
     description = models.TextField(blank=True)
     is_active = models.BooleanField(default=True)
@@ -55,6 +213,9 @@ class Medication(models.Model):
     class Meta:
         db_table = 'medications'
         ordering = ['name']
+        constraints = [
+            models.UniqueConstraint(fields=['name', 'generic'], name='uniq_brand_per_generic')
+        ]
     
     def __str__(self):
         return f"{self.name} ({self.strength})" if self.strength else self.name
@@ -205,7 +366,10 @@ class PrescriptionItem(models.Model):
     """
     
     prescription = models.ForeignKey(Prescription, on_delete=models.CASCADE, related_name='medications')
-    medication = models.ForeignKey(Medication, on_delete=models.PROTECT, related_name='prescription_items')
+    # Generic medication is required for prescribing
+    generic = models.ForeignKey(GenericMedication, on_delete=models.PROTECT, related_name='prescription_items')
+    # Brand medication is optional and selected during dispensing
+    medication = models.ForeignKey(Medication, on_delete=models.PROTECT, related_name='prescription_items', null=True, blank=True)
     
     quantity = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0)])
     unit = models.CharField(max_length=50)
@@ -224,7 +388,10 @@ class PrescriptionItem(models.Model):
         ordering = ['id']
     
     def __str__(self):
-        return f"{self.medication.name} - {self.quantity} {self.unit}"
+        if self.medication:
+            return f"{self.medication.name} - {self.quantity} {self.unit}"
+        else:
+            return f"{self.generic.name} - {self.quantity} {self.unit}"
     
     def recalculate_quantity(self):
         """Recalculate quantity based on dosage, frequency, and duration."""
@@ -319,3 +486,109 @@ class Dispense(models.Model):
     def __str__(self):
         return f"{self.dispense_id} - {self.medication.name}"
 
+
+class StockRequest(models.Model):
+    """
+    Request for stock transfer between locations (e.g., Store -> Dispensary).
+    """
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('approved', 'Approved'),
+        ('partially_fulfilled', 'Partially Fulfilled'),
+        ('fulfilled', 'Fulfilled'),
+        ('received', 'Received'),
+        ('rejected', 'Rejected'),
+        ('cancelled', 'Cancelled'),
+    ]
+
+    request_id = models.CharField(max_length=50, unique=True, db_index=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    
+    from_location = models.CharField(max_length=100)
+    to_location = models.CharField(max_length=100)
+    
+    requested_by = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, related_name='requested_stock')
+    confirmed_by = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, blank=True, related_name='confirmed_stock_requests')
+    
+    confirmed_at = models.DateTimeField(null=True, blank=True)
+    confirmed_notes = models.TextField(blank=True)
+    notes = models.TextField(blank=True)
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'stock_requests'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['request_id']),
+            models.Index(fields=['status']),
+            models.Index(fields=['from_location', 'to_location']),
+        ]
+
+    def save(self, *args, **kwargs):
+        if not self.request_id:
+            from datetime import datetime
+            timestamp = datetime.now().strftime('%Y%m%d-%H%M%S')
+            import random
+            suffix = f"{random.randint(1000, 9999)}"
+            self.request_id = f"REQ-{timestamp}-{suffix}"
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.request_id
+
+
+class StockRequestItem(models.Model):
+    """
+    Item within a stock request.
+    """
+    request = models.ForeignKey(StockRequest, on_delete=models.CASCADE, related_name='items')
+    medication = models.ForeignKey(Medication, on_delete=models.PROTECT)
+    quantity = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0)])
+    fulfilled_quantity = models.DecimalField(max_digits=10, decimal_places=2, default=0, validators=[MinValueValidator(0)])
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        db_table = 'stock_request_items'
+
+
+class StockIssue(models.Model):
+    """
+    Record of stock being issued/transferred.
+    """
+    issue_id = models.CharField(max_length=50, unique=True, db_index=True)
+    request = models.ForeignKey(StockRequest, on_delete=models.SET_NULL, null=True, blank=True, related_name='issues')
+    issued_by = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, related_name='issued_stock')
+    issued_at = models.DateTimeField(auto_now_add=True)
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        db_table = 'stock_issues'
+        ordering = ['-issued_at']
+
+    def save(self, *args, **kwargs):
+        if not self.issue_id:
+            from datetime import datetime
+            timestamp = datetime.now().strftime('%Y%m%d-%H%M%S')
+            import random
+            suffix = f"{random.randint(1000, 9999)}"
+            self.issue_id = f"ISS-{timestamp}-{suffix}"
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.issue_id
+
+
+class StockIssueLine(models.Model):
+    """
+    Line item for stock issue, tracking specific inventory movements.
+    """
+    issue = models.ForeignKey(StockIssue, on_delete=models.CASCADE, related_name='lines')
+    medication = models.ForeignKey(Medication, on_delete=models.PROTECT)
+    source_inventory_item = models.ForeignKey(MedicationInventory, on_delete=models.PROTECT, related_name='issues_from')
+    destination_inventory_item = models.ForeignKey(MedicationInventory, on_delete=models.PROTECT, related_name='issues_to')
+    quantity = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0)])
+
+    class Meta:
+        db_table = 'stock_issue_lines'

@@ -451,7 +451,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   const [selectedMedications, setSelectedMedications] = useState<Set<number>>(new Set()); // Track selected medication IDs for multi-select
   const [medicationConfigs, setMedicationConfigs] = useState<Map<number, MedicationConfig>>(new Map()); // Store medication configurations
   const [prescriptionsSentToPharmacy, setPrescriptionsSentToPharmacy] = useState(false);
-  const [medications, setMedications] = useState<Medication[]>([]); // Store real medications from API
+  const [medications, setMedications] = useState<any[]>([]); // Store medications or generics from API
   const [loadingMedications, setLoadingMedications] = useState(false);
   const [labOrders, setLabOrders] = useState<{ 
     id: string;
@@ -1802,26 +1802,28 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     }
   };
 
-  // Load medications and ICD-10 codes from API when component mounts
+  // Load generics and ICD-10 codes from API when component mounts
   useEffect(() => {
-    const loadMedications = async () => {
+    const loadGenerics = async () => {
       try {
         setLoadingMedications(true);
-        const response = await pharmacyService.getMedications({ page_size: 200 });
-        const loadedMeds = response.results || [];
-        setMedications(loadedMeds);
-        debugConsultationRoom(`[Consultation] Loaded ${loadedMeds.length} medications from API`);
+        debugConsultationRoom('[Consultation] Loading generics from API...');
+        const response = await pharmacyService.getGenericsForPrescription({ page_size: 200 });
+        debugConsultationRoom('[Consultation] API Response:', response);
+        const loadedGenerics = response.results || [];
+        setMedications(loadedGenerics as any); // Reuse medications state for generics - cast to any for compatibility
+        debugConsultationRoom(`[Consultation] Loaded ${loadedGenerics.length} generics from API`);
         // Debug: Check if paracetamol is in the list
-        const paracetamolMeds = loadedMeds.filter((m: any) => m.name?.toLowerCase().includes('paracetamol'));
-        if (paracetamolMeds.length > 0) {
+        const paracetamolGenerics = loadedGenerics.filter((g: any) => g.name?.toLowerCase().includes('paracetamol'));
+        if (paracetamolGenerics.length > 0) {
           debugConsultationRoom(
-            `[Consultation] Found ${paracetamolMeds.length} paracetamol medications:`,
-            paracetamolMeds.map((m: any) => m.name)
+            `[Consultation] Found ${paracetamolGenerics.length} paracetamol generics:`,
+            paracetamolGenerics.map((g: any) => g.name)
           );
         }
       } catch (err) {
-        debugConsultationRoom('Failed to load medications:', err);
-        toast.error('Failed to load medications. Using fallback list.');
+        debugConsultationRoom('Failed to load generics:', err);
+        toast.error('Failed to load medication list. Using fallback list.');
         // Keep medications as empty array if loading fails
       } finally {
         setLoadingMedications(false);
@@ -1865,7 +1867,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       }
     };
 
-    loadMedications();
+    loadGenerics();
     loadICD10Codes();
   }, []);
 
@@ -2989,38 +2991,38 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       const skippedMedications: string[] = [];
       
       for (const rx of draftPrescriptions) {
-        // Use the stored medication ID, or try to find it from medications list
-        let medicationId: number | undefined = rx.medicationId;
+        // Use the stored generic ID (now stored in medicationId field)
+        let genericId: number | undefined = rx.medicationId;
         
-        if (!medicationId) {
-          // Fallback: try to find medication by name
-          const medication = medications.find((m: any) => m.name === rx.medication);
-          if (medication) {
-            medicationId = typeof medication.id === 'string' ? parseInt(medication.id, 10) : medication.id;
+        if (!genericId) {
+          // Fallback: try to find generic by name
+          const generic = medications.find((g: any) => g.name === rx.medication);
+          if (generic) {
+            genericId = typeof generic.id === 'string' ? parseInt(generic.id, 10) : generic.id;
           } else {
             skippedMedications.push(rx.medication);
             continue; // Skip this medication
           }
         }
         
-        // Ensure medicationId is a number
-        const numericMedicationId = typeof medicationId === 'string' ? parseInt(medicationId, 10) : medicationId;
+        // Ensure genericId is a number
+        const numericGenericId = typeof genericId === 'string' ? parseInt(genericId, 10) : genericId;
         
-        if (!numericMedicationId || isNaN(numericMedicationId) || numericMedicationId === 0) {
+        if (!numericGenericId || isNaN(numericGenericId) || numericGenericId === 0) {
           skippedMedications.push(rx.medication);
           continue; // Skip this medication
         }
         
-        // Find medication details for unit
-        const medication = medications.find((m: any) => {
-          const mId = typeof m.id === 'string' ? parseInt(m.id, 10) : m.id;
-          return mId === numericMedicationId;
+        // Find generic details for unit
+        const generic = medications.find((g: any) => {
+          const gId = typeof g.id === 'string' ? parseInt(g.id, 10) : g.id;
+          return gId === numericGenericId;
         });
-        const unit = medication?.unit || 'tablet'; // Default to 'tablet' if not found
+        const unit = (generic as any)?.dosage_form || 'tablet'; // Default to 'tablet' if not found
         
-        // Add to items array
+        // Add to items array - now using generic instead of medication
         prescriptionItems.push({
-          medication: numericMedicationId,
+          generic: numericGenericId, // Changed from medication to generic
           quantity: rx.quantity,
           unit: unit,
           dosage: rx.dosage,
@@ -3201,7 +3203,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
             id: med.id || 0,
             name: med.name || '',
             strength: med.strength || '',
-            form: med.form || med.dosageForm || 'tablet',
+            form: med.dosage_form || 'tablet',
             route: defaultRoute,
             dosage: defaultDosage,
             frequency: 'Once daily (OD)',
@@ -3210,11 +3212,11 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
             quantity: 0,
             instructions: '',
             priority: 'Routine',
-            unit: med.unit,
-            generic_name: med.generic_name,
-            genericName: med.generic_name || '',
-            category: '', // Not available in Medication interface
-            dosageForm: med.form || med.dosageForm,
+            unit: med.dosage_form || 'tablet', // Use form as unit for generics
+            generic_name: med.name, // For generics, name is the generic name
+            genericName: med.name || '',
+            category: med.category || '',
+            dosageForm: med.dosage_form,
           });
           return newConfigs;
         });
@@ -3322,9 +3324,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       
       return {
         id: rxId,
-        medication: med.name,
-        medicationId: medicationId,
-        genericName: med.generic_name || '',
+        medication: med.name, // Generic name
+        medicationId: medicationId, // Generic ID
+        genericName: med.name, // Same as medication for generics
         dosage: config.dosage || 'As directed',
         frequency: config.frequency,
         duration: config.durationDays ? `${config.durationDays} days` : 'As directed',
@@ -3371,25 +3373,25 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     return Math.ceil(dosageValue * dailyDoses * durationDays);
   };
 
-  // CRITICAL: Only use real medications from API - do NOT use demo medications
+  // CRITICAL: Only use real generics from API - do NOT use demo medications
   // Demo medications have string IDs which cannot be used for prescriptions
   const availableMedications = medications.length > 0 ? medications : [];
   const filteredMedications = medicationSearch 
-    ? availableMedications.filter((med: any) => {
+    ? availableMedications.filter((generic: any) => {
         const searchTerm = medicationSearch.toLowerCase().trim();
         if (!searchTerm) return true; // Show all if search is empty
         
-        const name = (med.name || '').toLowerCase();
-        const genericName = ((med.generic_name || '')).toLowerCase();
-        const category = ''; // Not available in Medication interface
-        const form = ((med.form || med.dosageForm || '')).toLowerCase();
-        const code = ((med.code || '')).toLowerCase();
+        const name = (generic.name || '').toLowerCase();
+        const activeIngredient = ((generic.active_ingredient || '')).toLowerCase();
+        const category = ((generic.category || '')).toLowerCase();
+        const strength = ((generic.strength || '')).toLowerCase();
+        const form = ((generic.dosage_form || '')).toLowerCase();
         
         return name.includes(searchTerm) ||
-               genericName.includes(searchTerm) ||
+               activeIngredient.includes(searchTerm) ||
                category.includes(searchTerm) ||
-               form.includes(searchTerm) ||
-               code.includes(searchTerm);
+               strength.includes(searchTerm) ||
+               form.includes(searchTerm);
       })
     : availableMedications;
   // Toggle lab template selection
@@ -7517,7 +7519,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                           );
                         })}
                         {injectionMedications.length === 0 && !loadingInjectionMedications && (
-                          <SelectItem value="" disabled>No medications available</SelectItem>
+                          <SelectItem value="__none__" disabled>No medications available</SelectItem>
                         )}
                       </SelectContent>
                     </Select>
@@ -10419,4 +10421,3 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     </DashboardLayout>
   );
 }
-

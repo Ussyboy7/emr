@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, useMemo, useEffect } from 'react';
+import Link from 'next/link';
 import { StandardPagination } from '@/components/StandardPagination';
 import { DashboardLayout } from '@/components/DashboardLayout';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -11,14 +12,16 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
-import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
-import { pharmacyService, type MedicationInventory as ApiMedicationInventory, type Medication as ApiMedication } from '@/lib/services';
+import { pharmacyService, type StockRequest } from '@/lib/services';
+import { PHARMACY_LOCATIONS } from '@/lib/constants/pharmacy-locations';
 import { 
   Database, Search, Plus, Pill, Package, AlertTriangle, Eye, Edit,
   Layers, Calendar, CheckCircle2, XCircle, TrendingUp,
-  TrendingDown, Upload, Hash, Minus, ArrowUpDown, Clock, Beaker, Loader2
+  Upload, Hash, Minus, ArrowUpDown, Clock, Loader2
 } from 'lucide-react';
+
+import { MEDICATION_CATEGORIES, DOSAGE_FORMS, MEDICATION_STRENGTHS, MEDICATION_MANUFACTURERS } from '@/lib/constants/pharmacy';
 
 // Batch interface
 interface MedicationBatch {
@@ -54,45 +57,17 @@ interface MedicationInventoryItem {
   manufacturer: string;
   currentStock: number;
   minimumStock: number;
-  maximumStock: number;
-  location: string;
-  prescriptionRequired: boolean;
-  isGeneric: boolean;
   lastRestocked: string;
   expiryDate: string;
   batches: MedicationBatch[];
 }
 
-const categories = [
-  'All Categories',
-  'Antibiotics',
-  'Analgesics',
-  'Antimalarials',
-  'Antifungals',
-  'Antivirals',
-  'Anticonvulsants',
-  'Antipsychotics',
-  'Antidepressants',
-  'Antihistamines',
-  'Cardiovascular',
-  'Corticosteroids',
-  'Dermatology',
-  'Diabetes',
-  'Diuretics',
-  'Emergency/Critical Care',
-  'Gastrointestinal',
-  'Hormones',
-  'Ophthalmology',
-  'Oncology',
-  'Pediatrics',
-  'Respiratory',
-  'Vitamins & Supplements',
-  'Other'
-];
+const categories = MEDICATION_CATEGORIES;
 
-const dosageForms = ['Tablet', 'Capsule', 'Syrup', 'Injection', 'Cream', 'Ointment', 'Drops', 'Inhaler', 'Suspension', 'Powder'];
+const dosageForms = DOSAGE_FORMS;
 
 export default function InventoryPage() {
+  const location = PHARMACY_LOCATIONS.DISPENSARY;
   const [inventory, setInventory] = useState<MedicationInventoryItem[]>([]);
   const [allInventoryForStats, setAllInventoryForStats] = useState<MedicationInventoryItem[]>([]); // All inventory for stats calculation
   const [loading, setLoading] = useState(true);
@@ -100,6 +75,14 @@ export default function InventoryPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('All Categories');
   const [stockFilter, setStockFilter] = useState('all');
+
+  const [incomingLoading, setIncomingLoading] = useState(true);
+  const [incomingRequests, setIncomingRequests] = useState<StockRequest[]>([]);
+  const [selectedRequest, setSelectedRequest] = useState<StockRequest | null>(null);
+  const [showRequestDetailsModal, setShowRequestDetailsModal] = useState(false);
+  const [showConfirmReceiptModal, setShowConfirmReceiptModal] = useState(false);
+  const [confirmNotes, setConfirmNotes] = useState("");
+  const [confirmingReceipt, setConfirmingReceipt] = useState(false);
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -109,12 +92,13 @@ export default function InventoryPage() {
   // Load all inventory for stats (separate from paginated data)
   useEffect(() => {
     loadAllInventoryForStats();
+    loadIncomingRequests();
   }, []);
 
   // Load inventory from API
   useEffect(() => {
     loadInventory();
-  }, [currentPage, itemsPerPage]);
+  }, [currentPage, itemsPerPage, searchQuery, categoryFilter, stockFilter]);
 
   // Load all inventory for stats calculation
   const loadAllInventoryForStats = async () => {
@@ -122,6 +106,7 @@ export default function InventoryPage() {
       const response = await pharmacyService.getInventory({
         page: 1,
         page_size: 10000, // Load a large number for stats
+        location,
       });
       const transformed = transformInventoryItems(response.results);
       setAllInventoryForStats(transformed);
@@ -130,32 +115,63 @@ export default function InventoryPage() {
     }
   };
 
+  const loadIncomingRequests = async () => {
+    try {
+      setIncomingLoading(true);
+      const [fulfilled, partial] = await Promise.all([
+        pharmacyService.getStockRequests({ status: "fulfilled", page: 1, page_size: 50 }),
+        pharmacyService.getStockRequests({ status: "partially_fulfilled", page: 1, page_size: 50 }),
+      ]);
+      const combined = [...(fulfilled.results || []), ...(partial.results || [])]
+        .filter((r) => r.to_location === PHARMACY_LOCATIONS.DISPENSARY)
+        .sort((a, b) => String(b.updated_at || b.created_at).localeCompare(String(a.updated_at || a.created_at)));
+      setIncomingRequests(combined);
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to load incoming requests");
+    } finally {
+      setIncomingLoading(false);
+    }
+  };
+
+  const openRequestDetails = (req: StockRequest) => {
+    setSelectedRequest(req);
+    setShowRequestDetailsModal(true);
+  };
+
+  const openConfirmReceipt = (req: StockRequest) => {
+    setSelectedRequest(req);
+    setConfirmNotes("");
+    setShowConfirmReceiptModal(true);
+  };
+
+  const handleConfirmReceipt = async () => {
+    if (!selectedRequest) return;
+    try {
+      setConfirmingReceipt(true);
+      await pharmacyService.confirmStockRequest(selectedRequest.id, confirmNotes);
+      toast.success("Receipt confirmed");
+      setShowConfirmReceiptModal(false);
+      setShowRequestDetailsModal(false);
+      await Promise.all([loadIncomingRequests(), loadInventory(), loadAllInventoryForStats()]);
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to confirm receipt");
+    } finally {
+      setConfirmingReceipt(false);
+    }
+  };
+
   // Transform inventory items helper function
   const transformInventoryItems = (results: any[]): MedicationInventoryItem[] => {
     return results.map((item: any) => {
         // Extract medication details from nested medication object
-        const medication = item.medication || {};
+      const medication = item.medication || {};
         const medicationName = item.medication_name || medication.name || 'Unknown';
-        const genericName = medication.generic_name || '';
+        const genericName = (medication.generic && medication.generic.name) || '';
         const strength = medication.strength || '';
         const dosageForm = medication.form || medication.dosage_form || '';
-        const manufacturer = medication.manufacturer || '';
         
       // Get category from medication (now stored in backend)
-      let category = medication.category || 'All Categories';
-      if (category === 'All Categories' && genericName) {
-        // Try to infer category from generic name (simplified)
-        const lowerGeneric = genericName.toLowerCase();
-        if (lowerGeneric.includes('antibiotic') || lowerGeneric.includes('penicillin') || lowerGeneric.includes('cephalosporin')) {
-          category = 'Antibiotics';
-        } else if (lowerGeneric.includes('analgesic') || lowerGeneric.includes('paracetamol') || lowerGeneric.includes('ibuprofen')) {
-          category = 'Analgesics';
-        } else if (lowerGeneric.includes('antihypertensive') || lowerGeneric.includes('lisinopril') || lowerGeneric.includes('amlodipine')) {
-          category = 'Cardiovascular';
-        } else if (lowerGeneric.includes('metformin') || lowerGeneric.includes('glibenclamide')) {
-          category = 'Diabetes';
-        }
-      }
+      const category = medication.category || 'All Categories';
       
       // Get medication ID
       const medicationId = typeof item.medication === 'number' 
@@ -165,19 +181,15 @@ export default function InventoryPage() {
       return {
         id: item.id.toString(),
         medicationId, // Store medication ID for easier updates
-        name: medicationName,
-        genericName,
-        category,
-        strength,
-        dosageForm,
+          name: medicationName,
+          genericName,
+          category,
+          strength,
+          dosageForm,
         packSize: medication.pack_size || 10, // Get from backend
         manufacturer: medication.manufacturer || '', // Get from backend
         currentStock: Number(item.quantity),
         minimumStock: Number(item.min_stock_level),
-        maximumStock: item.max_stock_level ? Number(item.max_stock_level) : (Number(item.min_stock_level) * 10), // Get from backend
-        location: item.location || '',
-        prescriptionRequired: medication.prescription_required || false, // Get from backend
-        isGeneric: !!genericName && genericName.toLowerCase() === medicationName.toLowerCase(),
         lastRestocked: (item as any).created_at?.split('T')[0] || (item as any).updated_at?.split('T')[0] || '',
         expiryDate: item.expiry_date,
           batches: [{
@@ -196,12 +208,23 @@ export default function InventoryPage() {
     try {
       setLoading(true);
       setError(null);
-      const response = await pharmacyService.getInventory({
+      
+      const params: any = {
         page: currentPage,
         page_size: itemsPerPage,
         search: searchQuery || undefined,
-        // Note: categoryFilter, stockFilter not yet implemented in backend
-      });
+        location,
+      };
+
+      if (categoryFilter !== 'All Categories') {
+        params.medication__category = categoryFilter;
+      }
+      
+      if (stockFilter !== 'all') {
+        params.stock_status = stockFilter;
+      }
+
+      const response = await pharmacyService.getInventory(params);
       setTotalCount(response.count || response.results.length);
       // Transform API data to frontend format
       const transformed = transformInventoryItems(response.results);
@@ -217,12 +240,10 @@ export default function InventoryPage() {
   // Modal states
   const [showAddModal, setShowAddModal] = useState(false);
   const [showViewModal, setShowViewModal] = useState(false);
-  const [showEditModal, setShowEditModal] = useState(false);
   const [showAddStockModal, setShowAddStockModal] = useState(false);
   const [showAdjustStockModal, setShowAdjustStockModal] = useState(false);
   const [showBatchesModal, setShowBatchesModal] = useState(false);
   const [selectedMedication, setSelectedMedication] = useState<MedicationInventoryItem | null>(null);
-  const [addStockAmount, setAddStockAmount] = useState(0);
   
   // Add stock form
   const [newBatch, setNewBatch] = useState({
@@ -243,50 +264,21 @@ export default function InventoryPage() {
   // New medication form
   const [newMedication, setNewMedication] = useState({
     name: '', genericName: '', category: 'Analgesics', strength: '', dosageForm: 'Tablet',
-    packSize: 10, manufacturer: '', minimumStock: 100, maximumStock: 1000, 
-    location: '', prescriptionRequired: false, isGeneric: false
+    packSize: 10, manufacturer: '', minimumStock: 100
   });
   
-  // Edit medication form
-  const [editMedicationForm, setEditMedicationForm] = useState({
-    name: '',
-    genericName: '',
-    category: 'Analgesics',
-    strength: '',
-    dosageForm: 'Tablet',
-    packSize: 10,
-    manufacturer: '',
-    location: '',
-    minimumStock: 100,
-    maximumStock: 1000,
-    prescriptionRequired: false,
-    isGeneric: false,
-  });
-
-  // Filter inventory (client-side filtering on current page results)
-  const filteredInventory = useMemo(() => {
-    return inventory.filter(med => {
-      const matchesSearch = 
-        med.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        med.genericName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        med.id.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesCategory = categoryFilter === 'All Categories' || med.category === categoryFilter;
-      const matchesStock = stockFilter === 'all' ||
-        (stockFilter === 'out' && med.currentStock === 0) ||
-        (stockFilter === 'low' && med.currentStock > 0 && med.currentStock <= med.minimumStock) ||
-        (stockFilter === 'normal' && med.currentStock > med.minimumStock && med.currentStock <= med.maximumStock) ||
-        (stockFilter === 'over' && med.currentStock > med.maximumStock);
-      return matchesSearch && matchesCategory && matchesStock;
-    });
-  }, [inventory, searchQuery, categoryFilter, stockFilter]);
+  // Filter inventory (backend handles filtering now)
+  const filteredInventory = inventory;
 
   // Use filtered inventory directly (no client-side pagination - backend handles it)
   const paginatedInventory = filteredInventory;
 
-  // Reset to page 1 when filters change or items per page changes
+  // Reset to page 1 when filters change
   useEffect(() => {
-    setCurrentPage(1);
-  }, [searchQuery, categoryFilter, stockFilter, itemsPerPage]);
+    if (currentPage !== 1) {
+      setCurrentPage(1);
+    }
+  }, [searchQuery, categoryFilter, stockFilter]);
 
   // Check for expiring soon items (within 90 days) - use allInventoryForStats
   const getExpiringItems = useMemo(() => {
@@ -313,6 +305,12 @@ export default function InventoryPage() {
     expired: getExpiredItems.length,
   }), [allInventoryForStats, getExpiringItems, getExpiredItems]);
   
+  const formatPackDisplay = (units: number, packSize: number | undefined | null) => {
+    if (!packSize || packSize <= 1) return `${units.toLocaleString()} units`;
+    const packs = Math.floor(units / packSize);
+    return `${packs.toLocaleString()} packs (${units.toLocaleString()} units)`;
+  };
+
   const getDaysUntilExpiry = (expiryDate: string) => {
     const today = new Date();
     const expiry = new Date(expiryDate);
@@ -331,7 +329,6 @@ export default function InventoryPage() {
   const getStockStatus = (med: MedicationInventoryItem) => {
     if (med.currentStock === 0) return 'Out of Stock';
     if (med.currentStock <= med.minimumStock) return 'Low Stock';
-    if (med.currentStock > med.maximumStock) return 'Overstocked';
     return 'In Stock';
   };
 
@@ -340,21 +337,8 @@ export default function InventoryPage() {
       case 'Out of Stock': return 'bg-red-100 text-red-800 border-red-200 dark:bg-red-900/30 dark:text-red-400';
       case 'Low Stock': return 'bg-amber-100 text-amber-800 border-amber-200 dark:bg-amber-900/30 dark:text-amber-400';
       case 'In Stock': return 'bg-emerald-100 text-emerald-800 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400';
-      case 'Overstocked': return 'bg-violet-100 text-violet-800 border-violet-200 dark:bg-violet-900/30 dark:text-violet-400';
       default: return 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400';
     }
-  };
-
-  const getStockPercentage = (med: MedicationInventoryItem) => {
-    return Math.min((med.currentStock / med.maximumStock) * 100, 100);
-  };
-
-  const getProgressColor = (med: MedicationInventoryItem) => {
-    const percentage = getStockPercentage(med);
-    if (percentage === 0) return 'bg-red-500';
-    if (percentage <= 25) return 'bg-amber-500';
-    if (percentage > 100) return 'bg-violet-500';
-    return 'bg-emerald-500';
   };
 
   const handleViewDetails = (med: MedicationInventoryItem) => {
@@ -362,50 +346,9 @@ export default function InventoryPage() {
     setShowViewModal(true);
   };
 
-  const handleEditMedication = (med: MedicationInventoryItem) => {
-    setSelectedMedication(med);
-    setEditMedicationForm({
-      name: med.name,
-      genericName: med.genericName,
-      category: med.category,
-      strength: med.strength,
-      dosageForm: med.dosageForm,
-      packSize: med.packSize,
-      manufacturer: med.manufacturer,
-      location: med.location || '',
-      minimumStock: med.minimumStock,
-      maximumStock: med.maximumStock,
-      prescriptionRequired: med.prescriptionRequired,
-      isGeneric: med.isGeneric,
-    });
-    setShowEditModal(true);
-  };
-
   const handleAddStock = (med: MedicationInventoryItem) => {
     setSelectedMedication(med);
-    setAddStockAmount(0);
     setShowAddStockModal(true);
-  };
-
-  const confirmAddStock = async () => {
-    if (!selectedMedication || addStockAmount <= 0) {
-      toast.error('Please enter a valid quantity');
-      return;
-    }
-
-    setInventory(prev => prev.map(med => 
-      med.id === selectedMedication.id 
-        ? { ...med, currentStock: med.currentStock + addStockAmount, lastRestocked: new Date().toISOString().split('T')[0] }
-        : med
-    ));
-
-    // Reload all inventory for stats
-    await loadAllInventoryForStats();
-
-    toast.success(`Added ${addStockAmount} units to ${selectedMedication.name}`);
-    setShowAddStockModal(false);
-    setSelectedMedication(null);
-    setAddStockAmount(0);
   };
 
   const handleAddMedication = async () => {
@@ -427,9 +370,8 @@ export default function InventoryPage() {
     setShowAddModal(false);
     setNewMedication({
       name: '', genericName: '', category: 'Analgesics', strength: '', dosageForm: 'Tablet',
-      packSize: 10, manufacturer: '', minimumStock: 100, maximumStock: 1000,
-      location: '', prescriptionRequired: false, isGeneric: false
-    });
+      packSize: 10, manufacturer: '', minimumStock: 100
+      });
   };
 
   return (
@@ -440,21 +382,67 @@ export default function InventoryPage() {
           <div>
             <h1 className="text-2xl sm:text-3xl font-bold text-foreground flex items-center gap-3">
               <Database className="h-8 w-8 text-violet-500" />
-              Drug Inventory
+              Dispensary inventory
             </h1>
-            <p className="text-muted-foreground mt-1">Manage medication stock and track inventory levels</p>
+            <p className="text-muted-foreground mt-1">Manage dispensary stock and track inventory levels</p>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline">
-              <Upload className="h-4 w-4 mr-2" />
-              Bulk Upload
+            <Button asChild variant="outline">
+              <Link href="/pharmacy/drugs">Drug master</Link>
             </Button>
-            <Button className="bg-violet-600 hover:bg-violet-700" onClick={() => setShowAddModal(true)}>
-              <Plus className="h-4 w-4 mr-2" />
-              Add Medication
+            <Button asChild className="bg-violet-600 hover:bg-violet-700">
+              <Link href="/pharmacy/requests">Dispensary Requests</Link>
             </Button>
           </div>
         </div>
+
+        <Card>
+          <CardContent className="p-4 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="font-semibold text-foreground">Incoming from Central store</p>
+                <p className="text-sm text-muted-foreground">Confirm stock issued by Central store</p>
+              </div>
+              <Button variant="outline" onClick={loadIncomingRequests} disabled={incomingLoading}>
+                {incomingLoading ? "Loading..." : "Refresh"}
+              </Button>
+            </div>
+
+            {incomingLoading ? (
+              <div className="text-sm text-muted-foreground">Loading incoming requests…</div>
+            ) : incomingRequests.length > 0 ? (
+              <div className="space-y-2">
+                {incomingRequests.map((req) => (
+                  <div key={req.id} className="flex items-center justify-between gap-3 rounded-lg border p-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-medium">{req.request_id}</span>
+                        <Badge className={req.status === "partially_fulfilled" ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800"}>
+                          {req.status === "partially_fulfilled" ? "Partially Issued" : "Issued"}
+                        </Badge>
+                        <span className="text-xs text-muted-foreground">{new Date(req.updated_at || req.created_at).toLocaleString()}</span>
+                      </div>
+                      <div className="text-xs text-muted-foreground mt-1">
+                        {req.items?.length || 0} item(s)
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => openRequestDetails(req)}>
+                        <Eye className="h-4 w-4" />
+                      </Button>
+                      <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" onClick={() => openConfirmReceipt(req)}>
+                        <CheckCircle2 className="h-4 w-4 mr-2" />
+                        Confirm
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-sm text-muted-foreground">No issued requests awaiting confirmation.</div>
+            )}
+          </CardContent>
+        </Card>
 
         {/* Stats Cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -549,9 +537,9 @@ export default function InventoryPage() {
                 <Label>Category</Label>
                 <Select value={categoryFilter} onValueChange={setCategoryFilter}>
                   <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className="max-h-[300px]">
                     {categories.map(cat => (
-                      <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                      <SelectItem key={cat.value} value={cat.value}>{cat.label}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -565,7 +553,6 @@ export default function InventoryPage() {
                     <SelectItem value="out">Out of Stock</SelectItem>
                     <SelectItem value="low">Low Stock</SelectItem>
                     <SelectItem value="normal">In Stock</SelectItem>
-                    <SelectItem value="over">Overstocked</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -593,7 +580,6 @@ export default function InventoryPage() {
           ) : filteredInventory.length > 0 ? (
             paginatedInventory.map((med) => {
               const stockStatus = getStockStatus(med);
-              const stockPercentage = getStockPercentage(med);
               
               return (
                 <Card 
@@ -627,22 +613,16 @@ export default function InventoryPage() {
                             <span className="font-semibold text-foreground truncate">{med.name}</span>
                             <Badge variant="outline" className="text-[10px] px-1.5 py-0">{med.strength}</Badge>
                             <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${getStockColor(stockStatus)}`}>{stockStatus}</Badge>
-                            <span className={`text-[10px] font-medium ${stockStatus !== 'In Stock' ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground'}`}>
-                              {med.currentStock}/{med.maximumStock}
+                            <span className="text-[10px] font-medium text-muted-foreground">
+                              {formatPackDisplay(med.currentStock, med.packSize)}
                             </span>
                           </div>
                           <div className="flex items-center gap-1 flex-shrink-0">
                             <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => handleViewDetails(med)} title="View Details">
                               <Eye className="h-4 w-4 text-muted-foreground hover:text-primary" />
                             </Button>
-                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => handleEditMedication(med)} title="Edit Medication">
-                              <Edit className="h-4 w-4 text-muted-foreground hover:text-violet-500" />
-                            </Button>
                             <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => { setSelectedMedication(med); setShowBatchesModal(true); }} title="View Batches">
                               <Layers className="h-4 w-4 text-muted-foreground hover:text-violet-500" />
-                            </Button>
-                            <Button size="sm" className="h-7 px-2 bg-emerald-500 hover:bg-emerald-600 text-white text-xs" onClick={() => handleAddStock(med)} title="Add Stock">
-                              <Plus className="h-3 w-3 mr-1" />Add
                             </Button>
                             <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => { setSelectedMedication(med); setShowAdjustStockModal(true); }} title="Adjust Stock">
                               <ArrowUpDown className="h-4 w-4 text-muted-foreground hover:text-amber-500" />
@@ -650,7 +630,7 @@ export default function InventoryPage() {
                           </div>
                         </div>
                         
-                        {/* Row 2: Details + Progress */}
+                        {/* Row 2: Details */}
                         <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
                           <span>{med.genericName}</span>
                           <span>•</span>
@@ -658,19 +638,12 @@ export default function InventoryPage() {
                           <span>•</span>
                           <span>{med.dosageForm}</span>
                           <span>•</span>
-                          <span>{med.location}</span>
-                          <span>•</span>
-                          <span className={`flex items-center gap-1 ${getDaysUntilExpiry(med.expiryDate) <= 90 ? 'text-amber-600 dark:text-amber-400' : ''} ${getDaysUntilExpiry(med.expiryDate) < 0 ? 'text-red-600 dark:text-red-400' : ''}`}>
-                            <Clock className="h-3 w-3" />
-                            {getDaysUntilExpiry(med.expiryDate) < 0 ? 'Expired' : 
-                             getDaysUntilExpiry(med.expiryDate) <= 30 ? `${getDaysUntilExpiry(med.expiryDate)}d` :
-                             med.expiryDate}
-                          </span>
-                          <div className="flex-1 max-w-[80px] ml-2">
-                            <div className="h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-                              <div className={`h-full rounded-full ${getProgressColor(med)}`} style={{ width: `${stockPercentage}%` }} />
-                            </div>
-                          </div>
+                              <span className={`flex items-center gap-1 ${getDaysUntilExpiry(med.expiryDate) <= 90 ? 'text-amber-600 dark:text-amber-400' : ''} ${getDaysUntilExpiry(med.expiryDate) < 0 ? 'text-red-600 dark:text-red-400' : ''}`}>
+                                <Clock className="h-3 w-3" />
+                                {getDaysUntilExpiry(med.expiryDate) < 0 ? 'Expired' : 
+                                 getDaysUntilExpiry(med.expiryDate) <= 30 ? `${getDaysUntilExpiry(med.expiryDate)}d` :
+                                 med.expiryDate}
+                              </span>
                         </div>
                       </div>
                     </div>
@@ -724,14 +697,6 @@ export default function InventoryPage() {
                   <Badge variant="outline" className={getStockColor(getStockStatus(selectedMedication))}>
                     {getStockStatus(selectedMedication)}
                   </Badge>
-                  {selectedMedication.prescriptionRequired && (
-                    <Badge variant="outline" className="bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
-                      Rx Required
-                    </Badge>
-                  )}
-                  {selectedMedication.isGeneric && (
-                    <Badge variant="outline">Generic</Badge>
-                  )}
                 </div>
 
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4 bg-muted/50 rounded-lg p-4 text-sm">
@@ -742,35 +707,25 @@ export default function InventoryPage() {
                   <div><span className="text-muted-foreground">Form:</span> <span className="font-medium">{selectedMedication.dosageForm}</span></div>
                   <div><span className="text-muted-foreground">Pack Size:</span> <span className="font-medium">{selectedMedication.packSize}</span></div>
                   <div><span className="text-muted-foreground">Manufacturer:</span> <span className="font-medium">{selectedMedication.manufacturer}</span></div>
-                  <div><span className="text-muted-foreground">Location:</span> <span className="font-medium">{selectedMedication.location}</span></div>
                   <div><span className="text-muted-foreground">Last Restocked:</span> <span className="font-medium">{selectedMedication.lastRestocked}</span></div>
                 </div>
 
                 <div className="bg-muted/50 rounded-lg p-4">
                   <h4 className="font-medium mb-3">Stock Levels</h4>
-                  <div className="grid grid-cols-3 gap-4 text-center mb-3">
+                  <div className="grid grid-cols-2 gap-4 text-center mb-3">
                     <div>
-                      <p className="text-2xl font-bold text-foreground">{selectedMedication.currentStock.toLocaleString()}</p>
+                      <p className="text-2xl font-bold text-foreground">
+                        {formatPackDisplay(selectedMedication.currentStock, selectedMedication.packSize)}
+                      </p>
                       <p className="text-xs text-muted-foreground">Current</p>
                     </div>
                     <div>
-                      <p className="text-2xl font-bold text-amber-600">{selectedMedication.minimumStock}</p>
+                      <p className="text-2xl font-bold text-amber-600">
+                        {formatPackDisplay(selectedMedication.minimumStock, selectedMedication.packSize)}
+                      </p>
                       <p className="text-xs text-muted-foreground">Minimum</p>
                     </div>
-                    <div>
-                      <p className="text-2xl font-bold text-emerald-600">{selectedMedication.maximumStock.toLocaleString()}</p>
-                      <p className="text-xs text-muted-foreground">Maximum</p>
-                    </div>
                   </div>
-                  <div className="h-3 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-                    <div 
-                      className={`h-full rounded-full ${getProgressColor(selectedMedication)}`}
-                      style={{ width: `${getStockPercentage(selectedMedication)}%` }}
-                    />
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-2 text-center">
-                    {Math.round(getStockPercentage(selectedMedication))}% of maximum capacity
-                  </p>
                 </div>
 
                 <div className="bg-muted/50 rounded-lg p-4">
@@ -785,16 +740,6 @@ export default function InventoryPage() {
             
             <DialogFooter className="flex gap-2">
               <Button variant="outline" onClick={() => setShowViewModal(false)}>Close</Button>
-              <Button 
-                className="bg-emerald-600 hover:bg-emerald-700"
-                onClick={() => {
-                  setShowViewModal(false);
-                  if (selectedMedication) handleAddStock(selectedMedication);
-                }}
-              >
-                <Plus className="h-4 w-4 mr-2" />
-                Add Stock
-              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -817,11 +762,9 @@ export default function InventoryPage() {
                 <div className="bg-muted/50 rounded-lg p-4 text-sm">
                   <div className="flex justify-between mb-2">
                     <span className="text-muted-foreground">Current Stock:</span>
-                    <span className="font-medium">{selectedMedication.currentStock.toLocaleString()}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Maximum Stock:</span>
-                    <span className="font-medium">{selectedMedication.maximumStock.toLocaleString()}</span>
+                    <span className="font-medium">
+                      {formatPackDisplay(selectedMedication.currentStock, selectedMedication.packSize)}
+                    </span>
                   </div>
                 </div>
 
@@ -839,7 +782,7 @@ export default function InventoryPage() {
                     />
                   </div>
                   <div>
-                    <Label>Quantity *</Label>
+                    <Label>Quantity (Packs) *</Label>
                     <Input
                       type="number"
                       min="1"
@@ -848,6 +791,11 @@ export default function InventoryPage() {
                       placeholder="Enter quantity"
                       className="mt-1"
                     />
+                    {newBatch.quantity > 0 && selectedMedication?.packSize && (
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Total: {(newBatch.quantity * (selectedMedication.packSize || 1)).toLocaleString()} units
+                      </p>
+                    )}
                   </div>
                   <div>
                     <Label className="flex items-center gap-1">
@@ -875,7 +823,9 @@ export default function InventoryPage() {
                 {newBatch.quantity > 0 && (
                   <div className="p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg text-sm">
                     <p className="text-emerald-700 dark:text-emerald-400">
-                      New total stock: <strong>{(selectedMedication.currentStock + newBatch.quantity).toLocaleString()}</strong> units
+                      New total stock: <strong>
+                        {formatPackDisplay(selectedMedication.currentStock + (newBatch.quantity * (selectedMedication.packSize || 1)), selectedMedication.packSize)}
+                      </strong>
                     </p>
                   </div>
                 )}
@@ -905,7 +855,7 @@ export default function InventoryPage() {
                     
                     // Get medication ID from the inventory API response
                     // Fetch the specific inventory item by ID to get the medication reference
-                    const inventoryItems = await pharmacyService.getInventory({ search: currentItem.name });
+                    const inventoryItems = await pharmacyService.getInventory({ search: currentItem.name, location });
                     const matchingItem = inventoryItems.results.find((item: any) => {
                       // Match by name or by ID if available
                       return item.medication_name === currentItem.name || 
@@ -929,14 +879,14 @@ export default function InventoryPage() {
                       medication: typeof medicationId === 'number' ? medicationId : parseInt(medicationId),
                       batch_number: newBatch.batchNumber,
                       expiry_date: newBatch.expiryDate,
-                      quantity: newBatch.quantity,
+                      quantity: newBatch.quantity * (currentItem.packSize || 1),
                       unit: currentItem.dosageForm || 'unit',
                       min_stock_level: currentItem.minimumStock,
-                      location: currentItem.location || newBatch.supplier || '',
                       supplier: newBatch.supplier,
+                      location,
                     });
                     
-                    toast.success(`Added ${newBatch.quantity} units of ${selectedMedication?.name} (Batch: ${newBatch.batchNumber})`);
+                    toast.success(`Added ${newBatch.quantity} packs of ${selectedMedication?.name} (Batch: ${newBatch.batchNumber})`);
                     setShowAddStockModal(false);
                     setNewBatch({ batchNumber: '', quantity: 0, expiryDate: '', supplier: '' });
                     await loadInventory(); // Reload inventory
@@ -972,7 +922,9 @@ export default function InventoryPage() {
               <div className="space-y-4">
                 <div className="bg-muted/50 rounded-lg p-4 text-sm text-center">
                   <p className="text-muted-foreground">Current Stock</p>
-                  <p className="text-2xl sm:text-3xl font-bold">{selectedMedication.currentStock.toLocaleString()}</p>
+                  <p className="text-2xl sm:text-3xl font-bold">
+                    {formatPackDisplay(selectedMedication.currentStock, selectedMedication.packSize)}
+                  </p>
                 </div>
 
                 <div className="grid grid-cols-2 gap-2">
@@ -995,16 +947,21 @@ export default function InventoryPage() {
                 </div>
 
                 <div>
-                  <Label>Quantity *</Label>
+                  <Label>Quantity (Packs) *</Label>
                   <Input
                     type="number"
                     min="1"
-                    max={adjustmentForm.type === 'decrease' ? selectedMedication.currentStock : undefined}
+                    max={adjustmentForm.type === 'decrease' ? Math.floor(selectedMedication.currentStock / (selectedMedication.packSize || 1)) : undefined}
                     value={adjustmentForm.quantity || ''}
                     onChange={(e) => setAdjustmentForm({ ...adjustmentForm, quantity: parseInt(e.target.value) || 0 })}
                     placeholder="Enter quantity"
                     className="mt-1"
                   />
+                  {adjustmentForm.quantity > 0 && selectedMedication?.packSize && (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Total: {(adjustmentForm.quantity * (selectedMedication.packSize || 1)).toLocaleString()} units
+                    </p>
+                  )}
                 </div>
 
                 <div>
@@ -1034,11 +991,18 @@ export default function InventoryPage() {
                   <div className={`p-3 rounded-lg text-sm ${adjustmentForm.type === 'increase' ? 'bg-emerald-50 dark:bg-emerald-900/20' : 'bg-red-50 dark:bg-red-900/20'}`}>
                     <p className={adjustmentForm.type === 'increase' ? 'text-emerald-700 dark:text-emerald-400' : 'text-red-700 dark:text-red-400'}>
                       New stock level: <strong>
-                        {adjustmentForm.type === 'increase' 
-                          ? (selectedMedication.currentStock + adjustmentForm.quantity).toLocaleString()
-                          : (selectedMedication.currentStock - adjustmentForm.quantity).toLocaleString()
-                        }
-                      </strong> units
+                        {(() => {
+                          const current = selectedMedication.currentStock;
+                          const packSize = selectedMedication.packSize || 1;
+                          const adjustPacks = adjustmentForm.quantity;
+                          const adjustUnits = adjustPacks * packSize;
+                          const next =
+                            adjustmentForm.type === 'increase'
+                              ? current + adjustUnits
+                              : current - adjustUnits;
+                          return formatPackDisplay(Math.max(0, next), packSize);
+                        })()}
+                      </strong>
                     </p>
                   </div>
                 )}
@@ -1058,9 +1022,12 @@ export default function InventoryPage() {
                     return;
                   }
                   
+                  const packSize = selectedMedication!.packSize || 1;
+                  const adjustUnits = adjustmentForm.quantity * packSize;
+                  
                   const newStock = adjustmentForm.type === 'increase' 
-                    ? selectedMedication!.currentStock + adjustmentForm.quantity
-                    : selectedMedication!.currentStock - adjustmentForm.quantity;
+                    ? selectedMedication!.currentStock + adjustUnits
+                    : selectedMedication!.currentStock - adjustUnits;
                   
                   if (newStock < 0) {
                     toast.error('Stock cannot be negative');
@@ -1079,7 +1046,7 @@ export default function InventoryPage() {
                       quantity: newStock,
                     });
                     
-                    toast.success(`Stock ${adjustmentForm.type === 'increase' ? 'increased' : 'decreased'} by ${adjustmentForm.quantity} units`);
+                    toast.success(`Stock ${adjustmentForm.type === 'increase' ? 'increased' : 'decreased'} by ${adjustmentForm.quantity} packs (${adjustUnits} units)`);
                     setShowAdjustStockModal(false);
                     setAdjustmentForm({ type: 'decrease', quantity: 0, reason: '', notes: '' });
                     await loadInventory(); // Reload inventory
@@ -1138,7 +1105,9 @@ export default function InventoryPage() {
                           <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
                             <div>
                               <span className="text-muted-foreground">Quantity:</span>{' '}
-                              <span className="font-medium">{batch.quantity}</span>
+                              <span className="font-medium">
+                                {formatPackDisplay(Number(batch.quantity || 0), selectedMedication?.packSize)}
+                              </span>
                             </div>
                             <div>
                               <span className="text-muted-foreground">Received:</span>{' '}
@@ -1164,16 +1133,6 @@ export default function InventoryPage() {
             
             <DialogFooter>
               <Button variant="outline" onClick={() => setShowBatchesModal(false)}>Close</Button>
-              <Button 
-                className="bg-emerald-600 hover:bg-emerald-700"
-                onClick={() => {
-                  setShowBatchesModal(false);
-                  if (selectedMedication) handleAddStock(selectedMedication);
-                }}
-              >
-                <Plus className="h-4 w-4 mr-2" />
-                Add New Batch
-              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -1213,20 +1172,24 @@ export default function InventoryPage() {
                   <Select value={newMedication.category} onValueChange={(v) => setNewMedication({...newMedication, category: v})}>
                     <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      {categories.filter(c => c !== 'All Categories').map(cat => (
-                        <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                      {categories.filter(c => c.value !== 'All Categories').map(cat => (
+                        <SelectItem key={cat.value} value={cat.value}>{cat.label}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 </div>
                 <div>
                   <Label>Strength *</Label>
-                  <Input
-                    value={newMedication.strength}
-                    onChange={(e) => setNewMedication({...newMedication, strength: e.target.value})}
-                    placeholder="e.g., 500mg"
-                    className="mt-1"
-                  />
+                  <Select value={newMedication.strength} onValueChange={(v) => setNewMedication({...newMedication, strength: v})}>
+                    <SelectTrigger className="mt-1">
+                      <SelectValue placeholder="Select strength" />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-[200px]">
+                      {MEDICATION_STRENGTHS.map((strength) => (
+                        <SelectItem key={strength} value={strength}>{strength}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div>
                   <Label>Dosage Form *</Label>
@@ -1250,21 +1213,16 @@ export default function InventoryPage() {
                 </div>
                 <div>
                   <Label>Manufacturer</Label>
-                  <Input
-                    value={newMedication.manufacturer}
-                    onChange={(e) => setNewMedication({...newMedication, manufacturer: e.target.value})}
-                    placeholder="e.g., GSK"
-                    className="mt-1"
-                  />
-                </div>
-                <div>
-                  <Label>Storage Location</Label>
-                  <Input
-                    value={newMedication.location}
-                    onChange={(e) => setNewMedication({...newMedication, location: e.target.value})}
-                    placeholder="e.g., Shelf A1"
-                    className="mt-1"
-                  />
+                  <Select value={newMedication.manufacturer} onValueChange={(v) => setNewMedication({...newMedication, manufacturer: v})}>
+                    <SelectTrigger className="mt-1">
+                      <SelectValue placeholder="Select manufacturer" />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-[200px]">
+                      {MEDICATION_MANUFACTURERS.map((manufacturer) => (
+                        <SelectItem key={manufacturer} value={manufacturer}>{manufacturer}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div>
                   <Label>Minimum Stock</Label>
@@ -1275,35 +1233,6 @@ export default function InventoryPage() {
                     className="mt-1"
                   />
                 </div>
-                <div>
-                  <Label>Maximum Stock</Label>
-                  <Input
-                    type="number"
-                    value={newMedication.maximumStock}
-                    onChange={(e) => setNewMedication({...newMedication, maximumStock: parseInt(e.target.value) || 0})}
-                    className="mt-1"
-                  />
-                </div>
-              </div>
-              <div className="flex items-center gap-6">
-                <label className="flex items-center gap-2">
-                  <input 
-                    type="checkbox" 
-                    checked={newMedication.prescriptionRequired}
-                    onChange={(e) => setNewMedication({...newMedication, prescriptionRequired: e.target.checked})}
-                    className="rounded"
-                  />
-                  <span className="text-sm">Prescription Required</span>
-                </label>
-                <label className="flex items-center gap-2">
-                  <input 
-                    type="checkbox" 
-                    checked={newMedication.isGeneric}
-                    onChange={(e) => setNewMedication({...newMedication, isGeneric: e.target.checked})}
-                    className="rounded"
-                  />
-                  <span className="text-sm">Generic Drug</span>
-                </label>
               </div>
             </div>
             
@@ -1321,205 +1250,99 @@ export default function InventoryPage() {
           </DialogContent>
         </Dialog>
 
-        {/* Edit Medication Modal */}
-        <Dialog open={showEditModal} onOpenChange={setShowEditModal}>
-          <DialogContent className="w-[95vw] sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
+        <Dialog open={showRequestDetailsModal} onOpenChange={setShowRequestDetailsModal}>
+          <DialogContent className="w-[95vw] sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
-                <Edit className="h-5 w-5 text-violet-500" />
-                Edit Medication
+                <Eye className="h-5 w-5 text-violet-500" />
+                Request Details
               </DialogTitle>
             </DialogHeader>
-            
-            {selectedMedication && (
+            {selectedRequest && (
               <div className="space-y-4">
-                <p className="text-sm text-muted-foreground">
-                  Editing: <strong>{selectedMedication.name}</strong>
-                </p>
-                <div className="overflow-y-auto max-h-[60vh] space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <Label>Brand Name *</Label>
-                      <Input
-                        value={editMedicationForm.name}
-                        onChange={(e) => setEditMedicationForm({...editMedicationForm, name: e.target.value})}
-                        placeholder="e.g., Amoxil"
-                        className="mt-1"
-                      />
-                    </div>
-                    <div>
-                      <Label>Generic Name *</Label>
-                      <Input
-                        value={editMedicationForm.genericName}
-                        onChange={(e) => setEditMedicationForm({...editMedicationForm, genericName: e.target.value})}
-                        placeholder="e.g., Amoxicillin"
-                        className="mt-1"
-                      />
-                    </div>
-                    <div>
-                      <Label>Category *</Label>
-                      <Select value={editMedicationForm.category} onValueChange={(v) => setEditMedicationForm({...editMedicationForm, category: v})}>
-                        <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          {categories.filter(c => c !== 'All Categories').map(cat => (
-                            <SelectItem key={cat} value={cat}>{cat}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div>
-                      <Label>Strength *</Label>
-                      <Input
-                        value={editMedicationForm.strength}
-                        onChange={(e) => setEditMedicationForm({...editMedicationForm, strength: e.target.value})}
-                        placeholder="e.g., 500mg"
-                        className="mt-1"
-                      />
-                    </div>
-                    <div>
-                      <Label>Dosage Form *</Label>
-                      <Select value={editMedicationForm.dosageForm} onValueChange={(v) => setEditMedicationForm({...editMedicationForm, dosageForm: v})}>
-                        <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          {dosageForms.map(form => (
-                            <SelectItem key={form} value={form}>{form}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div>
-                      <Label>Pack Size</Label>
-                      <Input
-                        type="number"
-                        value={editMedicationForm.packSize}
-                        onChange={(e) => setEditMedicationForm({...editMedicationForm, packSize: parseInt(e.target.value) || 10})}
-                        className="mt-1"
-                      />
-                    </div>
-                    <div>
-                      <Label>Manufacturer</Label>
-                      <Input
-                        value={editMedicationForm.manufacturer}
-                        onChange={(e) => setEditMedicationForm({...editMedicationForm, manufacturer: e.target.value})}
-                        placeholder="e.g., GSK"
-                        className="mt-1"
-                      />
-                    </div>
-                    <div>
-                      <Label>Storage Location</Label>
-                      <Input
-                        value={editMedicationForm.location}
-                        onChange={(e) => setEditMedicationForm({...editMedicationForm, location: e.target.value})}
-                        placeholder="e.g., Shelf A1"
-                        className="mt-1"
-                      />
-                    </div>
-                    <div>
-                      <Label>Minimum Stock</Label>
-                      <Input
-                        type="number"
-                        value={editMedicationForm.minimumStock}
-                        onChange={(e) => setEditMedicationForm({...editMedicationForm, minimumStock: parseInt(e.target.value) || 0})}
-                        className="mt-1"
-                      />
-                    </div>
-                    <div>
-                      <Label>Maximum Stock</Label>
-                      <Input
-                        type="number"
-                        value={editMedicationForm.maximumStock}
-                        onChange={(e) => setEditMedicationForm({...editMedicationForm, maximumStock: parseInt(e.target.value) || 0})}
-                        className="mt-1"
-                      />
-                    </div>
+                <div className="grid grid-cols-2 gap-4 bg-muted/50 rounded-lg p-4 text-sm">
+                  <div>
+                    <p className="text-muted-foreground">Request ID</p>
+                    <p className="font-medium">{selectedRequest.request_id}</p>
                   </div>
-                  <div className="flex items-center gap-6">
-                    <label className="flex items-center gap-2">
-                      <input 
-                        type="checkbox" 
-                        checked={editMedicationForm.prescriptionRequired}
-                        onChange={(e) => setEditMedicationForm({...editMedicationForm, prescriptionRequired: e.target.checked})}
-                        className="rounded"
-                      />
-                      <span className="text-sm">Prescription Required</span>
-                    </label>
-                    <label className="flex items-center gap-2">
-                      <input 
-                        type="checkbox" 
-                        checked={editMedicationForm.isGeneric}
-                        onChange={(e) => setEditMedicationForm({...editMedicationForm, isGeneric: e.target.checked})}
-                        className="rounded"
-                      />
-                      <span className="text-sm">Generic Drug</span>
-                    </label>
+                  <div>
+                    <p className="text-muted-foreground">Status</p>
+                    <p className="font-medium">{selectedRequest.status}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">From</p>
+                    <p className="font-medium">{selectedRequest.from_location}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">To</p>
+                    <p className="font-medium">{selectedRequest.to_location}</p>
+                  </div>
+                </div>
+
+                {selectedRequest.notes && (
+                  <div className="rounded-lg border p-3 text-sm">
+                    <p className="text-muted-foreground">Notes</p>
+                    <p className="mt-1">{selectedRequest.notes}</p>
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  <p className="font-medium">Items</p>
+                  <div className="space-y-2">
+                    {(selectedRequest.items || []).map((it) => (
+                      <div key={it.id || `${it.medication}-${it.medication_name}`} className="rounded-lg border p-3 text-sm">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="font-medium truncate">{it.medication_name || `Medication ${it.medication}`}</p>
+                            <p className="text-xs text-muted-foreground mt-1">
+                              Requested: {it.quantity} {it.unit || "unit"} • Issued: {Number(it.fulfilled_quantity || 0)} {it.unit || "unit"}
+                            </p>
+                          </div>
+                          {Number(it.fulfilled_quantity || 0) >= it.quantity ? (
+                            <Badge className="bg-emerald-100 text-emerald-800">Full</Badge>
+                          ) : (
+                            <Badge className="bg-amber-100 text-amber-800">Partial</Badge>
+                          )}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
               </div>
             )}
-            
             <DialogFooter>
-              <Button variant="outline" onClick={() => setShowEditModal(false)}>Cancel</Button>
-              <Button 
-                className="bg-violet-600 hover:bg-violet-700"
-                onClick={async () => {
-                  if (!selectedMedication) return;
-                  
-                  try {
-                    // Get inventory item ID
-                    const inventoryId = parseInt(selectedMedication.id || '');
-                    if (!inventoryId) {
-                      toast.error('Invalid medication ID');
-                      return;
-                    }
-                    
-                    // Get medication ID from stored value or fetch it
-                    let medicationId = selectedMedication.medicationId;
-                    if (!medicationId) {
-                      // Fallback: fetch inventory item to get medication ID
-                      const inventoryItems = await pharmacyService.getInventory({ search: selectedMedication.name });
-                      const matchingItem = inventoryItems.results.find((item: any) => {
-                        return item.id?.toString() === selectedMedication.id;
-                      });
-                      
-                      if (!matchingItem || !matchingItem.medication) {
-                        toast.error('Could not find medication. Please try again.');
-                        return;
-                      }
-                      
-                      medicationId = typeof matchingItem.medication === 'number' 
-                        ? matchingItem.medication 
-                        : parseInt(matchingItem.medication);
-                    }
-                    
-                    // Update Medication model with medication details
-                    await pharmacyService.updateMedication(medicationId, {
-                      name: editMedicationForm.name,
-                      generic_name: editMedicationForm.genericName,
-                      strength: editMedicationForm.strength,
-                      form: editMedicationForm.dosageForm,
-                      unit: editMedicationForm.dosageForm.toLowerCase().includes('tablet') ? 'tablet' :
-                            editMedicationForm.dosageForm.toLowerCase().includes('capsule') ? 'capsule' :
-                            editMedicationForm.dosageForm.toLowerCase().includes('syrup') ? 'ml' :
-                            editMedicationForm.dosageForm.toLowerCase().includes('injection') ? 'ml' : 'unit',
-                    });
-                    
-                    // Update MedicationInventory with inventory-specific fields
-                    await pharmacyService.updateInventoryItem(inventoryId, {
-                      min_stock_level: editMedicationForm.minimumStock,
-                      location: editMedicationForm.location,
-                    });
-                    
-                    toast.success('Medication updated successfully');
-                    setShowEditModal(false);
-                    await loadInventory(); // Reload inventory
-                    await loadAllInventoryForStats(); // Reload stats
-                  } catch (err: any) {
-                    toast.error(err.message || 'Failed to update medication');
-                    console.error('Error updating medication:', err);
-                  }
-                }}
-              >
-                Save Changes
+              <Button variant="outline" onClick={() => setShowRequestDetailsModal(false)}>
+                Close
+              </Button>
+              {selectedRequest && (selectedRequest.status === "fulfilled" || selectedRequest.status === "partially_fulfilled") && (
+                <Button onClick={() => openConfirmReceipt(selectedRequest)} className="bg-emerald-600 hover:bg-emerald-700">
+                  <CheckCircle2 className="h-4 w-4 mr-2" />
+                  Confirm Receipt
+                </Button>
+              )}
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={showConfirmReceiptModal} onOpenChange={setShowConfirmReceiptModal}>
+          <DialogContent className="w-[95vw] sm:max-w-[600px]">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+                Confirm Received Stock
+              </DialogTitle>
+              <DialogDescription>Confirm that the dispensary has received the issued stock.</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-2">
+              <Label>Confirmation Notes (optional)</Label>
+              <Textarea value={confirmNotes} onChange={(e) => setConfirmNotes(e.target.value)} placeholder="e.g., Received complete, no discrepancies" />
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowConfirmReceiptModal(false)}>
+                Cancel
+              </Button>
+              <Button onClick={handleConfirmReceipt} disabled={confirmingReceipt} className="bg-emerald-600 hover:bg-emerald-700">
+                {confirmingReceipt ? "Confirming..." : "Confirm Receipt"}
               </Button>
             </DialogFooter>
           </DialogContent>

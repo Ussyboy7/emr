@@ -212,9 +212,9 @@ export default function StockRequestsPage() {
           <div>
             <h1 className="text-2xl sm:text-3xl font-bold text-foreground flex items-center gap-3">
               <Send className="h-8 w-8 text-violet-500" />
-              Stock Requests
+              Dispensary Requests
             </h1>
-            <p className="text-muted-foreground mt-1">Request stock from Warehouse to Dispensary</p>
+            <p className="text-muted-foreground mt-1">Request stock from Central store to Dispensary</p>
           </div>
           <Button onClick={() => setShowNewRequestModal(true)} className="bg-violet-600 hover:bg-violet-700">
             <Plus className="h-4 w-4 mr-2" />
@@ -387,8 +387,8 @@ export default function StockRequestsPage() {
         <Dialog open={showNewRequestModal} onOpenChange={setShowNewRequestModal}>
           <DialogContent className="w-[95vw] sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>Create Stock Request</DialogTitle>
-              <DialogDescription>Request medications from Warehouse to Dispensary</DialogDescription>
+              <DialogTitle>Create Dispensary Request</DialogTitle>
+              <DialogDescription>Request medications from Central store to Dispensary</DialogDescription>
             </DialogHeader>
 
             <div className="space-y-4">

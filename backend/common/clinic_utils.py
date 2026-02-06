@@ -3,6 +3,8 @@ Utility functions for clinic name normalization in the backend.
 This ensures consistent clinic naming across the application.
 """
 
+from typing import Optional
+
 # Standardized clinic names (must match frontend constants)
 STANDARD_CLINICS = [
     "GOPD",
@@ -13,7 +15,7 @@ STANDARD_CLINICS = [
 ]
 
 
-def normalize_clinic_name(clinic: str | None) -> str:
+def normalize_clinic_name(clinic: Optional[str]) -> str:
     """
     Normalize clinic name to standard format (title case).
     
@@ -64,7 +66,7 @@ def normalize_clinic_name(clinic: str | None) -> str:
     return title_case
 
 
-def is_valid_clinic(clinic: str | None) -> bool:
+def is_valid_clinic(clinic: Optional[str]) -> bool:
     """
     Check if a clinic name is valid (matches one of the standard clinics).
     

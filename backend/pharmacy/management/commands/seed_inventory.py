@@ -59,7 +59,7 @@ class Command(BaseCommand):
                     'quantity': Decimal(default_quantity),
                     'unit': unit,
                     'min_stock_level': Decimal(default_min_stock),
-                    'location': 'Main Pharmacy',
+                    'location': 'Store',
                     'supplier': 'Default Supplier',
                 }
             )
@@ -77,4 +77,3 @@ class Command(BaseCommand):
             f'  Updated: {updated_count} inventory items\n'
             f'  Total medications with inventory: {medications.count()}'
         ))
-
