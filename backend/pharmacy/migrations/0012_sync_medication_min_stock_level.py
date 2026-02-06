@@ -13,12 +13,18 @@ class Migration(migrations.Migration):
                 migrations.RunSQL(
                     sql="""
                         ALTER TABLE medications
+                        ADD COLUMN IF NOT EXISTS min_stock_level numeric(10,2);
+                        ALTER TABLE medications
                         ALTER COLUMN min_stock_level SET DEFAULT 0;
                         UPDATE medications SET min_stock_level = 0 WHERE min_stock_level IS NULL;
+                        ALTER TABLE medications
+                        ALTER COLUMN min_stock_level SET NOT NULL;
                     """,
                     reverse_sql="""
                         ALTER TABLE medications
                         ALTER COLUMN min_stock_level DROP DEFAULT;
+                        ALTER TABLE medications
+                        DROP COLUMN IF EXISTS min_stock_level;
                     """,
                 )
             ],
@@ -31,4 +37,3 @@ class Migration(migrations.Migration):
             ],
         ),
     ]
-
