@@ -11,8 +11,8 @@ class Command(BaseCommand):
         parser.add_argument("--limit", type=int, default=50)
 
     def handle(self, *args, **options):
-        per_med_qty = max(1, int(options.get("per_med_qty") or 50))
-        limit = int(options.get("limit") or 50)
+        per_med_qty = max(1, int(options.get("per_med_qty", 50)))
+        limit = int(options.get("limit", 50))
         today = timezone.now().date()
 
         meds = (
