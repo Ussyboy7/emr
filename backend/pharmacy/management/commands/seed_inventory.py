@@ -50,16 +50,17 @@ class Command(BaseCommand):
             # Determine unit from medication
             unit = medication.unit or 'tablet'
             
-            # Check if inventory item already exists for this medication
+            # Check if inventory item already exists for this medication/location
+            # NOTE: Dispensary seeding uses the same batch_number, so location must be part of the lookup.
             inventory_item, created = MedicationInventory.objects.update_or_create(
                 medication=medication,
                 batch_number=batch_number,
+                location='Store',
                 defaults={
                     'expiry_date': expiry_date,
                     'quantity': Decimal(default_quantity),
                     'unit': unit,
                     'min_stock_level': Decimal(default_min_stock),
-                    'location': 'Store',
                     'supplier': 'Default Supplier',
                 }
             )
