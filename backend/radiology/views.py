@@ -618,9 +618,6 @@ class RadiologyStudyViewSet(viewsets.ModelViewSet):
 class RadiologyReportViewSet(viewsets.ReadOnlyModelViewSet):
     """ViewSet for viewing radiology reports awaiting verification."""
 
-    # Debug log to check if class is loaded
-    print("DEBUG: RadiologyReportViewSet class definition loaded")
-
     permission_classes = [IsAuthenticated]
     serializer_class = RadiologyReportSerializer
     filter_backends = [DjangoFilterBackend, OrderingFilter]
@@ -754,4 +751,3 @@ class RadiologyReportViewSet(viewsets.ReadOnlyModelViewSet):
             'message': 'Report rejected and sent back for revision',
             'study': RadiologyStudySerializer(study).data
         })
-
