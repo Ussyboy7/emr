@@ -8,10 +8,13 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.filters import SearchFilter, OrderingFilter
+from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from common.clinic_utils import normalize_clinic_name
+from patients.models import Visit
 from .models import PhysioTemplate, PhysioOrder, PhysioSession
 from .serializers import (
     PhysioTemplateSerializer,
@@ -75,6 +78,93 @@ class PhysioOrderViewSet(viewsets.ModelViewSet):
         except Exception:
             # Notifications must never break physio order creation
             pass
+
+    @action(detail=False, methods=['post'], url_path='checkin-from-visit')
+    def checkin_from_visit(self, request):
+        visit_id = request.data.get("visit")
+        if not visit_id:
+            raise ValidationError({"visit": "This field is required."})
+
+        try:
+            visit = Visit.objects.select_related("patient").get(id=visit_id)
+        except Visit.DoesNotExist:
+            return Response({"detail": "Visit not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        clinic = normalize_clinic_name(visit.clinic or "")
+        if clinic != "Physiotherapy":
+            return Response(
+                {"detail": f"Visit clinic must be Physiotherapy (got '{clinic}')."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        patient = visit.patient
+        now = timezone.now()
+        created = False
+
+        order = (
+            PhysioOrder.objects.filter(
+                patient=patient,
+                consultation_session__isnull=True,
+                ordered_at__date=visit.date,
+                status__in=["pending", "scheduled", "in_progress"],
+            )
+            .order_by("-ordered_at")
+            .first()
+        )
+        if not order:
+            order = (
+                PhysioOrder.objects.filter(
+                    patient=patient,
+                    status__in=["pending", "scheduled", "in_progress"],
+                )
+                .order_by("-ordered_at")
+                .first()
+            )
+
+        if not order:
+            last_order = PhysioOrder.objects.filter(patient=patient).order_by("-ordered_at").first()
+            order = PhysioOrder.objects.create(
+                patient=patient,
+                ordered_by=request.user,
+                consultation_session=None,
+                diagnosis=(last_order.diagnosis if last_order else "") or "",
+                chief_complaint=(last_order.chief_complaint if last_order else "") or "Physiotherapy follow-up",
+                treatment_goal=(last_order.treatment_goal if last_order else "") or "",
+                special_instructions=(last_order.special_instructions if last_order else "") or "",
+                priority="routine",
+                status="scheduled",
+                scheduled_at=now,
+                sessions_completed=0,
+            )
+            created = True
+        else:
+            if order.status == "pending":
+                order.status = "scheduled"
+                order.scheduled_at = order.scheduled_at or now
+                order.save()
+
+        try:
+            from notifications.services import NotificationService
+
+            patient_name = patient.get_full_name() if patient else "Patient"
+            title = "Physiotherapy check-in"
+            message = f"{patient_name} checked in for physiotherapy (Visit {visit.visit_id})."
+
+            NotificationService.notify_role(
+                role_name="Physiotherapist",
+                title=title,
+                message=message,
+                notification_type="workflow",
+                priority="normal",
+                action_url="/physiotherapy/pool-queue",
+                object_type="physio_order",
+                object_id=str(order.id),
+            )
+        except Exception:
+            pass
+
+        payload = PhysioOrderSerializer(order).data
+        return Response(payload, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
 
     @action(detail=True, methods=['post'])
     def schedule(self, request, pk=None):

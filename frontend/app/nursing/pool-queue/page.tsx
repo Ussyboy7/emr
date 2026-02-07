@@ -106,6 +106,7 @@ export default function NursingPoolQueuePage() {
   const [error, setError] = useState<string | null>(null);
   const [authError, setAuthError] = useState<unknown | null>(null);
   useAuthRedirect(authError);
+  const [sendingToPhysioVisitId, setSendingToPhysioVisitId] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('today');
@@ -562,6 +563,25 @@ export default function NursingPoolQueuePage() {
   const openRoomPicker = (patient: NursingPatient) => {
     setSelectedPatient(patient);
     setIsRoomPickerOpen(true);
+  };
+
+  const handleSendToPhysio = async (patient: NursingPatient) => {
+    if (!patient.visitNumericId) return;
+    setSendingToPhysioVisitId(patient.visitNumericId);
+    try {
+      await apiFetch('/physiotherapy/orders/checkin-from-visit/', {
+        method: 'POST',
+        body: JSON.stringify({ visit: patient.visitNumericId }),
+      });
+      toast.success('Sent to Physiotherapy', {
+        description: `${patient.name} is now in the Physiotherapy queue`,
+      });
+      await loadData();
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to send to Physiotherapy');
+    } finally {
+      setSendingToPhysioVisitId(null);
+    }
   };
 
   const handleSaveVitals = async (e?: React.FormEvent) => {
@@ -1026,9 +1046,25 @@ export default function NursingPoolQueuePage() {
                             </>
                           )}
                           {(patient.nursingStatus === 'Vitals Recorded' || patient.nursingStatus === 'Ready for Consultation') && (
-                            <Button size="sm" onClick={() => openRoomPicker(patient)} className="h-7 px-2 bg-emerald-500 hover:bg-emerald-600 text-white text-xs">
-                              <ArrowRight className="h-3 w-3 mr-1" />Send
-                            </Button>
+                            clinicMatches(patient.clinic, 'Physiotherapy') ? (
+                              <Button
+                                size="sm"
+                                onClick={() => handleSendToPhysio(patient)}
+                                className="h-7 px-2 bg-indigo-500 hover:bg-indigo-600 text-white text-xs"
+                                disabled={sendingToPhysioVisitId === patient.visitNumericId}
+                              >
+                                {sendingToPhysioVisitId === patient.visitNumericId ? (
+                                  <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                ) : (
+                                  <Activity className="h-3 w-3 mr-1" />
+                                )}
+                                Physio
+                              </Button>
+                            ) : (
+                              <Button size="sm" onClick={() => openRoomPicker(patient)} className="h-7 px-2 bg-emerald-500 hover:bg-emerald-600 text-white text-xs">
+                                <ArrowRight className="h-3 w-3 mr-1" />Send
+                              </Button>
+                            )
                           )}
                           {patient.nursingStatus === 'Sent to Room' && (
                             <div className="h-7 w-7 flex items-center justify-center rounded border border-violet-500/50 text-violet-600 dark:text-violet-400 bg-violet-500/10">
@@ -1359,5 +1395,3 @@ export default function NursingPoolQueuePage() {
     </DashboardLayout>
   );
 }
-
-
