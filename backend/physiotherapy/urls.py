@@ -13,6 +13,11 @@ router.register(r'sessions', views.PhysioSessionViewSet, basename='physio-sessio
 
 # URL patterns - include physiotherapy prefix like other modules
 urlpatterns = [
+    path(
+        'physiotherapy/orders/checkin-from-visit/',
+        views.PhysioOrderViewSet.as_view({'post': 'checkin_from_visit'}),
+        name='physio-order-checkin-from-visit',
+    ),
     path('physiotherapy/', include(router.urls)),
     path('stats/', views.PhysioStatsView.as_view(), name='physio-stats'),
 ]
