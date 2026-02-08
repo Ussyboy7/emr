@@ -25,7 +25,8 @@ import { PatientAvatar } from '@/components/PatientAvatar';
 import { VitalsDetailModal } from '@/components/VitalsDetailModal';
 import { ConsultationReportModal } from '@/components/consultation/ConsultationReportModal';
 import { loadConsultationReportSession, type ConsultationReportSession } from '@/lib/consultation-report';
-import { getOrganizationHeader } from '@/lib/constants/organization';
+import { getOrganizationLabHeader } from '@/lib/constants/organization';
+import { getOrganizationServicesHeader } from '@/lib/constants/organization';
 
 // Utility functions
 const formatDate = (dateString: string | undefined): string => {
@@ -69,6 +70,41 @@ const formatVitalDisplay = (key: string, value: unknown): string => {
 const vitalLabel = (key: string): string => {
   if (key === 'recordedAt' || key === 'recorded_at') return 'Recorded at';
   return key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
+};
+
+const getOverallStatusBadge = (status: string) => {
+  switch (status) {
+    case 'Critical': return 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/50';
+    case 'Abnormal': return 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/50';
+    default: return 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/50';
+  }
+};
+
+const getResultStatusColor = (status: string) => {
+  switch (status) {
+    case 'Critical': return 'text-rose-600 dark:text-rose-400 font-bold';
+    case 'Abnormal': return 'text-amber-600 dark:text-amber-400 font-medium';
+    default: return 'text-foreground';
+  }
+};
+
+const humanizeStatus = (value: unknown): string => {
+  const s = String(value ?? '').trim();
+  if (!s) return '';
+  return s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+};
+
+const getImagingBadgeClass = (label: string) => {
+  if (label === 'Critical') return 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/50';
+  if (label === 'Abnormal') return 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/50';
+  if (label === 'Normal') return 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/50';
+  if (label === 'Verified') return 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/50';
+  if (label === 'Reported') return 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/50';
+  if (label === 'Pending') return 'bg-yellow-500/10 text-yellow-700 dark:text-yellow-400 border-yellow-500/50';
+  if (label === 'Admitted') return 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/50';
+  if (label === 'Discharged') return 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/50';
+  if (label === 'Transferred') return 'bg-violet-500/10 text-violet-600 dark:text-violet-400 border-violet-500/50';
+  return 'bg-muted/40 text-muted-foreground border-border/60';
 };
 
 export default function PatientMedicalRecordsPage({ params }: { params: Promise<{ patientId: string }> }) {
@@ -178,8 +214,44 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
       setLabHistory(labResults?.results || []);
 
       // Load imaging
-      const imagingResults = await radiologyService.getVerifiedReports({ patient: patientId.toString() });
-      setImagingHistory(imagingResults?.results || []);
+      try {
+        const imagingOrders = await radiologyService.getOrders({ patient: patientId.toString(), page_size: 1000 });
+        const items = (imagingOrders?.results || []).flatMap((order: any) => {
+          const studies = Array.isArray(order.studies) ? order.studies : [];
+          return studies.map((study: any) => ({
+            id: study?.id ?? `${order.id}-${study?.procedure ?? 'study'}`,
+            order: order.id,
+            order_id: order.order_id,
+            patient: order.patient,
+            patient_name: order.patient_name,
+            patient_details: order.patient_details,
+            created_at: study?.created_at ?? order.ordered_at,
+            overall_status: null,
+            priority: order.priority,
+            order_details: {
+              id: order.id,
+              order_id: order.order_id,
+              doctor: order.doctor,
+              doctor_name: order.doctor_name,
+              doctor_specialty: order.doctor_details?.specialty ?? '',
+              doctor_details: order.doctor_details,
+              clinic: order.clinic,
+              clinical_notes: order.clinical_notes,
+              patient_details: order.patient_details,
+            },
+            study_details: study,
+          }));
+        });
+        items.sort((a: any, b: any) => {
+          const aDate = new Date(a?.study_details?.verified_at || a?.study_details?.reported_at || a?.study_details?.created_at || a?.created_at || 0).getTime();
+          const bDate = new Date(b?.study_details?.verified_at || b?.study_details?.reported_at || b?.study_details?.created_at || b?.created_at || 0).getTime();
+          return bDate - aDate;
+        });
+        setImagingHistory(items);
+      } catch (err) {
+        console.warn('Could not load imaging history:', err);
+        setImagingHistory([]);
+      }
 
       // Load prescriptions
       const prescriptions = await pharmacyService.getPrescriptions({ patient: patientId.toString() });
@@ -361,62 +433,173 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
         />
         {/* Prescription View Dialog */}
         <Dialog open={showPrescriptionView} onOpenChange={setShowPrescriptionView}>
-          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-            {selectedPrescription && (
-              <>
-                <DialogHeader>
-                  <DialogTitle className="flex items-center gap-2">
-                    <Pill className="h-5 w-5 text-violet-500" />
-                    Prescription {selectedPrescription.prescription_id || selectedPrescription.id}
-                  </DialogTitle>
-                  <DialogDescription>
-                    {formatDate(selectedPrescription.prescribed_at || selectedPrescription.date)}
-                    {selectedPrescription.prescribed_at && ` at ${formatTime(selectedPrescription.prescribed_at)}`}
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="space-y-4 py-2">
-                  <div className="grid grid-cols-2 gap-3 text-sm">
-                    <div><span className="text-muted-foreground">Doctor:</span> {selectedPrescription.doctor_name ?? ''}</div>
-                    <div><span className="text-muted-foreground">Status:</span> <Badge variant="outline">{selectedPrescription.status ?? ''}</Badge></div>
-                    {selectedPrescription.diagnosis && <div className="col-span-2"><span className="text-muted-foreground">Diagnosis:</span> {selectedPrescription.diagnosis}</div>}
-                    {selectedPrescription.notes && <div className="col-span-2"><span className="text-muted-foreground">Notes:</span> {selectedPrescription.notes}</div>}
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-semibold mb-2">Medications</h4>
-                    <div className="border rounded-lg overflow-hidden">
-                      <table className="w-full text-sm">
-                        <thead className="bg-muted/50">
-                          <tr>
-                            <th className="px-3 py-2 text-left font-medium">Medication</th>
-                            <th className="px-3 py-2 text-left font-medium">Dosage</th>
-                            <th className="px-3 py-2 text-left font-medium">Frequency</th>
-                            <th className="px-3 py-2 text-left font-medium">Duration</th>
-                            <th className="px-3 py-2 text-center font-medium">Qty</th>
-                            <th className="px-3 py-2 text-center font-medium">Dispensed</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y">
-                          {(selectedPrescription.medications || []).map((med: any, idx: number) => (
-                            <tr key={med.id || idx}>
-                              <td className="px-3 py-2 font-medium">{(med.medication_name || med.medication?.name || med.name) ?? ''}</td>
-                              <td className="px-3 py-2">{med.dosage ?? ''}</td>
-                              <td className="px-3 py-2">{med.frequency ?? ''}</td>
-                              <td className="px-3 py-2">{med.duration ?? ''}</td>
-                              <td className="px-3 py-2 text-center">{med.quantity ?? ''}{med.unit ? ` ${med.unit}` : ''}</td>
-                              <td className="px-3 py-2 text-center">
-                                <Badge variant={med.is_dispensed ? 'default' : 'outline'} className={med.is_dispensed ? 'bg-emerald-600' : ''}>
-                                  {med.is_dispensed ? 'Yes' : 'No'}
-                                </Badge>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
+          <DialogContent className="w-[95vw] sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2"><FileText className="h-5 w-5 text-violet-500" />Prescription</DialogTitle>
+              <DialogDescription>
+                {selectedPrescription ? `${selectedPrescription.prescription_id || selectedPrescription.id} - ${selectedPrescription.patient_name || selectedPrescription.patient_details?.name || patient?.full_name || ''}` : ''}
+              </DialogDescription>
+            </DialogHeader>
+            {selectedPrescription && (() => {
+              const patientName =
+                selectedPrescription.patient_name ||
+                selectedPrescription.patient_details?.name ||
+                patient?.full_name ||
+                (patient ? `${patient.first_name || ''} ${patient.surname || ''}`.trim() : '') ||
+                '';
+              const patientIdValue = patient?.patient_id || selectedPrescription.patient_details?.patient_id || '';
+              const age = selectedPrescription.patient_details?.age ?? (patient as any)?.age ?? null;
+              const gender = selectedPrescription.patient_details?.gender ?? (patient as any)?.gender ?? '';
+
+              const prescribedAt = selectedPrescription.prescribed_at || selectedPrescription.date || '';
+              const dispensedAt = selectedPrescription.dispensed_at || '';
+
+              const handlePrint = () => {
+                try {
+                  const content = document.getElementById('prescription-report-print-root');
+                  if (!content) return;
+                  const w = window.open('', '_blank', 'noopener,noreferrer');
+                  if (!w) return;
+                  w.document.open();
+                  w.document.write(`
+                    <html>
+                      <head>
+                        <title>Prescription</title>
+                        <style>
+                          body { font-family: Arial, sans-serif; margin: 24px; }
+                          table { width: 100%; border-collapse: collapse; }
+                          th, td { border: 1px solid #ddd; padding: 8px; font-size: 12px; vertical-align: top; }
+                          th { background: #f5f5f5; text-align: left; }
+                          h2 { margin: 0 0 4px 0; }
+                        </style>
+                      </head>
+                      <body>${content.innerHTML}</body>
+                    </html>
+                  `);
+                  w.document.close();
+                  w.focus();
+                  w.print();
+                } catch {
+                  toast.error('Unable to print prescription');
+                }
+              };
+
+              const handleDownloadPdf = () => {
+                handlePrint();
+              };
+
+              return (
+                <div className="space-y-6 py-4">
+                  <div id="prescription-report-print-root">
+                    <div className="text-center p-4 border-b">
+                      <h2 className="text-xl font-bold">PRESCRIPTION</h2>
+                      <p className="text-sm text-muted-foreground">{getOrganizationServicesHeader()}</p>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4 p-4 rounded-lg bg-muted/50">
+                      <div>
+                        <p className="text-xs text-muted-foreground">Patient Name</p>
+                        <p className="font-medium">{patientName}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Patient ID</p>
+                        <p className="font-medium">{patientIdValue}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Age / Gender</p>
+                        <p className="font-medium">{age != null ? `${age} years` : ''} / {gender}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Clinic</p>
+                        <p className="font-medium">{selectedPrescription.clinic ?? ''}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Ordering Doctor</p>
+                        <p className="font-medium">{selectedPrescription.doctor_name ?? ''}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Prescription ID</p>
+                        <p className="font-medium">{selectedPrescription.prescription_id || selectedPrescription.id}</p>
+                      </div>
+                      <div className="col-span-2">
+                        <p className="text-xs text-muted-foreground">Status</p>
+                        <Badge variant="outline" className="w-fit">{humanizeStatus(selectedPrescription.status)}</Badge>
+                      </div>
+                      {selectedPrescription.diagnosis && (
+                        <div className="col-span-2">
+                          <p className="text-xs text-muted-foreground">Diagnosis</p>
+                          <p className="font-medium">{selectedPrescription.diagnosis}</p>
+                        </div>
+                      )}
+                      {selectedPrescription.notes && (
+                        <div className="col-span-2">
+                          <p className="text-xs text-muted-foreground">Notes</p>
+                          <p className="font-medium">{selectedPrescription.notes}</p>
+                        </div>
+                      )}
+                    </div>
+
+                    <div>
+                      <h3 className="font-semibold mb-3 flex items-center gap-2">
+                        <Pill className="h-4 w-4 text-violet-500" />
+                        Medications
+                      </h3>
+                      <div className="overflow-x-auto border rounded-lg">
+                        <table className="w-full text-sm">
+                          <thead><tr className="border-b bg-muted/50">
+                            <th className="text-left p-3 font-medium">Medication</th>
+                            <th className="text-left p-3 font-medium">Dosage</th>
+                            <th className="text-left p-3 font-medium">Frequency</th>
+                            <th className="text-left p-3 font-medium">Duration</th>
+                            <th className="text-left p-3 font-medium">Instructions</th>
+                            <th className="text-center p-3 font-medium">Qty</th>
+                            <th className="text-center p-3 font-medium">Dispensed</th>
+                          </tr></thead>
+                          <tbody>
+                            {(selectedPrescription.medications || []).map((med: any, idx: number) => (
+                              <tr key={med.id || idx} className="border-b">
+                                <td className="p-3 font-medium">{(med.medication_name || med.medication?.name || med.name) ?? ''}</td>
+                                <td className="p-3">{med.dosage ?? ''}</td>
+                                <td className="p-3">{med.frequency ?? ''}</td>
+                                <td className="p-3">{med.duration ?? ''}</td>
+                                <td className="p-3">{med.instructions ?? ''}</td>
+                                <td className="p-3 text-center">{med.quantity ?? ''}{med.unit ? ` ${med.unit}` : ''}</td>
+                                <td className="p-3 text-center">
+                                  <Badge variant={med.is_dispensed ? 'default' : 'outline'} className={med.is_dispensed ? 'bg-emerald-600' : ''}>
+                                    {med.is_dispensed ? 'Yes' : 'No'}
+                                  </Badge>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                      <div className="p-3 rounded-lg border">
+                        <p className="text-xs text-muted-foreground">Prescribed</p>
+                        <p className="font-medium">{prescribedAt ? `${formatDate(prescribedAt)} ${formatTime(prescribedAt)}` : ''}</p>
+                      </div>
+                      <div className="p-3 rounded-lg border">
+                        <p className="text-xs text-muted-foreground">Dispensed</p>
+                        <p className="font-medium">{dispensedAt ? `${formatDate(dispensedAt)} ${formatTime(dispensedAt)}` : ''}</p>
+                      </div>
                     </div>
                   </div>
+
+                  <div className="flex items-center justify-end gap-2">
+                    <Button variant="outline" onClick={() => { setShowPrescriptionView(false); setSelectedPrescription(null); }}>Close</Button>
+                    <Button variant="outline" onClick={handlePrint}>
+                      <Printer className="h-4 w-4 mr-2" />Print
+                    </Button>
+                    <Button onClick={handleDownloadPdf}>
+                      <Download className="h-4 w-4 mr-2" />Download PDF
+                    </Button>
+                  </div>
                 </div>
-              </>
-            )}
+              );
+            })()}
           </DialogContent>
         </Dialog>
 
@@ -427,54 +610,543 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
           onClose={() => { setIsVitalsDetailModalOpen(false); setSelectedVital(null); }}
         />
 
-        {/* Lab View Dialog */}
         <Dialog open={!!selectedLab} onOpenChange={(open) => { if (!open) setSelectedLab(null); }}>
-          <DialogContent className="max-w-lg">
-            {selectedLab && (
-              <>
-                <DialogHeader>
-                  <DialogTitle className="flex items-center gap-2"><TestTube className="h-5 w-5" /> Lab Result</DialogTitle>
-                  <DialogDescription>{(selectedLab.test_name || selectedLab.name) ?? ''} • {formatDate(selectedLab.processed_at || selectedLab.verified_at)}</DialogDescription>
-                </DialogHeader>
-                <div className="space-y-3 text-sm">
-                  <div><span className="text-muted-foreground">Test:</span> {(selectedLab.test_name || selectedLab.name) ?? ''}</div>
-                  <div><span className="text-muted-foreground">Date:</span> {formatDate(selectedLab.processed_at || selectedLab.verified_at)} {formatTime(selectedLab.processed_at || selectedLab.verified_at)}</div>
-                  <div><span className="text-muted-foreground">Status:</span> <Badge variant="outline">{selectedLab.status ?? ''}</Badge></div>
-                  {selectedLab.results && Object.keys(selectedLab.results || {}).length > 0 && (
-                    <div>
-                      <div className="font-medium mb-2">Results</div>
-                      <div className="border rounded p-3 space-y-1">
-                        {Object.entries(selectedLab.results || {}).map(([k, v]: [string, any]) => (
-                          <div key={k} className="flex justify-between"><span className="text-muted-foreground">{k}:</span> {String(v ?? '')}</div>
-                        ))}
+          <DialogContent className="w-[95vw] sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2"><FileText className="h-5 w-5 text-emerald-500" />Lab Report</DialogTitle>
+              <DialogDescription>{selectedLab ? `${selectedLab?.name ?? ''} - ${selectedLab?.order_details?.patient_details?.name ?? selectedLab?.order_details?.patient_name ?? ''}` : ''}</DialogDescription>
+            </DialogHeader>
+            {selectedLab && (() => {
+              const orderDetails = selectedLab.order_details || {};
+              const patientDetails = orderDetails.patient_details || {};
+              const doctorDetails = orderDetails.doctor_details || {};
+              const resolveTemplateMeta = (parameterName: string) => {
+                const normalRangeObj: Record<string, any> | undefined = selectedLab?.template_normal_range;
+                if (!normalRangeObj || typeof normalRangeObj !== 'object') return null;
+                const wanted = String(parameterName || '').trim().toLowerCase();
+                if (!wanted) return null;
+                for (const [k, v] of Object.entries(normalRangeObj)) {
+                  if (String(k).trim().toLowerCase() === wanted) return { key: k, meta: v as any };
+                }
+                return null;
+              };
+
+              const formatTemplateRange = (meta: any) => {
+                if (!meta) return '';
+                if (typeof meta.range === 'string' && meta.range.trim()) return meta.range.trim();
+                const min = meta.min ?? meta.normalRangeMin;
+                const max = meta.max ?? meta.normalRangeMax;
+                if (min !== undefined && max !== undefined && String(min).trim() && String(max).trim()) {
+                  return `${min}-${max}`;
+                }
+                return '';
+              };
+
+              const processedResults = Object.entries(selectedLab.results || {}).map(([key, value]) => {
+                const valueStr = String(value ?? '');
+                const valueNum = parseFloat(valueStr);
+                let unit = '';
+                let normalRange = '';
+                let status: 'Normal' | 'Abnormal' | 'Critical' = 'Normal';
+
+                const templateMatch = resolveTemplateMeta(key);
+                if (templateMatch) {
+                  unit = String((templateMatch.meta?.unit ?? '') || '');
+                  normalRange = formatTemplateRange(templateMatch.meta);
+
+                  const minRaw = templateMatch.meta?.min ?? templateMatch.meta?.normalRangeMin;
+                  const maxRaw = templateMatch.meta?.max ?? templateMatch.meta?.normalRangeMax;
+                  const min = minRaw !== undefined && String(minRaw).trim() !== '' ? Number(minRaw) : undefined;
+                  const max = maxRaw !== undefined && String(maxRaw).trim() !== '' ? Number(maxRaw) : undefined;
+                  if (!isNaN(valueNum) && valueStr.trim() !== '' && (min !== undefined || max !== undefined)) {
+                    if (min !== undefined && !isNaN(min) && valueNum < min) status = 'Abnormal';
+                    if (max !== undefined && !isNaN(max) && valueNum > max) status = 'Abnormal';
+                  }
+                }
+
+                return { parameter: key, value: valueStr, unit, normalRange, status };
+              });
+
+              const overallStatus: 'Normal' | 'Abnormal' | 'Critical' =
+                processedResults.some((r) => r.status === 'Abnormal') ? 'Abnormal' : 'Normal';
+
+              const orderedAt = selectedLab.created_at || selectedLab.collected_at || '';
+              const completedAt = selectedLab.processed_at || selectedLab.verified_at || '';
+              const verifiedAt = selectedLab.verified_at || '';
+              const turnaroundMs =
+                orderedAt && completedAt ? new Date(completedAt).getTime() - new Date(orderedAt).getTime() : 0;
+              const turnaroundHours = turnaroundMs > 0 ? Math.floor(turnaroundMs / 3600000) : 0;
+              const turnaroundMins = turnaroundMs > 0 ? Math.floor((turnaroundMs % 3600000) / 60000) : 0;
+              const turnaroundTime = turnaroundMs > 0 ? (turnaroundHours > 0 ? `${turnaroundHours}h ${turnaroundMins}m` : `${turnaroundMins}m`) : '';
+
+              const resultFileUrl = selectedLab.result_file ? (
+                String(selectedLab.result_file).startsWith('http') ? String(selectedLab.result_file) : `${window.location.origin}${selectedLab.result_file}`
+              ) : null;
+
+              const handlePrint = () => {
+                try {
+                  const content = document.getElementById('lab-report-print-root');
+                  if (!content) return;
+                  const w = window.open('', '_blank', 'noopener,noreferrer');
+                  if (!w) return;
+                  w.document.open();
+                  w.document.write(`
+                    <html>
+                      <head>
+                        <title>Lab Report</title>
+                        <style>
+                          body { font-family: Arial, sans-serif; margin: 24px; }
+                          table { width: 100%; border-collapse: collapse; }
+                          th, td { border: 1px solid #ddd; padding: 8px; font-size: 12px; }
+                          th { background: #f5f5f5; text-align: left; }
+                          h2 { margin: 0 0 4px 0; }
+                        </style>
+                      </head>
+                      <body>${content.innerHTML}</body>
+                    </html>
+                  `);
+                  w.document.close();
+                  w.focus();
+                  w.print();
+                } catch {
+                  toast.error('Unable to print lab report');
+                }
+              };
+
+              const handleDownloadPdf = () => {
+                if (resultFileUrl) {
+                  const link = document.createElement('a');
+                  link.href = resultFileUrl;
+                  link.download = `lab_result_${selectedLab.id}.pdf`;
+                  document.body.appendChild(link);
+                  link.click();
+                  document.body.removeChild(link);
+                  return;
+                }
+                handlePrint();
+              };
+
+              return (
+                <div className="space-y-6 py-4">
+                  <div id="lab-report-print-root">
+                    <div className="text-center p-4 border-b">
+                      <h2 className="text-xl font-bold">LABORATORY REPORT</h2>
+                      <p className="text-sm text-muted-foreground">{getOrganizationLabHeader()}</p>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4 p-4 rounded-lg bg-muted/50">
+                      <div>
+                        <p className="text-xs text-muted-foreground">Patient Name</p>
+                        <p className="font-medium">{patientDetails?.name ?? orderDetails?.patient_name ?? ''}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Age / Gender</p>
+                        <p className="font-medium">{patientDetails?.age != null ? `${patientDetails.age} years` : ''} / {patientDetails?.gender ?? ''}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Ordering Doctor</p>
+                        <p className="font-medium">{doctorDetails?.name ?? orderDetails?.doctor_name ?? ''}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Order ID</p>
+                        <p className="font-medium">{orderDetails?.order_id ?? ''}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Test Name</p>
+                        <p className="font-medium">{selectedLab.name} ({selectedLab.code})</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Clinic</p>
+                        <p className="font-medium">{orderDetails?.clinic ?? ''}</p>
                       </div>
                     </div>
-                  )}
+
+                    <div>
+                      <h3 className="font-semibold mb-3 flex items-center gap-2">
+                        <TestTube className="h-4 w-4 text-amber-500" />
+                        Test Results
+                        {processedResults.length > 0 && (
+                          <Badge variant="outline" className={getOverallStatusBadge(overallStatus)}>{overallStatus}</Badge>
+                        )}
+                      </h3>
+
+                      {processedResults.length > 0 ? (
+                        <>
+                          {resultFileUrl && (
+                            <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <FileText className="h-4 w-4 text-blue-600" />
+                                  <span className="text-sm font-medium text-blue-800 dark:text-blue-200">Additional Result File Available</span>
+                                </div>
+                                <div className="flex gap-2">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => { window.open(resultFileUrl, '_blank'); }}
+                                    className="text-blue-600 hover:text-blue-800"
+                                  >
+                                    <Download className="h-3 w-3 mr-1" />
+                                    View
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={handleDownloadPdf}
+                                    className="text-blue-600 hover:text-blue-800"
+                                  >
+                                    <Download className="h-3 w-3 mr-1" />
+                                    Download
+                                  </Button>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="overflow-x-auto border rounded-lg">
+                            <table className="w-full text-sm">
+                              <thead><tr className="border-b bg-muted/50">
+                                <th className="text-left p-3 font-medium">Parameter</th>
+                                <th className="text-left p-3 font-medium">Result</th>
+                                <th className="text-left p-3 font-medium">Unit</th>
+                                <th className="text-left p-3 font-medium">Normal Range</th>
+                                <th className="text-left p-3 font-medium">Status</th>
+                              </tr></thead>
+                              <tbody>
+                                {processedResults.map((r) => (
+                                  <tr key={r.parameter} className="border-b">
+                                    <td className="p-3 font-medium">{r.parameter}</td>
+                                    <td className={`p-3 ${getResultStatusColor(r.status)}`}>{r.value || 'Pending'}</td>
+                                    <td className="p-3 text-muted-foreground">{r.unit}</td>
+                                    <td className="p-3 text-muted-foreground">{r.normalRange}</td>
+                                    <td className="p-3">
+                                      {r.status === 'Normal' ? (
+                                        <div className="h-4 w-4 rounded-full bg-emerald-500/15 border border-emerald-500/30" />
+                                      ) : (
+                                        <AlertTriangle className="h-4 w-4 text-amber-500" />
+                                      )}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </>
+                      ) : resultFileUrl ? (
+                        <div className="space-y-4">
+                          <div className="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                            <div className="flex items-center gap-3 mb-2">
+                              <FileText className="h-5 w-5 text-blue-600" />
+                              <span className="font-medium text-blue-800 dark:text-blue-200">Result file available</span>
+                            </div>
+                            <p className="text-sm text-muted-foreground mb-4">
+                              Results are provided as a PDF document
+                            </p>
+                            <Button
+                              onClick={() => { window.open(resultFileUrl, '_blank'); }}
+                              className="bg-blue-600 hover:bg-blue-700"
+                            >
+                              <Download className="h-4 w-4 mr-2" />
+                              View PDF
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="p-8 text-center border rounded-lg">
+                          <div className="flex flex-col items-center gap-3">
+                            <TestTube className="h-8 w-8 text-amber-500" />
+                            <div>
+                              <p className="font-medium text-amber-800 dark:text-amber-200">No Results Available</p>
+                              <p className="text-sm text-muted-foreground mt-1">
+                                Test results have not been entered or uploaded yet.
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                      <div className="p-3 rounded-lg border">
+                        <p className="text-xs text-muted-foreground">Ordered</p>
+                        <p className="font-medium">{orderedAt ? `${formatDate(orderedAt)} ${formatTime(orderedAt)}` : ''}</p>
+                      </div>
+                      <div className="p-3 rounded-lg border">
+                        <p className="text-xs text-muted-foreground">Completed</p>
+                        <p className="font-medium">{completedAt ? `${formatDate(completedAt)} ${formatTime(completedAt)}` : ''}</p>
+                      </div>
+                      <div className="p-3 rounded-lg border">
+                        <p className="text-xs text-muted-foreground">Verified</p>
+                        <p className="font-medium">{verifiedAt ? `${formatDate(verifiedAt)} ${formatTime(verifiedAt)}` : ''}</p>
+                      </div>
+                      <div className="p-3 rounded-lg border">
+                        <p className="text-xs text-muted-foreground">Turnaround Time</p>
+                        <p className="font-medium">{turnaroundTime}</p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4 pt-4 border-t">
+                      <div>
+                        <p className="text-xs text-muted-foreground">Performed By</p>
+                        <p className="font-medium">{selectedLab.processed_by_name || selectedLab.processed_by || ''}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Verified By</p>
+                        <p className="font-medium">{selectedLab.verified_by_name || selectedLab.verified_by || ''}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2">
+                    <Button variant="outline" onClick={() => setSelectedLab(null)}>Close</Button>
+                    <Button variant="outline" onClick={handlePrint}>
+                      <Printer className="h-4 w-4 mr-2" />Print
+                    </Button>
+                    <Button onClick={handleDownloadPdf}>
+                      <Download className="h-4 w-4 mr-2" />Download PDF
+                    </Button>
+                  </div>
                 </div>
-              </>
-            )}
+              );
+            })()}
           </DialogContent>
         </Dialog>
 
         {/* Imaging View Dialog */}
         <Dialog open={!!selectedImaging} onOpenChange={(open) => { if (!open) setSelectedImaging(null); }}>
-          <DialogContent className="max-w-lg">
-            {selectedImaging && (
-              <>
-                <DialogHeader>
-                  <DialogTitle className="flex items-center gap-2"><ScanLine className="h-5 w-5" /> Imaging Report</DialogTitle>
-                  <DialogDescription>{(selectedImaging.study_details?.procedure || selectedImaging.procedure) ?? ''} • {formatDate(selectedImaging.reported_at || selectedImaging.created_at)}</DialogDescription>
-                </DialogHeader>
-                <div className="space-y-3 text-sm">
-                  <div><span className="text-muted-foreground">Procedure:</span> {(selectedImaging.study_details?.procedure || selectedImaging.procedure) ?? ''}</div>
-                  <div><span className="text-muted-foreground">Date:</span> {formatDate(selectedImaging.reported_at || selectedImaging.created_at)} {formatTime(selectedImaging.reported_at || selectedImaging.created_at)}</div>
-                  <div><span className="text-muted-foreground">Status:</span> <Badge variant="outline">{selectedImaging.overall_status ?? ''}</Badge></div>
-                  {(selectedImaging.impression || selectedImaging.finding || selectedImaging.conclusion) && (
-                    <div><span className="text-muted-foreground">Finding:</span> <p className="mt-1 p-2 bg-muted/50 rounded">{selectedImaging.impression || selectedImaging.finding || selectedImaging.conclusion}</p></div>
-                  )}
+          <DialogContent className="w-[95vw] sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2"><FileText className="h-5 w-5 text-emerald-500" />Radiology Report</DialogTitle>
+              <DialogDescription>
+                {selectedImaging ? `${selectedImaging?.study_details?.procedure ?? selectedImaging?.procedure ?? ''} - ${selectedImaging?.patient_details?.name ?? selectedImaging?.patient_name ?? ''}` : ''}
+              </DialogDescription>
+            </DialogHeader>
+            {selectedImaging && (() => {
+              const studyDetails = selectedImaging.study_details || {};
+              const orderDetails = selectedImaging.order_details || {};
+              const patientDetails = selectedImaging.patient_details || orderDetails.patient_details || {};
+              const doctorDetails = orderDetails.doctor_details || {};
+
+              const mapOverallStatus = (s: any): 'Normal' | 'Abnormal' | 'Critical' => {
+                const v = String(s ?? '').toLowerCase();
+                if (v === 'critical') return 'Critical';
+                if (v === 'abnormal') return 'Abnormal';
+                if (v === 'normal') return 'Normal';
+                return 'Normal';
+              };
+
+              const overallStatus = selectedImaging.overall_status ? mapOverallStatus(selectedImaging.overall_status) : null;
+              const studyStatusLabel = humanizeStatus(studyDetails.status || (overallStatus ? '' : 'reported'));
+              const statusLabel = overallStatus ?? studyStatusLabel;
+
+              const orderedAt = studyDetails.created_at || selectedImaging.created_at || '';
+              const completedAt = studyDetails.reported_at || studyDetails.verified_at || '';
+              const verifiedAt = studyDetails.verified_at || '';
+
+              const turnaroundMs =
+                orderedAt && completedAt ? new Date(completedAt).getTime() - new Date(orderedAt).getTime() : 0;
+              const turnaroundHours = turnaroundMs > 0 ? Math.floor(turnaroundMs / 3600000) : 0;
+              const turnaroundMins = turnaroundMs > 0 ? Math.floor((turnaroundMs % 3600000) / 60000) : 0;
+              const turnaroundTime = turnaroundMs > 0 ? (turnaroundHours > 0 ? `${turnaroundHours}h ${turnaroundMins}m` : `${turnaroundMins}m`) : '';
+
+              const reportFileUrl = studyDetails.report_file_url ? (
+                String(studyDetails.report_file_url).startsWith('http') ? String(studyDetails.report_file_url) : `${window.location.origin}${studyDetails.report_file_url}`
+              ) : (studyDetails.report_file ? (
+                String(studyDetails.report_file).startsWith('http') ? String(studyDetails.report_file) : `${window.location.origin}${studyDetails.report_file}`
+              ) : null);
+
+              const handlePrint = () => {
+                try {
+                  const content = document.getElementById('radiology-report-print-root');
+                  if (!content) return;
+                  const w = window.open('', '_blank', 'noopener,noreferrer');
+                  if (!w) return;
+                  w.document.open();
+                  w.document.write(`
+                    <html>
+                      <head>
+                        <title>Radiology Report</title>
+                        <style>
+                          body { font-family: Arial, sans-serif; margin: 24px; }
+                          h2 { margin: 0 0 4px 0; }
+                          .section { margin-top: 16px; }
+                          .label { font-weight: bold; }
+                          .box { border: 1px solid #ddd; padding: 12px; border-radius: 6px; }
+                          @media print { body { margin: 0; } }
+                        </style>
+                      </head>
+                      <body>${content.innerHTML}</body>
+                    </html>
+                  `);
+                  w.document.close();
+                  w.focus();
+                  w.print();
+                } catch {
+                  toast.error('Unable to print radiology report');
+                }
+              };
+
+              const handleDownloadPdf = () => {
+                if (!reportFileUrl) {
+                  handlePrint();
+                  return;
+                }
+                const link = document.createElement('a');
+                link.href = reportFileUrl;
+                link.download = `radiology_report_${selectedImaging.id}.pdf`;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+              };
+
+              return (
+                <div className="space-y-6 py-4">
+                  <div id="radiology-report-print-root">
+                    <div className="text-center p-4 border-b">
+                      <h2 className="text-xl font-bold">RADIOLOGY REPORT</h2>
+                      <p className="text-sm text-muted-foreground">{getOrganizationServicesHeader()}</p>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4 p-4 rounded-lg bg-muted/50">
+                      <div>
+                        <p className="text-xs text-muted-foreground">Patient Name</p>
+                        <p className="font-medium">{patientDetails?.name ?? selectedImaging.patient_name ?? ''}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Age / Gender</p>
+                        <p className="font-medium">{patientDetails?.age != null ? `${patientDetails.age} years` : ''} / {patientDetails?.gender ?? ''}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Ordering Doctor</p>
+                        <p className="font-medium">{doctorDetails?.name ?? orderDetails?.doctor_name ?? ''}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Order ID</p>
+                        <p className="font-medium">{selectedImaging.order_id ?? orderDetails?.order_id ?? ''}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Study</p>
+                        <p className="font-medium">{studyDetails.procedure ?? selectedImaging.procedure ?? ''}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Modality</p>
+                        <p className="font-medium">{studyDetails.modality ?? ''}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Clinic</p>
+                        <p className="font-medium">{orderDetails?.clinic ?? ''}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Status</p>
+                        <Badge variant="outline" className={getImagingBadgeClass(statusLabel)}>{statusLabel}</Badge>
+                      </div>
+                    </div>
+
+                    {reportFileUrl && (
+                      <div className="p-4">
+                        <div className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <FileText className="h-4 w-4 text-blue-600" />
+                              <span className="text-sm font-medium text-blue-800 dark:text-blue-200">Report file available</span>
+                            </div>
+                            <div className="flex gap-2">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => { window.open(reportFileUrl, '_blank'); }}
+                                className="text-blue-600 hover:text-blue-800"
+                              >
+                                <Download className="h-3 w-3 mr-1" />
+                                View
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={handleDownloadPdf}
+                                className="text-blue-600 hover:text-blue-800"
+                              >
+                                <Download className="h-3 w-3 mr-1" />
+                                Download
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {(studyDetails.findings || studyDetails.impression || studyDetails.recommendations || studyDetails.report) && (
+                      <div className="space-y-4 p-4">
+                        {studyDetails.findings && (
+                          <div className="section">
+                            <div className="text-sm font-semibold mb-2">Findings</div>
+                            <div className="box whitespace-pre-wrap text-sm">{studyDetails.findings}</div>
+                          </div>
+                        )}
+                        {studyDetails.impression && (
+                          <div className="section">
+                            <div className="text-sm font-semibold mb-2">Impression</div>
+                            <div className="box whitespace-pre-wrap text-sm">{studyDetails.impression}</div>
+                          </div>
+                        )}
+                        {studyDetails.recommendations && (
+                          <div className="section">
+                            <div className="text-sm font-semibold mb-2">Recommendations</div>
+                            <div className="box whitespace-pre-wrap text-sm">{studyDetails.recommendations}</div>
+                          </div>
+                        )}
+                        {!studyDetails.findings && !studyDetails.impression && studyDetails.report && (
+                          <div className="section">
+                            <div className="text-sm font-semibold mb-2">Report</div>
+                            <div className="box whitespace-pre-wrap text-sm">{studyDetails.report}</div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-2 gap-4 text-sm p-4">
+                      <div className="p-3 rounded-lg border">
+                        <p className="text-xs text-muted-foreground">Ordered</p>
+                        <p className="font-medium">{orderedAt ? `${formatDate(orderedAt)} ${formatTime(orderedAt)}` : ''}</p>
+                      </div>
+                      <div className="p-3 rounded-lg border">
+                        <p className="text-xs text-muted-foreground">Completed</p>
+                        <p className="font-medium">{completedAt ? `${formatDate(completedAt)} ${formatTime(completedAt)}` : ''}</p>
+                      </div>
+                      <div className="p-3 rounded-lg border">
+                        <p className="text-xs text-muted-foreground">Verified</p>
+                        <p className="font-medium">{verifiedAt ? `${formatDate(verifiedAt)} ${formatTime(verifiedAt)}` : ''}</p>
+                      </div>
+                      <div className="p-3 rounded-lg border">
+                        <p className="text-xs text-muted-foreground">Turnaround Time</p>
+                        <p className="font-medium">{turnaroundTime}</p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4 pt-4 border-t p-4">
+                      <div>
+                        <p className="text-xs text-muted-foreground">Verified By</p>
+                        <p className="font-medium">{studyDetails.verified_by_name || ''}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Report Status</p>
+                        <p className="font-medium">{humanizeStatus(studyDetails.status || 'reported')}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2">
+                    <Button variant="outline" onClick={() => setSelectedImaging(null)}>Close</Button>
+                    <Button variant="outline" onClick={handlePrint}>
+                      <Printer className="h-4 w-4 mr-2" />Print
+                    </Button>
+                    <Button onClick={handleDownloadPdf}>
+                      <Download className="h-4 w-4 mr-2" />Download PDF
+                    </Button>
+                  </div>
                 </div>
-              </>
-            )}
+              );
+            })()}
           </DialogContent>
         </Dialog>
 
@@ -533,25 +1205,63 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
                   </div>
                 )}
 
+                {(() => {
+                  const handlePrint = () => {
+                    try {
+                      const content = document.getElementById('physio-report-print-root');
+                      if (!content) return;
+                      const w = window.open('', '_blank', 'noopener,noreferrer');
+                      if (!w) return;
+                      w.document.open();
+                      w.document.write(`
+                        <html>
+                          <head>
+                            <title>Physiotherapy Session Report</title>
+                            <style>
+                              body { font-family: Arial, sans-serif; margin: 24px; }
+                              table { width: 100%; border-collapse: collapse; }
+                              th, td { border: 1px solid #ddd; padding: 8px; font-size: 12px; vertical-align: top; }
+                              th { background: #f5f5f5; text-align: left; }
+                              h2 { margin: 0 0 4px 0; }
+                            </style>
+                          </head>
+                          <body>${content.innerHTML}</body>
+                        </html>
+                      `);
+                      w.document.close();
+                      w.focus();
+                      w.print();
+                    } catch {
+                      toast.error('Unable to print physiotherapy report');
+                    }
+                  };
+
+                  const handleDownloadPdf = () => {
+                    handlePrint();
+                  };
+
+                  return (
+                    <div className="flex items-center justify-end gap-2 mb-4">
+                      <Button variant="outline" size="sm" onClick={handlePrint}>
+                        <Printer className="h-4 w-4 mr-1" />
+                        Print
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={handleDownloadPdf}>
+                        <Download className="h-4 w-4 mr-1" />
+                        Download PDF
+                      </Button>
+                    </div>
+                  );
+                })()}
+
                 <div className="space-y-6">
+                  <div id="physio-report-print-root">
                   {/* Report Header */}
                   <div className="border-b pb-4">
                     <div className="flex items-center justify-between mb-4">
                       <div>
                         <h2 className="text-lg font-semibold text-blue-700">PHYSIOTHERAPY SESSION REPORT</h2>
-                        <p className="text-sm text-muted-foreground">Nigerian Ports Authority Medical Services</p>
-                      </div>
-                      <div className="text-right">
-                        <div className="flex gap-2">
-                          <Button variant="outline" size="sm" onClick={() => window.print()}>
-                            <Printer className="h-4 w-4 mr-1" />
-                            Print
-                          </Button>
-                          <Button variant="outline" size="sm">
-                            <Download className="h-4 w-4 mr-1" />
-                            Download PDF
-                          </Button>
-                        </div>
+                        <p className="text-sm text-muted-foreground">{getOrganizationServicesHeader()}</p>
                       </div>
                     </div>
 
@@ -785,6 +1495,7 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
                       <p>Session ID: {selectedPhysioSession?.id != null ? `PHY-${String(selectedPhysioSession.id).padStart(6, '0')}` : '—'}</p>
                     </div>
                   </div>
+                  </div>
                 </div>
               </>
             ) : selectedPhysio && selectedPhysioSessions.length === 0 ? (
@@ -805,24 +1516,197 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
 
         {/* Ward Admission View Dialog */}
         <Dialog open={!!selectedWard} onOpenChange={(open) => { if (!open) setSelectedWard(null); }}>
-          <DialogContent className="max-w-lg">
-            {selectedWard && (
-              <>
-                <DialogHeader>
-                  <DialogTitle className="flex items-center gap-2"><Building2 className="h-5 w-5" /> Ward Admission</DialogTitle>
-                  <DialogDescription>{selectedWard.ward_name ?? ''} • {formatDate(selectedWard.admission_date)}</DialogDescription>
-                </DialogHeader>
-                <div className="space-y-3 text-sm">
-                  <div><span className="text-muted-foreground">Admission Date:</span> {formatDate(selectedWard.admission_date)} {formatTime(selectedWard.admission_date)}</div>
-                  <div><span className="text-muted-foreground">Ward:</span> {selectedWard.ward_name ?? ''}</div>
-                  <div><span className="text-muted-foreground">Type:</span> {selectedWard.admission_type ?? ''}</div>
-                  <div><span className="text-muted-foreground">Diagnosis:</span> {selectedWard.admission_diagnosis ?? ''}</div>
-                  <div><span className="text-muted-foreground">Length of Stay:</span> {selectedWard.length_of_stay ?? 0} days</div>
-                  <div><span className="text-muted-foreground">Status:</span> <Badge variant="outline">{selectedWard.status ?? ''}</Badge></div>
-                  {selectedWard.discharge_date && <div><span className="text-muted-foreground">Discharge Date:</span> {formatDate(selectedWard.discharge_date)}</div>}
+          <DialogContent className="w-[95vw] sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2"><FileText className="h-5 w-5 text-emerald-500" />Ward Admission</DialogTitle>
+              <DialogDescription>
+                {selectedWard ? `${selectedWard.admission_id || selectedWard.id} - ${selectedWard.patient_name || patient?.full_name || ''}` : ''}
+              </DialogDescription>
+            </DialogHeader>
+            {selectedWard && (() => {
+              const patientName =
+                selectedWard.patient_name ||
+                patient?.full_name ||
+                (patient ? `${patient.first_name || ''} ${patient.surname || ''}`.trim() : '') ||
+                '';
+              const patientIdValue = patient?.patient_id || '';
+              const age = (patient as any)?.age ?? null;
+              const gender = (patient as any)?.gender ?? '';
+              const statusLabel = humanizeStatus(selectedWard.status);
+
+              const handlePrint = () => {
+                try {
+                  const content = document.getElementById('ward-admission-print-root');
+                  if (!content) return;
+                  const w = window.open('', '_blank', 'noopener,noreferrer');
+                  if (!w) return;
+                  w.document.open();
+                  w.document.write(`
+                    <html>
+                      <head>
+                        <title>Ward Admission</title>
+                        <style>
+                          body { font-family: Arial, sans-serif; margin: 24px; }
+                          table { width: 100%; border-collapse: collapse; }
+                          th, td { border: 1px solid #ddd; padding: 8px; font-size: 12px; vertical-align: top; }
+                          th { background: #f5f5f5; text-align: left; }
+                          h2 { margin: 0 0 4px 0; }
+                        </style>
+                      </head>
+                      <body>${content.innerHTML}</body>
+                    </html>
+                  `);
+                  w.document.close();
+                  w.focus();
+                  w.print();
+                } catch {
+                  toast.error('Unable to print ward admission');
+                }
+              };
+
+              const handleDownloadPdf = () => {
+                handlePrint();
+              };
+
+              return (
+                <div className="space-y-6 py-4">
+                  <div id="ward-admission-print-root">
+                    <div className="text-center p-4 border-b">
+                      <h2 className="text-xl font-bold">WARD ADMISSION SUMMARY</h2>
+                      <p className="text-sm text-muted-foreground">{getOrganizationServicesHeader()}</p>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4 p-4 rounded-lg bg-muted/50">
+                      <div>
+                        <p className="text-xs text-muted-foreground">Patient Name</p>
+                        <p className="font-medium">{patientName}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Patient ID</p>
+                        <p className="font-medium">{patientIdValue}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Age / Gender</p>
+                        <p className="font-medium">{age != null ? `${age} years` : ''} / {gender}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Admission ID</p>
+                        <p className="font-medium">{selectedWard.admission_id || selectedWard.id}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Ward</p>
+                        <p className="font-medium">{selectedWard.ward_name ?? ''}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Bed</p>
+                        <p className="font-medium">{selectedWard.bed_number ?? '—'}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Admission Type</p>
+                        <p className="font-medium">{selectedWard.admission_type ?? ''}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Status</p>
+                        <Badge variant="outline" className={getImagingBadgeClass(statusLabel)}>{statusLabel}</Badge>
+                      </div>
+                      <div className="col-span-2">
+                        <p className="text-xs text-muted-foreground">Admission Diagnosis</p>
+                        <p className="font-medium">{selectedWard.admission_diagnosis ?? ''}</p>
+                      </div>
+                      {selectedWard.presenting_complaint && (
+                        <div className="col-span-2">
+                          <p className="text-xs text-muted-foreground">Presenting Complaint</p>
+                          <p className="font-medium whitespace-pre-wrap">{selectedWard.presenting_complaint}</p>
+                        </div>
+                      )}
+                      {selectedWard.admission_notes && (
+                        <div className="col-span-2">
+                          <p className="text-xs text-muted-foreground">Admission Notes</p>
+                          <p className="font-medium whitespace-pre-wrap">{selectedWard.admission_notes}</p>
+                        </div>
+                      )}
+                      {selectedWard.current_condition && (
+                        <div className="col-span-2">
+                          <p className="text-xs text-muted-foreground">Current Condition</p>
+                          <p className="font-medium whitespace-pre-wrap">{selectedWard.current_condition}</p>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                      <div className="p-3 rounded-lg border">
+                        <p className="text-xs text-muted-foreground">Admitted</p>
+                        <p className="font-medium">{selectedWard.admission_date ? `${formatDate(selectedWard.admission_date)} ${formatTime(selectedWard.admission_date)}` : ''}</p>
+                      </div>
+                      <div className="p-3 rounded-lg border">
+                        <p className="text-xs text-muted-foreground">Length of Stay</p>
+                        <p className="font-medium">{selectedWard.length_of_stay ?? 0} days</p>
+                      </div>
+                      <div className="p-3 rounded-lg border">
+                        <p className="text-xs text-muted-foreground">Discharged</p>
+                        <p className="font-medium">{selectedWard.discharge_date ? `${formatDate(selectedWard.discharge_date)} ${formatTime(selectedWard.discharge_date)}` : '—'}</p>
+                      </div>
+                      <div className="p-3 rounded-lg border">
+                        <p className="text-xs text-muted-foreground">Admitting Doctor</p>
+                        <p className="font-medium">{selectedWard.admitting_doctor_name ?? '—'}</p>
+                      </div>
+                    </div>
+
+                    {(selectedWard.discharge_summary || selectedWard.discharge_notes || selectedWard.discharge_diagnosis || selectedWard.follow_up_instructions) && (
+                      <div className="space-y-4 p-4 border-t">
+                        <h3 className="text-sm font-semibold">Discharge Details</h3>
+                        {selectedWard.discharge_type && (
+                          <div>
+                            <p className="text-xs text-muted-foreground">Discharge Type</p>
+                            <p className="font-medium">{selectedWard.discharge_type}</p>
+                          </div>
+                        )}
+                        {selectedWard.discharge_diagnosis && (
+                          <div>
+                            <p className="text-xs text-muted-foreground">Discharge Diagnosis</p>
+                            <p className="font-medium whitespace-pre-wrap">{selectedWard.discharge_diagnosis}</p>
+                          </div>
+                        )}
+                        {selectedWard.discharge_summary && (
+                          <div>
+                            <p className="text-xs text-muted-foreground">Discharge Summary</p>
+                            <p className="font-medium whitespace-pre-wrap">{selectedWard.discharge_summary}</p>
+                          </div>
+                        )}
+                        {selectedWard.discharge_notes && (
+                          <div>
+                            <p className="text-xs text-muted-foreground">Discharge Notes</p>
+                            <p className="font-medium whitespace-pre-wrap">{selectedWard.discharge_notes}</p>
+                          </div>
+                        )}
+                        {selectedWard.follow_up_instructions && (
+                          <div>
+                            <p className="text-xs text-muted-foreground">Follow-up Instructions</p>
+                            <p className="font-medium whitespace-pre-wrap">{selectedWard.follow_up_instructions}</p>
+                          </div>
+                        )}
+                        {selectedWard.discharge_doctor_name && (
+                          <div>
+                            <p className="text-xs text-muted-foreground">Discharge Doctor</p>
+                            <p className="font-medium">{selectedWard.discharge_doctor_name}</p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2">
+                    <Button variant="outline" onClick={() => setSelectedWard(null)}>Close</Button>
+                    <Button variant="outline" onClick={handlePrint}>
+                      <Printer className="h-4 w-4 mr-2" />Print
+                    </Button>
+                    <Button onClick={handleDownloadPdf}>
+                      <Download className="h-4 w-4 mr-2" />Download PDF
+                    </Button>
+                  </div>
                 </div>
-              </>
-            )}
+              );
+            })()}
           </DialogContent>
         </Dialog>
 
@@ -1024,13 +1908,18 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
                         {imagingHistory.map((img: any) => (
                           <tr key={img.id} className="hover:bg-muted/30">
                             <td className="px-4 py-3 text-muted-foreground">
-                              {formatDate(img.reported_at || img.created_at)} {formatTime(img.reported_at || img.created_at)}
+                              {formatDate(img.study_details?.verified_at || img.study_details?.reported_at || img.study_details?.created_at || img.created_at)} {formatTime(img.study_details?.verified_at || img.study_details?.reported_at || img.study_details?.created_at || img.created_at)}
                             </td>
                             <td className="px-4 py-3 font-medium">{(img.study_details?.procedure || img.procedure) ?? ''}</td>
                             <td className="px-4 py-3">
-                              <Badge className={img.overall_status === 'normal' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}>
-                                {img.overall_status ?? ''}
-                              </Badge>
+                              {(() => {
+                                const label = img.overall_status ? humanizeStatus(img.overall_status) : humanizeStatus(img.study_details?.status);
+                                return (
+                                  <Badge variant="outline" className={getImagingBadgeClass(label)}>
+                                    {label}
+                                  </Badge>
+                                );
+                              })()}
                             </td>
                             <td className="px-4 py-3 text-center">
                               <Button variant="ghost" size="sm" onClick={() => { setSelectedImaging(img); }}>
