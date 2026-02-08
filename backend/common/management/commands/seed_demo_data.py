@@ -6,15 +6,20 @@ Usage:
     python manage.py seed_demo_data
     python manage.py seed_demo_data --reset  # Clear existing data first
 """
+import csv
+from decimal import Decimal
+from pathlib import Path
+
+from django.core.management import call_command
 from django.core.management.base import BaseCommand
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 from datetime import datetime, timedelta
 from django.contrib.auth import get_user_model
 
 from accounts.models import User
 from laboratory.models import LabTemplate, LabOrder, LabTest
-from pharmacy.models import Medication, MedicationInventory, Prescription, PrescriptionItem
+from pharmacy.models import GenericMedication, Medication, MedicationInventory, Prescription, PrescriptionItem
 from radiology.models import RadiologyOrder, RadiologyStudy
 from consultation.models import ConsultationRoom, ConsultationSession, ConsultationQueue, ICD10Code, Diagnosis
 from nursing.models import NursingOrder
@@ -46,11 +51,12 @@ class Command(BaseCommand):
 
         with transaction.atomic():
             if options.get("reset"):
-                self._reset_data()
+                self._reset_data(preserve_users=bool(options.get("preserve_users")))
 
             clinic, departments = self._create_organization()
             roles = self._create_roles()
             users = self._create_users(clinic, departments, roles)
+            self._create_employee_patients()
             # Create wards and beds after users (for head nurse assignment)
             wards_created, beds_created = self._create_wards_and_beds(clinic, users.get('admin'))
             lab_templates = self._create_lab_templates()
@@ -74,10 +80,8 @@ class Command(BaseCommand):
         self.stdout.write("  Records: records / ChangeMe123!")
         self.stdout.write("  Physiotherapist: physio / ChangeMe123!")
 
-    def _reset_data(self):
+    def _reset_data(self, preserve_users: bool = False):
         """Delete existing demo data."""
-        preserve_users = self.options.get("preserve_users", False)
-
         if preserve_users:
             self.stdout.write("Deleting existing demo data (preserving users)...")
         else:
@@ -95,6 +99,7 @@ class Command(BaseCommand):
         Prescription.objects.all().delete()
         MedicationInventory.objects.all().delete()
         Medication.objects.all().delete()
+        GenericMedication.objects.all().delete()
         LabTest.objects.all().delete()
         LabOrder.objects.all().delete()
         LabTemplate.objects.all().delete()
@@ -109,6 +114,13 @@ class Command(BaseCommand):
         UserRole.objects.all().delete()  # Delete user-role relationships
         Role.objects.all().delete()  # Delete roles
         self.stdout.write(self.style.WARNING("Existing demo data removed."))
+
+    def _create_employee_patients(self):
+        self.stdout.write("Creating employee patients...")
+        try:
+            call_command("seed_employee_patients")
+        except Exception as e:
+            self.stdout.write(self.style.WARNING(f"  ! Employee patient seeding skipped: {e}"))
 
     def _create_roles(self):
         """Create default roles with permissions."""
@@ -2267,12 +2279,200 @@ class Command(BaseCommand):
         return templates
 
     def _create_medications(self):
-        """Create comprehensive medications inventory."""
         self.stdout.write("Creating medications...")
-        medications = []
+        data_dir = Path(__file__).resolve().parents[3] / "data"
 
-        med_data = [
-            # Antibiotics
+        category_map = {
+            "Antibiotic": "Antibiotics",
+            "Antimalarial": "Antimalarials",
+            "NSAID": "NSAIDs",
+            "Analgesic": "Analgesics",
+            "Antiplatelet": "Antiplatelet",
+            "Antigout": "Antigout",
+            "Antidepressant": "Antidepressants",
+            "Diuretic": "Diuretics",
+            "Antihypertensive": "Antihypertensives",
+            "Ophthalmic": "Ophthalmic",
+            "Cough": "Antitussives",
+            "Haematinics": "Haematinics",
+            "Neuropathic": "Analgesics",
+            "Device": "",
+            "Supplements": "Vitamins",
+            "PPI": "AntiUlcer",
+            "Respiratory": "AntiAsthmatics",
+            "Urology": "Urological",
+            "Antidiabetic": "Antidiabetics",
+            "DMARD": "Other",
+            "Antihistamine": "Antihistamines",
+            "Antifungal": "Antifungals",
+            "Decongestant": "NasalDecongestants",
+            "Topical Analgesic": "Analgesics",
+            "Renal": "Other",
+            "Combination": "Other",
+            "Hypnotic": "Sedatives",
+            "Antimigraine": "AntiMigraine",
+            "Lipid": "LipidLowering",
+            "Otic": "Otic",
+            "Hepatoprotective": "Hepatoprotective",
+        }
+
+        def normalize_unit(unit: str, form: str) -> str:
+            unit = (unit or "").strip()
+            form = (form or "").strip()
+            return unit or form or "unit"
+
+        def import_generics(csv_path: Path):
+            if not csv_path.exists():
+                return (0, 0)
+            created = 0
+            skipped = 0
+            with open(csv_path, "r", encoding="utf-8-sig") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    generic_id = (row.get("Generic_ID") or "").strip()
+                    name = (row.get("Generic_Name") or "").strip()
+                    active_ingredient = (row.get("Active_Ingredient") or "").strip()
+                    category = (row.get("Category") or "").strip() or "Other"
+                    strength = (row.get("Strengths_Available") or "").strip()
+                    dosage_form = (row.get("Dosage_Forms") or "").strip()
+                    route = (row.get("Route") or "").strip()
+
+                    if not name or not strength or strength == "-" or not dosage_form or dosage_form == "-":
+                        skipped += 1
+                        continue
+
+                    atc_code = generic_id or None
+                    try:
+                        GenericMedication.objects.create(
+                            name=name,
+                            active_ingredient=active_ingredient,
+                            category=category,
+                            strength=strength,
+                            dosage_form=dosage_form,
+                            route=route,
+                            atc_code=atc_code,
+                            is_active=True,
+                        )
+                        created += 1
+                    except Exception:
+                        try:
+                            GenericMedication.objects.create(
+                                name=name,
+                                active_ingredient=active_ingredient,
+                                category=category,
+                                strength=strength,
+                                dosage_form=dosage_form,
+                                route=route,
+                                is_active=True,
+                            )
+                            created += 1
+                        except Exception:
+                            skipped += 1
+            return (created, skipped)
+
+        def import_brands(csv_path: Path):
+            if not csv_path.exists():
+                return (0, 0, 0)
+            created = 0
+            updated = 0
+            skipped = 0
+            with open(csv_path, "r", encoding="utf-8-sig") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    brand_name = (row.get("Brand_Name") or "").strip()
+                    generic_id = (row.get("Generic_ID") or "").strip()
+                    generic_name = (row.get("Generic_Name") or "").strip()
+                    code = (row.get("Product_Code") or "").strip()
+                    unit = normalize_unit(row.get("Unit") or "", row.get("Form") or "")
+                    strength = (row.get("Strength") or "").strip()
+                    form = (row.get("Form") or "").strip()
+                    category_raw = (row.get("Category") or "").strip()
+                    manufacturer = (row.get("Manufacturer") or "").strip()
+                    pack_size_raw = (row.get("Pack_Size") or "").strip()
+
+                    if not brand_name or not code or not strength or strength == "-" or not form or form == "-":
+                        skipped += 1
+                        continue
+
+                    try:
+                        pack_size = int(pack_size_raw) if pack_size_raw else None
+                    except ValueError:
+                        pack_size = None
+
+                    category = category_map.get(category_raw, category_raw)
+
+                    generic = None
+                    if generic_id:
+                        generic = GenericMedication.objects.filter(atc_code=generic_id).first()
+                    if not generic and generic_name:
+                        generic = GenericMedication.objects.filter(name__iexact=generic_name).first()
+                    if not generic:
+                        skipped += 1
+                        continue
+
+                    existing = Medication.objects.filter(name=brand_name, generic=generic).first()
+                    if existing:
+                        existing.code = code
+                        existing.unit = unit
+                        existing.strength = strength or (generic.strength or "")
+                        existing.form = form or (generic.dosage_form or "")
+                        existing.category = category
+                        existing.manufacturer = manufacturer
+                        existing.pack_size = pack_size
+                        existing.is_active = True
+                        existing.save()
+                        updated += 1
+                        continue
+
+                    try:
+                        Medication.objects.create(
+                            name=brand_name,
+                            generic=generic,
+                            generic_name=generic.name,
+                            code=code,
+                            unit=unit,
+                            strength=strength or (generic.strength or ""),
+                            form=form or (generic.dosage_form or ""),
+                            category=category,
+                            manufacturer=manufacturer,
+                            pack_size=pack_size,
+                            prescription_required=False,
+                            min_stock_level=0,
+                            is_active=True,
+                        )
+                        created += 1
+                    except IntegrityError:
+                        try:
+                            Medication.objects.create(
+                                name=brand_name,
+                                generic=generic,
+                                generic_name=generic.name,
+                                code=f"{code}-{generic.id}",
+                                unit=unit,
+                                strength=strength or (generic.strength or ""),
+                                form=form or (generic.dosage_form or ""),
+                                category=category,
+                                manufacturer=manufacturer,
+                                pack_size=pack_size,
+                                prescription_required=False,
+                                min_stock_level=0,
+                                is_active=True,
+                            )
+                            created += 1
+                        except Exception:
+                            skipped += 1
+            return (created, updated, skipped)
+
+        gen_created, gen_skipped = import_generics(data_dir / "GENERIC_MEDICATIONS.csv")
+        self.stdout.write(f"  ✓ Generics imported: {gen_created} (skipped {gen_skipped})")
+
+        b1_created, b1_updated, b1_skipped = import_brands(data_dir / "BRAND_MEDICATIONS.csv")
+        b2_created, b2_updated, b2_skipped = import_brands(data_dir / "BRAND_MEDICATIONS_SEED.csv")
+        self.stdout.write(
+            f"  ✓ Brands imported: {b1_created + b2_created} (updated {b1_updated + b2_updated}, skipped {b1_skipped + b2_skipped})"
+        )
+
+        baseline_medications = [
             {'code': 'AMOX-250', 'name': 'Amoxicillin 250mg', 'generic_name': 'Amoxicillin', 'unit': 'capsule', 'strength': '250mg', 'form': 'capsule'},
             {'code': 'AMOX-500', 'name': 'Amoxicillin 500mg', 'generic_name': 'Amoxicillin', 'unit': 'capsule', 'strength': '500mg', 'form': 'capsule'},
             {'code': 'AUGM-625', 'name': 'Augmentin 625mg', 'generic_name': 'Amoxicillin + Clavulanic Acid', 'unit': 'tablet', 'strength': '625mg', 'form': 'tablet'},
@@ -2284,8 +2484,6 @@ class Command(BaseCommand):
             {'code': 'ERYTH-250', 'name': 'Erythromycin 250mg', 'generic_name': 'Erythromycin', 'unit': 'tablet', 'strength': '250mg', 'form': 'tablet'},
             {'code': 'METRO-200', 'name': 'Metronidazole 200mg', 'generic_name': 'Metronidazole', 'unit': 'tablet', 'strength': '200mg', 'form': 'tablet'},
             {'code': 'METRO-400', 'name': 'Metronidazole 400mg', 'generic_name': 'Metronidazole', 'unit': 'tablet', 'strength': '400mg', 'form': 'tablet'},
-
-            # Analgesics & Anti-inflammatory
             {'code': 'PARA-500', 'name': 'Paracetamol 500mg', 'generic_name': 'Paracetamol', 'unit': 'tablet', 'strength': '500mg', 'form': 'tablet'},
             {'code': 'PARA-250', 'name': 'Paracetamol 250mg (Pediatric)', 'generic_name': 'Paracetamol', 'unit': 'tablet', 'strength': '250mg', 'form': 'tablet'},
             {'code': 'IBUP-200', 'name': 'Ibuprofen 200mg', 'generic_name': 'Ibuprofen', 'unit': 'tablet', 'strength': '200mg', 'form': 'tablet'},
@@ -2296,8 +2494,6 @@ class Command(BaseCommand):
             {'code': 'NAPRO-500', 'name': 'Naproxen 500mg', 'generic_name': 'Naproxen', 'unit': 'tablet', 'strength': '500mg', 'form': 'tablet'},
             {'code': 'TRAM-50', 'name': 'Tramadol 50mg', 'generic_name': 'Tramadol', 'unit': 'capsule', 'strength': '50mg', 'form': 'capsule'},
             {'code': 'TRAM-100', 'name': 'Tramadol 100mg', 'generic_name': 'Tramadol', 'unit': 'capsule', 'strength': '100mg', 'form': 'capsule'},
-
-            # Antihypertensives
             {'code': 'AMLOD-5', 'name': 'Amlodipine 5mg', 'generic_name': 'Amlodipine', 'unit': 'tablet', 'strength': '5mg', 'form': 'tablet'},
             {'code': 'AMLOD-10', 'name': 'Amlodipine 10mg', 'generic_name': 'Amlodipine', 'unit': 'tablet', 'strength': '10mg', 'form': 'tablet'},
             {'code': 'LISIN-5', 'name': 'Lisinopril 5mg', 'generic_name': 'Lisinopril', 'unit': 'tablet', 'strength': '5mg', 'form': 'tablet'},
@@ -2310,8 +2506,6 @@ class Command(BaseCommand):
             {'code': 'ATEN-100', 'name': 'Atenolol 100mg', 'generic_name': 'Atenolol', 'unit': 'tablet', 'strength': '100mg', 'form': 'tablet'},
             {'code': 'METOP-25', 'name': 'Metoprolol 25mg', 'generic_name': 'Metoprolol', 'unit': 'tablet', 'strength': '25mg', 'form': 'tablet'},
             {'code': 'METOP-50', 'name': 'Metoprolol 50mg', 'generic_name': 'Metoprolol', 'unit': 'tablet', 'strength': '50mg', 'form': 'tablet'},
-
-            # Antidiabetics
             {'code': 'MET-500', 'name': 'Metformin 500mg', 'generic_name': 'Metformin', 'unit': 'tablet', 'strength': '500mg', 'form': 'tablet'},
             {'code': 'MET-850', 'name': 'Metformin 850mg', 'generic_name': 'Metformin', 'unit': 'tablet', 'strength': '850mg', 'form': 'tablet'},
             {'code': 'MET-1000', 'name': 'Metformin 1000mg SR', 'generic_name': 'Metformin', 'unit': 'tablet', 'strength': '1000mg', 'form': 'tablet'},
@@ -2319,14 +2513,10 @@ class Command(BaseCommand):
             {'code': 'GLIB-2.5', 'name': 'Glibenclamide 2.5mg', 'generic_name': 'Glibenclamide', 'unit': 'tablet', 'strength': '2.5mg', 'form': 'tablet'},
             {'code': 'GLIME-1', 'name': 'Glimepiride 1mg', 'generic_name': 'Glimepiride', 'unit': 'tablet', 'strength': '1mg', 'form': 'tablet'},
             {'code': 'GLIME-2', 'name': 'Glimepiride 2mg', 'generic_name': 'Glimepiride', 'unit': 'tablet', 'strength': '2mg', 'form': 'tablet'},
-
-            # Antihistamines
             {'code': 'LORAT-10', 'name': 'Loratadine 10mg', 'generic_name': 'Loratadine', 'unit': 'tablet', 'strength': '10mg', 'form': 'tablet'},
             {'code': 'CETIR-10', 'name': 'Cetirizine 10mg', 'generic_name': 'Cetirizine', 'unit': 'tablet', 'strength': '10mg', 'form': 'tablet'},
             {'code': 'PROMET-25', 'name': 'Promethazine 25mg', 'generic_name': 'Promethazine', 'unit': 'tablet', 'strength': '25mg', 'form': 'tablet'},
             {'code': 'CHLORPHEN-4', 'name': 'Chlorpheniramine 4mg', 'generic_name': 'Chlorpheniramine', 'unit': 'tablet', 'strength': '4mg', 'form': 'tablet'},
-
-            # Antacids & GIT
             {'code': 'OMEP-20', 'name': 'Omeprazole 20mg', 'generic_name': 'Omeprazole', 'unit': 'capsule', 'strength': '20mg', 'form': 'capsule'},
             {'code': 'OMEP-40', 'name': 'Omeprazole 40mg', 'generic_name': 'Omeprazole', 'unit': 'capsule', 'strength': '40mg', 'form': 'capsule'},
             {'code': 'PANT-40', 'name': 'Pantoprazole 40mg', 'generic_name': 'Pantoprazole', 'unit': 'tablet', 'strength': '40mg', 'form': 'tablet'},
@@ -2335,82 +2525,56 @@ class Command(BaseCommand):
             {'code': 'DOMPER-10', 'name': 'Domperidone 10mg', 'generic_name': 'Domperidone', 'unit': 'tablet', 'strength': '10mg', 'form': 'tablet'},
             {'code': 'ONDAN-4', 'name': 'Ondansetron 4mg', 'generic_name': 'Ondansetron', 'unit': 'tablet', 'strength': '4mg', 'form': 'tablet'},
             {'code': 'ONDAN-8', 'name': 'Ondansetron 8mg', 'generic_name': 'Ondansetron', 'unit': 'tablet', 'strength': '8mg', 'form': 'tablet'},
-
-            # Vitamins & Supplements
             {'code': 'VIT-B-COMPLEX', 'name': 'Vitamin B Complex', 'generic_name': 'Vitamin B Complex', 'unit': 'tablet', 'strength': 'N/A', 'form': 'tablet'},
             {'code': 'VIT-C-500', 'name': 'Vitamin C 500mg', 'generic_name': 'Ascorbic Acid', 'unit': 'tablet', 'strength': '500mg', 'form': 'tablet'},
             {'code': 'CALCIUM-500', 'name': 'Calcium 500mg', 'generic_name': 'Calcium Carbonate', 'unit': 'tablet', 'strength': '500mg', 'form': 'tablet'},
             {'code': 'FOLIC-5', 'name': 'Folic Acid 5mg', 'generic_name': 'Folic Acid', 'unit': 'tablet', 'strength': '5mg', 'form': 'tablet'},
             {'code': 'IRON-65', 'name': 'Iron (Ferrous Sulphate) 65mg', 'generic_name': 'Ferrous Sulphate', 'unit': 'tablet', 'strength': '65mg', 'form': 'tablet'},
             {'code': 'MULTIVITAMIN', 'name': 'Multivitamin Tablet', 'generic_name': 'Multivitamin', 'unit': 'tablet', 'strength': 'N/A', 'form': 'tablet'},
-
-            # Respiratory
             {'code': 'SALBU-2', 'name': 'Salbutamol 2mg', 'generic_name': 'Salbutamol', 'unit': 'tablet', 'strength': '2mg', 'form': 'tablet'},
             {'code': 'SALBU-INH', 'name': 'Salbutamol Inhaler 100mcg', 'generic_name': 'Salbutamol', 'unit': 'inhaler', 'strength': '100mcg', 'form': 'inhaler'},
             {'code': 'THEO-200', 'name': 'Theophylline 200mg SR', 'generic_name': 'Theophylline', 'unit': 'tablet', 'strength': '200mg', 'form': 'tablet'},
             {'code': 'DEXAMETH-INH', 'name': 'Dexamethasone + Neomycin Ear Drops', 'generic_name': 'Dexamethasone + Neomycin', 'unit': 'bottle', 'strength': 'N/A', 'form': 'drops'},
-
-            # Dermatology
             {'code': 'BETAMETH-CREAM', 'name': 'Betamethasone Cream 0.1%', 'generic_name': 'Betamethasone', 'unit': 'tube', 'strength': '0.1%', 'form': 'cream'},
             {'code': 'CLOTRI-CREAM', 'name': 'Clotrimazole Cream 1%', 'generic_name': 'Clotrimazole', 'unit': 'tube', 'strength': '1%', 'form': 'cream'},
             {'code': 'HYDROCORT-CREAM', 'name': 'Hydrocortisone Cream 1%', 'generic_name': 'Hydrocortisone', 'unit': 'tube', 'strength': '1%', 'form': 'cream'},
             {'code': 'PERMETHRIN-CREAM', 'name': 'Permethrin Cream 5%', 'generic_name': 'Permethrin', 'unit': 'tube', 'strength': '5%', 'form': 'cream'},
-
-            # Ophthalmology
             {'code': 'TOBRAMYCIN-EYE', 'name': 'Tobramycin Eye Drops 0.3%', 'generic_name': 'Tobramycin', 'unit': 'bottle', 'strength': '0.3%', 'form': 'eye_drops'},
             {'code': 'TIMOLOL-EYE', 'name': 'Timolol Eye Drops 0.5%', 'generic_name': 'Timolol', 'unit': 'bottle', 'strength': '0.5%', 'form': 'eye_drops'},
             {'code': 'CYCLOPENTOLATE', 'name': 'Cyclopentolate Eye Drops 1%', 'generic_name': 'Cyclopentolate', 'unit': 'bottle', 'strength': '1%', 'form': 'eye_drops'},
             {'code': 'ARTIFICIAL-TEARS', 'name': 'Artificial Tears Eye Drops', 'generic_name': 'Artificial Tears', 'unit': 'bottle', 'strength': 'N/A', 'form': 'eye_drops'},
-
-            # Gynecology
             {'code': 'MISOPROSTOL-200', 'name': 'Misoprostol 200mcg', 'generic_name': 'Misoprostol', 'unit': 'tablet', 'strength': '200mcg', 'form': 'tablet'},
             {'code': 'MEDROXY-10', 'name': 'Medroxyprogesterone 10mg', 'generic_name': 'Medroxyprogesterone', 'unit': 'tablet', 'strength': '10mg', 'form': 'tablet'},
             {'code': 'CONTRACEPTIVE-PILLS', 'name': 'Combined Oral Contraceptive Pills', 'generic_name': 'Ethinylestradiol + Levonorgestrel', 'unit': 'pack', 'strength': 'N/A', 'form': 'oral_contraceptive'},
-
-            # Pediatrics
             {'code': 'AMOX-SUSP', 'name': 'Amoxicillin Suspension 125mg/5ml', 'generic_name': 'Amoxicillin', 'unit': 'bottle', 'strength': '125mg/5ml', 'form': 'suspension'},
             {'code': 'PARA-SUSP', 'name': 'Paracetamol Suspension 120mg/5ml', 'generic_name': 'Paracetamol', 'unit': 'bottle', 'strength': '120mg/5ml', 'form': 'suspension'},
             {'code': 'IBUP-SUSP', 'name': 'Ibuprofen Suspension 100mg/5ml', 'generic_name': 'Ibuprofen', 'unit': 'bottle', 'strength': '100mg/5ml', 'form': 'suspension'},
             {'code': 'ORS', 'name': 'Oral Rehydration Solution', 'generic_name': 'ORS', 'unit': 'sachet', 'strength': 'N/A', 'form': 'powder'},
-
-            # Psychiatry
             {'code': 'AMITRIPTYLINE-25', 'name': 'Amitriptyline 25mg', 'generic_name': 'Amitriptyline', 'unit': 'tablet', 'strength': '25mg', 'form': 'tablet'},
             {'code': 'FLUOXETINE-20', 'name': 'Fluoxetine 20mg', 'generic_name': 'Fluoxetine', 'unit': 'capsule', 'strength': '20mg', 'form': 'capsule'},
             {'code': 'DIAZEPAM-5', 'name': 'Diazepam 5mg', 'generic_name': 'Diazepam', 'unit': 'tablet', 'strength': '5mg', 'form': 'tablet'},
             {'code': 'HALOPERIDOL-5', 'name': 'Haloperidol 5mg', 'generic_name': 'Haloperidol', 'unit': 'tablet', 'strength': '5mg', 'form': 'tablet'},
-
-            # Anticoagulants
             {'code': 'ASPIRIN-75', 'name': 'Aspirin 75mg', 'generic_name': 'Aspirin', 'unit': 'tablet', 'strength': '75mg', 'form': 'tablet'},
             {'code': 'ASPIRIN-300', 'name': 'Aspirin 300mg', 'generic_name': 'Aspirin', 'unit': 'tablet', 'strength': '300mg', 'form': 'tablet'},
             {'code': 'WARFARIN-1', 'name': 'Warfarin 1mg', 'generic_name': 'Warfarin', 'unit': 'tablet', 'strength': '1mg', 'form': 'tablet'},
             {'code': 'WARFARIN-2', 'name': 'Warfarin 2mg', 'generic_name': 'Warfarin', 'unit': 'tablet', 'strength': '2mg', 'form': 'tablet'},
             {'code': 'WARFARIN-5', 'name': 'Warfarin 5mg', 'generic_name': 'Warfarin', 'unit': 'tablet', 'strength': '5mg', 'form': 'tablet'},
-
-            # Diuretics
             {'code': 'FUROSEMIDE-40', 'name': 'Furosemide 40mg', 'generic_name': 'Furosemide', 'unit': 'tablet', 'strength': '40mg', 'form': 'tablet'},
             {'code': 'SPIRONOLACTONE-25', 'name': 'Spironolactone 25mg', 'generic_name': 'Spironolactone', 'unit': 'tablet', 'strength': '25mg', 'form': 'tablet'},
             {'code': 'AMILORIDE-5', 'name': 'Amiloride 5mg', 'generic_name': 'Amiloride', 'unit': 'tablet', 'strength': '5mg', 'form': 'tablet'},
-
-            # Hormones & Steroids
             {'code': 'PREDNISOLONE-5', 'name': 'Prednisolone 5mg', 'generic_name': 'Prednisolone', 'unit': 'tablet', 'strength': '5mg', 'form': 'tablet'},
             {'code': 'PREDNISOLONE-10', 'name': 'Prednisolone 10mg', 'generic_name': 'Prednisolone', 'unit': 'tablet', 'strength': '10mg', 'form': 'tablet'},
             {'code': 'DEXAMETHASONE-0.5', 'name': 'Dexamethasone 0.5mg', 'generic_name': 'Dexamethasone', 'unit': 'tablet', 'strength': '0.5mg', 'form': 'tablet'},
             {'code': 'THYROXINE-25', 'name': 'Thyroxine 25mcg', 'generic_name': 'Levothyroxine', 'unit': 'tablet', 'strength': '25mcg', 'form': 'tablet'},
             {'code': 'THYROXINE-50', 'name': 'Thyroxine 50mcg', 'generic_name': 'Levothyroxine', 'unit': 'tablet', 'strength': '50mcg', 'form': 'tablet'},
             {'code': 'THYROXINE-100', 'name': 'Thyroxine 100mcg', 'generic_name': 'Levothyroxine', 'unit': 'tablet', 'strength': '100mcg', 'form': 'tablet'},
-
-            # Anti-epileptics
             {'code': 'PHENYTOIN-100', 'name': 'Phenytoin 100mg', 'generic_name': 'Phenytoin', 'unit': 'capsule', 'strength': '100mg', 'form': 'capsule'},
             {'code': 'CARBAMAZEPINE-200', 'name': 'Carbamazepine 200mg', 'generic_name': 'Carbamazepine', 'unit': 'tablet', 'strength': '200mg', 'form': 'tablet'},
             {'code': 'VALPROATE-200', 'name': 'Sodium Valproate 200mg', 'generic_name': 'Sodium Valproate', 'unit': 'tablet', 'strength': '200mg', 'form': 'tablet'},
             {'code': 'VALPROATE-500', 'name': 'Sodium Valproate 500mg', 'generic_name': 'Sodium Valproate', 'unit': 'tablet', 'strength': '500mg', 'form': 'tablet'},
-
-            # Anti-malarials
             {'code': 'CHLOROQUINE-250', 'name': 'Chloroquine 250mg', 'generic_name': 'Chloroquine', 'unit': 'tablet', 'strength': '250mg', 'form': 'tablet'},
             {'code': 'ARTEMETHER-LUMEFANTRINE', 'name': 'Artemether + Lumefantrine', 'generic_name': 'Coartem', 'unit': 'blister', 'strength': '20+120mg', 'form': 'tablet'},
             {'code': 'QUININE-300', 'name': 'Quinine 300mg', 'generic_name': 'Quinine', 'unit': 'tablet', 'strength': '300mg', 'form': 'tablet'},
-
-            # Miscellaneous
             {'code': 'ALBENDAZOLE-400', 'name': 'Albendazole 400mg', 'generic_name': 'Albendazole', 'unit': 'tablet', 'strength': '400mg', 'form': 'tablet'},
             {'code': 'IVERMECTIN-12', 'name': 'Ivermectin 12mg', 'generic_name': 'Ivermectin', 'unit': 'tablet', 'strength': '12mg', 'form': 'tablet'},
             {'code': 'INSULIN-70/30', 'name': 'Insulin 70/30', 'generic_name': 'Human Insulin', 'unit': 'vial', 'strength': '100IU/ml', 'form': 'injection'},
@@ -2421,32 +2585,103 @@ class Command(BaseCommand):
             {'code': 'DIGOXIN-0.25', 'name': 'Digoxin 0.25mg', 'generic_name': 'Digoxin', 'unit': 'tablet', 'strength': '0.25mg', 'form': 'tablet'},
         ]
 
-        for data in med_data:
-            med, _ = Medication.objects.get_or_create(
-                code=data['code'],
-                defaults=data
+        for data in baseline_medications:
+            if Medication.objects.filter(name__iexact=data["name"]).exists():
+                continue
+            Medication.objects.get_or_create(code=data["code"], defaults=data)
+
+        linked = 0
+        for med in Medication.objects.filter(generic__isnull=True).exclude(generic_name=""):
+            name = (med.generic_name or "").strip()
+            strength = (med.strength or "").strip()
+            form = (med.form or "").strip()
+            if not name:
+                continue
+            gm = (
+                GenericMedication.objects.filter(name__iexact=name, strength=strength, dosage_form=form).first()
+                or GenericMedication.objects.filter(name__iexact=name).first()
             )
-            medications.append(med)
+            if not gm:
+                gm = GenericMedication.objects.create(
+                    name=name,
+                    active_ingredient=name,
+                    category="Other",
+                    strength=strength,
+                    dosage_form=form,
+                    route="",
+                    is_active=True,
+                )
+            if Medication.objects.filter(name=med.name, generic=gm).exclude(pk=med.pk).exists():
+                continue
+            med.generic = gm
+            med.save(update_fields=["generic"])
+            linked += 1
+        if linked:
+            self.stdout.write(f"  ✓ Linked {linked} medications to generics")
 
-            # Create inventory for each medication with varying quantities
-            import random
-            quantity = random.randint(200, 1000)  # Random quantity between 200-1000
-            expiry_days = random.randint(180, 730)  # Random expiry between 6 months to 2 years
+        default_quantity = Decimal("1000")
+        default_min_stock = Decimal("100")
+        expiry_date = (timezone.now() + timedelta(days=730)).date()
 
-            MedicationInventory.objects.get_or_create(
+        meds = Medication.objects.filter(is_active=True)
+        for med in meds:
+            batch_number = f"BATCH-{med.code}-001"
+            MedicationInventory.objects.update_or_create(
                 medication=med,
-                batch_number=f'BATCH-{med.code}-001',
+                batch_number=batch_number,
+                location="Store",
                 defaults={
-                    'expiry_date': (timezone.now() + timedelta(days=expiry_days)).date(),
-                    'quantity': quantity,
-                    'unit': data['unit'],
-                    'min_stock_level': max(50, quantity // 10),  # 10% of current stock as min level
-                    'location': random.choice(['Main Pharmacy', 'Emergency Pharmacy', 'Pediatric Pharmacy', 'General Ward', 'Surgical Ward']),
-                }
+                    "expiry_date": expiry_date,
+                    "quantity": default_quantity,
+                    "unit": med.unit or "unit",
+                    "min_stock_level": default_min_stock,
+                    "supplier": "Default Supplier",
+                },
             )
 
-        self.stdout.write(f"  ✓ Created {len(medications)} medications with inventory")
-        return medications
+        today = timezone.now().date()
+        moved_total = Decimal("0")
+        lines = 0
+        per_med_qty = Decimal("50")
+        for med in meds.order_by("name"):
+            source = (
+                MedicationInventory.objects.filter(
+                    medication=med,
+                    location="Store",
+                    quantity__gt=0,
+                    expiry_date__gt=today,
+                )
+                .order_by("expiry_date")
+                .first()
+            )
+            if not source:
+                continue
+            transfer_qty = min(source.quantity, per_med_qty)
+            if transfer_qty <= 0:
+                continue
+            source.quantity -= transfer_qty
+            source.save(update_fields=["quantity"])
+            dest, _ = MedicationInventory.objects.get_or_create(
+                medication=med,
+                batch_number=source.batch_number,
+                location="Dispensary",
+                defaults={
+                    "expiry_date": source.expiry_date,
+                    "quantity": Decimal("0"),
+                    "min_stock_level": source.min_stock_level,
+                    "unit": source.unit,
+                    "supplier": source.supplier,
+                },
+            )
+            dest.quantity += transfer_qty
+            dest.save(update_fields=["quantity"])
+            moved_total += transfer_qty
+            lines += 1
+
+        self.stdout.write(f"  ✓ Seeded Store inventory for {meds.count()} medications")
+        self.stdout.write(f"  ✓ Seeded Dispensary inventory: moved {int(moved_total)} across {lines} meds")
+        self.stdout.write(f"  ✓ Total medications: {Medication.objects.count()}")
+        return list(meds)
 
     def _create_icd10_codes(self):
         """Create comprehensive ICD-10 codes for medical diagnosis."""
