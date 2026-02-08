@@ -42,7 +42,7 @@ interface Patient {
   visitTime: string;
   visitType: string;
   visitNotes?: string; // Notes / Special Instructions from visit
-  nursingStatus: 'Pending' | 'Vitals Recorded' | 'Ready for Consultation' | 'Sent to Room';
+  nursingStatus: 'Pending' | 'Vitals Recorded' | 'Ready for Consultation' | 'Sent to Room' | 'Sent to Physiotherapy';
   consultationRoom?: string;
   vitals?: VitalsData;
   age?: number;
@@ -107,6 +107,7 @@ export default function NursingPoolQueuePage() {
   const [authError, setAuthError] = useState<unknown | null>(null);
   useAuthRedirect(authError);
   const [sendingToPhysioVisitId, setSendingToPhysioVisitId] = useState<number | null>(null);
+  const [physioCheckins, setPhysioCheckins] = useState<Record<number, { orderId: number; status: string }>>({});
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('today');
@@ -279,6 +280,28 @@ export default function NursingPoolQueuePage() {
           } as Visit);
         });
 
+        let physioCheckedInByVisitId: Record<number, { orderId: number; status: string }> = {};
+        const combinedVisitIds = Array.from(new Set(combinedVisits.map(v => v.id))).filter(Boolean);
+        try {
+          if (combinedVisitIds.length > 0) {
+            const qs = new URLSearchParams();
+            qs.set('visit_ids', combinedVisitIds.join(','));
+            const checkins = await apiFetch<{ results: Record<string, { checked_in: boolean; order_id?: number; status?: string }> }>(
+              `/physiotherapy/orders/checkins-for-visits/?${qs.toString()}`
+            );
+            Object.entries(checkins.results || {}).forEach(([visitIdRaw, payload]) => {
+              const visitId = Number(visitIdRaw);
+              if (!Number.isFinite(visitId)) return;
+              if (!payload?.checked_in) return;
+              if (typeof payload.order_id !== 'number') return;
+              physioCheckedInByVisitId[visitId] = { orderId: payload.order_id, status: payload.status || 'scheduled' };
+            });
+          }
+        } catch (err) {
+          debugLog('Physiotherapy check-ins not available:', err);
+        }
+        setPhysioCheckins(physioCheckedInByVisitId);
+
         // Fetch vitals for all relevant visits in parallel
         const vitalsPromises = combinedVisits.map(async (visit: Visit) => {
           try {
@@ -331,12 +354,15 @@ export default function NursingPoolQueuePage() {
           const vitalsData = vitalsMap.get(visit.id);
 
           // Determine nursing status based on visit data, vitals, and queue status
-          let nursingStatus: 'Pending' | 'Vitals Recorded' | 'Ready for Consultation' | 'Sent to Room' = 'Pending';
+          let nursingStatus: 'Pending' | 'Vitals Recorded' | 'Ready for Consultation' | 'Sent to Room' | 'Sent to Physiotherapy' = 'Pending';
           const roomName = queueVisitToRoom.get(visit.id);
+          const sentToPhysio = Boolean(physioCheckedInByVisitId[visit.id]);
           
           if (roomName) {
             // Patient has been sent to a room
             nursingStatus = 'Sent to Room';
+          } else if (sentToPhysio && clinicMatches(visit.clinic || '', 'Physiotherapy')) {
+            nursingStatus = 'Sent to Physiotherapy';
           } else if (vitalsData) {
             // Check if vitals are complete (have essential measurements - only temp and pulse required)
             const hasCompleteVitals = vitalsData.temperature && vitalsData.heart_rate;
@@ -378,6 +404,7 @@ export default function NursingPoolQueuePage() {
             visitNumericId: visit.id, // Store the actual visit ID from backend
             visitNotes: visit.clinical_notes, // Clinical notes from the visit
             sentAt: queueVisitToSentAt.get(visit.id),
+            sentToPhysio,
           };
         });
 
@@ -417,7 +444,7 @@ export default function NursingPoolQueuePage() {
     visitDate: string;
     visitTime: string;
     visitType: string;
-    nursingStatus: 'Pending' | 'Vitals Recorded' | 'Ready for Consultation' | 'Sent to Room';
+    nursingStatus: 'Pending' | 'Vitals Recorded' | 'Ready for Consultation' | 'Sent to Room' | 'Sent to Physiotherapy';
     consultationRoom?: string;
     vitals?: any;
     waitTime: number;
@@ -427,6 +454,7 @@ export default function NursingPoolQueuePage() {
     age?: number;
     gender?: string;
     sentAt?: string;
+    sentToPhysio?: boolean;
   }
 
   const [selectedPatient, setSelectedPatient] = useState<NursingPatient | null>(null);
@@ -569,10 +597,16 @@ export default function NursingPoolQueuePage() {
     if (!patient.visitNumericId) return;
     setSendingToPhysioVisitId(patient.visitNumericId);
     try {
-      await apiFetch('/physiotherapy/orders/checkin-from-visit/', {
+      const order = await apiFetch<any>('/physiotherapy/orders/checkin-from-visit/', {
         method: 'POST',
         body: JSON.stringify({ visit: patient.visitNumericId }),
       });
+      if (order?.id) {
+        setPhysioCheckins(prev => ({
+          ...prev,
+          [patient.visitNumericId]: { orderId: Number(order.id), status: String(order.status || 'scheduled') },
+        }));
+      }
       toast.success('Sent to Physiotherapy', {
         description: `${patient.name} is now in the Physiotherapy queue`,
       });
@@ -845,6 +879,7 @@ export default function NursingPoolQueuePage() {
       case 'Vitals Recorded': return 'border-blue-500/50 text-blue-600 dark:text-blue-400 bg-blue-500/10';
       case 'Ready for Consultation': return 'border-emerald-500/50 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10';
       case 'Sent to Room': return 'border-violet-500/50 text-violet-600 dark:text-violet-400 bg-violet-500/10';
+      case 'Sent to Physiotherapy': return 'border-indigo-500/50 text-indigo-600 dark:text-indigo-400 bg-indigo-500/10';
       default: return 'border-gray-500/50 text-gray-600 dark:text-gray-400 bg-gray-500/10';
     }
   };
@@ -962,6 +997,7 @@ export default function NursingPoolQueuePage() {
                     <SelectItem value="vitals-recorded">Vitals Recorded</SelectItem>
                     <SelectItem value="ready-for-consultation">Ready for Consultation</SelectItem>
                     <SelectItem value="sent-to-room">Sent to Room</SelectItem>
+                    <SelectItem value="sent-to-physiotherapy">Sent to Physiotherapy</SelectItem>
                   </SelectContent>
                 </Select>
                 <Select value={typeFilter} onValueChange={setTypeFilter}>
@@ -1026,7 +1062,9 @@ export default function NursingPoolQueuePage() {
                           <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${getStatusColor(patient.nursingStatus)}`}>
                             {patient.nursingStatus === 'Sent to Room' && patient.consultationRoom
                               ? `Sent to ${patient.consultationRoom}`
-                              : patient.nursingStatus}
+                              : patient.nursingStatus === 'Sent to Physiotherapy'
+                                ? 'Sent to Physiotherapy'
+                                : patient.nursingStatus}
                           </Badge>
                         </div>
                         <div className="flex items-center gap-1 flex-shrink-0">
@@ -1035,32 +1073,40 @@ export default function NursingPoolQueuePage() {
                               <Stethoscope className="h-3 w-3 mr-1" />Vitals
                             </Button>
                           )}
-                          {(patient.nursingStatus === 'Vitals Recorded' || patient.nursingStatus === 'Ready for Consultation') && (
-                            <>
-                              <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openViewVitals(patient)}>
-                                <Eye className="h-4 w-4 text-muted-foreground hover:text-primary" />
-                              </Button>
-                              <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openRecordVitals(patient)}>
-                                <Edit className="h-4 w-4 text-muted-foreground hover:text-blue-500" />
-                              </Button>
-                            </>
+                          {(patient.nursingStatus === 'Vitals Recorded' || patient.nursingStatus === 'Ready for Consultation' || patient.nursingStatus === 'Sent to Physiotherapy' || patient.nursingStatus === 'Sent to Room') && (
+                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openViewVitals(patient)}>
+                              <Eye className="h-4 w-4 text-muted-foreground hover:text-primary" />
+                            </Button>
                           )}
                           {(patient.nursingStatus === 'Vitals Recorded' || patient.nursingStatus === 'Ready for Consultation') && (
-                            clinicMatches(patient.clinic, 'Physiotherapy') ? (
-                              <Button
-                                size="sm"
-                                onClick={() => handleSendToPhysio(patient)}
-                                className="h-7 px-2 bg-indigo-500 hover:bg-indigo-600 text-white text-xs"
-                                disabled={sendingToPhysioVisitId === patient.visitNumericId}
-                              >
-                                {sendingToPhysioVisitId === patient.visitNumericId ? (
-                                  <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                                ) : (
-                                  <Activity className="h-3 w-3 mr-1" />
-                                )}
-                                Physio
-                              </Button>
+                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openRecordVitals(patient)}>
+                              <Edit className="h-4 w-4 text-muted-foreground hover:text-blue-500" />
+                            </Button>
+                          )}
+                          {clinicMatches(patient.clinic, 'Physiotherapy') ? (
+                            patient.sentToPhysio ? (
+                              <div className="h-7 w-7 flex items-center justify-center rounded border border-indigo-500/50 text-indigo-600 dark:text-indigo-400 bg-indigo-500/10">
+                                <CheckCircle2 className="h-4 w-4" />
+                              </div>
                             ) : (
+                              (patient.nursingStatus === 'Vitals Recorded' || patient.nursingStatus === 'Ready for Consultation') && (
+                                <Button
+                                  size="sm"
+                                  onClick={() => handleSendToPhysio(patient)}
+                                  className="h-7 px-2 bg-indigo-500 hover:bg-indigo-600 text-white text-xs"
+                                  disabled={sendingToPhysioVisitId === patient.visitNumericId}
+                                >
+                                  {sendingToPhysioVisitId === patient.visitNumericId ? (
+                                    <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                  ) : (
+                                    <Activity className="h-3 w-3 mr-1" />
+                                  )}
+                                  Physio
+                                </Button>
+                              )
+                            )
+                          ) : (
+                            (patient.nursingStatus === 'Vitals Recorded' || patient.nursingStatus === 'Ready for Consultation') && (
                               <Button size="sm" onClick={() => openRoomPicker(patient)} className="h-7 px-2 bg-emerald-500 hover:bg-emerald-600 text-white text-xs">
                                 <ArrowRight className="h-3 w-3 mr-1" />Send
                               </Button>

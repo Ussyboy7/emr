@@ -45,9 +45,16 @@ class Command(BaseCommand):
             action="store_true",
             help="Preserve existing users when resetting (don't delete them)",
         )
+        parser.add_argument(
+            "--force-pharmacy-inventory",
+            action="store_true",
+            help="Overwrite pharmacy Store/Dispensary inventory quantities (use with care)",
+        )
 
     def handle(self, *args, **options):
         self.stdout.write(self.style.MIGRATE_HEADING("Starting demo data seeding..."))
+
+        self._force_pharmacy_inventory = bool(options.get("force_pharmacy_inventory"))
 
         with transaction.atomic():
             if options.get("reset"):
@@ -2325,6 +2332,7 @@ class Command(BaseCommand):
             if not csv_path.exists():
                 return (0, 0)
             created = 0
+            updated = 0
             skipped = 0
             with open(csv_path, "r", encoding="utf-8-sig") as f:
                 reader = csv.DictReader(f)
@@ -2341,34 +2349,52 @@ class Command(BaseCommand):
                         skipped += 1
                         continue
 
-                    atc_code = generic_id or None
-                    try:
-                        GenericMedication.objects.create(
-                            name=name,
-                            active_ingredient=active_ingredient,
-                            category=category,
-                            strength=strength,
-                            dosage_form=dosage_form,
-                            route=route,
-                            atc_code=atc_code,
-                            is_active=True,
+                    defaults = {
+                        "name": name,
+                        "active_ingredient": active_ingredient,
+                        "category": category,
+                        "strength": strength,
+                        "dosage_form": dosage_form,
+                        "route": route,
+                        "is_active": True,
+                    }
+
+                    if generic_id:
+                        obj, obj_created = GenericMedication.objects.update_or_create(
+                            atc_code=generic_id,
+                            defaults=defaults,
                         )
-                        created += 1
-                    except Exception:
-                        try:
-                            GenericMedication.objects.create(
-                                name=name,
-                                active_ingredient=active_ingredient,
-                                category=category,
-                                strength=strength,
-                                dosage_form=dosage_form,
-                                route=route,
-                                is_active=True,
-                            )
+                        if obj_created:
                             created += 1
-                        except Exception:
-                            skipped += 1
-            return (created, skipped)
+                        else:
+                            updated += 1
+                        continue
+
+                    obj, obj_created = GenericMedication.objects.get_or_create(
+                        name=name,
+                        strength=strength,
+                        dosage_form=dosage_form,
+                        route=route,
+                        defaults={
+                            "active_ingredient": active_ingredient,
+                            "category": category,
+                            "is_active": True,
+                        },
+                    )
+                    if obj_created:
+                        created += 1
+                    else:
+                        if (
+                            obj.active_ingredient != active_ingredient
+                            or obj.category != category
+                            or obj.is_active is False
+                        ):
+                            obj.active_ingredient = active_ingredient
+                            obj.category = category
+                            obj.is_active = True
+                            obj.save(update_fields=["active_ingredient", "category", "is_active"])
+                            updated += 1
+            return (created, skipped, updated)
 
         def import_brands(csv_path: Path):
             if not csv_path.exists():
@@ -2463,8 +2489,8 @@ class Command(BaseCommand):
                             skipped += 1
             return (created, updated, skipped)
 
-        gen_created, gen_skipped = import_generics(data_dir / "GENERIC_MEDICATIONS.csv")
-        self.stdout.write(f"  ✓ Generics imported: {gen_created} (skipped {gen_skipped})")
+        gen_created, gen_skipped, gen_updated = import_generics(data_dir / "GENERIC_MEDICATIONS.csv")
+        self.stdout.write(f"  ✓ Generics imported: {gen_created} (updated {gen_updated}, skipped {gen_skipped})")
 
         b1_created, b1_updated, b1_skipped = import_brands(data_dir / "BRAND_MEDICATIONS.csv")
         b2_created, b2_updated, b2_skipped = import_brands(data_dir / "BRAND_MEDICATIONS_SEED.csv")
@@ -2619,25 +2645,47 @@ class Command(BaseCommand):
         if linked:
             self.stdout.write(f"  ✓ Linked {linked} medications to generics")
 
+        meds = Medication.objects.filter(is_active=True)
         default_quantity = Decimal("1000")
         default_min_stock = Decimal("100")
         expiry_date = (timezone.now() + timedelta(days=730)).date()
 
-        meds = Medication.objects.filter(is_active=True)
+        created_store = 0
+        updated_store = 0
         for med in meds:
             batch_number = f"BATCH-{med.code}-001"
-            MedicationInventory.objects.update_or_create(
-                medication=med,
-                batch_number=batch_number,
-                location="Store",
-                defaults={
-                    "expiry_date": expiry_date,
-                    "quantity": default_quantity,
-                    "unit": med.unit or "unit",
-                    "min_stock_level": default_min_stock,
-                    "supplier": "Default Supplier",
-                },
-            )
+            if self._force_pharmacy_inventory:
+                _, created = MedicationInventory.objects.update_or_create(
+                    medication=med,
+                    batch_number=batch_number,
+                    location="Store",
+                    defaults={
+                        "expiry_date": expiry_date,
+                        "quantity": default_quantity,
+                        "unit": med.unit or "unit",
+                        "min_stock_level": default_min_stock,
+                        "supplier": "Default Supplier",
+                    },
+                )
+                if created:
+                    created_store += 1
+                else:
+                    updated_store += 1
+            else:
+                _, created = MedicationInventory.objects.get_or_create(
+                    medication=med,
+                    batch_number=batch_number,
+                    location="Store",
+                    defaults={
+                        "expiry_date": expiry_date,
+                        "quantity": default_quantity,
+                        "unit": med.unit or "unit",
+                        "min_stock_level": default_min_stock,
+                        "supplier": "Default Supplier",
+                    },
+                )
+                if created:
+                    created_store += 1
 
         today = timezone.now().date()
         moved_total = Decimal("0")
@@ -2655,6 +2703,12 @@ class Command(BaseCommand):
                 .first()
             )
             if not source:
+                continue
+            if not self._force_pharmacy_inventory and MedicationInventory.objects.filter(
+                medication=med,
+                batch_number=source.batch_number,
+                location="Dispensary",
+            ).exists():
                 continue
             transfer_qty = min(source.quantity, per_med_qty)
             if transfer_qty <= 0:
@@ -2678,7 +2732,10 @@ class Command(BaseCommand):
             moved_total += transfer_qty
             lines += 1
 
-        self.stdout.write(f"  ✓ Seeded Store inventory for {meds.count()} medications")
+        if self._force_pharmacy_inventory:
+            self.stdout.write(f"  ✓ Seeded Store inventory for {meds.count()} medications (created {created_store}, updated {updated_store})")
+        else:
+            self.stdout.write(f"  ✓ Seeded Store inventory for {meds.count()} medications (created {created_store}, unchanged {meds.count() - created_store})")
         self.stdout.write(f"  ✓ Seeded Dispensary inventory: moved {int(moved_total)} across {lines} meds")
         self.stdout.write(f"  ✓ Total medications: {Medication.objects.count()}")
         return list(meds)

@@ -166,6 +166,68 @@ class PhysioOrderViewSet(viewsets.ModelViewSet):
         payload = PhysioOrderSerializer(order).data
         return Response(payload, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
 
+    @action(detail=False, methods=["get"], url_path="checkins-for-visits")
+    def checkins_for_visits(self, request):
+        raw = (request.query_params.get("visit_ids") or "").strip()
+        if not raw:
+            return Response({"results": {}}, status=status.HTTP_200_OK)
+
+        ids = []
+        for part in raw.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            try:
+                ids.append(int(part))
+            except ValueError:
+                continue
+
+        if not ids:
+            return Response({"results": {}}, status=status.HTTP_200_OK)
+
+        visits = Visit.objects.select_related("patient").filter(id__in=ids)
+        results = {}
+
+        for visit in visits:
+            patient = getattr(visit, "patient", None)
+            if not patient:
+                results[str(visit.id)] = {"checked_in": False}
+                continue
+
+            order = (
+                PhysioOrder.objects.filter(
+                    patient=patient,
+                    consultation_session__isnull=True,
+                    ordered_at__date=visit.date,
+                    status__in=["pending", "scheduled", "in_progress"],
+                )
+                .order_by("-ordered_at")
+                .first()
+            )
+
+            if not order:
+                order = (
+                    PhysioOrder.objects.filter(
+                        patient=patient,
+                        status__in=["pending", "scheduled", "in_progress"],
+                    )
+                    .order_by("-ordered_at")
+                    .first()
+                )
+
+            if not order:
+                results[str(visit.id)] = {"checked_in": False}
+                continue
+
+            results[str(visit.id)] = {
+                "checked_in": True,
+                "order_id": order.id,
+                "status": order.status,
+                "ordered_at": order.ordered_at,
+            }
+
+        return Response({"results": results}, status=status.HTTP_200_OK)
+
     @action(detail=True, methods=['post'])
     def schedule(self, request, pk=None):
         """Schedule a physiotherapy order."""
