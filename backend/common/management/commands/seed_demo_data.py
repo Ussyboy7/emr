@@ -2501,9 +2501,14 @@ class Command(BaseCommand):
                     dosage_form = (row.get("Dosage_Forms") or "").strip()
                     route = (row.get("Route") or "").strip()
 
-                    if not name or not strength or strength == "-" or not dosage_form or dosage_form == "-":
+                    if not name:
                         skipped += 1
                         continue
+
+                    if strength == "-":
+                        strength = ""
+                    if dosage_form == "-":
+                        dosage_form = ""
 
                     defaults = {
                         "name": name,
@@ -2526,7 +2531,7 @@ class Command(BaseCommand):
                             updated += 1
                         continue
 
-                    obj, obj_created = GenericMedication.objects.get_or_create(
+                    obj, obj_created = GenericMedication.objects.update_or_create(
                         name=name,
                         strength=strength,
                         dosage_form=dosage_form,
@@ -2540,16 +2545,7 @@ class Command(BaseCommand):
                     if obj_created:
                         created += 1
                     else:
-                        if (
-                            obj.active_ingredient != active_ingredient
-                            or obj.category != category
-                            or obj.is_active is False
-                        ):
-                            obj.active_ingredient = active_ingredient
-                            obj.category = category
-                            obj.is_active = True
-                            obj.save(update_fields=["active_ingredient", "category", "is_active"])
-                            updated += 1
+                        updated += 1
             return (created, skipped, updated)
 
         def import_brands(csv_path: Path):
@@ -2572,7 +2568,7 @@ class Command(BaseCommand):
                     manufacturer = (row.get("Manufacturer") or "").strip()
                     pack_size_raw = (row.get("Pack_Size") or "").strip()
 
-                    if not brand_name or not code or not strength or strength == "-" or not form or form == "-":
+                    if not brand_name or not code:
                         skipped += 1
                         continue
 
@@ -2592,47 +2588,25 @@ class Command(BaseCommand):
                         skipped += 1
                         continue
 
-                    existing = Medication.objects.filter(name=brand_name, generic=generic).first()
-                    if existing:
-                        existing.code = code
-                        existing.unit = unit
-                        existing.strength = strength or (generic.strength or "")
-                        existing.form = form or (generic.dosage_form or "")
-                        existing.category = category
-                        existing.manufacturer = manufacturer
-                        existing.pack_size = pack_size
-                        existing.is_active = True
-                        existing.save()
-                        updated += 1
-                        continue
+                    if not strength or strength == "-":
+                        strength = (generic.strength or "").strip()
+                    if not form or form == "-":
+                        form = (generic.dosage_form or "").strip()
 
-                    try:
-                        Medication.objects.create(
-                            name=brand_name,
-                            generic=generic,
-                            generic_name=generic.name,
-                            code=code,
-                            unit=unit,
-                            strength=strength or (generic.strength or ""),
-                            form=form or (generic.dosage_form or ""),
-                            category=category,
-                            manufacturer=manufacturer,
-                            pack_size=pack_size,
-                            prescription_required=False,
-                            min_stock_level=0,
-                            is_active=True,
-                        )
-                        created += 1
-                    except IntegrityError:
+                    by_code = Medication.objects.filter(code=code).first()
+                    by_brand = Medication.objects.filter(name=brand_name, generic=generic).first()
+
+                    target = by_code or by_brand
+                    if not target:
                         try:
                             Medication.objects.create(
                                 name=brand_name,
                                 generic=generic,
                                 generic_name=generic.name,
-                                code=f"{code}-{generic.id}",
+                                code=code,
                                 unit=unit,
-                                strength=strength or (generic.strength or ""),
-                                form=form or (generic.dosage_form or ""),
+                                strength=strength,
+                                form=form,
                                 category=category,
                                 manufacturer=manufacturer,
                                 pack_size=pack_size,
@@ -2641,8 +2615,28 @@ class Command(BaseCommand):
                                 is_active=True,
                             )
                             created += 1
-                        except Exception:
+                        except IntegrityError:
                             skipped += 1
+                        continue
+
+                    target.name = brand_name
+                    target.generic = generic
+                    target.generic_name = generic.name
+                    target.code = code
+                    target.unit = unit
+                    target.strength = strength
+                    target.form = form
+                    target.category = category
+                    target.manufacturer = manufacturer
+                    target.pack_size = pack_size
+                    target.prescription_required = False
+                    target.min_stock_level = 0
+                    target.is_active = True
+                    try:
+                        target.save()
+                        updated += 1
+                    except IntegrityError:
+                        skipped += 1
             return (created, updated, skipped)
 
         gen_created, gen_skipped, gen_updated = import_generics(data_dir / "GENERIC_MEDICATIONS.csv")
@@ -2847,52 +2841,52 @@ class Command(BaseCommand):
         moved_total = Decimal("0")
         lines = 0
         per_med_qty = Decimal("50")
-        for med in meds.order_by("name"):
-            source = (
-                MedicationInventory.objects.filter(
-                    medication=med,
-                    location="Store",
-                    quantity__gt=0,
-                    expiry_date__gt=today,
+        dispensary_has_any = MedicationInventory.objects.filter(location="Dispensary").exists()
+        should_seed_dispensary = self._force_pharmacy_inventory or not dispensary_has_any
+        if should_seed_dispensary:
+            for med in meds.order_by("name"):
+                source = (
+                    MedicationInventory.objects.filter(
+                        medication=med,
+                        location="Store",
+                        quantity__gt=0,
+                        expiry_date__gt=today,
+                    )
+                    .order_by("expiry_date")
+                    .first()
                 )
-                .order_by("expiry_date")
-                .first()
-            )
-            if not source:
-                continue
-            if not self._force_pharmacy_inventory and MedicationInventory.objects.filter(
-                medication=med,
-                batch_number=source.batch_number,
-                location="Dispensary",
-            ).exists():
-                continue
-            transfer_qty = min(source.quantity, per_med_qty)
-            if transfer_qty <= 0:
-                continue
-            source.quantity -= transfer_qty
-            source.save(update_fields=["quantity"])
-            dest, _ = MedicationInventory.objects.get_or_create(
-                medication=med,
-                batch_number=source.batch_number,
-                location="Dispensary",
-                defaults={
-                    "expiry_date": source.expiry_date,
-                    "quantity": Decimal("0"),
-                    "min_stock_level": source.min_stock_level,
-                    "unit": source.unit,
-                    "supplier": source.supplier,
-                },
-            )
-            dest.quantity += transfer_qty
-            dest.save(update_fields=["quantity"])
-            moved_total += transfer_qty
-            lines += 1
+                if not source:
+                    continue
+                transfer_qty = min(source.quantity, per_med_qty)
+                if transfer_qty <= 0:
+                    continue
+                source.quantity -= transfer_qty
+                source.save(update_fields=["quantity"])
+                dest, _ = MedicationInventory.objects.get_or_create(
+                    medication=med,
+                    batch_number=source.batch_number,
+                    location="Dispensary",
+                    defaults={
+                        "expiry_date": source.expiry_date,
+                        "quantity": Decimal("0"),
+                        "min_stock_level": source.min_stock_level,
+                        "unit": source.unit,
+                        "supplier": source.supplier,
+                    },
+                )
+                dest.quantity += transfer_qty
+                dest.save(update_fields=["quantity"])
+                moved_total += transfer_qty
+                lines += 1
 
         if self._force_pharmacy_inventory:
             self.stdout.write(f"  ✓ Seeded Store inventory for {meds.count()} medications (created {created_store}, updated {updated_store})")
         else:
             self.stdout.write(f"  ✓ Seeded Store inventory for {meds.count()} medications (created {created_store}, unchanged {meds.count() - created_store})")
-        self.stdout.write(f"  ✓ Seeded Dispensary inventory: moved {int(moved_total)} across {lines} meds")
+        if should_seed_dispensary:
+            self.stdout.write(f"  ✓ Seeded Dispensary inventory: moved {int(moved_total)} across {lines} meds")
+        else:
+            self.stdout.write("  ✓ Skipped Dispensary inventory seeding (already has stock)")
         self.stdout.write(f"  ✓ Total medications: {Medication.objects.count()}")
         return list(meds)
 
