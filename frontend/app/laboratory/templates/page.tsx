@@ -55,7 +55,13 @@ const transformTemplate = (apiTemplate: ApiLabTemplate): TestTemplate => {
     fields = (apiTemplate as any).fields;
   } else if (apiTemplate.normal_range && typeof apiTemplate.normal_range === 'object') {
     // Convert normal_range JSON to fields array
-    fields = Object.entries(apiTemplate.normal_range).map(([name, value]: [string, any]) => {
+    const nr: any = apiTemplate.normal_range;
+    const order = Array.isArray(nr._order) ? nr._order : null;
+    const keys = order
+      ? order.filter((k: any) => typeof k === 'string' && nr[k] != null)
+      : Object.keys(nr).filter((k) => !k.startsWith('_'));
+    fields = keys.map((name: string) => {
+      const value: any = nr[name];
       const field: TemplateField = {
         id: `f-${name}`,
         name,
@@ -893,4 +899,3 @@ export default function TestTemplatesPage() {
     </DashboardLayout>
   );
 }
-

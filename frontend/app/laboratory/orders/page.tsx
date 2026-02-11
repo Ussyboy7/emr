@@ -707,7 +707,12 @@ export default function LabOrdersPage() {
 
   const templateFromNormalRange = (code: string, nr: any) => {
     if (!nr || typeof nr !== 'object') return undefined;
-    const fields = Object.entries(nr).map(([name, v]: [string, any]) => {
+    const order = Array.isArray(nr._order) ? nr._order : null;
+    const keys = order
+      ? order.filter((k: any) => typeof k === 'string' && nr[k] != null)
+      : Object.keys(nr).filter((k) => !k.startsWith('_'));
+    const fields = keys.map((name: string) => {
+      const v = nr[name];
       let normalRange = v?.range || v?.normal_range || v?.normalRange || v?.normalRangeText || '';
       if (!normalRange && v?.min != null && v?.max != null) normalRange = `${v.min}-${v.max}`;
       if (!normalRange && v?.normalRangeMin != null && v?.normalRangeMax != null) normalRange = `${v.normalRangeMin}-${v.normalRangeMax}`;
@@ -901,7 +906,12 @@ export default function LabOrdersPage() {
       for (const t of results) {
         const nr = (t as any).normal_range;
         if (!nr || typeof nr !== 'object') continue;
-        const fields = Object.entries(nr).map(([name, v]: [string, any]) => {
+        const order = Array.isArray(nr._order) ? nr._order : null;
+        const keys = order
+          ? order.filter((k: any) => typeof k === 'string' && nr[k] != null)
+          : Object.keys(nr).filter((k) => !k.startsWith('_'));
+        const fields = keys.map((name: string) => {
+          const v = nr[name];
           let normalRange = v.range || v.normal_range || v.normalRange || v.normalRangeText || '';
           if (!normalRange && v.min != null && v.max != null) normalRange = `${v.min}-${v.max}`;
           if (!normalRange && v.normalRangeMin != null && v.normalRangeMax != null) normalRange = `${v.normalRangeMin}-${v.normalRangeMax}`;

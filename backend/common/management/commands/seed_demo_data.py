@@ -706,6 +706,11 @@ class Command(BaseCommand):
                 'code': 'FBC', 'name': 'Full Blood Count', 'category': 'hematology',
                 'sample_type': 'Blood', 'turnaround_time': '2 hours',
                 'normal_range': {
+                    '_order': [
+                        'RBC', 'HB', 'PCV', 'MCV', 'MCH', 'MCHC', 'RDW-CV', 'Platelets', 'WBC',
+                        'Neutrophil', 'Lymphocyte', 'Monocyte', 'Eosinophil', 'Basophil', 'MP',
+                        'ESR', 'Blood Group', 'Hb Genotype'
+                    ],
                     'RBC': {'unit': '10^6/µL', 'min': 3.5, 'max': 5.5, 'range': '3.50 – 5.50'},
                     'HB': {'unit': 'g/dL', 'min': 11, 'max': 18, 'range': '11.0 – 18.0/11.0 – 16.0'},
                     'PCV': {'unit': '%', 'min': 40, 'max': 54, 'range': '40.0 – 54.0/35.0 – 47.0'},
@@ -1073,64 +1078,84 @@ class Command(BaseCommand):
                 'code': 'FBS', 'name': 'Fasting Blood Sugar', 'category': 'chemistry',
                 'sample_type': 'Blood', 'turnaround_time': '1 hour',
                 'normal_range': {
-                    'Glucose': {'unit': 'mg/dL', 'min': 70, 'max': 100, 'range': '70-100 mg/dL'}
+                    '_order': ['FBS'],
+                    'FBS': {'unit': 'mmol/L', 'min': 3.4, 'max': 5.8, 'range': '3.4 – 5.8'}
                 }
             },
             {
                 'code': 'RBS', 'name': 'Random Blood Sugar', 'category': 'chemistry',
                 'sample_type': 'Blood', 'turnaround_time': '30 minutes',
                 'normal_range': {
-                    'Glucose': {'unit': 'mg/dL', 'min': 70, 'max': 140, 'range': '70-140 mg/dL'}
+                    '_order': ['RBS'],
+                    'RBS': {'unit': 'mmol/L', 'min': 3.9, 'max': 7.8, 'range': '3.9 – 7.8'}
                 }
             },
             {
                 'code': 'PPBS', 'name': 'Post Prandial Blood Sugar', 'category': 'chemistry',
                 'sample_type': 'Blood', 'turnaround_time': '1 hour',
                 'normal_range': {
-                    'Glucose': {'unit': 'mg/dL', 'min': 70, 'max': 140, 'range': '70-140 mg/dL'}
+                    '_order': ['2HPP'],
+                    '2HPP': {'unit': 'mmol/L', 'min': 3.9, 'max': 7.8, 'range': '3.9 – 7.8'}
                 }
             },
             {
                 'code': 'HBA1C', 'name': 'Glycosylated Hemoglobin (HbA1c)', 'category': 'chemistry',
                 'sample_type': 'Blood', 'turnaround_time': '24 hours',
                 'normal_range': {
-                    'HbA1c': {'unit': '%', 'min': 4.0, 'max': 5.6, 'range': '4.0-5.6%'}
+                    '_order': ['HbA1C (NGSP)', 'HbA1C (IFCC)', 'Estimated Average Glucose'],
+                    'HbA1C (NGSP)': {'unit': '%', 'min': 4.0, 'max': 6.4, 'range': '4.0 – 6.4'},
+                    'HbA1C (IFCC)': {'unit': 'mmol/mol', 'min': 20, 'max': 46, 'range': '20 – 46'},
+                    'Estimated Average Glucose': {'unit': 'mmol/L', 'range': ''},
                 }
             },
             {
                 'code': 'LFT', 'name': 'Liver Function Test', 'category': 'chemistry',
                 'sample_type': 'Blood', 'turnaround_time': '4 hours',
                 'normal_range': {
-                    'Total Bilirubin': {'unit': 'mg/dL', 'min': 0.3, 'max': 1.2, 'range': '0.3-1.2 mg/dL'},
-                    'Direct Bilirubin': {'unit': 'mg/dL', 'min': 0.0, 'max': 0.3, 'range': '0.0-0.3 mg/dL'},
-                    'Indirect Bilirubin': {'unit': 'mg/dL', 'min': 0.0, 'max': 0.9, 'range': '0.0-0.9 mg/dL'},
-                    'SGOT (AST)': {'unit': 'IU/L', 'min': 5, 'max': 40, 'range': '5-40 IU/L'},
-                    'SGPT (ALT)': {'unit': 'IU/L', 'min': 7, 'max': 56, 'range': '7-56 IU/L'},
-                    'ALP': {'unit': 'IU/L', 'min': 44, 'max': 147, 'range': '44-147 IU/L'},
-                    'Total Protein': {'unit': 'g/dL', 'min': 6.0, 'max': 8.5, 'range': '6.0-8.5 g/dL'},
-                    'Albumin': {'unit': 'g/dL', 'min': 3.5, 'max': 5.0, 'range': '3.5-5.0 g/dL'},
-                    'Globulin': {'unit': 'g/dL', 'min': 2.0, 'max': 3.5, 'range': '2.0-3.5 g/dL'},
-                    'A/G Ratio': {'unit': '', 'min': 1.0, 'max': 2.0, 'range': '1.0-2.0'},
+                    '_order': [
+                        'Bilirubin (Total)', 'Bilirubin (Direct)', 'Total Protein', 'Albumin',
+                        'ALP', 'gGT', 'ALT (GPT)', 'AST (GOT)'
+                    ],
+                    'Bilirubin (Total)': {'unit': 'umol/L', 'range': '3       -     26'},
+                    'Bilirubin (Direct)': {'unit': 'umol/L', 'range': '2       -      7'},
+                    'Total Protein': {'unit': 'g/L', 'range': '60     -     80'},
+                    'Albumin': {'unit': 'g/L', 'range': '35     -     50'},
+                    'ALP': {'unit': 'U/L', 'range': '51/53     -    117/128'},
+                    'gGT': {'unit': 'U/L', 'range': '0       -     44/64'},
+                    'ALT (GPT)': {'unit': 'U/L', 'range': '<35/< 40'},
+                    'AST (GOT)': {'unit': 'U/L', 'range': '13/15  -     35/40'},
                 }
             },
             {
                 'code': 'RFT', 'name': 'Renal Function Test', 'category': 'chemistry',
                 'sample_type': 'Blood', 'turnaround_time': '4 hours',
                 'normal_range': {
-                    'Blood Urea': {'unit': 'mg/dL', 'min': 10, 'max': 50, 'range': '10-50 mg/dL'},
-                    'Serum Creatinine': {'unit': 'mg/dL', 'min': 0.6, 'max': 1.2, 'range': '0.6-1.2 mg/dL'},
-                    'BUN': {'unit': 'mg/dL', 'min': 6, 'max': 24, 'range': '6-24 mg/dL'},
-                    'Uric Acid': {'unit': 'mg/dL', 'min': 3.5, 'max': 7.2, 'range': '3.5-7.2 mg/dL'},
+                    '_order': [
+                        'Sodium', 'Potassium', 'Chloride', 'Bicarbonate', 'Urea', 'Creatinine', 'eGFR (CKD - EPI)'
+                    ],
+                    'Sodium': {'unit': 'mmol/L', 'range': '135   -   150'},
+                    'Potassium': {'unit': 'mmol/L', 'range': '3.5    -    5.1'},
+                    'Chloride': {'unit': 'mmol/L', 'range': '98     -    107'},
+                    'Bicarbonate': {'unit': 'mmol/L', 'range': '21     -    29'},
+                    'Urea': {'unit': 'mmol/L', 'range': '2.1    -    7.1'},
+                    'Creatinine': {'unit': 'umol/L', 'range': '53/80     -    97/115'},
+                    'eGFR (CKD - EPI)': {'unit': 'mL/min/1.73m2', 'range': ''},
                 }
             },
             {
                 'code': 'LIP', 'name': 'Lipid Profile', 'category': 'chemistry',
                 'sample_type': 'Blood', 'turnaround_time': '6 hours',
                 'normal_range': {
-                    'Total Cholesterol': {'unit': 'mg/dL', 'min': 0, 'max': 200, 'range': '<200 mg/dL'},
-                    'HDL Cholesterol': {'unit': 'mg/dL', 'min': 40, 'max': 1000, 'range': '≥40 mg/dL'},
-                    'LDL Cholesterol': {'unit': 'mg/dL', 'min': 0, 'max': 100, 'range': '<100 mg/dL'},
-                    'Triglycerides': {'unit': 'mg/dL', 'min': 0, 'max': 150, 'range': '<150 mg/dL'},
+                    '_order': [
+                        'Total Cholesterol', 'Triglycerides', 'HDL Cholesterol', 'LDL  Cholesterol',
+                        'Non-HDL Cholesterol', 'Total Cholesterol /HDL'
+                    ],
+                    'Total Cholesterol': {'unit': 'mmol/L', 'range': '≤5.2'},
+                    'Triglycerides': {'unit': 'mmol/L', 'range': '≤1.9'},
+                    'HDL Cholesterol': {'unit': 'mmol/L', 'range': '≥0.9'},
+                    'LDL  Cholesterol': {'unit': 'mmol/L', 'range': '≤3.4'},
+                    'Non-HDL Cholesterol': {'unit': 'mmol/L', 'range': '≤4.3'},
+                    'Total Cholesterol /HDL': {'unit': '', 'range': '≤4.1'},
                 }
             },
             {
@@ -1337,7 +1362,8 @@ class Command(BaseCommand):
                 'code': 'URIC_ACID', 'name': 'Uric Acid', 'category': 'chemistry',
                 'sample_type': 'Blood', 'turnaround_time': '1 hour',
                 'normal_range': {
-                    'Uric Acid': {'unit': 'mg/dL', 'min': 3.5, 'max': 7.2, 'range': '3.5-7.2 mg/dL'}
+                    '_order': ['Uric Acid'],
+                    'Uric Acid': {'unit': 'mmol/L', 'range': '0.21 - 0.42 /0.15- 0.40'}
                 }
             },
             {
@@ -1598,10 +1624,20 @@ class Command(BaseCommand):
                 'code': 'WIDAL', 'name': 'Widal Test', 'category': 'immunology',
                 'sample_type': 'Blood', 'turnaround_time': '24 hours',
                 'normal_range': {
-                    'S. Typhi O': {'unit': '', 'range': '<1:80'},
-                    'S. Typhi H': {'unit': '', 'range': '<1:160'},
-                    'S. Paratyphi AH': {'unit': '', 'range': '<1:80'},
-                    'S. Paratyphi BH': {'unit': '', 'range': '<1:80'}
+                    '_order': [
+                        'Salmonella typhi O', 'Salmonella typhi H',
+                        'S. paratyphi A O', 'S. paratyphi A H',
+                        'S. paratyphi B O', 'S. paratyphi B H',
+                        'S. paratyphi C O', 'S. paratyphi C H',
+                    ],
+                    'Salmonella typhi O': {'unit': '', 'range': '1:20'},
+                    'Salmonella typhi H': {'unit': '', 'range': '1:20'},
+                    'S. paratyphi A O': {'unit': '', 'range': '1:20'},
+                    'S. paratyphi A H': {'unit': '', 'range': '1:20'},
+                    'S. paratyphi B O': {'unit': '', 'range': '1:20'},
+                    'S. paratyphi B H': {'unit': '', 'range': '1:20'},
+                    'S. paratyphi C O': {'unit': '', 'range': '1:20'},
+                    'S. paratyphi C H': {'unit': '', 'range': '1:20'},
                 }
             },
             {
@@ -2010,19 +2046,18 @@ class Command(BaseCommand):
                 'normal_range': {}
             },
             {
-                'code': 'STOOL_RE', 'name': 'Stool Routine Examination', 'category': 'chemistry',
+                'code': 'STOOL_RE', 'name': 'Stool Analysis', 'category': 'chemistry',
                 'sample_type': 'Stool', 'turnaround_time': '24 hours',
                 'normal_range': {
-                    'Color': {'unit': '', 'range': 'Brown'},
-                    'Consistency': {'unit': '', 'range': 'Soft'},
-                    'Mucus': {'unit': '', 'range': 'Nil'},
-                    'Blood': {'unit': '', 'range': 'Nil'},
-                    'Pus Cells': {'unit': '/HPF', 'min': 0, 'max': 5, 'range': '0-5 /HPF'},
-                    'RBC': {'unit': '/HPF', 'min': 0, 'max': 2, 'range': '0-2 /HPF'},
-                    'Macrophages': {'unit': '/HPF', 'range': 'Nil'},
-                    'Ova': {'unit': '', 'range': 'Nil'},
-                    'Cysts': {'unit': '', 'range': 'Nil'},
-                    'Vegetable Cells': {'unit': '/HPF', 'range': 'Nil'}
+                    '_order': ['Colour', 'Appearance', 'Mucus', 'Blood', 'Ova', 'Cyst', 'Yeast Cells', 'Other Parasites'],
+                    'Colour': {'unit': '', 'range': 'Brown'},
+                    'Appearance': {'unit': '', 'range': 'Soft Formed'},
+                    'Mucus': {'unit': '', 'range': 'None seen'},
+                    'Blood': {'unit': '', 'range': 'None seen'},
+                    'Ova': {'unit': '', 'range': 'None seen'},
+                    'Cyst': {'unit': '', 'range': 'None seen'},
+                    'Yeast Cells': {'unit': '', 'range': 'None seen'},
+                    'Other Parasites': {'unit': '', 'range': 'None seen'},
                 }
             },
             {
@@ -2276,15 +2311,131 @@ class Command(BaseCommand):
                     'Phosphorus': {'unit': 'mg/dL', 'min': 2.5, 'max': 4.5, 'range': '2.5-4.5 mg/dL'}
                 }
             },
+            {
+                'code': 'SEROLOGY', 'name': 'Serology Report', 'category': 'serology',
+                'sample_type': 'Blood', 'turnaround_time': '24 hours',
+                'normal_range': {
+                    '_order': ['RVS', 'HBsAg', 'HCVab', 'VDRL', 'H. pylori Ag', 'H. pylori ab'],
+                    'RVS': {'unit': '', 'range': ''},
+                    'HBsAg': {'unit': '', 'range': ''},
+                    'HCVab': {'unit': '', 'range': ''},
+                    'VDRL': {'unit': '', 'range': ''},
+                    'H. pylori Ag': {'unit': '', 'range': ''},
+                    'H. pylori ab': {'unit': '', 'range': ''},
+                }
+            },
+            {
+                'code': 'TOXICOLOGY', 'name': 'Noble Cup Toxicology', 'category': 'toxicology',
+                'sample_type': 'Urine', 'turnaround_time': '1 hour',
+                'normal_range': {
+                    '_order': [
+                        'AMPHETAMINE (AMP)', 'BARBITURATES (BAR)', 'TRICYCLIC ANTIDEPRESANTS (TCA)',
+                        'COCAINE (COC)', 'BENZODIAZEPINE (BZO)', 'OPIATE (OPI)',
+                        'METHAMPHETAMINE (MET)', 'MARIJUANA (THC)', 'ECSTASY (MDMA)', 'TRAMADOL (TML)'
+                    ],
+                    'AMPHETAMINE (AMP)': {'unit': '', 'range': ''},
+                    'BARBITURATES (BAR)': {'unit': '', 'range': ''},
+                    'TRICYCLIC ANTIDEPRESANTS (TCA)': {'unit': '', 'range': ''},
+                    'COCAINE (COC)': {'unit': '', 'range': ''},
+                    'BENZODIAZEPINE (BZO)': {'unit': '', 'range': ''},
+                    'OPIATE (OPI)': {'unit': '', 'range': ''},
+                    'METHAMPHETAMINE (MET)': {'unit': '', 'range': ''},
+                    'MARIJUANA (THC)': {'unit': '', 'range': ''},
+                    'ECSTASY (MDMA)': {'unit': '', 'range': ''},
+                    'TRAMADOL (TML)': {'unit': '', 'range': ''},
+                }
+            },
+            {
+                'code': 'URINALYSIS', 'name': 'Urinalysis', 'category': 'urinalysis',
+                'sample_type': 'Urine', 'turnaround_time': '2 hours',
+                'normal_range': {
+                    '_order': [
+                        'Colour', 'Appearance', 'pH', 'Specific gravity', 'Glucose', 'Ketone', 'Nitrite',
+                        'Proteins', 'Bilirubin', 'Urobilinogen', 'Blood', 'Leucocytes', 'Ascorbic acid',
+                        'Pus Cell', 'Epithelial Cell', 'Others', 'Culture', 'Sensitivity',
+                        'Pefloxacin (PEF)', 'Gentamycin (CN)', 'Ampiclox (APX)', 'Zinnacef (Z)',
+                        'Amoxacilin (AM)', 'Rosephine (R)', 'Ciprofloxacin (CPX)', 'Azithromycin (AZ)',
+                        'Levofloxacin (LEV)', 'Erythromycin (E)', 'Cefotaxim (CF)', 'Tarivid (OFX)',
+                        'Sparfloxacin (SP)', 'Augmentin (AU)'
+                    ],
+                    'Colour': {'unit': '', 'range': 'Amber'},
+                    'Appearance': {'unit': '', 'range': 'Clear'},
+                    'pH': {'unit': '', 'range': '5.0'},
+                    'Specific gravity': {'unit': '', 'range': '1.025'},
+                    'Glucose': {'unit': '', 'range': 'Negative'},
+                    'Ketone': {'unit': '', 'range': 'Negative'},
+                    'Nitrite': {'unit': '', 'range': 'Negative'},
+                    'Proteins': {'unit': '', 'range': 'Negative'},
+                    'Bilirubin': {'unit': '', 'range': 'Negative'},
+                    'Urobilinogen': {'unit': '', 'range': 'Normal'},
+                    'Blood': {'unit': '', 'range': 'Negative'},
+                    'Leucocytes': {'unit': '', 'range': 'Negative'},
+                    'Ascorbic acid': {'unit': '', 'range': 'Negative'},
+                    'Pus Cell': {'unit': '', 'range': ''},
+                    'Epithelial Cell': {'unit': '', 'range': ''},
+                    'Others': {'unit': '', 'range': ''},
+                    'Culture': {'unit': '', 'range': ''},
+                    'Sensitivity': {'unit': '', 'range': ''},
+                    'Pefloxacin (PEF)': {'unit': '', 'range': ''},
+                    'Gentamycin (CN)': {'unit': '', 'range': ''},
+                    'Ampiclox (APX)': {'unit': '', 'range': ''},
+                    'Zinnacef (Z)': {'unit': '', 'range': ''},
+                    'Amoxacilin (AM)': {'unit': '', 'range': ''},
+                    'Rosephine (R)': {'unit': '', 'range': ''},
+                    'Ciprofloxacin (CPX)': {'unit': '', 'range': ''},
+                    'Azithromycin (AZ)': {'unit': '', 'range': ''},
+                    'Levofloxacin (LEV)': {'unit': '', 'range': ''},
+                    'Erythromycin (E)': {'unit': '', 'range': ''},
+                    'Cefotaxim (CF)': {'unit': '', 'range': ''},
+                    'Tarivid (OFX)': {'unit': '', 'range': ''},
+                    'Sparfloxacin (SP)': {'unit': '', 'range': ''},
+                    'Augmentin (AU)': {'unit': '', 'range': ''},
+                }
+            },
+            {
+                'code': 'WAB_MCS', 'name': 'WAB MCS', 'category': 'microbiology',
+                'sample_type': 'Swab', 'turnaround_time': '48 hours',
+                'normal_range': {
+                    '_order': [
+                        'Pus Cells', 'RBCs', 'Bacteria', 'Fungal Elements', 'Gram Stain',
+                        'Isolated Organism', 'Pefloxacin (PEF)', 'Azithromycin (AZ)', 'Gentamycin (CN)',
+                        'Levofloxacin (LEV)', 'Ampiclox (APX)', 'Erythromycin (E)', 'Zinnacef (Z)',
+                        'Cefotaxim (CF)', 'Amoxacilin (AM)', 'Sparfloxacin (SP)', 'Rosephine (R)',
+                        'Tarivid (OFX)', 'Ciprofloxacin (CPX)', 'Augmentin (AU)'
+                    ],
+                    'Pus Cells': {'unit': '', 'range': ''},
+                    'RBCs': {'unit': '', 'range': ''},
+                    'Bacteria': {'unit': '', 'range': ''},
+                    'Fungal Elements': {'unit': '', 'range': ''},
+                    'Gram Stain': {'unit': '', 'range': ''},
+                    'Isolated Organism': {'unit': '', 'range': ''},
+                    'Pefloxacin (PEF)': {'unit': '', 'range': ''},
+                    'Azithromycin (AZ)': {'unit': '', 'range': ''},
+                    'Gentamycin (CN)': {'unit': '', 'range': ''},
+                    'Levofloxacin (LEV)': {'unit': '', 'range': ''},
+                    'Ampiclox (APX)': {'unit': '', 'range': ''},
+                    'Erythromycin (E)': {'unit': '', 'range': ''},
+                    'Zinnacef (Z)': {'unit': '', 'range': ''},
+                    'Cefotaxim (CF)': {'unit': '', 'range': ''},
+                    'Amoxacilin (AM)': {'unit': '', 'range': ''},
+                    'Sparfloxacin (SP)': {'unit': '', 'range': ''},
+                    'Rosephine (R)': {'unit': '', 'range': ''},
+                    'Tarivid (OFX)': {'unit': '', 'range': ''},
+                    'Ciprofloxacin (CPX)': {'unit': '', 'range': ''},
+                    'Augmentin (AU)': {'unit': '', 'range': ''},
+                }
+            },
         ]
 
         for data in template_data:
-            template, created = LabTemplate.objects.get_or_create(
+            template, created = LabTemplate.objects.update_or_create(
                 code=data['code'],
                 defaults=data
             )
             if created:
                 self.stdout.write(f"  ✓ Created template: {data['name']}")
+            else:
+                self.stdout.write(f"  ✓ Updated template: {data['name']}")
             templates.append(template)
 
         self.stdout.write(f"  ✓ Processed {len(templates)} lab templates")
