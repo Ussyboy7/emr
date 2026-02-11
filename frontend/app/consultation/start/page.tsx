@@ -211,9 +211,7 @@ const StartConsultation = () => {
       }
       
       try {
-        console.log('Loading patient for room:', selectedRoom);
-        console.log('Room data:', room);
-        console.log('Room queue:', room.queue);
+        
         
         // Get the first patient ID from queue (already stored as string)
         if (!room.queue || room.queue.length === 0) {
@@ -281,15 +279,15 @@ const StartConsultation = () => {
           // Continue with just the patient ID we have
         }
         
-        console.log('Queue item loaded:', queueItem);
+        
         if (queueItem) {
-          console.log('Queue item patient field:', queueItem.patient, typeof queueItem.patient);
+          
         }
         
         // Use the patient ID we have (either from room queue or from queue item)
         const queuePatientId = numericPatientId;
         
-        console.log(`Loading patient ${queuePatientId}`, { queueItem, queuePatientId });
+        
         
         // Load patient data from API using the queue item's patient ID
         let patient;
@@ -1018,4 +1016,3 @@ const StartConsultation = () => {
 };
 
 export default StartConsultation;
-

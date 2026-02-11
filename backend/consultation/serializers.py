@@ -3,6 +3,7 @@ Serializers for the Consultation app.
 """
 from rest_framework import serializers
 from .models import ConsultationRoom, ConsultationSession, ConsultationQueue, Referral, Diagnosis, ICD10Code
+from patients.serializers import PatientListSerializer, VitalReadingSerializer
 
 
 class ConsultationRoomSerializer(serializers.ModelSerializer):
@@ -55,6 +56,7 @@ class ConsultationQueueSerializer(serializers.ModelSerializer):
     """Serializer for ConsultationQueue model."""
 
     patient_name = serializers.CharField(source='patient.get_full_name', read_only=True)
+    patient_details = PatientListSerializer(source='patient', read_only=True)
     room_name = serializers.CharField(source='room.name', read_only=True)
     visit_display_id = serializers.CharField(source='visit.visit_id', read_only=True, allow_null=True)
     visit_date = serializers.DateField(source='visit.date', read_only=True, allow_null=True)
@@ -62,6 +64,19 @@ class ConsultationQueueSerializer(serializers.ModelSerializer):
     visit_type = serializers.CharField(source='visit.visit_type', read_only=True, allow_null=True)
     visit_status = serializers.CharField(source='visit.status', read_only=True, allow_null=True)
     visit_clinic = serializers.CharField(source='visit.clinic', read_only=True, allow_null=True)
+    latest_vitals = serializers.SerializerMethodField()
+
+    def get_latest_vitals(self, obj):
+        visit = getattr(obj, 'visit', None)
+        if not visit:
+            return None
+
+        vitals = list(getattr(visit, 'vital_readings', []).all())
+        if not vitals:
+            return None
+
+        latest = max(vitals, key=lambda v: v.recorded_at or v.created_at)
+        return VitalReadingSerializer(latest).data
 
     class Meta:
         model = ConsultationQueue
@@ -70,7 +85,8 @@ class ConsultationQueueSerializer(serializers.ModelSerializer):
             'called_at', 'is_active',
             # Read-only fields
             'patient_name', 'room_name', 'visit_display_id', 'visit_date',
-            'visit_time', 'visit_type', 'visit_status', 'visit_clinic'
+            'visit_time', 'visit_type', 'visit_status', 'visit_clinic',
+            'patient_details', 'latest_vitals',
         ]
         read_only_fields = ['queued_at', 'id']
         # Disable model validators - we handle unique constraints manually in perform_update
@@ -118,4 +134,3 @@ class DiagnosisSerializer(serializers.ModelSerializer):
                 'category': obj.icd10_code.category,
             }
         return None
-

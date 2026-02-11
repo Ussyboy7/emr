@@ -550,31 +550,30 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         // Use server-side search for injection-related medications
         const searchTerms = ['injection', 'inj', 'vial', 'ampoule', 'syringe'];
 
-        for (const term of searchTerms) {
-          try {
-            const response = await pharmacyService.getMedications({
+        const results = await Promise.allSettled(
+          searchTerms.map((term) =>
+            pharmacyService.getMedications({
               search: term,
-              page_size: 30 // Reasonable limit per search term
-            });
-            if (response.results && response.results.length > 0) {
-              const newMeds = response.results
-                .filter((m: any) => !allMedications.some(existing => existing.id === m.id))
-                .map((m: any) => ({
-                  id: m.id,
-                  name: m.name,
-                  category: m.category || '',
-                  strength: m.strength || '',
-                  generic_name: m.generic_name || '',
-                }));
-              allMedications = [...allMedications, ...newMeds];
+              page_size: 30,
+            })
+          )
+        );
 
-              // Break if we have enough results
-              if (allMedications.length >= 50) break;
-            }
-          } catch (searchErr) {
-            // Continue to next search term
-            continue;
-          }
+        for (const r of results) {
+          if (r.status !== 'fulfilled') continue;
+          const meds = r.value?.results || [];
+          if (!Array.isArray(meds) || meds.length === 0) continue;
+          const newMeds = meds
+            .filter((m: any) => !allMedications.some(existing => existing.id === m.id))
+            .map((m: any) => ({
+              id: m.id,
+              name: m.name,
+              category: m.category || '',
+              strength: m.strength || '',
+              generic_name: m.generic_name || '',
+            }));
+          allMedications = [...allMedications, ...newMeds];
+          if (allMedications.length >= 50) break;
         }
 
         // Fallback: if no results from search, load a small set and filter client-side
@@ -616,8 +615,12 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       }
     };
 
+    if (!showAddNursingOrder) return;
+    if (newNursingOrder.type !== 'Injection') return;
+    if (injectionMedications.length > 0) return;
+
     loadInjectionMedications();
-  }, []);
+  }, [showAddNursingOrder, newNursingOrder.type, injectionMedications.length]);
 
   // Referral state
   const [referrals, setReferrals] = useState<{
@@ -1056,18 +1059,20 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       // Transform queue items to Patient objects
       const transformedPatients = await Promise.all(sortedQueue.map(async (item: any, index: number) => {
         try {
-          const patient = await patientService.getPatient(item.patient);
-          
           let visitDate = new Date().toISOString().split('T')[0];
           let visitTime = new Date().toTimeString().slice(0, 5);
             if (item.visit) {
               try {
-                const visit = await apiFetch(`/visits/${item.visit}/`) as {
-                  date?: string;
-                  time?: string;
-                };
-                visitDate = visit.date || visitDate;
-                visitTime = visit.time || visitTime;
+                if (item.visit_date) visitDate = item.visit_date;
+                if (item.visit_time) visitTime = String(item.visit_time).slice(0, 5);
+                if (!item.visit_date || !item.visit_time) {
+                  const visit = await apiFetch(`/visits/${item.visit}/`) as {
+                    date?: string;
+                    time?: string;
+                  };
+                  visitDate = visit.date || visitDate;
+                  visitTime = visit.time || visitTime;
+                }
               } catch (err) {
                 console.warn('Could not load visit details:', err);
               }
@@ -1075,7 +1080,11 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
             
             // Get latest vitals for the patient (not just for this visit)
             const vitalsData = await safeAsync(
-              () => apiFetch<{ results: any[] }>(`/vitals/?patient=${item.patient}&ordering=-recorded_at&page_size=1`).then(result => result.results?.[0] || null),
+              async () => {
+                if (item.latest_vitals) return item.latest_vitals;
+                const result = await apiFetch<{ results: any[] }>(`/vitals/?patient=${item.patient}&ordering=-recorded_at&page_size=1`);
+                return result.results?.[0] || null;
+              },
               null,
               { operation: 'refreshPatientVitals', patientId: item.patient, component: 'ConsultationRoom' }
             );
@@ -1088,37 +1097,38 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
             };
             
             // Create the patient object with proper typing
+            const patientDetails = item.patient_details;
             const patientData = {
               id: String(item.patient),
               visitId: item.visit ? String(item.visit) : '',
-              patient_id: patient.patient_id,
-              patientId: patient.patient_id || String(patient.id),
-              full_name: patient.full_name,
-              first_name: patient.first_name,
-              surname: patient.surname,
-              name: patient.full_name || `${patient.first_name || ''} ${patient.surname || ''}`.trim(),
-              age: patient.age || 0,
-              gender: patient.gender || '',
-              mrn: patient.patient_id || '',
-              personal_number: patient.personal_number || '',
-              allergies: patient.allergies ? patient.allergies.split(/[,\n]/).map(a => a.trim()).filter(a => a) : [],
+              patient_id: patientDetails?.patient_id || '',
+              patientId: patientDetails?.patient_id || String(item.patient),
+              full_name: patientDetails?.full_name || '',
+              first_name: '',
+              surname: '',
+              name: patientDetails?.full_name || '',
+              age: patientDetails?.age || 0,
+              gender: patientDetails?.gender || '',
+              mrn: patientDetails?.patient_id || '',
+              personal_number: '',
+              allergies: [],
             waitTime: waitTime > 0 ? waitTime : 0,
             vitalsCompleted: !!vitalsData,
             priority: getPriority(typeof item.priority === 'number' ? item.priority : parseInt(item.priority) || 0),
             visitDate,
             visitTime,
             queuePosition: index + 1,
-              blood_group: patient.blood_group,
-              genotype: patient.genotype,
-              employee_type: (patient as any).employee_type,
-              division: (patient as any).division,
-              location: (patient as any).location,
-              phone: (patient as any).phone,
-              email: (patient as any).email,
-              occupation: (patient as any).occupation,
-              religion: (patient as any).religion,
-              tribe: (patient as any).tribe,
-            photo: (patient as any).photo || null,
+              blood_group: patientDetails?.blood_group,
+              genotype: undefined,
+              employee_type: undefined,
+              division: undefined,
+              location: undefined,
+              phone: patientDetails?.phone,
+              email: patientDetails?.email,
+              occupation: undefined,
+              religion: undefined,
+              tribe: undefined,
+            photo: patientDetails?.photo || null,
               vitals: processVitals(vitalsData),
             };
 
@@ -1198,21 +1208,22 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         // Transform queue items to Patient objects
         const transformedPatients = await Promise.all(sortedQueue.map(async (item: any, index: number) => {
           try {
-            // Get patient details
-            const patient = await patientService.getPatient(item.patient);
-            
             // Get visit details if available
             let visitDate = new Date().toISOString().split('T')[0];
             let visitTime = new Date().toTimeString().slice(0, 5);
             
             if (item.visit) {
               try {
-                const visit = await apiFetch(`/visits/${item.visit}/`) as {
-                  date?: string;
-                  time?: string;
-                };
-                visitDate = visit.date || visitDate;
-                visitTime = visit.time || visitTime;
+                if (item.visit_date) visitDate = item.visit_date;
+                if (item.visit_time) visitTime = String(item.visit_time).slice(0, 5);
+                if (!item.visit_date || !item.visit_time) {
+                  const visit = await apiFetch(`/visits/${item.visit}/`) as {
+                    date?: string;
+                    time?: string;
+                  };
+                  visitDate = visit.date || visitDate;
+                  visitTime = visit.time || visitTime;
+                }
               } catch (err) {
                 console.warn('Could not load visit details:', err);
               }
@@ -1220,7 +1231,11 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
             
             // Get latest vitals for the patient (not just for this visit)
             const vitalsData = await safeAsync(
-              () => apiFetch<{ results: any[] }>(`/vitals/?patient=${item.patient}&ordering=-recorded_at&page_size=1`).then(result => result.results?.[0] || null),
+              async () => {
+                if (item.latest_vitals) return item.latest_vitals;
+                const result = await apiFetch<{ results: any[] }>(`/vitals/?patient=${item.patient}&ordering=-recorded_at&page_size=1`);
+                return result.results?.[0] || null;
+              },
               null,
               { operation: 'loadPatientVitals', patientId: item.patient, component: 'ConsultationRoom' }
             );
@@ -1240,36 +1255,37 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
             };
             
             // Create the patient object with proper typing
+            const patientDetails = item.patient_details;
             const patientData = {
               id: String(item.patient), // Use patient ID from queue, not queue item ID
               visitId: item.visit ? String(item.visit) : '',
-              patient_id: patient.patient_id,
-              patientId: patient.patient_id || String(patient.id), // Display ID (e.g., "PAT-2024-001")
-              full_name: patient.full_name,
-              first_name: patient.first_name,
-              surname: patient.surname,
-              name: patient.full_name || `${patient.first_name || ''} ${patient.surname || ''}`.trim(),
-              age: patient.age || 0,
-              gender: patient.gender || '',
-              mrn: patient.patient_id || '',
-              personal_number: patient.personal_number || '',
-              allergies: patient.allergies ? patient.allergies.split(/[,\n]/).map(a => a.trim()).filter(a => a) : [],
+              patient_id: patientDetails?.patient_id || '',
+              patientId: patientDetails?.patient_id || String(item.patient), // Display ID (e.g., "PAT-2024-001")
+              full_name: patientDetails?.full_name || '',
+              first_name: '',
+              surname: '',
+              name: patientDetails?.full_name || '',
+              age: patientDetails?.age || 0,
+              gender: patientDetails?.gender || '',
+              mrn: patientDetails?.patient_id || '',
+              personal_number: '',
+              allergies: [],
               waitTime: waitTime > 0 ? waitTime : 0,
               vitalsCompleted: !!vitalsData,
               priority: getPriority(typeof item.priority === 'number' ? item.priority : parseInt(item.priority) || 0), // Default to 0 (Emergency) to match backend default
               visitDate,
               visitTime,
               queuePosition: index + 1,
-              blood_group: patient.blood_group,
-              genotype: patient.genotype,
-              employee_type: (patient as any).employee_type,
-              division: (patient as any).division,
-              location: (patient as any).location,
-              phone: (patient as any).phone,
-              email: (patient as any).email,
-              occupation: (patient as any).occupation,
-              religion: (patient as any).religion,
-              tribe: (patient as any).tribe,
+              blood_group: patientDetails?.blood_group,
+              genotype: undefined,
+              employee_type: undefined,
+              division: undefined,
+              location: undefined,
+              phone: patientDetails?.phone,
+              email: patientDetails?.email,
+              occupation: undefined,
+              religion: undefined,
+              tribe: undefined,
               vitals: processVitals(vitalsData),
             };
 
@@ -1768,7 +1784,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       loadPatientHistory(session.patient);
 
       toast.success(`Restored active session with ${restoredPatient.name}`);
-      console.log('Session restored successfully');
+      debugConsultationRoom('Session restored successfully');
     } catch (err: any) {
       console.error('Error restoring active session:', err);
       toast.error('Failed to restore active session. You may need to start a new session.');
@@ -1803,77 +1819,47 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     }
   };
 
-  // Load generics and ICD-10 codes from API when component mounts
   useEffect(() => {
+    if (!showAddPrescription && !showMedicationDropdown) return;
+    if (loadingMedications) return;
+    if (medications.length > 0) return;
+
     const loadGenerics = async () => {
       try {
         setLoadingMedications(true);
-        debugConsultationRoom('[Consultation] Loading generics from API...');
         const response = await pharmacyService.getGenericsForPrescription({ page_size: 200 });
-        debugConsultationRoom('[Consultation] API Response:', response);
         const loadedGenerics = response.results || [];
-        setMedications(loadedGenerics as any); // Reuse medications state for generics - cast to any for compatibility
-        debugConsultationRoom(`[Consultation] Loaded ${loadedGenerics.length} generics from API`);
-        // Debug: Check if paracetamol is in the list
-        const paracetamolGenerics = loadedGenerics.filter((g: any) => g.name?.toLowerCase().includes('paracetamol'));
-        if (paracetamolGenerics.length > 0) {
-          debugConsultationRoom(
-            `[Consultation] Found ${paracetamolGenerics.length} paracetamol generics:`,
-            paracetamolGenerics.map((g: any) => g.name)
-          );
-        }
+        setMedications(loadedGenerics as any);
       } catch (err) {
         debugConsultationRoom('Failed to load generics:', err);
-        toast.error('Failed to load medication list. Using fallback list.');
-        // Keep medications as empty array if loading fails
+        toast.error('Failed to load medication list.');
       } finally {
         setLoadingMedications(false);
       }
     };
 
+    loadGenerics();
+  }, [showAddPrescription, showMedicationDropdown, loadingMedications, medications.length]);
+
+  useEffect(() => {
+    if (!showAddDiagnosis) return;
+    if (icd10Codes.length > 0) return;
+
     const loadICD10Codes = async () => {
       try {
-        // Add a small delay to ensure authentication is ready
-        await new Promise(resolve => setTimeout(resolve, 100));
-        debugConsultationRoom('[Consultation] Loading ICD-10 codes...');
         const response = await consultationService.getICD10Codes({ page_size: 100 });
-        // Security: Removed console.log to prevent API response data leakage
-      // console.log('[Consultation] API Response:', response);
-        const loadedCodes = response.results || [];
-        debugConsultationRoom(`[Consultation] Loaded ${loadedCodes.length} ICD-10 codes from API`);
-
-        // Check for specific codes
-        const malariaCodes = loadedCodes.filter((code: any) => code.code?.startsWith('B5'));
-        const headacheCodes = loadedCodes.filter((code: any) => code.code === 'R51' || code.description?.toLowerCase().includes('headache'));
-
-        debugConsultationRoom(`[Consultation] Malaria codes found: ${malariaCodes.length}`, malariaCodes.slice(0, 3));
-        debugConsultationRoom(`[Consultation] Headache codes found: ${headacheCodes.length}`, headacheCodes.slice(0, 3));
-
-        setIcd10Codes(loadedCodes);
+        setIcd10Codes(response.results || []);
       } catch (err: any) {
         debugConsultationRoom('Failed to load ICD-10 codes:', err);
-        // Check if it's an authentication error
-        if (err.message?.includes('401') || err.message?.includes('Authentication')) {
-          debugConsultationRoom('ICD-10 codes failed to load due to authentication - will retry later');
-          // Try again after a longer delay
-          setTimeout(() => {
-            loadICD10Codes().catch(e => {
-              debugConsultationRoom('Retry also failed for ICD-10 codes:', e);
-            });
-          }, 2000);
-        } else {
-          debugConsultationRoom('ICD-10 codes failed to load - diagnosis search may not work');
-        }
-        // Keep ICD-10 codes as empty array if loading fails
       }
     };
 
-    loadGenerics();
     loadICD10Codes();
-  }, []);
+  }, [showAddDiagnosis, icd10Codes.length]);
 
-  // Load lab templates from API when component mounts
   useEffect(() => {
+    if (!showAddLabOrder && !showLabTemplateDropdown) return;
+    if (labTemplates.length > 0) return;
     const loadLabTemplates = async () => {
       try {
         setLoadingLabTemplates(true);
@@ -1889,33 +1875,19 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     };
     
     loadLabTemplates();
-  }, []);
+  }, [showAddLabOrder, showLabTemplateDropdown, labTemplates.length]);
 
-  // Load radiology templates from API when component mounts
   useEffect(() => {
+    if (!showAddRadiology && !showRadiologyTemplateDropdown) return;
+    if (radiologyTemplates.length > 0) return;
     const loadRadiologyTemplates = async () => {
       try {
         setLoadingRadiologyTemplates(true);
         setRadiologyTemplatesError(null);
-        debugConsultationRoom('[Consultation] Loading radiology templates...');
-        debugConsultationRoom('[Consultation] About to call radiologyService.getTemplates()');
         const templates = await radiologyService.getTemplates({ page_size: 1000 });
-        debugConsultationRoom('[Consultation] Radiology API full response:', templates);
-        debugConsultationRoom(`[Consultation] Loaded ${templates.results?.length || 0} radiology templates from API`);
-        debugConsultationRoom('[Consultation] Response type:', typeof templates);
-        debugConsultationRoom('[Consultation] Response keys:', Object.keys(templates || {}));
-        if (templates && templates.results) {
-            debugConsultationRoom('[Consultation] First 3 templates:', templates.results.slice(0, 3));
-        } else {
-            debugConsultationRoom('[Consultation] No results array in response');
-        }
         setRadiologyTemplates(templates.results || []);
-        if (!templates.results || templates.results.length === 0) {
-          debugConsultationRoom('[Consultation] No radiology templates found - this might be an authentication issue');
-        }
       } catch (err: any) {
         debugConsultationRoom('Failed to load radiology templates:', err);
-        debugConsultationRoom('Error details:', err?.message, err?.status, err?.response);
 
         // Check for authentication errors
         if (isAuthenticationError(err) || err.status === 401 || err.status === 403) {
@@ -1944,7 +1916,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     } else {
       setLoadingRadiologyTemplates(false);
     }
-  }, []);
+  }, [showAddRadiology, showRadiologyTemplateDropdown, radiologyTemplates.length]);
 
   // Load physio orders from API for this consultation session so doctor sees real status (pending/scheduled/in_progress/completed)
   useEffect(() => {
@@ -2020,7 +1992,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           assessment: medicalNotes.assessment || '',
           plan: medicalNotes.plan || '',
         });
-        console.log('Auto-saved medical notes');
+        debugConsultationRoom('Auto-saved medical notes');
       } catch (err) {
         console.error('Auto-save failed:', err);
         // Don't show error to user - silent fail for auto-save
@@ -2176,7 +2148,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     
     // In a real implementation, this would call an API to generate the PDF
     // For now, we'll simulate PDF generation
-    console.log('Generating PDF for session:', sessionData);
+    debugConsultationRoom('Generating PDF for session:', sessionData);
     return sessionData;
     } catch (error) {
       console.error('Error generating session PDF:', error);
@@ -2847,7 +2819,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
             reason: followUpReason,
             notes: `Follow-up from consultation session ${sessionId}. Reason: ${followUpReason}`,
           });
-          console.log('Follow-up appointment created');
+          debugConsultationRoom('Follow-up appointment created');
         } catch (apptError: any) {
           console.warn('Could not create follow-up appointment:', apptError?.message);
         }
@@ -2857,7 +2829,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       // Now safe with the new conditional unique constraint
       if (currentPatient?.id) {
         try {
-          console.log('Attempting to deactivate queue item for patient:', currentPatient.id);
+          debugConsultationRoom('Attempting to deactivate queue item for patient:', currentPatient.id);
           const queueData = await consultationService.getQueue({
             room: parseInt(roomId),
             patient: typeof currentPatient.id === 'string' ? parseInt(currentPatient.id) : currentPatient.id,
@@ -2866,7 +2838,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           
           if (queueData.results && queueData.results.length > 0) {
             const queueItem = queueData.results[0];
-            console.log('Found queue item to deactivate:', {
+            debugConsultationRoom('Found queue item to deactivate:', {
               id: queueItem.id,
               patient: queueItem.patient,
               room: queueItem.room,
@@ -2874,11 +2846,11 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
             });
             
             try {
-              console.log('Sending POST request to call/deactivate queue item:', `/consultation/queue/${queueItem.id}/call/`);
+              debugConsultationRoom('Sending POST request to call/deactivate queue item:', `/consultation/queue/${queueItem.id}/call/`);
               await apiFetch(`/consultation/queue/${queueItem.id}/call/`, {
                 method: 'POST',
               });
-              console.log('Queue item deactivated successfully');
+              debugConsultationRoom('Queue item deactivated successfully');
             } catch (deactivateErr: any) {
               // Log but don't fail - queue deactivation is not critical
               console.warn('Could not deactivate queue item (non-critical):', {
@@ -2887,7 +2859,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
               });
             }
           } else {
-            console.log('No active queue items found for patient');
+            debugConsultationRoom('No active queue items found for patient');
           }
         } catch (err) {
           console.error('Error fetching queue items:', err);
@@ -2898,9 +2870,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       // Step 3: End the session using the dedicated endpoint
       try {
         if (!sessionId) throw new Error('Session ID is required');
-        console.log('Ending session with ID:', sessionId);
+        debugConsultationRoom('Ending session with ID:', sessionId);
         await consultationService.endSession(sessionId);
-        console.log('Session ended successfully');
+        debugConsultationRoom('Session ended successfully');
       } catch (err: any) {
         console.error('Error ending session:', {
           sessionId,
@@ -6751,7 +6723,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                         if (diagnosisSearch.trim()) {
                           // Use API search results
                           displayCodes = icd10SearchResults;
-                          console.log(`[ICD-10 Search] "${diagnosisSearch}" returned ${displayCodes.length} results from API`);
+                          debugConsultationRoom(`[ICD-10 Search] "${diagnosisSearch}" returned ${displayCodes.length} results from API`);
                         } else {
                           // Show first 20 codes when no search
                           displayCodes = icd10Codes.slice(0, 20);

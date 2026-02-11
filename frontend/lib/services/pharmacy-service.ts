@@ -693,15 +693,7 @@ class PharmacyService {
       ...params,
       __ts: Date.now()
     });
-    console.log('[PharmacyService] Calling getGenericsForPrescription with query:', `/v1/pharmacy/generics/for_prescription/${query}`);
-    try {
-      const result = await apiFetch<{ results: GenericMedication[]; count: number }>(`/v1/pharmacy/generics/for_prescription/${query}`);
-      console.log('[PharmacyService] getGenericsForPrescription result:', result);
-      return result;
-    } catch (error) {
-      console.error('[PharmacyService] getGenericsForPrescription error:', error);
-      throw error;
-    }
+    return apiFetch<{ results: GenericMedication[]; count: number }>(`/v1/pharmacy/generics/for_prescription/${query}`);
   }
 
   async createGeneric(data: {

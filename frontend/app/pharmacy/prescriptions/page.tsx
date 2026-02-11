@@ -36,6 +36,16 @@ const substitutionReasons = [
   { value: 'other', label: 'Other', icon: '📝', description: 'Other reason - specify in notes' },
 ];
 
+const debugPharmacy = (...args: any[]) => {
+  if (typeof window === 'undefined') return;
+  try {
+    if (window.localStorage?.getItem('debug_pharmacy') === '1') {
+      console.log(...args);
+    }
+  } catch {
+  }
+};
+
 // Check for drug interactions using pharmacy service
 const checkInteractions = async (medications: string[]): Promise<DrugInteraction[]> => {
   try {
@@ -156,7 +166,7 @@ export default function PrescriptionsPage() {
 
   // Transform medication data with status determination
   const transformMedications = (medications: any[], prescriptionStatus: string) => {
-    console.log('Transforming medications:', medications);
+    debugPharmacy('Transforming medications:', medications);
     return medications.map((med: any) => {
       // Determine medication status - prioritize dispense status over stock availability
       let status: 'Available' | 'Low Stock' | 'Out of Stock' | 'Pending' | 'Dispensed' | 'Partially Dispensed' | 'Over-dispensed' = 'Pending';
@@ -217,7 +227,7 @@ export default function PrescriptionsPage() {
       };
       
       // Debug: Log the transformed medication
-      console.log(`Transformed medication ${med.id}:`, transformedMed);
+      debugPharmacy(`Transformed medication ${med.id}:`, transformedMed);
       
       return transformedMed;
     });

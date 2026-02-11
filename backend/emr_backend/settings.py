@@ -183,6 +183,8 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
+SERVE_MEDIA = os.getenv("SERVE_MEDIA", "").lower() == "true"
+
 
 # ---------------------------------------------------------------------------
 # Django REST Framework & OpenAPI
@@ -320,4 +322,3 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # Application URLs
 FRONTEND_BASE_URL = os.getenv("FRONTEND_BASE_URL", "http://localhost:3001")
-

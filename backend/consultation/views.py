@@ -43,7 +43,12 @@ class ConsultationRoomViewSet(viewsets.ModelViewSet):
     def queue(self, request, pk=None):
         """Get queue for a room."""
         room = self.get_object()
-        queue_items = room.queue_items.filter(is_active=True).order_by('priority', 'queued_at')
+        queue_items = (
+            room.queue_items.filter(is_active=True)
+            .select_related('room', 'patient', 'visit')
+            .prefetch_related('visit__vital_readings')
+            .order_by('priority', 'queued_at')
+        )
         serializer = ConsultationQueueSerializer(queue_items, many=True)
         return Response(serializer.data)
 
@@ -327,7 +332,11 @@ class ConsultationQueueViewSet(viewsets.ModelViewSet):
     ordering = ['priority', 'queued_at']
     
     def get_queryset(self):
-        qs = ConsultationQueue.objects.all().select_related('room', 'patient', 'visit')
+        qs = (
+            ConsultationQueue.objects.all()
+            .select_related('room', 'patient', 'visit')
+            .prefetch_related('visit__vital_readings')
+        )
 
         # Date filtering (match VisitViewSet pattern) but based on queued_at
         # because queued_at represents "Sent to Room".
@@ -579,4 +588,3 @@ class DiagnosisViewSet(viewsets.ModelViewSet):
             new_values={'icd10_code': diagnosis.icd10_code.code if diagnosis.icd10_code else '', 'status': diagnosis.status, 'certainty': diagnosis.certainty},
             request=self.request,
         )
-
