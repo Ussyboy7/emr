@@ -3,7 +3,8 @@
 from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib import admin
-from django.urls import include, path
+from django.urls import include, path, re_path
+from django.views.static import serve as static_serve
 from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, SpectacularSwaggerView
 
 from common.views import health_check
@@ -45,5 +46,15 @@ urlpatterns = [
     path('api/', include((api_v1_patterns, 'api'), namespace='api_legacy')),
 ]
 
-if settings.DEBUG or getattr(settings, 'SERVE_MEDIA', False):
+if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+elif getattr(settings, 'SERVE_MEDIA', False):
+    media_prefix = (settings.MEDIA_URL or "/media/").lstrip("/")
+    media_prefix = media_prefix.rstrip("/") + "/"
+    urlpatterns += [
+        re_path(
+            rf"^{media_prefix}(?P<path>.*)$",
+            static_serve,
+            {"document_root": settings.MEDIA_ROOT},
+        )
+    ]
