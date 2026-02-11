@@ -29,7 +29,6 @@ interface RadiologyTemplate {
   description?: string;
   body_part?: string;
   modality?: string;
-  contrast_required?: boolean;
   radiation_exposure?: string;
   preparation_required?: string;
   indications?: string;
@@ -53,7 +52,6 @@ const transformTemplate = (apiTemplate: ApiRadiologyTemplate): RadiologyTemplate
     description: apiTemplate.description,
     body_part: apiTemplate.body_part,
     modality: apiTemplate.modality,
-    contrast_required: apiTemplate.contrast_required,
     radiation_exposure: apiTemplate.radiation_exposure,
     preparation_required: apiTemplate.preparation_required,
     indications: apiTemplate.indications,
@@ -92,7 +90,7 @@ export default function RadiologyTemplatesPage() {
   // Form states
   const [formData, setFormData] = useState({
     name: '', code: '', category: 'xray', subcategory: '', description: '',
-    body_part: '', modality: '', contrast_required: false, radiation_exposure: 'moderate',
+    body_part: '', modality: '', radiation_exposure: 'moderate',
     preparation_required: '', indications: '', contraindications: '', turnaround_time: ''
   });
 
@@ -184,7 +182,6 @@ export default function RadiologyTemplatesPage() {
         description: formData.description || undefined,
         body_part: formData.body_part || undefined,
         modality: formData.modality || undefined,
-        contrast_required: formData.contrast_required || false,
         radiation_exposure: formData.radiation_exposure || 'moderate',
         preparation_required: formData.preparation_required || undefined,
         indications: formData.indications || undefined,
@@ -226,7 +223,6 @@ export default function RadiologyTemplatesPage() {
         description: formData.description || undefined,
         body_part: formData.body_part || undefined,
         modality: formData.modality || undefined,
-        contrast_required: formData.contrast_required || false,
         radiation_exposure: formData.radiation_exposure || 'moderate',
         preparation_required: formData.preparation_required || undefined,
         indications: formData.indications || undefined,
@@ -293,7 +289,6 @@ export default function RadiologyTemplatesPage() {
         description: original.description,
         body_part: original.body_part,
         modality: original.modality,
-        contrast_required: original.contrast_required,
         radiation_exposure: original.radiation_exposure,
         preparation_required: original.preparation_required,
         indications: original.indications,
@@ -336,7 +331,7 @@ export default function RadiologyTemplatesPage() {
   const resetForm = () => {
     setFormData({
       name: '', code: '', category: 'xray', subcategory: '', description: '',
-      body_part: '', modality: '', contrast_required: false, radiation_exposure: 'moderate',
+      body_part: '', modality: '', radiation_exposure: 'moderate',
       preparation_required: '', indications: '', contraindications: '', turnaround_time: ''
     });
   };
@@ -352,7 +347,6 @@ export default function RadiologyTemplatesPage() {
       description: template.description || '',
       body_part: template.body_part || '',
       modality: template.modality || '',
-      contrast_required: template.contrast_required || false,
       radiation_exposure: template.radiation_exposure || 'moderate',
       preparation_required: template.preparation_required || '',
       indications: template.indications || '',
@@ -539,7 +533,6 @@ export default function RadiologyTemplatesPage() {
                           <Badge variant="outline" className="text-[10px] px-1.5 py-0">{template.code}</Badge>
                           <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${getCategoryBadge(template.category)}`}>{template.category}</Badge>
                           {!template.is_active && <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-gray-500">Inactive</Badge>}
-                          {template.contrast_required && <Badge variant="destructive" className="text-[9px] px-1 py-0">Contrast</Badge>}
                           {template.radiation_exposure === 'high' && <Badge variant="outline" className="text-[9px] px-1 py-0 text-amber-600">High Rad</Badge>}
                         </div>
                         <div className="flex items-center gap-1 flex-shrink-0">
@@ -609,7 +602,6 @@ export default function RadiologyTemplatesPage() {
                   <Badge variant="outline" className={getCategoryBadge(selectedTemplate.category)}>{selectedTemplate.category}</Badge>
                   {selectedTemplate.subcategory && <Badge variant="outline">{selectedTemplate.subcategory}</Badge>}
                   {!selectedTemplate.is_active && <Badge variant="outline" className="text-gray-500">Inactive</Badge>}
-                  {selectedTemplate.contrast_required && <Badge variant="destructive">Requires Contrast</Badge>}
                   {selectedTemplate.radiation_exposure === 'high' && <Badge variant="outline" className="text-amber-600">High Radiation</Badge>}
                 </div>
 
@@ -680,7 +672,7 @@ export default function RadiologyTemplatesPage() {
                 <div className="space-y-2"><Label>Turnaround Time</Label><Input value={formData.turnaround_time} onChange={(e) => setFormData(p => ({ ...p, turnaround_time: e.target.value }))} placeholder="2 hours" /></div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4">
                 <div className="space-y-2">
                   <Label>Radiation Exposure</Label>
                   <Select value={formData.radiation_exposure} onValueChange={(v: 'none' | 'low' | 'moderate' | 'high') => setFormData(p => ({ ...p, radiation_exposure: v }))}>
@@ -692,17 +684,6 @@ export default function RadiologyTemplatesPage() {
                       <SelectItem value="high">High Radiation</SelectItem>
                     </SelectContent>
                   </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={formData.contrast_required}
-                      onChange={(e) => setFormData(p => ({ ...p, contrast_required: e.target.checked }))}
-                      className="rounded"
-                    />
-                    Requires Contrast
-                  </Label>
                 </div>
               </div>
 
@@ -748,4 +729,3 @@ export default function RadiologyTemplatesPage() {
     </DashboardLayout>
   );
 }
-

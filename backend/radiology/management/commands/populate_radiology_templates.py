@@ -229,9 +229,10 @@ class Command(BaseCommand):
 
         created_count = 0
         for template_data in all_templates:
+            template_defaults = {k: v for k, v in template_data.items() if k != 'contrast_required'}
             template, created = RadiologyTemplate.objects.get_or_create(
-                code=template_data['code'],
-                defaults=template_data
+                code=template_defaults['code'],
+                defaults=template_defaults
             )
             if created:
                 created_count += 1

@@ -88,26 +88,14 @@ const getSubstitutesForMedication = async (medicationName: string): Promise<Subs
     const enhancedSubstitutes: SubstituteOption[] = await Promise.all(
       substitutes.map(async (substitute) => {
         try {
-          // Get inventory data for stock levels
-          const inventory = await pharmacyService.getInventory({ medication: substitute.id });
-          const inventoryItem = inventory.results[0];
-
-          let stock = 0;
-          let expiryDate = '';
-          let daysToExpiry = 0;
-          let isNearExpiry = false;
-
-          if (inventoryItem) {
-            stock = inventoryItem.quantity;
-            // Calculate expiry data if available
-            if (inventoryItem.expiry_date) {
-              expiryDate = new Date(inventoryItem.expiry_date).toLocaleDateString();
-              const today = new Date();
-              const expiry = new Date(inventoryItem.expiry_date);
-              daysToExpiry = Math.ceil((expiry.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-              isNearExpiry = daysToExpiry <= 90; // Consider near expiry if <= 90 days
-            }
-          }
+          const batches = await pharmacyService.getMedicationBatches(Number(substitute.id));
+          const stock = batches.reduce((total, b) => total + Number(b.quantity || 0), 0);
+          const firstExpiry = batches.find((b) => Boolean(b.expiryDate))?.expiryDate || '';
+          const expiryDate = firstExpiry ? new Date(firstExpiry).toLocaleDateString() : '';
+          const daysToExpiry = firstExpiry
+            ? Math.ceil((new Date(firstExpiry).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+            : 0;
+          const isNearExpiry = firstExpiry ? daysToExpiry <= 90 : false;
 
           return {
             id: substitute.id,
@@ -412,6 +400,8 @@ export default function PrescriptionsPage() {
   const [availableSubstitutes, setAvailableSubstitutes] = useState<SubstituteOption[]>([]);
   const [allAvailableMedications, setAllAvailableMedications] = useState<SubstituteOption[]>([]);
   const [substituteSearchQuery, setSubstituteSearchQuery] = useState('');
+  const [brandSelectionTargetName, setBrandSelectionTargetName] = useState('');
+  const [brandSelectionMode, setBrandSelectionMode] = useState<'select' | 'switch'>('select');
 
   // Status update functionality
 
@@ -597,6 +587,30 @@ export default function PrescriptionsPage() {
     
     await Promise.all(batchPromises);
     setMedicationBatches(loadedBatches);
+
+    const medsWithDispensaryStock = transformedMedications.map((m: any) => {
+      const batches = loadedBatches[m.id];
+      if (!Array.isArray(batches)) return m;
+      const stock = batches.reduce((total, b) => total + Number(b.quantity || 0), 0);
+
+      const dispensedQty = Number(m.dispensed_quantity || 0);
+      const prescribedQty = Number(m.quantity || 0);
+      const remainingQty = Math.max(0, prescribedQty - dispensedQty);
+
+      let status = m.status;
+      if (status !== 'Pending' && status !== 'Dispensed' && status !== 'Over-dispensed' && remainingQty > 0) {
+        if (stock === 0) status = 'Out of Stock';
+        else if (stock < 50) status = 'Low Stock';
+        else status = 'Available';
+      }
+
+      return {
+        ...m,
+        stockLevel: stock,
+        status,
+      };
+    });
+    setSelectedPrescriptionMedications(medsWithDispensaryStock);
     
     // Check for drug interactions
     const medNames = transformedMedications.map(m => m.name);
@@ -660,7 +674,7 @@ export default function PrescriptionsPage() {
 
     // Validate batch selection for selected medications
     const missingBatches = await Promise.all(selectedMedications.map(async (medId) => {
-      const med = selectedPrescription!.medications.find(m => m.id === medId);
+      const med = selectedPrescriptionMedications.find(m => m.id === medId);
       // If manually selected batch exists, it's valid
       if (selectedBatches[medId]) return false;
       
@@ -720,7 +734,7 @@ export default function PrescriptionsPage() {
 
         // Dispense each selected medication
         const dispensePromises = selectedMedications.map(async (medId) => {
-        const med = selectedPrescription!.medications.find(m => m.id === medId);
+        const med = selectedPrescriptionMedications.find(m => m.id === medId);
         if (!med) {
           throw new Error(`Medication ${medId} not found in prescription`);
         }
@@ -1131,7 +1145,7 @@ export default function PrescriptionsPage() {
                 />
               </div>
               <div className="flex flex-wrap gap-2">
-                <Select value={dateFilter} onValueChange={setDateFilter} disabled>
+                <Select value={dateFilter} onValueChange={setDateFilter} >
                   <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Time</SelectItem>
@@ -1151,7 +1165,7 @@ export default function PrescriptionsPage() {
                     <SelectItem value="partially dispensed">Partial</SelectItem>
                   </SelectContent>
                 </Select>
-                <Select value={priorityFilter} onValueChange={setPriorityFilter} disabled>
+                <Select value={priorityFilter} onValueChange={setPriorityFilter} >
                   <SelectTrigger className="w-[150px]"><SelectValue placeholder="Priority" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Priority</SelectItem>
@@ -1161,7 +1175,7 @@ export default function PrescriptionsPage() {
                     <SelectItem value="low">Low</SelectItem>
                   </SelectContent>
                 </Select>
-                <Select value={genderFilter} onValueChange={setGenderFilter} disabled>
+                <Select value={genderFilter} onValueChange={setGenderFilter} >
                   <SelectTrigger className="w-[120px]"><SelectValue placeholder="Gender" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Gender</SelectItem>
@@ -1614,10 +1628,10 @@ export default function PrescriptionsPage() {
                 <div>
                   <h4 className="font-medium mb-3 flex items-center gap-2">
                     <Pill className="h-4 w-4 text-violet-500" />
-                    Medications ({selectedPrescription.medications.filter((med: any) => med.status === 'Available' || med.status === 'Low Stock' || med.status === 'Out of Stock' || med.status === 'Partially Dispensed' || med.status === 'Pending').length})
+                    Medications ({selectedPrescriptionMedications.filter((med: any) => med.status === 'Available' || med.status === 'Low Stock' || med.status === 'Out of Stock' || med.status === 'Partially Dispensed' || med.status === 'Pending').length})
                   </h4>
                   <div className="space-y-3">
-                    {selectedPrescription.medications
+                    {selectedPrescriptionMedications
                       .filter((med: any) => med.status === 'Available' || med.status === 'Low Stock' || med.status === 'Out of Stock' || med.status === 'Partially Dispensed' || med.status === 'Pending')
                       .map((med) => {
                       const isSelected = selectedMedications.includes(med.id);
@@ -1645,11 +1659,28 @@ export default function PrescriptionsPage() {
                               <div className="flex items-center justify-between mb-2">
                                 <div>
                                   <h5 className="font-medium">{med.name}</h5>
-                                  {(med as any).substitution && (
-                                    <p className="text-xs text-amber-600 dark:text-amber-400">
-                                      🔄 Substituted from {(med as any).originalMedication}
-                                    </p>
-                                  )}
+                                  {(() => {
+                                    const sub = (med as any).substitution;
+                                    const original = (med as any).originalMedication;
+                                    const previousBrand = sub?.previous_brand;
+
+                                    if (!sub && !original) return null;
+
+                                    return (
+                                      <div className="space-y-0.5">
+                                        {sub?.reason === 'brand_selection' && previousBrand && (
+                                          <p className="text-xs text-amber-600 dark:text-amber-400">
+                                            🔁 Brand switched from {previousBrand}
+                                          </p>
+                                        )}
+                                        {original && (
+                                          <p className="text-xs text-amber-600 dark:text-amber-400">
+                                            🔄 Substituted from {original}
+                                          </p>
+                                        )}
+                                      </div>
+                                    );
+                                  })()}
                                   <p className="text-xs text-muted-foreground">{med.route} • {med.frequency} • {med.duration}</p>
                                 </div>
                                 <div className="flex items-center gap-2">
@@ -1663,10 +1694,16 @@ export default function PrescriptionsPage() {
                                     className="h-7 text-xs border-blue-300 text-blue-700 hover:bg-blue-50 mr-2"
                                     onClick={async () => {
                                       setSubstitutionMed(med);
-
-                                      // Load suggested substitutes
-                                      const substitutes = await getSubstitutesForMedication(med.name);
-                                      setAvailableSubstitutes(substitutes);
+                                      setAvailableSubstitutes([]);
+                                      setAllAvailableMedications([]);
+                                      setSubstitutionForm({ 
+                                        reason: 'brand_selection', 
+                                        selectedSubstitute: '', 
+                                        notes: '' 
+                                      });
+                                      setSubstituteSearchQuery('');
+                                      setBrandSelectionTargetName('');
+                                      setBrandSelectionMode('select');
 
                                       // Load all available medications for search
                                       try {
@@ -1676,32 +1713,20 @@ export default function PrescriptionsPage() {
                                         const enhancedMeds: SubstituteOption[] = await Promise.all(
                                           allMeds.results.map(async (med) => {
                                             try {
-                                              // Get inventory data for stock levels
-                                              const inventory = await pharmacyService.getInventory({ medication: med.id.toString() });
-                                              const inventoryItem = inventory.results[0];
-
-                                              let stock = 0;
-                                              let expiryDate = '';
-                                              let daysToExpiry = 0;
-                                              let isNearExpiry = false;
-
-                                              if (inventoryItem) {
-                                                stock = inventoryItem.quantity;
-                                                // Calculate expiry data if available
-                                                if (inventoryItem.expiry_date) {
-                                                  expiryDate = new Date(inventoryItem.expiry_date).toLocaleDateString();
-                                                  const today = new Date();
-                                                  const expiry = new Date(inventoryItem.expiry_date);
-                                                  daysToExpiry = Math.ceil((expiry.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-                                                  isNearExpiry = daysToExpiry <= 90; // Consider near expiry if <= 90 days
-                                                }
-                                              }
+                                              const batches = await pharmacyService.getMedicationBatches(med.id);
+                                              const stock = batches.reduce((total, b) => total + Number(b.quantity || 0), 0);
+                                              const firstExpiry = batches.find((b) => Boolean(b.expiryDate))?.expiryDate || '';
+                                              const expiryDate = firstExpiry ? new Date(firstExpiry).toLocaleDateString() : '';
+                                              const daysToExpiry = firstExpiry
+                                                ? Math.ceil((new Date(firstExpiry).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+                                                : 0;
+                                              const isNearExpiry = firstExpiry ? daysToExpiry <= 90 : false;
 
                                               return {
                                                 id: med.id.toString(),
                                                 name: med.name,
                                                 strength: med.strength || '',
-                                                type: med.generic_name ? 'generic' : 'brand',
+                                                type: 'brand',
                                                 stock,
                                                 expiryDate,
                                                 daysToExpiry,
@@ -1714,7 +1739,7 @@ export default function PrescriptionsPage() {
                                                 id: med.id.toString(),
                                                 name: med.name,
                                                 strength: med.strength || '',
-                                                type: med.generic_name ? 'generic' : 'brand',
+                                                type: 'brand',
                                                 stock: 0,
                                                 expiryDate: '',
                                                 daysToExpiry: 0,
@@ -1730,16 +1755,29 @@ export default function PrescriptionsPage() {
                                         console.error('Failed to load medications:', error);
                                         setAllAvailableMedications([]);
                                       }
-
-                                      setSubstitutionForm({ 
-                                        reason: 'brand_selection', 
-                                        selectedSubstitute: '', 
-                                        notes: '' 
-                                      });
                                       
                                       // Load available brands for this generic
                                       try {
-                                        const genericId = med.generic || (med as any).medication_details?.generic_id;
+                                        const isGenericSelection =
+                                          (med as any).status === 'Pending' ||
+                                          (med as any).type === 'generic' ||
+                                          !Boolean((med as any).medication);
+
+                                        let genericId: number | null = null;
+                                        let targetName = (med as any).name || '';
+
+                                        if (isGenericSelection) {
+                                          genericId = Number(med.generic || (med as any).medication_details?.generic_id || 0) || null;
+                                          setBrandSelectionMode('select');
+                                        } else {
+                                          const medDetail = await pharmacyService.getMedication(Number((med as any).medication));
+                                          genericId = medDetail.generic?.id ?? null;
+                                          targetName = medDetail.generic?.name || targetName;
+                                          setBrandSelectionMode('switch');
+                                        }
+
+                                        setBrandSelectionTargetName(targetName);
+
                                         if (genericId) {
                                           const availableBrands = await pharmacyService.getAvailableBrands(genericId);
                                           // Convert Medication[] to SubstituteOption[]
@@ -1755,41 +1793,20 @@ export default function PrescriptionsPage() {
                                             isNearExpiry: false,
                                           }));
                                           setAvailableSubstitutes(substituteOptions);
+                                        } else {
+                                          setAvailableSubstitutes([]);
+                                          toast.error('Generic not found for this medication');
                                         }
                                       } catch (err) {
                                         console.error('Failed to load available brands:', err);
                                         toast.error('Failed to load available brands');
                                       }
-                                        
-                                        // If it's a brand selection, load available brands
-                                        if (med.generic) {
-                                          try {
-                                            const availableBrands = await pharmacyService.getAvailableBrands(med.generic);
-                                            // Convert Medication[] to SubstituteOption[]
-                                            const substituteOptions: SubstituteOption[] = availableBrands.map(brand => ({
-                                              id: brand.id.toString(),
-                                              name: brand.name,
-                                              strength: brand.strength || '',
-                                              type: 'brand',
-                                              stock: (brand as any).available_stock || 0,
-                                              expiryDate: '', // Will be populated from inventory
-                                              daysToExpiry: 0,
-                                              unitPrice: 0,
-                                              isNearExpiry: false,
-                                            }));
-                                            setAvailableSubstitutes(substituteOptions);
-                                          } catch (err) {
-                                            console.error('Failed to load available brands:', err);
-                                            toast.error('Failed to load available brands');
-                                          }
-                                        }
-                                        setSubstituteSearchQuery('');
-                                        setShowSubstitutionModal(true);
-                                      }}
+                                      setShowSubstitutionModal(true);
+                                    }}
                                     >
                                       <>
                                         <Tag className="h-3 w-3 mr-1" />
-                                        Select Brand
+                                        {((med as any).status === 'Pending' || (med as any).type === 'generic' || !(med as any).medication) ? 'Select Brand' : 'Switch Brand'}
                                       </>
                                     </Button>
                                     
@@ -1800,6 +1817,8 @@ export default function PrescriptionsPage() {
                                       className="h-7 text-xs border-amber-300 text-amber-700 hover:bg-amber-50"
                                       onClick={async () => {
                                         setSubstitutionMed(med);
+                                        setAvailableSubstitutes([]);
+                                        setAllAvailableMedications([]);
                                         setSubstitutionForm({ 
                                           reason: 'out_of_stock', 
                                           selectedSubstitute: '', 
@@ -1826,9 +1845,11 @@ export default function PrescriptionsPage() {
                                           });
 
                                           setAllAvailableMedications(enhancedMeds);
+                                          setAvailableSubstitutes(enhancedMeds);
                                         } catch (error) {
                                           console.error('Failed to load generic medications:', error);
                                           setAllAvailableMedications([]);
+                                          setAvailableSubstitutes([]);
                                         }
                                         
                                         setSubstituteSearchQuery('');
@@ -1855,11 +1876,22 @@ export default function PrescriptionsPage() {
                                         <Input
                                           type="number"
                                           min="0"
-                                          max={Math.min((med as any).remaining_quantity, med.stockLevel > 0 ? med.stockLevel : (med as any).remaining_quantity)}
+                                          max={(() => {
+                                            const stockCap = Array.isArray(batches)
+                                              ? batches.reduce((total, b) => total + Number(b.quantity || 0), 0)
+                                              : null;
+                                            const remaining = Math.max(0, Number((med as any).remaining_quantity || 0));
+                                            if (typeof stockCap === 'number') return Math.min(remaining, stockCap);
+                                            return remaining;
+                                          })()}
                                           value={dispenseQuantities[med.id] || Math.max(0, (med as any).remaining_quantity)}
                                           onChange={(e) => {
                                             const inputValue = Math.max(0, parseInt(e.target.value) || 0);
-                                            const maxAllowed = Math.min((med as any).remaining_quantity, med.stockLevel > 0 ? med.stockLevel : (med as any).remaining_quantity);
+                                            const stockCap = Array.isArray(batches)
+                                              ? batches.reduce((total, b) => total + Number(b.quantity || 0), 0)
+                                              : null;
+                                            const remaining = Math.max(0, Number((med as any).remaining_quantity || 0));
+                                            const maxAllowed = typeof stockCap === 'number' ? Math.min(remaining, stockCap) : remaining;
                                             setDispenseQuantities(prev => ({
                                               ...prev,
                                               [med.id]: Math.min(inputValue, maxAllowed)
@@ -1869,7 +1901,9 @@ export default function PrescriptionsPage() {
                                         />
                                       )}
                                       <div className="text-[10px] text-muted-foreground mt-1 space-y-1">
-                                        <div>Prescribed: {med.quantity} • Available: {med.stockLevel > 0 ? med.stockLevel : 'Unknown'}</div>
+                                        <div>
+                                          Prescribed: {med.quantity} • Available: {Array.isArray(batches) ? batches.reduce((total, b) => total + Number(b.quantity || 0), 0) : '—'}
+                                        </div>
                                         {(med as any).dispensed_quantity > 0 && (
                                         <div className={(med as any).remaining_quantity < 0 ? "text-red-600 dark:text-red-400" : "text-blue-600 dark:text-blue-400"}>
                                           Already dispensed: {(med as any).dispensed_quantity} • Remaining: {Math.max(0, (med as any).remaining_quantity)}
@@ -1879,41 +1913,26 @@ export default function PrescriptionsPage() {
                                       </div>
                                     </div>
                                     
-                                    {/* Batch Selection (Hidden - Auto Selected) */}
-                                    {/* 
-                                    <div>
-                                      <Label className="text-xs flex items-center gap-1">
-                                        <Hash className="h-3 w-3" />
-                                        Batch Number
-                                      </Label>
-                                      <Select 
-                                        value={selectedBatches[med.id] || ''} 
-                                        onValueChange={(v) => setSelectedBatches(prev => ({ ...prev, [med.id]: v }))}
-                                      >
-                                        <SelectTrigger className="h-8 mt-1 text-xs">
-                                          <SelectValue placeholder="Select batch" />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                          {batches.length > 0 ? (
-                                            batches.map(batch => (
-                                              <SelectItem key={batch.id} value={batch.id}>
-                                                {batch.batchNumber} (Exp: {batch.expiryDate}) • Qty: {batch.quantity}
-                                              </SelectItem>
-                                            ))
-                                          ) : (
-                                            <SelectItem value="no-batches" disabled>No batches available</SelectItem>
-                                          )}
-                                        </SelectContent>
-                                      </Select>
-                                    </div>
-                                    */}
-                                    
                                     {/* Stock Info */}
                                     <div>
                                       <Label className="text-xs">Stock Available</Label>
-                                      <div className={`mt-1 p-2 rounded text-center font-medium ${med.stockLevel < 50 ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'}`}>
-                                        {med.stockLevel} units
-                                      </div>
+                                      {(() => {
+                                        const stock = Array.isArray(batches)
+                                          ? batches.reduce((total, b) => total + Number(b.quantity || 0), 0)
+                                          : null;
+                                        if (stock === null) {
+                                          return (
+                                            <div className="mt-1 p-2 rounded text-center font-medium bg-muted text-muted-foreground">
+                                              —
+                                            </div>
+                                          );
+                                        }
+                                        return (
+                                          <div className={`mt-1 p-2 rounded text-center font-medium ${stock < 50 ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'}`}>
+                                            {stock} units
+                                          </div>
+                                        );
+                                      })()}
                                     </div>
                                   </div>
                                   
@@ -1983,7 +2002,7 @@ export default function PrescriptionsPage() {
                 {substitutionForm.reason === 'brand_selection' ? (
                   <>
                     <Tag className="h-5 w-5 text-blue-500" />
-                    Select Brand for Dispensing
+                    {brandSelectionMode === 'switch' ? 'Switch Brand for Dispensing' : 'Select Brand for Dispensing'}
                   </>
                 ) : (
                   <>
@@ -1994,7 +2013,7 @@ export default function PrescriptionsPage() {
               </DialogTitle>
               <DialogDescription>
                 {substitutionForm.reason === 'brand_selection' 
-                  ? `Select the specific brand of ${substitutionMed?.name} to dispense`
+                  ? `Select the specific brand of ${brandSelectionTargetName || substitutionMed?.name} to dispense`
                   : `Substitute ${substitutionMed?.name} with an alternative`
                 }
               </DialogDescription>
@@ -2256,16 +2275,24 @@ export default function PrescriptionsPage() {
                   if (selectedSub && substitutionMed) {
                     try {
                       let medicationIdToUse = selectedSub.id;
-                      
-                      // If the selected substitution is a generic, we need to handle it differently
-                      // For now, we'll use the generic ID directly, but the backend should handle mapping to appropriate brand
+                      let resolvedMedicationName = selectedSub.name;
+
                       if (selectedSub.type === 'generic') {
-                        // This might need adjustment based on how the backend handles generic substitutions
-                        console.log('Selected generic for substitution:', selectedSub);
+                        const brands = await pharmacyService.getAvailableBrands(Number(selectedSub.id));
+                        if (!brands || brands.length === 0) {
+                          throw new Error(`No in-stock brand available for "${selectedSub.name}"`);
+                        }
+
+                        const bestBrand = [...brands].sort(
+                          (a: any, b: any) => Number((b as any).available_stock || 0) - Number((a as any).available_stock || 0)
+                        )[0];
+
+                        medicationIdToUse = bestBrand.id.toString();
+                        resolvedMedicationName = bestBrand.name;
                       }
                       
                       // Call API to persist the substitution
-                      const updatedPrescription = await pharmacyService.substitutePrescriptionItem(
+                      await pharmacyService.substitutePrescriptionItem(
                         selectedPrescription.id,
                         substitutionMed.id, // prescription item ID
                         medicationIdToUse, // new medication ID
@@ -2274,10 +2301,7 @@ export default function PrescriptionsPage() {
                       );
                       
                       const actionType = substitutionForm.reason === 'brand_selection' ? 'Brand Selection' : 'Substitution';
-                      toast.success(`${actionType} confirmed: ${selectedSub.name}`);
-
-                      // Update local state with the API response
-                      setSelectedPrescription(updatedPrescription as any);
+                      toast.success(`${actionType} confirmed: ${resolvedMedicationName}`);
 
                       // Close the substitution modal first
                       setShowSubstitutionModal(false);
@@ -2285,36 +2309,16 @@ export default function PrescriptionsPage() {
                       // Reload prescriptions list to reflect substitution in the UI
                       await loadPrescriptions();
 
-                      // If prescription details modal is open, refresh it with updated data
-                      if (showViewModal && selectedPrescription?.id === String(updatedPrescription.id)) {
-                        setSelectedPrescription(updatedPrescription as any);
-                      }
+                      const prescriptionId = parseInt(String(selectedPrescription.id)) || Number(selectedPrescription.id);
+                      const refreshed = await pharmacyService.getPrescription(prescriptionId);
+                      let transformed = transformMedications(refreshed.medications as any, selectedPrescription.status);
 
-                      // Medication IDs stay the same for backend compatibility
-                      // Just reload batches for the substituted medication using the same prescription item ID
-                      try {
-                        const medicationId = selectedSub.id; // The actual medication ID from database
-                        console.log(`Loading fresh batches for substituted medication: ${selectedSub.name} (ID: ${medicationId})`);
-                        const inventory = await pharmacyService.getInventory({ medication: medicationId.toString() });
-                        console.log(`Inventory for substituted medication ${selectedSub.name}:`, inventory);
-
-                        const batches = inventory.results.map((item: any) => ({
-                          id: item.id.toString(),
-                          batchNumber: item.batch_number,
-                          quantity: Number(item.quantity),
-                          expiryDate: item.expiry_date,
-                          receivedDate: (item as any).created_at?.split('T')[0] || '',
-                          supplier: item.supplier || '',
-                          unitCost: Number((item as any).purchase_price) || 0,
-                        }));
-
-                        // Use the SAME prescription item ID as key (don't change it!)
+                      if (substitutionMed) {
+                        const batches = await pharmacyService.getMedicationBatches(Number(medicationIdToUse));
                         setMedicationBatches(prev => ({
                           ...prev,
                           [substitutionMed.id]: batches
                         }));
-
-                        // Update selected batch if available
                         if (batches.length > 0) {
                           setSelectedBatches(prev => ({
                             ...prev,
@@ -2322,17 +2326,44 @@ export default function PrescriptionsPage() {
                           }));
                         }
 
-                        console.log(`✅ Loaded ${batches.length} fresh batches for substituted medication ${selectedSub.name}`);
-                      } catch (batchError) {
-                        console.error(`❌ Failed to load batches for substituted medication ${selectedSub.name}:`, batchError);
-                        // If batch loading fails, set empty batches
-                        setMedicationBatches(prev => ({
-                          ...prev,
-                          [substitutionMed.id]: []
-                        }));
+                        const stock = batches.reduce((total, b) => total + Number(b.quantity || 0), 0);
+                        const previousBrandName = substitutionMed.name;
+                        const preservedOriginalMedication =
+                          substitutionForm.reason === 'brand_selection'
+                            ? (substitutionMed as any).originalMedication
+                            : substitutionMed.name;
+                        transformed = transformed.map((m: any) => {
+                          if (m.id !== substitutionMed.id) return m;
+                          const dispensedQty = Number(m.dispensed_quantity || 0);
+                          const prescribedQty = Number(m.quantity || 0);
+                          const remainingQty = Math.max(0, prescribedQty - dispensedQty);
+                          let status = m.status;
+                          if (remainingQty > 0) {
+                            if (stock === 0) status = 'Out of Stock';
+                            else if (stock < 50) status = 'Low Stock';
+                            else status = 'Available';
+                          }
+                          return {
+                            ...m,
+                            name: resolvedMedicationName,
+                            medication: Number(medicationIdToUse),
+                            stockLevel: stock,
+                            status,
+                            substitution: {
+                              reason: substitutionForm.reason,
+                              medication_id: medicationIdToUse,
+                              name: resolvedMedicationName,
+                              ...(substitutionForm.reason === 'brand_selection' ? { previous_brand: previousBrandName } : {}),
+                            },
+                            originalMedication: preservedOriginalMedication,
+                          };
+                        });
                       }
 
-                      toast.success(`Successfully substituted ${substitutionMed.name} with ${selectedSub.name}`);
+                      setSelectedPrescriptionMedications(transformed);
+                      setSelectedPrescription((prev: any) => prev ? { ...prev, medications: transformed } : prev);
+
+                      toast.success(`Successfully substituted ${substitutionMed.name} with ${resolvedMedicationName}`);
                       setShowSubstitutionModal(false);
 
                       // Reset form

@@ -1433,7 +1433,7 @@ export default function LabOrdersPage() {
                   />
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <Select value={dateFilter} onValueChange={setDateFilter} disabled>
+                  <Select value={dateFilter} onValueChange={setDateFilter} >
                     <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All Time</SelectItem>
@@ -1451,7 +1451,7 @@ export default function LabOrdersPage() {
                       <SelectItem value="Routine">Routine</SelectItem>
                     </SelectContent>
                   </Select>
-                  <Select value={genderFilter} onValueChange={setGenderFilter} disabled>
+                  <Select value={genderFilter} onValueChange={setGenderFilter} >
                     <SelectTrigger className="w-[120px]"><SelectValue placeholder="Gender" /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All Gender</SelectItem>

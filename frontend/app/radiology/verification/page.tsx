@@ -29,7 +29,6 @@ interface ImagingStudy {
   procedure: string;
   category: string;
   bodyPart: string;
-  contrastRequired: boolean;
   status: 'Pending' | 'Scheduled' | 'Acquired' | 'Processing' | 'Reported' | 'Verified';
   processingMethod?: 'In-house' | 'Outsourced';
   outsourcedFacility?: string;
@@ -58,7 +57,8 @@ interface RadiologyReport {
   priority: 'Routine' | 'Urgent' | 'STAT';
   clinic: string;
   clinicalIndication?: string;
-  specialInstructions?: string;
+  provisionalDiagnosis?: string;
+  lmp?: string;
 }
 
 // Transform backend radiology report to frontend format
@@ -81,7 +81,8 @@ const transformReport = (apiReport: any): RadiologyReport => {
   // Extract clinic and clinical indication
   const clinic = orderDetails.clinic || (apiReport as any).clinic || '';
   const clinicalIndication = orderDetails.clinical_notes || apiReport.clinical_notes || '';
-  const specialInstructions = orderDetails.special_instructions || (apiReport as any).special_instructions || '';
+  const provisionalDiagnosis = orderDetails.provisional_diagnosis || (apiReport as any).provisional_diagnosis || '';
+  const lmp = orderDetails.lmp || (apiReport as any).lmp || '';
   
   return {
     id: apiReport.id.toString(),
@@ -103,7 +104,6 @@ const transformReport = (apiReport: any): RadiologyReport => {
       procedure: studyObj.procedure || '',
       category: studyObj.modality || 'X-Ray',
       bodyPart: studyObj.body_part || '',
-      contrastRequired: studyObj.procedure?.toLowerCase().includes('contrast') || false,
       status: studyObj.status ? (
         studyObj.status === 'reported' || studyObj.status === 'results_ready' ? 'Reported' :
         studyObj.status === 'verified' ? 'Verified' : 'Reported'
@@ -128,7 +128,8 @@ const transformReport = (apiReport: any): RadiologyReport => {
     priority: transformPriority(apiReport.priority || 'routine') as 'Routine' | 'Urgent' | 'STAT',
     clinic,
     clinicalIndication,
-    specialInstructions,
+    provisionalDiagnosis: provisionalDiagnosis || undefined,
+    lmp: lmp || undefined,
   };
 };
 
@@ -1079,4 +1080,3 @@ export default function RadiologyVerificationPage() {
     </DashboardLayout>
   );
 }
-

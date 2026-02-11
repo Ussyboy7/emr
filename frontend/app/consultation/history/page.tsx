@@ -648,20 +648,15 @@ export default function ConsultationHistoryPage() {
       toast.error("Invalid consultation/patient");
       return;
     }
-    const clinicalNotes = [
-      payload.clinicalIndication?.trim(),
-      payload.specialInstructions?.trim() ? `Special Instructions: ${payload.specialInstructions.trim()}` : "",
-      payload.contrastRequired ? "Contrast Required: Yes" : "",
-    ]
-      .filter(Boolean)
-      .join("\n");
 
     await radiologyService.createOrder({
       patient: patientId,
       visit: selectedConsultation.visitId,
       consultation_session: sessionId,
       priority: payload.priority,
-      clinical_notes: clinicalNotes || undefined,
+      clinical_notes: payload.clinicalIndication?.trim() || undefined,
+      provisional_diagnosis: payload.provisionalDiagnosis?.trim() || undefined,
+      lmp: payload.lmp || undefined,
       studies_data: payload.templates.map((t) => ({
         procedure: t.name,
         body_part: t.body_part || "",
@@ -1422,4 +1417,3 @@ export default function ConsultationHistoryPage() {
     </DashboardLayout>
   );
 }
-

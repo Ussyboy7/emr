@@ -17,13 +17,13 @@ import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { toast } from 'sonner';
-import { radiologyService } from '@/lib/services';
+import { patientService, radiologyService } from '@/lib/services';
 import { PatientAvatar } from '@/components/PatientAvatar';
 import {
   ClipboardList, Search, Eye, Calendar, Clock, Activity, CheckCircle2,
   FileBarChart, AlertTriangle, ScanLine, User, ArrowRight,
   CalendarDays, Filter, Loader2, Play, FileText,
-  Beaker, Building2, Truck, RotateCcw, XCircle, TestTube
+  Beaker, Building2, Truck, RotateCcw, XCircle, TestTube, Plus
 } from 'lucide-react';
 
 export default function RadiologyOrdersPage() {
@@ -198,6 +198,7 @@ export default function RadiologyOrdersPage() {
   const [isResultsDialogOpen, setIsResultsDialogOpen] = useState(false);
   // View & Manage Order Dialog (like lab)
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
+  const [selectedPatientFull, setSelectedPatientFull] = useState<any | null>(null);
   const [resultEntryMode, setResultEntryMode] = useState<'manual' | 'upload'>('manual');
   const [resultsForm, setResultsForm] = useState({
     findings: '',
@@ -212,10 +213,43 @@ export default function RadiologyOrdersPage() {
   const [processingMethod, setProcessingMethod] = useState<'in_house' | 'outsourced'>('in_house');
   const [outsourcedLab, setOutsourcedLab] = useState('');
 
+  const [isAddStudyDialogOpen, setIsAddStudyDialogOpen] = useState(false);
+  const [templates, setTemplates] = useState<any[]>([]);
+  const [loadingTemplates, setLoadingTemplates] = useState(false);
+  const [templateSearch, setTemplateSearch] = useState('');
+  const [selectedTemplate, setSelectedTemplate] = useState<any | null>(null);
+  const [addStudyProcessingMethod, setAddStudyProcessingMethod] = useState<'in_house' | 'outsourced'>('in_house');
+  const [addStudyOutsourcedFacility, setAddStudyOutsourcedFacility] = useState('');
+  const [isAddingStudy, setIsAddingStudy] = useState(false);
+
   // Load orders from API
   useEffect(() => {
     loadOrders();
   }, [currentPage, itemsPerPage, searchQuery, priorityFilter]);
+
+  useEffect(() => {
+    if (!isViewDialogOpen) {
+      setSelectedPatientFull(null);
+      return;
+    }
+    const patientId = selectedOrder?.patient_details?.id ?? selectedOrder?.patient;
+    if (!patientId) {
+      setSelectedPatientFull(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const p = await patientService.getPatient(Number(patientId));
+        if (!cancelled) setSelectedPatientFull(p);
+      } catch {
+        if (!cancelled) setSelectedPatientFull(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isViewDialogOpen, selectedOrder?.patient_details?.id, selectedOrder?.patient]);
 
 
   const loadOrders = async () => {
@@ -238,6 +272,81 @@ export default function RadiologyOrdersPage() {
       console.error('Error loading radiology orders:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadTemplates = async () => {
+    setLoadingTemplates(true);
+    try {
+      const response = await radiologyService.getTemplates({ page_size: 1000 });
+      setTemplates(response.results || []);
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to load templates');
+      setTemplates([]);
+    } finally {
+      setLoadingTemplates(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!isAddStudyDialogOpen) return;
+    if (templates.length > 0) return;
+    loadTemplates();
+  }, [isAddStudyDialogOpen]);
+
+  const filteredTemplates = useMemo(() => {
+    const q = templateSearch.trim().toLowerCase();
+    if (!q) return [];
+    const matches = templates.filter((t) => {
+      const name = String(t?.name ?? '').toLowerCase();
+      const code = String(t?.code ?? '').toLowerCase();
+      return name.includes(q) || code.includes(q);
+    });
+    return matches.slice(0, 25);
+  }, [templateSearch, templates]);
+
+  const formatLmp = (value: any) => {
+    if (!value) return '';
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return String(value);
+    return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: '2-digit' });
+  };
+
+  const handleAddStudy = async () => {
+    if (!selectedOrder) return;
+    if (!selectedTemplate?.id) {
+      toast.error('Select an imaging study template first');
+      return;
+    }
+
+    setIsAddingStudy(true);
+    try {
+      await radiologyService.createStudy({
+        order: selectedOrder.id,
+        template: selectedTemplate.id,
+        procedure: selectedTemplate.name || 'Radiology Study',
+        body_part: selectedTemplate.body_part || '',
+        modality: selectedTemplate.modality || '',
+        status: 'pending',
+        images_count: 0,
+        processing_method: addStudyProcessingMethod,
+        outsourced_facility: addStudyProcessingMethod === 'outsourced' ? addStudyOutsourcedFacility : '',
+      } as any);
+
+      toast.success('Study added to order');
+      setIsAddStudyDialogOpen(false);
+      setTemplateSearch('');
+      setSelectedTemplate(null);
+      setAddStudyProcessingMethod('in_house');
+      setAddStudyOutsourcedFacility('');
+
+      await loadOrders();
+      const updatedOrder = await radiologyService.getOrder(selectedOrder.id);
+      setSelectedOrder(updatedOrder);
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to add study');
+    } finally {
+      setIsAddingStudy(false);
     }
   };
 
@@ -519,7 +628,7 @@ export default function RadiologyOrdersPage() {
                 />
               </div>
               <div className="flex flex-wrap gap-2">
-                <Select value={dateFilter} onValueChange={setDateFilter} disabled>
+                <Select value={dateFilter} onValueChange={setDateFilter} >
                   <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Time</SelectItem>
@@ -940,13 +1049,30 @@ export default function RadiologyOrdersPage() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <p className="text-sm font-medium mb-2">Patient</p>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-start gap-2">
                       <PatientAvatar name={selectedOrder.patient_name} size="sm" />
                       <div>
                         <p className="font-medium">{selectedOrder.patient_name}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {selectedOrder.patient_details?.age}y {selectedOrder.patient_details?.gender}
-                        </p>
+                        <div className="mt-1 text-xs text-muted-foreground space-y-0.5">
+                          <p>
+                            Patient ID: {selectedOrder.patient_details?.id ?? selectedOrder.patient ?? '—'}
+                            {selectedPatientFull?.patient_id ? ` • ${selectedPatientFull.patient_id}` : ''}
+                          </p>
+                          <p>{selectedOrder.patient_details?.age}y {selectedOrder.patient_details?.gender}</p>
+                          {(selectedPatientFull?.phone || selectedPatientFull?.email) && (
+                            <p>
+                              {selectedPatientFull?.phone ? selectedPatientFull.phone : '—'}
+                              {selectedPatientFull?.email ? ` • ${selectedPatientFull.email}` : ''}
+                            </p>
+                          )}
+                          {(selectedPatientFull?.category || selectedOrder?.clinic) && (
+                            <p>
+                              {selectedPatientFull?.category ? `Category: ${selectedPatientFull.category}` : ''}
+                              {selectedPatientFull?.category && selectedOrder?.clinic ? ' • ' : ''}
+                              {selectedOrder?.clinic ? `Clinic: ${selectedOrder.clinic}` : ''}
+                            </p>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -965,9 +1091,39 @@ export default function RadiologyOrdersPage() {
                   </div>
                 )}
 
+                {/* Provisional Diagnosis & LMP */}
+                {(selectedOrder.provisional_diagnosis || selectedOrder.lmp) && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {selectedOrder.provisional_diagnosis && (
+                      <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
+                        <p className="text-xs text-muted-foreground mb-1">Provisional Diagnosis</p>
+                        <p className="text-sm">{selectedOrder.provisional_diagnosis}</p>
+                      </div>
+                    )}
+                    {selectedOrder.lmp && (
+                      <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
+                        <p className="text-xs text-muted-foreground mb-1">LMP</p>
+                        <p className="text-sm">{formatLmp(selectedOrder.lmp)}</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* Individual Studies - With Actions */}
                 <div className="space-y-3">
-                  <p className="text-sm font-medium">Studies ({selectedOrder.studies?.length || 0})</p>
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-sm font-medium">Studies ({selectedOrder.studies?.length || 0})</p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setIsAddStudyDialogOpen(true)}
+                      className="h-8"
+                    >
+                      <Plus className="h-4 w-4 mr-2" />
+                      Add Study
+                    </Button>
+                  </div>
                   {selectedOrder.studies?.map((study: any, idx: number) => (
                     <div key={study.id || idx} className="p-3 rounded-lg border space-y-2">
                       <div className="flex items-center justify-between">
@@ -1087,6 +1243,124 @@ export default function RadiologyOrdersPage() {
                 </div>
               </div>
             )}
+          </DialogContent>
+        </Dialog>
+
+        <Dialog
+          open={isAddStudyDialogOpen}
+          onOpenChange={(open) => {
+            setIsAddStudyDialogOpen(open);
+            if (!open) {
+              setTemplateSearch('');
+              setSelectedTemplate(null);
+              setAddStudyProcessingMethod('in_house');
+              setAddStudyOutsourcedFacility('');
+            }
+          }}
+        >
+          <DialogContent className="w-[95vw] sm:max-w-[650px] max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Plus className="h-5 w-5 text-amber-500" />
+                Add Study
+              </DialogTitle>
+              <DialogDescription>
+                {selectedOrder?.order_id ? `${selectedOrder.order_id} • Add an imaging study to this order` : 'Add an imaging study to this order'}
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4 py-2">
+              <div className="space-y-2">
+                <Label htmlFor="template-search">Search & Select Imaging Study</Label>
+                <Input
+                  id="template-search"
+                  placeholder="Type to search by name or code..."
+                  value={templateSearch}
+                  onChange={(e) => {
+                    setTemplateSearch(e.target.value);
+                    if (!templates.length && !loadingTemplates) loadTemplates();
+                  }}
+                />
+                {loadingTemplates && (
+                  <div className="text-xs text-muted-foreground flex items-center gap-2">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Loading templates...
+                  </div>
+                )}
+                {templateSearch.trim() && filteredTemplates.length > 0 && (
+                  <div className="border rounded-md max-h-56 overflow-y-auto">
+                    {filteredTemplates.map((t) => (
+                      <button
+                        key={t.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedTemplate(t);
+                          setTemplateSearch(`${t.name ?? ''}`.trim());
+                        }}
+                        className="w-full text-left px-3 py-2 hover:bg-muted/60 transition-colors flex items-start justify-between gap-3"
+                      >
+                        <div>
+                          <div className="text-sm font-medium">{t.name}</div>
+                          <div className="text-xs text-muted-foreground">{t.code}</div>
+                        </div>
+                        <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                          {t.modality || t.category || 'Study'}
+                        </Badge>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {selectedTemplate && (
+                  <div className="p-3 rounded-md bg-muted/40">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-medium">{selectedTemplate.name}</p>
+                        <p className="text-xs text-muted-foreground">{selectedTemplate.code}</p>
+                      </div>
+                      <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                        {selectedTemplate.modality || selectedTemplate.category || 'Study'}
+                      </Badge>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label>Processing Method</Label>
+                  <Select value={addStudyProcessingMethod} onValueChange={(v) => setAddStudyProcessingMethod(v as any)}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select method" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="in_house">In-house</SelectItem>
+                      <SelectItem value="outsourced">Outsourced</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {addStudyProcessingMethod === 'outsourced' && (
+                  <div className="space-y-2">
+                    <Label htmlFor="outsourced-facility">Outsourced Facility</Label>
+                    <Input
+                      id="outsourced-facility"
+                      placeholder="Enter facility name..."
+                      value={addStudyOutsourcedFacility}
+                      onChange={(e) => setAddStudyOutsourcedFacility(e.target.value)}
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsAddStudyDialogOpen(false)} disabled={isAddingStudy}>
+                Cancel
+              </Button>
+              <Button onClick={handleAddStudy} disabled={isAddingStudy || !selectedTemplate} className="bg-amber-500 hover:bg-amber-600">
+                {isAddingStudy ? 'Adding...' : 'Add Study'}
+              </Button>
+            </DialogFooter>
           </DialogContent>
         </Dialog>
 

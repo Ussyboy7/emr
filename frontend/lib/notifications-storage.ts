@@ -121,16 +121,33 @@ export const getNotifications = async (params?: {
 /**
  * Get unread notification count.
  */
+let unreadCountInFlight: Promise<number> | null = null;
+let unreadCountLastValue: number | null = null;
+let unreadCountLastFetchedAt = 0;
+
 export const getUnreadNotificationCount = async (): Promise<number> => {
   if (!hasTokens()) return 0;
 
   try {
+    const now = Date.now();
+    if (unreadCountLastValue !== null && now - unreadCountLastFetchedAt < 1500) {
+      return unreadCountLastValue;
+    }
+    if (unreadCountInFlight) {
+      return unreadCountInFlight;
+    }
     // The router registers 'notifications' under api/notifications/, and the viewset is also 'notifications'
     // So the full path is /api/notifications/notifications/unread_count/
     // apiFetch adds /api/v1/ prefix, so we need /notifications/notifications/unread_count/
     const url = '/notifications/notifications/unread_count/';
-    const response = await apiFetch<{ count: number }>(url);
-    return response.count || 0;
+    unreadCountInFlight = (async () => {
+      const response = await apiFetch<{ count: number }>(url);
+      const count = response.count || 0;
+      unreadCountLastValue = count;
+      unreadCountLastFetchedAt = Date.now();
+      return count;
+    })();
+    return await unreadCountInFlight;
   } catch (error: any) {
     // Silently handle errors - notifications endpoint might not be available yet
     // Network errors (Failed to fetch), 404s, 401s, etc. are all acceptable
@@ -139,6 +156,8 @@ export const getUnreadNotificationCount = async (): Promise<number> => {
       console.debug('[notifications-storage] Error fetching unread count (silently handled):', error?.message || error);
     }
     return 0;
+  } finally {
+    unreadCountInFlight = null;
   }
 };
 

@@ -1,6 +1,7 @@
 """
 Views for the Radiology app.
 """
+import logging
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -20,6 +21,7 @@ from .serializers import (
 )
 from audit.services import AuditService
 
+logger = logging.getLogger(__name__)
 
 class RadiologyTemplateViewSet(viewsets.ModelViewSet):
     """ViewSet for managing radiology investigation templates."""
@@ -115,15 +117,15 @@ class RadiologyOrderViewSet(viewsets.ModelViewSet):
         return RadiologyOrder.objects.all().select_related('patient', 'doctor', 'visit', 'consultation_session', 'created_by').prefetch_related('studies')
 
     def list(self, request, *args, **kwargs):
-        print("DEBUG: RadiologyOrderViewSet.list() called")
+        logger.debug("RadiologyOrderViewSet.list() called")
         # Ensure all orders have at least one study before serialization
         orders = self.get_queryset()
         created_count = 0
         for order in orders:
             study_count = order.studies.count()
-            print(f"DEBUG: Order {order.id} ({order.order_id}) has {study_count} studies")
+            logger.debug("Order %s (%s) has %s studies", order.id, order.order_id, study_count)
             if study_count == 0:
-                print(f"DEBUG: Creating default study for order {order.id}")
+                logger.debug("Creating default study for order %s", order.id)
                 RadiologyStudy.objects.create(
                     order=order,
                     procedure='Radiology Study',
@@ -135,7 +137,7 @@ class RadiologyOrderViewSet(viewsets.ModelViewSet):
                 )
                 created_count += 1
 
-        print(f"DEBUG: Created {created_count} default studies")
+        logger.debug("Created %s default studies", created_count)
 
         # Refresh queryset to include newly created studies
         self.queryset = self.get_queryset()
@@ -143,19 +145,24 @@ class RadiologyOrderViewSet(viewsets.ModelViewSet):
         # Debug: Check final study counts
         final_orders = self.get_queryset()
         for order in final_orders[:3]:  # Just check first 3
-            print(f"DEBUG: Final - Order {order.id} has {order.studies.count()} studies")
+            logger.debug("Final - Order %s has %s studies", order.id, order.studies.count())
 
         return super().list(request, *args, **kwargs)
 
     def retrieve(self, request, *args, **kwargs):
-        print("DEBUG: RadiologyOrderViewSet.retrieve() called")
+        logger.debug("RadiologyOrderViewSet.retrieve() called")
         # Ensure the order has at least one study before serialization
         order = self.get_object()
         study_count = order.studies.count()
-        print(f"DEBUG: Order {order.id} ({order.order_id}) has {study_count} studies before retrieve")
+        logger.debug(
+            "Order %s (%s) has %s studies before retrieve",
+            order.id,
+            order.order_id,
+            study_count,
+        )
 
         if study_count == 0:
-            print(f"DEBUG: ViewSet retrieve() creating default study for order {order.id}")
+            logger.debug("ViewSet retrieve() creating default study for order %s", order.id)
             RadiologyStudy.objects.create(
                 order=order,
                 procedure='Radiology Study',
@@ -169,7 +176,7 @@ class RadiologyOrderViewSet(viewsets.ModelViewSet):
         # Refresh the order object to include the new study
         order.refresh_from_db()
         study_count_after = order.studies.count()
-        print(f"DEBUG: Order {order.id} has {study_count_after} studies after retrieve")
+        logger.debug("Order %s has %s studies after retrieve", order.id, study_count_after)
 
         return super().retrieve(request, *args, **kwargs)
 
@@ -288,9 +295,7 @@ class RadiologyOrderViewSet(viewsets.ModelViewSet):
         except RadiologyStudy.DoesNotExist:
             return Response({'error': 'Study not found'}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
-            print(f"Error in acquire method: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.exception("Error in acquire method")
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=True, methods=['post'])
@@ -334,16 +339,19 @@ class RadiologyOrderViewSet(viewsets.ModelViewSet):
                         'overall_status': 'critical' if critical else 'normal',
                     }
                 )
-                print(f"DEBUG: RadiologyReport {'created' if created else 'updated'} for study {study.id}, report ID: {report_record.id}")
+                logger.debug(
+                    "RadiologyReport %s for study %s, report ID: %s",
+                    "created" if created else "updated",
+                    study.id,
+                    report_record.id,
+                )
                 if not created:
                     if critical:
                         report_record.overall_status = 'critical'
                     report_record.save()
-                    print(f"DEBUG: Updated existing RadiologyReport {report_record.id}")
+                    logger.debug("Updated existing RadiologyReport %s", report_record.id)
             except Exception as e:
-                print(f"DEBUG: ERROR creating RadiologyReport for study {study.id}: {e}")
-                import traceback
-                traceback.print_exc()
+                logger.exception("Error creating RadiologyReport for study %s", study.id)
             
             # Log audit
             AuditService.log_activity(
@@ -392,7 +400,7 @@ class RadiologyStudyViewSet(viewsets.ModelViewSet):
             processing_method = request.data.get('processing_method')
             outsourced_facility = request.data.get('outsourced_facility')
 
-            print(f"DEBUG: update_study_status called for study {study.id}, status: {new_status}")
+            logger.debug("update_study_status called for study %s, status: %s", study.id, new_status)
 
             if new_status not in ['pending', 'processing', 'reported', 'verified', 'rejected']:
                 return Response({'error': 'Invalid status'}, status=status.HTTP_400_BAD_REQUEST)
@@ -437,9 +445,7 @@ class RadiologyStudyViewSet(viewsets.ModelViewSet):
             # Return serialized study data (like lab orders)
             return Response(RadiologyStudySerializer(study).data)
         except Exception as e:
-            print(f"DEBUG: Exception in update_study_status: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.exception("Exception in update_study_status")
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=True, methods=['post'])
@@ -476,18 +482,18 @@ class RadiologyStudyViewSet(viewsets.ModelViewSet):
                 if status_update == 'reported' and not study.reported_by:
                     study.reported_by = request.user
                     study.reported_at = timezone.now()
-                    print(f"Set reported_by to {request.user.get_full_name()}")
+                    logger.debug("Set reported_by to %s", request.user.get_full_name())
 
             # Handle file upload
             if request.FILES.get('report_file'):
-                print(f"Saving file: {request.FILES['report_file'].name}")
+                logger.debug("Saving file: %s", request.FILES['report_file'].name)
                 study.report_file = request.FILES['report_file']
-                print(f"File assigned to study {study.id}")
+                logger.debug("File assigned to study %s", study.id)
             else:
-                print("No report_file in request.FILES")
+                logger.debug("No report_file in request.FILES")
 
             study.save()
-            print(f"Study {study.id} saved successfully")
+            logger.debug("Study %s saved successfully", study.id)
 
             # Create or update report record for verification
             if status_update == 'reported':
@@ -573,9 +579,7 @@ class RadiologyStudyViewSet(viewsets.ModelViewSet):
         except RadiologyStudy.DoesNotExist:
             return Response({'error': 'Study not found'}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
-            print(f"Error rejecting study: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.exception("Error rejecting study")
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=False, methods=['post'])
@@ -586,13 +590,13 @@ class RadiologyStudyViewSet(viewsets.ModelViewSet):
         reported_studies = RadiologyStudy.objects.filter(status='reported')
         created_count = 0
 
-        print(f"DEBUG: Found {reported_studies.count()} studies with status='reported'")
+        logger.debug("Found %s studies with status='reported'", reported_studies.count())
 
         for study in reported_studies:
             # Check if RadiologyReport already exists
             existing_report = RadiologyReport.objects.filter(study=study).first()
             if existing_report:
-                print(f"DEBUG: RadiologyReport already exists for study {study.id}: {existing_report.id}")
+                logger.debug("RadiologyReport already exists for study %s: %s", study.id, existing_report.id)
                 continue
 
             try:
@@ -605,9 +609,9 @@ class RadiologyStudyViewSet(viewsets.ModelViewSet):
                     priority='high' if study.critical else 'medium',
                 )
                 created_count += 1
-                print(f"DEBUG: Created RadiologyReport {report_record.id} for study {study.id}")
+                logger.debug("Created RadiologyReport %s for study %s", report_record.id, study.id)
             except Exception as e:
-                print(f"DEBUG: ERROR creating RadiologyReport for study {study.id}: {e}")
+                logger.exception("Error creating RadiologyReport for study %s", study.id)
 
         return Response({
             'message': f'Created {created_count} RadiologyReport records',
@@ -626,23 +630,28 @@ class RadiologyReportViewSet(viewsets.ReadOnlyModelViewSet):
     ordering = ['-created_at']
 
     def list(self, request, *args, **kwargs):
-        print(f"DEBUG: RadiologyReportViewSet.list() called")
-        print(f"DEBUG: Checking existing RadiologyReport records:")
+        logger.debug("RadiologyReportViewSet.list() called")
 
         # Check all RadiologyReport records
         all_reports = RadiologyReport.objects.all()
-        print(f"DEBUG: Total RadiologyReport records: {all_reports.count()}")
+        logger.debug("Total RadiologyReport records: %s", all_reports.count())
 
         for report in all_reports:
-            print(f"DEBUG: Report {report.id}: study_id={report.study_id}, study_status={report.study.status}, patient={report.patient}")
+            logger.debug(
+                "Report %s: study_id=%s, study_status=%s, patient=%s",
+                report.id,
+                report.study_id,
+                report.study.status,
+                report.patient_id,
+            )
 
         # Check studies with reported status
         reported_studies = RadiologyStudy.objects.filter(status='reported')
-        print(f"DEBUG: Studies with status='reported': {reported_studies.count()}")
+        logger.debug("Studies with status='reported': %s", reported_studies.count())
 
         for study in reported_studies:
             has_report = RadiologyReport.objects.filter(study=study).exists()
-            print(f"DEBUG: Study {study.id} ({study.procedure}) has RadiologyReport: {has_report}")
+            logger.debug("Study %s (%s) has RadiologyReport: %s", study.id, study.procedure, has_report)
 
         return super().list(request, *args, **kwargs)
     
@@ -652,24 +661,24 @@ class RadiologyReportViewSet(viewsets.ReadOnlyModelViewSet):
 
         queryset = RadiologyReport.objects.select_related('study', 'order', 'patient', 'order__doctor', 'study__reported_by')
 
-        print(f"DEBUG: RadiologyReportViewSet.get_queryset called with status_filter='{status_filter}'")
-        print(f"DEBUG: Total RadiologyReport records in DB: {RadiologyReport.objects.count()}")
-        print(f"DEBUG: RadiologyReport records before filtering: {queryset.count()}")
+        logger.debug("RadiologyReportViewSet.get_queryset called with status_filter='%s'", status_filter)
+        logger.debug("Total RadiologyReport records in DB: %s", RadiologyReport.objects.count())
+        logger.debug("RadiologyReport records before filtering: %s", queryset.count())
 
         if status_filter == 'reported':
             # Only show reports that are ready for verification (exclude rejected)
             queryset = queryset.filter(study__status='reported')
-            print(f"DEBUG: After filtering for study__status='reported': {queryset.count()}")
+            logger.debug("After filtering for study__status='reported': %s", queryset.count())
         elif status_filter == 'verified':
             # Show verified reports
             queryset = queryset.filter(study__status='verified')
-            print(f"DEBUG: After filtering for study__status='verified': {queryset.count()}")
+            logger.debug("After filtering for study__status='verified': %s", queryset.count())
         elif status_filter == 'all':
             # Show all reports (both pending and verified)
             queryset = queryset.filter(study__status__in=['reported', 'verified'])
-            print(f"DEBUG: After filtering for study__status in ['reported', 'verified']: {queryset.count()}")
+            logger.debug("After filtering for study__status in ['reported', 'verified']: %s", queryset.count())
 
-        print(f"DEBUG: Final queryset count: {queryset.count()}")
+        logger.debug("Final queryset count: %s", queryset.count())
         return queryset
     
     @action(detail=True, methods=['post'])

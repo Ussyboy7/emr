@@ -143,6 +143,8 @@ class RadiologyReportSerializer(serializers.ModelSerializer):
                 'doctor_specialty': getattr(obj.order.doctor, 'specialty', None) if obj.order.doctor else None,
                 'clinic': obj.order.clinic,
                 'clinical_notes': obj.order.clinical_notes,
+                'provisional_diagnosis': obj.order.provisional_diagnosis,
+                'lmp': str(obj.order.lmp) if obj.order.lmp else None,
             }
         return None
     
@@ -150,4 +152,3 @@ class RadiologyReportSerializer(serializers.ModelSerializer):
         model = RadiologyReport
         fields = '__all__'
         read_only_fields = ['created_at']
-

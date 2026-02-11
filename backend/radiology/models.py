@@ -46,7 +46,6 @@ class RadiologyTemplate(models.Model):
     modality = models.CharField(max_length=50, blank=True, help_text="Imaging modality")
 
     # Technical parameters
-    contrast_required = models.BooleanField(default=False, help_text="Requires contrast media")
     radiation_exposure = models.CharField(max_length=20, choices=[
         ('none', 'No Radiation'),
         ('low', 'Low Radiation'),
@@ -100,6 +99,8 @@ class RadiologyOrder(models.Model):
     priority = models.CharField(max_length=20, choices=PRIORITY_CHOICES, default='routine')
     clinic = models.CharField(max_length=100, blank=True)
     clinical_notes = models.TextField(blank=True)
+    provisional_diagnosis = models.TextField(blank=True)
+    lmp = models.DateField(null=True, blank=True)
     
     ordered_at = models.DateTimeField(auto_now_add=True)
     created_by = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, related_name='created_radiology_orders')
@@ -246,4 +247,3 @@ class RadiologyReport(models.Model):
     
     def __str__(self):
         return f"Report for {self.study.procedure} - {self.patient.get_full_name()}"
-

@@ -652,8 +652,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     bodyPart: string;
     clinicalIndication: string;
     priority: 'Routine' | 'Urgent' | 'STAT';
-    contrastRequired: boolean;
-    specialInstructions?: string;
+    provisionalDiagnosis?: string;
+    lmp?: string;
     status: 'Draft' | 'Sent to Radiology' | 'Scheduled' | 'In Progress' | 'Completed';
   }[]>([]);
   const [showAddRadiology, setShowAddRadiology] = useState(false);
@@ -663,11 +663,12 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     bodyPart: "",
     clinicalIndication: "",
     priority: "Routine",
-    contrastRequired: false,
-    specialInstructions: ""
+    provisionalDiagnosis: "",
+    lmp: ""
   });
   const [radiologyTemplates, setRadiologyTemplates] = useState<any[]>([]);
   const [loadingRadiologyTemplates, setLoadingRadiologyTemplates] = useState(false);
+  const [radiologyTemplatesError, setRadiologyTemplatesError] = useState<string | null>(null);
   const [radiologyTemplateSearch, setRadiologyTemplateSearch] = useState("");
   const [showRadiologyTemplateDropdown, setShowRadiologyTemplateDropdown] = useState(false);
 
@@ -1724,8 +1725,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                 bodyPart: study.body_part || '',
                 clinicalIndication: order.clinical_notes || '',
                 priority: order.priority === 'routine' ? 'Routine' : order.priority === 'urgent' ? 'Urgent' : 'STAT',
-                contrastRequired: false, // Not stored in backend model
-                specialInstructions: study.technical_notes || undefined,
+                provisionalDiagnosis: order.provisional_diagnosis || undefined,
+                lmp: order.lmp || undefined,
                 status: 'Sent to Radiology' as const, // Already sent if loaded from API
               });
             });
@@ -1895,9 +1896,10 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     const loadRadiologyTemplates = async () => {
       try {
         setLoadingRadiologyTemplates(true);
+        setRadiologyTemplatesError(null);
         debugConsultationRoom('[Consultation] Loading radiology templates...');
         debugConsultationRoom('[Consultation] About to call radiologyService.getTemplates()');
-        const templates = await radiologyService.getTemplates();
+        const templates = await radiologyService.getTemplates({ page_size: 1000 });
         debugConsultationRoom('[Consultation] Radiology API full response:', templates);
         debugConsultationRoom(`[Consultation] Loaded ${templates.results?.length || 0} radiology templates from API`);
         debugConsultationRoom('[Consultation] Response type:', typeof templates);
@@ -1916,15 +1918,18 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         debugConsultationRoom('Error details:', err?.message, err?.status, err?.response);
 
         // Check for authentication errors
-        if (err.status === 401 || err.status === 403) {
+        if (isAuthenticationError(err) || err.status === 401 || err.status === 403) {
           debugConsultationRoom('[Consultation] Authentication error loading radiology templates');
           toast.error('Authentication required. Please log in again.');
+          setRadiologyTemplatesError('Authentication required. Please log in again.');
         } else if (err.status === 500) {
           debugConsultationRoom('[Consultation] Server error loading radiology templates');
           toast.error('Server error. Please try again later.');
+          setRadiologyTemplatesError('Server error. Please try again later.');
         } else {
           // Show error toast to inform user
           toast.error('Failed to load radiology templates. Some imaging studies may not be available.');
+          setRadiologyTemplatesError('Failed to load radiology templates.');
         }
         // Fall back to empty array
         setRadiologyTemplates([]);
@@ -3902,8 +3907,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         bodyPart: template.body_part || '',
       clinicalIndication: newRadiology.clinicalIndication,
       priority: newRadiology.priority as 'Routine' | 'Urgent' | 'STAT',
-        contrastRequired: template.contrast_required || false,
-      specialInstructions: newRadiology.specialInstructions || undefined,
+      provisionalDiagnosis: newRadiology.provisionalDiagnosis || undefined,
+      lmp: newRadiology.lmp || undefined,
         status: 'Draft' as const
       };
     }).filter((order): order is NonNullable<typeof order> => order !== null);
@@ -3913,7 +3918,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     // Reset form
     setSelectedRadiologyTemplates(new Set());
     setRadiologyTemplateSearch('');
-    setNewRadiology({ procedure: "", category: "", bodyPart: "", clinicalIndication: "", priority: "Routine", contrastRequired: false, specialInstructions: "" });
+    setNewRadiology({ procedure: "", category: "", bodyPart: "", clinicalIndication: "", priority: "Routine", provisionalDiagnosis: "", lmp: "" });
     setShowAddRadiology(false);
     toast.success(`${newOrders.length} imaging study/studies added to draft`);
   };
@@ -3952,6 +3957,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       
       // Use the first clinical indication only (simplified)
       const combinedClinicalNotes = draftOrders.find(o => o.clinicalIndication)?.clinicalIndication || '';
+      const combinedProvisionalDiagnosis = draftOrders.find(o => o.provisionalDiagnosis)?.provisionalDiagnosis || '';
+      const combinedLmp = draftOrders.find(o => o.lmp)?.lmp || '';
       
       const priorityMap: Record<string, 'routine' | 'urgent' | 'stat'> = {
         'Routine': 'routine',
@@ -3963,17 +3970,12 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       const studiesData = draftOrders.map(order => {
         // Find the template that matches this order
         const template = radiologyTemplates.find(t => t.name === order.procedure);
-        const studyData: any = {
+        const studyData = {
           procedure: order.procedure,
           body_part: template?.body_part || order.bodyPart || '',
           modality: template?.modality || order.category || 'X-Ray',
           status: 'pending',
         };
-
-        // Only include technical_notes if it exists (no || undefined)
-        if (order.specialInstructions) {
-          studyData.technical_notes = order.specialInstructions;
-        }
 
         // TODO: Include template if it exists - commented out to debug 500 error
         // if (template?.id) {
@@ -3992,6 +3994,12 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         consultation_session: sessionId,
         clinical_notes: combinedClinicalNotes,
       };
+      if (combinedProvisionalDiagnosis) {
+        orderData.provisional_diagnosis = combinedProvisionalDiagnosis;
+      }
+      if (combinedLmp) {
+        orderData.lmp = combinedLmp;
+      }
 
       // Security: Removed console.log to prevent data leakage in production
       // console.log('[Radiology Order] Sending data:', orderData);
@@ -4149,8 +4157,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       bodyPart: "",
       clinicalIndication: "",
       priority: "Routine",
-      contrastRequired: false,
-      specialInstructions: ""
+      provisionalDiagnosis: "",
+      lmp: ""
     });
 
     // Pre-populate the modal with existing order data
@@ -4160,8 +4168,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       bodyPart: orderToEdit.bodyPart,
       clinicalIndication: orderToEdit.clinicalIndication,
       priority: orderToEdit.priority,
-      contrastRequired: orderToEdit.contrastRequired || false,
-      specialInstructions: orderToEdit.specialInstructions || ""
+      provisionalDiagnosis: orderToEdit.provisionalDiagnosis || "",
+      lmp: orderToEdit.lmp || ""
     });
 
     // Remove the old order and open modal
@@ -5315,14 +5323,18 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                   </div>
                                   <div className="text-sm text-muted-foreground">
                                     <strong>Body Part:</strong> {order.bodyPart}
-                                    {order.contrastRequired && <span className="ml-2 text-amber-600 font-medium">• Contrast Required</span>}
                                   </div>
+                                  {order.lmp && (
+                                    <div className="text-sm text-muted-foreground mt-1">
+                                      <strong>LMP:</strong> {order.lmp}
+                                    </div>
+                                  )}
                                   <div className="text-sm text-muted-foreground mt-1">
                                     <strong>Indication:</strong> {order.clinicalIndication}
                                   </div>
-                                  {order.specialInstructions && (
+                                  {order.provisionalDiagnosis && (
                                     <div className="text-sm text-muted-foreground mt-1 p-2 bg-muted/50 rounded">
-                                      <strong>Special Instructions:</strong> {order.specialInstructions}
+                                      <strong>Provisional Diagnosis:</strong> {order.provisionalDiagnosis}
                                     </div>
                                   )}
                                 </div>
@@ -7725,7 +7737,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                         </div>
                       ) : radiologyTemplates.length === 0 ? (
                         <div className="p-4 text-center text-muted-foreground">
-                          <p className="text-xs">No templates found</p>
+                          <p className="text-xs">{radiologyTemplatesError || 'No templates found'}</p>
                         </div>
                       ) : (
                         <div className="p-2">
@@ -7789,12 +7801,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                       <span>{template.category}</span>
                                       <span>•</span>
                                       <span>{template.body_part || 'N/A'}</span>
-                                      {template.contrast_required && (
-                                        <>
-                                          <span>•</span>
-                                          <Badge variant="destructive" className="text-[9px] px-1 py-0">Contrast</Badge>
-                                        </>
-                                      )}
                                       {template.radiation_exposure === 'high' && (
                                         <>
                                           <span>•</span>
@@ -7852,7 +7858,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                 )}
               </div>
 
-              {/* Priority and Contrast */}
+              {/* Priority and LMP */}
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Priority</Label>
@@ -7866,17 +7872,12 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label>Contrast Required?</Label>
-                  <Select 
-                    value={newRadiology.contrastRequired ? "yes" : "no"} 
-                    onValueChange={(v) => setNewRadiology({ ...newRadiology, contrastRequired: v === "yes" })}
-                  >
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="no">No</SelectItem>
-                      <SelectItem value="yes">Yes - With Contrast</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <Label>LMP</Label>
+                  <Input
+                    type="date"
+                    value={newRadiology.lmp}
+                    onChange={(e) => setNewRadiology({ ...newRadiology, lmp: e.target.value })}
+                  />
                 </div>
               </div>
 
@@ -7891,25 +7892,16 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                 />
               </div>
 
-              {/* Special Instructions */}
+              {/* Provisional Diagnosis */}
               <div className="space-y-2">
-                <Label>Special Instructions</Label>
+                <Label>Provisional Diagnosis</Label>
                 <Textarea 
-                  value={newRadiology.specialInstructions}
-                  onChange={(e) => setNewRadiology({ ...newRadiology, specialInstructions: e.target.value })}
-                  placeholder="Any special requirements, patient preparation, or notes for radiologist..."
+                  value={newRadiology.provisionalDiagnosis}
+                  onChange={(e) => setNewRadiology({ ...newRadiology, provisionalDiagnosis: e.target.value })}
+                  placeholder="Provisional diagnosis..."
                   rows={2}
                 />
               </div>
-
-              {newRadiology.contrastRequired && (
-                <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
-                  <p className="text-sm text-amber-700 dark:text-amber-300 flex items-center gap-2">
-                    <AlertTriangle className="h-4 w-4" />
-                    Patient will need kidney function test before contrast administration
-                  </p>
-                </div>
-              )}
             </div>
             
             <DialogFooter>

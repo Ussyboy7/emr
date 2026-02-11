@@ -8,9 +8,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { AlertTriangle, Loader2, Plus, ScanLine, X } from "lucide-react";
+import { Loader2, Plus, ScanLine, X } from "lucide-react";
 import { toast } from "sonner";
 import { radiologyService } from "@/lib/services";
+import { isAuthenticationError } from "@/lib/auth-errors";
 
 export type RadiologyTemplateLike = {
   id: number;
@@ -19,15 +20,14 @@ export type RadiologyTemplateLike = {
   category?: string;
   body_part?: string;
   modality?: string;
-  contrast_required?: boolean;
   radiation_exposure?: string;
 };
 
 export type RadiologyOrderSubmitInput = {
   priority: "routine" | "urgent" | "stat";
-  contrastRequired: boolean;
   clinicalIndication: string;
-  specialInstructions: string;
+  provisionalDiagnosis: string;
+  lmp?: string;
   templates: RadiologyTemplateLike[];
 };
 
@@ -44,6 +44,7 @@ export function RadiologyOrderModal({
 }) {
   const [templates, setTemplates] = useState<RadiologyTemplateLike[]>([]);
   const [loadingTemplates, setLoadingTemplates] = useState(false);
+  const [templatesError, setTemplatesError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const [search, setSearch] = useState("");
@@ -51,18 +52,18 @@ export function RadiologyOrderModal({
   const [selected, setSelected] = useState<Set<number>>(new Set());
 
   const [priority, setPriority] = useState<"routine" | "urgent" | "stat">("routine");
-  const [contrastRequired, setContrastRequired] = useState(false);
   const [clinicalIndication, setClinicalIndication] = useState("");
-  const [specialInstructions, setSpecialInstructions] = useState("");
+  const [provisionalDiagnosis, setProvisionalDiagnosis] = useState("");
+  const [lmp, setLmp] = useState("");
 
   const reset = useCallback(() => {
     setSearch("");
     setShowDropdown(false);
     setSelected(new Set());
     setPriority("routine");
-    setContrastRequired(false);
     setClinicalIndication("");
-    setSpecialInstructions("");
+    setProvisionalDiagnosis("");
+    setLmp("");
     setSubmitting(false);
   }, []);
 
@@ -71,12 +72,14 @@ export function RadiologyOrderModal({
     const load = async () => {
       try {
         setLoadingTemplates(true);
+        setTemplatesError(null);
         const res = await radiologyService.getTemplates({ page_size: 500 } as any);
         setTemplates((res as any)?.results || []);
       } catch (err: any) {
         console.error("Failed to load radiology templates:", err);
-        toast.error("Failed to load radiology templates");
+        toast.error(isAuthenticationError(err) ? "Authentication required. Please log in again." : "Failed to load radiology templates");
         setTemplates([]);
+        setTemplatesError(isAuthenticationError(err) ? "Authentication required. Please log in again." : "Failed to load radiology templates");
       } finally {
         setLoadingTemplates(false);
       }
@@ -114,9 +117,9 @@ export function RadiologyOrderModal({
       setSubmitting(true);
       await onSubmit({
         priority,
-        contrastRequired,
         clinicalIndication: clinicalIndication.trim(),
-        specialInstructions: specialInstructions.trim(),
+        provisionalDiagnosis: provisionalDiagnosis.trim(),
+        lmp: lmp.trim() || undefined,
         templates: selectedTemplates,
       });
       onOpenChange(false);
@@ -171,7 +174,7 @@ export function RadiologyOrderModal({
                     </div>
                   ) : templates.length === 0 ? (
                     <div className="p-4 text-center text-muted-foreground">
-                      <p className="text-xs">No templates found</p>
+                      <p className="text-xs">{templatesError || "No templates found"}</p>
                     </div>
                   ) : (
                     <div className="p-2">
@@ -223,14 +226,6 @@ export function RadiologyOrderModal({
                                   <span>{t.category || "—"}</span>
                                   <span>•</span>
                                   <span>{t.body_part || "N/A"}</span>
-                                  {t.contrast_required && (
-                                    <>
-                                      <span>•</span>
-                                      <Badge variant="destructive" className="text-[9px] px-1 py-0">
-                                        Contrast
-                                      </Badge>
-                                    </>
-                                  )}
                                   {t.radiation_exposure === "high" && (
                                     <>
                                       <span>•</span>
@@ -307,16 +302,8 @@ export function RadiologyOrderModal({
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>Contrast Required?</Label>
-              <Select value={contrastRequired ? "yes" : "no"} onValueChange={(v) => setContrastRequired(v === "yes")}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="no">No</SelectItem>
-                  <SelectItem value="yes">Yes - With Contrast</SelectItem>
-                </SelectContent>
-              </Select>
+              <Label>LMP</Label>
+              <Input type="date" value={lmp} onChange={(e) => setLmp(e.target.value)} />
             </div>
           </div>
 
@@ -331,23 +318,14 @@ export function RadiologyOrderModal({
           </div>
 
           <div className="space-y-2">
-            <Label>Special Instructions</Label>
+            <Label>Provisional Diagnosis</Label>
             <Textarea
-              value={specialInstructions}
-              onChange={(e) => setSpecialInstructions(e.target.value)}
-              placeholder="Any special requirements, patient preparation, or notes for radiologist..."
+              value={provisionalDiagnosis}
+              onChange={(e) => setProvisionalDiagnosis(e.target.value)}
+              placeholder="Provisional diagnosis..."
               rows={2}
             />
           </div>
-
-          {contrastRequired && (
-            <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
-              <p className="text-sm text-amber-700 dark:text-amber-300 flex items-center gap-2">
-                <AlertTriangle className="h-4 w-4" />
-                Patient will need kidney function test before contrast administration
-              </p>
-            </div>
-          )}
         </div>
 
         <DialogFooter>
@@ -376,4 +354,3 @@ export function RadiologyOrderModal({
     </Dialog>
   );
 }
-

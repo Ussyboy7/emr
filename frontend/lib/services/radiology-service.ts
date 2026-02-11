@@ -15,6 +15,8 @@ export interface RadiologyOrder {
   priority: 'routine' | 'urgent' | 'stat';
   clinic?: string;
   clinical_notes?: string;
+  provisional_diagnosis?: string;
+  lmp?: string;
   studies: RadiologyStudy[];
   ordered_at: string;
   // For creating orders with studies
@@ -70,7 +72,6 @@ export interface RadiologyTemplate {
   description?: string;
   body_part?: string;
   modality?: string;
-  contrast_required?: boolean;
   radiation_exposure?: 'none' | 'low' | 'moderate' | 'high';
   preparation_required?: string;
   indications?: string;
@@ -111,6 +112,16 @@ class RadiologyService {
    */
   async createOrder(data: Partial<RadiologyOrder>): Promise<RadiologyOrder> {
     return apiFetch<RadiologyOrder>('/radiology/orders/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  /**
+   * Create a study within an existing order
+   */
+  async createStudy(data: Partial<RadiologyStudy> & { order: number }): Promise<RadiologyStudy> {
+    return apiFetch<RadiologyStudy>('/radiology/studies/', {
       method: 'POST',
       body: JSON.stringify(data),
     });
@@ -414,4 +425,3 @@ class RadiologyService {
 }
 
 export const radiologyService = new RadiologyService();
-
