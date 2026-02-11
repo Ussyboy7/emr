@@ -222,7 +222,7 @@ export default function RoomQueuePage() {
               name: patient 
                 ? (patient.full_name || `${patient.first_name} ${patient.surname}`)
                 : (item.patient_name || `Patient ${item.patient}`),
-              patientId: patient?.patient_id || String(patientId),
+              patientId: patient?.patient_id || '',
               personalNumber: patient?.personal_number || '',
               priority: getPriority(typeof item.priority === 'number' ? item.priority : parseInt(item.priority) || 2),
               waitTime: waitTime > 0 ? waitTime : 0,

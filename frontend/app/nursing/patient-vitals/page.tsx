@@ -269,7 +269,7 @@ export default function PatientVitalsPage() {
             return {
               id: String(patient.id),
               name: patient.full_name || `${patient.surname} ${patient.first_name}`,
-              patientId: patient.patient_id || String(patient.id),
+              patientId: patient.patient_id || '',
               personalNumber: patient.personal_number || '',
               age: patient.age || 0,
               gender: patient.gender || '',
@@ -721,5 +721,4 @@ export default function PatientVitalsPage() {
     </DashboardLayout>
   );
 }
-
 

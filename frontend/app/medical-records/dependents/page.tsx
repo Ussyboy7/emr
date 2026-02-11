@@ -149,7 +149,7 @@ export default function DependentsPage() {
                 try {
                   const primary = await patientService.getPatient(dep.principal_staff);
                   primaryPatient = {
-                    id: primary.patient_id || String(primary.id),
+                    id: primary.patient_id || '',
                     name: primary.full_name || `${primary.first_name} ${primary.surname}`,
                     category: primary.category,
                   };
@@ -159,7 +159,7 @@ export default function DependentsPage() {
               }
 
               return {
-                id: dep.patient_id || String(dep.id),
+                id: dep.patient_id || '',
                 firstName: dep.first_name || '',
                 lastName: dep.surname || '',
                 name: dep.full_name || `${dep.first_name} ${dep.surname}`,

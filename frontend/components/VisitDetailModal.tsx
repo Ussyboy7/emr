@@ -125,7 +125,7 @@ export function VisitDetailModal({ visit: visitProp, visitId: visitIdProp, isOpe
       try {
         const patientData = await patientService.getPatient(rawVisitData.patient);
         setPatient({
-          id: patientData.patient_id || String(patientData.id),
+          id: patientData.patient_id || '',
           name: patientData.full_name || `${patientData.first_name} ${patientData.surname}`,
         });
       } catch (err) {

@@ -81,7 +81,7 @@ function NewVisitPageContent() {
   }, []);
 
   const mapPatient = useCallback((p: any) => ({
-    id: p.patient_id || String(p.id),
+    id: p.patient_id || '',
     numericId: p.id,
     name: p.full_name || `${p.first_name || ''} ${p.surname || ''}`.trim() || 'Unknown',
     age: p.age || 0,
@@ -103,9 +103,7 @@ function NewVisitPageContent() {
         setError(null);
         const result = await patientService.getPatients({ search: patientIdParam, page_size: 10 });
         if (cancelled) return;
-        const p = result.results.find(
-          (r: any) => (r.patient_id || String(r.id)) === patientIdParam || String(r.id) === patientIdParam
-        );
+        const p = result.results.find((r: any) => r.patient_id === patientIdParam);
         if (p) {
           setSelectedPatient(mapPatient(p));
           setFormData(prev => ({ ...prev, patientId: patientIdParam }));

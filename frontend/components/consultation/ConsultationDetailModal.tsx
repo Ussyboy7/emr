@@ -961,7 +961,7 @@ const loadConsultationFromVisit = async (visitId: string | number): Promise<Cons
     return {
       id: String(visit.id),
       patient: patient.full_name || `${patient.first_name} ${patient.surname}`,
-      patientId: patient.patient_id || String(patient.id),
+      patientId: patient.patient_id || '',
       patientAge: patient.age || undefined,
       patientGender: patient.gender || undefined,
       doctor: await resolveDoctorName(
@@ -1333,7 +1333,7 @@ const loadConsultationFromSession = async (sessionId: string | number): Promise<
     return {
       id: String(session.id),
       patient: patient.full_name || `${patient.first_name} ${patient.surname}`,
-      patientId: patient.patient_id || String(patient.id),
+      patientId: patient.patient_id || '',
       patientAge: patient.age || undefined,
       patientGender: patient.gender || undefined,
       doctor: await resolveDoctorName(
@@ -2152,6 +2152,4 @@ export const ConsultationDetailModal = React.memo(function ConsultationDetailMod
     </Dialog>
   );
 });
-
-
 

@@ -1102,7 +1102,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
               id: String(item.patient),
               visitId: item.visit ? String(item.visit) : '',
               patient_id: patientDetails?.patient_id || '',
-              patientId: patientDetails?.patient_id || String(item.patient),
+              patientId: patientDetails?.patient_id || '',
               full_name: patientDetails?.full_name || '',
               first_name: '',
               surname: '',
@@ -1260,7 +1260,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
               id: String(item.patient), // Use patient ID from queue, not queue item ID
               visitId: item.visit ? String(item.visit) : '',
               patient_id: patientDetails?.patient_id || '',
-              patientId: patientDetails?.patient_id || String(item.patient), // Display ID (e.g., "PAT-2024-001")
+              patientId: patientDetails?.patient_id || '',
               full_name: patientDetails?.full_name || '',
               first_name: '',
               surname: '',
@@ -1412,7 +1412,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         id: String(patient.id),
         visitId: visitId ? String(visitId) : '',
         patient_id: patient.patient_id,
-        patientId: patient.patient_id || String(patient.id),
+        patientId: patient.patient_id || '',
         full_name: patient.full_name,
         first_name: patient.first_name,
         surname: patient.surname,
