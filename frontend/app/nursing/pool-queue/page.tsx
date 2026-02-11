@@ -29,15 +29,6 @@ import { PatientAvatar } from "@/components/PatientAvatar";
 // Constants - standardized clinic list
 const clinics = getAllClinicsWithAll();
 
-// Format patient ID for dependent display (ED-/RD- prefix without zero padding)
-const formatPatientIdForDisplay = (pid?: string) => {
-  if (!pid) return pid;
-  const mE = pid.match(/^E-([^-]+)-0?(\d+)$/);
-  if (mE) return `ED-${mE[1]}-${parseInt(mE[2], 10)}`;
-  const mR = pid.match(/^R-([^-]+)-0?(\d+)$/);
-  if (mR) return `RD-${mR[1]}-${parseInt(mR[2], 10)}`;
-  return pid;
-};
 // Types
 interface Patient {
   id: string;
@@ -399,7 +390,7 @@ export default function NursingPoolQueuePage() {
           return {
             id: String(visit.id),
             name: visit.patient_name || `Patient ${visit.patient}`,
-            patientId: formatPatientIdForDisplay((visit as any).patient_id) || '', // no fallback content; blank if missing
+            patientId: (visit as any).patient_id || '', // direct from backend
             visitId: visit.visit_id || String(visit.id), // Visit ID string (VIS-...)
             personalNumber: '', // Not used for search, keep empty
             clinic: visit.clinic || 'GOPD',

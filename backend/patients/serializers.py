@@ -11,12 +11,11 @@ class PatientSerializer(serializers.ModelSerializer):
     full_name = serializers.SerializerMethodField()
     age = serializers.ReadOnlyField()
     photo = serializers.SerializerMethodField()
-    display_patient_id = serializers.SerializerMethodField()
     
     class Meta:
         model = Patient
         fields = [
-            'id', 'patient_id', 'display_patient_id', 'category', 'title', 'surname', 'first_name', 'middle_name',
+            'id', 'patient_id', 'category', 'title', 'surname', 'first_name', 'middle_name',
             'full_name', 'gender', 'date_of_birth', 'age', 'marital_status', 'religion', 'tribe', 'occupation', 'photo',
             'personal_number', 'employee_type', 'division', 'location',
             'nonnpa_type', 'dependent_type', 'principal_staff',
@@ -38,21 +37,6 @@ class PatientSerializer(serializers.ModelSerializer):
             return obj.photo.url
         return None
     
-    def get_display_patient_id(self, obj: Patient) -> str:
-        """
-        Present dependent IDs with ED-/RD- prefixes:
-        - Employee dependent: ED-{personal_number}-{sequence}
-        - Retiree dependent: RD-{personal_number}-{sequence}
-        Other categories return patient_id unchanged.
-        """
-        pid = obj.patient_id or ""
-        if obj.category == "dependent" and pid:
-            import re
-            m = re.match(r"^(E|R)-([^-]+)-0?(\d+)$", pid)
-            if m:
-                prefix = "ED" if m.group(1) == "E" else "RD"
-                return f"{prefix}-{m.group(2)}-{int(m.group(3))}"
-        return pid
 
 
 class PatientListSerializer(serializers.ModelSerializer):
@@ -61,12 +45,11 @@ class PatientListSerializer(serializers.ModelSerializer):
     full_name = serializers.SerializerMethodField()
     age = serializers.ReadOnlyField()
     photo = serializers.SerializerMethodField()
-    display_patient_id = serializers.SerializerMethodField()
     
     class Meta:
         model = Patient
         fields = [
-            'id', 'patient_id', 'display_patient_id', 'category', 'full_name', 'gender', 'age',
+            'id', 'patient_id', 'category', 'full_name', 'gender', 'age',
             'phone', 'email', 'blood_group', 'is_active', 'created_at', 'photo',
         ]
         read_only_fields = ['id', 'patient_id', 'created_at', 'age']
@@ -81,15 +64,6 @@ class PatientListSerializer(serializers.ModelSerializer):
             return obj.photo.url
         return None
     
-    def get_display_patient_id(self, obj: Patient) -> str:
-        pid = obj.patient_id or ""
-        if obj.category == "dependent" and pid:
-            import re
-            m = re.match(r"^(E|R)-([^-]+)-0?(\d+)$", pid)
-            if m:
-                prefix = "ED" if m.group(1) == "E" else "RD"
-                return f"{prefix}-{m.group(2)}-{int(m.group(3))}"
-        return pid
 
 
 class VisitSerializer(serializers.ModelSerializer):

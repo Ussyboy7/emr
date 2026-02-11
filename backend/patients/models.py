@@ -240,15 +240,19 @@ class Patient(models.Model):
                     # Reload to get the generated patient_id
                     self.principal_staff.refresh_from_db()
                 
-                # Get parent's patient_id
-                parent_id = self.principal_staff.patient_id
+                # Determine dependent prefix and base from principal
+                parent_category = self.principal_staff.category
+                base_number = (self.principal_staff.personal_number or "").strip().upper()
+                if not base_number:
+                    raise ValueError("Principal personal number is required to generate dependent patient_id")
+                prefix = "ED" if parent_category == "employee" else "RD"
                 # Count existing dependents for this principal
                 count = Patient.objects.filter(
                     category='dependent',
                     principal_staff_id=self.principal_staff.id
                 ).count()
-                sequence = str(count + 1).zfill(2)  # Zero-padded to 2 digits (01, 02, etc.)
-                self.patient_id = f"{parent_id}-{sequence}"
+                sequence = str(count + 1)  # No zero padding
+                self.patient_id = f"{prefix}-{base_number}-{sequence}"
             else:
                 raise ValueError(f"Invalid patient category: {self.category}")
 
@@ -300,7 +304,9 @@ class Patient(models.Model):
             if not self.principal_staff:
                 raise ValueError("Principal staff is required for Dependent patients")
             # For existing dependents, regenerate based on current principal
-            parent_id = self.principal_staff.patient_id
+            parent_category = self.principal_staff.category
+            base_number = (self.principal_staff.personal_number or "").strip().upper()
+            prefix = "ED" if parent_category == "employee" else "RD"
             # Find the sequence for this dependent among siblings
             siblings = Patient.objects.filter(
                 category='dependent',
@@ -313,7 +319,7 @@ class Patient(models.Model):
                     break
                 sequence += 1
 
-            self.patient_id = f"{parent_id}-{str(sequence).zfill(2)}"
+            self.patient_id = f"{prefix}-{base_number}-{sequence}"
 
         return old_patient_id != self.patient_id  # Return True if ID changed
 
@@ -329,9 +335,9 @@ class Patient(models.Model):
             while Patient.objects.filter(patient_id=self.patient_id).exists():
                 # Handle collisions by incrementing sequence
                 if self.category == 'dependent':
-                    # For dependents, increment the sequence
+                    # For dependents, increment the sequence (no zero padding)
                     base_id = '-'.join(original_id.split('-')[:-1])
-                    self.patient_id = f"{base_id}-{str(counter + 1).zfill(2)}"
+                    self.patient_id = f"{base_id}-{str(counter + 1)}"
                 elif self.category == 'nonnpa':
                     # For Non-NPA, increment the number
                     parts = original_id.split('-')
@@ -563,4 +569,3 @@ class MedicalHistory(models.Model):
     
     def __str__(self):
         return f"Medical History for {self.patient.get_full_name()}"
-
