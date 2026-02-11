@@ -2796,7 +2796,7 @@ class Command(BaseCommand):
             self.stdout.write(f"  ✓ Linked {linked} medications to generics")
 
         meds = Medication.objects.filter(is_active=True)
-        default_quantity = Decimal("1000")
+        default_quantity = Decimal("10000")
         default_min_stock = Decimal("100")
         expiry_date = (timezone.now() + timedelta(days=730)).date()
 
@@ -2838,18 +2838,17 @@ class Command(BaseCommand):
                     created_store += 1
 
         today = timezone.now().date()
-        moved_total = Decimal("0")
-        lines = 0
-        per_med_qty = Decimal("50")
+        dispensary_quantity = Decimal("10000")
         dispensary_has_any = MedicationInventory.objects.filter(location="Dispensary").exists()
         should_seed_dispensary = self._force_pharmacy_inventory or not dispensary_has_any
+        created_disp = 0
+        updated_disp = 0
         if should_seed_dispensary:
             for med in meds.order_by("name"):
                 source = (
                     MedicationInventory.objects.filter(
                         medication=med,
                         location="Store",
-                        quantity__gt=0,
                         expiry_date__gt=today,
                     )
                     .order_by("expiry_date")
@@ -2857,34 +2856,50 @@ class Command(BaseCommand):
                 )
                 if not source:
                     continue
-                transfer_qty = min(source.quantity, per_med_qty)
-                if transfer_qty <= 0:
+
+                if self._force_pharmacy_inventory:
+                    _, created = MedicationInventory.objects.update_or_create(
+                        medication=med,
+                        batch_number=source.batch_number,
+                        location="Dispensary",
+                        defaults={
+                            "expiry_date": source.expiry_date,
+                            "quantity": dispensary_quantity,
+                            "min_stock_level": source.min_stock_level,
+                            "unit": source.unit,
+                            "supplier": source.supplier,
+                        },
+                    )
+                    if created:
+                        created_disp += 1
+                    else:
+                        updated_disp += 1
                     continue
-                source.quantity -= transfer_qty
-                source.save(update_fields=["quantity"])
-                dest, _ = MedicationInventory.objects.get_or_create(
+
+                _, created = MedicationInventory.objects.get_or_create(
                     medication=med,
                     batch_number=source.batch_number,
                     location="Dispensary",
                     defaults={
                         "expiry_date": source.expiry_date,
-                        "quantity": Decimal("0"),
+                        "quantity": dispensary_quantity,
                         "min_stock_level": source.min_stock_level,
                         "unit": source.unit,
                         "supplier": source.supplier,
                     },
                 )
-                dest.quantity += transfer_qty
-                dest.save(update_fields=["quantity"])
-                moved_total += transfer_qty
-                lines += 1
+                if created:
+                    created_disp += 1
 
         if self._force_pharmacy_inventory:
             self.stdout.write(f"  ✓ Seeded Store inventory for {meds.count()} medications (created {created_store}, updated {updated_store})")
         else:
             self.stdout.write(f"  ✓ Seeded Store inventory for {meds.count()} medications (created {created_store}, unchanged {meds.count() - created_store})")
         if should_seed_dispensary:
-            self.stdout.write(f"  ✓ Seeded Dispensary inventory: moved {int(moved_total)} across {lines} meds")
+            if self._force_pharmacy_inventory:
+                self.stdout.write(f"  ✓ Seeded Dispensary inventory for {meds.count()} medications (created {created_disp}, updated {updated_disp})")
+            else:
+                self.stdout.write(f"  ✓ Seeded Dispensary inventory for {meds.count()} medications (created {created_disp}, unchanged {meds.count() - created_disp})")
         else:
             self.stdout.write("  ✓ Skipped Dispensary inventory seeding (already has stock)")
         self.stdout.write(f"  ✓ Total medications: {Medication.objects.count()}")
