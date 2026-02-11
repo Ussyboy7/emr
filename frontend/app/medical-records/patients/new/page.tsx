@@ -1097,7 +1097,7 @@ export default function NewPatientPage() {
       setHasDraft(false);
       
       toast.success('Patient registered successfully', {
-        description: `Patient ID: ${createdPatient.patient_id}`,
+        description: `Patient ID: ${createdPatient.display_patient_id || createdPatient.patient_id}`,
       });
       
       // Redirect to patients list page (patient detail page was replaced with modal)

@@ -50,6 +50,7 @@ export function sanitizePatientForRendering(patient: any): any {
 export interface Patient {
   id: number;
   patient_id: string;
+  display_patient_id?: string;
   category: 'employee' | 'retiree' | 'nonnpa' | 'dependent';
   title?: string;
   surname: string;
@@ -240,4 +241,3 @@ class PatientService {
 
 export const patientService = new PatientService();
 export default patientService;
-
