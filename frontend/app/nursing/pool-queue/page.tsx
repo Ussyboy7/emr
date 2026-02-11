@@ -29,6 +29,15 @@ import { PatientAvatar } from "@/components/PatientAvatar";
 // Constants - standardized clinic list
 const clinics = getAllClinicsWithAll();
 
+// Format patient ID for dependent display (ED-/RD- prefix without zero padding)
+const formatPatientIdForDisplay = (pid?: string) => {
+  if (!pid) return pid;
+  const mE = pid.match(/^E-([^-]+)-0?(\d+)$/);
+  if (mE) return `ED-${mE[1]}-${parseInt(mE[2], 10)}`;
+  const mR = pid.match(/^R-([^-]+)-0?(\d+)$/);
+  if (mR) return `RD-${mR[1]}-${parseInt(mR[2], 10)}`;
+  return pid;
+};
 // Types
 interface Patient {
   id: string;
@@ -269,6 +278,7 @@ export default function NursingPoolQueuePage() {
           combinedVisits.push({
             id: visitId,
             visit_id: qi.visit_display_id || `VIS-${visitId}`,
+            patient_id: (qi as any).patient_details?.patient_id,
             patient: patientId,
             patient_name: qi.patient_name || `Patient ${patientId}`,
             visit_type: qi.visit_type || 'consultation',
@@ -389,7 +399,7 @@ export default function NursingPoolQueuePage() {
           return {
             id: String(visit.id),
             name: visit.patient_name || `Patient ${visit.patient}`,
-            patientId: String(visit.patient), // Patient ID string
+            patientId: formatPatientIdForDisplay((visit as any).patient_id) || '', // no fallback content; blank if missing
             visitId: visit.visit_id || String(visit.id), // Visit ID string (VIS-...)
             personalNumber: '', // Not used for search, keep empty
             clinic: visit.clinic || 'GOPD',
@@ -542,11 +552,20 @@ export default function NursingPoolQueuePage() {
     return matchesSearch && matchesStatus && matchesType && matchesClinic;
   });
 
-  // Sort by visit type (Emergency first) then by wait time
+  // Sort by visit type (Emergency first) then newest first
   const sortedPatients = [...filteredPatients].sort((a, b) => {
     const typeOrder: Record<string, number> = { 'Emergency': 0, 'Consultation': 1, 'Follow-up': 2 };
     const typeDiff = (typeOrder[a.visitType] ?? 3) - (typeOrder[b.visitType] ?? 3);
     if (typeDiff !== 0) return typeDiff;
+    const getTimeKey = (p: NursingPatient) => {
+      const raw = (p.nursingStatus === 'Sent to Room' && p.sentAt)
+        ? p.sentAt
+        : `${p.visitDate}T${p.visitTime}`;
+      const t = new Date(raw).getTime();
+      return Number.isFinite(t) ? t : 0;
+    };
+    const timeDiff = getTimeKey(b) - getTimeKey(a);
+    if (timeDiff !== 0) return timeDiff;
     return (b.waitTime || 0) - (a.waitTime || 0);
   });
 
@@ -1122,10 +1141,12 @@ export default function NursingPoolQueuePage() {
                       
                       {/* Row 2: Details */}
                       <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-wrap">
-                        <span>{patient.patientId}</span>
-                        <span>•</span>
-                        <span>{patient.visitId}</span>
-                        <span>•</span>
+                        {patient.patientId && (
+                          <>
+                            <span>{patient.patientId}</span>
+                            <span>•</span>
+                          </>
+                        )}
                         <span>{patient.clinic}</span>
                         <span>•</span>
                         <span>{patient.visitType}</span>
