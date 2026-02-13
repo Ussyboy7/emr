@@ -97,9 +97,32 @@ class PrescriptionItemSerializer(serializers.ModelSerializer):
     )
 
     def validate(self, attrs):
-        # Generic is now required
-        if not attrs.get('generic'):
+        generic = attrs.get('generic') or getattr(self.instance, 'generic', None)
+        medication = attrs.get('medication') if 'medication' in attrs else getattr(self.instance, 'medication', None)
+
+        # Generic is required
+        if not generic:
             raise serializers.ValidationError("Generic medication is required.")
+
+        # If a brand medication is provided, it must belong to the selected generic
+        if medication and medication.generic_id != generic.id:
+            raise serializers.ValidationError({
+                'medication': 'Selected brand does not belong to selected generic.'
+            })
+
+        # Auto-fill metadata from selected medication/generic when omitted
+        def _is_blank(value):
+            return value is None or (isinstance(value, str) and not value.strip())
+
+        if _is_blank(attrs.get('unit')):
+            attrs['unit'] = getattr(medication, 'unit', None) or getattr(generic, 'dosage_form', None) or 'unit'
+        if _is_blank(attrs.get('dosage_form')):
+            attrs['dosage_form'] = getattr(medication, 'form', None) or getattr(generic, 'dosage_form', None) or ''
+        if _is_blank(attrs.get('strength')):
+            attrs['strength'] = getattr(medication, 'strength', None) or getattr(generic, 'strength', None) or ''
+        if _is_blank(attrs.get('route')):
+            attrs['route'] = getattr(generic, 'route', None) or ''
+
         return attrs
 
     def get_medication_name(self, obj):
@@ -171,7 +194,7 @@ class PrescriptionItemSerializer(serializers.ModelSerializer):
         model = PrescriptionItem
         fields = [
             'id', 'prescription', 'medication', 'generic', 'medication_name', 'medication_code',
-            'medication_details', 'quantity', 'unit', 'dosage_form', 'dosage', 'frequency', 'duration',
+            'medication_details', 'quantity', 'unit', 'dosage_form', 'strength', 'dosage', 'frequency', 'duration', 'route',
             'instructions', 'dispensed_quantity', 'is_dispensed',
         ]
         read_only_fields = ['prescription']

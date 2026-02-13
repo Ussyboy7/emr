@@ -119,6 +119,14 @@ const formatPriority = (p: string | undefined): string => {
   return String(p);
 };
 
+const normalizeGenderLabel = (value: unknown): string => {
+  if (value == null) return '';
+  const normalized = String(value).trim().toLowerCase();
+  if (normalized === 'male' || normalized === 'm') return 'Male';
+  if (normalized === 'female' || normalized === 'f') return 'Female';
+  return '';
+};
+
 const formatVitalDisplay = (key: string, value: unknown): string => {
   if (value == null || value === '') return '';
   if (key === 'recordedAt' || key === 'recorded_at' || (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(value)))
@@ -304,6 +312,29 @@ const frequencyToDailyDoses: Record<string, number> = {
   'STAT (Single dose)': 0, // Special case
 };
 
+const PRESCRIPTION_UNIT_OPTIONS = [
+  'tablet',
+  'capsule',
+  'ml',
+  'mg',
+  'g',
+  'drop',
+  'vial',
+  'ampoule',
+  'sachet',
+  'suppository',
+  'puff',
+  'patch',
+];
+
+const parseMedicationOptions = (value: unknown): string[] => {
+  if (typeof value !== 'string') return [];
+  return value
+    .split(',')
+    .map((v) => v.trim())
+    .filter((v) => v.length > 0);
+};
+
 // Medical constants are now imported from @/lib/constants/medical-data
 const injectionRoutes = INJECTION_ROUTES;
 const woundTypes = WOUND_TYPES;
@@ -422,6 +453,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     medication: string; 
     medicationId?: number; // Store the actual medication ID from database
     genericName: string;
+    unit?: string;
+    strength?: string;
+    form?: string;
     dosage: string; 
     frequency: string; 
     duration: string; 
@@ -1103,13 +1137,13 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
               visitId: item.visit ? String(item.visit) : '',
               patient_id: patientDetails?.patient_id || '',
               patientId: patientDetails?.patient_id || '',
-              full_name: patientDetails?.full_name || '',
+              full_name: item.patient_name || '',
               first_name: '',
               surname: '',
-              name: patientDetails?.full_name || '',
-              age: patientDetails?.age || 0,
-              gender: patientDetails?.gender || '',
-              mrn: patientDetails?.patient_id || '',
+              name: item.patient_name || '',
+              age: (item as any).patient_age ?? patientDetails?.age ?? 0,
+              gender: normalizeGenderLabel((item as any).patient_gender ?? patientDetails?.gender),
+              mrn: (item as any).patient_id ?? patientDetails?.patient_id ?? '',
               personal_number: '',
               allergies: [],
             waitTime: waitTime > 0 ? waitTime : 0,
@@ -1261,13 +1295,13 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
               visitId: item.visit ? String(item.visit) : '',
               patient_id: patientDetails?.patient_id || '',
               patientId: patientDetails?.patient_id || '',
-              full_name: patientDetails?.full_name || '',
+              full_name: item.patient_name || '',
               first_name: '',
               surname: '',
-              name: patientDetails?.full_name || '',
-              age: patientDetails?.age || 0,
-              gender: patientDetails?.gender || '',
-              mrn: patientDetails?.patient_id || '',
+              name: item.patient_name || '',
+              age: (item as any).patient_age ?? patientDetails?.age ?? 0,
+              gender: normalizeGenderLabel((item as any).patient_gender ?? patientDetails?.gender),
+              mrn: (item as any).patient_id ?? patientDetails?.patient_id ?? '',
               personal_number: '',
               allergies: [],
               waitTime: waitTime > 0 ? waitTime : 0,
@@ -1677,8 +1711,11 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
             (rx.medications || []).map((item: any) => ({
               id: `RX-${rx.id}-${item.id}`,
               medication: item.medication?.name || item.medication_name || 'Unknown',
-              medicationId: item.medication?.id || item.medication_id,
+              medicationId: item.generic || item.generic_id || item.medication?.id || item.medication_id,
               genericName: item.medication?.generic_name || item.generic_name || '',
+              unit: item.unit || item.medication_details?.unit || 'tablet',
+              strength: item.strength || item.medication_details?.strength || '',
+              form: item.dosage_form || item.medication_details?.form || '',
                   dosage: item.dosage || '',
                   frequency: item.frequency || '',
                   duration: item.duration || '',
@@ -2194,6 +2231,15 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     // Ensure patient information is included (session should already have patient_name from serializer)
     if (!enrichedSession.patient_name && currentPatient) {
       enrichedSession.patient_name = currentPatient.name;
+    }
+    if (!enrichedSession.patient_id && currentPatient) {
+      enrichedSession.patient_id = currentPatient.patientId;
+    }
+    if (!enrichedSession.patient_age && currentPatient) {
+      enrichedSession.patient_age = currentPatient.age;
+    }
+    if (!enrichedSession.patient_gender && currentPatient) {
+      enrichedSession.patient_gender = currentPatient.gender;
     }
 
     // Load diagnoses for this session
@@ -2990,21 +3036,27 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           continue; // Skip this medication
         }
         
-        // Find generic details for unit
+        // Find generic details for fallback metadata
         const generic = medications.find((g: any) => {
           const gId = typeof g.id === 'string' ? parseInt(g.id, 10) : g.id;
           return gId === numericGenericId;
         });
-        const unit = (generic as any)?.dosage_form || 'tablet'; // Default to 'tablet' if not found
+        const fallbackUnit = (generic as any)?.dosage_form || 'tablet';
+        const fallbackForm = (generic as any)?.dosage_form || '';
+        const fallbackStrength = (generic as any)?.strength || '';
+        const fallbackRoute = (generic as any)?.route || 'Oral';
         
         // Add to items array - now using generic instead of medication
         prescriptionItems.push({
           generic: numericGenericId, // Changed from medication to generic
           quantity: rx.quantity,
-          unit: unit,
+          unit: rx.unit || fallbackUnit,
+          dosage_form: rx.form || fallbackForm,
+          strength: rx.strength || fallbackStrength,
           dosage: rx.dosage,
           frequency: rx.frequency,
           duration: rx.duration,
+          route: rx.route || fallbackRoute,
           instructions: rx.instructions,
         });
       }
@@ -3091,7 +3143,10 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         ? parseInt(prescriptionToEdit.duration.split(' ')[0]) || 0
         : 0,
       route: prescriptionToEdit.route,
-      instructions: prescriptionToEdit.instructions || ''
+      instructions: prescriptionToEdit.instructions || '',
+      unit: prescriptionToEdit.unit || 'tablet',
+      strength: prescriptionToEdit.strength || '',
+      form: prescriptionToEdit.form || '',
     };
     setMedicationConfigs(new Map([[medicationId, config]]));
 
@@ -3162,7 +3217,11 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
         setMedicationConfigs(prevConfigs => {
           const newConfigs = new Map(prevConfigs);
-          const form = med.form || med.dosageForm || 'tablet';
+          const formOptions = parseMedicationOptions(med.dosage_form || med.form || med.dosageForm);
+          const strengthOptions = parseMedicationOptions(med.strength);
+          const form = formOptions[0] || '';
+          const strength = strengthOptions[0] || '';
+          const unit = med.unit || form || 'tablet';
           // Set sensible defaults based on medication form
           const defaultDosage = form.toLowerCase().includes('tablet') || form.toLowerCase().includes('capsule') 
             ? `1 ${form.toLowerCase()}`
@@ -3179,8 +3238,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           newConfigs.set(medicationId!, {
             id: med.id || 0,
             name: med.name || '',
-            strength: med.strength || '',
-            form: med.dosage_form || 'tablet',
+            strength,
+            form,
             route: defaultRoute,
             dosage: defaultDosage,
             frequency: 'Once daily (OD)',
@@ -3189,11 +3248,11 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
             quantity: 0,
             instructions: '',
             priority: 'Routine',
-            unit: med.dosage_form || 'tablet', // Use form as unit for generics
+            unit,
             generic_name: med.name, // For generics, name is the generic name
             genericName: med.name || '',
             category: med.category || '',
-            dosageForm: med.dosage_form,
+            dosageForm: form,
           });
           return newConfigs;
         });
@@ -3218,12 +3277,15 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       
       const updatedConfig = { ...currentConfig, [field]: value };
       
-      // Auto-calculate quantity when frequency or durationDays changes
-      if (field === 'frequency' || field === 'durationDays') {
+      // Auto-calculate quantity when dose/frequency/duration changes
+      if (field === 'dosage' || field === 'frequency' || field === 'durationDays') {
         const dailyDoses = frequencyToDailyDoses[updatedConfig.frequency] || 1;
+        const dosageValue = updatedConfig.dosage
+          ? parseFloat(String(updatedConfig.dosage).replace(/[^\d.]/g, '')) || 1
+          : 1;
         updatedConfig.quantity = updatedConfig.frequency === 'STAT (Single dose)' 
-          ? 1 
-          : Math.ceil(dailyDoses * (updatedConfig.durationDays || 0));
+          ? dosageValue
+          : Math.ceil(dosageValue * dailyDoses * Math.max(updatedConfig.durationDays || 1, 1));
       }
       
       // Auto-update duration string when durationDays changes
@@ -3234,6 +3296,24 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       newConfigs.set(medicationId, updatedConfig);
       return newConfigs;
     });
+  };
+
+  const getCalculatedQuantity = (config: {
+    dosage?: string;
+    frequency?: string;
+    durationDays?: number | string;
+    quantity?: number;
+  }): number => {
+    if (typeof config.quantity === 'number' && Number.isFinite(config.quantity) && config.quantity > 0) {
+      return config.quantity;
+    }
+    const dailyDoses = frequencyToDailyDoses[config.frequency || ''] || 1;
+    const dosageValue = config.dosage ? parseFloat(String(config.dosage).replace(/[^\d.]/g, '')) || 1 : 1;
+    const durationDays = Number(config.durationDays || 0) || 0;
+    if ((config.frequency || '') === 'STAT (Single dose)') {
+      return dosageValue;
+    }
+    return Math.ceil(dosageValue * dailyDoses * Math.max(durationDays || 1, 1));
   };
 
   const addPrescription = () => {
@@ -3251,26 +3331,37 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     const missingConfigs: string[] = [];
     for (const medId of selectedMedications) {
       const config = medicationConfigs.get(medId);
+      const med = medications.find((m: any) => {
+        const mId = typeof m.id === 'number' ? m.id : parseInt(m.id, 10);
+        return mId === medId;
+      });
       if (!config || !config.dosage?.trim()) {
-        const med = medications.find((m: any) => {
-          const mId = typeof m.id === 'number' ? m.id : parseInt(m.id, 10);
-          return mId === medId;
-        });
         missingConfigs.push(`${med?.name || 'Unknown medication'} - dosage required`);
       }
       if (!config || !config.frequency) {
-        const med = medications.find((m: any) => {
-          const mId = typeof m.id === 'number' ? m.id : parseInt(m.id, 10);
-          return mId === medId;
-        });
         if (!missingConfigs.some(msg => msg.includes(med?.name || 'Unknown medication'))) {
           missingConfigs.push(`${med?.name || 'Unknown medication'} - frequency required`);
+        }
+      }
+      if (!config || !config.unit?.trim()) {
+        if (!missingConfigs.some(msg => msg.includes(med?.name || 'Unknown medication'))) {
+          missingConfigs.push(`${med?.name || 'Unknown medication'} - unit required`);
+        }
+      }
+      if (!config || !config.form?.trim()) {
+        if (!missingConfigs.some(msg => msg.includes(med?.name || 'Unknown medication'))) {
+          missingConfigs.push(`${med?.name || 'Unknown medication'} - form required`);
+        }
+      }
+      if (!config || !config.strength?.trim()) {
+        if (!missingConfigs.some(msg => msg.includes(med?.name || 'Unknown medication'))) {
+          missingConfigs.push(`${med?.name || 'Unknown medication'} - strength required`);
         }
       }
     }
 
     if (missingConfigs.length > 0) {
-      toast.error("Please complete all required fields (Dosage and Frequency) for each medication before adding to order.");
+      toast.error("Please complete required fields (dosage, frequency, unit, form, strength) for each medication.");
       return;
     }
     
@@ -3287,7 +3378,10 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         frequency: 'Once daily (OD)',
         durationDays: 0,
         route: 'Oral',
-        instructions: ''
+        instructions: '',
+        unit: med.unit || med.dosage_form || med.form || 'tablet',
+        strength: med.strength || '',
+        form: med.dosage_form || med.form || '',
       };
 
       const dailyDoses = frequencyToDailyDoses[config.frequency] || 1;
@@ -3304,6 +3398,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         medication: med.name, // Generic name
         medicationId: medicationId, // Generic ID
         genericName: med.name, // Same as medication for generics
+        unit: config.unit || med.unit || med.dosage_form || med.form || 'tablet',
+        strength: config.strength || med.strength || '',
+        form: config.form || med.dosage_form || med.form || '',
         dosage: config.dosage || 'As directed',
         frequency: config.frequency,
         duration: config.durationDays ? `${config.durationDays} days` : 'As directed',
@@ -4653,6 +4750,12 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                       // Reload the session data to update the selectedSession state
                       try {
                         const updatedSession = await consultationService.getSession(sessionId);
+                        if (currentPatient) {
+                          updatedSession.patient_name = updatedSession.patient_name || currentPatient.name;
+                          updatedSession.patient_id = updatedSession.patient_id || currentPatient.patientId;
+                          updatedSession.patient_age = updatedSession.patient_age || currentPatient.age;
+                          updatedSession.patient_gender = updatedSession.patient_gender || currentPatient.gender;
+                        }
                         setSelectedSession(updatedSession);
                       } catch (reloadErr) {
                         console.warn('Could not reload session data:', reloadErr);
@@ -4745,6 +4848,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                   </div>
                                   <div className="flex items-center gap-3 text-xs text-muted-foreground">
                                     <span><strong>Qty:</strong> {rx.quantity}</span>
+                                    {rx.unit && <span><strong>Unit:</strong> {rx.unit}</span>}
+                                    {rx.strength && <span><strong>Strength:</strong> {rx.strength}</span>}
+                                    {rx.form && <span><strong>Form:</strong> {rx.form}</span>}
                                     {rx.genericName && <span><strong>Generic:</strong> {rx.genericName}</span>}
                                   </div>
                                   {rx.instructions && (
@@ -6947,7 +7053,10 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                   <Button
                       variant="ghost"
                     size="sm"
-                      onClick={() => setSelectedMedications(new Set())}
+                      onClick={() => {
+                        setSelectedMedications(new Set());
+                        setMedicationConfigs(new Map());
+                      }}
                       className="text-xs"
                   >
                     Clear All
@@ -6963,7 +7072,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                     <div>
                       <Label className="text-sm font-semibold">Configure Prescriptions</Label>
                       <p className="text-xs text-muted-foreground mt-1">
-                        Set dosage, frequency, and duration for each selected medication
+                        Set dosage, frequency, duration, unit, strength, and form for each selected medication
                       </p>
                     </div>
                     <Badge variant="outline" className="text-xs">
@@ -6983,8 +7092,14 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                       frequency: 'Once daily (OD)',
                       durationDays: '',
                       route: 'Oral',
-                      instructions: ''
+                      instructions: '',
+                      unit: (med as any).unit || (med as any).dosage_form || (med as any).form || 'tablet',
+                      strength: parseMedicationOptions((med as any).strength)[0] || '',
+                      form: parseMedicationOptions((med as any).dosage_form || (med as any).form)[0] || '',
                     };
+                    const formOptions = parseMedicationOptions((med as any).dosage_form || (med as any).form);
+                    const strengthOptions = parseMedicationOptions((med as any).strength);
+                    const calculatedQuantity = getCalculatedQuantity(config as any);
 
                     return (
                         <Card key={medId} className="border-l-4 border-l-violet-500">
@@ -7006,7 +7121,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                           </Button>
                         </div>
                         
-                            <div className="grid grid-cols-2 gap-3">
+                            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                           <div className="space-y-1">
                                 <Label className="text-xs">Dosage <span className="text-red-500">*</span></Label>
                             <Input
@@ -7020,26 +7135,38 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                             />
                           </div>
                           <div className="space-y-1">
-                                <Label className="text-xs">Frequency <span className="text-red-500">*</span></Label>
+                                <Label className="text-xs">Unit <span className="text-red-500">*</span></Label>
                             <Select
-                                  value={config.frequency || 'Once daily (OD)'}
-                              onValueChange={(v) => updateMedicationConfig(medId, 'frequency', v)}
+                                  value={config.unit || 'tablet'}
+                                  onValueChange={(v) => updateMedicationConfig(medId, 'unit', v)}
                             >
-                                  <SelectTrigger className="h-8 text-xs">
+                              <SelectTrigger className="h-8 text-xs">
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
-                                    <SelectItem value="Once daily (OD)">Once daily (OD)</SelectItem>
-                                    <SelectItem value="Twice daily (BD)">Twice daily (BD)</SelectItem>
-                                    <SelectItem value="Three times daily (TDS)">Three times daily (TDS)</SelectItem>
-                                    <SelectItem value="Four times daily (QDS)">Four times daily (QDS)</SelectItem>
-                                    <SelectItem value="Every 6 hours">Every 6 hours</SelectItem>
-                                    <SelectItem value="Every 8 hours">Every 8 hours</SelectItem>
-                                    <SelectItem value="Every 12 hours">Every 12 hours</SelectItem>
-                                    <SelectItem value="As needed (PRN)">As needed (PRN)</SelectItem>
-                                    <SelectItem value="STAT (Single dose)">STAT (Single dose)</SelectItem>
-                                    <SelectItem value="Weekly">Weekly</SelectItem>
-                                    <SelectItem value="Monthly">Monthly</SelectItem>
+                                    {PRESCRIPTION_UNIT_OPTIONS.map((unit) => (
+                                      <SelectItem key={unit} value={unit}>
+                                        {unit}
+                                      </SelectItem>
+                                    ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-1">
+                                <Label className="text-xs">Form <span className="text-red-500">*</span></Label>
+                            <Select
+                                  value={config.form || ''}
+                                  onValueChange={(v) => updateMedicationConfig(medId, 'form', v)}
+                            >
+                              <SelectTrigger className="h-8 text-xs">
+                                <SelectValue placeholder="Select form" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                    {formOptions.map((form) => (
+                                      <SelectItem key={form} value={form}>
+                                        {form}
+                                      </SelectItem>
+                                    ))}
                               </SelectContent>
                             </Select>
                           </div>
@@ -7057,6 +7184,47 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                 updateMedicationConfig(medId, 'durationDays', days);
                               }}
                             />
+                          </div>
+                          <div className="space-y-1">
+                                <Label className="text-xs">Frequency <span className="text-red-500">*</span></Label>
+                            <Select
+                                  value={config.frequency || 'Once daily (OD)'}
+                              onValueChange={(v) => updateMedicationConfig(medId, 'frequency', v)}
+                            >
+                                  <SelectTrigger className="h-8 text-xs">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                    <SelectItem value="Once daily (OD)">Once daily (OD)</SelectItem>
+                                    <SelectItem value="Twice daily (BD)">Twice daily (BD)</SelectItem>
+                                    <SelectItem value="Three times daily (TDS)">Three times daily (TDS)</SelectItem>
+                                    <SelectItem value="Four times daily (QDS)">Four times daily (QDS)</SelectItem>
+                                    <SelectItem value="Every 6 hours (Q6H)">Every 6 hours</SelectItem>
+                                    <SelectItem value="Every 8 hours (Q8H)">Every 8 hours</SelectItem>
+                                    <SelectItem value="Every 12 hours (Q12H)">Every 12 hours</SelectItem>
+                                    <SelectItem value="As needed (PRN)">As needed (PRN)</SelectItem>
+                                    <SelectItem value="STAT (Single dose)">STAT (Single dose)</SelectItem>
+                                    <SelectItem value="Weekly">Weekly</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-1">
+                                <Label className="text-xs">Strength <span className="text-red-500">*</span></Label>
+                            <Select
+                                  value={config.strength || ''}
+                                  onValueChange={(v) => updateMedicationConfig(medId, 'strength', v)}
+                            >
+                              <SelectTrigger className="h-8 text-xs">
+                                <SelectValue placeholder="Select strength" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                    {strengthOptions.map((strength) => (
+                                      <SelectItem key={strength} value={strength}>
+                                        {strength}
+                                      </SelectItem>
+                                    ))}
+                              </SelectContent>
+                            </Select>
                           </div>
                           <div className="space-y-1">
                                 <Label className="text-xs">Route</Label>
@@ -7079,6 +7247,17 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                     <SelectItem value="Otic">Otic</SelectItem>
                               </SelectContent>
                             </Select>
+                          </div>
+                          <div className="space-y-1">
+                                <Label className="text-xs">Calculated Quantity</Label>
+                            <Input
+                                  className="h-8 text-xs"
+                                  value={String(calculatedQuantity)}
+                                  readOnly
+                            />
+                            <p className="text-[10px] text-muted-foreground">
+                              Dose x frequency x days
+                            </p>
                           </div>
                         </div>
 

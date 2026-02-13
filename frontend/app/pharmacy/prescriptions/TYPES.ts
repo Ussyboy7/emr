@@ -20,6 +20,9 @@ export interface MedicationItem {
   frequency: string;
   duration: string;
   quantity: number;
+  unit?: string;
+  dosage_form?: string;
+  strength?: string;
   dispensed_quantity?: number;
   route: string;
   instructions: string;
@@ -78,4 +81,3 @@ export interface SubstituteOption {
   unitPrice: number;
   isNearExpiry: boolean;
 }
-

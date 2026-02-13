@@ -374,9 +374,11 @@ class PrescriptionItem(models.Model):
     quantity = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0)])
     unit = models.CharField(max_length=50)
     dosage_form = models.CharField(max_length=100, blank=True, help_text="e.g., tablet, capsule, syrup")
+    strength = models.CharField(max_length=100, blank=True, help_text="e.g., 20/120mg")
     dosage = models.CharField(max_length=200, blank=True, help_text="e.g., 1 tablet twice daily")
     frequency = models.CharField(max_length=100, blank=True)
     duration = models.CharField(max_length=100, blank=True, help_text="e.g., 7 days")
+    route = models.CharField(max_length=50, blank=True, help_text="e.g., Oral, IV")
     instructions = models.TextField(blank=True)
     
     # Dispensing information

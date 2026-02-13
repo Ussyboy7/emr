@@ -34,6 +34,9 @@ export type PrescriptionOrderItemInput = {
   duration: string;
   quantity: number;
   unit: string;
+  dosage_form?: string;
+  strength?: string;
+  route?: string;
   instructions: string;
 };
 
@@ -49,6 +52,7 @@ type MedicationLike = {
   generic_name?: string;
   form?: string;
   dosageForm?: string;
+  dosage_form?: string;
   strength?: string;
   unit?: string;
 };
@@ -58,7 +62,34 @@ type MedicationConfig = {
   frequency: string;
   durationDays: number | "";
   route: string;
+  unit: string;
+  strength: string;
+  form: string;
+  quantity?: number;
   instructions: string;
+};
+
+const PRESCRIPTION_UNIT_OPTIONS = [
+  "tablet",
+  "capsule",
+  "ml",
+  "mg",
+  "g",
+  "drop",
+  "vial",
+  "ampoule",
+  "sachet",
+  "suppository",
+  "puff",
+  "patch",
+];
+
+const parseMedicationOptions = (value: unknown): string[] => {
+  if (typeof value !== "string") return [];
+  return value
+    .split(",")
+    .map((v) => v.trim())
+    .filter((v) => v.length > 0);
 };
 
 export function PrescriptionOrderModal({
@@ -148,13 +179,18 @@ export function PrescriptionOrderModal({
         setMedicationConfigs((prevConfigs) => {
           const nextConfigs = new Map(prevConfigs);
           if (!nextConfigs.has(medId)) {
-            const form = (med.form || (med as any).dosageForm || "").toLowerCase();
+            const formOptions = parseMedicationOptions(med.dosage_form || med.form || (med as any).dosageForm);
+            const strengthOptions = parseMedicationOptions(med.strength);
+            const form = (formOptions[0] || "").toLowerCase();
             const defaultRoute = form.includes("injection") || form.includes("vial") ? "IV" : "Oral";
             nextConfigs.set(medId, {
               dosage: "",
               frequency: "Once daily (OD)",
               durationDays: "",
               route: defaultRoute,
+              unit: med.unit || formOptions[0] || "tablet",
+              strength: strengthOptions[0] || "",
+              form: formOptions[0] || "",
               instructions: "",
             });
           }
@@ -170,9 +206,31 @@ export function PrescriptionOrderModal({
       const next = new Map(prev);
       const current = next.get(medId);
       if (!current) return next;
-      next.set(medId, { ...current, [field]: value });
+      const updated = { ...current, [field]: value };
+      if (field === "dosage" || field === "frequency" || field === "durationDays") {
+        const dailyDoses = frequencyToDailyDoses[updated.frequency] ?? 1;
+        const dosageValue = parseFloat(String(updated.dosage || "").replace(/[^\d.]/g, "")) || 1;
+        const days = updated.durationDays === "" ? 0 : Number(updated.durationDays || 0);
+        updated.quantity =
+          updated.frequency === "STAT (Single dose)"
+            ? dosageValue
+            : Math.ceil(dosageValue * dailyDoses * Math.max(days || 1, 1));
+      }
+      next.set(medId, updated);
       return next;
     });
+  }, []);
+
+  const getCalculatedQuantity = useCallback((cfg: MedicationConfig): number => {
+    if (typeof cfg.quantity === "number" && Number.isFinite(cfg.quantity) && cfg.quantity > 0) {
+      return cfg.quantity;
+    }
+    const dailyDoses = frequencyToDailyDoses[cfg.frequency] ?? 1;
+    const dosageValue = parseFloat(String(cfg.dosage || "").replace(/[^\d.]/g, "")) || 1;
+    const days = cfg.durationDays === "" ? 0 : Number(cfg.durationDays || 0);
+    return cfg.frequency === "STAT (Single dose)"
+      ? dosageValue
+      : Math.ceil(dosageValue * dailyDoses * Math.max(days || 1, 1));
   }, []);
 
   const filteredMedications = useMemo(() => {
@@ -181,7 +239,7 @@ export function PrescriptionOrderModal({
     return medications.filter((m) => {
       const name = (m.name || "").toLowerCase();
       const generic = (m.generic_name || "").toLowerCase();
-      const form = ((m.form || (m as any).dosageForm || "") as string).toLowerCase();
+      const form = ((m.form || m.dosage_form || (m as any).dosageForm || "") as string).toLowerCase();
       return name.includes(q) || generic.includes(q) || form.includes(q);
     });
   }, [medications, medicationSearch]);
@@ -204,6 +262,9 @@ export function PrescriptionOrderModal({
       const cfg = medicationConfigs.get(medId);
       if (!cfg?.dosage?.trim()) missing.push(`${med?.name || "Medication"} - dosage required`);
       if (!cfg?.frequency) missing.push(`${med?.name || "Medication"} - frequency required`);
+      if (!cfg?.unit?.trim()) missing.push(`${med?.name || "Medication"} - unit required`);
+      if (!cfg?.form?.trim()) missing.push(`${med?.name || "Medication"} - form required`);
+      if (!cfg?.strength?.trim()) missing.push(`${med?.name || "Medication"} - strength required`);
       if (!cfg) continue;
 
       // Quantity is inferred from dosage + frequency + durationDays (like room page)
@@ -217,7 +278,10 @@ export function PrescriptionOrderModal({
 
       items.push({
         medicationId: medId,
-        unit: med?.unit || "tablet",
+        unit: cfg.unit || med?.unit || "tablet",
+        dosage_form: cfg.form || med?.dosage_form || med?.form || (med as any)?.dosageForm || "",
+        strength: cfg.strength || med?.strength || "",
+        route: cfg.route || "Oral",
         dosage: cfg.dosage || "As directed",
         frequency: cfg.frequency || "Once daily (OD)",
         duration: days ? `${days} days` : "As directed",
@@ -227,7 +291,7 @@ export function PrescriptionOrderModal({
     }
 
     if (missing.length > 0) {
-      toast.error("Please complete required fields for each medication (Dosage, Frequency).");
+      toast.error("Please complete required fields for each medication (dosage, frequency, unit, form, strength).");
       return null;
     }
 
@@ -326,7 +390,7 @@ export function PrescriptionOrderModal({
                             <div className="font-medium text-sm">{med.name}</div>
                             <div className="text-xs text-muted-foreground mt-1">
                               {(med.generic_name || "").trim() ? `${med.generic_name} • ` : ""}
-                              {med.form || (med as any).dosageForm || "N/A"}
+                              {med.dosage_form || med.form || (med as any).dosageForm || "N/A"}
                               {med.strength ? ` • ${med.strength}` : ""}
                             </div>
                           </div>
@@ -378,7 +442,7 @@ export function PrescriptionOrderModal({
               <div className="flex items-center justify-between">
                 <div>
                   <Label className="text-sm font-semibold">Configure Prescriptions</Label>
-                  <p className="text-xs text-muted-foreground mt-1">Set dosage, frequency, and duration for each selected medication</p>
+                  <p className="text-xs text-muted-foreground mt-1">Set dosage, frequency, duration, unit, strength, and form for each selected medication</p>
                 </div>
                 <Badge variant="outline" className="text-xs">
                   {selectedMedications.size} medication{selectedMedications.size > 1 ? "s" : ""} selected
@@ -394,8 +458,15 @@ export function PrescriptionOrderModal({
                     frequency: "Once daily (OD)",
                     durationDays: "" as const,
                     route: "Oral",
+                    unit: med.unit || parseMedicationOptions(med.dosage_form || med.form || (med as any).dosageForm)[0] || "tablet",
+                    strength: parseMedicationOptions(med.strength)[0] || "",
+                    form: parseMedicationOptions(med.dosage_form || med.form || (med as any).dosageForm)[0] || "",
+                    quantity: 0,
                     instructions: "",
                   };
+                  const formOptions = parseMedicationOptions(med.dosage_form || med.form || (med as any).dosageForm);
+                  const strengthOptions = parseMedicationOptions(med.strength);
+                  const calculatedQuantity = getCalculatedQuantity(cfg);
 
                   return (
                     <div key={medId} className="rounded-lg border border-l-4 border-l-violet-500 p-4">
@@ -403,7 +474,7 @@ export function PrescriptionOrderModal({
                         <div>
                           <div className="font-medium text-sm">{med.name}</div>
                           <div className="text-xs text-muted-foreground">
-                            {med.generic_name || ""} • {med.form || (med as any).dosageForm || "N/A"}
+                            {med.generic_name || ""} • {med.dosage_form || med.form || (med as any).dosageForm || "N/A"}
                           </div>
                         </div>
                         <Button
@@ -416,7 +487,7 @@ export function PrescriptionOrderModal({
                         </Button>
                       </div>
 
-                      <div className="grid grid-cols-2 gap-3">
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                         <div className="space-y-1">
                           <Label className="text-xs">
                             Dosage <span className="text-red-500">*</span>
@@ -429,6 +500,55 @@ export function PrescriptionOrderModal({
                             className="h-8 text-xs"
                             value={cfg.dosage || ""}
                             onChange={(e) => updateMedicationConfig(medId, "dosage", e.target.value)}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">
+                            Unit <span className="text-red-500">*</span>
+                          </Label>
+                          <Select value={cfg.strength || ""} onValueChange={(v) => updateMedicationConfig(medId, "strength", v)}>
+                            <SelectTrigger className="h-8 text-xs">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {PRESCRIPTION_UNIT_OPTIONS.map((unit) => (
+                                <SelectItem key={unit} value={unit}>
+                                  {unit}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">
+                            Form <span className="text-red-500">*</span>
+                          </Label>
+                          <Select value={cfg.form || ""} onValueChange={(v) => updateMedicationConfig(medId, "form", v)}>
+                            <SelectTrigger className="h-8 text-xs">
+                              <SelectValue placeholder="Select form" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {formOptions.map((form) => (
+                                <SelectItem key={form} value={form}>
+                                  {form}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">Duration (days)</Label>
+                          <Input
+                            type="number"
+                            min="1"
+                            placeholder="e.g., 7"
+                            className="h-8 text-xs"
+                            value={cfg.durationDays === "" ? "" : String(cfg.durationDays)}
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              const days = value === "" ? "" : parseInt(value, 10) || "";
+                              updateMedicationConfig(medId, "durationDays", days);
+                            }}
                           />
                         </div>
                         <div className="space-y-1">
@@ -454,19 +574,21 @@ export function PrescriptionOrderModal({
                           </Select>
                         </div>
                         <div className="space-y-1">
-                          <Label className="text-xs">Duration (days)</Label>
-                          <Input
-                            type="number"
-                            min="1"
-                            placeholder="e.g., 7"
-                            className="h-8 text-xs"
-                            value={cfg.durationDays === "" ? "" : String(cfg.durationDays)}
-                            onChange={(e) => {
-                              const value = e.target.value;
-                              const days = value === "" ? "" : parseInt(value, 10) || "";
-                              updateMedicationConfig(medId, "durationDays", days);
-                            }}
-                          />
+                          <Label className="text-xs">
+                            Strength <span className="text-red-500">*</span>
+                          </Label>
+                          <Select value={cfg.unit || "tablet"} onValueChange={(v) => updateMedicationConfig(medId, "unit", v)}>
+                            <SelectTrigger className="h-8 text-xs">
+                              <SelectValue placeholder="Select strength" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {strengthOptions.map((strength) => (
+                                <SelectItem key={strength} value={strength}>
+                                  {strength}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
                         </div>
                         <div className="space-y-1">
                           <Label className="text-xs">Route</Label>
@@ -486,6 +608,11 @@ export function PrescriptionOrderModal({
                               <SelectItem value="Otic">Otic</SelectItem>
                             </SelectContent>
                           </Select>
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">Calculated Quantity</Label>
+                          <Input className="h-8 text-xs" value={String(calculatedQuantity)} readOnly />
+                          <p className="text-[10px] text-muted-foreground">Dose x frequency x days</p>
                         </div>
                       </div>
 
@@ -576,4 +703,3 @@ export function PrescriptionOrderModal({
     </Dialog>
   );
 }
-

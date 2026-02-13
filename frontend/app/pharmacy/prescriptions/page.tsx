@@ -212,6 +212,9 @@ export default function PrescriptionsPage() {
         frequency: med.frequency || med.frequency_display || '',
         duration: med.duration || '',
         quantity: Number(med.quantity || 0),
+        unit: med.unit || med.medication_details?.unit || '',
+        dosage_form: med.dosage_form || med.medication_details?.form || '',
+        strength: med.strength || med.medication_details?.strength || '',
         dispensed_quantity: Number(med.dispensed_quantity || 0),
         remaining_quantity: Math.max(0, Number(med.quantity || 0) - Number(med.dispensed_quantity || 0)),
         route: med.route || med.route_display || 'Oral',
@@ -713,7 +716,7 @@ export default function PrescriptionsPage() {
     // Check if quantities are valid
     const invalidQuantities = selectedMedications.filter(medId => {
       const med = selectedPrescriptionMedications.find(m => m.id === medId);
-      const quantity = dispenseQuantities[medId] || med?.remaining_quantity || 0;
+      const quantity = dispenseQuantities[medId] ?? med?.remaining_quantity ?? 0;
       const maxAllowed = Math.max(0, med?.remaining_quantity || 0);
       return med && (quantity < 0 || quantity > maxAllowed || (maxAllowed === 0 && quantity > 0));
     });
@@ -721,7 +724,7 @@ export default function PrescriptionsPage() {
     if (invalidQuantities.length > 0) {
       const hasInvalidAmounts = selectedMedications.some(medId => {
         const med = selectedPrescriptionMedications.find(m => m.id === medId);
-        const quantity = dispenseQuantities[medId] || med?.remaining_quantity || 0;
+        const quantity = dispenseQuantities[medId] ?? med?.remaining_quantity ?? 0;
         return med && quantity > Math.max(0, med.remaining_quantity);
       });
 
@@ -749,7 +752,7 @@ export default function PrescriptionsPage() {
           throw new Error(`Medication ${medId} not found in prescription`);
         }
 
-        const quantity = dispenseQuantities[medId] || med.quantity;
+        const quantity = dispenseQuantities[medId] ?? med.remaining_quantity ?? med.quantity;
         
         // Use manually selected batch OR fetch auto-selected batch (FEFO)
         let inventoryId = selectedBatches[medId] ? parseInt(selectedBatches[medId]) : undefined;
@@ -1662,7 +1665,11 @@ export default function PrescriptionsPage() {
                             <Checkbox
                               checked={isSelected}
                               disabled={!isAvailable && !isPendingGeneric}
-                              onCheckedChange={(checked) => handleMedicationSelection(med.id, checked as boolean, med.quantity)}
+                              onCheckedChange={(checked) => handleMedicationSelection(
+                                med.id,
+                                checked as boolean,
+                                Math.max(0, Number((med as any).remaining_quantity ?? med.quantity ?? 0))
+                              )}
                               className="mt-1"
                             />
                             <div className="flex-1">
@@ -1692,6 +1699,11 @@ export default function PrescriptionsPage() {
                                     );
                                   })()}
                                   <p className="text-xs text-muted-foreground">{med.route} • {med.frequency} • {med.duration}</p>
+                                  <p className="text-xs text-muted-foreground">
+                                    {(med as any).unit || 'unit'}
+                                    {(med as any).dosage_form ? ` • ${(med as any).dosage_form}` : ''}
+                                    {(med as any).strength ? ` • ${(med as any).strength}` : ''}
+                                  </p>
                                 </div>
                                 <div className="flex items-center gap-2">
                                   <Badge variant="outline" className={getMedicationStatusColor(med.status)}>
@@ -1894,7 +1906,7 @@ export default function PrescriptionsPage() {
                                             if (typeof stockCap === 'number') return Math.min(remaining, stockCap);
                                             return remaining;
                                           })()}
-                                          value={dispenseQuantities[med.id] || Math.max(0, (med as any).remaining_quantity)}
+                                          value={dispenseQuantities[med.id] ?? Math.max(0, Number((med as any).remaining_quantity ?? 0))}
                                           onChange={(e) => {
                                             const inputValue = Math.max(0, parseInt(e.target.value) || 0);
                                             const stockCap = Array.isArray(batches)

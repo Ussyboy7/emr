@@ -53,9 +53,12 @@ export interface PrescriptionItem {
   medication_name?: string;
   quantity: number;
   unit?: string; // Made optional since transformMedications might not provide it
+  dosage_form?: string;
+  strength?: string;
   dosage?: string;
   frequency?: string;
   duration?: string;
+  route?: string;
   instructions?: string;
   dispensed_quantity: number;
   is_dispensed: boolean;
