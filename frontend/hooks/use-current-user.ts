@@ -147,23 +147,14 @@ export const useCurrentUser = () => {
       return remoteUser;
     }
 
-    // Use remoteUser systemRole if available, otherwise fall back to orgMatch
-    // Handle empty string as "not available"
-    const resolvedSystemRole = remoteUser.systemRole?.trim() || orgMatch.systemRole?.trim() || '';
-    
+    // Simply use the API response systemRole, no fallback needed
     return {
       ...orgMatch,
       ...remoteUser,
-      directorate: orgMatch.directorate ?? remoteUser.directorate,
-      division: orgMatch.division ?? remoteUser.division,
-      department: orgMatch.department ?? remoteUser.department,
-      systemRole: resolvedSystemRole,
-      gradeLevel: remoteUser.gradeLevel || orgMatch.gradeLevel,
+      systemRole: remoteUser.systemRole,
       permissions: remoteUser.permissions,
       permissionActions: remoteUser.permissionActions,
-      active: orgMatch.active,
-      // Preserve isSuperuser from remoteUser (API) as it's the source of truth
-      isSuperuser: remoteUser.isSuperuser ?? orgMatch.isSuperuser ?? false,
+      isSuperuser: remoteUser.isSuperuser ?? false,
     } satisfies User;
   }, [remoteUser, users]);
 
