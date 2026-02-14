@@ -30,6 +30,10 @@ const mapApiUserToUser = (data: any): User => {
   if (uuidPattern.test(roleName)) {
     roleName = "";
   }
+  // If user is superuser and no role name, default to "System Administrator"
+  if (!roleName && data.is_superuser) {
+    roleName = "System Administrator";
+  }
   return {
     id: String(data.id ?? data.username),
     username: data.username ?? undefined,
