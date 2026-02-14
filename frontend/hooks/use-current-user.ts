@@ -147,13 +147,17 @@ export const useCurrentUser = () => {
       return remoteUser;
     }
 
+    // Use remoteUser systemRole if available, otherwise fall back to orgMatch
+    // Handle empty string as "not available"
+    const resolvedSystemRole = remoteUser.systemRole?.trim() || orgMatch.systemRole?.trim() || '';
+    
     return {
       ...orgMatch,
       ...remoteUser,
       directorate: orgMatch.directorate ?? remoteUser.directorate,
       division: orgMatch.division ?? remoteUser.division,
       department: orgMatch.department ?? remoteUser.department,
-      systemRole: remoteUser.systemRole || orgMatch.systemRole,
+      systemRole: resolvedSystemRole,
       gradeLevel: remoteUser.gradeLevel || orgMatch.gradeLevel,
       permissions: remoteUser.permissions,
       permissionActions: remoteUser.permissionActions,
