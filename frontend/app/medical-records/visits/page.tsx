@@ -84,7 +84,7 @@ export default function VisitsPage() {
     id: String(visit.id), // Always use numeric ID for API calls
     numericId: visit.id, // Keep numeric ID for backend API calls
     visitId: visit.visit_id || String(visit.id), // Display ID (visit_id string)
-    patientId: String(visit.patient),
+    patientId: visit.patient_id || '',
     patient: visit.patient_name || `Patient ${visit.patient}`,
     type: visit.visit_type || 'consultation', // Use backend value (lowercase)
     clinic: visit.clinic || '',
@@ -540,7 +540,7 @@ export default function VisitsPage() {
                     
                     {/* Row 2: IDs + Clinic + Location + Date/Time */}
                     <p className="text-xs text-muted-foreground mt-0.5 truncate">
-                      {visit.patientId} • {visit.id} • {visit.clinic} • {visit.location} • {visit.date} {visit.time}
+                      {visit.patientId} • {visit.clinic} • {visit.location} • {visit.date} {visit.time}
                     </p>
                     {/* Row 3: Notes (if available) */}
                     {visit.notes && (
@@ -691,7 +691,7 @@ export default function VisitsPage() {
                 Visit Details
               </DialogTitle>
               <DialogDescription>
-                {selectedVisit?.patient} - {selectedVisit?.id}
+                {selectedVisit?.patient}
               </DialogDescription>
             </DialogHeader>
             {selectedVisit && (

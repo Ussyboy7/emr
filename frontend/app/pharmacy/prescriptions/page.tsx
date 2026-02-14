@@ -150,7 +150,7 @@ export default function PrescriptionsPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [priorityFilter, setPriorityFilter] = useState('all');
-  const [dateFilter, setDateFilter] = useState('all');
+  const [dateFilter, setDateFilter] = useState('today');
   const [genderFilter, setGenderFilter] = useState('all');
   
   // Pagination state
@@ -421,27 +421,84 @@ export default function PrescriptionsPage() {
   // Print functionality
   const [printing, setPrinting] = useState(false);
 
-  // Filter prescriptions
-  // With server-side pagination, prescriptions array contains only current page results
-  const paginatedPrescriptions = prescriptions;
+  // Helper functions for filtering
+  const normalizeGender = (value: unknown): string => {
+    const v = String(value || '').trim().toLowerCase();
+    if (v === 'm') return 'male';
+    if (v === 'f') return 'female';
+    return v;
+  };
 
-  // For display consistency, use the same variable name
-  const filteredPrescriptions = paginatedPrescriptions;
+  const matchesDateFilter = (isoDate: string | undefined, filter: string): boolean => {
+    if (filter === 'all') return true;
+    if (!isoDate) return false;
+    const dt = new Date(isoDate);
+    if (Number.isNaN(dt.getTime())) return false;
+
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const tomorrowStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+
+    if (filter === 'today') {
+      return dt >= todayStart && dt < tomorrowStart;
+    }
+
+    if (filter === 'week') {
+      const weekStart = new Date(todayStart);
+      weekStart.setDate(todayStart.getDate() - 6);
+      return dt >= weekStart && dt < tomorrowStart;
+    }
+
+    if (filter === 'month') {
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      return dt >= monthStart && dt < tomorrowStart;
+    }
+
+    return true;
+  };
+
+  // Filter prescriptions - apply all filters client-side
+  const filteredPrescriptions = useMemo(() => {
+    return prescriptions.filter(prescription => {
+      // Date filter
+      if (!matchesDateFilter(prescription.date, dateFilter)) {
+        return false;
+      }
+
+      // Priority filter
+      if (priorityFilter !== 'all' && prescription.priority?.toLowerCase() !== priorityFilter) {
+        return false;
+      }
+
+      // Gender filter
+      if (genderFilter !== 'all') {
+        const patientGender = normalizeGender(prescription.patient?.gender);
+        if (patientGender !== genderFilter) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [prescriptions, dateFilter, priorityFilter, genderFilter]);
+
+  // Pagination will be applied to filtered results
+  const paginatedPrescriptions = filteredPrescriptions;
 
   // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, statusFilter]);
+  }, [searchQuery, statusFilter, dateFilter, priorityFilter, genderFilter]);
 
-  // Calculate stats
+  // Calculate stats from filtered results
   const stats = useMemo(() => ({
-    pending: prescriptions.filter(r => r.status === 'Pending').length,
-    processing: prescriptions.filter(r => r.status === 'Processing').length,
-    ready: prescriptions.filter(r => r.status === 'Ready').length,
-    onHold: prescriptions.filter(r => r.status === 'On Hold').length,
-    emergency: prescriptions.filter(r => r.priority === 'Emergency').length,
-    avgWaitTime: Math.round(prescriptions.reduce((sum, r) => sum + r.waitTime, 0) / prescriptions.length) || 0
-  }), [prescriptions]);
+    pending: filteredPrescriptions.filter(r => r.status === 'Pending').length,
+    processing: filteredPrescriptions.filter(r => r.status === 'Processing').length,
+    ready: filteredPrescriptions.filter(r => r.status === 'Ready').length,
+    onHold: filteredPrescriptions.filter(r => r.status === 'On Hold').length,
+    emergency: filteredPrescriptions.filter(r => r.priority === 'Emergency').length,
+    avgWaitTime: Math.round(filteredPrescriptions.reduce((sum, r) => sum + r.waitTime, 0) / filteredPrescriptions.length) || 0
+  }), [filteredPrescriptions]);
 
   const getPriorityColor = (priority: string) => {
     switch (priority) {

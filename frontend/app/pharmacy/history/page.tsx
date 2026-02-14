@@ -69,8 +69,8 @@ export default function DispenseHistoryPage() {
         const prescription = dispense.prescription_details || {};
         const patientDetails = prescription.patient_details || {};
         const patientName = dispense.patient_name || patientDetails.name || 'Unknown';
-        const patientId = patientDetails.id || '';
-        const patientMRN = patientDetails.mrn || patientDetails.patient_id || '';
+        const patientId = patientDetails.patient_id || '';
+        const patientMRN = patientDetails.patient_id || patientDetails.mrn || '';
         const patientAge = patientDetails.age || 0;
         const patientGender = patientDetails.gender || '';
         
@@ -118,12 +118,12 @@ export default function DispenseHistoryPage() {
         return {
           id: dispense.dispense_id || dispense.id.toString(),
           prescriptionId: dispense.prescription?.toString() || prescription.prescription_id || '',
-          patient: { 
-            name: patientName, 
-            id: patientId, 
-            mrn: patientMRN, 
-            age: patientAge, 
-            gender: patientGender 
+          patient: {
+            name: patientName,
+            id: patientId,
+            mrn: patientMRN,
+            age: patientAge,
+            gender: patientGender
           },
           medications,
           doctor: doctorName,
@@ -542,4 +542,3 @@ export default function DispenseHistoryPage() {
     </DashboardLayout>
   );
 }
-

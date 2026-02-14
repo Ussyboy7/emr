@@ -6,6 +6,7 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.exceptions import ValidationError
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django.utils import timezone
@@ -304,28 +305,30 @@ class RadiologyOrderViewSet(viewsets.ModelViewSet):
         order = self.get_object()
         study_id = request.data.get('study_id')
         report = request.data.get('report', '')
-        findings = request.data.get('findings', '')
-        impression = request.data.get('impression', '')
+        legacy_findings = request.data.get('findings', '')
+        legacy_impression = request.data.get('impression', '')
         recommendations = request.data.get('recommendations', '')
         critical = request.data.get('critical', False) or request.data.get('critical') == 'true'
         report_file = request.FILES.get('report_file')
         
         try:
             study = order.studies.get(id=study_id)
-            study.report = report
-            study.findings = findings
-            study.impression = impression
+            merged_report = (report or '').strip()
+            if not merged_report and legacy_findings:
+                merged_report = str(legacy_findings).strip()
+            if legacy_impression:
+                legacy_impression_text = str(legacy_impression).strip()
+                if legacy_impression_text:
+                    merged_report = f"{merged_report}\n\nImpression:\n{legacy_impression_text}".strip() if merged_report else f"Impression:\n{legacy_impression_text}"
+
+            study.report = merged_report
             study.recommendations = recommendations
             study.status = 'reported'
             study.reported_by = request.user
             study.reported_at = timezone.now()
-            # Store critical flag if model supports it (could be added as a field)
-            # For now, we'll note it in the report text if critical
             if critical:
                 study.report = f"[CRITICAL FINDING]\n\n{study.report}"
-            # File upload handling - could store file path if FileField added to model
             if report_file:
-                # Note: FileField would need to be added to model for actual file storage
                 study.technical_notes = f"{study.technical_notes}\n\nReport file uploaded: {report_file.name}".strip()
             study.save()
             
@@ -364,7 +367,7 @@ class RadiologyOrderViewSet(viewsets.ModelViewSet):
                 description=f'Created report for study: {study.procedure} (Order: {order.order_id})' + (' [CRITICAL FINDING]' if critical else ''),
                 old_values={'status': 'acquired'},
                 new_values={'status': 'reported', 'critical': critical},
-                metadata={'order_id': order.order_id, 'has_findings': bool(findings), 'has_impression': bool(impression)},
+                    metadata={'order_id': order.order_id, 'has_report': bool(study.report)},
                 request=request,
             )
             
@@ -454,15 +457,17 @@ class RadiologyStudyViewSet(viewsets.ModelViewSet):
         # Handle FormData (multipart/form-data) vs JSON
         if request.content_type and 'multipart/form-data' in request.content_type:
             # For FormData, get values from request.POST
-            findings = request.POST.get('findings', '')
-            impression = request.POST.get('impression', '')
+            report = request.POST.get('report', '')
+            legacy_findings = request.POST.get('findings', '')
+            legacy_impression = request.POST.get('impression', '')
             critical_str = request.POST.get('critical', 'false')
             critical = critical_str.lower() in ('true', '1', 'yes', 'on')
             status_update = request.POST.get('status')
         else:
             # For JSON, get values from request.data
-            findings = request.data.get('findings', '')
-            impression = request.data.get('impression', '')
+            report = request.data.get('report', '')
+            legacy_findings = request.data.get('findings', '')
+            legacy_impression = request.data.get('impression', '')
             critical = request.data.get('critical', False)
             status_update = request.data.get('status')
 
@@ -470,8 +475,15 @@ class RadiologyStudyViewSet(viewsets.ModelViewSet):
             study = self.get_object()
 
             # Update fields
-            study.findings = findings
-            study.impression = impression
+            merged_report = (report or '').strip()
+            if not merged_report and legacy_findings:
+                merged_report = str(legacy_findings).strip()
+            if legacy_impression:
+                legacy_impression_text = str(legacy_impression).strip()
+                if legacy_impression_text:
+                    merged_report = f"{merged_report}\n\nImpression:\n{legacy_impression_text}".strip() if merged_report else f"Impression:\n{legacy_impression_text}"
+
+            study.report = merged_report
             study.critical = critical
 
             old_status = study.status
@@ -553,8 +565,6 @@ class RadiologyStudyViewSet(viewsets.ModelViewSet):
             study.rejected_at = timezone.now()
             # Clear previous report data to allow re-reporting
             study.report = ''
-            study.findings = ''
-            study.impression = ''
             study.recommendations = ''
             study.reported_by = None
             study.reported_at = None
@@ -730,8 +740,6 @@ class RadiologyReportViewSet(viewsets.ReadOnlyModelViewSet):
         study.verified_at = None
         # Clear previous report data to allow re-reporting
         study.report = ''
-        study.findings = ''
-        study.impression = ''
         study.recommendations = ''
         study.reported_by = None
         study.reported_at = None

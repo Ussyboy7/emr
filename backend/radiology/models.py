@@ -114,8 +114,7 @@ class RadiologyOrder(models.Model):
         ('rejected', 'Rejected'),
     ]
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
-    findings = models.TextField(blank=True, help_text="Radiological findings")
-    impression = models.TextField(blank=True, help_text="Clinical impression/diagnosis")
+    report = models.TextField(blank=True, help_text="Radiology report text")
     critical = models.BooleanField(default=False, help_text="Critical findings flag")
     processed_by = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, blank=True, related_name='processed_radiology_orders')
     processed_at = models.DateTimeField(null=True, blank=True)
@@ -185,9 +184,7 @@ class RadiologyStudy(models.Model):
     acquired_at = models.DateTimeField(null=True, blank=True)
     
     # Reporting
-    report = models.TextField(blank=True)
-    findings = models.TextField(blank=True)
-    impression = models.TextField(blank=True)
+    report = models.TextField(blank=True, help_text="Radiology report text")
     recommendations = models.TextField(blank=True)
     critical = models.BooleanField(default=False, help_text="Critical findings flag")
     report_file = models.FileField(upload_to='radiology_reports/', blank=True, null=True, help_text="Uploaded report file")

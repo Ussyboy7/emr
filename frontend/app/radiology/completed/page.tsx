@@ -39,8 +39,7 @@ interface CompletedReport {
   verifiedAt: string;
   clinic: string;
   turnaroundTime: string;
-  findings?: string;
-  impression?: string;
+  report?: string;
   reportFile?: { name: string; url: string; };
 }
 
@@ -128,6 +127,13 @@ export default function CompletedReportsPage() {
 
       // Transform the reports to match our interface
       const transformedReports = response.results.map((apiReport: any) => {
+        const legacyFindings = String(apiReport.study_details?.findings || '').trim();
+        const legacyImpression = String(apiReport.study_details?.impression || '').trim();
+        const reportText = String(apiReport.study_details?.report || '').trim() || legacyFindings;
+        const mergedReportText = legacyImpression
+          ? `${reportText}\n\nImpression:\n${legacyImpression}`.trim()
+          : reportText;
+
         const verified = {
           date: apiReport.study_details?.verified_at ? new Date(apiReport.study_details.verified_at).toLocaleDateString('en-US', {
             month: 'short',
@@ -149,7 +155,7 @@ export default function CompletedReportsPage() {
             gender: apiReport.patient_details?.gender || 'Unknown'
           },
           patientName: apiReport.patient_name || 'Unknown',
-          patientId: apiReport.patient_details?.id || '',
+          patientId: apiReport.patient_details?.patient_id || '',
           age: apiReport.patient_details?.age || 0,
           gender: apiReport.patient_details?.gender || 'Unknown',
           doctor: {
@@ -170,8 +176,7 @@ export default function CompletedReportsPage() {
           verifiedAt: apiReport.study_details?.verified_at || '',
           clinic: apiReport.order_details?.clinic || '',
           turnaroundTime: calculateTurnaroundTime(apiReport.study_details?.created_at, apiReport.study_details?.verified_at),
-          findings: apiReport.study_details?.findings || '',
-          impression: apiReport.study_details?.impression || '',
+          report: mergedReportText || undefined,
           reportFile: apiReport.study_details?.report_file_url ? {
             name: (typeof apiReport.study_details.report_file === 'string' ? apiReport.study_details.report_file.split('/').pop() : null) || 'Report File',
             url: apiReport.study_details.report_file_url
@@ -306,11 +311,10 @@ export default function CompletedReportsPage() {
             <div class="timeline-item"><span class="label">Turnaround Time:</span> ${report.turnaroundTime}</div>
           </div>
 
-          ${(report.findings || report.impression) ? `
+          ${report.report ? `
           <div class="patient-info" style="margin-top: 20px;">
             <h3>Report Content</h3>
-            ${report.findings ? `<div style="margin: 10px 0;"><div class="label">Findings:</div><div style="white-space: pre-wrap;">${report.findings}</div></div>` : ''}
-            ${report.impression ? `<div style="margin: 10px 0;"><div class="label">Impression:</div><div style="white-space: pre-wrap;">${report.impression}</div></div>` : ''}
+            <div style="margin: 10px 0;"><div class="label">Report:</div><div style="white-space: pre-wrap;">${report.report}</div></div>
           </div>
           ` : ''}
 
@@ -682,31 +686,22 @@ export default function CompletedReportsPage() {
                   </div>
                 </div>
 
-                {/* Findings & Impression */}
-                {(selectedReport.findings || selectedReport.impression) && (
+                {selectedReport.report && (
                   <div>
                     <h3 className="font-semibold mb-3 flex items-center gap-2">
                       <FileText className="h-4 w-4 text-amber-500" />
                       Report Content
                     </h3>
                     <div className="space-y-3 p-4 rounded-lg bg-muted/50 border">
-                      {selectedReport.findings && (
-                        <div>
-                          <p className="text-xs text-muted-foreground font-medium mb-1">Findings</p>
-                          <p className="text-sm whitespace-pre-wrap">{selectedReport.findings}</p>
-                        </div>
-                      )}
-                      {selectedReport.impression && (
-                        <div>
-                          <p className="text-xs text-muted-foreground font-medium mb-1">Impression</p>
-                          <p className="text-sm whitespace-pre-wrap">{selectedReport.impression}</p>
-                        </div>
-                      )}
+                      <div>
+                        <p className="text-xs text-muted-foreground font-medium mb-1">Report</p>
+                        <p className="text-sm whitespace-pre-wrap">{selectedReport.report}</p>
+                      </div>
                     </div>
                   </div>
                 )}
 
-                {/* Report File (uploaded document) - show even if no findings/impression */}
+                {/* Report File (uploaded document) */}
                 {selectedReport.reportFile && (
                   <div>
                     <h3 className="font-semibold mb-2 flex items-center gap-2">

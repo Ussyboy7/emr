@@ -17,6 +17,8 @@ export interface RadiologyOrder {
   clinical_notes?: string;
   provisional_diagnosis?: string;
   lmp?: string;
+  report?: string;
+  critical?: boolean;
   studies: RadiologyStudy[];
   ordered_at: string;
   // For creating orders with studies
@@ -38,8 +40,6 @@ export interface RadiologyStudy {
   images_count?: number;
   technical_notes?: string;
   report?: string;
-  findings?: string;
-  impression?: string;
   recommendations?: string;
   acquired_by?: number;
   acquired_at?: string;
@@ -176,8 +176,6 @@ class RadiologyService {
     orderId: number,
     studyId: number,
     report: string,
-    findings?: string,
-    impression?: string,
     recommendations?: string
   ): Promise<RadiologyStudy> {
     return apiFetch<RadiologyStudy>(`/radiology/orders/${orderId}/report/`, {
@@ -185,8 +183,6 @@ class RadiologyService {
       body: JSON.stringify({
         study_id: studyId,
         report,
-        findings: findings || '',
-        impression: impression || '',
         recommendations: recommendations || '',
       }),
     });
@@ -357,15 +353,13 @@ class RadiologyService {
    * Update order results
    */
   async updateOrderResults(orderId: number, data: {
-    findings: string;
-    impression: string;
+    report: string;
     critical: boolean;
     reportFile?: File | null;
     status: string;
   }): Promise<RadiologyOrder> {
     const formData = new FormData();
-    formData.append('findings', data.findings);
-    formData.append('impression', data.impression);
+    formData.append('report', data.report);
     formData.append('critical', data.critical.toString());
     formData.append('status', data.status);
 
@@ -401,15 +395,13 @@ class RadiologyService {
    * Update study results (individual study results like lab tests)
    */
   async updateStudyResults(studyId: number, data: {
-    findings: string;
-    impression: string;
+    report: string;
     critical: boolean;
     reportFile?: File | null;
     status: string;
   }): Promise<any> {
     const formData = new FormData();
-    formData.append('findings', data.findings);
-    formData.append('impression', data.impression);
+    formData.append('report', data.report);
     formData.append('critical', data.critical.toString());
     formData.append('status', data.status);
 

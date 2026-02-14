@@ -228,7 +228,7 @@ export default function CompletedTestsPage() {
         // Extract patient data directly from API response - no fallbacks
         const patientDetails = orderDetails.patient_details;
         const patientName = patientDetails?.name || orderDetails.patient_name || '';
-        const patientId = patientDetails?.id?.toString() || '';
+        const patientId = patientDetails?.patient_id?.toString() || '';
         const age = patientDetails?.age || null;
         const gender = patientDetails?.gender || '';
         
@@ -927,4 +927,3 @@ export default function CompletedTestsPage() {
     </DashboardLayout>
   );
 }
-

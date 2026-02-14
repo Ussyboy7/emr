@@ -817,9 +817,58 @@ export default function LabOrdersPage() {
     return 'Pending';
   };
 
-  // Client-side filtering only for tabs (server handles search, priority, date, gender filters)
+  // Helper functions for filtering
+  const normalizeGender = (value: unknown): string => {
+    const v = String(value || '').trim().toLowerCase();
+    if (v === 'm') return 'male';
+    if (v === 'f') return 'female';
+    return v;
+  };
+
+  const matchesDateFilter = (isoDate: string | undefined, filter: string): boolean => {
+    if (filter === 'all') return true;
+    if (!isoDate) return false;
+    const dt = new Date(isoDate);
+    if (Number.isNaN(dt.getTime())) return false;
+
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const tomorrowStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+
+    if (filter === 'today') {
+      return dt >= todayStart && dt < tomorrowStart;
+    }
+
+    if (filter === 'week') {
+      const weekStart = new Date(todayStart);
+      weekStart.setDate(todayStart.getDate() - 6);
+      return dt >= weekStart && dt < tomorrowStart;
+    }
+
+    if (filter === 'month') {
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      return dt >= monthStart && dt < tomorrowStart;
+    }
+
+    return true;
+  };
+
+  // Client-side filtering for all filters
   const filteredOrders = useMemo(() => {
     return orders.filter(order => {
+      // Date filter
+      if (!matchesDateFilter(order.orderedAt, dateFilter)) {
+        return false;
+      }
+
+      // Gender filter
+      if (genderFilter !== 'all') {
+        const orderGender = normalizeGender(order.patient?.gender);
+        if (orderGender !== genderFilter) {
+          return false;
+        }
+      }
+
       // Tab filtering (client-side for UX)
       if (activeTab === 'pending') return order.tests.some(t => t.status === 'Pending');
       if (activeTab === 'processing') return order.tests.some(t => t.status === 'Sample Collected' || t.status === 'Processing');
@@ -827,7 +876,7 @@ export default function LabOrdersPage() {
       if (activeTab === 'rejected') return order.tests.some(t => t.status === 'Rejected');
       return true; // All tab shows everything
     });
-  }, [orders, activeTab]);
+  }, [orders, activeTab, dateFilter, genderFilter]);
 
   // With server-side pagination, orders array contains only current page results
   const paginatedOrders = filteredOrders;
@@ -835,7 +884,7 @@ export default function LabOrdersPage() {
   // Reset to page 1 when filters change or items per page changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, priorityFilter, activeTab, itemsPerPage]);
+  }, [searchQuery, priorityFilter, dateFilter, genderFilter, activeTab, itemsPerPage]);
 
   // Load orders function - memoized to prevent infinite loops
   const loadOrders = useCallback(async () => {

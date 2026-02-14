@@ -31,15 +31,14 @@ export default function RadiologyOrdersPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
   const [priorityFilter, setPriorityFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('today');
+  const [genderFilter, setGenderFilter] = useState('all');
   const [activeTab, setActiveTab] = useState('all');
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
-  const [totalCount, setTotalCount] = useState(0);
 
   const getTimeSince = (isoString: string) => {
     const diff = Date.now() - new Date(isoString).getTime();
@@ -201,8 +200,7 @@ export default function RadiologyOrdersPage() {
   const [selectedPatientFull, setSelectedPatientFull] = useState<any | null>(null);
   const [resultEntryMode, setResultEntryMode] = useState<'manual' | 'upload'>('manual');
   const [resultsForm, setResultsForm] = useState({
-    findings: '',
-    impression: '',
+    report: '',
     critical: false,
     reportFile: null as File | null,
   });
@@ -222,10 +220,63 @@ export default function RadiologyOrdersPage() {
   const [addStudyOutsourcedFacility, setAddStudyOutsourcedFacility] = useState('');
   const [isAddingStudy, setIsAddingStudy] = useState(false);
 
+  const normalizePriority = (value: unknown): string => String(value || '').trim().toLowerCase();
+
+  const normalizeGender = (value: unknown): string => {
+    const v = String(value || '').trim().toLowerCase();
+    if (v === 'm') return 'male';
+    if (v === 'f') return 'female';
+    return v;
+  };
+
+  const matchesDateFilter = (isoDate: string | undefined, filter: string): boolean => {
+    if (filter === 'all') return true;
+    if (!isoDate) {
+      console.log('Date filter: no date, returning false');
+      return false;
+    }
+    const dt = new Date(isoDate);
+    if (Number.isNaN(dt.getTime())) {
+      console.log('Date filter: invalid date', isoDate);
+      return false;
+    }
+
+    // Use local timezone for comparison
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const tomorrowStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+
+    if (filter === 'today') {
+      const result = dt >= todayStart && dt < tomorrowStart;
+      console.log('Date filter today:', { isoDate, dt: dt.toISOString(), todayStart: todayStart.toISOString(), tomorrowStart: tomorrowStart.toISOString(), result });
+      return result;
+    }
+
+    if (filter === 'week') {
+      const weekStart = new Date(todayStart);
+      weekStart.setDate(todayStart.getDate() - 6);
+      const result = dt >= weekStart && dt < tomorrowStart;
+      console.log('Date filter week:', { isoDate, weekStart: weekStart.toISOString(), result });
+      return result;
+    }
+
+    if (filter === 'month') {
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      const result = dt >= monthStart && dt < tomorrowStart;
+      console.log('Date filter month:', { isoDate, monthStart: monthStart.toISOString(), result });
+      return result;
+    }
+
+    return true;
+  };
+
+  const orderHasStudyStatus = (order: any, status: string): boolean =>
+    (order.studies || []).some((s: any) => s.status === status);
+
   // Load orders from API
   useEffect(() => {
     loadOrders();
-  }, [currentPage, itemsPerPage, searchQuery, priorityFilter]);
+  }, []);
 
   useEffect(() => {
     if (!isViewDialogOpen) {
@@ -258,14 +309,10 @@ export default function RadiologyOrdersPage() {
       setError(null);
 
       const response = await radiologyService.getOrders({
-        page: currentPage,
-        page_size: itemsPerPage,
-        search: searchQuery || undefined,
-        priority: priorityFilter !== 'all' ? priorityFilter : undefined,
-        // Note: statusFilter, dateFilter not yet implemented in backend
+        page: 1,
+        page_size: 1000,
       });
 
-      setTotalCount(response.count || response.results.length);
       setOrders(response.results || []);
     } catch (err: any) {
       setError(err.message || 'Failed to load radiology orders');
@@ -365,41 +412,100 @@ export default function RadiologyOrdersPage() {
     return 'pending';
   };
 
-  // Filter orders
-  // Client-side filtering only for tabs (server handles search, priority filters)
-  const filteredOrders = useMemo(() => {
+  // Base filtering (search/date/priority/gender)
+  const baseFilteredOrders = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    console.log('Applying filters:', { dateFilter, priorityFilter, genderFilter, totalOrders: orders.length });
+    
     return orders.filter(order => {
-      // Tab filtering (client-side for UX)
-      if (activeTab === 'pending') return (order.studies || []).some((s: any) => s.status === 'pending');
-      if (activeTab === 'processing') return (order.studies || []).some((s: any) => s.status === 'processing');
-      if (activeTab === 'results') return (order.studies || []).some((s: any) => s.status === 'reported');
-      if (activeTab === 'rejected') return (order.studies || []).some((s: any) => s.status === 'rejected');
-      return true; // All tab shows everything
-    });
-  }, [orders, activeTab]);
+      // Debug: log order details
+      if (dateFilter !== 'all' || priorityFilter !== 'all' || genderFilter !== 'all') {
+        console.log('Order:', {
+          id: order.id,
+          ordered_at: order.ordered_at,
+          priority: order.priority,
+          patient_gender: order.patient_gender,
+          patient_details_gender: order.patient_details?.gender
+        });
+      }
+      
+      if (!matchesDateFilter(order.ordered_at, dateFilter)) {
+        console.log('Date filter rejected:', order.ordered_at, dateFilter);
+        return false;
+      }
 
-  // With server-side pagination, orders array contains only current page results
-  const paginatedOrders = filteredOrders;
+      if (priorityFilter !== 'all' && normalizePriority(order.priority) !== priorityFilter) {
+        console.log('Priority filter rejected:', order.priority, priorityFilter);
+        return false;
+      }
+
+      if (genderFilter !== 'all') {
+        const orderGender =
+          normalizeGender(order.patient_details?.gender) ||
+          normalizeGender(order.patient_gender);
+        console.log('Gender check:', orderGender, genderFilter);
+        if (orderGender !== genderFilter) {
+          console.log('Gender filter rejected:', orderGender, genderFilter);
+          return false;
+        }
+      }
+
+      if (q) {
+        const studies = (order.studies || []).map((s: any) =>
+          `${String(s?.procedure || '')} ${String(s?.body_part || '')} ${String(s?.modality || '')}`
+        ).join(' ');
+        const haystack = [
+          order.order_id,
+          order.patient_name,
+          order.doctor_name,
+          order.clinical_notes,
+          order.provisional_diagnosis,
+          studies,
+        ]
+          .map((v) => String(v || '').toLowerCase())
+          .join(' ');
+        if (!haystack.includes(q)) return false;
+      }
+
+      return true;
+    });
+  }, [orders, searchQuery, dateFilter, priorityFilter, genderFilter]);
+
+  // Tab/status filtering on top of base filters
+  const filteredOrders = useMemo(() => {
+    return baseFilteredOrders.filter((order) => {
+      if (activeTab === 'pending') return orderHasStudyStatus(order, 'pending');
+      if (activeTab === 'processing') return orderHasStudyStatus(order, 'processing');
+      if (activeTab === 'results') return orderHasStudyStatus(order, 'reported');
+      if (activeTab === 'rejected') return orderHasStudyStatus(order, 'rejected');
+      return true;
+    });
+  }, [baseFilteredOrders, activeTab]);
+
+  // Client-side pagination for filtered dataset
+  const paginatedOrders = useMemo(() => {
+    const start = (currentPage - 1) * itemsPerPage;
+    return filteredOrders.slice(start, start + itemsPerPage);
+  }, [filteredOrders, currentPage, itemsPerPage]);
 
   // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, priorityFilter, activeTab]);
+  }, [searchQuery, priorityFilter, dateFilter, genderFilter, activeTab]);
 
-  // Calculate stats (simplified like lab)
-  // Calculate stats like lab orders - based on individual studies, not orders
+  // Calculate stats from current control filters (excluding tab)
   const stats = useMemo(() => {
-    const allStudies = orders.flatMap(order => order.studies || []);
+    const allStudies = baseFilteredOrders.flatMap(order => order.studies || []);
 
     return {
-      total: orders.length,
+      total: baseFilteredOrders.length,
       pendingSamples: allStudies.filter(s => s && s.status === 'pending').length,
       processing: allStudies.filter(s => s && s.status === 'processing').length,
       resultsReady: allStudies.filter(s => s && s.status === 'reported').length,
       rejected: allStudies.filter(s => s && s.status === 'rejected').length,
-      stat: orders.filter(o => o.priority === 'STAT').length,
+      stat: baseFilteredOrders.filter(o => normalizePriority(o.priority) === 'stat').length,
     };
-  }, [orders]);
+  }, [baseFilteredOrders]);
 
   const getPriorityColor = (priority: string) => {
     switch (priority) {
@@ -436,8 +542,7 @@ export default function RadiologyOrdersPage() {
     setSelectedStudy(study);
     setSelectedOrder(order);
     setResultsForm({
-      findings: study.findings || '',
-      impression: study.impression || '',
+      report: study.report || study.findings || '',
       critical: study.critical || false,
       reportFile: null,
     });
@@ -452,8 +557,7 @@ export default function RadiologyOrdersPage() {
     setIsSubmittingResults(true);
     try {
       await radiologyService.updateStudyResults(selectedStudy.id, {
-        findings: resultsForm.findings,
-        impression: resultsForm.impression,
+        report: resultsForm.report,
         critical: resultsForm.critical,
         reportFile: resultsForm.reportFile,
         status: 'reported'
@@ -641,12 +745,12 @@ export default function RadiologyOrdersPage() {
                   <SelectTrigger className="w-[130px]"><SelectValue placeholder="Priority" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Priority</SelectItem>
-                    <SelectItem value="STAT">STAT</SelectItem>
-                    <SelectItem value="Urgent">Urgent</SelectItem>
-                    <SelectItem value="Routine">Routine</SelectItem>
+                    <SelectItem value="stat">STAT</SelectItem>
+                    <SelectItem value="urgent">Urgent</SelectItem>
+                    <SelectItem value="routine">Routine</SelectItem>
                   </SelectContent>
                 </Select>
-                <Select value={'all'} onValueChange={() => {}}>
+                <Select value={genderFilter} onValueChange={setGenderFilter}>
                   <SelectTrigger className="w-[120px]"><SelectValue placeholder="Gender" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Gender</SelectItem>
@@ -694,7 +798,7 @@ export default function RadiologyOrdersPage() {
           <Card className="p-4">
             <StandardPagination
               currentPage={currentPage}
-              totalItems={totalCount}
+              totalItems={filteredOrders.length}
               itemsPerPage={itemsPerPage}
               onPageChange={setCurrentPage}
               onItemsPerPageChange={(newSize) => {
@@ -704,7 +808,7 @@ export default function RadiologyOrdersPage() {
               itemName="orders"
             />
             <p className="text-xs text-muted-foreground mt-2 text-center">
-              Showing {filteredOrders.length} order{filteredOrders.length !== 1 ? 's' : ''} (page {currentPage} of {Math.ceil(totalCount / itemsPerPage)})
+              Showing {paginatedOrders.length} of {filteredOrders.length} order{filteredOrders.length !== 1 ? 's' : ''} (page {currentPage} of {Math.max(1, Math.ceil(filteredOrders.length / itemsPerPage))})
             </p>
           </Card>
         )}
@@ -801,7 +905,7 @@ export default function RadiologyOrdersPage() {
               <DialogDescription>
                 {selectedStudy?.status === 'Rejected'
                   ? `Edit and resubmit corrected results for ${selectedStudy?.procedure}`
-                  : `Enter findings and impression for ${selectedStudy?.procedure}`}
+                  : `Enter report for ${selectedStudy?.procedure}`}
               </DialogDescription>
             </DialogHeader>
             {selectedStudy && selectedOrder && (
@@ -857,27 +961,16 @@ export default function RadiologyOrdersPage() {
 
                     <TabsContent value="manual" className="space-y-4 mt-4">
                       <div className="text-sm text-muted-foreground mb-3">
-                        Enter findings and impression text. You can also upload a file below if needed.
+                        Enter report text. You can also upload a file below if needed.
                       </div>
                       <div className="space-y-2">
-                        <Label htmlFor="findings">Findings</Label>
+                        <Label htmlFor="report">Report</Label>
                         <Textarea
-                          id="findings"
-                          placeholder="Describe the radiological findings..."
-                          value={resultsForm.findings}
-                          onChange={(e) => setResultsForm(prev => ({ ...prev, findings: e.target.value }))}
-                          rows={4}
-                        />
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label htmlFor="impression">Impression</Label>
-                        <Textarea
-                          id="impression"
-                          placeholder="Provide clinical impression and diagnosis..."
-                          value={resultsForm.impression}
-                          onChange={(e) => setResultsForm(prev => ({ ...prev, impression: e.target.value }))}
-                          rows={3}
+                          id="report"
+                          placeholder="Enter the radiology report..."
+                          value={resultsForm.report}
+                          onChange={(e) => setResultsForm(prev => ({ ...prev, report: e.target.value }))}
+                          rows={6}
                         />
                       </div>
 
@@ -912,7 +1005,7 @@ export default function RadiologyOrdersPage() {
 
                     <TabsContent value="upload" className="space-y-4 mt-4">
                       <div className="text-sm text-muted-foreground mb-3">
-                        Upload a complete report document. You can also add summary findings/impression text below if desired.
+                        Upload a complete report document. You can also add summary report text below if desired.
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="report-file">Upload Result File</Label>
@@ -932,24 +1025,13 @@ export default function RadiologyOrdersPage() {
                       </div>
 
                       <div className="space-y-2 border-t pt-4">
-                        <Label htmlFor="findings-upload">Optional: Summary Findings</Label>
+                        <Label htmlFor="report-upload">Optional: Summary Report</Label>
                         <Textarea
-                          id="findings-upload"
-                          placeholder="Optional: Add summary findings from the uploaded report..."
-                          value={resultsForm.findings}
-                          onChange={(e) => setResultsForm(prev => ({ ...prev, findings: e.target.value }))}
-                          rows={3}
-                        />
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label htmlFor="impression-upload">Optional: Summary Impression</Label>
-                        <Textarea
-                          id="impression-upload"
-                          placeholder="Optional: Add summary impression from the uploaded report..."
-                          value={resultsForm.impression}
-                          onChange={(e) => setResultsForm(prev => ({ ...prev, impression: e.target.value }))}
-                          rows={2}
+                          id="report-upload"
+                          placeholder="Optional: Add summary report text from the uploaded report..."
+                          value={resultsForm.report}
+                          onChange={(e) => setResultsForm(prev => ({ ...prev, report: e.target.value }))}
+                          rows={4}
                         />
                       </div>
 
@@ -975,7 +1057,7 @@ export default function RadiologyOrdersPage() {
               </Button>
               <Button
                 onClick={handleSubmitResults}
-                disabled={isSubmittingResults || (!resultsForm.reportFile && (!resultsForm.findings.trim() || !resultsForm.impression.trim()))}
+                disabled={isSubmittingResults || (!resultsForm.reportFile && !resultsForm.report.trim())}
                 className="bg-amber-500 hover:bg-amber-600"
               >
                 {isSubmittingResults ? 'Submitting...' : 'Submit Results'}
@@ -1194,13 +1276,10 @@ export default function RadiologyOrdersPage() {
                             )}
                           </div>
                           <div className="space-y-1">
-                            {study.findings && (
-                              <div><span className="text-muted-foreground">Findings:</span> <span className="font-medium">{study.findings}</span></div>
+                            {study.report && (
+                              <div><span className="text-muted-foreground">Report:</span> <span className="font-medium">{study.report}</span></div>
                             )}
-                            {study.impression && (
-                              <div><span className="text-muted-foreground">Impression:</span> <span className="font-medium">{study.impression}</span></div>
-                            )}
-                            {!study.findings && !study.impression && (
+                            {!study.report && (
                               <div><span className="text-muted-foreground">Status:</span> <span className="font-medium">Normal study</span></div>
                             )}
                           </div>

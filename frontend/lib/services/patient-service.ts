@@ -17,11 +17,11 @@ export function sanitizePatientForRendering(patient: any): any {
   return {
     id: String(patient.id || ''),
     visitId: String(patient.visitId || ''),
-    patientId: String(patient.patient_id || patient.patientId || ''),
-    name: String(patient.full_name || patient.name || `${patient.first_name || ''} ${patient.surname || ''}`.trim() || 'Unknown Patient'),
+    patientId: String(patient.patient_id ?? patient.patientId ?? ''),
+    name: typeof patient.full_name === 'string' ? String(patient.full_name) : (typeof patient.name === 'string' ? String(patient.name) : ''),
     age: typeof patient.age === 'number' ? patient.age : parseInt(String(patient.age || '0')) || 0,
     gender: String(patient.gender || ''),
-    mrn: String(patient.patient_id || patient.mrn || ''),
+    mrn: String(patient.patient_id ?? ''),
     personalNumber: String(patient.personal_number || ''),
     allergies: Array.isArray(patient.allergies)
       ? patient.allergies.map((a: any) => String(a).trim()).filter((a: string) => a)
@@ -98,6 +98,7 @@ export interface Visit {
   id: number;
   visit_id: string;
   patient: number;
+  patient_id?: string;
   patient_name?: string;
   visit_type: string;
   status: string;

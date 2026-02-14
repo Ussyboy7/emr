@@ -56,6 +56,9 @@ class ConsultationQueueSerializer(serializers.ModelSerializer):
     """Serializer for ConsultationQueue model."""
 
     patient_name = serializers.CharField(source='patient.get_full_name', read_only=True)
+    patient_id = serializers.CharField(source='patient.patient_id', read_only=True)
+    patient_age = serializers.IntegerField(source='patient.age', read_only=True)
+    patient_gender = serializers.CharField(source='patient.gender', read_only=True)
     patient_details = PatientListSerializer(source='patient', read_only=True)
     room_name = serializers.CharField(source='room.name', read_only=True)
     visit_display_id = serializers.CharField(source='visit.visit_id', read_only=True, allow_null=True)
@@ -84,7 +87,8 @@ class ConsultationQueueSerializer(serializers.ModelSerializer):
             'id', 'room', 'patient', 'visit', 'priority', 'notes', 'queued_at',
             'called_at', 'is_active',
             # Read-only fields
-            'patient_name', 'room_name', 'visit_display_id', 'visit_date',
+            'patient_name', 'patient_id', 'patient_age', 'patient_gender',
+            'room_name', 'visit_display_id', 'visit_date',
             'visit_time', 'visit_type', 'visit_status', 'visit_clinic',
             'patient_details', 'latest_vitals',
         ]

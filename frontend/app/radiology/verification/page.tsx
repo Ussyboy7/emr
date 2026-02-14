@@ -37,8 +37,7 @@ interface ImagingStudy {
   technologist?: string;
   acquiredAt?: string;
   imagesCount?: number;
-  findings?: string;
-  impression?: string;
+  report?: string;
   critical?: boolean;
   reportFile?: { name: string; type: string; uploadedAt: string };
   reportedBy?: string;
@@ -65,9 +64,15 @@ interface RadiologyReport {
 const transformReport = (apiReport: any): RadiologyReport => {
   const study = apiReport.study_details || apiReport.study;
   const studyObj = typeof study === 'object' && study !== null ? study : {};
+  const legacyFindings = String(studyObj.findings || '').trim();
+  const legacyImpression = String(studyObj.impression || '').trim();
+  const reportText = String(studyObj.report || '').trim() || legacyFindings;
+  const mergedReportText = legacyImpression
+    ? `${reportText}\n\nImpression:\n${legacyImpression}`.trim()
+    : reportText;
   
   // Extract patient details
-  const patientId = apiReport.patient?.toString() || '';
+  const patientId = (apiReport as any).patient_details?.patient_id || '';
   const patientName = apiReport.patient_name || 'Unknown';
   const patientAge = (apiReport as any).patient_details?.age || (apiReport as any).patient_age || 0;
   const patientGender = (apiReport as any).patient_details?.gender || (apiReport as any).patient_gender || 'Unknown';
@@ -111,8 +116,7 @@ const transformReport = (apiReport: any): RadiologyReport => {
       processingMethod: studyObj.processing_method ? (studyObj.processing_method === 'in_house' ? 'In-house' : 'Outsourced') : undefined,
       outsourcedFacility: studyObj.outsourced_facility,
       imagesCount: studyObj.images_count ? Number(studyObj.images_count) : undefined,
-      findings: studyObj.findings,
-      impression: studyObj.impression,
+      report: mergedReportText || undefined,
       critical: apiReport.overall_status === 'critical' || studyObj.critical || false,
       reportFile: studyObj.report_file_url ? {
         name: String(studyObj.report_file ? studyObj.report_file.split('/').pop() : 'Report File'),
@@ -679,10 +683,9 @@ export default function RadiologyVerificationPage() {
                           <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{getTimeSince(report.study.reportedAt || '')}</span>
                         </div>
 
-                        {/* Impression Preview */}
-                        {report.study.impression && (
+                        {report.study.report && (
                           <p className={`text-xs mt-1.5 line-clamp-1 ${report.study.critical ? 'text-rose-600 font-medium' : 'text-muted-foreground'}`}>
-                            {report.study.impression}
+                            {report.study.report}
                           </p>
                         )}
                       </div>
@@ -933,15 +936,9 @@ export default function RadiologyVerificationPage() {
                   </div>
                 )}
                 <div>
-                  <p className="text-sm text-muted-foreground mb-2 font-medium">Findings</p>
+                  <p className="text-sm text-muted-foreground mb-2 font-medium">Report</p>
                   <div className={`p-3 rounded-lg ${selectedReport.study.critical ? 'bg-rose-50 dark:bg-rose-900/20 border border-rose-200' : 'bg-emerald-50 dark:bg-emerald-900/20'}`}>
-                    <p className="text-sm">{selectedReport.study.findings}</p>
-                  </div>
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground mb-2 font-medium">Impression</p>
-                  <div className={`p-3 rounded-lg ${selectedReport.study.critical ? 'bg-rose-50 dark:bg-rose-900/20 border border-rose-200' : 'bg-emerald-50 dark:bg-emerald-900/20'}`}>
-                    <p className={`text-sm ${selectedReport.study.critical ? 'font-medium text-rose-700 dark:text-rose-400' : ''}`}>{selectedReport.study.impression}</p>
+                    <p className={`text-sm whitespace-pre-wrap ${selectedReport.study.critical ? 'font-medium text-rose-700 dark:text-rose-400' : ''}`}>{selectedReport.study.report}</p>
                   </div>
                 </div>
                 {selectedReport.study.reportFile && (

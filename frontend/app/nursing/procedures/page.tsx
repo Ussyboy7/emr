@@ -325,7 +325,7 @@ export default function ProceduresQueuePage() {
             type: procedureType,
             status: (order.status === 'completed' ? 'completed' : 'pending'),
             patientName: patient.full_name || `${patient.surname} ${patient.first_name}`,
-            patientId: patient.patient_id || String(patient.id),
+            patientId: patient.patient_id || '',
             personalNumber: patient.personal_number || '',
             age: patient.age || 0,
             gender: patient.gender || '',

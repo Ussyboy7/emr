@@ -161,7 +161,7 @@ export default function ProceduresHistoryPage() {
               id: String(proc.id),
               type: procedureType,
               patientName: patient.full_name || `${patient.surname} ${patient.first_name}`,
-              patientId: patient.patient_id || String(patient.id),
+              patientId: patient.patient_id || '',
               age: patient.age || 0,
               gender: patient.gender || '',
               ward: '',
@@ -571,4 +571,3 @@ export default function ProceduresHistoryPage() {
     </DashboardLayout>
   );
 }
-
