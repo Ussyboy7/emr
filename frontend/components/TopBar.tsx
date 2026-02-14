@@ -76,8 +76,7 @@ export const TopBar = () => {
 
   const getUserRoleDisplay = () => {
     if (!currentUser) return 'User';
-    if (currentUser.systemRole) return currentUser.systemRole;
-    return 'Staff';
+    return currentUser.systemRole || '';
   };
 
   const getUserInitials = () => {
