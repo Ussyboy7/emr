@@ -26,10 +26,6 @@ export default function LaboratoryPage() {
     try {
       setLoading(true);
       const orders = await labService.getOrders({ page: 1, page_size: 100 });
-      console.log('Lab orders:', orders.results.slice(0, 2).map((o: any) => ({
-        id: o.id,
-        tests: o.tests?.slice(0, 2).map((t: any) => ({ name: t.name, status: t.status }))
-      })));
       
       let pending = 0, inProgress = 0, resultsReady = 0, verified = 0;
       
