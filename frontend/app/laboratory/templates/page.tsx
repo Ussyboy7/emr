@@ -472,17 +472,6 @@ export default function TestTemplatesPage() {
               </div>
             </CardContent>
           </Card>
-          <Card className="border-l-4 border-l-emerald-500">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Active</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-emerald-600 dark:text-emerald-400">{stats.active}</p>
-                </div>
-                <CheckCircle2 className="h-8 w-8 text-emerald-400" />
-              </div>
-            </CardContent>
-          </Card>
           <Card className="border-l-4 border-l-rose-500">
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
@@ -513,17 +502,6 @@ export default function TestTemplatesPage() {
                   <p className="text-2xl sm:text-3xl font-bold text-emerald-600 dark:text-emerald-400">{stats.microbiology}</p>
                 </div>
                 <Microscope className="h-8 w-8 text-emerald-400" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="border-l-4 border-l-purple-500">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Endocrinology</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-purple-600 dark:text-purple-400">{stats.endocrinology}</p>
-                </div>
-                <Heart className="h-8 w-8 text-purple-400" />
               </div>
             </CardContent>
           </Card>
