@@ -17,6 +17,7 @@ export default function LaboratoryPage() {
     resultsReady: 0,
     verified: 0
   });
+  const [recentOrders, setRecentOrders] = useState<any[]>([]);
 
   useEffect(() => {
     loadStats();
@@ -60,6 +61,7 @@ export default function LaboratoryPage() {
       });
       
       setStats({ pending, inProgress, resultsReady, verified });
+      setRecentOrders(orders.results.slice(0, 5));
     } catch (error) {
       console.error('Failed to load lab stats:', error);
     } finally {
@@ -243,14 +245,28 @@ export default function LaboratoryPage() {
                   <Clock className="h-5 w-5 text-amber-500 dark:text-amber-400" />
                   Pending Tasks
                 </CardTitle>
-                <Badge variant="default" className="bg-green-500/10 text-green-700 border-green-500/20">
-                  ✓ All Complete
+                <Badge variant="default" className={`${stats.pending + stats.inProgress + stats.resultsReady > 0 ? 'bg-amber-500/10 text-amber-700 border-amber-500/20' : 'bg-green-500/10 text-green-700 border-green-500/20'}`}>
+                  {stats.pending + stats.inProgress + stats.resultsReady > 0 ? `${stats.pending + stats.inProgress + stats.resultsReady} Pending` : '✓ All Complete'}
                 </Badge>
               </CardHeader>
               <CardContent className="space-y-3">
                 {loading ? (
                   <div className="flex items-center justify-center p-8">
                     <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                  </div>
+                ) : recentOrders.length > 0 ? (
+                  <div className="space-y-2">
+                    {recentOrders.slice(0, 3).map((order: any) => (
+                      <div key={order.id} className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
+                        <div>
+                          <p className="font-medium text-sm">{order.patient?.name || 'Unknown Patient'}</p>
+                          <p className="text-xs text-muted-foreground">{order.tests?.length || 0} test(s) - {order.clinic || 'General'}</p>
+                        </div>
+                        <Badge variant="outline" className="text-xs">
+                          {order.tests?.[0]?.status?.replace('_', ' ') || 'pending'}
+                        </Badge>
+                      </div>
+                    ))}
                   </div>
                 ) : (
                   <div className="text-center py-8">
@@ -275,6 +291,20 @@ export default function LaboratoryPage() {
               {loading ? (
                 <div className="flex items-center justify-center p-8">
                   <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                </div>
+              ) : recentOrders.length > 0 ? (
+                <div className="space-y-3">
+                  {recentOrders.map((order: any) => (
+                    <div key={order.id} className="flex items-start gap-3">
+                      <div className="w-2 h-2 rounded-full bg-emerald-500 mt-2" />
+                      <div>
+                        <p className="text-sm font-medium">{order.patient?.name || 'Unknown'}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {new Date(order.ordered_at).toLocaleDateString()}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               ) : (
                 <div className="text-center py-8">
