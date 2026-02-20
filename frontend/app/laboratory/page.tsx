@@ -7,15 +7,69 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Loader2, FlaskConical, TestTube, FileSearch, Clock, CheckCircle2, AlertTriangle, Activity, ArrowRight, UserCheck, ClipboardList, TrendingUp } from 'lucide-react';
 import Link from 'next/link';
+import { labService } from '@/lib/services';
 
 export default function LaboratoryPage() {
   const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState({
+    pending: 0,
+    inProgress: 0,
+    resultsReady: 0,
+    verified: 0
+  });
 
   useEffect(() => {
-    // Simulate loading
-    const timer = setTimeout(() => setLoading(false), 1000);
-    return () => clearTimeout(timer);
+    loadStats();
   }, []);
+
+  const loadStats = async () => {
+    try {
+      setLoading(true);
+      const orders = await labService.getOrders({ page: 1, page_size: 100 });
+      console.log('Lab orders:', orders.results.slice(0, 2).map((o: any) => ({
+        id: o.id,
+        tests: o.tests?.slice(0, 2).map((t: any) => ({ name: t.name, status: t.status }))
+      })));
+      
+      let pending = 0, inProgress = 0, resultsReady = 0, verified = 0;
+      
+      orders.results.forEach((order: any) => {
+        // If no tests, count as pending
+        if (!order.tests || order.tests.length === 0) {
+          pending++;
+          return;
+        }
+        
+        // Get all test statuses
+        const statuses = order.tests.map((t: any) => t.status || 'pending');
+        
+        // Count based on statuses
+        const hasVerified = statuses.some((s: string) => s === 'verified');
+        const hasResultsReady = statuses.some((s: string) => s === 'results_ready');
+        const hasProcessing = statuses.some((s: string) => s === 'processing' || s === 'sample_collected');
+        const hasPending = statuses.some((s: string) => s === 'pending');
+        
+        // Priority: results_ready > processing > verified > pending
+        if (hasResultsReady) {
+          resultsReady++;
+        } else if (hasProcessing) {
+          inProgress++;
+        } else if (hasVerified) {
+          verified++;
+        } else if (hasPending) {
+          pending++;
+        } else {
+          pending++; // fallback
+        }
+      });
+      
+      setStats({ pending, inProgress, resultsReady, verified });
+    } catch (error) {
+      console.error('Failed to load lab stats:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <DashboardLayout>
@@ -44,7 +98,7 @@ export default function LaboratoryPage() {
                 <Button
                   variant="outline"
                   className="border-2 border-white/90 text-white hover:bg-white/30 hover:border-white dark:border-white dark:text-white dark:hover:bg-white/20 shadow-md backdrop-blur-sm bg-white/10"
-                  onClick={() => window.location.href = '/laboratory/results'}
+                  onClick={() => window.location.href = '/laboratory/verification'}
                 >
                   <FileSearch className="h-4 w-4 mr-2" />
                   Verify Results
@@ -79,16 +133,16 @@ export default function LaboratoryPage() {
               ))
             ) : (
               <>
-                <Card className={`border-l-4 ${0 > 0 ? 'border-l-amber-500' : 'border-l-green-500'}`}>
+                <Card className={`border-l-4 ${stats.pending > 0 ? 'border-l-amber-500' : 'border-l-green-500'}`}>
                   <CardContent className="p-4">
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-sm text-muted-foreground">Pending Tests</p>
                         <div className="flex items-center gap-2 mt-1">
-                          <Clock className={`h-5 w-5 ${0 > 0 ? 'text-amber-500 dark:text-amber-400' : 'text-green-500 dark:text-green-400'}`} />
-                          <p className={`text-2xl sm:text-3xl font-bold ${0 > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-green-600 dark:text-green-400'}`}>{0}</p>
+                          <Clock className={`h-5 w-5 ${stats.pending > 0 ? 'text-amber-500 dark:text-amber-400' : 'text-green-500 dark:text-green-400'}`} />
+                          <p className={`text-2xl sm:text-3xl font-bold ${stats.pending > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-green-600 dark:text-green-400'}`}>{stats.pending}</p>
                         </div>
-                        {0 === 0 ? (
+                        {stats.pending === 0 ? (
                           <p className="text-xs text-green-600 dark:text-green-400 mt-1">All caught up!</p>
                         ) : null}
                       </div>
@@ -96,16 +150,16 @@ export default function LaboratoryPage() {
                   </CardContent>
                 </Card>
 
-                <Card className={`border-l-4 ${0 === 0 ? 'border-l-green-500' : 'border-l-blue-500'}`}>
+                <Card className={`border-l-4 ${stats.inProgress === 0 ? 'border-l-green-500' : 'border-l-blue-500'}`}>
                   <CardContent className="p-4">
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-sm text-muted-foreground">In Progress</p>
                         <div className="flex items-center gap-2 mt-1">
-                          <FlaskConical className={`h-5 w-5 ${0 === 0 ? 'text-green-500 dark:text-green-400' : 'text-blue-500 dark:text-blue-400'}`} />
-                          <p className={`text-2xl sm:text-3xl font-bold ${0 === 0 ? 'text-green-600 dark:text-green-400' : 'text-blue-600 dark:text-blue-400'}`}>{0}</p>
+                          <FlaskConical className={`h-5 w-5 ${stats.inProgress === 0 ? 'text-green-500 dark:text-green-400' : 'text-blue-500 dark:text-blue-400'}`} />
+                          <p className={`text-2xl sm:text-3xl font-bold ${stats.inProgress === 0 ? 'text-green-600 dark:text-green-400' : 'text-blue-600 dark:text-blue-400'}`}>{stats.inProgress}</p>
                         </div>
-                        {0 === 0 ? (
+                        {stats.inProgress === 0 ? (
                           <p className="text-xs text-green-600 dark:text-green-400 mt-1">No tests in progress</p>
                         ) : null}
                       </div>
@@ -113,39 +167,40 @@ export default function LaboratoryPage() {
                   </CardContent>
                 </Card>
 
-                <Card className={`border-l-4 ${0 === 0 ? 'border-l-green-500' : 'border-l-emerald-500'}`}>
+                <Card className={`border-l-4 ${stats.resultsReady === 0 ? 'border-l-green-500' : 'border-l-amber-500'}`}>
                   <CardContent className="p-4">
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-sm text-muted-foreground">Results Ready</p>
                         <div className="flex items-center gap-2 mt-1">
-                          <CheckCircle2 className={`h-5 w-5 ${0 === 0 ? 'text-green-500 dark:text-green-400' : 'text-emerald-500 dark:text-emerald-400'}`} />
-                          <p className={`text-2xl sm:text-3xl font-bold ${0 === 0 ? 'text-green-600 dark:text-green-400' : 'text-emerald-600 dark:text-emerald-400'}`}>{0}</p>
+                          <FileSearch className={`h-5 w-5 ${stats.resultsReady === 0 ? 'text-green-500 dark:text-green-400' : 'text-amber-500 dark:text-amber-400'}`} />
+                          <p className={`text-2xl sm:text-3xl font-bold ${stats.resultsReady === 0 ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'}`}>{stats.resultsReady}</p>
                         </div>
-                        {0 === 0 ? (
-                          <p className="text-xs text-green-600 dark:text-green-400 mt-1">All results verified</p>
+                        {stats.resultsReady === 0 ? (
+                          <p className="text-xs text-green-600 dark:text-green-400 mt-1">No results ready</p>
                         ) : null}
                       </div>
                     </div>
                   </CardContent>
                 </Card>
 
-                <Card className={`border-l-4 ${0 === 0 ? 'border-l-green-500' : 'border-l-red-500'}`}>
+                <Card className={`border-l-4 ${stats.verified === 0 ? 'border-l-green-500' : 'border-l-emerald-500'}`}>
                   <CardContent className="p-4">
                     <div className="flex items-center justify-between">
                       <div>
-                        <p className="text-sm text-muted-foreground">Critical</p>
+                        <p className="text-sm text-muted-foreground">Verified</p>
                         <div className="flex items-center gap-2 mt-1">
-                          <AlertTriangle className={`h-5 w-5 ${0 === 0 ? 'text-green-500 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`} />
-                          <p className={`text-2xl sm:text-3xl font-bold ${0 === 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>{0}</p>
+                          <CheckCircle2 className={`h-5 w-5 ${stats.verified === 0 ? 'text-green-500 dark:text-green-400' : 'text-emerald-500 dark:text-emerald-400'}`} />
+                          <p className={`text-2xl sm:text-3xl font-bold ${stats.verified === 0 ? 'text-green-600 dark:text-green-400' : 'text-emerald-600 dark:text-emerald-400'}`}>{stats.verified}</p>
                         </div>
-                        {0 === 0 ? (
-                          <p className="text-xs text-green-600 dark:text-green-400 mt-1">No critical alerts</p>
+                        {stats.verified === 0 ? (
+                          <p className="text-xs text-green-600 dark:text-green-400 mt-1">All tests verified</p>
                         ) : null}
                       </div>
                     </div>
                   </CardContent>
                 </Card>
+
               </>
             )}
           </div>
@@ -165,20 +220,20 @@ export default function LaboratoryPage() {
               <span className="text-xs sm:text-sm font-medium">Lab Orders</span>
               <span className="text-[10px] sm:text-xs opacity-90">Test ordering</span>
             </Button>
-            <Button onClick={() => window.location.href = '/laboratory/results'} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-amber-500/30 hover:bg-amber-500/10 border-l-4 border-l-amber-500">
+            <Button onClick={() => window.location.href = '/laboratory/verification'} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-amber-500/30 hover:bg-amber-500/10 border-l-4 border-l-amber-500">
               <FileSearch className="h-5 w-5 sm:h-6 sm:w-6 text-amber-500 dark:text-amber-400" />
               <span className="text-xs sm:text-sm font-medium">Verify Results</span>
-              <span className="text-[10px] sm:text-xs text-muted-foreground">Result validation</span>
+              <span className="text-[10px] sm:text-xs text-muted-foreground">Result Verification</span>
             </Button>
-            <Button onClick={() => window.location.href = '/laboratory/queue'} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-amber-500/30 hover:bg-amber-500/10 border-l-4 border-l-blue-500">
+            <Button onClick={() => window.location.href = '/laboratory/templates'} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-amber-500/30 hover:bg-amber-500/10 border-l-4 border-l-blue-500">
               <ClipboardList className="h-5 w-5 sm:h-6 sm:w-6 text-blue-500 dark:text-blue-400" />
-              <span className="text-xs sm:text-sm font-medium">Test Queue</span>
-              <span className="text-[10px] sm:text-xs text-muted-foreground">Pending tests</span>
+              <span className="text-xs sm:text-sm font-medium">Test Templates</span>
+              <span className="text-[10px] sm:text-xs text-muted-foreground">Test templates</span>
             </Button>
-            <Button onClick={() => window.location.href = '/laboratory/reports'} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-amber-500/30 hover:bg-amber-500/10 border-l-4 border-l-emerald-500">
+            <Button onClick={() => window.location.href = '/laboratory/completed'} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-amber-500/30 hover:bg-amber-500/10 border-l-4 border-l-emerald-500">
               <UserCheck className="h-5 w-5 sm:h-6 sm:w-6 text-emerald-500 dark:text-emerald-400" />
-              <span className="text-xs sm:text-sm font-medium">Quality Control</span>
-              <span className="text-[10px] sm:text-xs text-muted-foreground">QC management</span>
+              <span className="text-xs sm:text-sm font-medium">Completed Tests</span>
+              <span className="text-[10px] sm:text-xs text-muted-foreground">Completed tests</span>
             </Button>
           </div>
         </div>
