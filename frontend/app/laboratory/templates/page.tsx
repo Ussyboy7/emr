@@ -105,7 +105,7 @@ export default function TestTemplatesPage() {
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [itemsPerPage, setItemsPerPage] = useState(50);
 
   // Dialog states
   const [selectedTemplate, setSelectedTemplate] = useState<TestTemplate | null>(null);
