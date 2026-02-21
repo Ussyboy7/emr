@@ -93,7 +93,7 @@ const transformTemplate = (apiTemplate: ApiLabTemplate): TestTemplate => {
   };
 };
 
-const categories = ['All', 'chemistry', 'hematology', 'microbiology', 'endocrinology'];
+const categories = ['All', 'chemistry', 'hematology', 'microbiology', 'serology', 'toxicology'];
 
 export default function TestTemplatesPage() {
   const [templates, setTemplates] = useState<TestTemplate[]>([]);
@@ -179,11 +179,12 @@ export default function TestTemplatesPage() {
   const stats = {
     total: templates.length,
     active: templates.filter(t => t.status === 'Active').length,
-    // Top 4 categories by usage
+    // Top 5 categories by usage
     chemistry: templates.filter(t => t.category === 'chemistry').length,
     hematology: templates.filter(t => t.category === 'hematology').length,
     microbiology: templates.filter(t => t.category === 'microbiology').length,
-    endocrinology: templates.filter(t => t.category === 'endocrinology').length,
+    serology: templates.filter(t => t.category === 'serology').length,
+    toxicology: templates.filter(t => t.category === 'toxicology').length,
   };
 
   const getCategoryBadge = (category: string) => {
@@ -191,7 +192,8 @@ export default function TestTemplatesPage() {
       case 'chemistry': return 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/50';
       case 'hematology': return 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/50';
       case 'microbiology': return 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/50';
-      case 'endocrinology': return 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/50';
+      case 'toxicology': return 'bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/50';
+      case 'serology': return 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/50';
       default: return 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/50';
     }
   };
@@ -558,7 +560,8 @@ export default function TestTemplatesPage() {
                 template.category === 'chemistry' ? 'border-l-amber-500' :
                 template.category === 'hematology' ? 'border-l-rose-500' :
                 template.category === 'microbiology' ? 'border-l-emerald-500' :
-                template.category === 'endocrinology' ? 'border-l-purple-500' : 'border-l-blue-500'
+                template.category === 'serology' ? 'border-l-purple-500' : 
+                template.category === 'toxicology' ? 'border-l-red-500' : 'border-l-blue-500'
               }`}>
                 <CardContent className="py-3 px-4">
                   <div className="flex items-center gap-3">
@@ -567,12 +570,14 @@ export default function TestTemplatesPage() {
                       template.category === 'chemistry' ? 'bg-amber-100 dark:bg-amber-900/30' :
                       template.category === 'hematology' ? 'bg-rose-100 dark:bg-rose-900/30' :
                       template.category === 'microbiology' ? 'bg-emerald-100 dark:bg-emerald-900/30' :
-                      template.category === 'endocrinology' ? 'bg-purple-100 dark:bg-purple-900/30' : 'bg-blue-100 dark:bg-blue-900/30'
+                      template.category === 'serology' ? 'bg-purple-100 dark:bg-purple-900/30' : 
+                      template.category === 'toxicology' ? 'bg-red-100 dark:bg-red-900/30' : 'bg-blue-100 dark:bg-blue-900/30'
                     }`}>
                       {template.category === 'chemistry' ? <FlaskConical className="h-4 w-4 text-amber-600" /> :
                        template.category === 'hematology' ? <Activity className="h-4 w-4 text-rose-600" /> :
                        template.category === 'microbiology' ? <Microscope className="h-4 w-4 text-emerald-600" /> :
-                       template.category === 'endocrinology' ? <Heart className="h-4 w-4 text-purple-600" /> :
+                       template.category === 'serology' ? <Heart className="h-4 w-4 text-purple-600" /> :
+                       template.category === 'toxicology' ? <FlaskConical className="h-4 w-4 text-red-600" /> :
                        <FlaskConical className="h-4 w-4 text-blue-600" />}
                     </div>
                     

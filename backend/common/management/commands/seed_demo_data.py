@@ -437,8 +437,8 @@ class Command(BaseCommand):
             {
                 'username': 'admin',
                 'email': 'admin@npa.gov.ng',
-                'first_name': 'System',
-                'last_name': 'Administrator',
+                'first_name': '',
+                'last_name': '',
                 'system_role': 'System Administrator',
                 'employee_id': 'NPA-ADMIN-001',
                 'is_staff': True,
