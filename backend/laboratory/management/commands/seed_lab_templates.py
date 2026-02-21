@@ -79,15 +79,14 @@ class Command(BaseCommand):
                 }
             },
             {
-                'name': 'Blood Group and Rh Type',
+                'name': 'Blood Group',
                 'code': 'BG',
                 'category': 'hematology',
                 'sample_type': 'EDTA Blood',
-                'description': 'Determination of ABO blood group and Rhesus factor',
+                'description': 'Determination of blood group',
                 'turnaround_time': '30 minutes',
                 'normal_range': {
                     'Blood Group': {'unit': '', 'range': 'A/B/AB/O', 'dataType': 'text', 'required': True},
-                    'Rh Type': {'unit': '', 'range': 'Positive/Negative', 'dataType': 'text', 'required': True},
                 }
             },
             {
@@ -202,8 +201,6 @@ class Command(BaseCommand):
                     'LDL Cholesterol': {'unit': 'mmol/L', 'min': '0', 'max': '3.4', 'dataType': 'numeric', 'required': True},
                     'Non-HDL Cholesterol': {'unit': 'mmol/L', 'min': '0', 'max': '4.3', 'dataType': 'numeric', 'required': True},
                     'Total Cholesterol / HDL': {'unit': '', 'min': '0', 'max': '4.1', 'dataType': 'numeric', 'required': True},
-                    'Uric Acid (Male)': {'unit': 'mmol/L', 'min': '0.21', 'max': '0.42', 'dataType': 'numeric', 'required': False},
-                    'Uric Acid (Female)': {'unit': 'mmol/L', 'min': '0.15', 'max': '0.40', 'dataType': 'numeric', 'required': False},
                 }
             },
             {
@@ -278,15 +275,11 @@ class Command(BaseCommand):
                 'description': 'Routine stool examination',
                 'turnaround_time': '1 hour',
                 'normal_range': {
-                    '_order': ['Colour', 'Appearance', 'Mucus', 'Blood', 'Ova', 'Cyst', 'Yeast Cells', 'Other Parasites'],
+                    '_order': ['Colour', 'Appearance', 'Mucus', 'Blood'],
                     'Colour': {'unit': '', 'range': 'Brown', 'dataType': 'text', 'required': True},
                     'Appearance': {'unit': '', 'range': 'Soft Formed', 'dataType': 'text', 'required': True},
                     'Mucus': {'unit': '', 'range': 'None', 'dataType': 'text', 'required': True},
                     'Blood': {'unit': '', 'range': 'None', 'dataType': 'text', 'required': True},
-                    'Ova': {'unit': '', 'range': 'None seen', 'dataType': 'text', 'required': True},
-                    'Cyst': {'unit': '', 'range': 'None seen', 'dataType': 'text', 'required': True},
-                    'Yeast Cells': {'unit': '', 'range': 'None seen', 'dataType': 'text', 'required': True},
-                    'Other Parasites': {'unit': '', 'range': 'None seen', 'dataType': 'text', 'required': True},
                 }
             },
             {
@@ -385,7 +378,7 @@ class Command(BaseCommand):
                 'description': 'Complete urinalysis',
                 'turnaround_time': '15 minutes',
                 'normal_range': {
-                    '_order': ['Colour', 'Appearance', 'pH', 'Specific Gravity', 'Glucose', 'Ketone', 'Nitrite', 'Proteins', 'Bilirubin', 'Urobilinogen', 'Blood', 'Leucocytes', 'Ascorbic Acid', 'Pus Cell', 'Epithelial Cell', 'Others', 'Culture'],
+                    '_order': ['Colour', 'Appearance', 'pH', 'Specific Gravity', 'Glucose', 'Ketone', 'Nitrite', 'Proteins', 'Bilirubin', 'Urobilinogen', 'Blood', 'Leucocytes', 'Ascorbic Acid', 'Pus Cell', 'Epithelial Cell', 'Others', 'Culture', 'Pefloxacin (PEF)', 'Gentamycin (CN)', 'Ampiclox (APX)', 'Zinnacef (Z)', 'Amoxacilin (AM)', 'Rosephine (R)', 'Ciprofloxacin (CPX)', 'Azithromycin (AZ)', 'Levofloxacin (LEV)', 'Erythromycin (E)', 'Cefotaxim (CF)', 'Tarivid (OFX)', 'Sparfloxacin (SP)', 'Augmentin (AU)'],
                     'Colour': {'unit': '', 'range': 'Amber', 'dataType': 'text', 'required': True},
                     'Appearance': {'unit': '', 'range': 'Clear', 'dataType': 'text', 'required': True},
                     'pH': {'unit': '', 'min': '5.0', 'max': '8.0', 'dataType': 'numeric', 'required': True},
@@ -403,6 +396,20 @@ class Command(BaseCommand):
                     'Epithelial Cell': {'unit': '', 'range': 'None seen', 'dataType': 'text', 'required': False},
                     'Others': {'unit': '', 'range': 'None seen', 'dataType': 'text', 'required': False},
                     'Culture': {'unit': '', 'range': 'No growth', 'dataType': 'text', 'required': False},
+                    'Pefloxacin (PEF)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
+                    'Gentamycin (CN)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
+                    'Ampiclox (APX)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
+                    'Zinnacef (Z)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
+                    'Amoxacilin (AM)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
+                    'Rosephine (R)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
+                    'Ciprofloxacin (CPX)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
+                    'Azithromycin (AZ)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
+                    'Levofloxacin (LEV)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
+                    'Erythromycin (E)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
+                    'Cefotaxim (CF)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
+                    'Tarivid (OFX)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
+                    'Sparfloxacin (SP)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
+                    'Augmentin (AU)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
                 }
             },
             {
@@ -436,16 +443,22 @@ class Command(BaseCommand):
             {
                 'name': 'Noble Cup',
                 'code': 'NOBLE-CUP',
-                'category': 'hematology',
-                'sample_type': 'EDTA Blood',
-                'description': 'Complete blood count with specialized analysis',
+                'category': 'toxicology',
+                'sample_type': 'Urine',
+                'description': 'Drug screening test panel',
                 'turnaround_time': '1 hour',
                 'normal_range': {
-                    'Haemoglobin (Hb)': {'unit': 'g/dL', 'min': '12.0', 'max': '16.0', 'dataType': 'numeric', 'required': True},
-                    'Haematocrit (Hct)': {'unit': '%', 'min': '36', 'max': '48', 'dataType': 'numeric', 'required': True},
-                    'White Blood Cell Count (WBC)': {'unit': 'x10³/µL', 'min': '4.0', 'max': '11.0', 'dataType': 'numeric', 'required': True},
-                    'Platelet Count': {'unit': 'x10³/µL', 'min': '150', 'max': '450', 'dataType': 'numeric', 'required': True},
-                    'MCV': {'unit': 'fL', 'min': '80', 'max': '100', 'dataType': 'numeric', 'required': True},
+                    '_order': ['AMPHETAMINE (AMP)', 'BARBITURATES (BAR)', 'TRICYCLIC ANTIDEPRESANTS (TCA)', 'COCAINE (COC)', 'BENZODIAZEPINE (BZO)', 'OPIATE (OPI)', 'METHAMPHETAMINE (MET)', 'MARIJUANA (THC)', 'ECSTASY (MDMA)', 'TRAMADOL (TML)'],
+                    'AMPHETAMINE (AMP)': {'unit': '', 'range': 'Negative', 'dataType': 'text', 'required': True},
+                    'BARBITURATES (BAR)': {'unit': '', 'range': 'Negative', 'dataType': 'text', 'required': True},
+                    'TRICYCLIC ANTIDEPRESANTS (TCA)': {'unit': '', 'range': 'Negative', 'dataType': 'text', 'required': True},
+                    'COCAINE (COC)': {'unit': '', 'range': 'Negative', 'dataType': 'text', 'required': True},
+                    'BENZODIAZEPINE (BZO)': {'unit': '', 'range': 'Negative', 'dataType': 'text', 'required': True},
+                    'OPIATE (OPI)': {'unit': '', 'range': 'Negative', 'dataType': 'text', 'required': True},
+                    'METHAMPHETAMINE (MET)': {'unit': '', 'range': 'Negative', 'dataType': 'text', 'required': True},
+                    'MARIJUANA (THC)': {'unit': '', 'range': 'Negative', 'dataType': 'text', 'required': True},
+                    'ECSTASY (MDMA)': {'unit': '', 'range': 'Negative', 'dataType': 'text', 'required': True},
+                    'TRAMADOL (TML)': {'unit': '', 'range': 'Negative', 'dataType': 'text', 'required': True},
                 }
             },
         ]
