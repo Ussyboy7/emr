@@ -282,6 +282,8 @@ export default function TestTemplatesPage() {
         sample_type: formData.specimenType,
         normal_range: normalRange,
         is_active: true,
+        category: formData.category,
+        turnaround_time: formData.turnaroundTime,
       };
 
       const created = await labService.createTemplate(templateData);
@@ -331,6 +333,8 @@ export default function TestTemplatesPage() {
         sample_type: formData.specimenType,
         normal_range: normalRange,
         is_active: selectedTemplate?.status === 'Active' || true,
+        category: formData.category,
+        turnaround_time: formData.turnaroundTime,
       };
 
       const updated = await labService.updateTemplate(templateId, templateData);
