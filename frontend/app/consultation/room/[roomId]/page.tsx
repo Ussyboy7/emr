@@ -7169,6 +7169,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                     <SelectItem value="Every 6 hours (Q6H)">Every 6 hours</SelectItem>
                                     <SelectItem value="Every 8 hours (Q8H)">Every 8 hours</SelectItem>
                                     <SelectItem value="Every 12 hours (Q12H)">Every 12 hours</SelectItem>
+                                    <SelectItem value="At bedtime (Nocte)">At bedtime (Nocte)</SelectItem>
                                     <SelectItem value="As needed (PRN)">As needed (PRN)</SelectItem>
                                     <SelectItem value="STAT (Single dose)">STAT (Single dose)</SelectItem>
                                     <SelectItem value="Weekly">Weekly</SelectItem>
