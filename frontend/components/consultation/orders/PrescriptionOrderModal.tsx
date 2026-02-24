@@ -378,7 +378,7 @@ export function PrescriptionOrderModal({
                     filteredMedications.slice(0, 50).map((med) => {
                       const id = normalizeMedicationId(med.id);
                       if (!id) return null;
-                      const isSelected = selectedMedications.has(id);
+                      const isSelected = selectedMedications.includes(id);
                       return (
                         <div
                           key={id}
