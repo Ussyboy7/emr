@@ -506,23 +506,6 @@ export function PrescriptionOrderModal({
                         </div>
                         <div className="space-y-1">
                           <Label className="text-xs">
-                            Unit <span className="text-red-500">*</span>
-                          </Label>
-                          <Select value={cfg.strength || ""} onValueChange={(v) => updateMedicationConfig(medId, "strength", v)}>
-                            <SelectTrigger className="h-8 text-xs">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {PRESCRIPTION_UNIT_OPTIONS.map((unit) => (
-                                <SelectItem key={unit} value={unit}>
-                                  {unit}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="space-y-1">
-                          <Label className="text-xs">
                             Form <span className="text-red-500">*</span>
                           </Label>
                           <Select value={cfg.form || ""} onValueChange={(v) => updateMedicationConfig(medId, "form", v)}>

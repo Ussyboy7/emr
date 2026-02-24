@@ -312,21 +312,6 @@ const frequencyToDailyDoses: Record<string, number> = {
   'STAT (Single dose)': 0, // Special case
 };
 
-const PRESCRIPTION_UNIT_OPTIONS = [
-  'tablet',
-  'capsule',
-  'ml',
-  'mg',
-  'g',
-  'drop',
-  'vial',
-  'ampoule',
-  'sachet',
-  'suppository',
-  'puff',
-  'patch',
-];
-
 const parseMedicationOptions = (value: unknown): string[] => {
   if (typeof value !== 'string') return [];
   return value
@@ -3198,7 +3183,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     
     // Toggle selection
     setSelectedMedications(prev => {
-      const newSet = new Set(prev);
+      let newSet = new Set(prev);
       if (newSet.has(medicationId!)) {
         // Remove medication and its config
         newSet.delete(medicationId!);
@@ -3208,8 +3193,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           return newConfigs;
         });
       } else {
-        // Add medication with sensible defaults based on form
-        newSet.add(medicationId!);
+        // Add medication at the top (most recently selected first)
+        newSet.delete(medicationId!);
+        newSet = new Set([medicationId!, ...Array.from(newSet)]);
 
         // Close dropdown and clear search when medication is selected
         setShowMedicationDropdown(false);
@@ -3343,11 +3329,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           missingConfigs.push(`${med?.name || 'Unknown medication'} - frequency required`);
         }
       }
-      if (!config || !config.unit?.trim()) {
-        if (!missingConfigs.some(msg => msg.includes(med?.name || 'Unknown medication'))) {
-          missingConfigs.push(`${med?.name || 'Unknown medication'} - unit required`);
-        }
-      }
       if (!config || !config.form?.trim()) {
         if (!missingConfigs.some(msg => msg.includes(med?.name || 'Unknown medication'))) {
           missingConfigs.push(`${med?.name || 'Unknown medication'} - form required`);
@@ -3361,7 +3342,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     }
 
     if (missingConfigs.length > 0) {
-      toast.error("Please complete required fields (dosage, frequency, unit, form, strength) for each medication.");
+      toast.error("Please complete required fields (dosage, frequency, form, strength) for each medication.");
       return;
     }
     
@@ -7038,9 +7019,13 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                   <div className="mt-2 space-y-2">
                     <div className="text-sm font-medium">Selected Medications ({selectedMedications.size}):</div>
                     <div className="flex flex-wrap gap-2">
-                      {medications
-                        .filter(m => selectedMedications.has(typeof m.id === 'number' ? m.id : parseInt(m.id, 10)))
-                        .map(med => (
+                      {Array.from(selectedMedications)
+                        .map((medId) => medications.find((m: any) => {
+                          const mId = typeof m.id === 'number' ? m.id : parseInt(m.id, 10);
+                          return mId === medId;
+                        }))
+                        .filter((med): med is any => !!med)
+                        .map((med) => (
                           <Badge key={med.id} variant="secondary" className="flex items-center gap-1">
                             {med.name}
                             <X
@@ -7072,7 +7057,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                     <div>
                       <Label className="text-sm font-semibold">Configure Prescriptions</Label>
                       <p className="text-xs text-muted-foreground mt-1">
-                        Set dosage, frequency, duration, unit, strength, and form for each selected medication
+                        Set dosage, frequency, duration, strength, and form for each selected medication
                       </p>
                     </div>
                     <Badge variant="outline" className="text-xs">
@@ -7133,24 +7118,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                   value={config.dosage || ''}
                               onChange={(e) => updateMedicationConfig(medId, 'dosage', e.target.value)}
                             />
-                          </div>
-                          <div className="space-y-1">
-                                <Label className="text-xs">Unit <span className="text-red-500">*</span></Label>
-                            <Select
-                                  value={config.unit || 'tablet'}
-                                  onValueChange={(v) => updateMedicationConfig(medId, 'unit', v)}
-                            >
-                              <SelectTrigger className="h-8 text-xs">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                    {PRESCRIPTION_UNIT_OPTIONS.map((unit) => (
-                                      <SelectItem key={unit} value={unit}>
-                                        {unit}
-                                      </SelectItem>
-                                    ))}
-                              </SelectContent>
-                            </Select>
                           </div>
                           <div className="space-y-1">
                                 <Label className="text-xs">Form <span className="text-red-500">*</span></Label>
