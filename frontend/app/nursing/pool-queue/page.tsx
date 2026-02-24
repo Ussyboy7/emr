@@ -488,7 +488,7 @@ export default function NursingPoolQueuePage() {
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [itemsPerPage, setItemsPerPage] = useState(50);
 
   // Filter patients
   const filteredPatients = patients.filter(p => {
@@ -543,11 +543,8 @@ export default function NursingPoolQueuePage() {
     return matchesSearch && matchesStatus && matchesType && matchesClinic;
   });
 
-  // Sort by visit type (Emergency first) then newest first
+  // Sort newest first
   const sortedPatients = [...filteredPatients].sort((a, b) => {
-    const typeOrder: Record<string, number> = { 'Emergency': 0, 'Consultation': 1, 'Follow-up': 2 };
-    const typeDiff = (typeOrder[a.visitType] ?? 3) - (typeOrder[b.visitType] ?? 3);
-    if (typeDiff !== 0) return typeDiff;
     const getTimeKey = (p: NursingPatient) => {
       const raw = (p.nursingStatus === 'Sent to Room' && p.sentAt)
         ? p.sentAt
@@ -557,6 +554,9 @@ export default function NursingPoolQueuePage() {
     };
     const timeDiff = getTimeKey(b) - getTimeKey(a);
     if (timeDiff !== 0) return timeDiff;
+    const typeOrder: Record<string, number> = { 'Emergency': 0, 'Consultation': 1, 'Follow-up': 2 };
+    const typeDiff = (typeOrder[a.visitType] ?? 3) - (typeOrder[b.visitType] ?? 3);
+    if (typeDiff !== 0) return typeDiff;
     return (b.waitTime || 0) - (a.waitTime || 0);
   });
 
@@ -1169,6 +1169,7 @@ export default function NursingPoolQueuePage() {
               onPageChange={setCurrentPage}
               onItemsPerPageChange={setItemsPerPage}
               itemName="patients"
+              pageSizeOptions={[50, 75, 100]}
             />
           </Card>
         )}

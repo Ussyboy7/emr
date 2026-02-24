@@ -13,6 +13,7 @@ export interface VisitFilters {
   date?: string;
   start_date?: string;
   end_date?: string;
+  ordering?: string;
   page?: number;
   page_size?: number;
 }
@@ -98,4 +99,3 @@ class VisitService {
 }
 
 export const visitService = new VisitService();
-

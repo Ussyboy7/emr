@@ -68,7 +68,7 @@ export default function VisitsPage() {
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [itemsPerPage, setItemsPerPage] = useState(50);
   const [totalCount, setTotalCount] = useState(0);
 
   // Stats state (separate from pagination)
@@ -180,6 +180,7 @@ export default function VisitsPage() {
         date: dateParam,
         start_date: startDate,
         end_date: endDate,
+        ordering: '-date,-time',
       };
 
       const result = await visitService.getVisits(filterParams);
@@ -187,7 +188,12 @@ export default function VisitsPage() {
       
       // Transform visits to match frontend structure
       const transformedVisits = result.results.map(transformVisit);
-      setVisits(transformedVisits);
+      const newestFirst = [...transformedVisits].sort((a, b) => {
+        const aTime = new Date(`${a.date}T${a.time}`).getTime();
+        const bTime = new Date(`${b.date}T${b.time}`).getTime();
+        return (Number.isFinite(bTime) ? bTime : 0) - (Number.isFinite(aTime) ? aTime : 0);
+      });
+      setVisits(newestFirst);
     } catch (err) {
       console.error('Error loading visits:', err);
       if (isAuthenticationError(err)) {
@@ -607,7 +613,7 @@ export default function VisitsPage() {
             {paginatedVisits.length > 0 && (
               <StandardPagination
                 currentPage={currentPage}
-              totalItems={totalCount}
+                totalItems={totalCount}
                 itemsPerPage={itemsPerPage}
                 onPageChange={setCurrentPage}
                 onItemsPerPageChange={(newSize) => {
@@ -615,6 +621,7 @@ export default function VisitsPage() {
                   setCurrentPage(1);
                 }}
                 itemName="visits"
+                pageSizeOptions={[50, 75, 100]}
               />
             )}
           </>
