@@ -19,7 +19,7 @@ class Command(BaseCommand):
         deleted_count, _ = LabTemplate.objects.all().delete()
         self.stdout.write(f'Deleted {deleted_count} existing templates')
         
-        self.stdout.write('Creating 26 lab templates...')
+        self.stdout.write('Creating lab templates...')
 
         templates_data = [
             # HEMATOLOGY
@@ -63,8 +63,7 @@ class Command(BaseCommand):
                 'description': 'Malaria parasite detection by microscopy',
                 'turnaround_time': '1 hour',
                 'normal_range': {
-                    'Result': {'unit': '', 'range': 'Not detected', 'dataType': 'text', 'required': True},
-                    'Species': {'unit': '', 'range': 'N/A', 'dataType': 'text', 'required': False},
+                    'Result': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
                 }
             },
             {
@@ -75,7 +74,10 @@ class Command(BaseCommand):
                 'description': 'Non-specific inflammation marker',
                 'turnaround_time': '1 hour',
                 'normal_range': {
-                    'ESR': {'unit': 'mm/hr', 'min': '0', 'max': '20', 'dataType': 'numeric', 'required': True},
+                    '_order': ['ESR (Adult)', 'ESR (Child)', 'ESR (Elderly)'],
+                    'ESR (Adult)': {'unit': 'mm/hr', 'min': '0', 'max': '15', 'dataType': 'numeric', 'required': True},
+                    'ESR (Child)': {'unit': 'mm/hr', 'min': '0', 'max': '20', 'dataType': 'numeric', 'required': True},
+                    'ESR (Elderly)': {'unit': 'mm/hr', 'min': '0', 'max': '30', 'dataType': 'numeric', 'required': True},
                 }
             },
             {
@@ -86,7 +88,7 @@ class Command(BaseCommand):
                 'description': 'Determination of blood group',
                 'turnaround_time': '30 minutes',
                 'normal_range': {
-                    'Blood Group': {'unit': '', 'range': 'A/B/AB/O', 'dataType': 'text', 'required': True},
+                    'Blood Group': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
                 }
             },
             {
@@ -97,7 +99,7 @@ class Command(BaseCommand):
                 'description': 'Haemoglobin electrophoresis for genotype determination',
                 'turnaround_time': '24 hours',
                 'normal_range': {
-                    'HB Genotype': {'unit': '', 'range': 'AA/AS/SS/AC/SC/CC', 'dataType': 'text', 'required': True},
+                    'HB Genotype': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
                 }
             },
             # CHEMISTRY
@@ -123,7 +125,7 @@ class Command(BaseCommand):
                 'description': 'Blood glucose level after at least 8 hours of fasting',
                 'turnaround_time': '30 minutes',
                 'normal_range': {
-                    'Glucose (Fasting)': {'unit': 'mg/dL', 'min': '70', 'max': '100', 'dataType': 'numeric', 'required': True},
+                    'Glucose (Fasting)': {'unit': 'mmol/L', 'min': '3.4', 'max': '5.8', 'dataType': 'numeric', 'required': True},
                 }
             },
             {
@@ -145,7 +147,7 @@ class Command(BaseCommand):
                 'description': 'Blood glucose level at any random time',
                 'turnaround_time': '30 minutes',
                 'normal_range': {
-                    'Glucose (Random)': {'unit': 'mg/dL', 'min': '70', 'max': '140', 'dataType': 'numeric', 'required': True},
+                    'Glucose (Random)': {'unit': 'mmol/L', 'min': '3.9', 'max': '7.8', 'dataType': 'numeric', 'required': True},
                 }
             },
             {
@@ -194,11 +196,11 @@ class Command(BaseCommand):
                 'description': 'Fasting cholesterol and triglyceride levels',
                 'turnaround_time': '2 hours',
                 'normal_range': {
-                    '_order': ['Total Cholesterol', 'Triglycerides', 'HDL Cholesterol', 'LDL Cholesterol', 'Non-HDL Cholesterol', 'Total Cholesterol / HDL', 'Uric Acid (Male)', 'Uric Acid (Female)'],
+                    '_order': ['Total Cholesterol', 'Triglycerides', 'HDL Cholesterol', 'LDL Cholesterol', 'Non-HDL Cholesterol', 'Total Cholesterol / HDL'],
                     'Total Cholesterol': {'unit': 'mmol/L', 'min': '0', 'max': '5.2', 'dataType': 'numeric', 'required': True},
                     'Triglycerides': {'unit': 'mmol/L', 'min': '0', 'max': '1.9', 'dataType': 'numeric', 'required': True},
-                    'HDL Cholesterol': {'unit': 'mmol/L', 'min': '0.9', 'max': '', 'dataType': 'numeric', 'required': True},
-                    'LDL Cholesterol': {'unit': 'mmol/L', 'min': '0', 'max': '3.4', 'dataType': 'numeric', 'required': True},
+                    'HDL Cholesterol': {'unit': 'mmol/L', 'min': '0', 'max': '0.9', 'dataType': 'numeric', 'required': True},
+                    'LDL Cholesterol': {'unit': 'mmol/L', 'min': '0.9', 'max': '', 'dataType': 'numeric', 'required': True},
                     'Non-HDL Cholesterol': {'unit': 'mmol/L', 'min': '0', 'max': '4.3', 'dataType': 'numeric', 'required': True},
                     'Total Cholesterol / HDL': {'unit': '', 'min': '0', 'max': '4.1', 'dataType': 'numeric', 'required': True},
                 }
@@ -237,34 +239,158 @@ class Command(BaseCommand):
                 }
             },
             {
-                'name': 'Wound Swab M/CS',
-                'code': 'WOUND-MCS',
+                'name': 'Wound Swab',
+                'code': 'WOUND-SW',
                 'category': 'microbiology',
                 'sample_type': 'Swab',
                 'description': 'Microbiology culture and sensitivity for wound infection',
                 'turnaround_time': '48 hours',
                 'normal_range': {
-                    '_order': ['Pus Cells', 'RBCs', 'Bacteria', 'Fungal Elements', 'Gram Stain', 'Isolated Organism', 'Pefloxacin (PEF)', 'Azithromycin (AZ)', 'Gentamycin (CN)', 'Levofloxacin (LEV)', 'Ampiclox (APX)', 'Erythromycin (E)', 'Zinnacef (Z)', 'Cefotaxim (CF)', 'Amoxacilin (AM)', 'Sparfloxacin (SP)', 'Rosephine (R)', 'Tarivid (OFX)', 'Ciprofloxacin (CPX)', 'Augmentin (AU)'],
-                    'Pus Cells': {'unit': '', 'range': 'Scanty', 'dataType': 'text', 'required': True},
-                    'RBCs': {'unit': '', 'range': 'None seen', 'dataType': 'text', 'required': True},
-                    'Bacteria': {'unit': '', 'range': 'None seen', 'dataType': 'text', 'required': True},
-                    'Fungal Elements': {'unit': '', 'range': 'None seen', 'dataType': 'text', 'required': True},
-                    'Gram Stain': {'unit': '', 'range': 'No organisms seen', 'dataType': 'text', 'required': True},
-                    'Isolated Organism': {'unit': '', 'range': 'No growth', 'dataType': 'text', 'required': True},
-                    'Pefloxacin (PEF)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
-                    'Azithromycin (AZ)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
-                    'Gentamycin (CN)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
-                    'Levofloxacin (LEV)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
-                    'Ampiclox (APX)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
-                    'Erythromycin (E)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
-                    'Zinnacef (Z)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
-                    'Cefotaxim (CF)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
-                    'Amoxacilin (AM)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
-                    'Sparfloxacin (SP)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
-                    'Rosephine (R)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
-                    'Tarivid (OFX)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
-                    'Ciprofloxacin (CPX)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
-                    'Augmentin (AU)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
+                    '_order': ['Pus Cells', 'RBCs', 'Bacteria', 'Fungal Elements', 'Gram Stain', 'Culture', 'Pefloxacin (PEF)', 'Azithromycin (AZ)', 'Gentamycin (CN)', 'Levofloxacin (LEV)', 'Ampiclox (APX)', 'Erythromycin (E)', 'Zinnacef (Z)', 'Cefotaxim (CF)', 'Amoxacilin (AM)', 'Sparfloxacin (SP)', 'Rosephine (R)', 'Tarivid (OFX)', 'Ciprofloxacin (CPX)', 'Augmentin (AU)'],
+                    'Pus Cells': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'RBCs': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'Bacteria': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'Fungal Elements': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'Gram Stain': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'Culture': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'Pefloxacin (PEF)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Azithromycin (AZ)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Gentamycin (CN)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Levofloxacin (LEV)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Ampiclox (APX)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Erythromycin (E)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Zinnacef (Z)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Cefotaxim (CF)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Amoxacilin (AM)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Sparfloxacin (SP)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Rosephine (R)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Tarivid (OFX)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Ciprofloxacin (CPX)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Augmentin (AU)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                }
+            },
+            {
+                'name': 'EAR Swab',
+                'code': 'EAR-SW',
+                'category': 'microbiology',
+                'sample_type': 'Swab',
+                'description': 'Microbiology culture and sensitivity for ear infection',
+                'turnaround_time': '48 hours',
+                'normal_range': {
+                    '_order': ['Pus Cells', 'RBCs', 'Bacteria', 'Fungal Elements', 'Gram Stain', 'Culture', 'Pefloxacin (PEF)', 'Azithromycin (AZ)', 'Gentamycin (CN)', 'Levofloxacin (LEV)', 'Ampiclox (APX)', 'Erythromycin (E)', 'Zinnacef (Z)', 'Cefotaxim (CF)', 'Amoxacilin (AM)', 'Sparfloxacin (SP)', 'Rosephine (R)', 'Tarivid (OFX)', 'Ciprofloxacin (CPX)', 'Augmentin (AU)'],
+                    'Pus Cells': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'RBCs': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'Bacteria': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'Fungal Elements': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'Gram Stain': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'Culture': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'Pefloxacin (PEF)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Azithromycin (AZ)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Gentamycin (CN)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Levofloxacin (LEV)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Ampiclox (APX)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Erythromycin (E)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Zinnacef (Z)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Cefotaxim (CF)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Amoxacilin (AM)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Sparfloxacin (SP)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Rosephine (R)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Tarivid (OFX)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Ciprofloxacin (CPX)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Augmentin (AU)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                }
+            },
+            {
+                'name': 'HIGH VAGINAL Swab',
+                'code': 'HVS-SW',
+                'category': 'microbiology',
+                'sample_type': 'Swab',
+                'description': 'Microbiology culture and sensitivity for vaginal infection',
+                'turnaround_time': '48 hours',
+                'normal_range': {
+                    '_order': ['Pus Cells', 'RBCs', 'Bacteria', 'Fungal Elements', 'Gram Stain', 'Culture', 'Pefloxacin (PEF)', 'Azithromycin (AZ)', 'Gentamycin (CN)', 'Levofloxacin (LEV)', 'Ampiclox (APX)', 'Erythromycin (E)', 'Zinnacef (Z)', 'Cefotaxim (CF)', 'Amoxacilin (AM)', 'Sparfloxacin (SP)', 'Rosephine (R)', 'Tarivid (OFX)', 'Ciprofloxacin (CPX)', 'Augmentin (AU)'],
+                    'Pus Cells': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'RBCs': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'Bacteria': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'Fungal Elements': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'Gram Stain': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'Culture': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'Pefloxacin (PEF)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Azithromycin (AZ)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Gentamycin (CN)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Levofloxacin (LEV)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Ampiclox (APX)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Erythromycin (E)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Zinnacef (Z)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Cefotaxim (CF)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Amoxacilin (AM)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Sparfloxacin (SP)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Rosephine (R)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Tarivid (OFX)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Ciprofloxacin (CPX)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Augmentin (AU)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                }
+            },
+            {
+                'name': 'Endocervical Swab',
+                'code': 'ENDO-SW',
+                'category': 'microbiology',
+                'sample_type': 'Swab',
+                'description': 'Microbiology culture and sensitivity for cervical infection',
+                'turnaround_time': '48 hours',
+                'normal_range': {
+                    '_order': ['Pus Cells', 'RBCs', 'Bacteria', 'Fungal Elements', 'Gram Stain', 'Culture', 'Pefloxacin (PEF)', 'Azithromycin (AZ)', 'Gentamycin (CN)', 'Levofloxacin (LEV)', 'Ampiclox (APX)', 'Erythromycin (E)', 'Zinnacef (Z)', 'Cefotaxim (CF)', 'Amoxacilin (AM)', 'Sparfloxacin (SP)', 'Rosephine (R)', 'Tarivid (OFX)', 'Ciprofloxacin (CPX)', 'Augmentin (AU)'],
+                    'Pus Cells': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'RBCs': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'Bacteria': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'Fungal Elements': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'Gram Stain': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'Culture': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'Pefloxacin (PEF)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Azithromycin (AZ)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Gentamycin (CN)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Levofloxacin (LEV)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Ampiclox (APX)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Erythromycin (E)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Zinnacef (Z)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Cefotaxim (CF)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Amoxacilin (AM)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Sparfloxacin (SP)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Rosephine (R)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Tarivid (OFX)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Ciprofloxacin (CPX)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Augmentin (AU)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                }
+            },
+            {
+                'name': 'Throat Swab',
+                'code': 'THROAT-SW',
+                'category': 'microbiology',
+                'sample_type': 'Swab',
+                'description': 'Microbiology culture and sensitivity for throat infection',
+                'turnaround_time': '48 hours',
+                'normal_range': {
+                    '_order': ['Pus Cells', 'RBCs', 'Bacteria', 'Fungal Elements', 'Gram Stain', 'Culture', 'Pefloxacin (PEF)', 'Azithromycin (AZ)', 'Gentamycin (CN)', 'Levofloxacin (LEV)', 'Ampiclox (APX)', 'Erythromycin (E)', 'Zinnacef (Z)', 'Cefotaxim (CF)', 'Amoxacilin (AM)', 'Sparfloxacin (SP)', 'Rosephine (R)', 'Tarivid (OFX)', 'Ciprofloxacin (CPX)', 'Augmentin (AU)'],
+                    'Pus Cells': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'RBCs': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'Bacteria': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'Fungal Elements': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'Gram Stain': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'Culture': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'Pefloxacin (PEF)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Azithromycin (AZ)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Gentamycin (CN)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Levofloxacin (LEV)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Ampiclox (APX)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Erythromycin (E)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Zinnacef (Z)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Cefotaxim (CF)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Amoxacilin (AM)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Sparfloxacin (SP)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Rosephine (R)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Tarivid (OFX)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Ciprofloxacin (CPX)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Augmentin (AU)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
                 }
             },
             {
@@ -275,22 +401,45 @@ class Command(BaseCommand):
                 'description': 'Routine stool examination',
                 'turnaround_time': '1 hour',
                 'normal_range': {
-                    '_order': ['Colour', 'Appearance', 'Mucus', 'Blood'],
-                    'Colour': {'unit': '', 'range': 'Brown', 'dataType': 'text', 'required': True},
-                    'Appearance': {'unit': '', 'range': 'Soft Formed', 'dataType': 'text', 'required': True},
-                    'Mucus': {'unit': '', 'range': 'None', 'dataType': 'text', 'required': True},
-                    'Blood': {'unit': '', 'range': 'None', 'dataType': 'text', 'required': True},
+                    '_order': ['Colour', 'Appearance', 'Mucus', 'Blood', 'Ova', 'Cyst', 'Yeast Cells', 'Other Parasites'],
+                    'Colour': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'Appearance': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'Mucus': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'Blood': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'Ova': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'Cyst': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'Yeast Cells': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'Other Parasites': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
                 }
             },
             {
-                'name': 'Stool M/CS',
+                'name': 'Stool MCS',
                 'code': 'STOOL-MCS',
                 'category': 'microbiology',
                 'sample_type': 'Stool',
                 'description': 'Stool microbiology culture and sensitivity',
                 'turnaround_time': '48 hours',
                 'normal_range': {
-                    'Culture': {'unit': '', 'range': 'No growth', 'dataType': 'text', 'required': True},
+                    '_order': ['Pus Cells', 'Parasites', 'Others', 'Culture', 'Anti-Microbial Sensitivity', 'Pefloxacin (PEF)', 'Gentamycin (CN)', 'Ampiclox (APX)', 'Zinnacef (Z)', 'Amoxacilin (AM)', 'Rosephine (R)', 'Ciprofloxacin (CPX)', 'Azithromycin (AZ)', 'Levofloxacin (LEV)', 'Erythromycin (E)', 'Cefotaxim (CF)', 'Tarivid (OFX)', 'Sparfloxacin (SP)', 'Augmentin (AU)'],
+                    'Pus Cells': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'Parasites': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'Others': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'Culture': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'Anti-Microbial Sensitivity': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'Pefloxacin (PEF)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
+                    'Gentamycin (CN)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
+                    'Ampiclox (APX)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
+                    'Zinnacef (Z)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
+                    'Amoxacilin (AM)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
+                    'Rosephine (R)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
+                    'Ciprofloxacin (CPX)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
+                    'Azithromycin (AZ)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
+                    'Levofloxacin (LEV)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
+                    'Erythromycin (E)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
+                    'Cefotaxim (CF)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
+                    'Tarivid (OFX)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
+                    'Sparfloxacin (SP)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
+                    'Augmentin (AU)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
                 }
             },
             {
@@ -301,7 +450,7 @@ class Command(BaseCommand):
                 'description': 'HIV-1/2 antibody screening test',
                 'turnaround_time': '30 minutes',
                 'normal_range': {
-                    'HIV 1/2': {'unit': '', 'range': 'Non-Reactive', 'dataType': 'text', 'required': True},
+                    'HIV 1/2': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
                 }
             },
             {
@@ -312,7 +461,7 @@ class Command(BaseCommand):
                 'description': 'Hepatitis B virus surface antigen screening',
                 'turnaround_time': '30 minutes',
                 'normal_range': {
-                    'HBsAg': {'unit': '', 'range': 'Non-Reactive', 'dataType': 'text', 'required': True},
+                    'HBsAg': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
                 }
             },
             {
@@ -323,7 +472,7 @@ class Command(BaseCommand):
                 'description': 'Hepatitis C virus antibody screening',
                 'turnaround_time': '30 minutes',
                 'normal_range': {
-                    'HCV': {'unit': '', 'range': 'Non-Reactive', 'dataType': 'text', 'required': True},
+                    'HCV': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
                 }
             },
             {
@@ -334,7 +483,7 @@ class Command(BaseCommand):
                 'description': 'Venereal Disease Research Laboratory test for syphilis',
                 'turnaround_time': '30 minutes',
                 'normal_range': {
-                    'VDRL': {'unit': '', 'range': 'Non-Reactive', 'dataType': 'text', 'required': True},
+                    'VDRL': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
                 }
             },
             {
@@ -345,7 +494,7 @@ class Command(BaseCommand):
                 'description': 'Helicobacter pylori antigen detection in stool',
                 'turnaround_time': '1 hour',
                 'normal_range': {
-                    'H. Pylori Antigen': {'unit': '', 'range': 'Negative', 'dataType': 'text', 'required': True},
+                    'H. Pylori AG': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
                 }
             },
             {
@@ -356,7 +505,7 @@ class Command(BaseCommand):
                 'description': 'Helicobacter pylori antibody detection',
                 'turnaround_time': '1 hour',
                 'normal_range': {
-                    'H. Pylori IgG': {'unit': '', 'range': 'Negative', 'dataType': 'text', 'required': True},
+                    'H. Pylori AB': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
                 }
             },
             {
@@ -367,7 +516,7 @@ class Command(BaseCommand):
                 'description': 'Human chorionic gonadotropin (hCG) pregnancy test',
                 'turnaround_time': '15 minutes',
                 'normal_range': {
-                    'hCG': {'unit': '', 'range': 'Negative', 'dataType': 'text', 'required': True},
+                    'hCG': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
                 }
             },
             {
@@ -378,66 +527,54 @@ class Command(BaseCommand):
                 'description': 'Complete urinalysis',
                 'turnaround_time': '15 minutes',
                 'normal_range': {
-                    '_order': ['Colour', 'Appearance', 'pH', 'Specific Gravity', 'Glucose', 'Ketone', 'Nitrite', 'Proteins', 'Bilirubin', 'Urobilinogen', 'Blood', 'Leucocytes', 'Ascorbic Acid', 'Pus Cell', 'Epithelial Cell', 'Others', 'Culture', 'Pefloxacin (PEF)', 'Gentamycin (CN)', 'Ampiclox (APX)', 'Zinnacef (Z)', 'Amoxacilin (AM)', 'Rosephine (R)', 'Ciprofloxacin (CPX)', 'Azithromycin (AZ)', 'Levofloxacin (LEV)', 'Erythromycin (E)', 'Cefotaxim (CF)', 'Tarivid (OFX)', 'Sparfloxacin (SP)', 'Augmentin (AU)'],
-                    'Colour': {'unit': '', 'range': 'Amber', 'dataType': 'text', 'required': True},
-                    'Appearance': {'unit': '', 'range': 'Clear', 'dataType': 'text', 'required': True},
+                    '_order': ['Colour', 'Appearance', 'pH', 'Specific Gravity', 'Glucose', 'Ketone', 'Nitrite', 'Proteins', 'Bilirubin', 'Urobilinogen', 'Blood', 'Leucocytes', 'Ascorbic Acid'],
+                    'Colour': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'Appearance': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
                     'pH': {'unit': '', 'min': '5.0', 'max': '8.0', 'dataType': 'numeric', 'required': True},
                     'Specific Gravity': {'unit': '', 'min': '1.005', 'max': '1.030', 'dataType': 'numeric', 'required': True},
-                    'Glucose': {'unit': '', 'range': 'Negative', 'dataType': 'text', 'required': True},
-                    'Ketone': {'unit': '', 'range': 'Negative', 'dataType': 'text', 'required': True},
-                    'Nitrite': {'unit': '', 'range': 'Negative', 'dataType': 'text', 'required': True},
-                    'Proteins': {'unit': '', 'range': 'Negative', 'dataType': 'text', 'required': True},
-                    'Bilirubin': {'unit': '', 'range': 'Negative', 'dataType': 'text', 'required': True},
-                    'Urobilinogen': {'unit': '', 'range': 'Normal', 'dataType': 'text', 'required': True},
-                    'Blood': {'unit': '', 'range': 'Negative', 'dataType': 'text', 'required': True},
-                    'Leucocytes': {'unit': '', 'range': 'Negative', 'dataType': 'text', 'required': True},
-                    'Ascorbic Acid': {'unit': '', 'range': 'Negative', 'dataType': 'text', 'required': True},
-                    'Pus Cell': {'unit': '', 'range': 'None seen', 'dataType': 'text', 'required': False},
-                    'Epithelial Cell': {'unit': '', 'range': 'None seen', 'dataType': 'text', 'required': False},
-                    'Others': {'unit': '', 'range': 'None seen', 'dataType': 'text', 'required': False},
-                    'Culture': {'unit': '', 'range': 'No growth', 'dataType': 'text', 'required': False},
-                    'Pefloxacin (PEF)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
-                    'Gentamycin (CN)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
-                    'Ampiclox (APX)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
-                    'Zinnacef (Z)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
-                    'Amoxacilin (AM)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
-                    'Rosephine (R)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
-                    'Ciprofloxacin (CPX)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
-                    'Azithromycin (AZ)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
-                    'Levofloxacin (LEV)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
-                    'Erythromycin (E)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
-                    'Cefotaxim (CF)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
-                    'Tarivid (OFX)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
-                    'Sparfloxacin (SP)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
-                    'Augmentin (AU)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
+                    'Glucose': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'Ketone': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'Nitrite': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'Proteins': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'Bilirubin': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'Urobilinogen': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'Blood': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'Leucocytes': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'Ascorbic Acid': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
                 }
             },
             {
-                'name': 'Urine M/CS',
+                'name': 'Urine MCS',
                 'code': 'URINE-MCS',
                 'category': 'microbiology',
                 'sample_type': 'Urine',
                 'description': 'Urine microscopy, culture and sensitivity',
                 'turnaround_time': '48 hours',
                 'normal_range': {
-                    '_order': ['Pus Cells', 'Epithelial Cell', 'Culture', 'Pefloxacin (PEF)', 'Gentamycin (CN)', 'Ampiclox (APX)', 'Zinnacef (Z)', 'Amoxacilin (AM)', 'Rosephine (R)', 'Ciprofloxacin (CPX)', 'Azithromycin (AZ)', 'Levofloxacin (LEV)', 'Erythromycin (E)', 'Cefotaxim (CF)', 'Tarivid (OFX)', 'Sparfloxacin (SP)', 'Augmentin (AU)'],
-                    'Pus Cells': {'unit': '', 'range': 'None seen', 'dataType': 'text', 'required': True},
-                    'Epithelial Cell': {'unit': '', 'range': 'None seen', 'dataType': 'text', 'required': True},
-                    'Culture': {'unit': '', 'range': 'No growth', 'dataType': 'text', 'required': True},
+                    '_order': ['Pus Cells', 'Epithelial Cell', 'Yeast Cells', 'Cast/Crystals', 'Others', 'Culture', 'Anti-Microbial Sensitivity', 'Pefloxacin (PEF)', 'Gentamycin (CN)', 'Ampiclox (APX)', 'Ceftriaxone (CRO)', 'Amoxacilin (AM)', 'Rosephine (R)', 'Ciprofloxacin (CPX)', 'Nitrofurantoin (F)', 'Levofloxacin (LEV)', 'Imipenem (IMI)', 'Cefotaxim (CF)', 'Tarivid (OFX)', 'Caftazidime (CAZ)', 'Augmentin (AU)', 'Meropenem (MEM)'],
+                    'Pus Cells': {'unit': '', 'range': 'N', 'dataType': 'text', 'required': True},
+                    'Epithelial Cell': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'Yeast Cells': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'Cast/Crystals': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'Others': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'Culture': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'Anti-Microbial Sensitivity': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
                     'Pefloxacin (PEF)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
                     'Gentamycin (CN)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
                     'Ampiclox (APX)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
-                    'Zinnacef (Z)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
+                    'Ceftriaxone (CRO)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
                     'Amoxacilin (AM)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
                     'Rosephine (R)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
                     'Ciprofloxacin (CPX)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
-                    'Azithromycin (AZ)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
+                    'Nitrofurantoin (F)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
                     'Levofloxacin (LEV)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
-                    'Erythromycin (E)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
+                    'Imipenem (IMI)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
                     'Cefotaxim (CF)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
                     'Tarivid (OFX)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
-                    'Sparfloxacin (SP)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
+                    'Caftazidime (CAZ)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
                     'Augmentin (AU)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
+                    'Meropenem (MEM)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
+
                 }
             },
             {
@@ -449,16 +586,16 @@ class Command(BaseCommand):
                 'turnaround_time': '1 hour',
                 'normal_range': {
                     '_order': ['AMPHETAMINE (AMP)', 'BARBITURATES (BAR)', 'TRICYCLIC ANTIDEPRESANTS (TCA)', 'COCAINE (COC)', 'BENZODIAZEPINE (BZO)', 'OPIATE (OPI)', 'METHAMPHETAMINE (MET)', 'MARIJUANA (THC)', 'ECSTASY (MDMA)', 'TRAMADOL (TML)'],
-                    'AMPHETAMINE (AMP)': {'unit': '', 'range': 'Negative', 'dataType': 'text', 'required': True},
-                    'BARBITURATES (BAR)': {'unit': '', 'range': 'Negative', 'dataType': 'text', 'required': True},
-                    'TRICYCLIC ANTIDEPRESANTS (TCA)': {'unit': '', 'range': 'Negative', 'dataType': 'text', 'required': True},
-                    'COCAINE (COC)': {'unit': '', 'range': 'Negative', 'dataType': 'text', 'required': True},
-                    'BENZODIAZEPINE (BZO)': {'unit': '', 'range': 'Negative', 'dataType': 'text', 'required': True},
-                    'OPIATE (OPI)': {'unit': '', 'range': 'Negative', 'dataType': 'text', 'required': True},
-                    'METHAMPHETAMINE (MET)': {'unit': '', 'range': 'Negative', 'dataType': 'text', 'required': True},
-                    'MARIJUANA (THC)': {'unit': '', 'range': 'Negative', 'dataType': 'text', 'required': True},
-                    'ECSTASY (MDMA)': {'unit': '', 'range': 'Negative', 'dataType': 'text', 'required': True},
-                    'TRAMADOL (TML)': {'unit': '', 'range': 'Negative', 'dataType': 'text', 'required': True},
+                    'AMPHETAMINE (AMP)': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'BARBITURATES (BAR)': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'TRICYCLIC ANTIDEPRESANTS (TCA)': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'COCAINE (COC)': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'BENZODIAZEPINE (BZO)': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'OPIATE (OPI)': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'METHAMPHETAMINE (MET)': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'MARIJUANA (THC)': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'ECSTASY (MDMA)': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
+                    'TRAMADOL (TML)': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
                 }
             },
         ]

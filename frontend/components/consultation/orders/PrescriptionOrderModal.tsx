@@ -111,7 +111,7 @@ export function PrescriptionOrderModal({
 
   const [medicationSearch, setMedicationSearch] = useState("");
   const [showMedicationDropdown, setShowMedicationDropdown] = useState(false);
-  const [selectedMedications, setSelectedMedications] = useState<Set<number>>(new Set());
+  const [selectedMedications, setSelectedMedications] = useState<number[]>([]);
   const [medicationConfigs, setMedicationConfigs] = useState<Map<number, MedicationConfig>>(new Map());
 
   const [priority, setPriority] = useState<"Routine" | "Urgent" | "STAT">("Routine");
@@ -120,7 +120,7 @@ export function PrescriptionOrderModal({
   const reset = useCallback(() => {
     setMedicationSearch("");
     setShowMedicationDropdown(false);
-    setSelectedMedications(new Set());
+    setSelectedMedications([]);
     setMedicationConfigs(new Map());
     setPriority("Routine");
     setClinicalIndication("");
@@ -158,18 +158,20 @@ export function PrescriptionOrderModal({
     if (!medId) return;
 
     setSelectedMedications((prev) => {
-      const next = new Set(prev);
-      const isSelected = next.has(medId);
+      const isSelected = prev.includes(medId);
       if (isSelected) {
-        next.delete(medId);
-        // remove config when deselecting (match consultation session behavior)
+        // Remove from array
+        const next = prev.filter(id => id !== medId);
+        // remove config when deselecting
         setMedicationConfigs((prevConfigs) => {
           const nextConfigs = new Map(prevConfigs);
           nextConfigs.delete(medId);
           return nextConfigs;
         });
+        return next;
       } else {
-        next.add(medId);
+        // Add to beginning of array (newest first)
+        const next = [medId, ...prev];
 
         // Close dropdown and clear search when medication is selected
         setShowMedicationDropdown(false);
@@ -196,8 +198,8 @@ export function PrescriptionOrderModal({
           }
           return nextConfigs;
         });
+        return next;
       }
-      return next;
     });
   }, []);
 
@@ -245,7 +247,7 @@ export function PrescriptionOrderModal({
   }, [medications, medicationSearch]);
 
   const buildSubmitPayload = (): PrescriptionOrderSubmitInput | null => {
-    if (selectedMedications.size === 0) {
+    if (selectedMedications.length === 0) {
       toast.error("Please select at least one medication");
       return null;
     }
@@ -402,14 +404,14 @@ export function PrescriptionOrderModal({
               )}
             </div>
 
-            {selectedMedications.size > 0 && (
+            {selectedMedications.length > 0 && (
               <div className="mt-2 space-y-2">
-                <div className="text-sm font-medium">Selected Medications ({selectedMedications.size}):</div>
+                <div className="text-sm font-medium">Selected Medications ({selectedMedications.length}):</div>
                 <div className="flex flex-wrap gap-2">
                   {medications
                     .filter((m) => {
                       const id = normalizeMedicationId(m.id);
-                      return id != null && selectedMedications.has(id);
+                      return id != null && selectedMedications.includes(id);
                     })
                     .map((med) => {
                       const id = normalizeMedicationId(med.id)!;
@@ -425,7 +427,7 @@ export function PrescriptionOrderModal({
                   variant="ghost"
                   size="sm"
                   onClick={() => {
-                    setSelectedMedications(new Set());
+                    setSelectedMedications([]);
                     setMedicationConfigs(new Map());
                   }}
                   className="text-xs"
@@ -437,7 +439,7 @@ export function PrescriptionOrderModal({
           </div>
 
           {/* Medication Configuration */}
-          {selectedMedications.size > 0 && (
+          {selectedMedications.length > 0 && (
             <div className="space-y-4 border-t pt-4 mt-4">
               <div className="flex items-center justify-between">
                 <div>
@@ -445,12 +447,12 @@ export function PrescriptionOrderModal({
                   <p className="text-xs text-muted-foreground mt-1">Set dosage, frequency, duration, unit, strength, and form for each selected medication</p>
                 </div>
                 <Badge variant="outline" className="text-xs">
-                  {selectedMedications.size} medication{selectedMedications.size > 1 ? "s" : ""} selected
+                  {selectedMedications.length} medication{selectedMedications.length > 1 ? "s" : ""} selected
                 </Badge>
               </div>
 
               <div className="space-y-3">
-                {Array.from(selectedMedications).map((medId) => {
+                {selectedMedications.map((medId) => {
                   const med = medications.find((m) => normalizeMedicationId(m.id) === medId);
                   if (!med) return null;
                   const cfg = medicationConfigs.get(medId) || {
@@ -683,7 +685,7 @@ export function PrescriptionOrderModal({
           </Button>
           <Button
             onClick={handleConfirm}
-            disabled={submitting || selectedMedications.size === 0 || !clinicalIndication.trim()}
+            disabled={submitting || selectedMedications.length === 0 || !clinicalIndication.trim()}
             className="bg-violet-600 hover:bg-violet-700"
           >
             {submitting ? (
@@ -694,7 +696,7 @@ export function PrescriptionOrderModal({
             ) : (
               <>
                 <Plus className="h-4 w-4 mr-2" />
-                {confirmLabel || `Add Prescription${selectedMedications.size > 1 ? "s" : ""}`}
+                {confirmLabel || `Add Prescription${selectedMedications.length > 1 ? "s" : ""}`}
               </>
             )}
           </Button>
