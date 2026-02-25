@@ -1792,7 +1792,11 @@ export default function PrescriptionsPage() {
                                   </p>
                                 </div>
                                 <div className="flex items-center gap-2">
-                                  <Badge variant="outline" className={getMedicationStatusColor(med.status)}>
+                                  <Badge 
+                                    variant="outline" 
+                                    className={getMedicationStatusColor(med.status)}
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
                                     {med.status}
                                   </Badge>
                                   {/* Select Brand Button - Always available for brand selection */}
@@ -1801,7 +1805,8 @@ export default function PrescriptionsPage() {
                                     size="sm"
                                     className="h-7 text-xs border-blue-300 text-blue-700 hover:bg-blue-50 mr-2"
                                     disabled={isLoadingBrands}
-                                    onClick={async () => {
+                                    onClick={async (e) => {
+                                      e.stopPropagation();
                                       // Debounce rapid clicks
                                       if (brandSelectionTimeoutRef.current) {
                                         clearTimeout(brandSelectionTimeoutRef.current);
@@ -1934,7 +1939,8 @@ export default function PrescriptionsPage() {
                                       size="sm"
                                       className="h-7 text-xs border-amber-300 text-amber-700 hover:bg-amber-50"
                                       disabled={isLoadingSubstitutes}
-                                      onClick={async () => {
+                                      onClick={async (e) => {
+                                        e.stopPropagation();
                                         // Debounce rapid clicks
                                         if (substituteTimeoutRef.current) {
                                           clearTimeout(substituteTimeoutRef.current);
@@ -2078,7 +2084,7 @@ export default function PrescriptionsPage() {
                               </div>
                               
                               {isSelected && isAvailable && (
-                                <div className="space-y-3 mt-3 pt-3 border-t">
+                                <div className="space-y-3 mt-3 pt-3 border-t" onClick={(e) => e.stopPropagation()}>
                                   <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                                     {/* Quantity */}
                                     <div>

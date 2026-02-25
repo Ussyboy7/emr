@@ -136,7 +136,7 @@ class Command(BaseCommand):
                 'description': 'Blood glucose level 2 hours after a meal',
                 'turnaround_time': '30 minutes',
                 'normal_range': {
-                    'Glucose (2-hour PP)': {'unit': 'mg/dL', 'min': '70', 'max': '140', 'dataType': 'numeric', 'required': True},
+                    'Glucose (2-hour PP)': {'unit': 'mmol/L', 'min': '3.9', 'max': '7.8', 'dataType': 'numeric', 'required': True},
                 }
             },
             {
