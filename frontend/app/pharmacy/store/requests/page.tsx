@@ -85,6 +85,8 @@ export default function HandleRequestsPage() {
     return requests.slice(start, start + itemsPerPage);
   }, [requests, currentPage, itemsPerPage]);
 
+  const getItemUnit = (item: any) => item.unit || "units";
+
   const getStatusBadge = (status: string) => {
     switch (status) {
       case "pending":
@@ -277,7 +279,7 @@ export default function HandleRequestsPage() {
                           <div>
                             <p className="font-medium text-sm">{item.medication_name}</p>
                             <p className="text-xs text-muted-foreground mt-1">
-                              Requested: {item.quantity} {item.unit}
+                              Requested: {item.quantity} {getItemUnit(item)}
                             </p>
                           </div>
                           {item.fulfilled_quantity && item.fulfilled_quantity > 0 && (

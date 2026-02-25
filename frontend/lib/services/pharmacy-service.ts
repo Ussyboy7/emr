@@ -608,7 +608,6 @@ class PharmacyService {
     items: Array<{
       medication: number;
       quantity: number;
-      unit?: string;
       notes?: string;
     }>;
   }): Promise<StockRequest> {
@@ -621,7 +620,6 @@ class PharmacyService {
         items: data.items.map((i) => ({
           medication: i.medication,
           quantity: i.quantity,
-          unit: i.unit || 'unit',
           notes: i.notes || '',
         })),
       }),
