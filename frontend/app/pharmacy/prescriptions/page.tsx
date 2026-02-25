@@ -1878,7 +1878,7 @@ export default function PrescriptionsPage() {
                                                 const batches = await pharmacyService.getMedicationBatches(brand.id);
                                                 if (batches.length > 0) {
                                                   // Find the batch expiring soonest (but not expired)
-                                                  const activeBatches = batches.filter(b => !b.is_expired && b.expiryDate);
+                                                  const activeBatches = batches.filter(b => b.expiryDate && new Date(b.expiryDate) > new Date());
                                                   if (activeBatches.length > 0) {
                                                     const soonest = activeBatches.reduce((prev, curr) => 
                                                       new Date(curr.expiryDate) < new Date(prev.expiryDate) ? curr : prev
@@ -1972,7 +1972,7 @@ export default function PrescriptionsPage() {
                                                     // Get batch info for earliest expiry
                                                     for (const brand of brands) {
                                                       const batches = await pharmacyService.getMedicationBatches(brand.id);
-                                                      const activeBatches = batches.filter(b => !b.is_expired && b.expiryDate);
+                                                      const activeBatches = batches.filter(b => b.expiryDate && new Date(b.expiryDate) > new Date());
                                                       if (activeBatches.length > 0) {
                                                         const soonest = activeBatches.reduce((prev, curr) => 
                                                           new Date(curr.expiryDate) < new Date(prev.expiryDate) ? curr : prev
