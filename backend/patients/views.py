@@ -278,8 +278,61 @@ class VitalReadingViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         return VitalReading.objects.all().select_related('patient', 'visit', 'recorded_by')
+
+    @action(detail=False, methods=['get'], url_path='latest-by-visits')
+    def latest_by_visits(self, request):
+        """
+        Return latest vital reading per visit for a CSV list of visit IDs.
+        Query param:
+          - visit_ids: "1,2,3"
+        Response:
+          {
+            "results": {
+              "1": { ...vital... },
+              "2": { ...vital... }
+            }
+          }
+        """
+        visit_ids_raw = request.query_params.get('visit_ids', '').strip()
+        if not visit_ids_raw:
+            return Response({'results': {}})
+
+        visit_ids: list[int] = []
+        for value in visit_ids_raw.split(','):
+            value = value.strip()
+            if not value:
+                continue
+            try:
+                visit_id = int(value)
+                if visit_id > 0:
+                    visit_ids.append(visit_id)
+            except (TypeError, ValueError):
+                continue
+
+        if not visit_ids:
+            return Response({'results': {}})
+
+        qs = (
+            VitalReading.objects
+            .filter(visit_id__in=visit_ids)
+            .select_related('patient', 'visit', 'recorded_by')
+            .order_by('visit_id', '-recorded_at')
+        )
+
+        latest_by_visit: dict[int, VitalReading] = {}
+        for vital in qs:
+            if vital.visit_id not in latest_by_visit:
+                latest_by_visit[vital.visit_id] = vital
+
+        serialized = VitalReadingSerializer(latest_by_visit.values(), many=True).data
+        by_visit_id: dict[str, dict] = {}
+        for item in serialized:
+            visit_id = item.get('visit')
+            if isinstance(visit_id, int):
+                by_visit_id[str(visit_id)] = item
+
+        return Response({'results': by_visit_id})
     
     def perform_create(self, serializer):
         """Set recorded_by when creating a vital reading."""
         serializer.save(recorded_by=self.request.user)
-

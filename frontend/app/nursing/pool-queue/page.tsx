@@ -121,7 +121,7 @@ export default function NursingPoolQueuePage() {
         setError(null);
 
         // Load rooms first
-        const roomsResult = await roomService.getRooms({ page_size: 1000 });
+        const roomsResult = await roomService.getRooms({ page_size: 200 });
         const transformedRooms: ConsultationRoom[] = roomsResult.results.map((room: any) => ({
           id: String(room.id),
           name: room.name,
@@ -159,7 +159,7 @@ export default function NursingPoolQueuePage() {
         // Only visits with status 'in_progress' should appear in nursing pool queue
         const result = await visitService.getVisits({
           status: 'in_progress',
-          page_size: 500,
+          page_size: 300,
           date: dateParam,
           start_date: startDate,
           end_date: endDate,
@@ -168,7 +168,13 @@ export default function NursingPoolQueuePage() {
         // Fetch completed consultation sessions to exclude visits that have completed consultations
         let completedConsultationVisits = new Set<number>();
         try {
-          const consultationSessionsResult = await apiFetch<{ results: any[] }>(`/consultation/sessions/?status=completed&page_size=1000`);
+          const completedQs = new URLSearchParams();
+          completedQs.set('status', 'completed');
+          completedQs.set('page_size', '1000');
+          if (dateParam) completedQs.set('date', dateParam);
+          if (startDate) completedQs.set('start_date', startDate);
+          if (endDate) completedQs.set('end_date', endDate);
+          const consultationSessionsResult = await apiFetch<{ results: any[] }>(`/consultation/sessions/?${completedQs.toString()}`);
           completedConsultationVisits = new Set(consultationSessionsResult.results
             .filter((session: any) => session.visit)
             .map((session: any) => session.visit));
@@ -211,7 +217,7 @@ export default function NursingPoolQueuePage() {
             if (startDate) qs.set('start_date', startDate);
             if (endDate) qs.set('end_date', endDate);
             qs.set('ordering', '-queued_at');
-            qs.set('page_size', '5000');
+            qs.set('page_size', dateFilter === 'all' ? '1000' : '500');
 
             const queueResult = await apiFetch<{ results: QueueItem[] }>(`/consultation/queue/?${qs.toString()}`);
             (queueResult.results || []).forEach((item) => {
@@ -233,14 +239,14 @@ export default function NursingPoolQueuePage() {
         }
 
         debugLog('All visits loaded:', result.results.length);
-        console.log('Filtered nursing visits:', nursingVisits.length);
+        debugLog('Filtered nursing visits:', nursingVisits.length);
         debugLog('Visit statuses found:', [...new Set(result.results.map(v => v.status))]);
 
         // Use filtered results
         const filteredResult = { ...result, results: nursingVisits };
 
         debugLog('Nursing pool queue - loaded visits:', filteredResult.results.length);
-        console.log('Visit details:', filteredResult.results.map(v => ({
+        debugLog('Visit details:', filteredResult.results.map(v => ({
           id: v.id,
           patient: v.patient_name,
           status: v.status,
@@ -303,19 +309,24 @@ export default function NursingPoolQueuePage() {
         }
         setPhysioCheckins(physioCheckedInByVisitId);
 
-        // Fetch vitals for all relevant visits in parallel
-        const vitalsPromises = combinedVisits.map(async (visit: Visit) => {
+        // Fetch latest vitals in one batch call for active nursing visits.
+        const vitalsTargetVisitIds = Array.from(new Set(nursingVisits.map(v => v.id))).filter(Boolean);
+        const vitalsMap = new Map<number, any>();
+        if (vitalsTargetVisitIds.length > 0) {
           try {
-            const vitalsResult = await apiFetch<{ results: any[] }>(`/vitals/?visit=${visit.id}&ordering=-recorded_at`);
-            debugLog(`Vitals for visit ${visit.id}:`, vitalsResult.results[0] || 'No vitals');
-            return { visitId: visit.id, vitals: vitalsResult.results[0] || null };
+            const vitalsResponse = await apiFetch<{ results: Record<string, any> }>(
+              `/vitals/latest-by-visits/?visit_ids=${vitalsTargetVisitIds.join(',')}`
+            );
+            Object.entries(vitalsResponse.results || {}).forEach(([visitIdRaw, vital]) => {
+              const visitId = Number(visitIdRaw);
+              if (Number.isFinite(visitId)) {
+                vitalsMap.set(visitId, vital);
+              }
+            });
           } catch (err) {
-            console.error(`Error fetching vitals for visit ${visit.id}:`, err);
-            return { visitId: visit.id, vitals: null };
+            console.error('Error fetching batched vitals:', err);
           }
-        });
-        const vitalsResults = await Promise.all(vitalsPromises);
-        const vitalsMap = new Map(vitalsResults.map(r => [r.visitId, r.vitals]));
+        }
 
         // Build visit -> room mapping for "Sent to Room" status.
         // If we did not load history (because statusFilter isn't all/sent-to-room),
@@ -410,7 +421,7 @@ export default function NursingPoolQueuePage() {
         });
 
         debugLog('Nursing patients created:', transformedPatients.length);
-        console.log('Sample patient:', transformedPatients[0]);
+        debugLog('Sample patient:', transformedPatients[0]);
 
         setPatients(transformedPatients);
       } catch (err) {
@@ -423,7 +434,7 @@ export default function NursingPoolQueuePage() {
       } finally {
         setLoading(false);
       }
-  }, [dateFilter, statusFilter, typeFilter, clinicFilter]);
+  }, [dateFilter, statusFilter]);
 
   // Load data when filters change
   useEffect(() => {
@@ -465,9 +476,10 @@ export default function NursingPoolQueuePage() {
   // Reload rooms when room picker opens
   useEffect(() => {
     if (isRoomPickerOpen) {
+      if (rooms.length > 0) return;
       const loadRooms = async () => {
         try {
-          const roomsResult = await roomService.getRooms({ page_size: 1000 });
+          const roomsResult = await roomService.getRooms({ page_size: 200 });
           const transformedRooms: ConsultationRoom[] = roomsResult.results.map((room: any) => ({
             id: String(room.id),
             name: room.name,
@@ -484,7 +496,7 @@ export default function NursingPoolQueuePage() {
       };
       loadRooms();
     }
-  }, [isRoomPickerOpen]);
+  }, [isRoomPickerOpen, rooms.length]);
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -786,19 +798,6 @@ export default function NursingPoolQueuePage() {
       // so we don't PATCH the visit status again here. Re-patching can fail if the patient
       // has legacy duplicate open visits in the system.
       
-      // Check if patient is already in queue for this room
-      try {
-        const existingQueue = await apiFetch<{ results: any[] }>(`/consultation/queue/?room=${parseInt(roomId)}&patient=${patientId}&is_active=true`);
-        if (existingQueue.results && existingQueue.results.length > 0) {
-          toast.error('Patient is already in the queue for this room');
-          setIsSubmitting(false);
-          return;
-        }
-      } catch (checkErr) {
-        // Ignore check errors, proceed with adding
-        console.warn('Could not check existing queue:', checkErr);
-      }
-      
       // Add patient to consultation queue
       try {
         const queuePayload = {
@@ -857,8 +856,20 @@ export default function NursingPoolQueuePage() {
         return;
       }
       
-      // Reload data to reflect the queue addition (patient will be filtered out)
-      await loadData();
+      // Optimistically update UI immediately, then refresh in background.
+      setPatients((prev) =>
+        prev.map((p) =>
+          p.visitNumericId === visitId
+            ? {
+                ...p,
+                nursingStatus: 'Sent to Room',
+                consultationRoom: room.name,
+                sentAt: new Date().toISOString(),
+              }
+            : p
+        )
+      );
+      void loadData();
 
       toast.success(`Patient sent to ${room.name}`, {
         description: `${selectedPatient.name} added to consultation queue`
