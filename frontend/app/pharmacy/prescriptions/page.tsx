@@ -1866,56 +1866,59 @@ export default function PrescriptionsPage() {
                                         if (genericId) {
                                           const availableBrands = await pharmacyService.getAvailableBrands(genericId);
                                           
-                                          // Enhance brands with batch/expiry information
-                                          const substituteOptions: SubstituteOption[] = await Promise.all(
-                                            availableBrands.map(async (brand) => {
-                                              let expiryDate = '';
-                                              let daysToExpiry = 0;
-                                              let isNearExpiry = false;
-                                              
-                                              try {
-                                                // Get batches for early expiry detection
-                                                const batches = await pharmacyService.getMedicationBatches(brand.id);
-                                                if (batches.length > 0) {
-                                                  // Find the batch expiring soonest (but not expired)
-                                                  const activeBatches = batches.filter(b => b.expiryDate && new Date(b.expiryDate) > new Date());
-                                                  if (activeBatches.length > 0) {
-                                                    const soonest = activeBatches.reduce((prev, curr) => 
-                                                      new Date(curr.expiryDate) < new Date(prev.expiryDate) ? curr : prev
-                                                    );
-                                                    expiryDate = new Date(soonest.expiryDate).toLocaleDateString();
-                                                    daysToExpiry = Math.ceil((new Date(soonest.expiryDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-                                                    isNearExpiry = daysToExpiry <= 90;
-                                                  }
-                                                }
-                                              } catch (err) {
-                                                console.warn(`Could not get batch info for ${brand.name}:`, err);
-                                              }
-                                              
-                                              return {
-                                                id: brand.id.toString(),
-                                                name: brand.name,
-                                                strength: brand.strength || '',
-                                                type: 'brand',
-                                                stock: Math.round(Number((brand as any).available_stock) || 0),
-                                                expiryDate,
-                                                daysToExpiry,
-                                                unitPrice: 0,
-                                                isNearExpiry,
-                                              };
-                                            })
-                                          );
+                                          // Immediately create options with basic data (no batch queries yet)
+                                          const substituteOptions: SubstituteOption[] = availableBrands.map(brand => ({
+                                            id: brand.id.toString(),
+                                            name: brand.name,
+                                            strength: brand.strength || '',
+                                            type: 'brand',
+                                            stock: Math.round(Number((brand as any).available_stock) || 0),
+                                            expiryDate: '', // Will be loaded in background
+                                            daysToExpiry: 0,
+                                            unitPrice: 0,
+                                            isNearExpiry: false,
+                                          }));
                                           setAvailableSubstitutes(substituteOptions);
+                                          
+                                          // Load batch info in background (don't wait for it)
+                                          setIsLoadingBrands(false);
+                                          setShowSubstitutionModal(true);
+                                          
+                                          // Load batch details asynchronously in the background
+                                          availableBrands.forEach((brand) => {
+                                            pharmacyService.getMedicationBatches(brand.id).then(batches => {
+                                              if (batches.length > 0) {
+                                                const activeBatches = batches.filter(b => b.expiryDate && new Date(b.expiryDate) > new Date());
+                                                if (activeBatches.length > 0) {
+                                                  const soonest = activeBatches.reduce((prev, curr) => 
+                                                    new Date(curr.expiryDate) < new Date(prev.expiryDate) ? curr : prev
+                                                  );
+                                                  const expiryDate = new Date(soonest.expiryDate).toLocaleDateString();
+                                                  const daysToExpiry = Math.ceil((new Date(soonest.expiryDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+                                                  
+                                                  // Update the specific brand with batch info
+                                                  setAvailableSubstitutes(prev => prev.map(opt => 
+                                                    opt.id === brand.id.toString() 
+                                                      ? { ...opt, expiryDate, daysToExpiry, isNearExpiry: daysToExpiry <= 90 }
+                                                      : opt
+                                                  ));
+                                                }
+                                              }
+                                            }).catch(err => {
+                                              console.warn(`Could not get batch info for ${brand.name}:`, err);
+                                            });
+                                          });
                                         } else {
                                           setAvailableSubstitutes([]);
+                                          setIsLoadingBrands(false);
+                                          setShowSubstitutionModal(true);
                                           toast.error('Generic not found for this medication');
                                         }
                                       } catch (err) {
                                         console.error('Failed to load available brands:', err);
-                                        toast.error('Failed to load available brands');
-                                      } finally {
                                         setIsLoadingBrands(false);
                                         setShowSubstitutionModal(true);
+                                        toast.error('Failed to load available brands');
                                       }
                                     }}
                                     >
@@ -1951,75 +1954,121 @@ export default function PrescriptionsPage() {
                                           if (!genericsCache.current) {
                                             const allGenerics = await pharmacyService.getGenericsForPrescription({ page_size: 50 });
                                             
-                                            // Enhance each generic with available brand information
-                                            genericsCache.current = await Promise.all(
-                                              allGenerics.results.map(async (generic) => {
-                                                let totalStock = 0;
-                                                let expiryDate = '';
-                                                let daysToExpiry = 0;
-                                                let isNearExpiry = false;
-
-                                                try {
-                                                  // Get available brands for this generic
-                                                  const brands = await pharmacyService.getAvailableBrands(generic.id);
-                                                  
-                                                  if (brands.length > 0) {
-                                                    // Calculate total stock and find earliest expiry
-                                                    totalStock = brands.reduce((sum, brand) => 
-                                                      sum + (Number((brand as any).available_stock) || 0), 0
-                                                    );
-
-                                                    // Get batch info for earliest expiry
-                                                    for (const brand of brands) {
-                                                      const batches = await pharmacyService.getMedicationBatches(brand.id);
-                                                      const activeBatches = batches.filter(b => b.expiryDate && new Date(b.expiryDate) > new Date());
-                                                      if (activeBatches.length > 0) {
-                                                        const soonest = activeBatches.reduce((prev, curr) => 
-                                                          new Date(curr.expiryDate) < new Date(prev.expiryDate) ? curr : prev
-                                                        );
-                                                        const soonestDate = new Date(soonest.expiryDate);
-                                                        const soonestDays = Math.ceil((soonestDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-                                                        
-                                                        // Keep track of earliest expiry across all brands
-                                                        if (!expiryDate || soonestDate < new Date(expiryDate)) {
-                                                          expiryDate = soonest.expiryDate;
-                                                          daysToExpiry = soonestDays;
-                                                          isNearExpiry = soonestDays <= 90;
-                                                        }
-                                                      }
-                                                    }
-                                                  }
-                                                } catch (err) {
-                                                  console.warn(`Could not get brands for generic ${generic.name}:`, err);
-                                                }
-
-                                                return {
+                                            // Create basic options without batch data (fast)
+                                            const basicOptions: SubstituteOption[] = [];
+                                            
+                                            for (const generic of allGenerics.results) {
+                                              try {
+                                                // Get available brands for this generic (fast)
+                                                const brands = await pharmacyService.getAvailableBrands(generic.id);
+                                                const totalStock = brands.reduce((sum, brand) => 
+                                                  sum + (Number((brand as any).available_stock) || 0), 0
+                                                );
+                                                
+                                                basicOptions.push({
                                                   id: generic.id.toString(),
                                                   name: generic.name,
                                                   strength: generic.strength || '',
                                                   type: 'generic',
                                                   stock: Math.round(totalStock),
-                                                  expiryDate: expiryDate ? new Date(expiryDate).toLocaleDateString() : '',
-                                                  daysToExpiry,
+                                                  expiryDate: '', // Will be loaded in background
+                                                  daysToExpiry: 0,
                                                   unitPrice: 0,
-                                                  isNearExpiry,
-                                                };
-                                              })
-                                            );
+                                                  isNearExpiry: false,
+                                                });
+                                              } catch (err) {
+                                                console.warn(`Could not get brands for generic ${generic.name}:`, err);
+                                                // Add generic without stock info
+                                                basicOptions.push({
+                                                  id: generic.id.toString(),
+                                                  name: generic.name,
+                                                  strength: generic.strength || '',
+                                                  type: 'generic',
+                                                  stock: 0,
+                                                  expiryDate: '',
+                                                  daysToExpiry: 0,
+                                                  unitPrice: 0,
+                                                  isNearExpiry: false,
+                                                });
+                                              }
+                                            }
+                                            
+                                            genericsCache.current = basicOptions;
                                           }
 
                                           setAllAvailableMedications(genericsCache.current);
                                           setAvailableSubstitutes(genericsCache.current);
+                                          
+                                          // Open modal immediately
+                                          setIsLoadingSubstitutes(false);
+                                          setSubstituteSearchQuery('');
+                                          setShowSubstitutionModal(true);
+                                          
+                                          // Load batch info in background for each generic
+                                          if (!genericsCache.current) return;
+                                          
+                                          genericsCache.current.forEach((option) => {
+                                            if (option.type === 'generic') {
+                                              const genericId = parseInt(option.id);
+                                              pharmacyService.getAvailableBrands(genericId).then(brands => {
+                                                if (brands.length === 0) return;
+                                                
+                                                let expiryDate = '';
+                                                let daysToExpiry = 0;
+                                                let isNearExpiry = false;
+                                                
+                                                // Load batch info for all brands in parallel
+                                                Promise.all(
+                                                  brands.map(brand => 
+                                                    pharmacyService.getMedicationBatches(brand.id)
+                                                      .then(batches => ({ brand, batches }))
+                                                      .catch(() => ({ brand, batches: [] }))
+                                                  )
+                                                ).then(results => {
+                                                  // Find earliest expiry across all brands
+                                                  for (const { batches } of results) {
+                                                    const activeBatches = batches.filter(b => b.expiryDate && new Date(b.expiryDate) > new Date());
+                                                    if (activeBatches.length > 0) {
+                                                      const soonest = activeBatches.reduce((prev, curr) => 
+                                                        new Date(curr.expiryDate) < new Date(prev.expiryDate) ? curr : prev
+                                                      );
+                                                      const soonestDate = new Date(soonest.expiryDate);
+                                                      const soonestDays = Math.ceil((soonestDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+                                                      
+                                                      if (!expiryDate || soonestDate < new Date(expiryDate)) {
+                                                        expiryDate = soonest.expiryDate;
+                                                        daysToExpiry = soonestDays;
+                                                        isNearExpiry = soonestDays <= 90;
+                                                      }
+                                                    }
+                                                  }
+                                                  
+                                                  // Update the generic with batch info
+                                                  setAvailableSubstitutes(prev => prev.map(opt =>
+                                                    opt.id === option.id
+                                                      ? { 
+                                                          ...opt, 
+                                                          expiryDate: expiryDate ? new Date(expiryDate).toLocaleDateString() : '',
+                                                          daysToExpiry,
+                                                          isNearExpiry
+                                                        }
+                                                      : opt
+                                                  ));
+                                                }).catch(() => {
+                                                  console.warn(`Could not load batch info for generic ${option.name}`);
+                                                });
+                                              }).catch(() => {
+                                                console.warn(`Could not get brands for generic ${option.name}`);
+                                              });
+                                            }
+                                          });
                                         } catch (error) {
                                           console.error('Failed to load generic medications:', error);
                                           setAllAvailableMedications([]);
                                           setAvailableSubstitutes([]);
-                                        } finally {
                                           setIsLoadingSubstitutes(false);
+                                          setShowSubstitutionModal(true);
                                         }
-                                        
-                                        setSubstituteSearchQuery('');
-                                        setShowSubstitutionModal(true);
                                       }}
                                     >
                                       <ArrowRightLeft className="h-3 w-3 mr-1" />
