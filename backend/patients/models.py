@@ -153,17 +153,12 @@ class Patient(models.Model):
         return f"{self.patient_id} - {self.get_full_name()}"
     
     def get_full_name(self):
-        """Return the patient's full name."""
-        # Retiree records (per provided source data) should display the raw surname as-is.
-        # This avoids confusion caused by previously "cleaned"/split names.
-        if self.category == "retiree" and self.surname:
-            return self.surname.strip()
-
-        # Capitalize title properly (handle common abbreviations)
-        title_str = ''
+        """Return the patient's full name formatted properly."""
+        parts = []
+        
+        # Add title if present
         if self.title:
-            title_lower = self.title.lower().strip()
-            # Map common title abbreviations to proper capitalized form
+            title_lower = str(self.title).lower().strip()
             title_map = {
                 'mr': 'Mr',
                 'mrs': 'Mrs',
@@ -178,9 +173,16 @@ class Patient(models.Model):
                 'mallam': 'Mallam',
                 'lady': 'Lady',
             }
-            title_str = title_map.get(title_lower, self.title.title())
+            parts.append(title_map.get(title_lower, self.title.title()))
         
-        parts = [title_str, self.first_name, self.middle_name, self.surname]
+        # Add first name, middle name, surname
+        if self.first_name:
+            parts.append(self.first_name)
+        if self.middle_name:
+            parts.append(self.middle_name)
+        if self.surname:
+            parts.append(self.surname)
+        
         return ' '.join(filter(None, parts))
     
     @property
