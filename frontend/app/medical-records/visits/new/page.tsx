@@ -196,6 +196,7 @@ function NewVisitPageContent() {
         status: 'scheduled',
       };
 
+      console.log('Sending visit data:', visitData);
       const createdVisit = await visitService.createVisit(visitData);
       
       // Get visit ID
@@ -227,10 +228,19 @@ function NewVisitPageContent() {
       
     } catch (err: any) {
       console.error('Error creating visit:', err);
+      console.error('Error details:', {
+        message: err.message,
+        status: err.status,
+        apiMessage: err.apiMessage,
+        body: err.body
+      });
+      
       if (isAuthenticationError(err)) {
         setAuthError(err);
       } else {
-        toast.error(err.message || 'Failed to create visit. Please try again.');
+        // Show more detailed error message
+        const errorMessage = err.apiMessage || err.message || 'Failed to create visit. Please try again.';
+        toast.error(errorMessage);
         setIsSubmitting(false);
       }
     }
