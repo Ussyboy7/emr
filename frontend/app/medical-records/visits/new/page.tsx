@@ -222,6 +222,9 @@ function NewVisitPageContent() {
       setIsSuccessDialogOpen(true);
       setIsSubmitting(false);
       
+      // Show toast notification
+      toast.success('Patient visit has been created waiting to be sent to nursing in manage visit');
+      
     } catch (err: any) {
       console.error('Error creating visit:', err);
       if (isAuthenticationError(err)) {
@@ -553,7 +556,7 @@ function NewVisitPageContent() {
                   <div>
                     <p className="font-medium text-blue-600 dark:text-blue-400 text-sm">Visit Workflow</p>
                     <p className="text-xs text-muted-foreground mt-1">
-                      After the visit is created, it will appear in <strong>Manage Visits</strong> where you can forward the patient to the <strong>Nursing Pool Queue</strong> for vital signs recording.
+                      After creating the visit, go to <strong>Manage Visits</strong> to change the status to <strong>In Progress</strong>. This will automatically send the patient to the <strong>Nursing Pool Queue</strong> where nursing officers will record vital signs.
                     </p>
                   </div>
                 </div>
@@ -612,7 +615,10 @@ function NewVisitPageContent() {
                 </div>
                 <div className="text-sm text-muted-foreground">
                   <p>
-                    The visit has been created and is ready to be sent to nursing staff.
+                    The visit has been created and is ready to be sent to nursing staff for vital signs recording.
+                  </p>
+                  <p className="mt-2 text-blue-600 dark:text-blue-400">
+                    Next step: Go to Manage Visits to forward this patient to the Nursing Pool Queue.
                   </p>
                 </div>
               </div>
