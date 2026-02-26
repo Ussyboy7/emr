@@ -21,6 +21,8 @@ interface AttendanceData {
   category: string;
   employee: number;
   non_employee: number;
+  male: number;
+  female: number;
   total: number;
   percentage: number;
 }
@@ -28,13 +30,15 @@ interface AttendanceData {
 interface AttendanceSummary {
   total_employee: number;
   total_non_employee: number;
+  total_male: number;
+  total_female: number;
   grand_total: number;
 }
 
 export default function AttendanceSummaryReport() {
   const router = useRouter();
   const [data, setData] = useState<AttendanceData[]>([]);
-  const [summary, setSummary] = useState<AttendanceSummary>({ total_employee: 0, total_non_employee: 0, grand_total: 0 });
+  const [summary, setSummary] = useState<AttendanceSummary>({ total_employee: 0, total_non_employee: 0, total_male: 0, total_female: 0, grand_total: 0 });
   const [isLoading, setIsLoading] = useState(true);
   
   // Filters
@@ -77,12 +81,12 @@ export default function AttendanceSummaryReport() {
 
       const response = await apiFetch<{ data: AttendanceData[]; summary: AttendanceSummary }>(url);
       setData(response.data || []);
-      setSummary(response.summary || { total_employee: 0, total_non_employee: 0, grand_total: 0 });
+      setSummary(response.summary || { total_employee: 0, total_non_employee: 0, total_male: 0, total_female: 0, grand_total: 0 });
     } catch (error: any) {
       console.error("Error fetching report:", error);
       toast.error(error.message || "Failed to load attendance report");
       setData([]);
-      setSummary({ total_employee: 0, total_non_employee: 0, grand_total: 0 });
+      setSummary({ total_employee: 0, total_non_employee: 0, total_male: 0, total_female: 0, grand_total: 0 });
     } finally {
       setIsLoading(false);
     }
@@ -108,16 +112,17 @@ export default function AttendanceSummaryReport() {
       return;
     }
 
-    const headers = ["S/N", "Category", "Employee", "Non-Employee", "Total", "%"];
+    const headers = ["S/N", "Category", "Employee", "Non-Employee", "Male", "Female", "Total", "%"];
     const rows = data.map(row => [
       row.sn,
       row.category,
       row.employee,
       row.non_employee,
+      row.male,
+      row.female,
       row.total,
       `${row.percentage}%`
     ]);
-    
     const csv = [
       headers.join(','),
       ...rows.map(row => row.join(',')),
@@ -268,7 +273,7 @@ export default function AttendanceSummaryReport() {
         </Card>
 
         {/* Summary Cards */}
-        <div className="grid gap-4 md:grid-cols-3">
+        <div className="grid gap-4 md:grid-cols-5">
           <Card className="border-l-4 border-l-blue-500">
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
@@ -294,6 +299,34 @@ export default function AttendanceSummaryReport() {
                   </p>
                 </div>
                 <Users className="h-10 w-10 text-green-500 opacity-50" />
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="border-l-4 border-l-cyan-500">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Total Male</p>
+                  <p className="text-2xl sm:text-3xl font-bold">{summary.total_male.toLocaleString()}</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {summary.grand_total > 0 ? `${((summary.total_male / summary.grand_total) * 100).toFixed(1)}%` : '0%'} of total
+                  </p>
+                </div>
+                <Users className="h-10 w-10 text-cyan-500 opacity-50" />
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="border-l-4 border-l-pink-500">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Total Female</p>
+                  <p className="text-2xl sm:text-3xl font-bold">{summary.total_female.toLocaleString()}</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {summary.grand_total > 0 ? `${((summary.total_female / summary.grand_total) * 100).toFixed(1)}%` : '0%'} of total
+                  </p>
+                </div>
+                <Users className="h-10 w-10 text-pink-500 opacity-50" />
               </div>
             </CardContent>
           </Card>
@@ -339,6 +372,8 @@ export default function AttendanceSummaryReport() {
                       <th className="text-left p-3 text-sm font-medium text-muted-foreground">Category</th>
                       <th className="text-right p-3 text-sm font-medium text-muted-foreground">Employee</th>
                       <th className="text-right p-3 text-sm font-medium text-muted-foreground">Non-Employee</th>
+                      <th className="text-right p-3 text-sm font-medium text-muted-foreground">Male</th>
+                      <th className="text-right p-3 text-sm font-medium text-muted-foreground">Female</th>
                       <th className="text-right p-3 text-sm font-medium text-muted-foreground">Total</th>
                       <th className="text-right p-3 text-sm font-medium text-muted-foreground">%</th>
                     </tr>
@@ -350,6 +385,8 @@ export default function AttendanceSummaryReport() {
                         <td className="p-3 font-medium text-foreground">{row.category}</td>
                         <td className="p-3 text-right text-foreground">{row.employee.toLocaleString()}</td>
                         <td className="p-3 text-right text-foreground">{row.non_employee.toLocaleString()}</td>
+                        <td className="p-3 text-right text-foreground">{row.male.toLocaleString()}</td>
+                        <td className="p-3 text-right text-foreground">{row.female.toLocaleString()}</td>
                         <td className="p-3 text-right font-semibold text-foreground">{row.total.toLocaleString()}</td>
                         <td className="p-3 text-right text-foreground">{row.percentage.toFixed(1)}%</td>
                       </tr>
@@ -358,6 +395,8 @@ export default function AttendanceSummaryReport() {
                       <td className="p-3 text-foreground" colSpan={2}>TOTAL</td>
                       <td className="p-3 text-right text-foreground">{summary.total_employee.toLocaleString()}</td>
                       <td className="p-3 text-right text-foreground">{summary.total_non_employee.toLocaleString()}</td>
+                      <td className="p-3 text-right text-foreground">{summary.total_male.toLocaleString()}</td>
+                      <td className="p-3 text-right text-foreground">{summary.total_female.toLocaleString()}</td>
                       <td className="p-3 text-right text-foreground">{summary.grand_total.toLocaleString()}</td>
                       <td className="p-3 text-right text-foreground">100.0%</td>
                     </tr>

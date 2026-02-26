@@ -511,9 +511,6 @@ export default function NewPatientPage() {
   // Track if NOK auto-population has occurred to prevent it being overwritten
   const [nokAutoPopulated, setNokAutoPopulated] = useState(false);
 
-  // Timeout ref for debouncing validation
-  const validationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
   const [formData, setFormData] = useState({
     // Personal Details
     personalNumber: '', title: '', surname: '', firstName: '', middleName: '', 
@@ -676,7 +673,8 @@ export default function NewPatientPage() {
     const cleaned = phone.replace(/\s|-/g, '');
     return phoneRegex.test(cleaned) || /^0\d{10}$/.test(cleaned);
   };
-
+  
+  
   // Validate Principal Staff ID
   const validatePrincipalStaffId = async (staffId: string) => {
     if (!staffId || !staffId.trim()) {
@@ -848,6 +846,15 @@ export default function NewPatientPage() {
         setIsSubmitting(false);
         return;
       }
+
+      // Validate personal number for Employee/Retiree
+      if ((patientCategory === 'employee' || patientCategory === 'retiree') && !formData.personalNumber) {
+        toast.error('Personal number is required for Employee and Retiree patients');
+        setIsSubmitting(false);
+        return;
+      }
+
+
 
       // Validate phone if provided
       if (formData.phone && !validatePhone(formData.phone)) {
@@ -1104,8 +1111,49 @@ export default function NewPatientPage() {
       router.push('/medical-records/patients');
     } catch (error: any) {
       console.error('Error registering patient:', error);
-      toast.error('Failed to register patient', {
-        description: error.message || 'Please check all required fields and try again',
+      
+      // Extract detailed error message
+      let errorMessage = 'Failed to register patient';
+      let errorDetails = '';
+      
+      if (error) {
+        // Handle API validation errors
+        if (error.message && typeof error.message === 'string') {
+          try {
+            // Try to parse JSON error message
+            const parsed = JSON.parse(error.message);
+            if (parsed.personal_number) {
+              errorMessage = parsed.personal_number[0];
+            } else if (parsed.patient_id) {
+              errorMessage = parsed.patient_id[0];
+            } else if (parsed.non_field_errors) {
+              errorMessage = parsed.non_field_errors[0];
+            } else {
+              // Try to find any field error
+              const firstField = Object.keys(parsed)[0];
+              if (firstField && parsed[firstField] && Array.isArray(parsed[firstField])) {
+                errorMessage = parsed[firstField][0];
+              }
+            }
+          } catch (parseError) {
+            // If not JSON, use the message directly if it's meaningful
+            if (error.message !== 'Request failed. Please try again') {
+              errorMessage = error.message;
+            }
+          }
+        }
+        
+        // Check for apiMessage property
+        if (error.apiMessage) {
+          errorMessage = error.apiMessage;
+        }
+        
+        // Add technical details for debugging
+        errorDetails = error.message || 'Unknown error';
+      }
+      
+      toast.error(errorMessage, {
+        description: errorDetails && errorDetails !== errorMessage ? errorDetails : undefined,
       });
       setIsSubmitting(false);
     }
@@ -1282,10 +1330,10 @@ export default function NewPatientPage() {
                     {/* Personal Number - only for Employee/Retiree */}
                     {showWorkInfo && (
                       <div className="space-y-2">
-                        <Label>Personal Number</Label>
+                        <Label>Personal Number *</Label>
                         <Input 
                           value={formData.personalNumber} 
-                          onChange={(e) => handleInputChange('personalNumber', e.target.value)} 
+                          onChange={(e) => handleInputChange('personalNumber', e.target.value)}
                           placeholder="NPA Staff ID" 
                         />
                       </div>
@@ -1484,17 +1532,7 @@ export default function NewPatientPage() {
                           <Label>Principal Staff ID *</Label>
                           <Input
                             value={formData.principalStaffId}
-                            onChange={(e) => {
-                              handleInputChange('principalStaffId', e.target.value);
-                              // Clear previous timeout
-                              if (validationTimeoutRef.current) {
-                                clearTimeout(validationTimeoutRef.current);
-                              }
-                              // Debounce validation
-                              validationTimeoutRef.current = setTimeout(() => {
-                                validatePrincipalStaffId(e.target.value);
-                              }, 500);
-                            }}
+                            onChange={(e) => handleInputChange('principalStaffId', e.target.value)}
                             placeholder="Enter NPA Staff ID (e.g., A2000)"
                             className={(() => {
                               if (!formData.principalStaffId) return '';

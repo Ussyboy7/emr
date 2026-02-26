@@ -19,6 +19,8 @@ interface ServiceData {
   sn: number;
   category: string;
   count: number;
+  male: number;
+  female: number;
 }
 
 export default function ServicesActivitiesReport() {
@@ -54,13 +56,16 @@ export default function ServicesActivitiesReport() {
       return;
     }
 
-    const headers = ["S/N", "Category", "No of Patients"];
-    const rows = data.map(row => [row.sn, row.category, row.count]);
+    const headers = ["S/N", "Category", "Total", "Male", "Female"];
+    const rows = data.map(row => [row.sn, row.category, row.count, row.male, row.female]);
+    
+    const totalMale = data.reduce((sum, row) => sum + row.male, 0);
+    const totalFemale = data.reduce((sum, row) => sum + row.female, 0);
     
     const csv = [
       headers.join(','),
       ...rows.map(row => row.join(',')),
-      `TOTAL,,${total}`
+      `TOTAL,,${total},${totalMale},${totalFemale}`
     ].join('\n');
     
     const blob = new Blob([csv], { type: 'text/csv' });
@@ -140,16 +145,37 @@ export default function ServicesActivitiesReport() {
           </CardContent>
         </Card>
 
-        {/* Total Card */}
-        <Card className="border-l-4 border-l-orange-500">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Total Services & Activities</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-4xl font-bold text-orange-600 dark:text-orange-400">{total.toLocaleString()}</div>
-            <p className="text-xs text-muted-foreground">For the year {year}</p>
-          </CardContent>
-        </Card>
+        {/* Summary Cards */}
+        <div className="grid gap-4 md:grid-cols-3">
+          <Card className="border-l-4 border-l-orange-500">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">Total Services</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-3xl font-bold text-orange-600 dark:text-orange-400">{total.toLocaleString()}</div>
+            </CardContent>
+          </Card>
+          <Card className="border-l-4 border-l-cyan-500">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">Male Patients</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-3xl font-bold text-cyan-600 dark:text-cyan-400">
+                {data.reduce((sum, row) => sum + row.male, 0).toLocaleString()}
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="border-l-4 border-l-pink-500">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">Female Patients</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-3xl font-bold text-pink-600 dark:text-pink-400">
+                {data.reduce((sum, row) => sum + row.female, 0).toLocaleString()}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
 
         {/* Data Table */}
         <Card>
@@ -173,7 +199,9 @@ export default function ServicesActivitiesReport() {
                     <tr className="border-b border-border">
                       <th className="text-left p-3 text-sm font-medium text-muted-foreground">S/N</th>
                       <th className="text-left p-3 text-sm font-medium text-muted-foreground">Category</th>
-                      <th className="text-right p-3 text-sm font-medium text-muted-foreground">No of Patients</th>
+                      <th className="text-right p-3 text-sm font-medium text-muted-foreground">Total</th>
+                      <th className="text-right p-3 text-sm font-medium text-muted-foreground">Male</th>
+                      <th className="text-right p-3 text-sm font-medium text-muted-foreground">Female</th>
                       <th className="text-left p-3 text-sm font-medium text-muted-foreground">Distribution</th>
                     </tr>
                   </thead>
@@ -188,6 +216,8 @@ export default function ServicesActivitiesReport() {
                             {row.category}
                           </td>
                           <td className="p-3 text-right font-semibold text-foreground">{row.count.toLocaleString()}</td>
+                          <td className="p-3 text-right text-cyan-600 dark:text-cyan-400 font-medium">{row.male.toLocaleString()}</td>
+                          <td className="p-3 text-right text-pink-600 dark:text-pink-400 font-medium">{row.female.toLocaleString()}</td>
                           <td className="p-3">
                             <div className="w-full bg-muted rounded-full h-4">
                               <div 
@@ -202,6 +232,12 @@ export default function ServicesActivitiesReport() {
                     <tr className="border-t-2 border-border bg-orange-50 dark:bg-orange-900/20 font-bold">
                       <td colSpan={2} className="p-3 text-foreground">TOTAL</td>
                       <td className="p-3 text-right text-orange-600 dark:text-orange-400">{total.toLocaleString()}</td>
+                      <td className="p-3 text-right text-cyan-600 dark:text-cyan-400">
+                        {data.reduce((sum, row) => sum + row.male, 0).toLocaleString()}
+                      </td>
+                      <td className="p-3 text-right text-pink-600 dark:text-pink-400">
+                        {data.reduce((sum, row) => sum + row.female, 0).toLocaleString()}
+                      </td>
                       <td className="p-3"></td>
                     </tr>
                   </tbody>

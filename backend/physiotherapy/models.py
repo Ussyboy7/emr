@@ -38,6 +38,14 @@ class PhysioOrder(models.Model):
 
     patient = models.ForeignKey('patients.Patient', on_delete=models.CASCADE, related_name='physio_orders')
     ordered_by = models.ForeignKey('accounts.User', on_delete=models.CASCADE, related_name='physio_orders_created')
+    visit = models.ForeignKey(
+        'patients.Visit',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='physio_orders',
+        help_text="Visit this physio order is associated with (for multi-clinic visits)"
+    )
     consultation_session = models.ForeignKey(
         'consultation.ConsultationSession',
         on_delete=models.SET_NULL,

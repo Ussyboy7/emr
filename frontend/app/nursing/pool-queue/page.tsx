@@ -405,6 +405,8 @@ export default function NursingPoolQueuePage() {
             visitId: visit.visit_id || String(visit.id), // Visit ID string (VIS-...)
             personalNumber: '', // Not used for search, keep empty
             clinic: visit.clinic || 'GOPD',
+            clinics: (visit.clinics && visit.clinics.length > 0 ? visit.clinics : [visit.clinic]) as string[], // All clinics for this visit
+            completedClinics: (visit.completed_clinics || []) as string[], // Completed clinics
             visitDate: visit.date,
             visitTime: visit.time,
             visitType: visit.visit_type || 'consultation', // Keep lowercase for filtering
@@ -453,6 +455,8 @@ export default function NursingPoolQueuePage() {
     visitId: string;
     personalNumber: string;
     clinic: string;
+    clinics?: string[]; // Multiple clinics for this visit
+    completedClinics?: string[]; // Completed clinics
     visitDate: string;
     visitTime: string;
     visitType: string;
@@ -1104,35 +1108,66 @@ export default function NursingPoolQueuePage() {
                               <Edit className="h-4 w-4 text-muted-foreground hover:text-blue-500" />
                             </Button>
                           )}
-                          {clinicMatches(patient.clinic, 'Physiotherapy') ? (
-                            patient.sentToPhysio ? (
-                              <div className="h-7 w-7 flex items-center justify-center rounded border border-indigo-500/50 text-indigo-600 dark:text-indigo-400 bg-indigo-500/10">
-                                <CheckCircle2 className="h-4 w-4" />
-                              </div>
-                            ) : (
-                              (patient.nursingStatus === 'Vitals Recorded' || patient.nursingStatus === 'Ready for Consultation') && (
-                                <Button
-                                  size="sm"
-                                  onClick={() => handleSendToPhysio(patient)}
-                                  className="h-7 px-2 bg-indigo-500 hover:bg-indigo-600 text-white text-xs"
-                                  disabled={sendingToPhysioVisitId === patient.visitNumericId}
-                                >
-                                  {sendingToPhysioVisitId === patient.visitNumericId ? (
-                                    <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                                  ) : (
-                                    <Activity className="h-3 w-3 mr-1" />
-                                  )}
-                                  Physio
+                          {/* Action buttons for sending patient to rooms */}
+                          {(() => {
+                            const hasPhysio = patient.clinics?.some((c: string) => clinicMatches(c, 'Physiotherapy'));
+                            const hasOtherClinics = patient.clinics?.some((c: string) => !clinicMatches(c, 'Physiotherapy'));
+                            const isOnlyPhysio = hasPhysio && !hasOtherClinics;
+                            
+                            // If patient has multiple clinics, always show "Send" button for consultation rooms
+                            // Backend will automatically create queue entries for all matching clinic rooms
+                            if (patient.clinics && patient.clinics.length > 1) {
+                              // Multi-clinic patient - show Send button, backend handles routing to all clinics
+                              return patient.sentToPhysio ? (
+                                <div className="h-7 w-7 flex items-center justify-center rounded border border-indigo-500/50 text-indigo-600 dark:text-indigo-400 bg-indigo-500/10">
+                                  <CheckCircle2 className="h-4 w-4" />
+                                </div>
+                              ) : (
+                                (patient.nursingStatus === 'Vitals Recorded' || patient.nursingStatus === 'Ready for Consultation') && (
+                                  <Button 
+                                    size="sm" 
+                                    onClick={() => openRoomPicker(patient)} 
+                                    className="h-7 px-2 bg-emerald-500 hover:bg-emerald-600 text-white text-xs"
+                                  >
+                                    <ArrowRight className="h-3 w-3 mr-1" />Send
+                                  </Button>
+                                )
+                              );
+                            }
+                            
+                            // Single clinic patient - use original logic
+                            if (isOnlyPhysio) {
+                              // Only physiotherapy
+                              return patient.sentToPhysio ? (
+                                <div className="h-7 w-7 flex items-center justify-center rounded border border-indigo-500/50 text-indigo-600 dark:text-indigo-400 bg-indigo-500/10">
+                                  <CheckCircle2 className="h-4 w-4" />
+                                </div>
+                              ) : (
+                                (patient.nursingStatus === 'Vitals Recorded' || patient.nursingStatus === 'Ready for Consultation') && (
+                                  <Button
+                                    size="sm"
+                                    onClick={() => handleSendToPhysio(patient)}
+                                    className="h-7 px-2 bg-indigo-500 hover:bg-indigo-600 text-white text-xs"
+                                    disabled={sendingToPhysioVisitId === patient.visitNumericId}
+                                  >
+                                    {sendingToPhysioVisitId === patient.visitNumericId ? (
+                                      <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                    ) : (
+                                      <Activity className="h-3 w-3 mr-1" />
+                                    )}
+                                    Physio
+                                  </Button>
+                                )
+                              );
+                            } else {
+                              // Not physiotherapy - show room picker
+                              return (patient.nursingStatus === 'Vitals Recorded' || patient.nursingStatus === 'Ready for Consultation') && (
+                                <Button size="sm" onClick={() => openRoomPicker(patient)} className="h-7 px-2 bg-emerald-500 hover:bg-emerald-600 text-white text-xs">
+                                  <ArrowRight className="h-3 w-3 mr-1" />Send
                                 </Button>
-                              )
-                            )
-                          ) : (
-                            (patient.nursingStatus === 'Vitals Recorded' || patient.nursingStatus === 'Ready for Consultation') && (
-                              <Button size="sm" onClick={() => openRoomPicker(patient)} className="h-7 px-2 bg-emerald-500 hover:bg-emerald-600 text-white text-xs">
-                                <ArrowRight className="h-3 w-3 mr-1" />Send
-                              </Button>
-                            )
-                          )}
+                              );
+                            }
+                          })()}
                           {patient.nursingStatus === 'Sent to Room' && (
                             <div className="h-7 w-7 flex items-center justify-center rounded border border-violet-500/50 text-violet-600 dark:text-violet-400 bg-violet-500/10">
                               <CheckCircle2 className="h-4 w-4" />
@@ -1149,7 +1184,28 @@ export default function NursingPoolQueuePage() {
                             <span>•</span>
                           </>
                         )}
-                        <span>{patient.clinic}</span>
+                        {patient.clinics && patient.clinics.length > 1 ? (
+                          <div className="flex gap-1 flex-wrap">
+                            {patient.clinics.map((clinic: string, idx: number) => {
+                              const isCompleted = patient.completedClinics?.includes(clinic);
+                              return (
+                                <Badge 
+                                  key={idx} 
+                                  variant="outline" 
+                                  className={`text-[10px] px-1 py-0 h-4 ${
+                                    isCompleted 
+                                      ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400' 
+                                      : 'bg-blue-500/10 border-blue-500/30 text-blue-600 dark:text-blue-400'
+                                  }`}
+                                >
+                                  {clinic}{isCompleted && ' ✓'}
+                                </Badge>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <span>{patient.clinic || 'GOPD'}</span>
+                        )}
                         <span>•</span>
                         <span>{patient.visitType}</span>
                         <span>•</span>

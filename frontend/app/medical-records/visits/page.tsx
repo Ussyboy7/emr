@@ -88,6 +88,8 @@ export default function VisitsPage() {
     patient: visit.patient_name || `Patient ${visit.patient}`,
     type: visit.visit_type || 'consultation', // Use backend value (lowercase)
     clinic: visit.clinic || '',
+    clinics: visit.clinics || [], // All clinics for this visit
+    completedClinics: visit.completed_clinics || [], // Completed clinics
     date: visit.date,
     time: visit.time,
     status: visit.status === 'scheduled' ? 'Scheduled' :
@@ -544,10 +546,37 @@ export default function VisitsPage() {
                       </Badge>
                     </div>
                     
-                    {/* Row 2: IDs + Clinic + Location + Date/Time */}
-                    <p className="text-xs text-muted-foreground mt-0.5 truncate">
-                      {visit.patientId} • {visit.clinic} • {visit.location} • {visit.date} {visit.time}
-                    </p>
+                    {/* Row 2: IDs + Clinic(s) + Location + Date/Time */}
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5 flex-wrap">
+                      <span>{visit.patientId}</span>
+                      <span>•</span>
+                      {visit.clinics && visit.clinics.length > 1 ? (
+                        <div className="flex gap-1 flex-wrap">
+                          {visit.clinics.map((clinic: string, idx: number) => {
+                            const isCompleted = visit.completedClinics?.includes(clinic);
+                            return (
+                              <Badge 
+                                key={idx} 
+                                variant="outline" 
+                                className={`text-[10px] px-1 py-0 h-4 ${
+                                  isCompleted 
+                                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400' 
+                                    : 'bg-blue-500/10 border-blue-500/30 text-blue-600 dark:text-blue-400'
+                                }`}
+                              >
+                                {clinic}{isCompleted && ' ✓'}
+                              </Badge>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <span>{visit.clinic || 'GOPD'}</span>
+                      )}
+                      <span>•</span>
+                      <span>{visit.location}</span>
+                      <span>•</span>
+                      <span>{visit.date} {visit.time}</span>
+                    </div>
                     {/* Row 3: Notes (if available) */}
                     {visit.notes && (
                       <p className="text-xs text-muted-foreground mt-1 line-clamp-1">

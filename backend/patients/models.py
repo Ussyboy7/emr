@@ -4,6 +4,7 @@ Patient models for the EMR system.
 from django.db import models
 from django.core.validators import RegexValidator
 from django.utils import timezone
+from .validators import validate_personal_number_uniqueness
 
 
 class Patient(models.Model):
@@ -325,8 +326,23 @@ class Patient(models.Model):
 
         return old_patient_id != self.patient_id  # Return True if ID changed
 
+    def clean(self):
+        """Validate model fields before saving."""
+        super().clean()
+        
+        # Validate personal number uniqueness for Employee/Retiree
+        if self.personal_number and self.category in ['employee', 'retiree']:
+            validate_personal_number_uniqueness(
+                self.personal_number,
+                patient_id=self.pk,
+                category=self.category
+            )
+    
     def save(self, *args, **kwargs):
         """Override save to auto-generate patient_id for new patients."""
+        # Validate before saving
+        self.clean()
+        
         # Generate patient_id only for new records
         if not self.pk:
             self.generate_patient_id()
@@ -349,9 +365,8 @@ class Patient(models.Model):
                     else:
                         self.patient_id = f"{original_id}-{counter}"
                 else:
-                    # For employees/retirees, this shouldn't happen if personal_number is unique
-                    # But handle it gracefully
-                    self.patient_id = f"{original_id}-{counter}"
+                    # This should never happen due to validation, but handle gracefully
+                    raise ValueError(f"Unable to generate unique patient_id for {self.category}")
                 counter += 1
                 if counter > 100:  # Safety limit
                     raise ValueError(f"Unable to generate unique patient_id for {self.category}")
@@ -394,7 +409,9 @@ class Visit(models.Model):
     # Visit Details
     date = models.DateField()
     time = models.TimeField()
-    clinic = models.CharField(max_length=100, blank=True)
+    clinic = models.CharField(max_length=100, blank=True)  # Primary clinic (for backward compatibility)
+    clinics = models.JSONField(default=list, blank=True)  # List of all clinics for this visit
+    completed_clinics = models.JSONField(default=list, blank=True)  # Clinics that have been completed
     location = models.CharField(max_length=100, blank=True, null=True)
     doctor = models.ForeignKey(
         'accounts.User',
@@ -449,7 +466,7 @@ class Visit(models.Model):
         if not self.pk:
             self.generate_visit_id()
             
-            # Ensure uniqueness (handle edge cases where multiple visits are created simultaneously)
+            # Handle collisions gracefully (should be rare)
             original_id = self.visit_id
             counter = 1
             while Visit.objects.filter(visit_id=self.visit_id).exists():
@@ -466,6 +483,55 @@ class Visit(models.Model):
                     raise ValueError(f"Unable to generate unique visit_id")
         
         super().save(*args, **kwargs)
+    
+    def save(self, *args, **kwargs):
+        """Override save to auto-generate visit_id, normalize clinic names, and handle multi-clinic."""
+        # Normalize primary clinic name
+        if self.clinic:
+            from common.clinic_utils import normalize_clinic_name
+            self.clinic = normalize_clinic_name(self.clinic)
+        
+        # Sync clinics list with primary clinic field
+        if self.clinic and self.clinic not in self.clinics:
+            if not self.clinics:  # Initialize if empty
+                self.clinics = [self.clinic]
+            else:
+                self.clinics.append(self.clinic)
+        
+        # Ensure uniqueness of clinics
+        if self.clinics:
+            self.clinics = list(dict.fromkeys(self.clinics))  # Remove duplicates while preserving order
+        
+        if not self.pk:
+            self.generate_visit_id()
+            
+            # Handle collisions gracefully (should be rare)
+            original_id = self.visit_id
+            counter = 1
+            while Visit.objects.filter(visit_id=self.visit_id).exists():
+                # Handle collisions by incrementing sequence
+                parts = original_id.split('-')
+                if len(parts) >= 3:
+                    base = '-'.join(parts[:-1])
+                    self.visit_id = f"{base}-{str(int(parts[-1]) + counter).zfill(4)}"
+                else:
+                    # Fallback if format is unexpected
+                    self.visit_id = f"{original_id}-{counter}"
+                counter += 1
+                if counter > 1000:  # Safety limit
+                    raise ValueError(f"Unable to generate unique visit_id")
+        
+        super().save(*args, **kwargs)
+    
+    @property
+    def pending_clinics(self):
+        """Return list of clinics not yet completed."""
+        return [c for c in self.clinics if c not in self.completed_clinics]
+    
+    @property
+    def is_fully_completed(self):
+        """Check if all clinics have been completed."""
+        return bool(self.clinics) and len(self.completed_clinics) == len(self.clinics)
     
     def __str__(self):
         return f"{self.visit_id} - {self.patient.get_full_name()} - {self.date}"

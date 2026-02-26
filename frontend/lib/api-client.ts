@@ -424,6 +424,22 @@ export const apiFetch = async <T = unknown>(path: string, options: FetchOptions 
               (typeof (parsed as any).error === "string" && (parsed as any).error) ||
               (typeof (parsed as any).detail === "string" && (parsed as any).detail) ||
               undefined;
+            
+            // Handle Django REST Framework validation errors
+            // Format: {"field_name": ["error message"]}
+            if (!apiMessage) {
+              const fieldErrors = Object.entries(parsed as Record<string, unknown>).filter(
+                ([key, value]) => key !== 'detail' && key !== 'error' && Array.isArray(value) && value.length > 0
+              );
+              
+              if (fieldErrors.length > 0) {
+                // Take the first error message from the first field
+                const [fieldName, errors] = fieldErrors[0];
+                if (Array.isArray(errors) && errors.length > 0) {
+                  apiMessage = `${fieldName}: ${(errors as string[])[0]}`;
+                }
+              }
+            }
           }
         } catch {
           // Not JSON (could be HTML); ignore.

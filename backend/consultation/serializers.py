@@ -67,7 +67,21 @@ class ConsultationQueueSerializer(serializers.ModelSerializer):
     visit_type = serializers.CharField(source='visit.visit_type', read_only=True, allow_null=True)
     visit_status = serializers.CharField(source='visit.status', read_only=True, allow_null=True)
     visit_clinic = serializers.CharField(source='visit.clinic', read_only=True, allow_null=True)
+    visit_clinics = serializers.SerializerMethodField()  # All clinics for this visit
+    visit_completed_clinics = serializers.SerializerMethodField()  # Completed clinics
     latest_vitals = serializers.SerializerMethodField()
+
+    def get_visit_clinics(self, obj):
+        """Get all clinics for this visit."""
+        if not obj.visit:
+            return []
+        return getattr(obj.visit, 'clinics', []) or []
+    
+    def get_visit_completed_clinics(self, obj):
+        """Get completed clinics for this visit."""
+        if not obj.visit:
+            return []
+        return getattr(obj.visit, 'completed_clinics', []) or []
 
     def get_latest_vitals(self, obj):
         visit = getattr(obj, 'visit', None)
@@ -90,6 +104,7 @@ class ConsultationQueueSerializer(serializers.ModelSerializer):
             'patient_name', 'patient_id', 'patient_age', 'patient_gender',
             'room_name', 'visit_display_id', 'visit_date',
             'visit_time', 'visit_type', 'visit_status', 'visit_clinic',
+            'visit_clinics', 'visit_completed_clinics',  # Multi-clinic support
             'patient_details', 'latest_vitals',
         ]
         read_only_fields = ['queued_at', 'id']

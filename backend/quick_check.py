@@ -1,0 +1,1 @@
+import os; import django; os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'emr_backend.settings'); django.setup(); from patients.models import Patient; print('Categories:', list(Patient.objects.values_list('category', flat=True).distinct())); print('Empty first_name:', Patient.objects.filter(first_name='').count())

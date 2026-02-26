@@ -20,7 +20,7 @@ import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { 
   Calendar, User, Send, Stethoscope, ClipboardList, Search, AlertTriangle,
-  MapPin, FileText, Users, CheckCircle2, Clock, Loader2, CheckCircle
+  MapPin, FileText, Users, CheckCircle2, Clock, Loader2, CheckCircle, X
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { CLINICS } from '@/lib/constants/clinics';
@@ -64,7 +64,8 @@ function NewVisitPageContent() {
   const [formData, setFormData] = useState({
     patientId: patientIdParam || '',
     visitType: '',
-    clinic: '',
+    clinic: '', // Primary clinic (for backward compatibility)
+    clinics: [] as string[], // All clinics for this visit
     location: '',
     visitDate: '',
     visitTime: '',
@@ -153,6 +154,23 @@ function NewVisitPageContent() {
 
   const handleInputChange = (field: string, value: string) => setFormData(prev => ({ ...prev, [field]: value }));
 
+  const handleClinicToggle = (clinicName: string) => {
+    setFormData(prev => {
+      const currentClinics = [...prev.clinics];
+      const index = currentClinics.indexOf(clinicName);
+      
+      if (index > -1) {
+        // Remove clinic if already selected
+        currentClinics.splice(index, 1);
+      } else {
+        // Add clinic if not selected
+        currentClinics.push(clinicName);
+      }
+      
+      return { ...prev, clinics: currentClinics };
+    });
+  };
+
   const handlePatientSelect = (patientId: string) => {
     const patient = patients.find(p => p.id === patientId);
     if (patient) { 
@@ -164,11 +182,11 @@ function NewVisitPageContent() {
   // Calculate completion percentage
   const completionPercentage = useMemo(() => {
     let completed = 0;
-    let total = 5; // patient, visitType, clinic, location, date
+    let total = 5; // patient, visitType, clinic(s), location, date
 
     if (selectedPatient) completed++;
     if (formData.visitType) completed++;
-    if (formData.clinic) completed++;
+    if (formData.clinics.length > 0) completed++; // At least one clinic selected
     if (formData.location) completed++;
     if (formData.visitDate) completed++;
 
@@ -176,7 +194,7 @@ function NewVisitPageContent() {
   }, [selectedPatient, formData]);
 
   const handleSubmit = async () => {
-    if (!selectedPatient || !formData.visitType || !formData.clinic || !formData.location) {
+    if (!selectedPatient || !formData.visitType || formData.clinics.length === 0 || !formData.location) {
       toast.error('Please fill in all required fields');
       return;
     }
@@ -185,18 +203,24 @@ function NewVisitPageContent() {
       setIsSubmitting(true);
 
       // Prepare visit data for API
+      // Ensure proper data types and format
+      const patientId = selectedPatient.numericId || selectedPatient.id;
+      const primaryClinic = formData.clinics[0]; // First clinic is primary
       const visitData = {
-        patient: selectedPatient.numericId || selectedPatient.id,
+        patient: typeof patientId === 'string' ? parseInt(patientId, 10) : patientId,
         visit_type: formData.visitType,
-        clinic: normalizeClinicName(formData.clinic),
+        clinic: normalizeClinicName(primaryClinic), // Primary clinic (backward compatibility)
+        clinics: formData.clinics.map(c => normalizeClinicName(c)), // All clinics
         location: formData.location || '',
         date: formData.visitDate,
-        time: formData.visitTime,
+        // Ensure time is in HH:MM:SS format for Django
+        time: formData.visitTime && formData.visitTime.length === 5 ? `${formData.visitTime}:00` : formData.visitTime,
         clinical_notes: formData.notes || '',
         status: 'scheduled',
       };
 
-      console.log('Sending visit data:', visitData);
+      console.log('Creating visit with data:', visitData);
+
       const createdVisit = await visitService.createVisit(visitData);
       
       // Get visit ID
@@ -216,7 +240,7 @@ function NewVisitPageContent() {
         date: formattedDate,
         time: formData.visitTime,
         location: formData.location,
-        clinic: formData.clinic,
+        clinic: formData.clinics.join(', '), // Show all clinics
       });
       
       // Show success dialog
@@ -228,18 +252,25 @@ function NewVisitPageContent() {
       
     } catch (err: any) {
       console.error('Error creating visit:', err);
-      console.error('Error details:', {
-        message: err.message,
-        status: err.status,
-        apiMessage: err.apiMessage,
-        body: err.body
-      });
-      
       if (isAuthenticationError(err)) {
         setAuthError(err);
       } else {
-        // Show more detailed error message
-        const errorMessage = err.apiMessage || err.message || 'Failed to create visit. Please try again.';
+        // Try to extract more detailed error message from the API response
+        let errorMessage = 'Failed to create visit. Please try again.';
+        
+        if (err.apiMessage) {
+          errorMessage = err.apiMessage;
+        } else if (err.message) {
+          // Check if the message contains useful information
+          const msg = err.message;
+          if (msg.includes('non_field_errors')) {
+            // Try to extract the actual error from the serialized error
+            errorMessage = 'This patient already has an open visit for this date. Please complete or cancel the existing visit first.';
+          } else if (msg !== 'Request failed. Please try again') {
+            errorMessage = msg;
+          }
+        }
+        
         toast.error(errorMessage);
         setIsSubmitting(false);
       }
@@ -421,20 +452,53 @@ function NewVisitPageContent() {
                 <Separator />
 
                 {/* Clinic & Location */}
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label>Clinic *</Label>
-                    <Select value={formData.clinic} onValueChange={(v) => handleInputChange('clinic', v)}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select clinic" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {clinics.map(clinic => (
-                          <SelectItem key={clinic} value={clinic}>{clinic}</SelectItem>
+                <div className="space-y-4">
+                  {/* Multi-Clinic Selection */}
+                  <div className="space-y-3">
+                    <Label>Clinics *</Label>
+                    <p className="text-xs text-muted-foreground">Select one or more clinics for this visit (e.g., GOPD, Eye, Physiotherapy)</p>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-2 max-h-[300px] overflow-y-auto p-2 border rounded-lg">
+                      {clinics.map((clinic) => {
+                        const isSelected = formData.clinics.includes(clinic);
+                        return (
+                          <div
+                            key={clinic}
+                            onClick={() => handleClinicToggle(clinic)}
+                            className={`p-2 rounded-md cursor-pointer transition-all text-center ${
+                              isSelected
+                                ? 'border-teal-500 bg-teal-500/10'
+                                : 'border-border hover:border-primary/50'
+                            }`}
+                          >
+                            <p className={`font-medium text-sm ${isSelected ? 'text-teal-600 dark:text-teal-400' : 'text-foreground'}`}>
+                              {clinic}
+                            </p>
+                            {isSelected && (
+                              <CheckCircle className="h-3 w-3 mx-auto mt-1 text-teal-600 dark:text-teal-400" />
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    {formData.clinics.length > 0 && (
+                      <div className="flex flex-wrap gap-2 mt-2">
+                        {formData.clinics.map((clinic) => (
+                          <Badge key={clinic} variant="secondary" className="gap-1">
+                            {clinic}
+                            <button
+                              onClick={() => handleClinicToggle(clinic)}
+                              className="ml-1 hover:text-destructive"
+                              type="button"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          </Badge>
                         ))}
-                      </SelectContent>
-                    </Select>
+                      </div>
+                    )}
                   </div>
+
+                  {/* Location */}
                   <div className="space-y-2">
                     <Label>Location *</Label>
                     <Select value={formData.location} onValueChange={(v) => handleInputChange('location', v)}>
@@ -487,7 +551,7 @@ function NewVisitPageContent() {
                 <div className="flex justify-end pt-4">
                   <Button 
                     onClick={handleSubmit} 
-                    disabled={isSubmitting || !selectedPatient || !formData.visitType || !formData.clinic || !formData.location}
+                    disabled={isSubmitting || !selectedPatient || !formData.visitType || formData.clinics.length === 0 || !formData.location}
                     className="bg-gradient-to-r from-teal-500 to-cyan-500 hover:from-teal-600 hover:to-cyan-600 text-white"
                   >
                     {isSubmitting ? (
@@ -539,7 +603,9 @@ function NewVisitPageContent() {
                   </div>
                   <div className="flex items-start justify-between">
                     <span className="text-muted-foreground">Clinic</span>
-                    <span className="font-medium capitalize">{formData.clinic || '—'}</span>
+                    <span className="font-medium text-right max-w-[120px] truncate">
+                      {formData.clinics.length > 0 ? formData.clinics.join(', ') : '—'}
+                    </span>
                   </div>
                   <div className="flex items-start justify-between">
                     <span className="text-muted-foreground">Location</span>
@@ -652,6 +718,7 @@ function NewVisitPageContent() {
                     patientId: '',
                     visitType: '',
                     clinic: '',
+                    clinics: [],
                     location: '',
                     visitDate: new Date().toISOString().split('T')[0],
                     visitTime: new Date().toTimeString().slice(0, 5),

@@ -105,6 +105,8 @@ export interface Visit {
   date: string;
   time: string;
   clinic?: string;
+  clinics?: string[]; // Multiple clinics for this visit
+  completed_clinics?: string[]; // Clinics that have been completed
   location?: string;
   doctor?: number;
   doctor_name?: string;

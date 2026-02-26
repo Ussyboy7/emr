@@ -380,42 +380,80 @@ class AttendanceSummaryReportView(views.APIView):
         ).exclude(patient__employee_type__isnull=True).exclude(patient__employee_type='')
         
         # Filter by employee_type containing 'Officer' (case-insensitive)
-        officers_count = officers_visits.filter(
-            patient__employee_type__icontains='officer'
+        officers_male = officers_visits.filter(
+            patient__employee_type__icontains='officer',
+            patient__gender='male'
         ).values('patient').distinct().count()
+        officers_female = officers_visits.filter(
+            patient__employee_type__icontains='officer',
+            patient__gender='female'
+        ).values('patient').distinct().count()
+        officers_count = officers_male + officers_female
         
         # Staff (employees that are not officers)
-        staff_count = officers_visits.exclude(
+        staff_male = officers_visits.exclude(
             patient__employee_type__icontains='officer'
+        ).filter(
+            patient__gender='male'
         ).values('patient').distinct().count()
+        staff_female = officers_visits.exclude(
+            patient__employee_type__icontains='officer'
+        ).filter(
+            patient__gender='female'
+        ).values('patient').distinct().count()
+        staff_count = staff_male + staff_female
         
         # Employee Dependents
         emp_dep_visits = visits_queryset.filter(patient__category='dependent')
-        emp_dep_count = emp_dep_visits.exclude(
+        emp_dep_male = emp_dep_visits.exclude(
             patient__dependent_type__isnull=True
         ).filter(
-            patient__dependent_type__icontains='employee'
+            patient__dependent_type__icontains='employee',
+            patient__gender='male'
         ).values('patient').distinct().count()
+        emp_dep_female = emp_dep_visits.exclude(
+            patient__dependent_type__isnull=True
+        ).filter(
+            patient__dependent_type__icontains='employee',
+            patient__gender='female'
+        ).values('patient').distinct().count()
+        emp_dep_count = emp_dep_male + emp_dep_female
         
         # Retiree Dependents
-        ret_dep_count = emp_dep_visits.exclude(
+        ret_dep_male = emp_dep_visits.exclude(
             patient__dependent_type__isnull=True
         ).filter(
-            patient__dependent_type__icontains='retiree'
+            patient__dependent_type__icontains='retiree',
+            patient__gender='male'
         ).values('patient').distinct().count()
+        ret_dep_female = emp_dep_visits.exclude(
+            patient__dependent_type__isnull=True
+        ).filter(
+            patient__dependent_type__icontains='retiree',
+            patient__gender='female'
+        ).values('patient').distinct().count()
+        ret_dep_count = ret_dep_male + ret_dep_female
         
         # Non-NPA
         nonnpa_visits = visits_queryset.filter(patient__category='nonnpa')
-        nonnpa_count = nonnpa_visits.values('patient').distinct().count()
+        nonnpa_male = nonnpa_visits.filter(patient__gender='male').values('patient').distinct().count()
+        nonnpa_female = nonnpa_visits.filter(patient__gender='female').values('patient').distinct().count()
+        nonnpa_count = nonnpa_male + nonnpa_female
         
         # Retirees
         retiree_visits = visits_queryset.filter(patient__category='retiree')
-        retiree_count = retiree_visits.values('patient').distinct().count()
+        retiree_male = retiree_visits.filter(patient__gender='male').values('patient').distinct().count()
+        retiree_female = retiree_visits.filter(patient__gender='female').values('patient').distinct().count()
+        retiree_count = retiree_male + retiree_female
         
         # Calculate totals
         total_employee = officers_count + staff_count
         total_non_employee = emp_dep_count + ret_dep_count + nonnpa_count + retiree_count
         grand_total = total_employee + total_non_employee
+        
+        # Calculate gender totals
+        total_male = officers_male + staff_male + emp_dep_male + ret_dep_male + nonnpa_male + retiree_male
+        total_female = officers_female + staff_female + emp_dep_female + ret_dep_female + nonnpa_female + retiree_female
         
         # Build response data
         categories = [
@@ -424,6 +462,8 @@ class AttendanceSummaryReportView(views.APIView):
                 'category': 'Officers',
                 'employee': officers_count,
                 'non_employee': 0,
+                'male': officers_male,
+                'female': officers_female,
                 'total': officers_count,
                 'percentage': round((officers_count / grand_total * 100) if grand_total > 0 else 0, 1)
             },
@@ -432,6 +472,8 @@ class AttendanceSummaryReportView(views.APIView):
                 'category': 'Staff',
                 'employee': staff_count,
                 'non_employee': 0,
+                'male': staff_male,
+                'female': staff_female,
                 'total': staff_count,
                 'percentage': round((staff_count / grand_total * 100) if grand_total > 0 else 0, 1)
             },
@@ -440,6 +482,8 @@ class AttendanceSummaryReportView(views.APIView):
                 'category': 'Employee Dependents',
                 'employee': 0,
                 'non_employee': emp_dep_count,
+                'male': emp_dep_male,
+                'female': emp_dep_female,
                 'total': emp_dep_count,
                 'percentage': round((emp_dep_count / grand_total * 100) if grand_total > 0 else 0, 1)
             },
@@ -448,6 +492,8 @@ class AttendanceSummaryReportView(views.APIView):
                 'category': 'Retiree Dependents',
                 'employee': 0,
                 'non_employee': ret_dep_count,
+                'male': ret_dep_male,
+                'female': ret_dep_female,
                 'total': ret_dep_count,
                 'percentage': round((ret_dep_count / grand_total * 100) if grand_total > 0 else 0, 1)
             },
@@ -456,6 +502,8 @@ class AttendanceSummaryReportView(views.APIView):
                 'category': 'Non-NPA',
                 'employee': 0,
                 'non_employee': nonnpa_count,
+                'male': nonnpa_male,
+                'female': nonnpa_female,
                 'total': nonnpa_count,
                 'percentage': round((nonnpa_count / grand_total * 100) if grand_total > 0 else 0, 1)
             },
@@ -464,6 +512,8 @@ class AttendanceSummaryReportView(views.APIView):
                 'category': 'Retirees',
                 'employee': 0,
                 'non_employee': retiree_count,
+                'male': retiree_male,
+                'female': retiree_female,
                 'total': retiree_count,
                 'percentage': round((retiree_count / grand_total * 100) if grand_total > 0 else 0, 1)
             }
@@ -477,6 +527,8 @@ class AttendanceSummaryReportView(views.APIView):
             'summary': {
                 'total_employee': total_employee,
                 'total_non_employee': total_non_employee,
+                'total_male': total_male,
+                'total_female': total_female,
                 'grand_total': grand_total
             }
         })
@@ -552,28 +604,60 @@ class LaboratoryAttendanceReportView(views.APIView):
         for i, month_name in enumerate(months, 1):
             month_orders = lab_orders.filter(month=i)
             
-            # Count by category (unique patients)
-            officers = month_orders.filter(
+            # Count by category with gender breakdown (unique patients)
+            officers_male = month_orders.filter(
                 patient__category='employee',
-                patient__employee_type__icontains='officer'
+                patient__employee_type__icontains='officer',
+                patient__gender='male'
             ).values('patient').distinct().count()
+            officers_female = month_orders.filter(
+                patient__category='employee',
+                patient__employee_type__icontains='officer',
+                patient__gender='female'
+            ).values('patient').distinct().count()
+            officers = officers_male + officers_female
             
-            staff = month_orders.filter(
-                patient__category='employee'
+            staff_male = month_orders.filter(
+                patient__category='employee',
+                patient__gender='male'
             ).exclude(patient__employee_type__icontains='officer').values('patient').distinct().count()
+            staff_female = month_orders.filter(
+                patient__category='employee',
+                patient__gender='female'
+            ).exclude(patient__employee_type__icontains='officer').values('patient').distinct().count()
+            staff = staff_male + staff_female
             
-            dependents = month_orders.filter(
+            dependents_male = month_orders.filter(
                 patient__category='dependent',
-                patient__dependent_type__icontains='employee'
+                patient__dependent_type__icontains='employee',
+                patient__gender='male'
             ).values('patient').distinct().count()
+            dependents_female = month_orders.filter(
+                patient__category='dependent',
+                patient__dependent_type__icontains='employee',
+                patient__gender='female'
+            ).values('patient').distinct().count()
+            dependents = dependents_male + dependents_female
             
-            retirees = month_orders.filter(
-                patient__category='retiree'
+            retirees_male = month_orders.filter(
+                patient__category='retiree',
+                patient__gender='male'
             ).values('patient').distinct().count()
+            retirees_female = month_orders.filter(
+                patient__category='retiree',
+                patient__gender='female'
+            ).values('patient').distinct().count()
+            retirees = retirees_male + retirees_female
             
-            non_npa = month_orders.filter(
-                patient__category='nonnpa'
+            non_npa_male = month_orders.filter(
+                patient__category='nonnpa',
+                patient__gender='male'
             ).values('patient').distinct().count()
+            non_npa_female = month_orders.filter(
+                patient__category='nonnpa',
+                patient__gender='female'
+            ).values('patient').distinct().count()
+            non_npa = non_npa_male + non_npa_female
             
             month_total = officers + staff + dependents + retirees + non_npa
             
@@ -582,11 +666,23 @@ class LaboratoryAttendanceReportView(views.APIView):
                     'sn': len(monthly_data) + 1,
                     'month': month_name,
                     'officers': officers,
+                    'officers_male': officers_male,
+                    'officers_female': officers_female,
                     'staff': staff,
+                    'staff_male': staff_male,
+                    'staff_female': staff_female,
                     'dependents': dependents,
+                    'dependents_male': dependents_male,
+                    'dependents_female': dependents_female,
                     'retirees': retirees,
+                    'retirees_male': retirees_male,
+                    'retirees_female': retirees_female,
                     'non_npa': non_npa,
-                    'total': month_total
+                    'non_npa_male': non_npa_male,
+                    'non_npa_female': non_npa_female,
+                    'total': month_total,
+                    'total_male': officers_male + staff_male + dependents_male + retirees_male + non_npa_male,
+                    'total_female': officers_female + staff_female + dependents_female + retirees_female + non_npa_female
                 })
                 total += month_total
         
@@ -608,38 +704,108 @@ class ServicesActivitiesReportView(views.APIView):
         except (ValueError, TypeError):
             year_int = timezone.now().year
         
-        # Get procedures for the year
+        # Get procedures for the year with gender breakdown
         procedures = Procedure.objects.filter(
             performed_at__year=year_int
-        )
+        ).select_related('patient')
         
-        # Count by procedure type
-        injections = procedures.filter(procedure_type='injection').count()
-        dressing = procedures.filter(procedure_type='dressing').count()
+        # Count by procedure type with gender breakdown
+        injections_male = procedures.filter(
+            procedure_type='injection',
+            patient__gender='male'
+        ).count()
+        injections_female = procedures.filter(
+            procedure_type='injection',
+            patient__gender='female'
+        ).count()
+        injections = injections_male + injections_female
         
-        # Get nursing orders for sick leave tracking (if applicable)
-        # For now, we'll use a simplified approach
+        dressing_male = procedures.filter(
+            procedure_type='dressing',
+            patient__gender='male'
+        ).count()
+        dressing_female = procedures.filter(
+            procedure_type='dressing',
+            patient__gender='female'
+        ).count()
+        dressing = dressing_male + dressing_female
+        
+        # Get nursing orders for sick leave tracking with gender breakdown
         nursing_orders = NursingOrder.objects.filter(
             ordered_at__year=year_int,
             order_type__icontains='sick'
-        ).count()
+        ).select_related('patient')
         
-        # Get referrals from consultation
+        sick_leave_male = nursing_orders.filter(
+            patient__gender='male'
+        ).count()
+        sick_leave_female = nursing_orders.filter(
+            patient__gender='female'
+        ).count()
+        sick_leave = sick_leave_male + sick_leave_female
+        
+        # Get referrals from consultation with gender breakdown
         referrals = Referral.objects.filter(
             created_at__year=year_int
-        ).count()
+        ).select_related('patient')
         
-        # Get observations (can be from consultation sessions)
-        observations = ConsultationSession.objects.filter(
+        referrals_male = referrals.filter(
+            patient__gender='male'
+        ).count()
+        referrals_female = referrals.filter(
+            patient__gender='female'
+        ).count()
+        referrals_total = referrals_male + referrals_female
+        
+        # Get observations (can be from consultation sessions) with gender breakdown
+        observations_qs = ConsultationSession.objects.filter(
             started_at__year=year_int
-        ).exclude(assessment='').exclude(assessment__isnull=True).count()
+        ).exclude(assessment='').exclude(assessment__isnull=True).select_related('patient')
+        
+        observations_male = observations_qs.filter(
+            patient__gender='male'
+        ).count()
+        observations_female = observations_qs.filter(
+            patient__gender='female'
+        ).count()
+        observations = observations_male + observations_female
         
         categories = [
-            {'sn': 1, 'category': 'Injections', 'count': injections},
-            {'sn': 2, 'category': 'Dressing', 'count': dressing},
-            {'sn': 3, 'category': 'Sick Leave', 'count': nursing_orders},
-            {'sn': 4, 'category': 'Referrals', 'count': referrals},
-            {'sn': 5, 'category': 'Observations', 'count': observations},
+            {
+                'sn': 1, 
+                'category': 'Injections', 
+                'count': injections,
+                'male': injections_male,
+                'female': injections_female
+            },
+            {
+                'sn': 2, 
+                'category': 'Dressing', 
+                'count': dressing,
+                'male': dressing_male,
+                'female': dressing_female
+            },
+            {
+                'sn': 3, 
+                'category': 'Sick Leave', 
+                'count': sick_leave,
+                'male': sick_leave_male,
+                'female': sick_leave_female
+            },
+            {
+                'sn': 4, 
+                'category': 'Referrals', 
+                'count': referrals_total,
+                'male': referrals_male,
+                'female': referrals_female
+            },
+            {
+                'sn': 5, 
+                'category': 'Observations', 
+                'count': observations,
+                'male': observations_male,
+                'female': observations_female
+            },
         ]
         
         # Filter out zero counts
@@ -789,19 +955,25 @@ class ClinicAttendanceReportView(views.APIView):
         for i, month_name in enumerate(months, 1):
             month_visits = visits_queryset.filter(date__month=i)
             
-            # Count unique employees
+            # Count unique employees with gender breakdown
             employee_visits = month_visits.filter(
                 Q(patient__category='employee') |
                 Q(patient__category='retiree')
             ).values('patient').distinct()
-            employee_count = employee_visits.count()
             
-            # Count unique non-employees
+            employee_male = employee_visits.filter(patient__gender='male').count()
+            employee_female = employee_visits.filter(patient__gender='female').count()
+            employee_count = employee_male + employee_female
+            
+            # Count unique non-employees with gender breakdown
             non_employee_visits = month_visits.filter(
                 Q(patient__category='dependent') |
                 Q(patient__category='nonnpa')
             ).values('patient').distinct()
-            non_employee_count = non_employee_visits.count()
+            
+            non_employee_male = non_employee_visits.filter(patient__gender='male').count()
+            non_employee_female = non_employee_visits.filter(patient__gender='female').count()
+            non_employee_count = non_employee_male + non_employee_female
             
             month_total = employee_count + non_employee_count
             
@@ -810,8 +982,14 @@ class ClinicAttendanceReportView(views.APIView):
                     'sn': len(monthly_data) + 1,
                     'month': month_name,
                     'employee': employee_count,
+                    'employee_male': employee_male,
+                    'employee_female': employee_female,
                     'non_employee': non_employee_count,
-                    'total': month_total
+                    'non_employee_male': non_employee_male,
+                    'non_employee_female': non_employee_female,
+                    'total': month_total,
+                    'total_male': employee_male + non_employee_male,
+                    'total_female': employee_female + non_employee_female
                 })
                 total_employee += employee_count
                 total_non_employee += non_employee_count
@@ -845,28 +1023,58 @@ class RadiologicalServicesReportView(views.APIView):
             created_at__year=year_int
         ).select_related('order__patient')
         
-        # Count by modality/type
-        xray_count = studies.filter(
-            Q(modality__icontains='x-ray') | Q(modality__icontains='xray') | Q(procedure__icontains='x-ray')
+        # Count by modality/type with gender breakdown
+        xray_male = studies.filter(
+            Q(modality__icontains='x-ray') | Q(modality__icontains='xray') | Q(procedure__icontains='x-ray'),
+            order__patient__gender='male'
         ).count()
-        
-        ecg_count = studies.filter(
-            Q(modality__icontains='ecg') | Q(procedure__icontains='ecg') | Q(procedure__icontains='electrocardiogram')
+        xray_female = studies.filter(
+            Q(modality__icontains='x-ray') | Q(modality__icontains='xray') | Q(procedure__icontains='x-ray'),
+            order__patient__gender='female'
         ).count()
+        xray_count = xray_male + xray_female
         
-        ultrasound_count = studies.filter(
-            Q(modality__icontains='ultrasound') | Q(procedure__icontains='ultrasound')
+        ecg_male = studies.filter(
+            Q(modality__icontains='ecg') | Q(procedure__icontains='ecg') | Q(procedure__icontains='electrocardiogram'),
+            order__patient__gender='male'
         ).count()
-        
-        ct_count = studies.filter(
-            Q(modality__icontains='ct') | Q(modality__icontains='computed tomography') | Q(procedure__icontains='ct scan')
+        ecg_female = studies.filter(
+            Q(modality__icontains='ecg') | Q(procedure__icontains='ecg') | Q(procedure__icontains='electrocardiogram'),
+            order__patient__gender='female'
         ).count()
+        ecg_count = ecg_male + ecg_female
         
-        mri_count = studies.filter(
-            Q(modality__icontains='mri') | Q(procedure__icontains='magnetic resonance')
+        ultrasound_male = studies.filter(
+            Q(modality__icontains='ultrasound') | Q(procedure__icontains='ultrasound'),
+            order__patient__gender='male'
         ).count()
+        ultrasound_female = studies.filter(
+            Q(modality__icontains='ultrasound') | Q(procedure__icontains='ultrasound'),
+            order__patient__gender='female'
+        ).count()
+        ultrasound_count = ultrasound_male + ultrasound_female
         
-        other_count = studies.exclude(
+        ct_male = studies.filter(
+            Q(modality__icontains='ct') | Q(modality__icontains='computed tomography') | Q(procedure__icontains='ct scan'),
+            order__patient__gender='male'
+        ).count()
+        ct_female = studies.filter(
+            Q(modality__icontains='ct') | Q(modality__icontains='computed tomography') | Q(procedure__icontains='ct scan'),
+            order__patient__gender='female'
+        ).count()
+        ct_count = ct_male + ct_female
+        
+        mri_male = studies.filter(
+            Q(modality__icontains='mri') | Q(procedure__icontains='magnetic resonance'),
+            order__patient__gender='male'
+        ).count()
+        mri_female = studies.filter(
+            Q(modality__icontains='mri') | Q(procedure__icontains='magnetic resonance'),
+            order__patient__gender='female'
+        ).count()
+        mri_count = mri_male + mri_female
+        
+        other_male = studies.exclude(
             Q(modality__icontains='x-ray') | Q(modality__icontains='xray') |
             Q(modality__icontains='ecg') | Q(modality__icontains='ultrasound') |
             Q(modality__icontains='ct') | Q(modality__icontains='mri')
@@ -874,17 +1082,69 @@ class RadiologicalServicesReportView(views.APIView):
             Q(procedure__icontains='x-ray') | Q(procedure__icontains='ecg') |
             Q(procedure__icontains='ultrasound') | Q(procedure__icontains='ct scan') |
             Q(procedure__icontains='magnetic resonance')
+        ).filter(
+            order__patient__gender='male'
         ).count()
+        other_female = studies.exclude(
+            Q(modality__icontains='x-ray') | Q(modality__icontains='xray') |
+            Q(modality__icontains='ecg') | Q(modality__icontains='ultrasound') |
+            Q(modality__icontains='ct') | Q(modality__icontains='mri')
+        ).exclude(
+            Q(procedure__icontains='x-ray') | Q(procedure__icontains='ecg') |
+            Q(procedure__icontains='ultrasound') | Q(procedure__icontains='ct scan') |
+            Q(procedure__icontains='magnetic resonance')
+        ).filter(
+            order__patient__gender='female'
+        ).count()
+        other_count = other_male + other_female
         
         total = studies.count()
+        total_male = xray_male + ecg_male + ultrasound_male + ct_male + mri_male + other_male
+        total_female = xray_female + ecg_female + ultrasound_female + ct_female + mri_female + other_female
         
         categories = [
-            {'sn': 1, 'category': 'X-Ray', 'count': xray_count},
-            {'sn': 2, 'category': 'ECG', 'count': ecg_count},
-            {'sn': 3, 'category': 'Ultrasound', 'count': ultrasound_count},
-            {'sn': 4, 'category': 'CT Scan', 'count': ct_count},
-            {'sn': 5, 'category': 'MRI', 'count': mri_count},
-            {'sn': 6, 'category': 'Other', 'count': other_count},
+            {
+                'sn': 1, 
+                'category': 'X-Ray', 
+                'count': xray_count,
+                'male': xray_male,
+                'female': xray_female
+            },
+            {
+                'sn': 2, 
+                'category': 'ECG', 
+                'count': ecg_count,
+                'male': ecg_male,
+                'female': ecg_female
+            },
+            {
+                'sn': 3, 
+                'category': 'Ultrasound', 
+                'count': ultrasound_count,
+                'male': ultrasound_male,
+                'female': ultrasound_female
+            },
+            {
+                'sn': 4, 
+                'category': 'CT Scan', 
+                'count': ct_count,
+                'male': ct_male,
+                'female': ct_female
+            },
+            {
+                'sn': 5, 
+                'category': 'MRI', 
+                'count': mri_count,
+                'male': mri_male,
+                'female': mri_female
+            },
+            {
+                'sn': 6, 
+                'category': 'Other', 
+                'count': other_count,
+                'male': other_male,
+                'female': other_female
+            },
         ]
         
         # Filter out zero counts
@@ -1046,33 +1306,72 @@ class GOPAttendanceReportView(views.APIView):
         for i, month_name in enumerate(months, 1):
             month_visits = visits.filter(month=i)
             
-            # Count by category (unique patients)
-            officers = month_visits.filter(
+            # Count by category with gender breakdown (unique patients)
+            officers_male = month_visits.filter(
                 patient__category='employee',
-                patient__employee_type__icontains='officer'
+                patient__employee_type__icontains='officer',
+                patient__gender='male'
             ).values('patient').distinct().count()
+            officers_female = month_visits.filter(
+                patient__category='employee',
+                patient__employee_type__icontains='officer',
+                patient__gender='female'
+            ).values('patient').distinct().count()
+            officers = officers_male + officers_female
             
-            staff = month_visits.filter(
-                patient__category='employee'
+            staff_male = month_visits.filter(
+                patient__category='employee',
+                patient__gender='male'
             ).exclude(patient__employee_type__icontains='officer').values('patient').distinct().count()
+            staff_female = month_visits.filter(
+                patient__category='employee',
+                patient__gender='female'
+            ).exclude(patient__employee_type__icontains='officer').values('patient').distinct().count()
+            staff = staff_male + staff_female
             
-            dependents = month_visits.filter(
+            dependents_male = month_visits.filter(
                 patient__category='dependent',
-                patient__dependent_type__icontains='employee'
+                patient__dependent_type__icontains='employee',
+                patient__gender='male'
             ).values('patient').distinct().count()
-            
-            retirees = month_visits.filter(
-                patient__category='retiree'
+            dependents_female = month_visits.filter(
+                patient__category='dependent',
+                patient__dependent_type__icontains='employee',
+                patient__gender='female'
             ).values('patient').distinct().count()
+            dependents = dependents_male + dependents_female
             
-            police = month_visits.filter(
+            retirees_male = month_visits.filter(
+                patient__category='retiree',
+                patient__gender='male'
+            ).values('patient').distinct().count()
+            retirees_female = month_visits.filter(
+                patient__category='retiree',
+                patient__gender='female'
+            ).values('patient').distinct().count()
+            retirees = retirees_male + retirees_female
+            
+            police_male = month_visits.filter(
                 patient__category='nonnpa',
-                patient__nonnpa_type__icontains='police'
+                patient__nonnpa_type__icontains='police',
+                patient__gender='male'
             ).values('patient').distinct().count()
+            police_female = month_visits.filter(
+                patient__category='nonnpa',
+                patient__nonnpa_type__icontains='police',
+                patient__gender='female'
+            ).values('patient').distinct().count()
+            police = police_male + police_female
             
-            non_npa = month_visits.filter(
-                patient__category='nonnpa'
+            non_npa_male = month_visits.filter(
+                patient__category='nonnpa',
+                patient__gender='male'
             ).exclude(patient__nonnpa_type__icontains='police').values('patient').distinct().count()
+            non_npa_female = month_visits.filter(
+                patient__category='nonnpa',
+                patient__gender='female'
+            ).exclude(patient__nonnpa_type__icontains='police').values('patient').distinct().count()
+            non_npa = non_npa_male + non_npa_female
             
             month_total = officers + staff + dependents + retirees + police + non_npa
             
@@ -1081,12 +1380,26 @@ class GOPAttendanceReportView(views.APIView):
                     'sn': len(monthly_data) + 1,
                     'month': month_name,
                     'officers': officers,
+                    'officers_male': officers_male,
+                    'officers_female': officers_female,
                     'staff': staff,
+                    'staff_male': staff_male,
+                    'staff_female': staff_female,
                     'dependents': dependents,
+                    'dependents_male': dependents_male,
+                    'dependents_female': dependents_female,
                     'retirees': retirees,
+                    'retirees_male': retirees_male,
+                    'retirees_female': retirees_female,
                     'police': police,
+                    'police_male': police_male,
+                    'police_female': police_female,
                     'non_npa': non_npa,
-                    'total': month_total
+                    'non_npa_male': non_npa_male,
+                    'non_npa_female': non_npa_female,
+                    'total': month_total,
+                    'total_male': officers_male + staff_male + dependents_male + retirees_male + police_male + non_npa_male,
+                    'total_female': officers_female + staff_female + dependents_female + retirees_female + police_female + non_npa_female
                 })
                 totals['officers'] += officers
                 totals['staff'] += staff

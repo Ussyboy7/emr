@@ -37,6 +37,24 @@ class PatientSerializer(serializers.ModelSerializer):
             return obj.photo.url
         return None
     
+    def validate(self, attrs):
+        """Custom validation for patient data."""
+        attrs = super().validate(attrs)
+        
+        # Validate personal number uniqueness for Employee/Retiree
+        personal_number = attrs.get('personal_number')
+        category = attrs.get('category')
+        
+        if personal_number and category in ['employee', 'retiree']:
+            from .validators import validate_personal_number_uniqueness
+            validate_personal_number_uniqueness(
+                personal_number,
+                patient_id=self.instance.id if self.instance else None,
+                category=category
+            )
+        
+        return attrs
+    
 
 
 class PatientListSerializer(serializers.ModelSerializer):
@@ -104,8 +122,9 @@ class VisitSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         """
-        Prevent duplicate *open* visits for same patient on same date.
-
+        Prevent duplicate *open* visits for same patient on same date with SAME clinics.
+        
+        Multi-clinic visits are allowed - a patient can have ONE visit with multiple clinics.
         "Open" = scheduled or in_progress. Completed/cancelled are allowed to have another visit.
         """
         attrs = super().validate(attrs)
@@ -113,6 +132,7 @@ class VisitSerializer(serializers.ModelSerializer):
         patient = attrs.get('patient', self.instance.patient if self.instance else None)
         date = attrs.get('date', self.instance.date if self.instance else None)
         status = attrs.get('status', self.instance.status if self.instance else None)
+        new_clinics = attrs.get('clinics', [])
 
         # Enforce only on create, or when patient/date/status is being changed.
         # This avoids blocking unrelated PATCH updates when duplicates already exist.
@@ -123,13 +143,22 @@ class VisitSerializer(serializers.ModelSerializer):
         if should_check_duplicates and patient and date:
             open_statuses = ['scheduled', 'in_progress']
             if status in open_statuses:
-                qs = Visit.objects.filter(patient=patient, date=date, status__in=open_statuses)
+                # Check for existing open visits
+                existing_visits = Visit.objects.filter(
+                    patient=patient, 
+                    date=date, 
+                    status__in=open_statuses
+                )
                 if self.instance:
-                    qs = qs.exclude(pk=self.instance.pk)
-                if qs.exists():
+                    existing_visits = existing_visits.exclude(pk=self.instance.pk)
+                
+                # If there's an existing visit, check if clinics overlap
+                if existing_visits.exists():
+                    # For now, allow only ONE multi-clinic visit per patient per day
+                    # The visit can have multiple clinics, but we don't allow duplicate visits
                     raise serializers.ValidationError({
                         'non_field_errors': [
-                            'This patient already has an open visit for this date. Please complete or cancel the existing visit first.'
+                            'This patient already has an open visit for this date. Please add all required clinics to the existing visit, or complete/cancel it first.'
                         ]
                     })
 
@@ -139,11 +168,15 @@ class VisitSerializer(serializers.ModelSerializer):
         model = Visit
         fields = [
             'id', 'visit_id', 'patient', 'patient_id', 'patient_name', 'visit_type', 'status',
-            'date', 'time', 'clinic', 'location', 'doctor', 'doctor_name',
+            'date', 'time', 'clinic', 'clinics', 'completed_clinics', 'location', 'doctor', 'doctor_name',
             'clinical_notes', 'vitals',
             'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'visit_id', 'created_at', 'updated_at', 'vitals']
+        extra_kwargs = {
+            'clinics': {'required': False},
+            'completed_clinics': {'required': False},
+        }
 
 
 class VitalReadingSerializer(serializers.ModelSerializer):

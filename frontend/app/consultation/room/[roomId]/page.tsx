@@ -279,6 +279,9 @@ interface Patient {
   tribe?: string;
   photo?: string | null;
   vitals?: { temperature: string; bloodPressure: string; heartRate: string; respiratoryRate: string; oxygenSaturation: string; weight: string; height: string; recordedAt: string };
+  // Multi-clinic support
+  clinics?: string[];
+  completedClinics?: string[];
 }
 
 interface ConsultationRoom {
@@ -1149,6 +1152,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
               tribe: undefined,
             photo: patientDetails?.photo || null,
               vitals: processVitals(vitalsData),
+              // Multi-clinic support
+              clinics: item.visit_clinics || [],
+              completedClinics: item.visit_completed_clinics || [],
             };
 
             // Sanitize to ensure all fields are proper types for React rendering
@@ -8502,6 +8508,27 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                 <Badge variant="outline" className={priorityColor}>
                                   {patient.priority}
                                 </Badge>
+                                {/* Multi-clinic badges */}
+                                {patient.clinics && patient.clinics.length > 0 && (
+                                  <div className="flex gap-1 flex-wrap">
+                                    {patient.clinics.map((clinic: string, idx: number) => {
+                                      const isCompleted = patient.completedClinics?.includes(clinic);
+                                      return (
+                                        <Badge 
+                                          key={idx} 
+                                          variant="outline" 
+                                          className={`text-[10px] px-1 py-0 h-4 ${
+                                            isCompleted 
+                                              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400' 
+                                              : 'bg-blue-500/10 border-blue-500/30 text-blue-600 dark:text-blue-400'
+                                          }`}
+                                        >
+                                          {clinic}{isCompleted && ' ✓'}
+                                        </Badge>
+                                      );
+                                    })}
+                                  </div>
+                                )}
                               </div>
                               <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm text-muted-foreground mb-2">
                                 <div>

@@ -356,12 +356,17 @@ class ConsultationQueueViewSet(viewsets.ModelViewSet):
         return qs
     
     def perform_create(self, serializer):
-        """Create queue item with duplicate prevention."""
+        """Create queue item(s) with duplicate prevention.
+        
+        For multi-clinic visits, create queue entries for all matching clinic rooms.
+        """
         from django.db import IntegrityError
+        from organization.models import Clinic
         
         # Check if patient is already in queue for this room (active)
         room = serializer.validated_data.get('room')
         patient = serializer.validated_data.get('patient')
+        visit = serializer.validated_data.get('visit')
         
         existing = ConsultationQueue.objects.filter(
             room=room,
@@ -377,6 +382,79 @@ class ConsultationQueueViewSet(viewsets.ModelViewSet):
         
         # Save the queue item
         queue_item = serializer.save()
+        
+        # If this visit has multiple clinics, create queue entries for ALL matching clinic rooms
+        if visit and hasattr(visit, 'clinics') and visit.clinics and len(visit.clinics) > 1:
+            # Get all clinics for this visit
+            visit_clinics = visit.clinics
+            
+            # Check if Physiotherapy is one of the clinics
+            has_physio = any('physiotherapy' in clinic.lower() for clinic in visit_clinics)
+            
+            # Create physiotherapy order if needed
+            if has_physio:
+                try:
+                    from physiotherapy.models import PhysioOrder
+                    
+                    # Check if physio order already exists for this visit
+                    physio_order_exists = PhysioOrder.objects.filter(
+                        patient=patient,
+                        visit=visit,
+                        status__in=['pending', 'scheduled', 'in_progress']
+                    ).exists()
+                    
+                    if not physio_order_exists:
+                        # Create physio order automatically
+                        PhysioOrder.objects.create(
+                            patient=patient,
+                            ordered_by=self.request.user,
+                            visit=visit,  # Link to the visit
+                            consultation_session=None,
+                            diagnosis='',
+                            chief_complaint=f'Multi-clinic visit: {", ".join(visit_clinics)}',
+                            treatment_goal='',
+                            special_instructions='Automatically created from multi-clinic visit',
+                            priority='routine',
+                            status='scheduled',
+                            scheduled_at=timezone.now(),
+                            sessions_completed=0,
+                        )
+                        logger.info(f'Created automatic physio order for patient {patient} from multi-clinic visit')
+                except Exception as e:
+                    logger.error(f'Failed to create physio order: {e}')
+            
+            # Find all active consultation rooms for NON-physio clinics
+            non_physio_clinics = [c for c in visit_clinics if 'physiotherapy' not in c.lower()]
+            
+            if non_physio_clinics:
+                matching_rooms = ConsultationRoom.objects.filter(
+                    clinic__name__in=non_physio_clinics,
+                    status='active',
+                    is_active=True
+                ).exclude(id=room.id)  # Exclude the room we just created
+                
+                # Create queue items for each matching room
+                for matching_room in matching_rooms:
+                    try:
+                        # Check if already in queue for this room
+                        already_queued = ConsultationQueue.objects.filter(
+                            room=matching_room,
+                            patient=patient,
+                            is_active=True
+                        ).exists()
+                        
+                        if not already_queued:
+                            ConsultationQueue.objects.create(
+                                room=matching_room,
+                                patient=patient,
+                                visit=visit,
+                                priority=queue_item.priority,
+                                notes=queue_item.notes,
+                                is_active=True
+                            )
+                    except Exception as e:
+                        # Log error but don't fail the entire operation
+                        logger.error(f'Failed to create queue item for room {matching_room.name}: {e}')
         
         # Log audit
         AuditService.log_activity(
