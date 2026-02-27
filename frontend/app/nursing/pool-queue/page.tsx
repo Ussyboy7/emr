@@ -1227,6 +1227,22 @@ export default function NursingPoolQueuePage() {
                                 )
                               );
                             }
+
+                            // General or other single-clinic patient (e.g. GOPD) - send to consultation rooms
+                            if (patient.nursingStatus === 'Vitals Recorded' || patient.nursingStatus === 'Ready for Consultation') {
+                              return (
+                                <Button
+                                  size="sm"
+                                  onClick={() => openRoomPicker(patient)}
+                                  className="h-7 px-2 bg-emerald-500 hover:bg-emerald-600 text-white text-xs"
+                                >
+                                  <ArrowRight className="h-3 w-3 mr-1" />
+                                  Send
+                                </Button>
+                              );
+                            }
+
+                            return null;
                           })()}
                           {patient.nursingStatus === 'Sent to Room' && (
                             <div className="h-7 w-7 flex items-center justify-center rounded border border-violet-500/50 text-violet-600 dark:text-violet-400 bg-violet-500/10">
