@@ -925,7 +925,9 @@ export default function NewPatientPage() {
 
       // Add optional title field
       if (formData.title) {
-        payload.title = formData.title.toLowerCase(); // Backend expects lowercase: 'mr', 'mrs', etc.
+        const normalizedTitle = formData.title.toLowerCase();
+        // Backend TITLE_CHOICES do not include 'master', so map it to 'mr' to avoid validation errors
+        payload.title = normalizedTitle === 'master' ? 'mr' : normalizedTitle;
       }
 
       // Category-specific fields
