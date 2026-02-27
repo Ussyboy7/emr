@@ -48,7 +48,7 @@ const employeeTypes = ["Officer", "Staff"];
 const dependentTypes = ["Employee Dependent", "Retiree Dependent"];
 
 // Titles
-const titles = ['Mr', 'Mrs', 'Ms', 'Dr', 'Chief', 'Engr', 'Prof', 'Alhaji', 'Hajiya'];
+const titles = ['Mr', 'Mrs', 'Ms', 'Master', 'Dr', 'Chief', 'Engr', 'Prof', 'Alhaji', 'Hajiya'];
 
 // Religions
 const religions = ['Christianity', 'Islam', 'Traditional', 'Other', 'None'];
@@ -580,7 +580,7 @@ export default function NewPatientPage() {
       if (field === 'title') {
         const normalized = (value || '').toLowerCase().trim();
         const inferredGender =
-          normalized === 'mr' || normalized === 'alhaji' || normalized === 'mallam'
+          normalized === 'mr' || normalized === 'master' || normalized === 'alhaji' || normalized === 'mallam'
             ? 'male'
             : normalized === 'mrs' || normalized === 'ms' || normalized === 'miss' || normalized === 'hajia' || normalized === 'lady'
               ? 'female'
