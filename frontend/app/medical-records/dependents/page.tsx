@@ -98,6 +98,8 @@ export default function DependentsPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [relationshipFilter, setRelationshipFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [principalSearchResult, setPrincipalSearchResult] = useState<{ patient: ApiPatient; staffId: string } | null>(null);
+  const [isSearchingPrincipal, setIsSearchingPrincipal] = useState(false);
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -234,46 +236,82 @@ export default function DependentsPage() {
     return (patient.category === 'retiree' || (patient.category as string) === 'Retiree') ? 'Retiree Dependent' : 'Employee Dependent';
   };
 
-  // Validate Principal Staff ID
+  // Search Principal Staff ID via API (employees/retirees)
+  const searchPrincipalByStaffId = async (staffId: string): Promise<ApiPatient | null> => {
+    const trimmedId = staffId.trim();
+    if (!trimmedId) return null;
+    try {
+      const result = await patientService.getPatients({ search: trimmedId, page_size: 50 });
+      const matches = (result.results || []).filter(
+        (p) =>
+          p.patient_id === trimmedId ||
+          p.personal_number === trimmedId ||
+          p.employee_id === trimmedId ||
+          String(p.id) === trimmedId
+      );
+      const principal = matches.find((p) => p.category === 'employee' || p.category === 'retiree') ?? matches[0];
+      return principal && (principal.category === 'employee' || principal.category === 'retiree') ? principal : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const handleSearchPrincipal = async (staffId: string) => {
+    const trimmedId = staffId.trim();
+    if (!trimmedId) {
+      toast.error('Enter a Staff ID to search');
+      return;
+    }
+    setIsSearchingPrincipal(true);
+    setPrincipalSearchResult(null);
+    try {
+      const principal = await searchPrincipalByStaffId(trimmedId);
+      if (principal) {
+        setPrincipalSearchResult({ patient: principal, staffId: trimmedId });
+        toast.success(`Found: ${principal.full_name || `${principal.first_name} ${principal.surname}`} (${principal.category})`);
+      } else {
+        toast.error(`Staff ID "${trimmedId}" not found. Enter a valid NPA staff or retiree ID.`);
+      }
+    } catch (err) {
+      toast.error('Search failed. Please try again.');
+    } finally {
+      setIsSearchingPrincipal(false);
+    }
+  };
+
+  // Validate Principal Staff ID (uses API search result when available)
   const validatePrincipalStaffId = (staffId: string) => {
     if (!staffId || !staffId.trim()) {
       return { valid: false, message: 'Principal Staff ID is required' };
     }
 
     const trimmedId = staffId.trim();
-    // First, try to find by patient_id (like E-A2000 or R-A2000)
-    let patient = patients.find(p => p.patient_id === trimmedId);
 
-    // If not found by patient_id, try by personal_number (like A2000)
-    if (!patient) {
-      patient = patients.find(p => p.personal_number === trimmedId);
+    // Use API search result if it matches
+    if (principalSearchResult && principalSearchResult.staffId === trimmedId) {
+      const patient = principalSearchResult.patient;
+      return {
+        valid: true,
+        message: `Valid: ${patient.full_name || `${patient.first_name} ${patient.surname}`} (${patient.category})`,
+        patient,
+      };
     }
 
-    // If still not found, try by employee_id
-    if (!patient) {
-      patient = patients.find(p => p.employee_id === trimmedId);
-    }
-
-    // Finally, try by database ID as fallback
-    if (!patient) {
-      patient = patients.find(p => String(p.id) === trimmedId);
-    }
+    // Fallback: search local patients (may be paginated, limited)
+    let patient = patients.find((p) => p.patient_id === trimmedId || p.personal_number === trimmedId || p.employee_id === trimmedId || String(p.id) === trimmedId);
 
     if (!patient) {
-      return { valid: false, message: `Staff ID "${trimmedId}" not found in the system` };
+      return { valid: false, message: `Staff ID not found. Click "Search" to look up employees/retirees.` };
     }
 
-    // Validate category
     if (patient.category !== 'employee' && patient.category !== 'retiree') {
       return { valid: false, message: `ID "${trimmedId}" belongs to a ${patient.category}, not a staff member or retiree` };
     }
 
-    // No entitlement restrictions
-
     return {
       valid: true,
       message: `Valid: ${patient.full_name || `${patient.first_name} ${patient.surname}`} (${patient.category})`,
-      patient
+      patient,
     };
   };
 
@@ -339,29 +377,44 @@ export default function DependentsPage() {
     try {
       const trimmedId = newDependent.primaryPatientId.trim();
 
-      // First, try to find by patient_id (like E-A2000 or R-A2000)
-      let primaryPatient = patients.find(p => p.patient_id === trimmedId);
-
-      // If not found by patient_id, try by personal_number (like A2000)
-      if (!primaryPatient) {
-        primaryPatient = patients.find(p => p.personal_number === trimmedId);
-      }
-
-      // If still not found, try by employee_id
-      if (!primaryPatient) {
-        primaryPatient = patients.find(p => p.employee_id === trimmedId);
-      }
-
-      // Finally, try by database ID as fallback
-      if (!primaryPatient) {
-        primaryPatient = patients.find(p => String(p.id) === trimmedId);
-      }
-
-      if (!primaryPatient) {
-        toast.error(`Principal Staff ID "${trimmedId}" not found. Please enter a valid NPA staff or retiree ID.`);
+      // 1) Use API search result if available and matches
+      if (principalSearchResult && principalSearchResult.staffId === trimmedId) {
+        const primaryPatient = principalSearchResult.patient;
+        await doAddDependent(primaryPatient, trimmedId);
         return;
       }
 
+      // 2) Try local patients
+      let primaryPatient = patients.find(p => p.patient_id === trimmedId);
+      if (!primaryPatient) primaryPatient = patients.find(p => p.personal_number === trimmedId);
+      if (!primaryPatient) primaryPatient = patients.find(p => p.employee_id === trimmedId);
+      if (!primaryPatient) primaryPatient = patients.find(p => String(p.id) === trimmedId);
+
+      if (primaryPatient) {
+        await doAddDependent(primaryPatient, trimmedId);
+        return;
+      }
+
+      // 3) Fallback: search via API (employees/retirees)
+      const principal = await searchPrincipalByStaffId(trimmedId);
+      if (principal) {
+        await doAddDependent(principal, trimmedId);
+        return;
+      }
+
+      toast.error(`Principal Staff ID "${trimmedId}" not found. Click "Search" to look up employees/retirees.`);
+    } catch (err: any) {
+      console.error('Error adding dependent:', err);
+      if (isAuthenticationError(err)) {
+        setAuthError(err);
+      } else {
+        toast.error(err.message || 'Failed to add dependent. Please try again.');
+      }
+    }
+  };
+
+  const doAddDependent = async (primaryPatient: ApiPatient, trimmedId: string) => {
+    try {
       // Validate that the principal is actually an employee or retiree
       if (primaryPatient.category !== 'employee' && primaryPatient.category !== 'retiree') {
         toast.error(`Principal must be an NPA staff member or retiree. Selected patient is categorized as: ${primaryPatient.category}`);
@@ -439,8 +492,8 @@ export default function DependentsPage() {
       
       setDependents(transformedDependents);
       setNewDependent({ firstName: '', lastName: '', dob: '', gender: '', relationship: '', primaryPatientId: '', phone: '', email: '', dependentType: '' });
+      setPrincipalSearchResult(null);
       setIsAddDialogOpen(false);
-      
     } catch (err: any) {
       console.error('Error adding dependent:', err);
       if (isAuthenticationError(err)) {
@@ -473,26 +526,21 @@ export default function DependentsPage() {
 
       const trimmedId = editForm.primaryPatientId.trim();
 
-      // First, try to find by patient_id (like E-A2000 or R-A2000)
-      let primaryPatient = patients.find(p => p.patient_id === trimmedId);
-
-      // If not found by patient_id, try by personal_number (like A2000)
-      if (!primaryPatient) {
-        primaryPatient = patients.find(p => p.personal_number === trimmedId);
+      // 1) Use API search result if available and matches
+      let primaryPatient: ApiPatient | null = null;
+      if (principalSearchResult && principalSearchResult.staffId === trimmedId) {
+        primaryPatient = principalSearchResult.patient;
       }
-
-      // If still not found, try by employee_id
-      if (!primaryPatient) {
-        primaryPatient = patients.find(p => p.employee_id === trimmedId);
-      }
-
-      // Finally, try by database ID as fallback
-      if (!primaryPatient) {
-        primaryPatient = patients.find(p => String(p.id) === trimmedId);
-      }
+      // 2) Try local patients
+      if (!primaryPatient) primaryPatient = patients.find(p => p.patient_id === trimmedId) ?? null;
+      if (!primaryPatient) primaryPatient = patients.find(p => p.personal_number === trimmedId) ?? null;
+      if (!primaryPatient) primaryPatient = patients.find(p => p.employee_id === trimmedId) ?? null;
+      if (!primaryPatient) primaryPatient = patients.find(p => String(p.id) === trimmedId) ?? null;
+      // 3) Fallback: search via API
+      if (!primaryPatient) primaryPatient = await searchPrincipalByStaffId(trimmedId);
 
       if (!primaryPatient) {
-        toast.error(`Principal Staff ID "${trimmedId}" not found. Please enter a valid NPA staff or retiree ID.`);
+        toast.error(`Principal Staff ID "${trimmedId}" not found. Click "Search" to look up employees/retirees.`);
         return;
       }
 
@@ -679,6 +727,7 @@ export default function DependentsPage() {
     setEditFormLoading(true);
     setPhotoPreview(null);
     setPhotoFile(null);
+    setPrincipalSearchResult(null);
 
     try {
       // Load full dependent data from API to get additional fields
@@ -752,7 +801,7 @@ export default function DependentsPage() {
             <h1 className="text-2xl sm:text-3xl font-bold text-foreground">Manage Dependents</h1>
             <p className="text-muted-foreground mt-1">Manage family members linked to NPA staff and retirees</p>
           </div>
-          <Button onClick={() => setIsAddDialogOpen(true)} className="bg-gradient-to-r from-violet-500 to-purple-500 hover:from-violet-600 hover:to-purple-600 text-white">
+          <Button onClick={() => { setPrincipalSearchResult(null); setIsAddDialogOpen(true); }} className="bg-gradient-to-r from-violet-500 to-purple-500 hover:from-violet-600 hover:to-purple-600 text-white">
             <Plus className="h-4 w-4 mr-2" />Add Dependent
           </Button>
         </div>
@@ -929,7 +978,7 @@ export default function DependentsPage() {
             <Card>
               <CardHeader className="pb-3"><CardTitle className="text-lg">Quick Actions</CardTitle></CardHeader>
               <CardContent className="space-y-2">
-                <Button variant="ghost" size="sm" className="w-full justify-start" onClick={() => setIsAddDialogOpen(true)}>
+                <Button variant="ghost" size="sm" className="w-full justify-start" onClick={() => { setPrincipalSearchResult(null); setIsAddDialogOpen(true); }}>
                   <UserPlus className="h-4 w-4 mr-2" />Add New Dependent
                 </Button>
                 <Button variant="ghost" size="sm" className="w-full justify-start" onClick={() => router.push('/medical-records/patients')}>
@@ -985,24 +1034,36 @@ export default function DependentsPage() {
               </div>
               <div className="space-y-2">
                 <Label>Principal Staff ID *</Label>
-                <Input
-                  value={newDependent.primaryPatientId}
-                  onChange={(e) => {
-                    const newId = e.target.value;
-                    setNewDependent(prev => ({
-                      ...prev,
-                      primaryPatientId: newId,
-                      dependentType: newId ? getDependentType(newId) : ''
-                    }));
-                  }}
-                  placeholder="Enter NPA Staff ID (e.g., A2000)"
-                  className={(() => {
-                    if (!newDependent.primaryPatientId) return '';
-                    const validation = validatePrincipalStaffId(newDependent.primaryPatientId);
-                    return validation.valid ? 'border-green-500 focus:border-green-500' : 'border-red-500 focus:border-red-500';
-                  })()}
-                />
-                <p className="text-xs text-muted-foreground">Enter the NPA Staff ID of the employee or retiree this dependent belongs to</p>
+                <div className="flex gap-2">
+                  <Input
+                    value={newDependent.primaryPatientId}
+                    onChange={(e) => {
+                      const newId = e.target.value;
+                      setNewDependent(prev => ({
+                        ...prev,
+                        primaryPatientId: newId,
+                        dependentType: newId ? getDependentType(newId) : '',
+                      }));
+                      setPrincipalSearchResult(null);
+                    }}
+                    placeholder="Enter NPA Staff ID (e.g., A2000)"
+                    className={`flex-1 ${(() => {
+                      if (!newDependent.primaryPatientId) return '';
+                      const validation = validatePrincipalStaffId(newDependent.primaryPatientId);
+                      return validation.valid ? 'border-green-500 focus:border-green-500' : 'border-red-500 focus:border-red-500';
+                    })()}`}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => handleSearchPrincipal(newDependent.primaryPatientId)}
+                    disabled={!newDependent.primaryPatientId?.trim() || isSearchingPrincipal}
+                  >
+                    {isSearchingPrincipal ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                    Search
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">Enter Staff ID and click Search to find the employee or retiree</p>
                 {newDependent.primaryPatientId && (
                   <div className={`text-xs p-2 rounded-md border ${
                     (() => {
@@ -1305,24 +1366,36 @@ export default function DependentsPage() {
                       <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-2">
                           <Label>Principal Staff ID *</Label>
-                          <Input
-                            value={editForm.primaryPatientId}
-                            onChange={(e) => {
-                              const newId = e.target.value;
-                              setEditForm(prev => ({
-                                ...prev,
-                                primaryPatientId: newId,
-                                dependentType: newId ? getDependentType(newId) : prev.dependentType
-                              }));
-                            }}
-                            placeholder="Enter NPA Staff ID (e.g., A2000)"
-                            className={(() => {
-                              if (!editForm.primaryPatientId) return '';
-                              const validation = validatePrincipalStaffId(editForm.primaryPatientId);
-                              return validation.valid ? 'border-green-500 focus:border-green-500' : 'border-red-500 focus:border-red-500';
-                            })()}
-                          />
-                          <p className="text-xs text-muted-foreground">Enter the NPA Staff ID of the employee or retiree this dependent belongs to</p>
+                          <div className="flex gap-2">
+                            <Input
+                              value={editForm.primaryPatientId}
+                              onChange={(e) => {
+                                const newId = e.target.value;
+                                setEditForm(prev => ({
+                                  ...prev,
+                                  primaryPatientId: newId,
+                                  dependentType: newId ? getDependentType(newId) : prev.dependentType
+                                }));
+                                setPrincipalSearchResult(null);
+                              }}
+                              placeholder="Enter NPA Staff ID (e.g., A2000)"
+                              className={`flex-1 ${(() => {
+                                if (!editForm.primaryPatientId) return '';
+                                const validation = validatePrincipalStaffId(editForm.primaryPatientId);
+                                return validation.valid ? 'border-green-500 focus:border-green-500' : 'border-red-500 focus:border-red-500';
+                              })()}`}
+                            />
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={() => handleSearchPrincipal(editForm.primaryPatientId)}
+                              disabled={!editForm.primaryPatientId?.trim() || isSearchingPrincipal}
+                            >
+                              {isSearchingPrincipal ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                              Search
+                            </Button>
+                          </div>
+                          <p className="text-xs text-muted-foreground">Enter Staff ID and click Search to find the employee or retiree</p>
                           {editForm.primaryPatientId && (
                             <div className={`text-xs p-2 rounded-md border mt-1 ${
                               (() => {

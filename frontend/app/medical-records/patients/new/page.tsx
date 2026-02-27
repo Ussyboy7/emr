@@ -20,7 +20,7 @@ import { patientService } from '@/lib/services/patient-service';
 import { 
   UserPlus, User, Phone, Heart, Users, Send, ArrowLeft, ArrowRight, 
   Briefcase, MapPin, Upload, Camera, FileText, Save, Trash2, 
-  CheckCircle2, Clock, Loader2, Plus, X, AlertTriangle
+  CheckCircle2, Clock, Loader2, Plus, X, AlertTriangle, Search
 } from 'lucide-react';
 
 // NPA Locations
@@ -691,25 +691,26 @@ export default function NewPatientPage() {
       let numericId: number | null = null;
 
       // Try to find patient by various methods and get their numeric ID
-      const searchResult = await patientService.getPatients({ search: trimmedId }).catch(() => ({ results: [] }));
+      const searchResult = await patientService.getPatients({ search: trimmedId, page_size: 50 }).catch(() => ({ results: [] }));
+      const results = searchResult.results || [];
 
-      // Look for patient by patient_id
-      foundPatient = searchResult.results.find(p => p.patient_id === trimmedId);
+      const matchPrincipal = (p: any) =>
+        p.patient_id === trimmedId ||
+        p.personal_number === trimmedId ||
+        p.employee_id === trimmedId ||
+        p.patient_id === `E-${trimmedId}` ||
+        p.patient_id === `R-${trimmedId}` ||
+        (p.patient_id && String(p.patient_id).toUpperCase().endsWith(`-${trimmedId}`));
+
+      // Look for employee or retiree first
+      foundPatient = results.find((p: any) => matchPrincipal(p) && (p.category === 'employee' || p.category === 'retiree'));
       if (foundPatient) {
         numericId = foundPatient.id;
       }
 
-      // If not found by patient_id, try by personal_number
+      // Fallback: any matching principal
       if (!foundPatient) {
-        foundPatient = searchResult.results.find(p => p.personal_number === trimmedId);
-        if (foundPatient) {
-          numericId = foundPatient.id;
-        }
-      }
-
-      // If still not found, try by employee_id
-      if (!foundPatient) {
-        foundPatient = searchResult.results.find(p => p.employee_id === trimmedId);
+        foundPatient = results.find((p: any) => matchPrincipal(p));
         if (foundPatient) {
           numericId = foundPatient.id;
         }
@@ -1530,17 +1531,28 @@ export default function NewPatientPage() {
                         </div>
                         <div className="space-y-2">
                           <Label>Principal Staff ID *</Label>
-                          <Input
-                            value={formData.principalStaffId}
-                            onChange={(e) => handleInputChange('principalStaffId', e.target.value)}
-                            placeholder="Enter NPA Staff ID (e.g., A2000)"
-                            className={(() => {
-                              if (!formData.principalStaffId) return '';
-                              if (principalValidation.isValidating) return 'border-blue-500';
-                              return principalValidation.isValid ? 'border-green-500 focus:border-green-500' : 'border-red-500 focus:border-red-500';
-                            })()}
-                          />
-                          <p className="text-xs text-muted-foreground">Enter the NPA Staff ID of the employee or retiree this dependent belongs to</p>
+                          <div className="flex gap-2">
+                            <Input
+                              value={formData.principalStaffId}
+                              onChange={(e) => handleInputChange('principalStaffId', e.target.value)}
+                              placeholder="Enter NPA Staff ID (e.g., A2000 or 2001)"
+                              className={`flex-1 ${(() => {
+                                if (!formData.principalStaffId) return '';
+                                if (principalValidation.isValidating) return 'border-blue-500';
+                                return principalValidation.isValid ? 'border-green-500 focus:border-green-500' : 'border-red-500 focus:border-red-500';
+                              })()}`}
+                            />
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={() => validatePrincipalStaffId(formData.principalStaffId)}
+                              disabled={!formData.principalStaffId?.trim() || principalValidation.isValidating}
+                            >
+                              {principalValidation.isValidating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                              Search
+                            </Button>
+                          </div>
+                          <p className="text-xs text-muted-foreground">Enter Staff ID and click Search to find the employee or retiree</p>
                           {formData.principalStaffId && (
                             <div className={`text-xs p-2 rounded-md border ${
                               principalValidation.isValidating ? 'bg-blue-50 border-blue-200 text-blue-700' :
