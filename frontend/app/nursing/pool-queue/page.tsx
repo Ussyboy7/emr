@@ -108,6 +108,7 @@ export default function NursingPoolQueuePage() {
   useAuthRedirect(authError);
   const [sendingToPhysioVisitId, setSendingToPhysioVisitId] = useState<number | null>(null);
   const [physioCheckins, setPhysioCheckins] = useState<Record<number, { orderId: number; status: string }>>({});
+  const [eyeCheckins, setEyeCheckins] = useState<Record<number, { orderId: number; status: string }>>({});
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('today');
@@ -288,26 +289,41 @@ export default function NursingPoolQueuePage() {
         });
 
         let physioCheckedInByVisitId: Record<number, { orderId: number; status: string }> = {};
+        let eyeCheckedInByVisitId: Record<number, { orderId: number; status: string }> = {};
         const combinedVisitIds = Array.from(new Set(combinedVisits.map(v => v.id))).filter(Boolean);
         try {
           if (combinedVisitIds.length > 0) {
             const qs = new URLSearchParams();
             qs.set('visit_ids', combinedVisitIds.join(','));
-            const checkins = await apiFetch<{ results: Record<string, { checked_in: boolean; order_id?: number; status?: string }> }>(
+            // Fetch physio checkins
+            const physioCheckins = await apiFetch<{ results: Record<string, { checked_in: boolean; order_id?: number; status?: string }> }>(
               `/physiotherapy/orders/checkins-for-visits/?${qs.toString()}`
             );
-            Object.entries(checkins.results || {}).forEach(([visitIdRaw, payload]) => {
+            Object.entries(physioCheckins.results || {}).forEach(([visitIdRaw, payload]) => {
               const visitId = Number(visitIdRaw);
               if (!Number.isFinite(visitId)) return;
               if (!payload?.checked_in) return;
               if (typeof payload.order_id !== 'number') return;
               physioCheckedInByVisitId[visitId] = { orderId: payload.order_id, status: payload.status || 'scheduled' };
             });
+            
+            // Fetch eye clinic checkins
+            const eyeCheckins = await apiFetch<{ results: Record<string, { checked_in: boolean; order_id?: number; status?: string }> }>(
+              `/eyecare/orders/checkins-for-visits/?${qs.toString()}`
+            );
+            Object.entries(eyeCheckins.results || {}).forEach(([visitIdRaw, payload]) => {
+              const visitId = Number(visitIdRaw);
+              if (!Number.isFinite(visitId)) return;
+              if (!payload?.checked_in) return;
+              if (typeof payload.order_id !== 'number') return;
+              eyeCheckedInByVisitId[visitId] = { orderId: payload.order_id, status: payload.status || 'scheduled' };
+            });
           }
         } catch (err) {
-          debugLog('Physiotherapy check-ins not available:', err);
+          debugLog('Specialty clinic check-ins not available:', err);
         }
         setPhysioCheckins(physioCheckedInByVisitId);
+        setEyeCheckins(eyeCheckedInByVisitId);
 
         // Fetch latest vitals in one batch call for active nursing visits.
         const vitalsTargetVisitIds = Array.from(new Set(nursingVisits.map(v => v.id))).filter(Boolean);
@@ -366,13 +382,16 @@ export default function NursingPoolQueuePage() {
           const vitalsData = vitalsMap.get(visit.id);
 
           // Determine nursing status based on visit data, vitals, and queue status
-          let nursingStatus: 'Pending' | 'Vitals Recorded' | 'Ready for Consultation' | 'Sent to Room' | 'Sent to Physiotherapy' = 'Pending';
+          let nursingStatus: 'Pending' | 'Vitals Recorded' | 'Ready for Consultation' | 'Sent to Room' | 'Sent to Physiotherapy' | 'Sent to Eye Clinic' = 'Pending';
           const roomName = queueVisitToRoom.get(visit.id);
           const sentToPhysio = Boolean(physioCheckedInByVisitId[visit.id]);
+          const sentToEyeClinic = Boolean(eyeCheckedInByVisitId[visit.id]);
           
           if (roomName) {
             // Patient has been sent to a room
             nursingStatus = 'Sent to Room';
+          } else if (sentToEyeClinic && clinicMatches(visit.clinic || '', 'Eye Clinic')) {
+            nursingStatus = 'Sent to Eye Clinic';
           } else if (sentToPhysio && clinicMatches(visit.clinic || '', 'Physiotherapy')) {
             nursingStatus = 'Sent to Physiotherapy';
           } else if (vitalsData) {
@@ -419,6 +438,7 @@ export default function NursingPoolQueuePage() {
             visitNotes: visit.clinical_notes, // Clinical notes from the visit
             sentAt: queueVisitToSentAt.get(visit.id),
             sentToPhysio,
+            sentToEyeClinic,
           };
         });
 
@@ -460,7 +480,7 @@ export default function NursingPoolQueuePage() {
     visitDate: string;
     visitTime: string;
     visitType: string;
-    nursingStatus: 'Pending' | 'Vitals Recorded' | 'Ready for Consultation' | 'Sent to Room' | 'Sent to Physiotherapy';
+    nursingStatus: 'Pending' | 'Vitals Recorded' | 'Ready for Consultation' | 'Sent to Room' | 'Sent to Physiotherapy' | 'Sent to Eye Clinic';
     consultationRoom?: string;
     vitals?: any;
     waitTime: number;
@@ -471,6 +491,7 @@ export default function NursingPoolQueuePage() {
     gender?: string;
     sentAt?: string;
     sentToPhysio?: boolean;
+    sentToEyeClinic?: boolean;
   }
 
   const [selectedPatient, setSelectedPatient] = useState<NursingPatient | null>(null);
@@ -641,6 +662,28 @@ export default function NursingPoolQueuePage() {
       toast.error(err?.message || 'Failed to send to Physiotherapy');
     } finally {
       setSendingToPhysioVisitId(null);
+    }
+  };
+
+  const handleSendToEyeClinic = async (patient: NursingPatient) => {
+    if (!patient.visitNumericId) return;
+    try {
+      const order = await apiFetch<any>('/eyecare/orders/checkin-from-visit/', {
+        method: 'POST',
+        body: JSON.stringify({ visit: patient.visitNumericId }),
+      });
+      if (order?.id) {
+        setEyeCheckins(prev => ({
+          ...prev,
+          [patient.visitNumericId]: { orderId: Number(order.id), status: String(order.status || 'scheduled') },
+        }));
+      }
+      toast.success('Sent to Eye Clinic', {
+        description: `${patient.name} is now in the Eye Clinic queue`,
+      });
+      await loadData();
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to send to Eye Clinic');
     }
   };
 
@@ -1111,14 +1154,17 @@ export default function NursingPoolQueuePage() {
                           {/* Action buttons for sending patient to rooms */}
                           {(() => {
                             const hasPhysio = patient.clinics?.some((c: string) => clinicMatches(c, 'Physiotherapy'));
-                            const hasOtherClinics = patient.clinics?.some((c: string) => !clinicMatches(c, 'Physiotherapy'));
+                            const hasEye = patient.clinics?.some((c: string) => clinicMatches(c, 'Eye Clinic'));
+                            const hasOtherClinics = patient.clinics?.some((c: string) => !clinicMatches(c, 'Physiotherapy') && !clinicMatches(c, 'Eye Clinic'));
                             const isOnlyPhysio = hasPhysio && !hasOtherClinics;
+                            const isOnlyEye = hasEye && !hasOtherClinics;
                             
                             // If patient has multiple clinics, always show "Send" button for consultation rooms
                             // Backend will automatically create queue entries for all matching clinic rooms
                             if (patient.clinics && patient.clinics.length > 1) {
                               // Multi-clinic patient - show Send button, backend handles routing to all clinics
-                              return patient.sentToPhysio ? (
+                              const sentToSpecialtyClinic = patient.sentToPhysio || patient.sentToEyeClinic;
+                              return sentToSpecialtyClinic ? (
                                 <div className="h-7 w-7 flex items-center justify-center rounded border border-indigo-500/50 text-indigo-600 dark:text-indigo-400 bg-indigo-500/10">
                                   <CheckCircle2 className="h-4 w-4" />
                                 </div>
@@ -1159,12 +1205,26 @@ export default function NursingPoolQueuePage() {
                                   </Button>
                                 )
                               );
-                            } else {
-                              // Not physiotherapy - show room picker
-                              return (patient.nursingStatus === 'Vitals Recorded' || patient.nursingStatus === 'Ready for Consultation') && (
-                                <Button size="sm" onClick={() => openRoomPicker(patient)} className="h-7 px-2 bg-emerald-500 hover:bg-emerald-600 text-white text-xs">
-                                  <ArrowRight className="h-3 w-3 mr-1" />Send
-                                </Button>
+                            }
+                            
+                            // Eye Clinic only patient
+                            if (isOnlyEye) {
+                              // Only eye clinic
+                              return patient.sentToEyeClinic ? (
+                                <div className="h-7 w-7 flex items-center justify-center rounded border border-blue-500/50 text-blue-600 dark:text-blue-400 bg-blue-500/10">
+                                  <CheckCircle2 className="h-4 w-4" />
+                                </div>
+                              ) : (
+                                (patient.nursingStatus === 'Vitals Recorded' || patient.nursingStatus === 'Ready for Consultation') && (
+                                  <Button
+                                    size="sm"
+                                    onClick={() => handleSendToEyeClinic(patient)}
+                                    className="h-7 px-2 bg-blue-500 hover:bg-blue-600 text-white text-xs"
+                                  >
+                                    <Eye className="h-3 w-3 mr-1" />
+                                    Eye
+                                  </Button>
+                                )
                               );
                             }
                           })()}

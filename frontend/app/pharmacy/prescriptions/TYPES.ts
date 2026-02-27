@@ -75,7 +75,7 @@ export interface SubstituteOption {
   name: string;
   strength: string;
   type: 'generic' | 'brand' | 'therapeutic';
-  stock: number;
+  stock: number | null; // null means loading
   expiryDate: string;
   daysToExpiry: number;
   unitPrice: number;

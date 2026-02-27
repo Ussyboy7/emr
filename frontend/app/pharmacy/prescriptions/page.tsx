@@ -15,6 +15,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import { pharmacyService, type Prescription as ApiPrescription, type PrescriptionItem } from '@/lib/services';
+import { PHARMACY_LOCATIONS } from '@/lib/constants/pharmacy-locations';
 import { PatientAvatar } from "@/components/PatientAvatar";
 import { 
   ClipboardList, Search, Eye, Clock, CheckCircle2, CheckCircle, Pill, Calendar,
@@ -408,11 +409,16 @@ export default function PrescriptionsPage() {
   const [substitutionForm, setSubstitutionForm] = useState({
     reason: '',
     selectedSubstitute: '',
+    selectedSubstituteBrand: '', // When substituting with generic, pharmacist picks brand
     notes: '',
   });
   const [availableSubstitutes, setAvailableSubstitutes] = useState<SubstituteOption[]>([]);
   const [allAvailableMedications, setAllAvailableMedications] = useState<SubstituteOption[]>([]);
   const [substituteSearchQuery, setSubstituteSearchQuery] = useState('');
+  const [substituteSearchResults, setSubstituteSearchResults] = useState<SubstituteOption[]>([]);
+  const [substituteBrandOptions, setSubstituteBrandOptions] = useState<SubstituteOption[]>([]);
+  const [isSearchingSubstitutes, setIsSearchingSubstitutes] = useState(false);
+  const [isLoadingSubstituteBrands, setIsLoadingSubstituteBrands] = useState(false);
   const [brandSelectionTargetName, setBrandSelectionTargetName] = useState('');
   const [brandSelectionMode, setBrandSelectionMode] = useState<'select' | 'switch'>('select');
 
@@ -423,6 +429,7 @@ export default function PrescriptionsPage() {
   const genericsCache = useRef<SubstituteOption[] | null>(null);
   const brandSelectionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const substituteTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const brandSelectionGenericIdRef = useRef<number | null>(null);
 
   // Status update functionality
 
@@ -436,6 +443,188 @@ export default function PrescriptionsPage() {
     if (v === 'f') return 'female';
     return v;
   };
+
+  /**
+   * Calculate auto-adjusted dispense quantity based on strength difference
+   * between prescribed generic and selected brand.
+   * 
+   * Formula: prescribed_qty × (prescribed_strength / brand_strength)
+   * 
+   * Example:
+   * - Prescribed: Paracetamol 500mg, 6 tablets
+   * - Brand selected: Panadol 1000mg
+   * - Auto-calculated: 6 × (500/1000) = 3 tablets
+   */
+  const calculateAutoQuantity = (med: any): number => {
+    // If user has already set a quantity, use it
+    if (dispenseQuantities[med.id]) {
+      return dispenseQuantities[med.id];
+    }
+
+    // Get prescribed quantity and strength
+    const prescribedQty = Number(med.quantity || 0);
+    const prescribedStrength = med.strength || '';
+    
+    // If no brand is selected yet, return prescribed quantity
+    if (!med.medication || !prescribedStrength) {
+      return Math.max(0, Number(med.remaining_quantity ?? med.quantity ?? 0));
+    }
+
+    // Extract numeric value from strength (e.g., "500mg" -> 500)
+    const parseStrength = (strengthStr: string): number => {
+      const match = strengthStr.match(/(\d+(?:\.\d+)?)/);
+      return match ? parseFloat(match[1]) : 0;
+    };
+
+    const prescribedStrengthValue = parseStrength(prescribedStrength);
+    
+    // For now, return prescribed quantity
+    // In future, when brand selection is implemented, we can compare strengths
+    return Math.max(0, Number(med.remaining_quantity ?? med.quantity ?? 0));
+  };
+
+  /**
+   * Server-side search for both modals (fast, no client-side filtering).
+   * Select Brand: getMedications({ generic, search }) - brands for the generic.
+   * Substitute: getGenerics({ search }) - generic drug names.
+   */
+  const performSubstituteSearch = async (query: string) => {
+    setIsSearchingSubstitutes(true);
+    try {
+      if (substitutionForm.reason === 'brand_selection') {
+        // Select Brand: use same source as Dispensary inventory (location=Dispensary, filter by generic)
+        const genericId = brandSelectionGenericIdRef.current;
+        if (!genericId) {
+          setSubstituteSearchResults([]);
+          return;
+        }
+        const inventoryResponse = await pharmacyService.getInventory({
+          location: PHARMACY_LOCATIONS.DISPENSARY,
+          medication__generic: genericId,
+          search: query.length >= 2 ? query : undefined,
+          page: 1,
+          page_size: 100,
+        });
+        // Aggregate inventory by medication (same source as Dispensary inventory page)
+        const byMed = new Map<number, { med: any; stock: number; expiryDate: string; isNearExpiry: boolean }>();
+        for (const item of inventoryResponse.results) {
+          const med = (item as any).medication;
+          const medId = typeof med === 'object' && med?.id != null ? Number(med.id) : Number((item as any).medication);
+          if (!medId) continue;
+          const qty = Number((item as any).quantity || 0);
+          const exp = (item as any).expiry_date;
+          const isExpired = exp && new Date(exp) <= new Date();
+          if (isExpired) continue;
+          const medObj = typeof med === 'object' && med ? med : { id: medId, name: (item as any).medication_name || '', strength: '' };
+          const existing = byMed.get(medId);
+          if (!existing) {
+            const daysToExpiry = exp ? Math.ceil((new Date(exp).getTime() - Date.now()) / (1000 * 60 * 60 * 24)) : 0;
+            byMed.set(medId, {
+              med: medObj,
+              stock: qty,
+              expiryDate: exp ? new Date(exp).toLocaleDateString() : '',
+              isNearExpiry: daysToExpiry <= 90,
+            });
+          } else {
+            existing.stock += qty;
+            if (exp) {
+              const existingExp = existing.expiryDate ? new Date(existing.expiryDate) : null;
+              const newExp = new Date(exp);
+              if (!existingExp || newExp.getTime() < existingExp.getTime()) {
+                existing.expiryDate = new Date(exp).toLocaleDateString();
+                const daysToExpiry = Math.ceil((newExp.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+                existing.isNearExpiry = daysToExpiry <= 90;
+              }
+            }
+          }
+        }
+        const options: SubstituteOption[] = Array.from(byMed.values()).map(({ med, stock, expiryDate, isNearExpiry }) => ({
+          id: med.id.toString(),
+          name: med.name,
+          strength: med.strength || med.form || '',
+          type: 'brand' as const,
+          stock,
+          expiryDate,
+          daysToExpiry: 0,
+          unitPrice: 0,
+          isNearExpiry,
+        }));
+        setSubstituteSearchResults(options);
+      } else {
+        // Substitute: server-side search for generic drug names
+        if (query.length < 2) {
+          setSubstituteSearchResults([]);
+          return;
+        }
+        const results = await pharmacyService.getGenerics({
+          search: query,
+          page: 1,
+          page_size: 50,
+        });
+        // Generics: no stock/expiry shown (stock lives at brand level; checked on confirm)
+        const options: SubstituteOption[] = results.results.map((g) => ({
+          id: g.id.toString(),
+          name: g.name,
+          strength: g.strength || '',
+          type: 'generic' as const,
+          stock: 0,
+          expiryDate: '',
+          daysToExpiry: 0,
+          unitPrice: 0,
+          isNearExpiry: false,
+        }));
+        setSubstituteSearchResults(options);
+      }
+    } catch (error) {
+      console.error('Search failed:', error);
+      setSubstituteSearchResults([]);
+    } finally {
+      setIsSearchingSubstitutes(false);
+    }
+  };
+
+  // Load brands when pharmacist selects a generic in Substitute modal
+  useEffect(() => {
+    if (substitutionForm.reason !== 'substitute' || !substitutionForm.selectedSubstitute || !substitutionMed) return;
+    const selected = substituteSearchResults.find((s) => s.id === substitutionForm.selectedSubstitute);
+    if (!selected || selected.type !== 'generic') {
+      setSubstituteBrandOptions([]);
+      setSubstitutionForm((f) => ({ ...f, selectedSubstituteBrand: '' }));
+      return;
+    }
+    let cancelled = false;
+    const loadBrands = async () => {
+      setIsLoadingSubstituteBrands(true);
+      setSubstituteBrandOptions([]);
+      setSubstitutionForm((f) => ({ ...f, selectedSubstituteBrand: '' }));
+      try {
+        const brands = await pharmacyService.getAvailableBrands(Number(selected.id));
+        if (cancelled) return;
+        const options: SubstituteOption[] = brands.map((b: any) => ({
+          id: b.id.toString(),
+          name: b.name,
+          strength: b.strength || '',
+          type: 'brand' as const,
+          stock: Math.round(Number(b.available_stock) || 0),
+          expiryDate: '',
+          daysToExpiry: 0,
+          unitPrice: 0,
+          isNearExpiry: false,
+        }));
+        setSubstituteBrandOptions(options);
+        const bestBrand = [...options].sort((a, b) => (b.stock || 0) - (a.stock || 0))[0];
+        if (bestBrand) {
+          setSubstitutionForm((f) => ({ ...f, selectedSubstituteBrand: bestBrand.id }));
+        }
+      } catch (err) {
+        if (!cancelled) setSubstituteBrandOptions([]);
+      } finally {
+        if (!cancelled) setIsLoadingSubstituteBrands(false);
+      }
+    };
+    loadBrands();
+    return () => { cancelled = true; };
+  }, [substitutionForm.reason, substitutionForm.selectedSubstitute, substituteSearchResults, substitutionMed]);
 
   const matchesDateFilter = (isoDate: string | undefined, filter: string): boolean => {
     if (filter === 'all') return true;
@@ -1631,7 +1820,7 @@ export default function PrescriptionsPage() {
                   <div><span className="text-muted-foreground">Patient ID:</span> <span className="font-medium">{selectedPrescription.patient_details?.patient_id || 'N/A'}</span></div>
                   <div><span className="text-muted-foreground">Doctor:</span> <span className="font-medium">{selectedPrescription.doctor_name || 'N/A'}</span></div>
                   <div><span className="text-muted-foreground">Clinic:</span> <span className="font-medium">{selectedPrescription.visit_details?.clinic || 'Not specified'}</span></div>
-                  <div><span className="text-muted-foreground">Date:</span> <span className="font-medium">{selectedPrescription.prescribed_at ? new Date(selectedPrescription.prescribed_at).toLocaleDateString() : 'N/A'}</span></div>
+                  <div><span className="text-muted-foreground">Date:</span> <span className="font-medium">{selectedPrescription.prescribed_at ? new Date(selectedPrescription.prescribed_at).toLocaleDateString() : selectedPrescription.date || 'N/A'}</span></div>
                 </div>
 
                 {/* Dispensing History */}
@@ -1761,19 +1950,28 @@ export default function PrescriptionsPage() {
                             }}>
                               <div className="flex items-center justify-between mb-2">
                                 <div>
-                                  <h5 className="font-medium">{med.name}</h5>
+                                  <h5 className="font-medium">
+                                    {med.name}
+                                    {(med as any).strength &&
+                                    !String(med.name || '').toLowerCase().includes(String((med as any).strength || '').toLowerCase()) && (
+                                      <span className="font-normal text-muted-foreground ml-1">{(med as any).strength}</span>
+                                    )}
+                                  </h5>
                                   {(() => {
                                     const sub = (med as any).substitution;
                                     const original = (med as any).originalMedication;
                                     const previousBrand = sub?.previous_brand;
+                                    const isFirstBrandSelection = sub?.reason === 'brand_selection' && sub?.is_first_brand_selection !== false;
 
                                     if (!sub && !original) return null;
 
                                     return (
                                       <div className="space-y-0.5">
                                         {sub?.reason === 'brand_selection' && previousBrand && (
-                                          <p className="text-xs text-amber-600 dark:text-amber-400">
-                                            🔁 Brand switched from {previousBrand}
+                                          <p className="text-xs text-emerald-600 dark:text-emerald-400">
+                                            {isFirstBrandSelection
+                                              ? `✓ Brand selected: ${med.name}`
+                                              : `🔁 Brand switched from ${previousBrand}`}
                                           </p>
                                         )}
                                         {original && (
@@ -1784,11 +1982,10 @@ export default function PrescriptionsPage() {
                                       </div>
                                     );
                                   })()}
-                                  <p className="text-xs text-muted-foreground">{med.route} • {med.frequency} • {med.duration}</p>
                                   <p className="text-xs text-muted-foreground">
-                                    {(med as any).unit || 'unit'}
-                                    {(med as any).dosage_form ? ` • ${(med as any).dosage_form}` : ''}
-                                    {(med as any).strength ? ` • ${(med as any).strength}` : ''}
+                                    {med.route}
+                                    {med.frequency ? ` • ${med.frequency}` : ''}
+                                    {med.duration ? ` • ${med.duration}` : ''}
                                   </p>
                                 </div>
                                 <div className="flex items-center gap-2">
@@ -1814,39 +2011,17 @@ export default function PrescriptionsPage() {
 
                                       setIsLoadingBrands(true);
                                       setSubstitutionMed(med);
-                                      setAvailableSubstitutes([]);
-                                      setSubstitutionForm({ 
-                                        reason: 'brand_selection', 
-                                        selectedSubstitute: '', 
-                                        notes: '' 
+                                      setSubstituteSearchResults([]);
+                                      setSubstitutionForm({
+                                        reason: 'brand_selection',
+                                        selectedSubstitute: '',
+                                        selectedSubstituteBrand: '',
+                                        notes: '',
                                       });
                                       setSubstituteSearchQuery('');
                                       setBrandSelectionTargetName('');
                                       setBrandSelectionMode('select');
 
-                                      try {
-                                        // Load all medications for search - use cache if available
-                                        if (!medicationsCache.current) {
-                                          const allMeds = await pharmacyService.getMedications({ page_size: 50 }); // Reduced from 100
-                                          medicationsCache.current = allMeds.results.map(med => ({
-                                            id: med.id.toString(),
-                                            name: med.name,
-                                            strength: med.strength || '',
-                                            type: 'brand',
-                                            stock: (med as any).available_stock || 0,
-                                            expiryDate: '',
-                                            daysToExpiry: 0,
-                                            unitPrice: 0,
-                                            isNearExpiry: false,
-                                          }));
-                                        }
-                                        setAllAvailableMedications(medicationsCache.current);
-                                      } catch (error) {
-                                        console.error('Failed to load medications:', error);
-                                        setAllAvailableMedications([]);
-                                      }
-                                      
-                                      // Load available brands for this generic
                                       try {
                                         const isGenericSelection =
                                           (med as any).status === 'Pending' ||
@@ -1858,78 +2033,37 @@ export default function PrescriptionsPage() {
 
                                         if (isGenericSelection) {
                                           genericId = Number(med.generic || (med as any).medication_details?.generic_id || 0) || null;
-                                          setBrandSelectionMode('select');
                                         } else {
                                           const medDetail = await pharmacyService.getMedication(Number((med as any).medication));
                                           genericId = medDetail.generic?.id ?? null;
                                           targetName = medDetail.generic?.name || targetName;
-                                          setBrandSelectionMode('switch');
                                         }
 
                                         setBrandSelectionTargetName(targetName);
+                                        brandSelectionGenericIdRef.current = genericId;
 
                                         if (genericId) {
-                                          const availableBrands = await pharmacyService.getAvailableBrands(genericId);
-                                          
-                                          // Immediately create options with basic data (no batch queries yet)
-                                          const substituteOptions: SubstituteOption[] = availableBrands.map(brand => ({
-                                            id: brand.id.toString(),
-                                            name: brand.name,
-                                            strength: brand.strength || '',
-                                            type: 'brand',
-                                            stock: Math.round(Number((brand as any).available_stock) || 0),
-                                            expiryDate: '', // Will be loaded in background
-                                            daysToExpiry: 0,
-                                            unitPrice: 0,
-                                            isNearExpiry: false,
-                                          }));
-                                          setAvailableSubstitutes(substituteOptions);
-                                          
-                                          // Load batch info in background (don't wait for it)
-                                          setIsLoadingBrands(false);
                                           setShowSubstitutionModal(true);
-                                          
-                                          // Load batch details asynchronously in the background
-                                          availableBrands.forEach((brand) => {
-                                            pharmacyService.getMedicationBatches(brand.id).then(batches => {
-                                              if (batches.length > 0) {
-                                                const activeBatches = batches.filter(b => b.expiryDate && new Date(b.expiryDate) > new Date());
-                                                if (activeBatches.length > 0) {
-                                                  const soonest = activeBatches.reduce((prev, curr) => 
-                                                    new Date(curr.expiryDate) < new Date(prev.expiryDate) ? curr : prev
-                                                  );
-                                                  const expiryDate = new Date(soonest.expiryDate).toLocaleDateString();
-                                                  const daysToExpiry = Math.ceil((new Date(soonest.expiryDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-                                                  
-                                                  // Update the specific brand with batch info
-                                                  setAvailableSubstitutes(prev => prev.map(opt => 
-                                                    opt.id === brand.id.toString() 
-                                                      ? { ...opt, expiryDate, daysToExpiry, isNearExpiry: daysToExpiry <= 90 }
-                                                      : opt
-                                                  ));
-                                                }
-                                              }
-                                            }).catch(err => {
-                                              console.warn(`Could not get batch info for ${brand.name}:`, err);
-                                            });
-                                          });
+                                          setIsLoadingBrands(false);
+                                          // Server-side load: initial brands for this generic
+                                          performSubstituteSearch('');
                                         } else {
-                                          setAvailableSubstitutes([]);
-                                          setIsLoadingBrands(false);
                                           setShowSubstitutionModal(true);
+                                          setIsLoadingBrands(false);
+                                          setSubstituteSearchResults([]);
                                           toast.error('Generic not found for this medication');
                                         }
                                       } catch (err) {
-                                        console.error('Failed to load available brands:', err);
+                                        console.error('Failed to open brand selection:', err);
                                         setIsLoadingBrands(false);
                                         setShowSubstitutionModal(true);
-                                        toast.error('Failed to load available brands');
+                                        toast.error('Failed to load brands');
                                       }
                                     }}
                                     >
                                       <>
                                         <Tag className="h-3 w-3 mr-1" />
-                                        {((med as any).status === 'Pending' || (med as any).type === 'generic' || !(med as any).medication) ? 'Select Brand' : 'Switch Brand'}
+                                        Select Brand
                                       </>
                                     </Button>
                                     
@@ -1948,133 +2082,20 @@ export default function PrescriptionsPage() {
 
                                         setIsLoadingSubstitutes(true);
                                         setSubstitutionMed(med);
-                                        setAvailableSubstitutes([]);
-                                        setSubstitutionForm({ 
-                                          reason: 'out_of_stock', 
-                                          selectedSubstitute: '', 
-                                          notes: '' 
+                                        setSubstituteSearchResults([]);
+                                        setSubstituteBrandOptions([]);
+                                        setSubstitutionForm({
+                                          reason: 'out_of_stock',
+                                          selectedSubstitute: '',
+                                          selectedSubstituteBrand: '',
+                                          notes: '',
                                         });
+                                        setSubstituteSearchQuery('');
+                                        brandSelectionGenericIdRef.current = null;
 
-                                        // Load available generic medications with brand stock information
-                                        try {
-                                          if (!genericsCache.current) {
-                                            const allGenerics = await pharmacyService.getGenericsForPrescription({ page_size: 50 });
-                                            
-                                            // Create basic options without batch data (fast)
-                                            const basicOptions: SubstituteOption[] = [];
-                                            
-                                            for (const generic of allGenerics.results) {
-                                              try {
-                                                // Get available brands for this generic (fast)
-                                                const brands = await pharmacyService.getAvailableBrands(generic.id);
-                                                const totalStock = brands.reduce((sum, brand) => 
-                                                  sum + (Number((brand as any).available_stock) || 0), 0
-                                                );
-                                                
-                                                basicOptions.push({
-                                                  id: generic.id.toString(),
-                                                  name: generic.name,
-                                                  strength: generic.strength || '',
-                                                  type: 'generic',
-                                                  stock: Math.round(totalStock),
-                                                  expiryDate: '', // Will be loaded in background
-                                                  daysToExpiry: 0,
-                                                  unitPrice: 0,
-                                                  isNearExpiry: false,
-                                                });
-                                              } catch (err) {
-                                                console.warn(`Could not get brands for generic ${generic.name}:`, err);
-                                                // Add generic without stock info
-                                                basicOptions.push({
-                                                  id: generic.id.toString(),
-                                                  name: generic.name,
-                                                  strength: generic.strength || '',
-                                                  type: 'generic',
-                                                  stock: 0,
-                                                  expiryDate: '',
-                                                  daysToExpiry: 0,
-                                                  unitPrice: 0,
-                                                  isNearExpiry: false,
-                                                });
-                                              }
-                                            }
-                                            
-                                            genericsCache.current = basicOptions;
-                                          }
-
-                                          setAllAvailableMedications(genericsCache.current);
-                                          setAvailableSubstitutes(genericsCache.current);
-                                          
-                                          // Open modal immediately
-                                          setIsLoadingSubstitutes(false);
-                                          setSubstituteSearchQuery('');
-                                          setShowSubstitutionModal(true);
-                                          
-                                          // Load batch info in background for each generic
-                                          if (!genericsCache.current) return;
-                                          
-                                          genericsCache.current.forEach((option) => {
-                                            if (option.type === 'generic') {
-                                              const genericId = parseInt(option.id);
-                                              pharmacyService.getAvailableBrands(genericId).then(brands => {
-                                                if (brands.length === 0) return;
-                                                
-                                                let expiryDate = '';
-                                                let daysToExpiry = 0;
-                                                let isNearExpiry = false;
-                                                
-                                                // Load batch info for all brands in parallel
-                                                Promise.all(
-                                                  brands.map(brand => 
-                                                    pharmacyService.getMedicationBatches(brand.id)
-                                                      .then(batches => ({ brand, batches }))
-                                                      .catch(() => ({ brand, batches: [] }))
-                                                  )
-                                                ).then(results => {
-                                                  // Find earliest expiry across all brands
-                                                  for (const { batches } of results) {
-                                                    const activeBatches = batches.filter(b => b.expiryDate && new Date(b.expiryDate) > new Date());
-                                                    if (activeBatches.length > 0) {
-                                                      const soonest = activeBatches.reduce((prev, curr) => 
-                                                        new Date(curr.expiryDate) < new Date(prev.expiryDate) ? curr : prev
-                                                      );
-                                                      const soonestDate = new Date(soonest.expiryDate);
-                                                      const soonestDays = Math.ceil((soonestDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-                                                      
-                                                      if (!expiryDate || soonestDate < new Date(expiryDate)) {
-                                                        expiryDate = soonest.expiryDate;
-                                                        daysToExpiry = soonestDays;
-                                                        isNearExpiry = soonestDays <= 90;
-                                                      }
-                                                    }
-                                                  }
-                                                  
-                                                  // Update the generic with batch info
-                                                  setAvailableSubstitutes(prev => prev.map(opt =>
-                                                    opt.id === option.id
-                                                      ? { 
-                                                          ...opt, 
-                                                          expiryDate: expiryDate ? new Date(expiryDate).toLocaleDateString() : '',
-                                                          daysToExpiry,
-                                                          isNearExpiry
-                                                        }
-                                                      : opt
-                                                  ));
-                                                }).catch(() => {
-                                                  console.warn(`Could not load batch info for generic ${option.name}`);
-                                                });
-                                              }).catch(() => {
-                                                console.warn(`Could not get brands for generic ${option.name}`);
-                                              });
-                                            }
-                                          });
-                                        } catch (error) {
-                                          console.error('Failed to load generic medications:', error);
-                                          setAllAvailableMedications([]);
-                                          setAvailableSubstitutes([]);
-                                          setIsLoadingSubstitutes(false);
-                                          setShowSubstitutionModal(true);
-                                        }
+                                        // Open modal immediately - server-side search on type (fast)
+                                        setIsLoadingSubstitutes(false);
+                                        setShowSubstitutionModal(true);
                                       }}
                                     >
                                       <ArrowRightLeft className="h-3 w-3 mr-1" />
@@ -2097,25 +2118,12 @@ export default function PrescriptionsPage() {
                                         <Input
                                           type="number"
                                           min="0"
-                                          max={(() => {
-                                            const stockCap = Array.isArray(batches)
-                                              ? batches.reduce((total, b) => total + Number(b.quantity || 0), 0)
-                                              : null;
-                                            const remaining = Math.max(0, Number((med as any).remaining_quantity || 0));
-                                            if (typeof stockCap === 'number') return Math.min(remaining, stockCap);
-                                            return remaining;
-                                          })()}
-                                          value={dispenseQuantities[med.id] ?? Math.max(0, Number((med as any).remaining_quantity ?? 0))}
+                                          value={dispenseQuantities[med.id] ?? Math.max(0, Number((med as any).remaining_quantity ?? med.quantity ?? 0))}
                                           onChange={(e) => {
                                             const inputValue = Math.max(0, parseInt(e.target.value) || 0);
-                                            const stockCap = Array.isArray(batches)
-                                              ? batches.reduce((total, b) => total + Number(b.quantity || 0), 0)
-                                              : null;
-                                            const remaining = Math.max(0, Number((med as any).remaining_quantity || 0));
-                                            const maxAllowed = typeof stockCap === 'number' ? Math.min(remaining, stockCap) : remaining;
                                             setDispenseQuantities(prev => ({
                                               ...prev,
-                                              [med.id]: Math.min(inputValue, maxAllowed)
+                                              [med.id]: inputValue
                                             }));
                                           }}
                                           className="h-8 mt-1"
@@ -2223,13 +2231,13 @@ export default function PrescriptionsPage() {
                 {substitutionForm.reason === 'brand_selection' ? (
                   <>
                     <Tag className="h-5 w-5 text-blue-500" />
-                    {brandSelectionMode === 'switch' ? 'Switch Brand for Dispensing' : 'Select Brand for Dispensing'}
+                    Select Brand for Dispensing
                     {isLoadingBrands && <span className="text-xs font-normal text-muted-foreground ml-2">(Loading...)</span>}
                   </>
                 ) : (
                   <>
                     <ArrowRightLeft className="h-5 w-5 text-amber-500" />
-                    Switch Brand or Substitute Medication
+                    Substitute Medication
                     {isLoadingSubstitutes && <span className="text-xs font-normal text-muted-foreground ml-2">(Loading...)</span>}
                   </>
                 )}
@@ -2244,13 +2252,24 @@ export default function PrescriptionsPage() {
             
             {substitutionMed && (
               <div className="overflow-y-auto max-h-[55vh] space-y-4">
-                {/* Original Medication */}
+                {/* Original Medication - what the doctor ordered */}
                 <div className="p-3 rounded-lg bg-muted/50 border">
-                  <p className="text-xs text-muted-foreground mb-1">Original Medication</p>
+                  <p className="text-xs text-muted-foreground mb-1">Original Medication (Doctor&apos;s order)</p>
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="font-medium">{substitutionMed.name}</p>
-                      <p className="text-xs text-muted-foreground">{substitutionMed.route} • {substitutionMed.frequency} • Qty: {substitutionMed.quantity}</p>
+                      <p className="font-medium">
+                        {substitutionMed.name}
+                        {(substitutionMed as any).strength &&
+                        !String(substitutionMed.name || '').toLowerCase().includes(String((substitutionMed as any).strength || '').toLowerCase()) && (
+                          <span className="font-normal text-muted-foreground ml-1">{(substitutionMed as any).strength}</span>
+                        )}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {substitutionMed.route}
+                        {substitutionMed.frequency ? ` • ${substitutionMed.frequency}` : ''}
+                        {substitutionMed.duration ? ` • ${substitutionMed.duration}` : ''}
+                        {` • Qty: ${substitutionMed.quantity}`}
+                      </p>
                     </div>
                     <Badge variant="outline" className={getMedicationStatusColor(substitutionMed.status)}>
                       {substitutionMed.status}
@@ -2301,11 +2320,22 @@ export default function PrescriptionsPage() {
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <Input
                       value={substituteSearchQuery}
-                      onChange={(e) => setSubstituteSearchQuery(e.target.value)}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setSubstituteSearchQuery(val);
+                        // Both modals: server-side search
+                        if (substitutionForm.reason === 'brand_selection') {
+                          performSubstituteSearch(val); // loads all brands when empty, filters when typed
+                        } else if (val.length >= 2) {
+                          performSubstituteSearch(val); // generics search
+                        } else {
+                          setSubstituteSearchResults([]);
+                        }
+                      }}
                       placeholder={
                         substitutionForm.reason === 'brand_selection' 
-                          ? 'Search for brand (e.g. Amatem)...' 
-                          : 'Search for substitute medication...'
+                          ? 'Type to filter brands...' 
+                          : 'Type to search medications (min 2 characters)...'
                       }
                       className="pl-10"
                     />
@@ -2318,33 +2348,20 @@ export default function PrescriptionsPage() {
                   </p>
                 </div>
 
-                {/* Available Substitutes */}
+                {/* Available Substitutes - Brands for Select Brand, Generics for Substitute */}
                 <div className="space-y-2 max-h-[180px] overflow-y-auto border rounded-lg p-2">
-                  {(() => {
-                    // If searching, show search results based on the reason
-                    if (substituteSearchQuery.trim()) {
-                      let searchResults;
-                      if (substitutionForm.reason === 'brand_selection') {
-                        // For brand selection, search all medications (brands)
-                        searchResults = allAvailableMedications
-                          .filter(med =>
-                            med.name.toLowerCase().includes(substituteSearchQuery.toLowerCase())
-                          )
-                          .slice(0, 10); // Limit to 10 results for performance
-                      } else {
-                        // For substitution, search only generics
-                        searchResults = allAvailableMedications
-                          .filter(med =>
-                            med.type === 'generic' &&
-                            med.name.toLowerCase().includes(substituteSearchQuery.toLowerCase())
-                          )
-                          .slice(0, 10); // Limit to 10 results for performance
-                      }
-
-                      return searchResults.length > 0 ? (
-                        searchResults
-                          .sort((a, b) => b.stock - a.stock)
-                          .map(sub => (
+                  {isSearchingSubstitutes ? (
+                    <div className="flex items-center justify-center py-8 text-muted-foreground">
+                      <Loader2 className="h-6 w-6 animate-spin mr-2" />
+                      Searching...
+                    </div>
+                  ) : (() => {
+                    // Both modals use substituteSearchResults from server-side search
+                    const displayedOptions = substituteSearchResults;
+                    return displayedOptions.length > 0 ? (
+                    displayedOptions
+                      .sort((a, b) => (b.stock || 0) - (a.stock || 0))
+                      .map(sub => (
                             <div
                               key={sub.id}
                               onClick={() => setSubstitutionForm({ ...substitutionForm, selectedSubstitute: sub.id })}
@@ -2374,74 +2391,84 @@ export default function PrescriptionsPage() {
                                   <CheckCircle2 className="h-4 w-4 text-amber-500 flex-shrink-0" />
                                 )}
                               </div>
-                              <div className="flex items-center gap-3 text-xs text-muted-foreground mt-1">
-                                <span>Stock: <strong className={sub.stock < 50 ? 'text-red-600' : 'text-emerald-600'}>{Math.round(sub.stock).toLocaleString()}</strong></span>
-                                <span>Exp: <strong className={sub.isNearExpiry ? 'text-amber-600' : ''}>{sub.expiryDate || 'N/A'}</strong></span>
-                              </div>
+                              {sub.type !== 'generic' && (
+                                <div className="flex items-center gap-3 text-xs text-muted-foreground mt-1">
+                                  <span>Stock: <strong className={(sub.stock || 0) < 50 ? 'text-red-600' : 'text-emerald-600'}>{Math.round(sub.stock || 0).toLocaleString()}</strong></span>
+                                  <span>Exp: <strong className={sub.isNearExpiry ? 'text-amber-600' : ''}>{sub.expiryDate || 'N/A'}</strong></span>
+                                </div>
+                              )}
                             </div>
                           ))
-                      ) : (
-                        <div className="p-4 text-center text-muted-foreground">
-                          <Search className="h-6 w-6 mx-auto mb-1" />
-                          <p className="text-sm">No {substitutionForm.reason === 'brand_selection' ? 'brands' : 'generics'} found for "{substituteSearchQuery}"</p>
-                        </div>
-                      );
-                    }
+                  ) : substitutionForm.reason === 'brand_selection' ? (
+                    <div className="text-center py-8 text-muted-foreground text-sm">
+                      {substituteSearchQuery.trim() 
+                        ? `No brands found for "${substituteSearchQuery}"` 
+                        : 'No brands available for this medication'}
+                    </div>
+                  ) : substituteSearchQuery.length >= 2 ? (
+                    <div className="text-center py-8 text-muted-foreground text-sm">
+                      No medications found matching "{substituteSearchQuery}"
+                    </div>
+                  ) : (
+                    <div className="text-center py-8 text-muted-foreground text-sm">
+                      Type at least 2 characters to search for medications
+                    </div>
+                  )
+                })()}
+                </div>
 
-                    // If no search query, show suggested substitutes
-                    return availableSubstitutes.length > 0 ? (
-                      availableSubstitutes
-                        .sort((a, b) => {
-                          if (substitutionForm.reason === 'near_expiry') {
-                            return a.daysToExpiry - b.daysToExpiry;
-                          }
-                          return b.stock - a.stock;
-                        })
-                        .map(sub => (
+                {/* Brand selection when substituting with generic */}
+                {substitutionForm.reason === 'substitute' &&
+                  substituteSearchResults.find((s) => s.id === substitutionForm.selectedSubstitute)?.type === 'generic' && (
+                  <div className="space-y-2">
+                    <Label className="text-sm">Select brand to dispense *</Label>
+                    {isLoadingSubstituteBrands ? (
+                      <div className="flex items-center gap-2 py-4 text-muted-foreground">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Loading brands...
+                      </div>
+                    ) : substituteBrandOptions.length > 0 ? (
+                      <div className="space-y-2 max-h-[140px] overflow-y-auto border rounded-lg p-2">
+                        {substituteBrandOptions.map((brand) => (
                           <div
-                            key={sub.id}
-                            onClick={() => setSubstitutionForm({ ...substitutionForm, selectedSubstitute: sub.id })}
+                            key={brand.id}
+                            onClick={() =>
+                              setSubstitutionForm((f) => ({ ...f, selectedSubstituteBrand: brand.id }))
+                            }
                             className={`p-2.5 rounded-lg border cursor-pointer transition-all ${
-                              substitutionForm.selectedSubstitute === sub.id
-                                ? 'border-amber-500 bg-amber-50 dark:bg-amber-900/20'
-                                : 'border-transparent hover:border-amber-300 hover:bg-muted/50'
+                              substitutionForm.selectedSubstituteBrand === brand.id
+                                ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20'
+                                : 'border-transparent hover:border-emerald-300 hover:bg-muted/50'
                             }`}
                           >
                             <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <span className="font-medium text-sm">{sub.name}</span>
-                                <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${
-                                  sub.type === 'generic' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-700' :
-                                  sub.type === 'brand' ? 'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-700' :
-                                  'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-700'
-                                }`}>
-                                  {sub.type}
-                                </Badge>
-                                {sub.isNearExpiry && (
-                                  <Badge className="text-[10px] px-1.5 py-0 bg-amber-500 text-white">
-                                    Near Expiry
-                                  </Badge>
-                                )}
-                              </div>
-                              {substitutionForm.selectedSubstitute === sub.id && (
-                                <CheckCircle2 className="h-4 w-4 text-amber-500 flex-shrink-0" />
+                              <span className="font-medium text-sm">{brand.name}</span>
+                              {substitutionForm.selectedSubstituteBrand === brand.id && (
+                                <CheckCircle2 className="h-4 w-4 text-emerald-500 flex-shrink-0" />
                               )}
                             </div>
                             <div className="flex items-center gap-3 text-xs text-muted-foreground mt-1">
-                              <span>Stock: <strong className={sub.stock < 50 ? 'text-red-600' : 'text-emerald-600'}>{Math.round(sub.stock).toLocaleString()}</strong></span>
-                              <span>Exp: <strong className={sub.isNearExpiry ? 'text-amber-600' : ''}>{sub.expiryDate || 'N/A'}</strong></span>
+                              <span>
+                                Stock:{' '}
+                                <strong
+                                  className={
+                                    (brand.stock || 0) < 50 ? 'text-red-600' : 'text-emerald-600'
+                                  }
+                                >
+                                  {Math.round(brand.stock || 0).toLocaleString()}
+                                </strong>
+                              </span>
                             </div>
                           </div>
-                        ))
-                    ) : (
-                      <div className="p-4 text-center text-muted-foreground">
-                        <Package className="h-6 w-6 mx-auto mb-1" />
-                        <p className="text-sm">No suggested {substitutionForm.reason === 'brand_selection' ? 'brands' : 'generics'} available</p>
-                        <p className="text-xs mt-1">Try searching for any {substitutionForm.reason === 'brand_selection' ? 'brand' : 'generic'} above</p>
+                        ))}
                       </div>
-                    );
-                  })()}
-                </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground py-2">
+                        No in-stock brands available for this generic.
+                      </p>
+                    )}
+                  </div>
+                )}
 
                 {/* Notes */}
                 <div>
@@ -2455,23 +2482,36 @@ export default function PrescriptionsPage() {
                 </div>
 
                 {/* Summary */}
-                {substitutionForm.reason && substitutionForm.selectedSubstitute && (
+                {substitutionForm.reason &&
+                  substitutionForm.selectedSubstitute &&
+                  (substitutionForm.reason !== 'substitute' ||
+                    substituteSearchResults.find((s) => s.id === substitutionForm.selectedSubstitute)?.type !== 'generic' ||
+                    substitutionForm.selectedSubstituteBrand) && (
                   <div className={`p-3 rounded-lg border ${
-                    substitutionForm.reason === 'brand_selection' 
+                    substitutionForm.reason === 'brand_selection'
                       ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800'
                       : 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800'
                   }`}>
                     <div className="flex items-center gap-2 text-sm">
-                      {substitutionForm.reason === 'brand_selection' 
+                      {substitutionForm.reason === 'brand_selection'
                         ? <Tag className="h-4 w-4 text-blue-600" />
                         : <CheckCircle2 className="h-4 w-4 text-emerald-600" />
                       }
                       <span className={substitutionForm.reason === 'brand_selection' ? "text-blue-700 dark:text-blue-400" : "text-emerald-700 dark:text-emerald-400"}>
                         {substitutionForm.reason === 'brand_selection' ? (
-                          <>Dispensing <strong>{(availableSubstitutes.find(s => s.id === substitutionForm.selectedSubstitute) || allAvailableMedications.find(s => s.id === substitutionForm.selectedSubstitute))?.name}</strong> for <strong>{substitutionMed.name}</strong></>
-                        ) : (
-                          <><strong>{substitutionMed.name}</strong> → <strong>{(availableSubstitutes.find(s => s.id === substitutionForm.selectedSubstitute) || allAvailableMedications.find(s => s.id === substitutionForm.selectedSubstitute))?.name}</strong></>
-                        )}
+                          <>Dispensing <strong>{(substituteSearchResults.find(s => s.id === substitutionForm.selectedSubstitute))?.name}</strong> for <strong>{substitutionMed.name}</strong></>
+                        ) : (() => {
+                          const sel = substituteSearchResults.find((s) => s.id === substitutionForm.selectedSubstitute);
+                          const brandName =
+                            sel?.type === 'generic' && substitutionForm.selectedSubstituteBrand
+                              ? substituteBrandOptions.find((b) => b.id === substitutionForm.selectedSubstituteBrand)?.name
+                              : sel?.name;
+                          return (
+                            <>
+                              <strong>{substitutionMed.name}</strong> → <strong>{brandName || sel?.name}</strong>
+                            </>
+                          );
+                        })()}
                       </span>
                     </div>
                     <p className={`text-xs mt-1 ${
@@ -2486,32 +2526,33 @@ export default function PrescriptionsPage() {
             
             <DialogFooter>
               <Button variant="outline" onClick={() => setShowSubstitutionModal(false)}>Cancel</Button>
-              <Button 
+              <Button
                 className={substitutionForm.reason === 'brand_selection' ? "bg-blue-600 hover:bg-blue-700" : "bg-amber-500 hover:bg-amber-600"}
-                disabled={!substitutionForm.reason || !substitutionForm.selectedSubstitute}
+                disabled={
+                  !substitutionForm.reason ||
+                  !substitutionForm.selectedSubstitute ||
+                  (substitutionForm.reason === 'substitute' &&
+                    substituteSearchResults.find((s) => s.id === substitutionForm.selectedSubstitute)?.type === 'generic' &&
+                    !substitutionForm.selectedSubstituteBrand)
+                }
                 onClick={async () => {
                   if (!selectedPrescription) return;
 
                   // Check both availableSubstitutes (suggested) and allAvailableMedications (searched)
-                  const selectedSub = availableSubstitutes.find(s => s.id === substitutionForm.selectedSubstitute) ||
-                                    allAvailableMedications.find(s => s.id === substitutionForm.selectedSubstitute);
+                  const selectedSub = substituteSearchResults.find(s => s.id === substitutionForm.selectedSubstitute);
                   if (selectedSub && substitutionMed) {
                     try {
                       let medicationIdToUse = selectedSub.id;
                       let resolvedMedicationName = selectedSub.name;
 
                       if (selectedSub.type === 'generic') {
-                        const brands = await pharmacyService.getAvailableBrands(Number(selectedSub.id));
-                        if (!brands || brands.length === 0) {
-                          throw new Error(`No in-stock brand available for "${selectedSub.name}"`);
+                        const brandId = substitutionForm.selectedSubstituteBrand;
+                        const brand = substituteBrandOptions.find((b) => b.id === brandId);
+                        if (!brand) {
+                          throw new Error(`Please select a brand to dispense for "${selectedSub.name}"`);
                         }
-
-                        const bestBrand = [...brands].sort(
-                          (a: any, b: any) => Number((b as any).available_stock || 0) - Number((a as any).available_stock || 0)
-                        )[0];
-
-                        medicationIdToUse = bestBrand.id.toString();
-                        resolvedMedicationName = bestBrand.name;
+                        medicationIdToUse = brand.id;
+                        resolvedMedicationName = brand.name;
                       }
                       
                       // Call API to persist the substitution
@@ -2576,7 +2617,12 @@ export default function PrescriptionsPage() {
                               reason: substitutionForm.reason,
                               medication_id: medicationIdToUse,
                               name: resolvedMedicationName,
-                              ...(substitutionForm.reason === 'brand_selection' ? { previous_brand: previousBrandName } : {}),
+                              ...(substitutionForm.reason === 'brand_selection'
+                                ? {
+                                    previous_brand: previousBrandName,
+                                    is_first_brand_selection: !Boolean((substitutionMed as any).medication),
+                                  }
+                                : {}),
                             },
                             originalMedication: preservedOriginalMedication,
                           };
@@ -2590,7 +2636,7 @@ export default function PrescriptionsPage() {
                       setShowSubstitutionModal(false);
 
                       // Reset form
-                      setSubstitutionForm({ reason: '', selectedSubstitute: '', notes: '' });
+                      setSubstitutionForm({ reason: '', selectedSubstitute: '', selectedSubstituteBrand: '', notes: '' });
                       setSubstituteSearchQuery('');
 
                     } catch (error) {

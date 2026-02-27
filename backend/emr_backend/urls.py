@@ -19,6 +19,7 @@ api_v1_patterns = [
     path('', include('pharmacy.urls')),
     path('', include('radiology.urls')),
     path('', include('physiotherapy.urls')),
+    path('', include('eyecare.urls')),
     path('', include('consultation.urls')),
     path('', include('nursing.urls')),
     path('', include('audit.urls')),

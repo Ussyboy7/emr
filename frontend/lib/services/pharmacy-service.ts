@@ -425,6 +425,7 @@ class PharmacyService {
     page?: number;
     page_size?: number;
     medication__category?: string;
+    medication__generic?: number;
     stock_status?: string;
   }): Promise<{ results: MedicationInventory[]; count: number }> {
     const query = buildQueryString(params || {});

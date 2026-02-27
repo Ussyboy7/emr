@@ -391,8 +391,7 @@ export function PrescriptionOrderModal({
                           <div className="flex-1 min-w-0">
                             <div className="font-medium text-sm">{med.name}</div>
                             <div className="text-xs text-muted-foreground mt-1">
-                              {(med.generic_name || "").trim() ? `${med.generic_name} • ` : ""}
-                              {med.dosage_form || med.form || (med as any).dosageForm || "N/A"}
+                              {(med.generic_name || "").trim() ? `${med.generic_name}` : ""}
                               {med.strength ? ` • ${med.strength}` : ""}
                             </div>
                           </div>
@@ -444,7 +443,7 @@ export function PrescriptionOrderModal({
               <div className="flex items-center justify-between">
                 <div>
                   <Label className="text-sm font-semibold">Configure Prescriptions</Label>
-                  <p className="text-xs text-muted-foreground mt-1">Set dosage, frequency, duration, unit, strength, and form for each selected medication</p>
+                  <p className="text-xs text-muted-foreground mt-1">Set strength, dosage frequency, duration, and route for each selected medication</p>
                 </div>
                 <Badge variant="outline" className="text-xs">
                   {selectedMedications.length} medication{selectedMedications.length > 1 ? "s" : ""} selected
@@ -475,9 +474,11 @@ export function PrescriptionOrderModal({
                       <div className="flex items-start justify-between mb-3">
                         <div>
                           <div className="font-medium text-sm">{med.name}</div>
-                          <div className="text-xs text-muted-foreground">
-                            {med.generic_name || ""} • {med.dosage_form || med.form || (med as any).dosageForm || "N/A"}
-                          </div>
+                          {med.generic_name && (
+                            <div className="text-xs text-muted-foreground">
+                              {med.generic_name}
+                            </div>
+                          )}
                         </div>
                         <Button
                           variant="ghost"
@@ -489,56 +490,27 @@ export function PrescriptionOrderModal({
                         </Button>
                       </div>
 
-                      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                         <div className="space-y-1">
                           <Label className="text-xs">
-                            Dosage <span className="text-red-500">*</span>
+                            Strength <span className="text-red-500">*</span>
                           </Label>
-                          <Input
-                            type="number"
-                            min="0"
-                            step="1"
-                            placeholder="e.g., 1"
-                            className="h-8 text-xs"
-                            value={cfg.dosage || ""}
-                            onChange={(e) => updateMedicationConfig(medId, "dosage", e.target.value)}
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <Label className="text-xs">
-                            Form <span className="text-red-500">*</span>
-                          </Label>
-                          <Select value={cfg.form || ""} onValueChange={(v) => updateMedicationConfig(medId, "form", v)}>
+                          <Select value={cfg.unit || "tablet"} onValueChange={(v) => updateMedicationConfig(medId, "unit", v)}>
                             <SelectTrigger className="h-8 text-xs">
-                              <SelectValue placeholder="Select form" />
+                              <SelectValue placeholder="Select strength" />
                             </SelectTrigger>
                             <SelectContent>
-                              {formOptions.map((form) => (
-                                <SelectItem key={form} value={form}>
-                                  {form}
+                              {strengthOptions.map((strength) => (
+                                <SelectItem key={strength} value={strength}>
+                                  {strength}
                                 </SelectItem>
                               ))}
                             </SelectContent>
                           </Select>
                         </div>
                         <div className="space-y-1">
-                          <Label className="text-xs">Duration (days)</Label>
-                          <Input
-                            type="number"
-                            min="1"
-                            placeholder="e.g., 7"
-                            className="h-8 text-xs"
-                            value={cfg.durationDays === "" ? "" : String(cfg.durationDays)}
-                            onChange={(e) => {
-                              const value = e.target.value;
-                              const days = value === "" ? "" : parseInt(value, 10) || "";
-                              updateMedicationConfig(medId, "durationDays", days);
-                            }}
-                          />
-                        </div>
-                        <div className="space-y-1">
                           <Label className="text-xs">
-                            Frequency <span className="text-red-500">*</span>
+                            Dosage (times/day) <span className="text-red-500">*</span>
                           </Label>
                           <Select value={cfg.frequency || "Once daily (OD)"} onValueChange={(v) => updateMedicationConfig(medId, "frequency", v)}>
                             <SelectTrigger className="h-8 text-xs">
@@ -559,21 +531,19 @@ export function PrescriptionOrderModal({
                           </Select>
                         </div>
                         <div className="space-y-1">
-                          <Label className="text-xs">
-                            Strength <span className="text-red-500">*</span>
-                          </Label>
-                          <Select value={cfg.unit || "tablet"} onValueChange={(v) => updateMedicationConfig(medId, "unit", v)}>
-                            <SelectTrigger className="h-8 text-xs">
-                              <SelectValue placeholder="Select strength" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {strengthOptions.map((strength) => (
-                                <SelectItem key={strength} value={strength}>
-                                  {strength}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                          <Label className="text-xs">Duration (days)</Label>
+                          <Input
+                            type="number"
+                            min="1"
+                            placeholder="e.g., 7"
+                            className="h-8 text-xs"
+                            value={cfg.durationDays === "" ? "" : String(cfg.durationDays)}
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              const days = value === "" ? "" : parseInt(value, 10) || "";
+                              updateMedicationConfig(medId, "durationDays", days);
+                            }}
+                          />
                         </div>
                         <div className="space-y-1">
                           <Label className="text-xs">Route</Label>
@@ -594,22 +564,6 @@ export function PrescriptionOrderModal({
                             </SelectContent>
                           </Select>
                         </div>
-                        <div className="space-y-1">
-                          <Label className="text-xs">Calculated Quantity</Label>
-                          <Input className="h-8 text-xs" value={String(calculatedQuantity)} readOnly />
-                          <p className="text-[10px] text-muted-foreground">Dose x frequency x days</p>
-                        </div>
-                      </div>
-
-                      <div className="mt-3 space-y-1">
-                        <Label className="text-xs">Instructions</Label>
-                        <Textarea
-                          placeholder="Special instructions (optional)"
-                          rows={2}
-                          className="text-xs"
-                          value={cfg.instructions || ""}
-                          onChange={(e) => updateMedicationConfig(medId, "instructions", e.target.value)}
-                        />
                       </div>
                     </div>
                   );

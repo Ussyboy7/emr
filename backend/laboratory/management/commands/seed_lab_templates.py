@@ -1,13 +1,13 @@
 """
-Django management command to seed the database with 26 core lab test templates.
-Run with: python manage.py seed_lab_templates_26
+Django management command to seed the database with core lab test templates.
+Run with: python manage.py seed_lab_templates
 """
 from django.core.management.base import BaseCommand
 from laboratory.models import LabTemplate
 
 
 class Command(BaseCommand):
-    help = 'Seed the database with 26 core lab test templates'
+    help = 'Seed the database with core lab test templates'
 
     def handle(self, *args, **options):
         from laboratory.models import LabTest, LabOrder
@@ -426,20 +426,20 @@ class Command(BaseCommand):
                     'Others': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
                     'Culture': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
                     'Anti-Microbial Sensitivity': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
-                    'Pefloxacin (PEF)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
-                    'Gentamycin (CN)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
-                    'Ampiclox (APX)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
-                    'Zinnacef (Z)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
-                    'Amoxacilin (AM)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
-                    'Rosephine (R)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
-                    'Ciprofloxacin (CPX)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
-                    'Azithromycin (AZ)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
-                    'Levofloxacin (LEV)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
-                    'Erythromycin (E)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
-                    'Cefotaxim (CF)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
-                    'Tarivid (OFX)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
-                    'Sparfloxacin (SP)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
-                    'Augmentin (AU)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
+                    'Pefloxacin (PEF)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Gentamycin (CN)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Ampiclox (APX)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Zinnacef (Z)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Amoxacilin (AM)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Rosephine (R)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Ciprofloxacin (CPX)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Azithromycin (AZ)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Levofloxacin (LEV)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Erythromycin (E)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Cefotaxim (CF)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Tarivid (OFX)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Sparfloxacin (SP)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Augmentin (AU)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
                 }
             },
             {
@@ -559,21 +559,21 @@ class Command(BaseCommand):
                     'Others': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
                     'Culture': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
                     'Anti-Microbial Sensitivity': {'unit': '', 'range': '', 'dataType': 'text', 'required': True},
-                    'Pefloxacin (PEF)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
-                    'Gentamycin (CN)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
-                    'Ampiclox (APX)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
-                    'Ceftriaxone (CRO)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
-                    'Amoxacilin (AM)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
-                    'Rosephine (R)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
-                    'Ciprofloxacin (CPX)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
-                    'Nitrofurantoin (F)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
-                    'Levofloxacin (LEV)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
-                    'Imipenem (IMI)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
-                    'Cefotaxim (CF)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
-                    'Tarivid (OFX)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
-                    'Caftazidime (CAZ)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
-                    'Augmentin (AU)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
-                    'Meropenem (MEM)': {'unit': '', 'range': 'S/R', 'dataType': 'text', 'required': False},
+                    'Pefloxacin (PEF)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Gentamycin (CN)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Ampiclox (APX)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Ceftriaxone (CRO)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Amoxacilin (AM)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Rosephine (R)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Ciprofloxacin (CPX)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Nitrofurantoin (F)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Levofloxacin (LEV)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Imipenem (IMI)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Cefotaxim (CF)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Tarivid (OFX)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Caftazidime (CAZ)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Augmentin (AU)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                    'Meropenem (MEM)': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
 
                 }
             },

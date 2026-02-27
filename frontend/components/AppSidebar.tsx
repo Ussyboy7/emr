@@ -28,6 +28,7 @@ import {
   ClipboardList,
   UserPlus,
   TestTube,
+  Eye,
   Building2,
   FolderOpen,
   FilePlus,
@@ -193,6 +194,18 @@ const menuSections: MenuSection[] = [
       { label: "Home", href: "/physiotherapy", icon: LayoutDashboard },
       { label: "Pool Queue", href: "/physiotherapy/pool-queue", icon: Users },
       { label: "Completed Sessions", href: "/physiotherapy/completed", icon: CheckCircle },
+    ],
+  },
+  {
+    label: "Eye Clinic",
+    icon: Eye,
+    color: "text-blue-400",
+    activeColor: "data-[active=true]:bg-blue-500/10 data-[active=true]:text-blue-400",
+    basePath: "/eyecare",
+    items: [
+      { label: "Home", href: "/eyecare", icon: LayoutDashboard },
+      { label: "Pool Queue", href: "/eyecare/pool-queue", icon: Users },
+      { label: "Completed Orders", href: "/eyecare/completed", icon: CheckCircle },
     ],
   },
   {

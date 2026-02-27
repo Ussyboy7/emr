@@ -78,6 +78,7 @@ LOCAL_APPS = [
     "pharmacy",
     "radiology",
     "physiotherapy",
+    "eyecare",
     "consultation",
     "nursing",
     "wards",

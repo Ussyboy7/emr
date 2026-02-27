@@ -423,6 +423,47 @@ class ConsultationQueueViewSet(viewsets.ModelViewSet):
                 except Exception as e:
                     logger.error(f'Failed to create physio order: {e}')
             
+            # Check if Eye Clinic is one of the clinics
+            has_eye = any('eye' in clinic.lower() for clinic in visit_clinics)
+            
+            # Create eye order if needed
+            if has_eye:
+                try:
+                    from eyecare.models import EyeOrder
+                    
+                    # Check if eye order already exists for this visit
+                    eye_order_exists = EyeOrder.objects.filter(
+                        patient=patient,
+                        visit=visit,
+                        status__in=['pending', 'scheduled', 'in_progress']
+                    ).exists()
+                    
+                    if not eye_order_exists:
+                        # Create eye order automatically
+                        EyeOrder.objects.create(
+                            patient=patient,
+                            ordered_by=self.request.user,
+                            visit=visit,
+                            consultation_session=None,
+                            chief_complaint=f'Multi-clinic visit: {", ".join(visit_clinics)}',
+                            visual_acuity_od='',
+                            visual_acuity_os='',
+                            visual_acuity_ou='',
+                            refraction_od='',
+                            refraction_os='',
+                            iop_od=None,
+                            iop_os=None,
+                            diagnosis='',
+                            treatment_plan='',
+                            special_instructions='Automatically created from multi-clinic visit',
+                            priority='routine',
+                            status='scheduled',
+                            scheduled_at=timezone.now(),
+                        )
+                        logger.info(f'Created automatic eye order for patient {patient} from multi-clinic visit')
+                except Exception as e:
+                    logger.error(f'Failed to create eye order: {e}')
+            
             # Find all active consultation rooms for NON-physio clinics
             non_physio_clinics = [c for c in visit_clinics if 'physiotherapy' not in c.lower()]
             

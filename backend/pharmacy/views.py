@@ -206,7 +206,7 @@ class MedicationInventoryViewSet(viewsets.ModelViewSet):
     serializer_class = MedicationInventorySerializer
     pagination_class = FlexiblePageNumberPagination
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['medication', 'location', 'medication__category']
+    filterset_fields = ['medication', 'location', 'medication__category', 'medication__generic']
     search_fields = ['medication__name', 'batch_number']
     ordering_fields = ['expiry_date', 'created_at']
     ordering = ['expiry_date']

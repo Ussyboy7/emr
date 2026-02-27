@@ -7006,7 +7006,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                   {isAllergyRisk && <AlertTriangle className="h-3 w-3 text-red-500" />}
                                 </div>
                                 <div className="text-xs text-muted-foreground mt-1">
-                                  {(med.generic_name || '')} • {(med.form || 'N/A')}
+                                  {(med.generic_name || '')}
                                 </div>
                                 {isAllergyRisk && (
                                   <div className="text-xs text-red-600 dark:text-red-400 mt-1">
@@ -7063,7 +7063,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                     <div>
                       <Label className="text-sm font-semibold">Configure Prescriptions</Label>
                       <p className="text-xs text-muted-foreground mt-1">
-                        Set dosage, frequency, duration, strength, and form for each selected medication
+                        Set strength, dosage frequency, duration, and route for each selected medication
                       </p>
                     </div>
                     <Badge variant="outline" className="text-xs">
@@ -7099,7 +7099,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                               <div>
                                 <div className="font-medium text-sm">{med.name}</div>
                             <div className="text-xs text-muted-foreground">
-                                  {med.generic_name || ''} • {med.form || 'N/A'}
+                                  {med.generic_name}
                             </div>
                           </div>
                           <Button
@@ -7112,54 +7112,27 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                           </Button>
                         </div>
                         
-                            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                           <div className="space-y-1">
-                                <Label className="text-xs">Dosage <span className="text-red-500">*</span></Label>
-                            <Input
-                                  type="number"
-                                  min="0"
-                                  step="1"
-                                  placeholder="e.g., 1 tablet, 5ml, 10mg"
-                                  className="h-8 text-xs"
-                                  value={config.dosage || ''}
-                              onChange={(e) => updateMedicationConfig(medId, 'dosage', e.target.value)}
-                            />
-                          </div>
-                          <div className="space-y-1">
-                                <Label className="text-xs">Form <span className="text-red-500">*</span></Label>
+                                <Label className="text-xs">Strength <span className="text-red-500">*</span></Label>
                             <Select
-                                  value={config.form || ''}
-                                  onValueChange={(v) => updateMedicationConfig(medId, 'form', v)}
+                                  value={config.strength || ''}
+                                  onValueChange={(v) => updateMedicationConfig(medId, 'strength', v)}
                             >
                               <SelectTrigger className="h-8 text-xs">
-                                <SelectValue placeholder="Select form" />
+                                <SelectValue placeholder="Select strength" />
                               </SelectTrigger>
                               <SelectContent>
-                                    {formOptions.map((form) => (
-                                      <SelectItem key={form} value={form}>
-                                        {form}
+                                    {strengthOptions.map((strength) => (
+                                      <SelectItem key={strength} value={strength}>
+                                        {strength}
                                       </SelectItem>
                                     ))}
                               </SelectContent>
                             </Select>
                           </div>
                           <div className="space-y-1">
-                                <Label className="text-xs">Duration (days)</Label>
-                            <Input
-                              type="number"
-                              min="1"
-                                  placeholder="e.g., 7, 14, 30"
-                                  className="h-8 text-xs"
-                              value={config.durationDays || ''}
-                              onChange={(e) => {
-                                const value = e.target.value;
-                                const days = value === '' ? '' : parseInt(value) || '';
-                                updateMedicationConfig(medId, 'durationDays', days);
-                              }}
-                            />
-                          </div>
-                          <div className="space-y-1">
-                                <Label className="text-xs">Frequency <span className="text-red-500">*</span></Label>
+                                <Label className="text-xs">Dosage (times/day) <span className="text-red-500">*</span></Label>
                             <Select
                                   value={config.frequency || 'Once daily (OD)'}
                               onValueChange={(v) => updateMedicationConfig(medId, 'frequency', v)}
@@ -7183,22 +7156,19 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                             </Select>
                           </div>
                           <div className="space-y-1">
-                                <Label className="text-xs">Strength <span className="text-red-500">*</span></Label>
-                            <Select
-                                  value={config.strength || ''}
-                                  onValueChange={(v) => updateMedicationConfig(medId, 'strength', v)}
-                            >
-                              <SelectTrigger className="h-8 text-xs">
-                                <SelectValue placeholder="Select strength" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                    {strengthOptions.map((strength) => (
-                                      <SelectItem key={strength} value={strength}>
-                                        {strength}
-                                      </SelectItem>
-                                    ))}
-                              </SelectContent>
-                            </Select>
+                                <Label className="text-xs">Duration (days)</Label>
+                            <Input
+                              type="number"
+                              min="1"
+                                  placeholder="e.g., 7, 14, 30"
+                                  className="h-8 text-xs"
+                              value={config.durationDays || ''}
+                              onChange={(e) => {
+                                const value = e.target.value;
+                                const days = value === '' ? '' : parseInt(value) || '';
+                                updateMedicationConfig(medId, 'durationDays', days);
+                              }}
+                            />
                           </div>
                           <div className="space-y-1">
                                 <Label className="text-xs">Route</Label>
@@ -7222,28 +7192,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                               </SelectContent>
                             </Select>
                           </div>
-                          <div className="space-y-1">
-                                <Label className="text-xs">Calculated Quantity</Label>
-                            <Input
-                                  className="h-8 text-xs"
-                                  value={String(calculatedQuantity)}
-                                  readOnly
-                            />
-                            <p className="text-[10px] text-muted-foreground">
-                              Dose x frequency x days
-                            </p>
-                          </div>
-                        </div>
-
-                            <div className="mt-3 space-y-1">
-                              <Label className="text-xs">Instructions</Label>
-                          <Textarea
-                                placeholder="Special instructions (optional)"
-                            rows={2}
-                            className="text-xs"
-                                value={config.instructions || ''}
-                                onChange={(e) => updateMedicationConfig(medId, 'instructions', e.target.value)}
-                          />
                         </div>
                           </CardContent>
                         </Card>
