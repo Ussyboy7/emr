@@ -436,14 +436,38 @@ export default function NursingPoolQueuePage() {
             patientNumericId: visit.patient, // Store the actual patient ID from backend
             visitNumericId: visit.id, // Store the actual visit ID from backend
             visitNotes: visit.clinical_notes, // Clinical notes from the visit
+            age: (visit as any).age, // Patient age from backend
+            gender: (visit as any).gender, // Patient gender from backend
             sentAt: queueVisitToSentAt.get(visit.id),
             sentToPhysio,
             sentToEyeClinic,
           };
         });
 
-        debugLog('Nursing patients created:', transformedPatients.length);
-        debugLog('Sample patient:', transformedPatients[0]);
+        // Fetch patient details (age, gender) for all unique patients
+        const uniquePatientIds = Array.from(new Set(transformedPatients.map(p => p.patientNumericId)));
+        if (uniquePatientIds.length > 0) {
+          const patientDetailsMap = new Map<number, { age: number; gender: string }>();
+          await Promise.all(uniquePatientIds.map(async (patientId) => {
+            try {
+              const patientData = await apiFetch<any>(`/patients/${patientId}/`);
+              patientDetailsMap.set(patientId, {
+                age: patientData.age || 0,
+                gender: patientData.gender || '',
+              });
+            } catch (err) {
+              console.warn(`Failed to fetch details for patient ${patientId}:`, err);
+            }
+          }));
+          
+          transformedPatients.forEach(patient => {
+            const details = patientDetailsMap.get(patient.patientNumericId);
+            if (details) {
+              patient.age = details.age;
+              patient.gender = details.gender as any;
+            }
+          });
+        }
 
         setPatients(transformedPatients);
       } catch (err) {
@@ -1283,10 +1307,9 @@ export default function NursingPoolQueuePage() {
                           <span>{patient.clinic || 'GOPD'}</span>
                         )}
                         <span>•</span>
-                        <span>{patient.visitType}</span>
+                        <span>{patient.age}y</span>
                         <span>•</span>
                         <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{patient.waitTime}m</span>
-                        {/* Age and gender not available in visit data */}
                       </div>
                       {/* Row 3: Visit Notes (if available) */}
                       {patient.visitNotes && (
