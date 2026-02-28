@@ -26,6 +26,17 @@ import { getAllClinicsWithAll } from '@/lib/constants/clinics';
 import { clinicMatches } from '@/lib/utils/clinic-utils';
 import { PatientAvatar } from "@/components/PatientAvatar";
 
+// Format visit type for display
+const getVisitTypeLabel = (type: string) => {
+  const typeMap: Record<string, string> = {
+    'consultation': 'Consultation',
+    'follow_up': 'Follow-up',
+    'emergency': 'Emergency',
+    'routine': 'Routine Checkup',
+  };
+  return typeMap[type] || type.charAt(0).toUpperCase() + type.slice(1).replace(/_/g, '-');
+};
+
 // Constants - standardized clinic list
 const clinics = getAllClinicsWithAll();
 
@@ -956,13 +967,14 @@ export default function NursingPoolQueuePage() {
     }
   };
 
-  const getVisitTypeColor = (type: string) => {
-    switch (type) {
-      case 'Emergency': return 'bg-rose-500 text-white';
-      case 'Consultation': return 'bg-blue-500 text-white';
-      case 'Follow-up': return 'bg-emerald-500 text-white';
-      default: return 'bg-gray-500 text-white';
-    }
+  const getVisitTypeBadge = (type: string) => {
+    const styles: Record<string, string> = {
+      'consultation': 'border-teal-500/50 text-teal-600 dark:text-teal-400',
+      'follow_up': 'border-blue-500/50 text-blue-600 dark:text-blue-400',
+      'emergency': 'border-rose-500/50 text-rose-600 dark:text-rose-400',
+      'routine': 'border-violet-500/50 text-violet-600 dark:text-violet-400',
+    };
+    return styles[type] || 'border-muted-foreground/50 text-muted-foreground';
   };
 
   const getStatusColor = (status: string) => {
@@ -977,12 +989,13 @@ export default function NursingPoolQueuePage() {
   };
 
   const getVisitTypeBorderColor = (type: string) => {
-    switch (type) {
-      case 'Emergency': return 'border-l-rose-500';
-      case 'Consultation': return 'border-l-blue-500';
-      case 'Follow-up': return 'border-l-emerald-500';
-      default: return 'border-l-gray-500';
-    }
+    const styles: Record<string, string> = {
+      'consultation': 'border-l-teal-500',
+      'follow_up': 'border-l-blue-500',
+      'emergency': 'border-l-rose-500',
+      'routine': 'border-l-violet-500',
+    };
+    return styles[type] || 'border-l-gray-500';
   };
 
   // Show loading state
@@ -1150,7 +1163,7 @@ export default function NursingPoolQueuePage() {
                       <div className="flex items-center justify-between gap-2">
                         <div className="flex items-center gap-2 flex-wrap min-w-0">
                           <span className="font-semibold text-foreground truncate">{patient.name}</span>
-                          <Badge className={`text-[10px] px-1.5 py-0 ${getVisitTypeColor(patient.visitType)}`}>{patient.visitType}</Badge>
+                          <Badge variant="outline" className={`text-[10px] px-1.5 py-0 h-5 ${getVisitTypeBadge(patient.visitType)}`}>{getVisitTypeLabel(patient.visitType)}</Badge>
                           <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${getStatusColor(patient.nursingStatus)}`}>
                             {patient.nursingStatus === 'Sent to Room' && patient.consultationRoom
                               ? `Sent to ${patient.consultationRoom}`

@@ -1340,8 +1340,8 @@ export default function PrescriptionsPage() {
           </div>
         </div>
 
-        {/* Stats Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
+        {/* Stats Cards - 4 key workflow metrics */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <Card>
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
@@ -1379,32 +1379,10 @@ export default function PrescriptionsPage() {
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-muted-foreground">On Hold</p>
-                  <p className="text-2xl font-bold text-red-600">{stats.onHold}</p>
-                </div>
-                <XCircle className="h-5 w-5 text-red-500" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
                   <p className="text-sm text-muted-foreground">Emergency</p>
                   <p className="text-2xl font-bold text-red-600">{stats.emergency}</p>
                 </div>
                 <AlertTriangle className="h-5 w-5 text-red-500" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Avg Wait</p>
-                  <p className="text-2xl font-bold text-violet-600">{stats.avgWaitTime >= 60 ? `${Math.floor(stats.avgWaitTime/60)}h ${stats.avgWaitTime%60}m` : `${stats.avgWaitTime}m`}</p>
-                </div>
-                <Clock className="h-5 w-5 text-violet-500" />
               </div>
             </CardContent>
           </Card>

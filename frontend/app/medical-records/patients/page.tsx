@@ -137,6 +137,11 @@ const getPhotoUrl = (photoPath: string | null | undefined): string => {
   return `${baseUrl}/media/${photoPath.startsWith('/') ? photoPath.slice(1) : photoPath}`;
 };
 
+// Safe property access helper
+const getLocation = (patient: any): string => {
+  return patient.location || patient.work_location || patient.office_location || '';
+};
+
 // Transform backend patient to frontend format
 const transformPatient = (apiPatient: ApiPatient): Patient => {
   const categoryMap: Record<string, string> = {
@@ -168,7 +173,7 @@ const transformPatient = (apiPatient: ApiPatient): Patient => {
     emergencyContact: apiPatient.nok_first_name ? `${apiPatient.nok_first_name} ${apiPatient.nok_middle_name || ''} - ${apiPatient.nok_phone || ''}`.trim() : '',
     lastVisit: '', // Will be populated if visit data is available
     totalVisits: 0, // Will be populated if visit data is available
-    location: apiPatient.location || '',
+    location: getLocation(apiPatient),
     photoUrl: getPhotoUrl(apiPatient.photo),
     registeredAt: apiPatient.created_at?.split('T')[0] || '',
     primaryPatient: '', // Will be populated if principal_staff data is available
@@ -320,7 +325,36 @@ export default function PatientsListPage() {
       setTotalCount(response.count || response.results.length);
       
       // Transform patients (visit data will be fetched on-demand when viewing patient details)
-      const transformedPatients = response.results.map(transformPatient);
+      const transformedPatients = response.results.map(apiPatient => {
+        console.log('API Patient data:', {
+          id: apiPatient.id,
+          patient_id: apiPatient.patient_id,
+          location: apiPatient.location,
+          division: apiPatient.division,
+          employee_type: apiPatient.employee_type,
+          category: apiPatient.category
+        });
+        return transformPatient(apiPatient);
+      });
+      
+      // Fetch employment details for Employee and Retiree patients
+      await Promise.allSettled(
+        transformedPatients.map(async (patient, index) => {
+          const apiPatient = response.results[index];
+          
+          // Only fetch employment details for Employee and Retiree patients
+          if ((apiPatient.category === 'employee' || apiPatient.category === 'retiree') && apiPatient.id) {
+            try {
+              const fullPatient = await patientService.getPatient(apiPatient.id);
+              patient.location = fullPatient.location || '';
+              patient.division = fullPatient.division || '';
+              patient.employeeType = fullPatient.employee_type || '';
+            } catch (err) {
+              console.debug('Could not fetch employment details for patient', apiPatient.id);
+            }
+          }
+        })
+      );
       
       // Optionally fetch visit counts and principal staff names in parallel (but limit to avoid slowdown)
       // For better performance, we'll only fetch these when opening the view modal
@@ -952,9 +986,18 @@ export default function PatientsListPage() {
                             <span>•</span>
                             <span>{patient.age}y {patient.gender}</span>
                             <span>•</span>
-                            <span className="flex items-center gap-1"><Phone className="h-3 w-3" />{patient.phone}</span>
-                            <span>•</span>
-                            <span className="truncate max-w-[120px]">{patient.location}</span>
+                            <span className="flex items-center gap-1"><Phone className="h-3 w-3" />{patient.phone || 'No phone'}</span>
+                            {patient.location ? (
+                              <>
+                                <span>•</span>
+                                <span className="truncate max-w-[120px]">{patient.location}</span>
+                              </>
+                            ) : (
+                              <>
+                                <span>•</span>
+                                <span className="text-muted-foreground italic">Location not set</span>
+                              </>
+                            )}
                             <span>•</span>
                             <span>Last: {patient.lastVisit}</span>
                             <span className="text-teal-600 dark:text-teal-400">({patient.totalVisits} visits)</span>
@@ -1863,7 +1906,7 @@ export default function PatientsListPage() {
             )}
             <DialogFooter>
               <Button variant="outline" onClick={() => setIsEditModalOpen(false)}>Cancel</Button>
-              <Button onClick={handleSaveEdit} disabled={isSubmitting || editFormLoading || !editForm.firstName || !editForm.lastName || !editForm.phone}>
+              <Button onClick={handleSaveEdit} disabled={isSubmitting || editFormLoading}>
                 {isSubmitting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Edit className="h-4 w-4 mr-2" />}
                 Save Changes
               </Button>

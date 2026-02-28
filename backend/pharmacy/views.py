@@ -1,7 +1,10 @@
 """
 Views for the Pharmacy app.
 """
+import logging
 from rest_framework import viewsets, status
+
+logger = logging.getLogger(__name__)
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
@@ -740,9 +743,69 @@ class StockRequestViewSet(viewsets.ModelViewSet):
     search_fields = ['request_id', 'notes']
     ordering_fields = ['created_at', 'updated_at']
     ordering = ['-created_at']
+
+    def get_queryset(self):
+        from datetime import datetime
+        qs = StockRequest.objects.all()
+        date_after = self.request.query_params.get('date_after')
+        date_before = self.request.query_params.get('date_before')
+        if date_after:
+            try:
+                dt = datetime.strptime(date_after, '%Y-%m-%d').date()
+                qs = qs.filter(created_at__date__gte=dt)
+            except ValueError:
+                pass
+        if date_before:
+            try:
+                dt = datetime.strptime(date_before, '%Y-%m-%d').date()
+                qs = qs.filter(created_at__date__lte=dt)
+            except ValueError:
+                pass
+        return qs
     
     def perform_create(self, serializer):
         serializer.save(requested_by=self.request.user)
+
+    def partial_update(self, request, *args, **kwargs):
+        """PATCH support: accept items to update quantities."""
+        try:
+            stock_request = self.get_object()
+            items_data = request.data.get('items')
+            if items_data is not None and isinstance(items_data, list) and len(items_data) > 0:
+                if stock_request.status not in ['pending', 'approved']:
+                    return Response(
+                        {'error': f'Cannot update items for request with status {stock_request.status}'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+                for entry in items_data:
+                    item_id = entry.get('id')
+                    new_qty = entry.get('quantity')
+                    if item_id is None or new_qty is None:
+                        continue
+                    try:
+                        item_id = int(item_id)
+                        new_qty = max(0, float(new_qty))
+                    except (TypeError, ValueError):
+                        continue
+                    try:
+                        item = stock_request.items.get(id=item_id)
+                    except StockRequestItem.DoesNotExist:
+                        continue
+                    fulfilled = float(item.fulfilled_quantity or 0)
+                    if new_qty < fulfilled:
+                        new_qty = fulfilled
+                    item.quantity = Decimal(str(new_qty))
+                    item.save()
+                stock_request.refresh_from_db()
+                serializer = StockRequestSerializer(stock_request)
+                return Response({
+                    'message': 'Quantities updated',
+                    'request': serializer.data
+                })
+            return super().partial_update(request, *args, **kwargs)
+        except Exception as e:
+            logger.exception('StockRequest partial_update failed: %s', e)
+            raise
 
     @action(detail=True, methods=['post'])
     def approve(self, request, pk=None):
@@ -802,6 +865,57 @@ class StockRequestViewSet(viewsets.ModelViewSet):
         stock_request.save()
         
         return Response(StockRequestSerializer(stock_request).data)
+
+    @action(detail=True, methods=['post'], url_path='update_items')
+    def update_items(self, request, pk=None):
+        """
+        Update item quantities for a pending or approved request.
+        Request body: { "items": [{ "id": <item_id>, "quantity": <number> }, ...] }
+        """
+        stock_request = self.get_object()
+        if stock_request.status not in ['pending', 'approved']:
+            return Response(
+                {'error': f'Cannot update items for request with status {stock_request.status}'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        items_data = request.data.get('items', [])
+        if not items_data:
+            return Response(
+                {'error': 'No items provided'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        updated = []
+        for entry in items_data:
+            item_id = entry.get('id')
+            new_qty = entry.get('quantity')
+            if item_id is None or new_qty is None:
+                continue
+            try:
+                item_id = int(item_id)
+                new_qty = max(0, float(new_qty))
+            except (TypeError, ValueError):
+                continue
+
+            try:
+                item = stock_request.items.get(id=item_id)
+            except StockRequestItem.DoesNotExist:
+                continue
+
+            # Cannot reduce quantity below already fulfilled amount
+            if new_qty < float(item.fulfilled_quantity or 0):
+                new_qty = float(item.fulfilled_quantity or 0)
+
+            item.quantity = Decimal(str(new_qty))
+            item.save()
+            updated.append({'id': item.id, 'quantity': float(item.quantity)})
+
+        stock_request.refresh_from_db()
+        return Response({
+            'message': f'Updated {len(updated)} item(s)',
+            'request': StockRequestSerializer(stock_request).data
+        })
 
     @action(detail=True, methods=['post'])
     def fulfill(self, request, pk=None):

@@ -628,10 +628,8 @@ class PharmacyService {
   }
 
   async approveStockRequest(id: number): Promise<StockRequest> {
-    // Fallback to PATCH if custom action is not found
-    return apiFetch<StockRequest>(`/v1/pharmacy/stock-requests/${id}/`, {
-      method: 'PATCH',
-      body: JSON.stringify({ status: 'approved' })
+    return apiFetch<StockRequest>(`/v1/pharmacy/stock-requests/${id}/approve/`, {
+      method: 'POST',
     });
   }
 
@@ -649,6 +647,17 @@ class PharmacyService {
       method: 'PATCH',
       body: JSON.stringify({ status: 'cancelled' })
     });
+  }
+
+  async updateStockRequestItems(id: number, items: Array<{ id: number; quantity: number }>): Promise<{ message: string; request: StockRequest }> {
+    const res = await apiFetch<{ message?: string; request?: StockRequest }>(
+      `/v1/pharmacy/stock-requests/${id}/update_items/`,
+      { method: 'POST', body: JSON.stringify({ items }) }
+    );
+    return {
+      message: (res as any)?.message ?? 'Quantities updated',
+      request: (res as any)?.request ?? res as StockRequest
+    };
   }
 
   async fulfillStockRequest(id: number): Promise<{ request: StockRequest; issue: StockIssue }> {

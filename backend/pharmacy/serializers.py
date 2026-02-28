@@ -298,7 +298,10 @@ class DispenseSerializer(serializers.ModelSerializer):
 
 
 class StockRequestItemSerializer(serializers.ModelSerializer):
-    medication_name = serializers.CharField(source='medication.name', read_only=True)
+    medication_name = serializers.SerializerMethodField(read_only=True)
+
+    def get_medication_name(self, obj):
+        return obj.medication.name if obj.medication else ''
     
     class Meta:
         model = StockRequestItem
@@ -308,8 +311,14 @@ class StockRequestItemSerializer(serializers.ModelSerializer):
 
 class StockRequestSerializer(serializers.ModelSerializer):
     items = StockRequestItemSerializer(many=True)
-    requested_by_name = serializers.CharField(source='requested_by.get_full_name', read_only=True)
-    confirmed_by_name = serializers.CharField(source='confirmed_by.get_full_name', read_only=True)
+    requested_by_name = serializers.SerializerMethodField(read_only=True)
+    confirmed_by_name = serializers.SerializerMethodField(read_only=True)
+
+    def get_requested_by_name(self, obj):
+        return obj.requested_by.get_full_name() if obj.requested_by else ''
+
+    def get_confirmed_by_name(self, obj):
+        return obj.confirmed_by.get_full_name() if obj.confirmed_by else ''
     
     class Meta:
         model = StockRequest

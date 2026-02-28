@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { StandardPagination } from "@/components/StandardPagination";
 import { Card, CardContent } from "@/components/ui/card";
@@ -11,17 +11,31 @@ import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "sonner";
 import { pharmacyService, type StockRequest, type Medication } from "@/lib/services";
-import { Send, Search, Plus, CheckCircle2, Clock, Loader2, Eye } from "lucide-react";
+import { Send, Search, Plus, CheckCircle2, Clock, Loader2, Eye, HelpCircle } from "lucide-react";
 
-export default function StockRequestsPage() {
+const MEDICATION_SEARCH_LIMIT = 20;
+const MAX_QUANTITY = 100000;
+
+function useDebouncedValue<T>(value: T, delay: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(t);
+  }, [value, delay]);
+  return debounced;
+}
+
+export default function DispensaryRequestsPage() {
   const [loading, setLoading] = useState(true);
   const [requests, setRequests] = useState<StockRequest[]>([]);
   const [totalRequests, setTotalRequests] = useState(0);
   const [medications, setMedications] = useState<Medication[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [dateFilter, setDateFilter] = useState("today");
   const [showNewRequestModal, setShowNewRequestModal] = useState(false);
   const [selectedRequest, setSelectedRequest] = useState<StockRequest | null>(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
@@ -29,51 +43,61 @@ export default function StockRequestsPage() {
   const [confirmNotes, setConfirmNotes] = useState("");
   const [isConfirming, setIsConfirming] = useState(false);
 
-  // Form state
   const [requestItems, setRequestItems] = useState<Array<{ medication: number; quantity: number }>>([]);
   const [requestNotes, setRequestNotes] = useState("");
   const [creatingRequest, setCreatingRequest] = useState(false);
   const [medicationSearch, setMedicationSearch] = useState("");
+  const debouncedMedSearch = useDebouncedValue(medicationSearch, 300);
   const [selectedMedication, setSelectedMedication] = useState<Medication | null>(null);
   const [requestQuantity, setRequestQuantity] = useState("100");
-  const [stats, setStats] = useState({
-    total: 0,
-    pending: 0,
-    approved: 0,
-    confirmed: 0,
-    awaitingConfirmation: 0,
-  });
+  const [stats, setStats] = useState({ total: 0, pending: 0, approved: 0, confirmed: 0, awaitingConfirmation: 0 });
 
-  // Pagination
   const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [itemsPerPage, setItemsPerPage] = useState(50);
+
+  const buildDateParams = useCallback(() => {
+    const p: Record<string, string> = {};
+    if (dateFilter === "today") {
+      const today = new Date().toISOString().split("T")[0];
+      p.date_after = today;
+      p.date_before = today;
+    } else if (dateFilter === "week") {
+      const today = new Date();
+      const weekStart = new Date(today);
+      weekStart.setDate(today.getDate() - today.getDay());
+      p.date_after = weekStart.toISOString().split("T")[0];
+      p.date_before = today.toISOString().split("T")[0];
+    } else if (dateFilter === "month") {
+      const today = new Date();
+      const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+      p.date_after = monthStart.toISOString().split("T")[0];
+      p.date_before = today.toISOString().split("T")[0];
+    }
+    return p;
+  }, [dateFilter]);
 
   useEffect(() => {
     loadMedications();
-    loadStats();
   }, []);
 
   useEffect(() => {
+    loadStats();
+  }, [searchQuery, statusFilter, dateFilter]);
+
+  useEffect(() => {
     loadRequests();
-  }, [currentPage, itemsPerPage, statusFilter, searchQuery]);
+  }, [currentPage, itemsPerPage, statusFilter, searchQuery, dateFilter]);
 
   const loadRequests = async () => {
     try {
       setLoading(true);
-      const params: Record<string, string | number> = {
-        page: currentPage,
-        page_size: itemsPerPage,
-      };
-
-      const trimmedSearch = searchQuery.trim();
+      const params: Record<string, string | number> = { page: currentPage, page_size: itemsPerPage };
       if (statusFilter !== "all") params.status = statusFilter;
-      if (trimmedSearch) params.search = trimmedSearch;
-
-      const response = await pharmacyService.getStockRequests({
-        ...params,
-      });
+      if (searchQuery.trim()) params.search = searchQuery.trim();
+      Object.assign(params, buildDateParams());
+      const response = await pharmacyService.getStockRequests(params);
       setRequests(response.results || []);
-      setTotalRequests(response.count || 0);
+      setTotalRequests(response.count ?? response.results?.length ?? 0);
     } catch (err) {
       console.error("Error loading stock requests:", err);
       toast.error("Failed to load stock requests");
@@ -84,32 +108,32 @@ export default function StockRequestsPage() {
 
   const loadStats = async () => {
     try {
-      const [allResponse, pendingResponse, approvedResponse, receivedResponse, fulfilledResponse] = await Promise.all([
-        pharmacyService.getStockRequests({ page: 1, page_size: 1 }),
-        pharmacyService.getStockRequests({ status: "pending", page: 1, page_size: 1 }),
-        pharmacyService.getStockRequests({ status: "approved", page: 1, page_size: 1 }),
-        pharmacyService.getStockRequests({ status: "received", page: 1, page_size: 1 }),
-        pharmacyService.getStockRequests({ status: "fulfilled", page: 1, page_size: 1 }),
+      const baseParams: Record<string, string | number> = { page: 1, page_size: 1 };
+      if (searchQuery.trim()) baseParams.search = searchQuery.trim();
+      Object.assign(baseParams, buildDateParams());
+      const [all, pending, approved, received, fulfilled] = await Promise.all([
+        pharmacyService.getStockRequests(baseParams),
+        pharmacyService.getStockRequests({ ...baseParams, status: "pending" }),
+        pharmacyService.getStockRequests({ ...baseParams, status: "approved" }),
+        pharmacyService.getStockRequests({ ...baseParams, status: "received" }),
+        pharmacyService.getStockRequests({ ...baseParams, status: "fulfilled" }),
       ]);
-
+      const partResp = await pharmacyService.getStockRequests({ ...baseParams, status: "partially_fulfilled" });
       setStats({
-        total: allResponse.count || 0,
-        pending: pendingResponse.count || 0,
-        approved: approvedResponse.count || 0,
-        confirmed: receivedResponse.count || 0,
-        awaitingConfirmation: fulfilledResponse.count || 0,
+        total: all.count ?? 0,
+        pending: pending.count ?? 0,
+        approved: approved.count ?? 0,
+        confirmed: received.count ?? 0,
+        awaitingConfirmation: (fulfilled.count ?? 0) + (partResp.count ?? 0),
       });
-    } catch (err) {
-      console.error("Error loading stock request stats:", err);
+    } catch {
+      // ignore
     }
   };
 
   const loadMedications = async () => {
     try {
-      const response = await pharmacyService.getMedications({
-        page: 1,
-        page_size: 500,
-      });
+      const response = await pharmacyService.getMedications({ page: 1, page_size: 500 });
       setMedications(response.results || []);
     } catch (err) {
       console.error("Error loading medications:", err);
@@ -121,24 +145,20 @@ export default function StockRequestsPage() {
       toast.error("Please select a medication");
       return;
     }
-    if (!requestQuantity || Number(requestQuantity) <= 0) {
-      toast.error("Please enter a valid quantity");
+    const qty = parseInt(requestQuantity, 10);
+    if (isNaN(qty) || qty < 1) {
+      toast.error("Please enter a valid quantity (min 1)");
       return;
     }
-
+    if (qty > MAX_QUANTITY) {
+      toast.error(`Quantity must not exceed ${MAX_QUANTITY.toLocaleString()}`);
+      return;
+    }
     if (requestItems.find((i) => i.medication === selectedMedication.id)) {
       toast.error("This medication is already added");
       return;
     }
-
-    setRequestItems([
-      ...requestItems,
-      {
-        medication: selectedMedication.id,
-        quantity: Number(requestQuantity),
-      },
-    ]);
-
+    setRequestItems([...requestItems, { medication: selectedMedication.id, quantity: qty }]);
     setSelectedMedication(null);
     setMedicationSearch("");
     setRequestQuantity("100");
@@ -149,13 +169,9 @@ export default function StockRequestsPage() {
       toast.error("Please add at least one medication");
       return;
     }
-
     try {
       setCreatingRequest(true);
-      await pharmacyService.createStockRequest({
-        items: requestItems,
-        notes: requestNotes,
-      });
+      await pharmacyService.createStockRequest({ items: requestItems, notes: requestNotes });
       toast.success("Stock request created successfully");
       setShowNewRequestModal(false);
       setRequestItems([]);
@@ -171,29 +187,32 @@ export default function StockRequestsPage() {
 
   const handleConfirmReceipt = async () => {
     if (!selectedRequest) return;
-
     try {
       setIsConfirming(true);
-      await pharmacyService.confirmStockRequest(selectedRequest.id, confirmNotes);
+      const res = await pharmacyService.confirmStockRequest(selectedRequest.id, confirmNotes);
       toast.success("Stock receipt confirmed!");
       setShowConfirmModal(false);
       setConfirmNotes("");
+      if (res?.request) setSelectedRequest(res.request);
       await loadRequests();
       await loadStats();
     } catch (err: any) {
-      toast.error(err?.message || "Failed to confirm receipt");
+      toast.error(err?.apiMessage || err?.message || "Failed to confirm receipt");
     } finally {
       setIsConfirming(false);
     }
   };
 
   const filteredMedications = useMemo(() => {
-    if (!medicationSearch) return [];
-    return medications.filter((med) =>
-      med.name.toLowerCase().includes(medicationSearch.toLowerCase()) ||
-      med.code.toLowerCase().includes(medicationSearch.toLowerCase())
-    );
-  }, [medications, medicationSearch]);
+    if (!debouncedMedSearch.trim()) return [];
+    const term = debouncedMedSearch.toLowerCase();
+    return medications
+      .filter(
+        (med) =>
+          med.name.toLowerCase().includes(term) || (med.code || "").toLowerCase().includes(term)
+      )
+      .slice(0, MEDICATION_SEARCH_LIMIT);
+  }, [medications, debouncedMedSearch]);
 
   const getItemUnit = (item: any) => {
     if (item.unit) return item.unit;
@@ -202,34 +221,42 @@ export default function StockRequestsPage() {
   };
 
   const getStatusBadge = (status: string) => {
-    switch (status) {
-      case "pending":
-        return <Badge className="bg-orange-100 text-orange-800">Pending</Badge>;
-      case "approved":
-        return <Badge className="bg-blue-100 text-blue-800">Approved</Badge>;
-      case "fulfilled":
-        return <Badge className="bg-yellow-100 text-yellow-800">Issued (Awaiting Confirmation)</Badge>;
-      case "received":
-        return <Badge className="bg-green-100 text-green-800">Confirmed ✓</Badge>;
-      case "rejected":
-        return <Badge className="bg-red-100 text-red-800">Rejected</Badge>;
-      case "partially_fulfilled":
-        return <Badge className="bg-amber-100 text-amber-800">Partially Fulfilled</Badge>;
-      default:
-        return <Badge>{status}</Badge>;
-    }
+    const map: Record<string, { label: string; cls: string; tip?: string }> = {
+      pending: { label: "Pending", cls: "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-200", tip: "Awaiting store approval" },
+      approved: { label: "Approved", cls: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-200", tip: "Ready for store to issue" },
+      fulfilled: { label: "Issued (Awaiting Confirm)", cls: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-200", tip: "Stock issued; confirm receipt when received" },
+      received: { label: "Confirmed ✓", cls: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-200" },
+      rejected: { label: "Rejected", cls: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-200" },
+      partially_fulfilled: { label: "Partially Fulfilled", cls: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200" },
+    };
+    const cfg = map[status] || { label: status, cls: "" };
+    const badge = <Badge className={cfg.cls}>{cfg.label}</Badge>;
+    return cfg.tip ? (
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>{badge}</TooltipTrigger>
+          <TooltipContent><p>{cfg.tip}</p></TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    ) : badge;
   };
+
+  const statsCards = useMemo(
+    () => [
+      { label: "Total", value: stats.total, icon: Send, color: "text-violet-500", bg: "bg-violet-500/10" },
+      { label: "Pending", value: stats.pending, icon: Clock, color: "text-amber-500", bg: "bg-amber-500/10" },
+      { label: "Approved", value: stats.approved, icon: Clock, color: "text-blue-500", bg: "bg-blue-500/10" },
+      { label: "Confirmed", value: stats.confirmed, icon: CheckCircle2, color: "text-green-500", bg: "bg-green-500/10", sub: stats.awaitingConfirmation ? `Awaiting: ${stats.awaitingConfirmation}` : undefined },
+    ],
+    [stats]
+  );
 
   return (
     <DashboardLayout>
       <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
-        {/* Header */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl sm:text-3xl font-bold text-foreground flex items-center gap-3">
-              <Send className="h-8 w-8 text-violet-500" />
-              Dispensary Requests
-            </h1>
+            <h1 className="text-2xl sm:text-3xl font-bold text-foreground">Dispensary Requests</h1>
             <p className="text-muted-foreground mt-1">Request stock from Central store to Dispensary</p>
           </div>
           <Button onClick={() => setShowNewRequestModal(true)} className="bg-violet-600 hover:bg-violet-700">
@@ -238,168 +265,127 @@ export default function StockRequestsPage() {
           </Button>
         </div>
 
-        {/* Stats */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {loading && (
           <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Total</p>
-                  <p className="text-2xl font-bold text-violet-600">{stats.total}</p>
-                </div>
-                <Send className="h-5 w-5 text-violet-500" />
-              </div>
+            <CardContent className="p-12 text-center">
+              <Loader2 className="h-12 w-12 mx-auto mb-4 animate-spin text-muted-foreground" />
+              <p className="text-muted-foreground">Loading requests...</p>
             </CardContent>
           </Card>
+        )}
 
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Pending</p>
-                  <p className={`text-2xl font-bold ${stats.pending > 0 ? "text-orange-600" : "text-green-600"}`}>
-                    {stats.pending}
-                  </p>
-                </div>
-                <Clock className={`h-5 w-5 ${stats.pending > 0 ? "text-orange-500" : "text-green-500"}`} />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Approved</p>
-                  <p className="text-2xl font-bold text-blue-600">{stats.approved}</p>
-                </div>
-                <Clock className="h-5 w-5 text-blue-500" />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Confirmed</p>
-                  <p className="text-2xl font-bold text-green-600">{stats.confirmed}</p>
-                  <p className="text-xs text-muted-foreground">Awaiting: {stats.awaitingConfirmation}</p>
-                </div>
-                <CheckCircle2 className="h-5 w-5 text-green-500" />
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Filters */}
-        <Card>
-          <CardContent className="p-4">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div>
-                <Label className="text-xs">Search</Label>
-                <div className="relative mt-1">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    placeholder="Search by ID or notes..."
-                    value={searchQuery}
-                    onChange={(e) => {
-                      setSearchQuery(e.target.value);
-                      setCurrentPage(1);
-                    }}
-                    className="pl-10"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <Label className="text-xs">Status</Label>
-                <Select value={statusFilter} onValueChange={(val) => {
-                  setStatusFilter(val);
-                  setCurrentPage(1);
-                }}>
-                  <SelectTrigger className="mt-1">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Status</SelectItem>
-                    <SelectItem value="pending">Pending</SelectItem>
-                    <SelectItem value="approved">Approved</SelectItem>
-                    <SelectItem value="fulfilled">Fulfilled</SelectItem>
-                    <SelectItem value="partially_fulfilled">Partially Fulfilled</SelectItem>
-                    <SelectItem value="received">Received</SelectItem>
-                    <SelectItem value="rejected">Rejected</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Requests List */}
-        <div className="space-y-3">
-          {loading ? (
-            <Card>
-              <CardContent className="p-8 text-center text-muted-foreground">
-                <Loader2 className="h-12 w-12 mx-auto mb-4 animate-spin opacity-50" />
-                <p>Loading requests...</p>
-              </CardContent>
-            </Card>
-          ) : requests.length > 0 ? (
-            requests.map((req) => (
-              <Card key={req.id} className="hover:shadow-md transition-shadow">
-                <CardContent className="p-4">
-                  <div className="flex items-center justify-between gap-4">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-semibold">{req.request_id}</span>
-                        {getStatusBadge(req.status)}
+        {!loading && (
+          <>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {statsCards.map((stat, i) => (
+                <Card key={i}>
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-muted-foreground">{stat.label}</p>
+                        <p className={`text-2xl sm:text-3xl font-bold ${stat.color} mt-1`}>{stat.value}</p>
+                        {stat.sub && <p className="text-xs text-muted-foreground">{stat.sub}</p>}
                       </div>
-                      <div className="text-xs text-muted-foreground mt-1">
-                        {req.items?.length || 0} item(s) • Created {new Date(req.created_at).toLocaleDateString()}
+                      <div className={`p-3 rounded-full ${stat.bg}`}>
+                        <stat.icon className={`h-5 w-5 ${stat.color}`} />
                       </div>
                     </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        setSelectedRequest(req);
-                        setShowDetailsModal(true);
-                      }}
-                    >
-                      <Eye className="h-4 w-4 mr-1" />
-                      View
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            ))
-          ) : (
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+
             <Card>
-              <CardContent className="py-12 text-center text-muted-foreground">
-                <Send className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                <p>No requests found</p>
+              <CardContent className="p-4">
+                <div className="flex flex-col gap-4">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Search by request ID or notes..."
+                      value={searchQuery}
+                      onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }}
+                      className="pl-10"
+                    />
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Select value={dateFilter} onValueChange={setDateFilter}>
+                      <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="today">Today</SelectItem>
+                        <SelectItem value="week">This Week</SelectItem>
+                        <SelectItem value="month">This Month</SelectItem>
+                        <SelectItem value="all">All Time</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v); setCurrentPage(1); }}>
+                      <SelectTrigger className="w-[180px]"><SelectValue placeholder="Status" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Status</SelectItem>
+                        <SelectItem value="pending">Pending</SelectItem>
+                        <SelectItem value="approved">Approved</SelectItem>
+                        <SelectItem value="fulfilled">Fulfilled</SelectItem>
+                        <SelectItem value="partially_fulfilled">Partially Fulfilled</SelectItem>
+                        <SelectItem value="received">Received</SelectItem>
+                        <SelectItem value="rejected">Rejected</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
               </CardContent>
             </Card>
-          )}
-        </div>
 
-        {/* Pagination */}
-        {totalRequests > 0 && (
-          <Card className="p-4">
-            <StandardPagination
-              currentPage={currentPage}
-              totalItems={totalRequests}
-              itemsPerPage={itemsPerPage}
-              onPageChange={setCurrentPage}
-              onItemsPerPageChange={(newSize) => {
-                setItemsPerPage(newSize);
-                setCurrentPage(1);
-              }}
-              itemName="requests"
-              pageSizeOptions={[10, 25, 50, 75, 100]}
-            />
-          </Card>
+            <div className="flex justify-between px-1">
+              <p className="text-sm text-muted-foreground">
+                Showing <span className="font-medium text-foreground">{requests.length}</span> requests
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              {requests.length === 0 ? (
+                <Card>
+                  <CardContent className="py-12 text-center text-muted-foreground">
+                    <Send className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                    <p>No requests found</p>
+                  </CardContent>
+                </Card>
+              ) : (
+                requests.map((req) => (
+                  <Card key={req.id} className="border-l-4 border-l-violet-500/50 hover:shadow-md transition-shadow">
+                    <CardContent className="py-3 px-4">
+                      <div className="flex items-center gap-3">
+                        <div className="flex-1 min-w-0 overflow-hidden">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-semibold text-foreground">{req.request_id}</span>
+                            {getStatusBadge(req.status)}
+                          </div>
+                          <div className="text-xs text-muted-foreground mt-1">
+                            {req.items?.length || 0} item(s) • Created {new Date(req.created_at).toLocaleDateString()}
+                          </div>
+                        </div>
+                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { setSelectedRequest(req); setShowDetailsModal(true); }} title="View details">
+                          <Eye className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))
+              )}
+            </div>
+
+            {totalRequests > 0 && (
+              <Card className="p-4">
+                <StandardPagination
+                  currentPage={currentPage}
+                  totalItems={totalRequests}
+                  itemsPerPage={itemsPerPage}
+                  onPageChange={setCurrentPage}
+                  onItemsPerPageChange={(s) => { setItemsPerPage(s); setCurrentPage(1); }}
+                  itemName="requests"
+                  pageSizeOptions={[25, 50, 75, 100]}
+                />
+              </Card>
+            )}
+          </>
         )}
 
         {/* New Request Modal */}
@@ -409,11 +395,17 @@ export default function StockRequestsPage() {
               <DialogTitle>Create Dispensary Request</DialogTitle>
               <DialogDescription>Request medications from Central store to Dispensary</DialogDescription>
             </DialogHeader>
-
             <div className="space-y-4">
               <div className="border rounded-lg p-4">
-                <h4 className="font-medium mb-3">Add Items to Request</h4>
-
+                <div className="flex items-center gap-2 mb-3">
+                  <h4 className="font-medium">Add Items to Request</h4>
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger><HelpCircle className="h-4 w-4 text-muted-foreground" /></TooltipTrigger>
+                      <TooltipContent><p>Search by name or code. Quantity must be 1–{MAX_QUANTITY.toLocaleString()}.</p></TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                </div>
                 <div className="space-y-3">
                   <div className="relative">
                     <Label className="text-xs mb-1 block">Search Medication</Label>
@@ -424,53 +416,49 @@ export default function StockRequestsPage() {
                       className="mt-1"
                     />
                     {filteredMedications.length > 0 && medicationSearch && (
-                      <div className="absolute top-full left-0 right-0 mt-1 border rounded-lg bg-white dark:bg-slate-950 shadow-lg z-10 max-h-48 overflow-y-auto">
+                      <div className="absolute top-full left-0 right-0 mt-1 border rounded-lg bg-background shadow-lg z-10 max-h-48 overflow-y-auto">
                         {filteredMedications.map((med) => (
                           <button
                             key={med.id}
-                            onClick={() => {
-                              setSelectedMedication(med);
-                              setMedicationSearch("");
-                            }}
+                            onClick={() => { setSelectedMedication(med); setMedicationSearch(""); }}
                             className="w-full text-left px-3 py-2 hover:bg-muted text-sm border-b last:border-b-0"
                           >
                             <div className="font-medium">{med.name}</div>
                             <div className="text-xs text-muted-foreground">{med.code} • {med.strength}</div>
                           </button>
                         ))}
+                        {filteredMedications.length >= MEDICATION_SEARCH_LIMIT && (
+                          <p className="px-3 py-2 text-xs text-muted-foreground">Showing first {MEDICATION_SEARCH_LIMIT} results. Refine search for more.</p>
+                        )}
                       </div>
                     )}
                   </div>
-
                   {selectedMedication && (
-                    <div className="bg-blue-50 dark:bg-blue-950/30 p-2 rounded border border-blue-200 dark:border-blue-900">
+                    <div className="bg-muted/50 p-2 rounded border">
                       <p className="text-sm font-medium">{selectedMedication.name}</p>
                       <p className="text-xs text-muted-foreground">{selectedMedication.code}</p>
                     </div>
                   )}
-
                   {selectedMedication && (
                     <div>
-                      <div>
-                        <Label className="text-xs">Quantity</Label>
-                        <Input
-                          type="number"
-                          value={requestQuantity}
-                          onChange={(e) => setRequestQuantity(e.target.value)}
-                          placeholder="100"
-                          className="mt-1"
-                        />
-                      </div>
+                      <Label className="text-xs">Quantity (1–{MAX_QUANTITY.toLocaleString()})</Label>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={MAX_QUANTITY}
+                        value={requestQuantity}
+                        onChange={(e) => setRequestQuantity(e.target.value)}
+                        placeholder="100"
+                        className="mt-1"
+                      />
                     </div>
                   )}
-
                   {selectedMedication && (
                     <Button onClick={handleAddItem} className="w-full bg-blue-600 hover:bg-blue-700">
                       <Plus className="h-4 w-4 mr-2" />
                       Add to Request
                     </Button>
                   )}
-
                   {requestItems.length > 0 && (
                     <div className="mt-4 space-y-2">
                       <p className="text-sm font-medium">Items Added ({requestItems.length})</p>
@@ -482,14 +470,7 @@ export default function StockRequestsPage() {
                               <p className="text-sm font-medium">{med?.name}</p>
                               <p className="text-xs text-muted-foreground">{item.quantity} {med?.unit || "units"}</p>
                             </div>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => setRequestItems(requestItems.filter((_, i) => i !== idx))}
-                              className="h-6 w-6 p-0"
-                            >
-                              ×
-                            </Button>
+                            <Button variant="ghost" size="sm" onClick={() => setRequestItems(requestItems.filter((_, i) => i !== idx))} className="h-6 w-6 p-0">×</Button>
                           </div>
                         );
                       })}
@@ -497,7 +478,6 @@ export default function StockRequestsPage() {
                   )}
                 </div>
               </div>
-
               <div>
                 <Label>Notes (optional)</Label>
                 <Textarea
@@ -509,16 +489,9 @@ export default function StockRequestsPage() {
                 />
               </div>
             </div>
-
             <DialogFooter>
-              <Button variant="outline" onClick={() => setShowNewRequestModal(false)}>
-                Cancel
-              </Button>
-              <Button
-                onClick={handleCreateRequest}
-                disabled={creatingRequest || requestItems.length === 0}
-                className="bg-violet-600 hover:bg-violet-700"
-              >
+              <Button variant="outline" onClick={() => setShowNewRequestModal(false)}>Cancel</Button>
+              <Button onClick={handleCreateRequest} disabled={creatingRequest || requestItems.length === 0} className="bg-violet-600 hover:bg-violet-700">
                 {creatingRequest ? "Creating..." : "Create Request"}
               </Button>
             </DialogFooter>
@@ -543,7 +516,6 @@ export default function StockRequestsPage() {
                     <p className="font-medium">{new Date(selectedRequest.created_at).toLocaleDateString()}</p>
                   </div>
                 </div>
-
                 {selectedRequest.confirmed_at && (
                   <div className="bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-900 rounded-lg p-3">
                     <p className="text-sm font-medium mb-1 text-green-800 dark:text-green-200">✓ Receipt Confirmed</p>
@@ -551,35 +523,24 @@ export default function StockRequestsPage() {
                     <p className="text-xs text-green-700 dark:text-green-300">On: {new Date(selectedRequest.confirmed_at).toLocaleString()}</p>
                   </div>
                 )}
-
                 <div>
                   <p className="text-sm font-medium mb-2">Items ({selectedRequest.items?.length || 0})</p>
                   <div className="space-y-2">
-                    {selectedRequest.items?.map((item, idx) => (
-                      <div key={idx} className="border rounded-lg p-3 text-sm">
-                        <div className="flex justify-between items-start">
-                          <div>
-                            <p className="font-medium">{item.medication_name || "Unknown"}</p>
-                            <p className="text-xs text-muted-foreground">Requested: {item.quantity} {getItemUnit(item)}</p>
-                          </div>
-                          {item.fulfilled_quantity && item.fulfilled_quantity > 0 && (
-                            <span className="text-xs font-medium text-green-600">✓ {item.fulfilled_quantity}</span>
-                          )}
+                    {(selectedRequest.items || []).map((item: any, idx: number) => (
+                      <div key={idx} className="border rounded-lg p-3 text-sm flex justify-between items-start">
+                        <div>
+                          <p className="font-medium">{item.medication_name || "Unknown"}</p>
+                          <p className="text-xs text-muted-foreground">Requested: {item.quantity} {getItemUnit(item)}</p>
                         </div>
+                        {item.fulfilled_quantity > 0 && <span className="text-xs font-medium text-green-600">✓ {item.fulfilled_quantity}</span>}
                       </div>
                     ))}
                   </div>
                 </div>
-
-                <DialogFooter className="gap-2">
-                  <Button variant="outline" onClick={() => setShowDetailsModal(false)}>
-                    Close
-                  </Button>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setShowDetailsModal(false)}>Close</Button>
                   {(selectedRequest.status === "fulfilled" || selectedRequest.status === "partially_fulfilled") && !selectedRequest.confirmed_at && (
-                    <Button
-                      onClick={() => setShowConfirmModal(true)}
-                      className="bg-green-600 hover:bg-green-700"
-                    >
+                    <Button onClick={() => setShowConfirmModal(true)} className="bg-green-600 hover:bg-green-700">
                       <CheckCircle2 className="h-4 w-4 mr-2" />
                       Confirm Receipt
                     </Button>
@@ -597,13 +558,12 @@ export default function StockRequestsPage() {
               <DialogTitle>Confirm Stock Receipt</DialogTitle>
               <DialogDescription>Verify that you have received the issued stock</DialogDescription>
             </DialogHeader>
-
             {selectedRequest && (
               <div className="space-y-4">
                 <div className="bg-muted/50 rounded-lg p-3 text-sm">
                   <p className="font-medium mb-2">Request: {selectedRequest.request_id}</p>
                   <div className="space-y-1 text-xs">
-                    {selectedRequest.items?.map((item, idx) => (
+                    {(selectedRequest.items || []).map((item: any, idx: number) => (
                       <div key={idx} className="flex justify-between">
                         <span>{item.medication_name}</span>
                         <span className="font-medium">{item.fulfilled_quantity || item.quantity} {getItemUnit(item)}</span>
@@ -611,27 +571,13 @@ export default function StockRequestsPage() {
                     ))}
                   </div>
                 </div>
-
                 <div>
                   <Label>Confirmation Notes (optional)</Label>
-                  <Textarea
-                    placeholder="e.g., All items received in good condition..."
-                    value={confirmNotes}
-                    onChange={(e) => setConfirmNotes(e.target.value)}
-                    rows={3}
-                    className="mt-1"
-                  />
+                  <Textarea placeholder="e.g., All items received in good condition..." value={confirmNotes} onChange={(e) => setConfirmNotes(e.target.value)} rows={3} className="mt-1" />
                 </div>
-
-                <DialogFooter className="gap-2">
-                  <Button variant="outline" onClick={() => setShowConfirmModal(false)} disabled={isConfirming}>
-                    Cancel
-                  </Button>
-                  <Button
-                    onClick={handleConfirmReceipt}
-                    disabled={isConfirming}
-                    className="bg-green-600 hover:bg-green-700"
-                  >
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setShowConfirmModal(false)} disabled={isConfirming}>Cancel</Button>
+                  <Button onClick={handleConfirmReceipt} disabled={isConfirming} className="bg-green-600 hover:bg-green-700">
                     {isConfirming ? "Confirming..." : "Confirm Receipt"}
                   </Button>
                 </DialogFooter>
