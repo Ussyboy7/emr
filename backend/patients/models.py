@@ -88,6 +88,14 @@ class Patient(models.Model):
     employee_type = models.CharField(max_length=20, blank=True, null=True)  # Officer, Staff
     division = models.CharField(max_length=100, blank=True, null=True)
     location = models.CharField(max_length=100, blank=True, null=True)
+    location_clinic = models.ForeignKey(
+        'organization.Clinic',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='patients',
+        help_text='Clinic/facility from Clinics & Departments (replaces free-text location when set)',
+    )
     
     # NonNPA Specific
     nonnpa_type = models.CharField(max_length=50, blank=True, null=True)  # Police, IT, NYSC, etc.
@@ -413,6 +421,14 @@ class Visit(models.Model):
     clinics = models.JSONField(default=list, blank=True)  # List of all clinics for this visit
     completed_clinics = models.JSONField(default=list, blank=True)  # Clinics that have been completed
     location = models.CharField(max_length=100, blank=True, null=True)
+    location_clinic = models.ForeignKey(
+        'organization.Clinic',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='visits',
+        help_text='Clinic/facility from Clinics & Departments (replaces free-text location when set)',
+    )
     doctor = models.ForeignKey(
         'accounts.User',
         on_delete=models.SET_NULL,

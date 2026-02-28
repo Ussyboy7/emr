@@ -24,15 +24,10 @@ import {
 import { StandardPagination } from '@/components/StandardPagination';
 import { getAllClinicsWithAll, CLINICS } from '@/lib/constants/clinics';
 import { clinicMatches, normalizeClinicName } from '@/lib/utils/clinic-utils';
+import { useLocationOptions } from '@/lib/hooks/use-location-options';
 
 // NPA Clinics - standardized list
 const clinics = getAllClinicsWithAll();
-
-// NPA Locations
-const locations = [
-  "All Locations", "Headquarters", "Bode Thomas Clinic", "Lagos Port Complex", "Tincan Island Port Complex",
-  "Rivers Port Complex", "Onne Port Complex", "Delta Port Complex", "Calabar Port", "Lekki Deep Sea Port"
-];
 
 // Simplified visit statuses for Medical Records
 // Scheduled = Created, waiting to be sent to nursing
@@ -43,6 +38,7 @@ type VisitStatus = 'Scheduled' | 'In Progress'| 'Completed' | 'Cancelled';
 
 export default function VisitsPage() {
   const router = useRouter();
+  const { locations: locationOptions } = useLocationOptions();
   const [visits, setVisits] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -694,9 +690,11 @@ export default function VisitsPage() {
                 <div className="space-y-2">
                   <Label>Location</Label>
                   <Select value={editForm.location} onValueChange={(v) => setEditForm(prev => ({ ...prev, location: v }))}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectTrigger><SelectValue placeholder="Select location" /></SelectTrigger>
                     <SelectContent>
-                      {locations.slice(1).map(l => <SelectItem key={l} value={l}>{l}</SelectItem>)}
+                      {locationOptions.filter((l) => l.value !== "all").map((l) => (
+                        <SelectItem key={l.value} value={l.value}>{l.label}</SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>

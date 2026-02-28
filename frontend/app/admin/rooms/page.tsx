@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { CLINICS } from '@/lib/constants/clinics';
 import { normalizeClinicName } from '@/lib/utils/clinic-utils';
+import { useLocationOptions } from '@/lib/hooks/use-location-options';
 
 interface Room {
   id: string | number;
@@ -47,15 +48,10 @@ interface Room {
 // NPA Clinics (for Specialty/Clinic Type) - standardized list
 const clinics = CLINICS;
 
-// NPA Locations
-const locations = [
-  "Headquarters", "Bode Thomas Clinic", "Lagos Port Complex", "Tincan Island Port Complex",
-  "Rivers Port Complex", "Onne Port Complex", "Delta Port Complex", "Calabar Port", "Lekki Deep Sea Port"
-];
-
 const roomTypes: string[] = ['Consultation', 'Procedure', 'Emergency', 'Examination'];
 
 export default function RoomManagementPage() {
+  const { locations: locationOptions } = useLocationOptions({ includeAll: true });
   const [rooms, setRooms] = useState<Room[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -184,7 +180,8 @@ export default function RoomManagementPage() {
   };
 
   const openCreateDialog = () => {
-    setFormData({ name: '', type: 'Consultation', location: locations[0] || '', floor: '', specialty: '', capacity: 2, status: 'Active', description: '' });
+    const defaultLocation = locationOptions.find((l) => l.value !== "all")?.value || "";
+    setFormData({ name: '', type: 'Consultation', location: defaultLocation, floor: '', specialty: '', capacity: 2, status: 'Active', description: '' });
     setIsCreateDialogOpen(true);
   };
 
@@ -449,8 +446,9 @@ export default function RoomManagementPage() {
               <Select value={locationFilter} onValueChange={setLocationFilter}>
                 <SelectTrigger className="w-[180px]"><SelectValue placeholder="Location" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All Locations</SelectItem>
-                  {locations.map(l => <SelectItem key={l} value={l}>{l}</SelectItem>)}
+                  {locationOptions.map((l) => (
+                    <SelectItem key={l.value} value={l.value}>{l.label}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
               <Select value={typeFilter} onValueChange={setTypeFilter}>
@@ -644,10 +642,12 @@ export default function RoomManagementPage() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Location *</Label>
-                  <Select value={formData.location} onValueChange={handleLocationChange}>
-                    <SelectTrigger><SelectValue placeholder="Select location" /></SelectTrigger>
+                  <Select value={formData.location} onValueChange={handleLocationChange} disabled={locationOptions.filter((l) => l.value !== "all").length === 0}>
+                    <SelectTrigger><SelectValue placeholder={locationOptions.length <= 1 ? "No locations—add clinics in Admin" : "Select location"} /></SelectTrigger>
                     <SelectContent>
-                      {locations.map(l => <SelectItem key={l} value={l}>{l}</SelectItem>)}
+                      {locationOptions.filter((l) => l.value !== "all").map((l) => (
+                        <SelectItem key={l.value} value={l.value}>{l.label}</SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
@@ -722,10 +722,12 @@ export default function RoomManagementPage() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Location *</Label>
-                  <Select value={formData.location} onValueChange={handleLocationChange}>
-                    <SelectTrigger><SelectValue placeholder="Select location" /></SelectTrigger>
+                  <Select value={formData.location} onValueChange={handleLocationChange} disabled={locationOptions.filter((l) => l.value !== "all").length === 0}>
+                    <SelectTrigger><SelectValue placeholder={locationOptions.length <= 1 ? "No locations—add clinics in Admin" : "Select location"} /></SelectTrigger>
                     <SelectContent>
-                      {locations.map(l => <SelectItem key={l} value={l}>{l}</SelectItem>)}
+                      {locationOptions.filter((l) => l.value !== "all").map((l) => (
+                        <SelectItem key={l.value} value={l.value}>{l.label}</SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>

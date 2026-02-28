@@ -26,6 +26,7 @@ import {
 import { StandardPagination } from '@/components/StandardPagination';
 import { PatientOverviewModal } from '@/components/PatientOverviewModal';
 import { PatientAvatar } from "@/components/PatientAvatar";
+import { useLocationOptions } from '@/lib/hooks/use-location-options';
 
 // ==========================================
 // UTILITY FUNCTIONS
@@ -182,15 +183,11 @@ const transformPatient = (apiPatient: ApiPatient): Patient => {
   };
 };
 
-const locations = [
-  "All Locations", "Headquarters", "Bode Thomas Clinic", "Lagos Port Complex", "Tincan Island Port Complex",
-  "Rivers Port Complex", "Onne Port Complex", "Delta Port Complex", "Calabar Port", "Lekki Deep Sea Port"
-];
-
 const categories = ["All Categories", "Employee", "Retiree", "Dependent", "NonNPA"];
 
 export default function PatientsListPage() {
   const router = useRouter();
+  const { locations: locationOptions } = useLocationOptions({ includeAll: true });
   const [patients, setPatients] = useState<Patient[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -895,7 +892,9 @@ export default function PatientsListPage() {
                     <Select value={locationFilter} onValueChange={setLocationFilter}>
                       <SelectTrigger className="w-[180px]"><SelectValue placeholder="Location" /></SelectTrigger>
                       <SelectContent>
-                        {locations.map(l => <SelectItem key={l} value={l === 'All Locations' ? 'all' : l}>{l}</SelectItem>)}
+                        {locationOptions.map((l) => (
+                          <SelectItem key={l.value} value={l.value}>{l.label}</SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </div>
@@ -1823,8 +1822,8 @@ export default function PatientsListPage() {
                                 <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
                                 <SelectContent>
                                   <SelectItem value="not-specified">Not specified</SelectItem>
-                                  {locations.filter(l => l !== 'All Locations').map(l => (
-                                    <SelectItem key={l} value={l}>{l}</SelectItem>
+                                  {locationOptions.filter((l) => l.value !== "all").map((l) => (
+                                    <SelectItem key={l.value} value={l.value}>{l.label}</SelectItem>
                                   ))}
                                 </SelectContent>
                               </Select>
@@ -1849,8 +1848,8 @@ export default function PatientsListPage() {
                                 <SelectTrigger><SelectValue placeholder="Select location" /></SelectTrigger>
                                 <SelectContent>
                                   <SelectItem value="not-specified">Not specified</SelectItem>
-                                  {locations.filter(l => l !== 'All Locations').map(l => (
-                                    <SelectItem key={l} value={l}>{l}</SelectItem>
+                                  {locationOptions.filter((l) => l.value !== "all").map((l) => (
+                                    <SelectItem key={l.value} value={l.value}>{l.label}</SelectItem>
                                   ))}
                                 </SelectContent>
                               </Select>

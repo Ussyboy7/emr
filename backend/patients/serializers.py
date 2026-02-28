@@ -17,7 +17,7 @@ class PatientSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'patient_id', 'category', 'title', 'surname', 'first_name', 'middle_name',
             'full_name', 'gender', 'date_of_birth', 'age', 'marital_status', 'religion', 'tribe', 'occupation', 'photo',
-            'personal_number', 'employee_type', 'division', 'location',
+            'personal_number', 'employee_type', 'division', 'location', 'location_clinic',
             'nonnpa_type', 'dependent_type', 'principal_staff',
             'email', 'phone', 'state_of_residence', 'residential_address',
             'state_of_origin', 'lga', 'permanent_address',
@@ -36,6 +36,31 @@ class PatientSerializer(serializers.ModelSerializer):
             # Return relative URL - frontend will construct full URL
             return obj.photo.url
         return None
+
+    def _resolve_location_clinic(self, location_str):
+        """Resolve location_clinic from location string when clinic exists."""
+        if not location_str:
+            return None
+        try:
+            from organization.models import Clinic
+            return Clinic.objects.filter(name=location_str, is_active=True).first()
+        except Exception:
+            return None
+
+    def create(self, validated_data):
+        location_str = validated_data.get('location')
+        if location_str and validated_data.get('location_clinic') is None:
+            clinic = self._resolve_location_clinic(location_str)
+            if clinic:
+                validated_data['location_clinic'] = clinic
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        location_str = validated_data.get('location', instance.location)
+        if location_str and 'location_clinic' not in validated_data:
+            clinic = self._resolve_location_clinic(location_str)
+            validated_data['location_clinic'] = clinic
+        return super().update(instance, validated_data)
     
     def validate(self, attrs):
         """Custom validation for patient data."""
@@ -120,6 +145,31 @@ class VisitSerializer(serializers.ModelSerializer):
             return normalize_clinic_name(value)
         return value
 
+    def _resolve_location_clinic(self, location_str):
+        """Resolve location_clinic from location string when clinic exists."""
+        if not location_str:
+            return None
+        try:
+            from organization.models import Clinic
+            return Clinic.objects.filter(name=location_str, is_active=True).first()
+        except Exception:
+            return None
+
+    def create(self, validated_data):
+        location_str = validated_data.get('location')
+        if location_str and validated_data.get('location_clinic') is None:
+            clinic = self._resolve_location_clinic(location_str)
+            if clinic:
+                validated_data['location_clinic'] = clinic
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        location_str = validated_data.get('location', instance.location)
+        if location_str and 'location_clinic' not in validated_data:
+            clinic = self._resolve_location_clinic(location_str)
+            validated_data['location_clinic'] = clinic
+        return super().update(instance, validated_data)
+    
     def validate(self, attrs):
         """
         Prevent duplicate *open* visits for same patient on same date with SAME clinics.
@@ -168,7 +218,7 @@ class VisitSerializer(serializers.ModelSerializer):
         model = Visit
         fields = [
             'id', 'visit_id', 'patient', 'patient_id', 'patient_name', 'visit_type', 'status',
-            'date', 'time', 'clinic', 'clinics', 'completed_clinics', 'location', 'doctor', 'doctor_name',
+            'date', 'time', 'clinic', 'clinics', 'completed_clinics', 'location', 'location_clinic', 'doctor', 'doctor_name',
             'clinical_notes', 'vitals',
             'created_at', 'updated_at',
         ]

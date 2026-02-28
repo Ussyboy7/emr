@@ -22,12 +22,7 @@ import {
   Briefcase, MapPin, Upload, Camera, FileText, Save, Trash2, 
   CheckCircle2, Clock, Loader2, Plus, X, AlertTriangle, Search
 } from 'lucide-react';
-
-// NPA Locations
-const locations = [
-  "Headquarters", "Bode Thomas Clinic", "Lagos Port Complex", "Tincan Island Port Complex",
-  "Rivers Port Complex", "Onne Port Complex", "Delta Port Complex", "Calabar Port", "Lekki Deep Sea Port"
-];
+import { useLocationOptions } from '@/lib/hooks/use-location-options';
 
 // NPA Divisions
 const divisions = [
@@ -491,6 +486,7 @@ const STEPS: { id: FormStep; label: string; icon: React.ReactNode }[] = [
 
 export default function NewPatientPage() {
   const router = useRouter();
+  const { locations: locationOptions } = useLocationOptions();
   const [patientCategory, setPatientCategory] = useState<'employee' | 'retiree' | 'nonnpa' | 'dependent'>('employee');
   const [currentStep, setCurrentStep] = useState<FormStep>('personal');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -1478,10 +1474,10 @@ export default function NewPatientPage() {
                         </div>
                         <div className="space-y-2">
                           <Label>Location *</Label>
-                          <Select value={formData.location} onValueChange={(v) => handleInputChange('location', v)}>
-                            <SelectTrigger><SelectValue placeholder="Select location" /></SelectTrigger>
+                          <Select value={formData.location} onValueChange={(v) => handleInputChange('location', v)} disabled={locationOptions.length === 0}>
+                            <SelectTrigger><SelectValue placeholder={locationOptions.length === 0 ? "No locations—add clinics in Admin" : "Select location"} /></SelectTrigger>
                             <SelectContent>
-                              {locations.map(loc => <SelectItem key={loc} value={loc}>{loc}</SelectItem>)}
+                              {locationOptions.map((loc) => <SelectItem key={loc.value} value={loc.value}>{loc.label}</SelectItem>)}
                             </SelectContent>
                           </Select>
                         </div>
@@ -1510,10 +1506,10 @@ export default function NewPatientPage() {
                         </div>
                         <div className="space-y-2">
                           <Label>Location</Label>
-                          <Select value={formData.location} onValueChange={(v) => handleInputChange('location', v)}>
-                            <SelectTrigger><SelectValue placeholder="Select location" /></SelectTrigger>
+                          <Select value={formData.location} onValueChange={(v) => handleInputChange('location', v)} disabled={locationOptions.length === 0}>
+                            <SelectTrigger><SelectValue placeholder={locationOptions.length === 0 ? "No locations—add clinics in Admin" : "Select location"} /></SelectTrigger>
                             <SelectContent>
-                              {locations.map(loc => <SelectItem key={loc} value={loc}>{loc}</SelectItem>)}
+                              {locationOptions.map((loc) => <SelectItem key={loc.value} value={loc.value}>{loc.label}</SelectItem>)}
                             </SelectContent>
                           </Select>
                         </div>

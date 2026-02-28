@@ -13,6 +13,31 @@ class ConsultationRoomSerializer(serializers.ModelSerializer):
     active_session = serializers.SerializerMethodField()
     clinic_name = serializers.CharField(source='clinic.name', read_only=True, allow_null=True)
     
+    def _resolve_clinic_from_location(self, location_str):
+        """Resolve clinic FK from location string when it matches a Clinic name."""
+        if not location_str:
+            return None
+        try:
+            from organization.models import Clinic
+            return Clinic.objects.filter(name=location_str, is_active=True).first()
+        except Exception:
+            return None
+
+    def create(self, validated_data):
+        location_str = validated_data.get('location')
+        if location_str and validated_data.get('clinic') is None:
+            clinic = self._resolve_clinic_from_location(location_str)
+            if clinic:
+                validated_data['clinic'] = clinic
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        location_str = validated_data.get('location', instance.location)
+        if location_str and 'clinic' not in validated_data:
+            clinic = self._resolve_clinic_from_location(location_str)
+            validated_data['clinic'] = clinic
+        return super().update(instance, validated_data)
+    
     class Meta:
         model = ConsultationRoom
         fields = '__all__'

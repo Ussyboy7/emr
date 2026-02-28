@@ -25,15 +25,10 @@ import {
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { CLINICS } from '@/lib/constants/clinics';
 import { normalizeClinicName } from '@/lib/utils/clinic-utils';
+import { useLocationOptions } from '@/lib/hooks/use-location-options';
 
 // NPA Clinics - standardized list
 const clinics = CLINICS;
-
-// NPA Locations
-const locations = [
-  "Headquarters", "Bode Thomas Clinic", "Lagos Port Complex", "Tincan Island Port Complex",
-  "Rivers Port Complex", "Onne Port Complex", "Delta Port Complex", "Calabar Port", "Lekki Deep Sea Port"
-];
 
 // Visit Types (matching backend choices)
 const visitTypes = [
@@ -47,6 +42,7 @@ function NewVisitPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const patientIdParam = searchParams.get('patient');
+  const { locations: locationOptions } = useLocationOptions();
   
   const [loading, setLoading] = useState(!!patientIdParam);
   const [searching, setSearching] = useState(false);
@@ -501,13 +497,13 @@ function NewVisitPageContent() {
                   {/* Location */}
                   <div className="space-y-2">
                     <Label>Location *</Label>
-                    <Select value={formData.location} onValueChange={(v) => handleInputChange('location', v)}>
+                    <Select value={formData.location} onValueChange={(v) => handleInputChange('location', v)} disabled={locationOptions.length === 0}>
                       <SelectTrigger>
-                        <SelectValue placeholder="Select location" />
+                        <SelectValue placeholder={locationOptions.length === 0 ? "No locations—add clinics in Admin" : "Select location"} />
                       </SelectTrigger>
                       <SelectContent>
-                        {locations.map(loc => (
-                          <SelectItem key={loc} value={loc}>{loc}</SelectItem>
+                        {locationOptions.map((loc) => (
+                          <SelectItem key={loc.value} value={loc.value}>{loc.label}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
