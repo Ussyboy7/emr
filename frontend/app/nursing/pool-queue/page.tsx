@@ -421,8 +421,8 @@ export default function NursingPoolQueuePage() {
             oxygenSaturation: vitalsData.oxygen_saturation?.toString() || '',
             weight: vitalsData.weight?.toString() || '',
             height: vitalsData.height?.toString() || '',
-            painScale: '', // Not in backend model yet
-            bloodSugar: '', // Not in backend model yet
+            painScale: vitalsData.pain_scale?.toString() || '',
+            bloodSugar: vitalsData.blood_sugar?.toString() || '',
             notes: vitalsData.notes || '',
             recordedAt: vitalsData.recorded_at || new Date().toISOString(),
             recordedBy: vitalsData.recorded_by_name || 'Unknown',
@@ -447,38 +447,13 @@ export default function NursingPoolQueuePage() {
             patientNumericId: visit.patient, // Store the actual patient ID from backend
             visitNumericId: visit.id, // Store the actual visit ID from backend
             visitNotes: visit.clinical_notes, // Clinical notes from the visit
-            age: (visit as any).age, // Patient age from backend
-            gender: (visit as any).gender, // Patient gender from backend
+            age: (visit as any).age || 0, // Patient age from backend
+            gender: ((visit as any).gender || 'Male') as any, // Patient gender from backend
             sentAt: queueVisitToSentAt.get(visit.id),
             sentToPhysio,
             sentToEyeClinic,
           };
         });
-
-        // Fetch patient details (age, gender) for all unique patients
-        const uniquePatientIds = Array.from(new Set(transformedPatients.map(p => p.patientNumericId)));
-        if (uniquePatientIds.length > 0) {
-          const patientDetailsMap = new Map<number, { age: number; gender: string }>();
-          await Promise.all(uniquePatientIds.map(async (patientId) => {
-            try {
-              const patientData = await apiFetch<any>(`/patients/${patientId}/`);
-              patientDetailsMap.set(patientId, {
-                age: patientData.age || 0,
-                gender: patientData.gender || '',
-              });
-            } catch (err) {
-              console.warn(`Failed to fetch details for patient ${patientId}:`, err);
-            }
-          }));
-          
-          transformedPatients.forEach(patient => {
-            const details = patientDetailsMap.get(patient.patientNumericId);
-            if (details) {
-              patient.age = details.age;
-              patient.gender = details.gender as any;
-            }
-          });
-        }
 
         setPatients(transformedPatients);
       } catch (err) {
@@ -575,10 +550,9 @@ export default function NursingPoolQueuePage() {
     const matchesType = typeFilter === 'all' || p.visitType.toLowerCase() === typeFilter.toLowerCase();
     const matchesClinic = clinicFilter === 'all' || clinicMatches(p.clinic, clinicFilter);
 
-    // Debug logging
     const passesAllFilters = matchesSearch && matchesStatus && matchesType && matchesClinic;
     if (!passesAllFilters && patients.length > 0) {
-      console.log('Patient filtered out:', p.name, {
+      debugLog('Patient filtered out:', p.name, {
         matchesSearch,
         matchesStatus,
         matchesType,
@@ -765,17 +739,17 @@ export default function NursingPoolQueuePage() {
         oxygen_saturation: vitalsForm.oxygenSaturation ? parseFloat(vitalsForm.oxygenSaturation) : null,
         weight: vitalsForm.weight ? parseFloat(vitalsForm.weight) : null,
         height: vitalsForm.height ? parseFloat(vitalsForm.height) : null,
+        pain_scale: vitalsForm.painScale ? parseInt(vitalsForm.painScale, 10) : null,
+        blood_sugar: vitalsForm.bloodSugar ? parseFloat(vitalsForm.bloodSugar) : null,
         notes: vitalsForm.notes || '',
         // Note: BMI will be auto-calculated by the backend
       };
       
       // Save vitals to API
-      console.log('[Pool Queue] Saving vitals:', payload);
-      const response = await apiFetch('/vitals/', {
+      await apiFetch('/vitals/', {
         method: 'POST',
         body: JSON.stringify(payload),
       });
-      console.log('[Pool Queue] Vitals save response:', response);
       
       // Update visit status (optional - you might want to add a field to track vitals recorded)
       // For now, we'll just reload the data
@@ -827,12 +801,6 @@ export default function NursingPoolQueuePage() {
           }
         }
       }
-      
-      console.error('[Pool Queue] Error details:', {
-        message: errorMessage,
-        originalError: err,
-        status: err?.status,
-      });
       
       toast.error('Failed to save vitals', {
         description: errorMessage
@@ -890,14 +858,14 @@ export default function NursingPoolQueuePage() {
           is_active: true,
         };
         
-        console.log('Sending patient to queue for room:', room?.id || roomId);
+        debugLog('Sending patient to queue for room:', room?.id || roomId);
         
         const queueResponse = await apiFetch('/consultation/queue/', {
           method: 'POST',
           body: JSON.stringify(queuePayload),
         });
         
-        console.log('Queue response:', queueResponse);
+        debugLog('Queue response:', queueResponse);
       } catch (queueErr: any) {
         console.error('Error adding to consultation queue:', queueErr);
         

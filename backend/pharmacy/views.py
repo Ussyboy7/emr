@@ -404,13 +404,12 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
         try:
             item = prescription.medications.get(id=item_id)
 
-            # Check if dispensing quantity exceeds remaining prescribed amount
-            remaining_quantity = item.quantity - item.dispensed_quantity
-            if quantity > remaining_quantity:
-                return Response(
-                    {'error': f'Cannot dispense {quantity} units. Only {remaining_quantity} units remaining to be dispensed.'},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
+            # Pharmacy has discretion to determine appropriate quantity based on:
+            # - Available brand packaging (different pack sizes)
+            # - Stock availability
+            # - Professional judgment
+            # - Patient needs
+            # No validation against prescribed quantity - pharmacist decides
 
             # Check if enough quantity available in stock
             if inventory_id:

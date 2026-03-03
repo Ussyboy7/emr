@@ -967,26 +967,15 @@ export default function PrescriptionsPage() {
       return;
     }
 
-    // Check if quantities are valid
+    // Check if quantities are valid (allow any positive quantity)
     const invalidQuantities = selectedMedications.filter(medId => {
       const med = selectedPrescriptionMedications.find(m => m.id === medId);
       const quantity = dispenseQuantities[medId] ?? med?.remaining_quantity ?? 0;
-      const maxAllowed = Math.max(0, med?.remaining_quantity || 0);
-      return med && (quantity < 0 || quantity > maxAllowed || (maxAllowed === 0 && quantity > 0));
+      return med && quantity < 0; // Only reject negative quantities
     });
 
     if (invalidQuantities.length > 0) {
-      const hasInvalidAmounts = selectedMedications.some(medId => {
-        const med = selectedPrescriptionMedications.find(m => m.id === medId);
-        const quantity = dispenseQuantities[medId] ?? med?.remaining_quantity ?? 0;
-        return med && quantity > Math.max(0, med.remaining_quantity);
-      });
-
-      if (hasInvalidAmounts) {
-        toast.error('Cannot dispense more than remaining prescribed amount');
-      } else {
-        toast.error('Please enter valid dispense quantities');
-      }
+      toast.error('Please enter valid dispense quantities');
       return;
     }
 

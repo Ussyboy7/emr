@@ -225,7 +225,7 @@ export default function ConsultationHistoryPage() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [dateFilter, setDateFilter] = useState("today");
+  const [dateFilter, setDateFilter] = useState("all"); // Changed from "today" to "all" to show all data by default
   const [clinicFilter, setClinicFilter] = useState("all");
   
   // Pagination state

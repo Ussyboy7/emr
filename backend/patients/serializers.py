@@ -242,7 +242,7 @@ class VitalReadingSerializer(serializers.ModelSerializer):
             'id', 'visit', 'patient', 'patient_id', 'patient_name',
             'temperature', 'blood_pressure_systolic', 'blood_pressure_diastolic',
             'heart_rate', 'respiratory_rate', 'oxygen_saturation',
-            'weight', 'height', 'bmi',
+            'weight', 'height', 'bmi', 'pain_scale', 'blood_sugar',
             'notes', 'recorded_at', 'recorded_by', 'recorded_by_name',
         ]
         read_only_fields = ['id', 'bmi', 'recorded_at']

@@ -1051,24 +1051,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         return;
       }
       
-      // Load queue items for this room
-      let queueItems: any[] = [];
-      try {
-        const roomQueueResult = await apiFetch<any[]>(`/consultation/rooms/${numericRoomId}/queue/`);
-        queueItems = Array.isArray(roomQueueResult) ? roomQueueResult : [];
-      } catch (err) {
-        try {
-          const queueResult = await apiFetch<{ results: any[] }>(`/consultation/queue/?room=${numericRoomId}&is_active=true&page_size=${LARGE_PAGE_SIZE}`);
-          queueItems = queueResult.results || [];
-        } catch (filterErr) {
-          const allQueueResult = await apiFetch<{ results: any[] }>(`/consultation/queue/?is_active=true&page_size=${LARGE_PAGE_SIZE}`);
-          const allItems = allQueueResult.results || [];
-          queueItems = allItems.filter((item: any) => {
-            const itemRoomId = typeof item.room === 'number' ? item.room : parseInt(item.room);
-            return itemRoomId === numericRoomId;
-          });
-        }
-      }
+      // Load queue items for this room - single optimized API call
+      const queueResult = await apiFetch<{ results: any[] }>(`/consultation/queue/?room=${numericRoomId}&is_active=true&page_size=100`);
+      const queueItems = queueResult.results || [];
       
       // Sort queue by priority
       const sortedQueue = queueItems.sort((a, b) => {
@@ -1078,92 +1063,54 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         return new Date(a.queued_at).getTime() - new Date(b.queued_at).getTime();
       });
       
-      // Transform queue items to Patient objects
-      const transformedPatients = await Promise.all(sortedQueue.map(async (item: any, index: number) => {
-        try {
-          let visitDate = new Date().toISOString().split('T')[0];
-          let visitTime = new Date().toTimeString().slice(0, 5);
-            if (item.visit) {
-              try {
-                if (item.visit_date) visitDate = item.visit_date;
-                if (item.visit_time) visitTime = String(item.visit_time).slice(0, 5);
-                if (!item.visit_date || !item.visit_time) {
-                  const visit = await apiFetch(`/visits/${item.visit}/`) as {
-                    date?: string;
-                    time?: string;
-                  };
-                  visitDate = visit.date || visitDate;
-                  visitTime = visit.time || visitTime;
-                }
-              } catch (err) {
-                console.warn('Could not load visit details:', err);
-              }
-            }
-            
-            // Get latest vitals for the patient (not just for this visit)
-            const vitalsData = await safeAsync(
-              async () => {
-                if (item.latest_vitals) return item.latest_vitals;
-                const result = await apiFetch<{ results: any[] }>(`/vitals/?patient=${item.patient}&ordering=-recorded_at&page_size=1`);
-                return result.results?.[0] || null;
-              },
-              null,
-              { operation: 'refreshPatientVitals', patientId: item.patient, component: 'ConsultationRoom' }
-            );
-            
-            const queuedAt = new Date(item.queued_at);
-            const waitTime = Math.floor((Date.now() - queuedAt.getTime()) / (1000 * 60));
-            
-            const getPriority = (priorityNum: number): Patient['priority'] => {
-              return getPriorityLabel(priorityNum);
-            };
-            
-            // Create the patient object with proper typing
-            const patientDetails = item.patient_details;
-            const patientData = {
-              id: String(item.patient),
-              visitId: item.visit ? String(item.visit) : '',
-              patient_id: patientDetails?.patient_id || '',
-              patientId: patientDetails?.patient_id || '',
-              full_name: item.patient_name || '',
-              first_name: '',
-              surname: '',
-              name: item.patient_name || '',
-              age: (item as any).patient_age ?? patientDetails?.age ?? 0,
-              gender: normalizeGenderLabel((item as any).patient_gender ?? patientDetails?.gender),
-              mrn: (item as any).patient_id ?? patientDetails?.patient_id ?? '',
-              personal_number: '',
-              allergies: [],
-            waitTime: waitTime > 0 ? waitTime : 0,
-            vitalsCompleted: !!vitalsData,
-            priority: getPriority(typeof item.priority === 'number' ? item.priority : parseInt(item.priority) || 0),
-            visitDate,
-            visitTime,
-            queuePosition: index + 1,
-              blood_group: patientDetails?.blood_group,
-              genotype: undefined,
-              employee_type: undefined,
-              division: undefined,
-              location: undefined,
-              phone: patientDetails?.phone,
-              email: patientDetails?.email,
-              occupation: undefined,
-              religion: undefined,
-              tribe: undefined,
-            photo: patientDetails?.photo || null,
-              vitals: processVitals(vitalsData),
-              // Multi-clinic support
-              clinics: item.visit_clinics || [],
-              completedClinics: item.visit_completed_clinics || [],
-            };
-
-            // Sanitize to ensure all fields are proper types for React rendering
-            return sanitizePatientForRendering(patientData);
-        } catch (err) {
-          console.error(`Error loading patient ${item.patient}:`, err);
-          return null;
-        }
-      }));
+      // Transform queue items to Patient objects - NO nested API calls needed
+      const transformedPatients = sortedQueue.map((item: any, index: number) => {
+        // Backend already provides visit_date, visit_time, patient_age, patient_gender, latest_vitals
+        const queuedAt = new Date(item.queued_at);
+        const waitTime = Math.floor((Date.now() - queuedAt.getTime()) / (1000 * 60));
+        
+        const getPriority = (priorityNum: number): Patient['priority'] => {
+          return getPriorityLabel(priorityNum);
+        };
+        
+        // Create the patient object with data from backend
+        const patientDetails = item.patient_details;
+        return {
+          id: String(item.patient),
+          visitId: item.visit ? String(item.visit) : '',
+          patient_id: patientDetails?.patient_id || '',
+          patientId: patientDetails?.patient_id || '',
+          full_name: item.patient_name || '',
+          first_name: '',
+          surname: '',
+          name: item.patient_name || '',
+          age: (item as any).patient_age ?? patientDetails?.age ?? 0,
+          gender: normalizeGenderLabel((item as any).patient_gender ?? patientDetails?.gender),
+          mrn: ((item as any).patient_id ?? patientDetails?.patient_id) || '',
+          personal_number: '',
+          allergies: [],
+          waitTime: waitTime > 0 ? waitTime : 0,
+          vitalsCompleted: !!item.latest_vitals,
+          priority: getPriority(typeof item.priority === 'number' ? item.priority : parseInt(item.priority) || 0),
+          visitDate: item.visit_date || new Date().toISOString().split('T')[0],
+          visitTime: item.visit_time ? String(item.visit_time).slice(0, 5) : new Date().toTimeString().slice(0, 5),
+          queuePosition: index + 1,
+          blood_group: patientDetails?.blood_group,
+          employee_type: undefined,
+          division: undefined,
+          location: undefined,
+          phone: patientDetails?.phone,
+          email: patientDetails?.email,
+          occupation: undefined,
+          religion: undefined,
+          tribe: undefined,
+          photo: patientDetails?.photo || null,
+          vitals: processVitals(item.latest_vitals),
+          // Multi-clinic support
+          clinics: item.visit_clinics || [],
+          completedClinics: item.visit_completed_clinics || [],
+        };
+      });
       
       // Filter out any null results
       const validPatients = transformedPatients.filter((p) => p !== null) as Patient[];
@@ -1192,34 +1139,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       // Load room details
       const roomData = await roomService.getRoom(numericRoomId);
       
-      // Load queue items for this room
-      // Try the room-specific queue endpoint first, then fallback to filtered query
-      let queueItems: any[] = [];
-      try {
-        // Try the room-specific queue endpoint: /consultation/rooms/{id}/queue/
-        const roomQueueResult = await apiFetch<any[]>(`/consultation/rooms/${numericRoomId}/queue/`);
-        queueItems = Array.isArray(roomQueueResult) ? roomQueueResult : [];
-      } catch (err) {
-        console.warn('Room-specific queue endpoint failed, trying filtered endpoint:', err);
-        // Fallback: Use filtered queue endpoint
-        try {
-          const queueResult = await apiFetch<{ results: any[] }>(`/consultation/queue/?room=${numericRoomId}&is_active=true&page_size=${LARGE_PAGE_SIZE}`);
-          queueItems = queueResult.results || [];
-        } catch (filterErr) {
-          console.warn('Filtered queue endpoint failed, loading all queue items:', filterErr);
-          // Last resort: Load all and filter client-side
-          const allQueueResult = await apiFetch<{ results: any[] }>(`/consultation/queue/?is_active=true&page_size=${LARGE_PAGE_SIZE}`);
-          const allItems = allQueueResult.results || [];
-          // Filter by room client-side
-          queueItems = allItems.filter((item: any) => {
-            const itemRoomId = typeof item.room === 'number' ? item.room : parseInt(item.room);
-            const matches = itemRoomId === numericRoomId;
-            if (!matches && allItems.length > 0) {
-            }
-            return matches;
-          });
-        }
-      }
+      // Load queue items for this room - single optimized API call
+      const queueResult = await apiFetch<{ results: any[] }>(`/consultation/queue/?room=${numericRoomId}&is_active=true&page_size=100`);
+      const queueItems = queueResult.results || [];
       
         
         // Sort queue by priority (lower number = higher priority), then by queued_at
@@ -1230,140 +1152,62 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           return new Date(a.queued_at).getTime() - new Date(b.queued_at).getTime();
         });
         
-        // Transform queue items to Patient objects
-        const transformedPatients = await Promise.all(sortedQueue.map(async (item: any, index: number) => {
-          try {
-            // Get visit details if available
-            let visitDate = new Date().toISOString().split('T')[0];
-            let visitTime = new Date().toTimeString().slice(0, 5);
-            
-            if (item.visit) {
-              try {
-                if (item.visit_date) visitDate = item.visit_date;
-                if (item.visit_time) visitTime = String(item.visit_time).slice(0, 5);
-                if (!item.visit_date || !item.visit_time) {
-                  const visit = await apiFetch(`/visits/${item.visit}/`) as {
-                    date?: string;
-                    time?: string;
-                  };
-                  visitDate = visit.date || visitDate;
-                  visitTime = visit.time || visitTime;
-                }
-              } catch (err) {
-                console.warn('Could not load visit details:', err);
-              }
-            }
-            
-            // Get latest vitals for the patient (not just for this visit)
-            const vitalsData = await safeAsync(
-              async () => {
-                if (item.latest_vitals) return item.latest_vitals;
-                const result = await apiFetch<{ results: any[] }>(`/vitals/?patient=${item.patient}&ordering=-recorded_at&page_size=1`);
-                return result.results?.[0] || null;
-              },
-              null,
-              { operation: 'loadPatientVitals', patientId: item.patient, component: 'ConsultationRoom' }
-            );
-            
-            // Calculate wait time with better error handling
-            const queuedAt = new Date(item.queued_at);
-            const now = Date.now();
-            const waitTimeMs = now - queuedAt.getTime();
-            // Ensure wait time is not negative and handle invalid dates
-            const waitTime = (!isNaN(waitTimeMs) && waitTimeMs >= 0) ? Math.floor(waitTimeMs / (1000 * 60)) : 0;
-            
-            // Map priority (integer) to string using centralized utility
-            // NOTE: Priority comes from ConsultationQueue model and was automatically set based on visit_type
-            // when the patient was added to the queue. No manual priority selection is needed.
-            const getPriority = (priorityNum: number): Patient['priority'] => {
-              return getPriorityLabel(priorityNum);
-            };
-            
-            // Create the patient object with proper typing
-            const patientDetails = item.patient_details;
-            const patientData = {
-              id: String(item.patient), // Use patient ID from queue, not queue item ID
-              visitId: item.visit ? String(item.visit) : '',
-              patient_id: patientDetails?.patient_id || '',
-              patientId: patientDetails?.patient_id || '',
-              full_name: item.patient_name || '',
-              first_name: '',
-              surname: '',
-              name: item.patient_name || '',
-              age: (item as any).patient_age ?? patientDetails?.age ?? 0,
-              gender: normalizeGenderLabel((item as any).patient_gender ?? patientDetails?.gender),
-              mrn: (item as any).patient_id ?? patientDetails?.patient_id ?? '',
-              personal_number: '',
-              allergies: [],
-              waitTime: waitTime > 0 ? waitTime : 0,
-              vitalsCompleted: !!vitalsData,
-              priority: getPriority(typeof item.priority === 'number' ? item.priority : parseInt(item.priority) || 0), // Default to 0 (Emergency) to match backend default
-              visitDate,
-              visitTime,
-              queuePosition: index + 1,
-              blood_group: patientDetails?.blood_group,
-              genotype: undefined,
-              employee_type: undefined,
-              division: undefined,
-              location: undefined,
-              phone: patientDetails?.phone,
-              email: patientDetails?.email,
-              occupation: undefined,
-              religion: undefined,
-              tribe: undefined,
-              vitals: processVitals(vitalsData),
-            };
-
-            // Sanitize to ensure all fields are proper types for React rendering
-            return sanitizePatientForRendering(patientData);
-          } catch (err) {
-            console.error(`Error loading patient ${item.patient}:`, err);
-            return null;
-          }
-        }));
+        // Transform queue items to Patient objects - NO nested API calls needed
+        const transformedPatients = queueItems.map((item: any, index: number) => {
+          // Backend already provides visit_date, visit_time, patient_age, patient_gender, latest_vitals
+          const queuedAt = new Date(item.queued_at);
+          const now = Date.now();
+          const waitTimeMs = now - queuedAt.getTime();
+          const waitTime = (!isNaN(waitTimeMs) && waitTimeMs >= 0) ? Math.floor(waitTimeMs / (1000 * 60)) : 0;
+          
+          const getPriority = (priorityNum: number): Patient['priority'] => {
+            return getPriorityLabel(priorityNum);
+          };
+          
+          // Create the patient object with data from backend
+          const patientDetails = item.patient_details;
+          return {
+            id: String(item.patient),
+            visitId: item.visit ? String(item.visit) : '',
+            patient_id: patientDetails?.patient_id || '',
+            patientId: patientDetails?.patient_id || '',
+            full_name: item.patient_name || '',
+            first_name: '',
+            surname: '',
+            name: item.patient_name || '',
+            age: (item as any).patient_age ?? patientDetails?.age ?? 0,
+            gender: normalizeGenderLabel((item as any).patient_gender ?? patientDetails?.gender),
+            mrn: ((item as any).patient_id ?? patientDetails?.patient_id) || '',
+            personal_number: '',
+            allergies: [],
+            waitTime: waitTime > 0 ? waitTime : 0,
+            vitalsCompleted: !!item.latest_vitals,
+            priority: getPriority(typeof item.priority === 'number' ? item.priority : parseInt(item.priority) || 0),
+            visitDate: item.visit_date || new Date().toISOString().split('T')[0],
+            visitTime: item.visit_time ? String(item.visit_time).slice(0, 5) : new Date().toTimeString().slice(0, 5),
+            queuePosition: index + 1,
+            blood_group: patientDetails?.blood_group,
+            employee_type: undefined,
+            division: undefined,
+            location: undefined,
+            phone: patientDetails?.phone,
+            email: patientDetails?.email,
+            occupation: undefined,
+            religion: undefined,
+            tribe: undefined,
+            photo: patientDetails?.photo || null,
+            vitals: processVitals(item.latest_vitals),
+            // Multi-clinic support
+            clinics: item.visit_clinics || [],
+            completedClinics: item.visit_completed_clinics || [],
+          };
+        });
         
         // Filter out any null results
         const validPatients = transformedPatients.filter((p) => p !== null) as Patient[];
+        setPatients(validPatients);
         
-        // Calculate today's statistics from completed sessions
-        let totalConsultationsToday = 0;
-        let averageConsultationTime = 0;
-
-        const sessionStats = await safeAsync(
-          async () => {
-            const today = new Date();
-            const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate()).toISOString();
-            const endOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59).toISOString();
-
-            const sessionsResult = await apiFetch<{ results: any[] }>(
-              `/consultation/sessions/?room=${numericRoomId}&status=completed&started_at__gte=${startOfDay}&started_at__lte=${endOfDay}&page_size=${LARGE_PAGE_SIZE}`
-            );
-
-            const todaySessions = sessionsResult.results || [];
-            const consultationsCount = todaySessions.length;
-            let avgTime = 0;
-
-            if (todaySessions.length > 0) {
-              const totalDuration = todaySessions.reduce((sum, session) => {
-                if (session.started_at && session.ended_at) {
-                  const duration = Math.round((new Date(session.ended_at).getTime() - new Date(session.started_at).getTime()) / (1000 * 60));
-                  return sum + Math.max(0, duration); // Ensure non-negative duration
-                }
-                return sum;
-              }, 0);
-              avgTime = Math.round(totalDuration / todaySessions.length);
-            }
-
-            return { consultationsCount, avgTime };
-          },
-          { consultationsCount: 0, avgTime: 0 },
-          { operation: 'loadSessionStatistics', component: 'ConsultationRoom' }
-        );
-
-        totalConsultationsToday = sessionStats.consultationsCount;
-        averageConsultationTime = sessionStats.avgTime;
-        
-        // Transform room data
+        // Transform room data - statistics set to 0 (not critical for queue display)
         const transformedRoom: ConsultationRoom = {
           id: String(roomData.id),
           name: roomData.name,
@@ -1372,8 +1216,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           startTime: undefined,
           doctor: (roomData as any).assigned_doctor || undefined,
           specialtyFocus: roomData.specialty || 'General Practice',
-          totalConsultationsToday,
-          averageConsultationTime,
+          totalConsultationsToday: 0,
+          averageConsultationTime: 0,
           queue: sortedQueue.map((item: any, index: number) => ({
             patient_id: String(item.patient),
             position: index + 1,

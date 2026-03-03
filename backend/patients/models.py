@@ -2,7 +2,7 @@
 Patient models for the EMR system.
 """
 from django.db import models
-from django.core.validators import RegexValidator
+from django.core.validators import RegexValidator, MinValueValidator, MaxValueValidator
 from django.utils import timezone
 from .validators import validate_personal_number_uniqueness
 
@@ -571,6 +571,19 @@ class VitalReading(models.Model):
     weight = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True, help_text="Weight in kg")
     height = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True, help_text="Height in cm")
     bmi = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True, help_text="Body Mass Index")
+    pain_scale = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(0), MaxValueValidator(10)],
+        help_text="Pain scale from 0 to 10",
+    )
+    blood_sugar = models.DecimalField(
+        max_digits=6,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Blood sugar in mg/dL",
+    )
     
     # Additional Notes
     notes = models.TextField(blank=True)

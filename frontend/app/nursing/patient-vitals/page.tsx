@@ -77,7 +77,6 @@ export default function PatientVitalsPage() {
         setError(null);
 
         // Fetch visits that should be processed by nursing (similar to pool queue)
-        console.log('[Patient Vitals] Fetching visits for nursing...');
         // NOTE: `patientService.getPatientVisits(id)` fetches visits for a single patient.
         // Passing `0` causes a 404 on backends that don't have a patient with ID 0.
         // Use the visits endpoint instead.
@@ -106,7 +105,6 @@ export default function PatientVitalsPage() {
           end_date: endDate,
         });
         const allVisits = visitsResponse.results || [];
-        console.log('[Patient Vitals] Fetched visits:', allVisits.length, 'records');
 
         // Get all visit IDs that have consultation sessions
         let visitsWithSessions: Set<number> = new Set();
@@ -117,9 +115,8 @@ export default function PatientVitalsPage() {
               .map((s: any) => s.visit?.id || s.visit_id)
               .filter((id: any) => id)
           );
-          console.log('[Patient Vitals] Visits with consultation sessions:', Array.from(visitsWithSessions));
         } catch (error) {
-          console.log('[Patient Vitals] Could not load consultation sessions:', error);
+          console.warn('[Patient Vitals] Could not load consultation sessions:', error);
         }
 
         // Filter visits that should go to nursing (active visits that don't have consultation sessions)
@@ -132,17 +129,13 @@ export default function PatientVitalsPage() {
 
           // Exclude visits that have consultation sessions (already sent to consultation)
           if (visitsWithSessions.has(visit.id)) {
-            console.log('[Patient Vitals] Excluding visit', visit.visit_id, '- has consultation sessions');
             return false;
           }
 
           return true;
         });
 
-        console.log('[Patient Vitals] Filtered nursing visits:', nursingVisits.length);
-
         if (nursingVisits.length === 0) {
-          console.log('[Patient Vitals] No visits found for nursing');
           setPatients([]);
           setLoading(false);
           return;
@@ -163,12 +156,9 @@ export default function PatientVitalsPage() {
           ),
         ];
 
-        console.log('[Patient Vitals] Unique patient IDs:', patientIds.length);
-        
         // Fetch patient details and check vitals status
         const patientPromises = patientIds.map(async (patientId) => {
           try {
-            console.log('[Patient Vitals] Fetching patient details for ID:', patientId);
             const patient = await patientService.getPatient(parseInt(patientId));
 
             // Load patient's vitals history
@@ -188,10 +178,8 @@ export default function PatientVitalsPage() {
                 hasVitalsToday = vitalsDate >= sevenDaysAgo;
               }
             } catch (vitalsError) {
-              console.log('[Patient Vitals] Could not load vitals for patient:', patientId, vitalsError);
+              console.warn('[Patient Vitals] Could not load vitals for patient:', patientId, vitalsError);
             }
-
-            console.log('[Patient Vitals] Patient', patientId, 'has vitals today:', hasVitalsToday);
             
             // Determine nursing status based on vitals recording
             const nursingStatus = hasVitalsToday ? 'Ready for Consultation' : 'Pending Vitals';
@@ -239,8 +227,8 @@ export default function PatientVitalsPage() {
               oxygenSaturation: latestVitals.oxygen_saturation?.toString() || '',
               weight: latestVitals.weight?.toString() || '',
               height: latestVitals.height?.toString() || '',
-              painScale: '',
-              bloodSugar: '',
+              painScale: latestVitals.pain_scale?.toString() || '',
+              bloodSugar: latestVitals.blood_sugar?.toString() || '',
               bmi: latestVitals.bmi?.toString() || '',
               notes: latestVitals.notes || '',
               recordedAt: latestVitals.recorded_at || new Date().toISOString(),
@@ -258,8 +246,8 @@ export default function PatientVitalsPage() {
               oxygenSaturation: v.oxygen_saturation?.toString() || '',
               weight: v.weight?.toString() || '',
               height: v.height?.toString() || '',
-              painScale: '',
-              bloodSugar: '',
+              painScale: v.pain_scale?.toString() || '',
+              bloodSugar: v.blood_sugar?.toString() || '',
               bmi: v.bmi?.toString() || '',
               notes: v.notes || '',
               recordedAt: v.recorded_at || new Date().toISOString(),
@@ -288,12 +276,10 @@ export default function PatientVitalsPage() {
         });
         
         const loadedPatients = (await Promise.all(patientPromises)).filter((p): p is PatientVitals => p !== null);
-        console.log('[Patient Vitals] Successfully loaded', loadedPatients.length, 'patients');
         setPatients(loadedPatients);
       } catch (err) {
         console.error('[Patient Vitals] Error loading patients with vitals:', err);
         const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-        console.error('[Patient Vitals] Full error details:', err);
         
         if (isAuthenticationError(err)) {
           setAuthError(err);
@@ -721,4 +707,3 @@ export default function PatientVitalsPage() {
     </DashboardLayout>
   );
 }
-
