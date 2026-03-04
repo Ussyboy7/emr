@@ -3363,9 +3363,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         newSet.delete(templateId);
       } else {
         newSet.add(templateId);
-        // Close dropdown and clear search when template is selected
-        setShowLabTemplateDropdown(false);
-        setLabTemplateSearch("");
+        // Keep dropdown open and search so user can multi-select
       }
       return newSet;
     });
@@ -4568,44 +4566,53 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                     </div>
                   ) : (
                     <div className="space-y-2">
-                      {diagnoses.map((dx, index) => (
-                        <div key={dx.id} className={`p-3 rounded-lg border flex items-start justify-between gap-3 ${
-                          dx.certainty === 'confirmed' ? 'bg-rose-50 dark:bg-rose-900/20 border-rose-200 dark:border-rose-800' :
-                          dx.certainty === 'probable' ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800' :
-                          'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800'
-                        }`}>
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2 mb-1">
-                              <Badge variant="outline" className={`text-xs ${
-                                dx.status === 'confirmed' ? 'bg-green-500/10 text-green-600 border-green-500/30' :
-                                dx.status === 'suspected' ? 'bg-amber-500/10 text-amber-600 border-amber-500/30' :
-                                'bg-red-500/10 text-red-600 border-red-500/30'
-                              }`}>{dx.status}</Badge>
-                              <span className="font-mono text-sm font-medium">{dx.icd10_code_details?.code || 'Unknown'}</span>
+                      {diagnoses.map((dx) => {
+                        const diagnosisType = dx.certainty === 'confirmed' ? 'Primary' : dx.certainty === 'probable' ? 'Secondary' : 'Differential';
+                        const typeStyles = dx.certainty === 'confirmed'
+                          ? 'bg-rose-50 dark:bg-rose-900/20 border-rose-200 dark:border-rose-800'
+                          : dx.certainty === 'probable'
+                            ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800'
+                            : 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800';
+                        const typeBadgeStyles = dx.certainty === 'confirmed'
+                          ? 'bg-rose-500/15 text-rose-700 dark:text-rose-300 border-rose-300 dark:border-rose-700'
+                          : dx.certainty === 'probable'
+                            ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-700'
+                            : 'bg-blue-500/15 text-blue-700 dark:text-blue-300 border-blue-300 dark:border-blue-700';
+                        return (
+                          <div key={dx.id} className={`p-3 rounded-lg border flex items-start justify-between gap-3 ${typeStyles}`}>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex flex-wrap items-center gap-2 mb-1.5">
+                                <Badge variant="outline" className={`text-xs font-medium shrink-0 ${typeBadgeStyles}`}>
+                                  {diagnosisType}
+                                </Badge>
+                                <span className="font-mono text-sm font-semibold text-foreground">{dx.icd10_code_details?.code || 'Unknown'}</span>
+                              </div>
+                              <p className="text-sm text-foreground/90 leading-snug">{dx.icd10_code_details?.description || dx.diagnosis_text || 'Unknown diagnosis'}</p>
+                              {(dx.notes || (dx.diagnosis_text && dx.diagnosis_text !== (dx.icd10_code_details?.description ?? ''))) && (
+                                <p className="text-xs text-muted-foreground mt-1.5">{dx.notes || dx.diagnosis_text}</p>
+                              )}
                             </div>
-                            <p className="text-sm font-medium">{dx.icd10_code_details?.description || dx.diagnosis_text || 'Unknown diagnosis'}</p>
-                            {dx.notes && <p className="text-xs text-muted-foreground mt-1">{dx.notes}</p>}
-                            {dx.diagnosis_text && <p className="text-xs text-muted-foreground mt-1">{dx.diagnosis_text}</p>}
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 w-8 p-0 shrink-0 rounded-full"
+                              onClick={async () => {
+                                try {
+                                  await consultationService.deleteDiagnosis(dx.id);
+                                  setDiagnoses(diagnoses.filter(d => d.id !== dx.id));
+                                  toast.success('Diagnosis removed');
+                                } catch (err: any) {
+                                  console.error('Error deleting diagnosis:', err);
+                                  toast.error('Failed to remove diagnosis');
+                                }
+                              }}
+                              title="Remove diagnosis"
+                            >
+                              <X className="h-4 w-4" />
+                            </Button>
                           </div>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 w-7 p-0"
-                            onClick={async () => {
-                              try {
-                                await consultationService.deleteDiagnosis(dx.id);
-                                setDiagnoses(diagnoses.filter(d => d.id !== dx.id));
-                                toast.success('Diagnosis removed');
-                              } catch (err: any) {
-                                console.error('Error deleting diagnosis:', err);
-                                toast.error('Failed to remove diagnosis');
-                              }
-                            }}
-                          >
-                            <X className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>
@@ -6677,7 +6684,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
               {/* ICD-10 Search */}
               <div className="space-y-2">
                 <Label>Search ICD-10 Code *</Label>
-                <div className="relative">
+                <div className="relative" ref={diagnosisDropdownContainerRef}>
                   <Input 
                     value={diagnosisSearch} 
                     onChange={(e) => {
@@ -6706,10 +6713,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                   />
                   {showDiagnosisDropdown && (
                     <div className="absolute z-50 w-full mt-1 bg-background border rounded-md shadow-lg max-h-[250px] overflow-y-auto">
-                      {/* Debug info */}
-                      <div className="p-2 text-xs text-muted-foreground border-b">
-                        Loaded: {icd10Codes.length} | Searching: {diagnosisSearch} | Results: {icd10SearchResults.length} {isSearchingICD10 && '(Searching...)'}
-                      </div>
                       {(() => {
                         let displayCodes;
                         if (diagnosisSearch.trim()) {
@@ -6769,12 +6772,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                 // Security: Removed console.log to prevent diagnosis data exposure
                                 const newDiagnosis = await consultationService.createDiagnosis(diagnosisData);
                                 setDiagnoses([...diagnoses, newDiagnosis]);
-
-                              setDiagnosisSearch("");
-                              setShowDiagnosisDropdown(false);
-                              setDiagnosisNotes("");
-                              setShowAddDiagnosis(false);
                                 toast.success(`Added diagnosis: ${dx.code} - ${dx.description}`);
+                                // Keep dropdown and search open so user can add more diagnoses
                               } catch (err: any) {
                                 console.error('Error creating diagnosis:', err);
                                 toast.error('Failed to add diagnosis. Please try again.');
@@ -7219,7 +7218,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
             <div className="space-y-4 py-2">
               <div className="space-y-2">
                 <Label>Search and Select Tests *</Label>
-                <div className="relative" data-lab-template-dropdown>
+                <div className="relative" ref={labTemplateDropdownContainerRef} data-lab-template-dropdown>
                   <Input
                     placeholder="Search tests by name, code, or sample type..."
                     value={labTemplateSearch}
@@ -7728,7 +7727,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
               {/* Radiology Template Selection */}
               <div className="space-y-2">
                 <Label>Search and Select Imaging Studies *</Label>
-                <div className="relative" data-radiology-template-dropdown>
+                <div className="relative" ref={radiologyTemplateDropdownContainerRef} data-radiology-template-dropdown>
                   <Input
                     placeholder="Search imaging studies by name, code, or modality..."
                     value={radiologyTemplateSearch}
@@ -7798,8 +7797,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                   className="flex items-center justify-between p-2 rounded hover:bg-muted cursor-pointer"
                                   onClick={() => {
                                     setSelectedRadiologyTemplates(prev => new Set([...prev, template.id]));
-                                    setRadiologyTemplateSearch('');
-                                    setShowRadiologyTemplateDropdown(false);
+                                    // Keep dropdown and search so user can multi-select
                                   }}
                                 >
                                   <div className="flex-1 min-w-0">
