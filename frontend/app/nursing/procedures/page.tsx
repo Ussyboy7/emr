@@ -392,7 +392,7 @@ export default function ProceduresQueuePage() {
         // Build comprehensive description for injection
         const injectionDetails = [
           selectedProcedure.details.medication || 'Injection',
-          selectedProcedure.details.dosage && `Dosage: ${selectedProcedure.details.dosage}`,
+          selectedProcedure.details.dosage && `Dose: ${selectedProcedure.details.dosage}`,
           selectedProcedure.details.route && `Route: ${selectedProcedure.details.route}`,
           selectedProcedure.details.frequency && `Frequency: ${selectedProcedure.details.frequency}`,
         ].filter(Boolean).join(' • ');

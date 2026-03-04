@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, use } from "react";
+import { useEffect, useRef, useState, use } from "react";
 import { useRouter } from "next/navigation";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -323,6 +323,33 @@ const parseMedicationOptions = (value: unknown): string[] => {
     .filter((v) => v.length > 0);
 };
 
+const formatMedicationVariantLabel = (med: any): string => {
+  const name = med?.name || '';
+  const strength = (med?.strength || '').toString().trim();
+  const form = (med?.dosage_form || med?.form || '').toString().trim();
+  if (strength && form) return `${name} (${strength}, ${form})`;
+  if (strength) return `${name} (${strength})`;
+  if (form) return `${name} (${form})`;
+  return name;
+};
+
+const inferDoseUnitFromForm = (formValue?: string, fallbackUnit?: string): string => {
+  const fallback = (fallbackUnit || '').toString().trim().toLowerCase();
+  const form = (formValue || '').toString().trim().toLowerCase();
+
+  if (fallback && ['tablet', 'capsule', 'ml', 'drop', 'puff', 'vial', 'ampoule', 'sachet', 'unit'].includes(fallback)) {
+    return fallback;
+  }
+  if (form.includes('syrup') || form.includes('suspension') || form.includes('solution')) return 'ml';
+  if (form.includes('drop') || form.includes('ophthalmic') || form.includes('otic')) return 'drop';
+  if (form.includes('inhal') || form.includes('spray')) return 'puff';
+  if (form.includes('capsule') || form.includes('softgel')) return 'capsule';
+  if (form.includes('vial') || form.includes('injection') || form.includes('injectable')) return 'vial';
+  if (form.includes('ampoule')) return 'ampoule';
+  if (form.includes('sachet') || form.includes('powder')) return 'sachet';
+  return 'tablet';
+};
+
 // Medical constants are now imported from @/lib/constants/medical-data
 const injectionRoutes = INJECTION_ROUTES;
 const woundTypes = WOUND_TYPES;
@@ -444,6 +471,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     unit?: string;
     strength?: string;
     form?: string;
+    dose?: string; 
     dosage: string; 
     frequency: string; 
     duration: string; 
@@ -475,6 +503,11 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   const [prescriptionsSentToPharmacy, setPrescriptionsSentToPharmacy] = useState(false);
   const [medications, setMedications] = useState<any[]>([]); // Store medications or generics from API
   const [loadingMedications, setLoadingMedications] = useState(false);
+  const medicationSearchRequestRef = useRef(0);
+  const diagnosisDropdownContainerRef = useRef<HTMLDivElement | null>(null);
+  const medicationDropdownContainerRef = useRef<HTMLDivElement | null>(null);
+  const labTemplateDropdownContainerRef = useRef<HTMLDivElement | null>(null);
+  const radiologyTemplateDropdownContainerRef = useRef<HTMLDivElement | null>(null);
   const [labOrders, setLabOrders] = useState<{ 
     id: string;
     test: string; 
@@ -805,7 +838,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         diagnosis: rx.diagnosis || rx.notes || '',
         medications: (rx.medications || []).map((med: any) => ({
           medication_name: med.medication_name || med.medication || 'Unknown',
-          dosage: med.dosage || '',
+          dosage: med.dose || med.dosage || '',
           frequency: med.frequency || '',
           route: med.route || ''
         })),
@@ -1347,7 +1380,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
             return items.map((m: any) => ({
               id: String(p.id) + (m.id != null ? '-' + m.id : ''),
               medication: m.medication_name || m.medication?.name || p.medication_name || p.medication || 'Unknown',
-              dosage: m.dosage || p.dosage || '',
+              dosage: m.dose || m.dosage || p.dose || p.dosage || '',
               frequency: m.frequency || p.frequency || '',
               duration: m.duration || p.duration || '',
               quantity: m.quantity ?? p.quantity ?? 0,
@@ -1551,7 +1584,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
               unit: item.unit || item.medication_details?.unit || 'tablet',
               strength: item.strength || item.medication_details?.strength || '',
               form: item.dosage_form || item.medication_details?.form || '',
-                  dosage: item.dosage || '',
+                  dosage: item.dose || item.dosage || '',
                   frequency: item.frequency || '',
                   duration: item.duration || '',
                   quantity: item.quantity || 0,
@@ -1692,26 +1725,40 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   };
 
   useEffect(() => {
-    if (!showAddPrescription && !showMedicationDropdown) return;
-    if (loadingMedications) return;
-    if (medications.length > 0) return;
+    if (!showAddPrescription || !showMedicationDropdown) return;
 
-    const loadGenerics = async () => {
+    const searchTerm = medicationSearch.trim();
+    if (!searchTerm) {
+      setMedications([]);
+      return;
+    }
+
+    const requestId = ++medicationSearchRequestRef.current;
+    const timeout = setTimeout(async () => {
       try {
         setLoadingMedications(true);
-        const response = await pharmacyService.getGenericsForPrescription({ page_size: 200 });
-        const loadedGenerics = response.results || [];
-        setMedications(loadedGenerics as any);
+        const response = await pharmacyService.getGenericsForPrescription({
+          search: searchTerm,
+          page_size: 50,
+        });
+        if (requestId === medicationSearchRequestRef.current) {
+          setMedications((response.results || []) as any[]);
+        }
       } catch (err) {
-        debugConsultationRoom('Failed to load generics:', err);
-        toast.error('Failed to load medication list.');
+        if (requestId === medicationSearchRequestRef.current) {
+          debugConsultationRoom('Failed to search generics:', err);
+          setMedications([]);
+          toast.error('Failed to load medication search results.');
+        }
       } finally {
-        setLoadingMedications(false);
+        if (requestId === medicationSearchRequestRef.current) {
+          setLoadingMedications(false);
+        }
       }
-    };
+    }, 300);
 
-    loadGenerics();
-  }, [showAddPrescription, showMedicationDropdown, loadingMedications, medications.length]);
+    return () => clearTimeout(timeout);
+  }, [showAddPrescription, showMedicationDropdown, medicationSearch]);
 
   useEffect(() => {
     if (!showAddDiagnosis) return;
@@ -1808,26 +1855,46 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     return () => { cancelled = true; };
   }, [sessionId]);
 
-  // Close lab template dropdown when clicking outside
+  // Close custom search dropdowns when clicking outside
   useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      const target = event.target as HTMLElement;
-      if (showLabTemplateDropdown && !target.closest('[data-lab-template-dropdown]')) {
+    const handleClickOutside = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      const path = typeof event.composedPath === 'function' ? event.composedPath() : [];
+
+      const isEventInside = (container: HTMLElement | null) =>
+        !!container && (path.includes(container) || container.contains(target));
+
+      if (showDiagnosisDropdown && !isEventInside(diagnosisDropdownContainerRef.current)) {
+        setShowDiagnosisDropdown(false);
+      }
+      if (showLabTemplateDropdown && !isEventInside(labTemplateDropdownContainerRef.current)) {
         setShowLabTemplateDropdown(false);
       }
-      if (showRadiologyTemplateDropdown && !target.closest('[data-radiology-template-dropdown]')) {
+      if (showRadiologyTemplateDropdown && !isEventInside(radiologyTemplateDropdownContainerRef.current)) {
         setShowRadiologyTemplateDropdown(false);
       }
-      if (showMedicationDropdown && !target.closest('[data-medication-dropdown]')) {
+
+      if (
+        showMedicationDropdown &&
+        !isEventInside(medicationDropdownContainerRef.current)
+      ) {
         setShowMedicationDropdown(false);
       }
     };
-    
-    if (showLabTemplateDropdown) {
-      document.addEventListener('mousedown', handleClickOutside);
-      return () => document.removeEventListener('mousedown', handleClickOutside);
-    }
-  }, [showLabTemplateDropdown, showRadiologyTemplateDropdown, showMedicationDropdown]);
+
+    if (!showDiagnosisDropdown && !showLabTemplateDropdown && !showRadiologyTemplateDropdown && !showMedicationDropdown) return;
+    document.addEventListener('pointerdown', handleClickOutside, true);
+    return () => document.removeEventListener('pointerdown', handleClickOutside, true);
+  }, [showDiagnosisDropdown, showLabTemplateDropdown, showRadiologyTemplateDropdown, showMedicationDropdown]);
+
+  // Ensure dropdowns don't persist when moving across tabs.
+  useEffect(() => {
+    setShowDiagnosisDropdown(false);
+    setShowMedicationDropdown(false);
+    setShowLabTemplateDropdown(false);
+    setShowRadiologyTemplateDropdown(false);
+  }, [activeTab]);
   
   const handleRefresh = async () => {
     setIsRefreshing(true);
@@ -2112,7 +2179,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       return items.map((m: any) => ({
         id: String(p.id) + (m.id != null ? '-' + m.id : ''),
         medication: m.medication_name || m.medication?.name || p.medication_name || p.medication || 'Unknown',
-        dosage: m.dosage || p.dosage || '',
+        dosage: m.dose || m.dosage || p.dose || p.dosage || '',
         frequency: m.frequency || p.frequency || '',
         duration: m.duration || p.duration || '',
         quantity: m.quantity ?? p.quantity ?? 0,
@@ -2510,7 +2577,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
             <thead>
               <tr>
                 <th>Medication</th>
-                <th>Dosage</th>
+                <th>Dose</th>
                 <th>Frequency</th>
                 <th>Duration</th>
                 <th>Quantity</th>
@@ -2876,8 +2943,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           const gId = typeof g.id === 'string' ? parseInt(g.id, 10) : g.id;
           return gId === numericGenericId;
         });
-        const fallbackUnit = (generic as any)?.dosage_form || 'tablet';
         const fallbackForm = (generic as any)?.dosage_form || '';
+        const fallbackUnit = inferDoseUnitFromForm(fallbackForm, (generic as any)?.unit);
         const fallbackStrength = (generic as any)?.strength || '';
         const fallbackRoute = (generic as any)?.route || 'Oral';
         
@@ -2888,7 +2955,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           unit: rx.unit || fallbackUnit,
           dosage_form: rx.form || fallbackForm,
           strength: rx.strength || fallbackStrength,
-          dosage: rx.dosage,
+          dose: rx.dose || rx.dosage,
           frequency: rx.frequency,
           duration: rx.duration,
           route: rx.route || fallbackRoute,
@@ -2972,14 +3039,14 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
     // Pre-populate the configuration
     const config: any = {
-      dosage: prescriptionToEdit.dosage === 'As directed' ? '' : prescriptionToEdit.dosage,
+      dosage: (prescriptionToEdit.dose || prescriptionToEdit.dosage) === 'As directed' ? '' : (prescriptionToEdit.dose || prescriptionToEdit.dosage || ''),
       frequency: prescriptionToEdit.frequency,
       durationDays: prescriptionToEdit.duration.includes('days')
         ? parseInt(prescriptionToEdit.duration.split(' ')[0]) || 0
         : 0,
       route: prescriptionToEdit.route,
       instructions: prescriptionToEdit.instructions || '',
-      unit: prescriptionToEdit.unit || 'tablet',
+      unit: prescriptionToEdit.unit || inferDoseUnitFromForm(prescriptionToEdit.form),
       strength: prescriptionToEdit.strength || '',
       form: prescriptionToEdit.form || '',
     };
@@ -3047,25 +3114,21 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         newSet.delete(medicationId!);
         newSet = new Set([medicationId!, ...Array.from(newSet)]);
 
-        // Close dropdown and clear search when medication is selected
-        setShowMedicationDropdown(false);
-        setMedicationSearch("");
-
         setMedicationConfigs(prevConfigs => {
           const newConfigs = new Map(prevConfigs);
           const formOptions = parseMedicationOptions(med.dosage_form || med.form || med.dosageForm);
           const strengthOptions = parseMedicationOptions(med.strength);
           const form = formOptions[0] || '';
           const strength = strengthOptions[0] || '';
-          const unit = med.unit || form || 'tablet';
+          const unit = inferDoseUnitFromForm(form, med.unit);
           // Set sensible defaults based on medication form
           const defaultDosage = form.toLowerCase().includes('tablet') || form.toLowerCase().includes('capsule') 
-            ? `1 ${form.toLowerCase()}`
+            ? '1'
             : form.toLowerCase().includes('syrup') || form.toLowerCase().includes('suspension')
-            ? '5ml'
+            ? '5'
             : form.toLowerCase().includes('injection') || form.toLowerCase().includes('vial')
-            ? '1 vial'
-            : `1 ${form.toLowerCase()}`;
+            ? '1'
+            : '1';
           
           const defaultRoute = form.toLowerCase().includes('injection') || form.toLowerCase().includes('vial')
             ? 'IV'
@@ -3158,11 +3221,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       return;
     }
 
-    if (!newPrescription.notes) {
-      toast.error("Please provide clinical indication");
-      return;
-    }
-
     // Validate medication configurations
     const missingConfigs: string[] = [];
     for (const medId of selectedMedications) {
@@ -3171,35 +3229,48 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         const mId = typeof m.id === 'number' ? m.id : parseInt(m.id, 10);
         return mId === medId;
       });
-      if (!config || !config.dosage?.trim()) {
-        missingConfigs.push(`${med?.name || 'Unknown medication'} - dosage required`);
-      }
       if (!config || !config.frequency) {
         if (!missingConfigs.some(msg => msg.includes(med?.name || 'Unknown medication'))) {
           missingConfigs.push(`${med?.name || 'Unknown medication'} - frequency required`);
         }
       }
-      if (!config || !config.form?.trim()) {
+      if (!config || !config.unit?.trim()) {
         if (!missingConfigs.some(msg => msg.includes(med?.name || 'Unknown medication'))) {
-          missingConfigs.push(`${med?.name || 'Unknown medication'} - form required`);
+          missingConfigs.push(`${med?.name || 'Unknown medication'} - dose unit required`);
         }
       }
-      if (!config || !config.strength?.trim()) {
+      if (config?.dosage && (Number.isNaN(parseFloat(String(config.dosage))) || parseFloat(String(config.dosage)) <= 0)) {
         if (!missingConfigs.some(msg => msg.includes(med?.name || 'Unknown medication'))) {
-          missingConfigs.push(`${med?.name || 'Unknown medication'} - strength required`);
+          missingConfigs.push(`${med?.name || 'Unknown medication'} - dose must be a positive number`);
         }
       }
     }
 
     if (missingConfigs.length > 0) {
-      toast.error("Please complete required fields (dosage, frequency, form, strength) for each medication.");
+      toast.error("Please complete required fields (frequency and dose unit) and provide a valid dose.");
       return;
     }
     
-    const selectedMeds = medications.filter((m: any) => {
-      const mId = typeof m.id === 'number' ? m.id : parseInt(m.id, 10);
-      return selectedMedications.has(mId);
-    });
+    const selectedMeds = Array.from(selectedMedications)
+      .map((medId) => {
+        const foundMedication = medications.find((m: any) => {
+          const mId = typeof m.id === 'number' ? m.id : parseInt(m.id, 10);
+          return mId === medId;
+        });
+        if (foundMedication) return foundMedication;
+        const config = medicationConfigs.get(medId);
+        if (!config) return null;
+        return {
+          id: medId,
+          name: config.name || 'Medication',
+          dosage_form: config.form || '',
+          form: config.form || '',
+          strength: config.strength || '',
+          unit: config.unit || '',
+          generic_name: config.generic_name || config.genericName || config.name || '',
+        };
+      })
+      .filter((m): m is any => !!m);
     
     // Add all selected medications to prescriptions list with configurations
     const newPrescriptions = selectedMeds.map((med: any) => {
@@ -3210,7 +3281,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         durationDays: 0,
         route: 'Oral',
         instructions: '',
-        unit: med.unit || med.dosage_form || med.form || 'tablet',
+        unit: inferDoseUnitFromForm(med.dosage_form || med.form, med.unit),
         strength: med.strength || '',
         form: med.dosage_form || med.form || '',
       };
@@ -3229,15 +3300,16 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         medication: med.name, // Generic name
         medicationId: medicationId, // Generic ID
         genericName: med.name, // Same as medication for generics
-        unit: config.unit || med.unit || med.dosage_form || med.form || 'tablet',
+        unit: config.unit || inferDoseUnitFromForm(med.dosage_form || med.form, med.unit),
         strength: config.strength || med.strength || '',
         form: config.form || med.dosage_form || med.form || '',
-        dosage: config.dosage || 'As directed',
+        dose: `${config.dosage || '1'} ${config.unit || inferDoseUnitFromForm(med.dosage_form || med.form, med.unit)}`.trim(),
+        dosage: config.dosage ? `${config.dosage} ${config.unit || inferDoseUnitFromForm(med.dosage_form || med.form, med.unit)}`.trim() : 'As directed',
         frequency: config.frequency,
         duration: config.durationDays ? `${config.durationDays} days` : 'As directed',
         quantity: calculatedQty,
         route: config.route,
-        instructions: config.instructions || newPrescription.notes,
+        instructions: config.instructions || newPrescription.notes || '',
         priority: newPrescription.priority,
         status: 'Draft' as const
       };
@@ -3281,24 +3353,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   // CRITICAL: Only use real generics from API - do NOT use demo medications
   // Demo medications have string IDs which cannot be used for prescriptions
   const availableMedications = medications.length > 0 ? medications : [];
-  const filteredMedications = medicationSearch 
-    ? availableMedications.filter((generic: any) => {
-        const searchTerm = medicationSearch.toLowerCase().trim();
-        if (!searchTerm) return true; // Show all if search is empty
-        
-        const name = (generic.name || '').toLowerCase();
-        const activeIngredient = ((generic.active_ingredient || '')).toLowerCase();
-        const category = ((generic.category || '')).toLowerCase();
-        const strength = ((generic.strength || '')).toLowerCase();
-        const form = ((generic.dosage_form || '')).toLowerCase();
-        
-        return name.includes(searchTerm) ||
-               activeIngredient.includes(searchTerm) ||
-               category.includes(searchTerm) ||
-               strength.includes(searchTerm) ||
-               form.includes(searchTerm);
-      })
-    : availableMedications;
+  const filteredMedications = availableMedications;
   // Toggle lab template selection
   const toggleLabTemplateSelection = (template: any) => {
     const templateId = template.id;
@@ -6778,7 +6833,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                 Add Prescription
               </DialogTitle>
               <DialogDescription>
-                Search and select medications, then configure dosage details for each. All medications will be sent as one prescription order to Pharmacy queue.
+                Search and select medications, then configure dose details for each. All medications will be sent as one prescription order to Pharmacy queue.
               </DialogDescription>
             </DialogHeader>
             
@@ -6796,7 +6851,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
               {/* Medication Search */}
               <div className="space-y-2">
                 <Label>Search and Select Medications *</Label>
-                <div className="relative">
+                <div className="relative" ref={medicationDropdownContainerRef}>
                   <Input 
                     placeholder="Search medications by name, generic name, or category..."
                     value={medicationSearch} 
@@ -6846,7 +6901,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                               <Checkbox checked={isSelected} onCheckedChange={() => toggleMedicationSelection(med)} />
                               <div className="flex-1 min-w-0">
                                 <div className="font-medium text-sm flex items-center gap-2">
-                                  {med.name}
+                                  {formatMedicationVariantLabel(med)}
                                   {isAllergyRisk && <AlertTriangle className="h-3 w-3 text-red-500" />}
                                 </div>
                                 <div className="text-xs text-muted-foreground mt-1">
@@ -6870,14 +6925,26 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                     <div className="text-sm font-medium">Selected Medications ({selectedMedications.size}):</div>
                     <div className="flex flex-wrap gap-2">
                       {Array.from(selectedMedications)
-                        .map((medId) => medications.find((m: any) => {
-                          const mId = typeof m.id === 'number' ? m.id : parseInt(m.id, 10);
-                          return mId === medId;
-                        }))
+                        .map((medId) => {
+                          const foundMedication = medications.find((m: any) => {
+                            const mId = typeof m.id === 'number' ? m.id : parseInt(m.id, 10);
+                            return mId === medId;
+                          });
+                          if (foundMedication) return foundMedication;
+                          const config = medicationConfigs.get(medId);
+                          if (!config) return null;
+                          return {
+                            id: medId,
+                            name: config.name || 'Medication',
+                            dosage_form: config.form || '',
+                            strength: config.strength || '',
+                            generic_name: config.generic_name || config.genericName || '',
+                          };
+                        })
                         .filter((med): med is any => !!med)
                         .map((med) => (
                           <Badge key={med.id} variant="secondary" className="flex items-center gap-1">
-                            {med.name}
+                            {formatMedicationVariantLabel(med)}
                             <X
                               className="h-3 w-3 cursor-pointer"
                               onClick={() => toggleMedicationSelection(med)}
@@ -6907,7 +6974,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                     <div>
                       <Label className="text-sm font-semibold">Configure Prescriptions</Label>
                       <p className="text-xs text-muted-foreground mt-1">
-                        Set strength, dosage frequency, duration, and route for each selected medication
+                        Set dose, frequency, duration, and route for each selected medication
                       </p>
                     </div>
                     <Badge variant="outline" className="text-xs">
@@ -6917,31 +6984,37 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
                   <div className="space-y-3">
                   {Array.from(selectedMedications).map((medId) => {
-                    const med = medications.find((m: any) => {
+                    const foundMedication = medications.find((m: any) => {
                       const mId = typeof m.id === 'number' ? m.id : parseInt(m.id, 10);
                       return mId === medId;
                     });
+                    const existingConfig = medicationConfigs.get(medId);
+                    const med = foundMedication || (existingConfig ? {
+                      id: medId,
+                      name: existingConfig.name || 'Medication',
+                      generic_name: existingConfig.generic_name || existingConfig.genericName || '',
+                      unit: existingConfig.unit || inferDoseUnitFromForm(existingConfig.form),
+                      strength: existingConfig.strength || '',
+                      dosage_form: existingConfig.form || '',
+                      form: existingConfig.form || '',
+                    } : null);
                     if (!med) return null;
-                    const config = medicationConfigs.get(medId) || {
+                    const config = existingConfig || {
                       dosage: '',
                       frequency: 'Once daily (OD)',
                       durationDays: '',
                       route: 'Oral',
                       instructions: '',
-                      unit: (med as any).unit || (med as any).dosage_form || (med as any).form || 'tablet',
+                      unit: inferDoseUnitFromForm((med as any).dosage_form || (med as any).form, (med as any).unit),
                       strength: parseMedicationOptions((med as any).strength)[0] || '',
                       form: parseMedicationOptions((med as any).dosage_form || (med as any).form)[0] || '',
                     };
-                    const formOptions = parseMedicationOptions((med as any).dosage_form || (med as any).form);
-                    const strengthOptions = parseMedicationOptions((med as any).strength);
-                    const calculatedQuantity = getCalculatedQuantity(config as any);
-
                     return (
                         <Card key={medId} className="border-l-4 border-l-violet-500">
                           <CardContent className="p-4">
                             <div className="flex items-start justify-between mb-3">
                               <div>
-                                <div className="font-medium text-sm">{med.name}</div>
+                                <div className="font-medium text-sm">{formatMedicationVariantLabel(med)}</div>
                             <div className="text-xs text-muted-foreground">
                                   {med.generic_name}
                             </div>
@@ -6956,74 +7029,94 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                           </Button>
                         </div>
                         
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                          <div className="space-y-1">
-                                <Label className="text-xs">Strength <span className="text-red-500">*</span></Label>
-                            <Select
-                                  value={config.strength || ''}
-                                  onValueChange={(v) => updateMedicationConfig(medId, 'strength', v)}
-                            >
-                              <SelectTrigger className="h-8 text-xs">
-                                <SelectValue placeholder="Select strength" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                    {strengthOptions.map((strength) => (
-                                      <SelectItem key={strength} value={strength}>
-                                        {strength}
-                                      </SelectItem>
-                                    ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          <div className="space-y-1">
-                                <Label className="text-xs">Dosage (times/day) <span className="text-red-500">*</span></Label>
-                            <Select
-                                  value={config.frequency || 'Once daily (OD)'}
-                              onValueChange={(v) => updateMedicationConfig(medId, 'frequency', v)}
-                            >
-                                  <SelectTrigger className="h-8 text-xs">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                    <SelectItem value="Once daily (OD)">Once daily (OD)</SelectItem>
-                                    <SelectItem value="Twice daily (BD)">Twice daily (BD)</SelectItem>
-                                    <SelectItem value="Three times daily (TDS)">Three times daily (TDS)</SelectItem>
-                                    <SelectItem value="Four times daily (QDS)">Four times daily (QDS)</SelectItem>
-                                    <SelectItem value="Every 6 hours (Q6H)">Every 6 hours</SelectItem>
-                                    <SelectItem value="Every 8 hours (Q8H)">Every 8 hours</SelectItem>
-                                    <SelectItem value="Every 12 hours (Q12H)">Every 12 hours</SelectItem>
-                                    <SelectItem value="At bedtime (Nocte)">At bedtime (Nocte)</SelectItem>
-                                    <SelectItem value="As needed (PRN)">As needed (PRN)</SelectItem>
-                                    <SelectItem value="STAT (Single dose)">STAT (Single dose)</SelectItem>
-                                    <SelectItem value="Weekly">Weekly</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          <div className="space-y-1">
-                                <Label className="text-xs">Duration (days)</Label>
-                            <Input
-                              type="number"
-                              min="1"
-                                  placeholder="e.g., 7, 14, 30"
-                                  className="h-8 text-xs"
-                              value={config.durationDays || ''}
-                              onChange={(e) => {
-                                const value = e.target.value;
-                                const days = value === '' ? '' : parseInt(value) || '';
-                                updateMedicationConfig(medId, 'durationDays', days);
-                              }}
-                            />
-                          </div>
-                          <div className="space-y-1">
+                            <div className="space-y-3">
+                              <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
+                                <div className="space-y-1 md:col-span-7">
+                                  <Label className="text-xs">Dose per administration</Label>
+                                  <Input
+                                    type="number"
+                                    min="0.1"
+                                    step="0.1"
+                                    className="h-8 text-xs"
+                                    placeholder="e.g., 1, 5"
+                                    value={config.dosage || ''}
+                                    onChange={(e) => updateMedicationConfig(medId, 'dosage', e.target.value)}
+                                  />
+                                </div>
+                                <div className="space-y-1 md:col-span-5">
+                                  <Label className="text-xs">Dose Unit <span className="text-red-500">*</span></Label>
+                                  <Select
+                                    value={config.unit || 'tablet'}
+                                    onValueChange={(v) => updateMedicationConfig(medId, 'unit', v)}
+                                  >
+                                    <SelectTrigger className="h-8 text-xs">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="tablet">Tablet</SelectItem>
+                                      <SelectItem value="capsule">Capsule</SelectItem>
+                                      <SelectItem value="ml">ml</SelectItem>
+                                      <SelectItem value="drop">Drop</SelectItem>
+                                      <SelectItem value="puff">Puff</SelectItem>
+                                      <SelectItem value="vial">Vial</SelectItem>
+                                      <SelectItem value="ampoule">Ampoule</SelectItem>
+                                      <SelectItem value="sachet">Sachet</SelectItem>
+                                      <SelectItem value="unit">Unit</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                              </div>
+                              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                <div className="space-y-1 md:col-span-2">
+                                  <Label className="text-xs">Frequency <span className="text-red-500">*</span></Label>
+                                  <Select
+                                    value={config.frequency || 'Once daily (OD)'}
+                                    onValueChange={(v) => updateMedicationConfig(medId, 'frequency', v)}
+                                  >
+                                    <SelectTrigger className="h-8 text-xs">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="Once daily (OD)">Once daily (OD)</SelectItem>
+                                      <SelectItem value="Twice daily (BD)">Twice daily (BD)</SelectItem>
+                                      <SelectItem value="Three times daily (TDS)">Three times daily (TDS)</SelectItem>
+                                      <SelectItem value="Four times daily (QDS)">Four times daily (QDS)</SelectItem>
+                                      <SelectItem value="Every 6 hours (Q6H)">Every 6 hours</SelectItem>
+                                      <SelectItem value="Every 8 hours (Q8H)">Every 8 hours</SelectItem>
+                                      <SelectItem value="Every 12 hours (Q12H)">Every 12 hours</SelectItem>
+                                      <SelectItem value="At bedtime (Nocte)">At bedtime (Nocte)</SelectItem>
+                                      <SelectItem value="As needed (PRN)">As needed (PRN)</SelectItem>
+                                      <SelectItem value="STAT (Single dose)">STAT (Single dose)</SelectItem>
+                                      <SelectItem value="Weekly">Weekly</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                                <div className="space-y-1">
+                                  <Label className="text-xs">Duration (days)</Label>
+                                  <Input
+                                    type="number"
+                                    min="1"
+                                    placeholder="e.g., 7, 14, 30"
+                                    className="h-8 text-xs"
+                                    value={config.durationDays || ''}
+                                    onChange={(e) => {
+                                      const value = e.target.value;
+                                      const days = value === '' ? '' : parseInt(value) || '';
+                                      updateMedicationConfig(medId, 'durationDays', days);
+                                    }}
+                                  />
+                                </div>
+                              </div>
+                              <div className="space-y-1">
                                 <Label className="text-xs">Route</Label>
-                            <Select
+                                <Select
                                   value={config.route || 'Oral'}
                                   onValueChange={(v) => updateMedicationConfig(medId, 'route', v)}
-                            >
-                              <SelectTrigger className="h-8 text-xs">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
+                                >
+                                  <SelectTrigger className="h-8 text-xs">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
                                     <SelectItem value="Oral">Oral</SelectItem>
                                     <SelectItem value="IV">Intravenous (IV)</SelectItem>
                                     <SelectItem value="IM">Intramuscular (IM)</SelectItem>
@@ -7033,10 +7126,10 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                     <SelectItem value="Rectal">Rectal</SelectItem>
                                     <SelectItem value="Ophthalmic">Ophthalmic</SelectItem>
                                     <SelectItem value="Otic">Otic</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-                        </div>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            </div>
                           </CardContent>
                         </Card>
                     );
@@ -7064,11 +7157,11 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
               {/* Clinical Indication */}
               <div className="space-y-2">
-                <Label>Clinical Indication *</Label>
+                <Label>Clinical Indication</Label>
                 <Textarea
                   value={newPrescription.notes}
                   onChange={(e) => setNewPrescription({ ...newPrescription, notes: e.target.value })}
-                  placeholder="Reason for prescription, clinical context, and special instructions..."
+                  placeholder="Reason for prescription, clinical context, and special instructions (optional)..."
                   rows={3}
                 />
               </div>
@@ -7097,7 +7190,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
               </Button>
                 <Button 
                 onClick={addPrescription}
-                disabled={selectedMedications.size === 0 || !newPrescription.notes}
+                disabled={selectedMedications.size === 0}
                   className="bg-violet-600 hover:bg-violet-700"
                 >
                   <Pill className="h-4 w-4 mr-2" />
@@ -7458,7 +7551,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
-                      <Label>Dosage</Label>
+                      <Label>Dose</Label>
                       <Input 
                         value={newNursingOrder.dosage} 
                         onChange={(e) => setNewNursingOrder({ ...newNursingOrder, dosage: e.target.value })}
@@ -8736,7 +8829,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                           <thead className="bg-violet-50 dark:bg-violet-900/20">
                             <tr>
                               <th className="px-3 py-2 text-left font-medium">Medication</th>
-                              <th className="px-3 py-2 text-left font-medium">Dosage</th>
+                              <th className="px-3 py-2 text-left font-medium">Dose</th>
                               <th className="px-3 py-2 text-left font-medium">Frequency</th>
                               <th className="px-3 py-2 text-left font-medium">Duration</th>
                               <th className="px-3 py-2 text-center font-medium">Qty</th>

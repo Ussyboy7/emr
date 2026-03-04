@@ -167,7 +167,7 @@ export function buildConsultationReportHTML(session: ConsultationReportSession):
   <div class="section">
     <h3>PRESCRIPTIONS</h3>
     <table>
-      <thead><tr><th>Medication</th><th>Dosage</th><th>Frequency</th><th>Duration</th><th>Quantity</th></tr></thead>
+      <thead><tr><th>Medication</th><th>Dose</th><th>Frequency</th><th>Duration</th><th>Quantity</th></tr></thead>
       <tbody>
         ${prescriptions.map((rx: any) => `<tr><td>${(rx.medication_name ?? rx.medication) ?? ''}</td><td>${rx.dosage ?? ''}</td><td>${rx.frequency ?? ''}</td><td>${rx.duration ?? ''}</td><td>${rx.quantity ?? ''}</td></tr>`).join('')}
       </tbody>

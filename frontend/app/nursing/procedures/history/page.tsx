@@ -516,7 +516,7 @@ export default function ProceduresHistoryPage() {
                     {selectedProcedure.type === 'injection' && (
                       <>
                         <div><p className="text-xs text-muted-foreground">Medication</p><p className="font-medium">{selectedProcedure.details.medication}</p></div>
-                        <div><p className="text-xs text-muted-foreground">Dosage</p><p className="font-medium">{selectedProcedure.details.dosage}</p></div>
+                        <div><p className="text-xs text-muted-foreground">Dose</p><p className="font-medium">{selectedProcedure.details.dosage}</p></div>
                         <div><p className="text-xs text-muted-foreground">Route</p><p className="font-medium">{selectedProcedure.details.route}</p></div>
                         <div><p className="text-xs text-muted-foreground">Site</p><p className="font-medium">{selectedProcedure.record.site}</p></div>
                         {selectedProcedure.record.batchNumber && (

@@ -55,6 +55,7 @@ export interface PrescriptionItem {
   unit?: string; // Made optional since transformMedications might not provide it
   dosage_form?: string;
   strength?: string;
+  dose?: string;
   dosage?: string;
   frequency?: string;
   duration?: string;
@@ -267,13 +268,15 @@ class PharmacyService {
     itemId: number,
     quantity: number,
     inventoryId?: number,
-    notes?: string
+    notes?: string,
+    coverageQuantity?: number
   ): Promise<Dispense> {
     return apiFetch<Dispense>(`/v1/pharmacy/prescriptions/${prescriptionId}/dispense/`, {
       method: 'POST',
       body: JSON.stringify({
         item_id: itemId,
         quantity,
+        coverage_quantity: coverageQuantity,
         inventory_id: inventoryId,
         notes: notes || '',
       }),

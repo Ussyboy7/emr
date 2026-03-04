@@ -14,7 +14,7 @@ from django.utils import timezone
 from django.db.models import Q, F
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import never_cache
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from .models import GenericMedication, Medication, MedicationInventory, Prescription, PrescriptionItem, Dispense, StockRequest, StockRequestItem, StockIssue, StockIssueLine
 from .serializers import (
@@ -52,11 +52,20 @@ class GenericMedicationViewSet(viewsets.ModelViewSet):
         # Apply filters
         search = request.query_params.get('search', '')
         if search:
-            generics = generics.filter(
+            search_q = (
                 Q(name__icontains=search) |
                 Q(active_ingredient__icontains=search) |
-                Q(category__icontains=search)
+                Q(category__icontains=search) |
+                Q(strength__icontains=search) |
+                Q(dosage_form__icontains=search) |
+                Q(route__icontains=search)
             )
+            lower_search = search.lower()
+            if 'syrup' in lower_search:
+                search_q |= Q(dosage_form__icontains='suspension') | Q(dosage_form__icontains='solution')
+            if 'suspension' in lower_search:
+                search_q |= Q(dosage_form__icontains='syrup')
+            generics = generics.filter(search_q)
         
         # Paginate
         page = self.paginate_queryset(generics)
@@ -291,7 +300,12 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
     ordering = ['-prescribed_at']
     
     def get_queryset(self):
-        return Prescription.objects.all().select_related('patient', 'doctor', 'visit', 'consultation_session', 'created_by').prefetch_related('medications__medication')
+        return Prescription.objects.all().select_related(
+            'patient', 'doctor', 'visit', 'consultation_session', 'created_by'
+        ).prefetch_related(
+            'medications__medication',
+            'medications__dispenses',
+        )
     
     def perform_update(self, serializer):
         """Update prescription and log audit."""
@@ -398,7 +412,30 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
         """Dispense medication from a prescription."""
         prescription = self.get_object()
         item_id = request.data.get('item_id')
-        quantity = Decimal(str(request.data.get('quantity', 0)))
+        coverage_quantity_raw = request.data.get('coverage_quantity', None)
+        try:
+            quantity = Decimal(str(request.data.get('quantity', 0)))
+            coverage_quantity = (
+                Decimal(str(coverage_quantity_raw))
+                if coverage_quantity_raw not in (None, '')
+                else quantity
+            )
+        except (InvalidOperation, TypeError, ValueError):
+            return Response(
+                {'error': 'Invalid quantity or coverage_quantity'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if quantity <= 0:
+            return Response(
+                {'error': 'Dispense quantity must be greater than zero'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        if coverage_quantity <= 0:
+            return Response(
+                {'error': 'Coverage quantity must be greater than zero'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
         inventory_id = request.data.get('inventory_id')
         
         try:
@@ -434,6 +471,22 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
+            # Backward-compatible fallback for liquid prescriptions dispensed as bottles:
+            # if coverage_quantity is not provided, infer clinical coverage from bottle pack size.
+            if coverage_quantity_raw in (None, ''):
+                try:
+                    item_unit = (item.unit or '').strip().lower()
+                    stock_unit = (getattr(dispensed_medication, 'unit', '') or '').strip().lower()
+                    if item_unit == 'ml' and stock_unit in ('bottle', 'bottles'):
+                        pack_size = getattr(dispensed_medication, 'pack_size', None)
+                        if pack_size and Decimal(str(pack_size)) > 0:
+                            remaining = max(Decimal('0'), item.quantity - item.dispensed_quantity)
+                            inferred_coverage = quantity * Decimal(str(pack_size))
+                            coverage_quantity = min(remaining, inferred_coverage)
+                except Exception:
+                    # Never fail dispense because of fallback inference
+                    pass
+
             # Create dispense record
             dispense = Dispense.objects.create(
                 prescription=prescription,
@@ -441,14 +494,14 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
                 medication=dispensed_medication,
                 inventory_item=inventory if inventory_id else None,
                 quantity=quantity,
-                unit=item.unit,
+                unit=getattr(dispensed_medication, 'unit', None) or item.unit,
                 batch_number=inventory.batch_number if inventory_id else '',
                 dispensed_by=request.user,
                 notes=request.data.get('notes', '')
             )
             
             # Update prescription item
-            item.dispensed_quantity += quantity
+            item.dispensed_quantity += coverage_quantity
             # Mark as dispensed if dispensed quantity meets or exceeds required quantity
             if item.dispensed_quantity >= item.quantity:
                 item.is_dispensed = True
@@ -466,10 +519,15 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
                 object_id=str(prescription.id),
                 module='pharmacy',
                 object_repr=f'Prescription {prescription.prescription_id}',
-                description=f'Dispensed {quantity} {item.unit} of {item.medication.name} from prescription {prescription.prescription_id}',
-                old_values={'status': old_status, 'item_dispensed_quantity': float(item.dispensed_quantity - quantity)},
+                description=f'Dispensed {quantity} {dispense.unit} of {dispensed_medication.name} from prescription {prescription.prescription_id}',
+                old_values={'status': old_status, 'item_dispensed_quantity': float(item.dispensed_quantity - coverage_quantity)},
                 new_values={'status': prescription.status, 'item_dispensed_quantity': float(item.dispensed_quantity)},
-                metadata={'dispense_id': str(dispense.id), 'batch_number': inventory.batch_number if inventory_id else ''},
+                metadata={
+                    'dispense_id': str(dispense.id),
+                    'batch_number': inventory.batch_number if inventory_id else '',
+                    'coverage_quantity': float(coverage_quantity),
+                    'coverage_unit': item.unit,
+                },
                 request=self.request,
             )
             
@@ -663,7 +721,10 @@ class DispenseViewSet(viewsets.ReadOnlyModelViewSet):
     ordering = ['-dispensed_at']
     
     def get_queryset(self):
-        return Dispense.objects.all().select_related('prescription', 'medication', 'dispensed_by', 'inventory_item')
+        return Dispense.objects.all().select_related(
+            'prescription', 'medication', 'dispensed_by', 'inventory_item',
+            'prescription_item', 'prescription_item__generic', 'prescription_item__medication'
+        )
 
 
 class InventoryAlertViewSet(viewsets.ReadOnlyModelViewSet):

@@ -753,7 +753,7 @@ export function MedicalHistoryTab({
                               )}
                             </div>
                             <div className="text-sm text-muted-foreground space-y-1">
-                              <p>Dosage: {med.dosage} • Frequency: {med.frequency}</p>
+                              <p>Dose: {med.dosage} • Frequency: {med.frequency}</p>
                               {med.duration && <p>Duration: {med.duration}</p>}
                               <p>Quantity: {med.quantity} {med.unit}</p>
                               {med.instructions && <p>Instructions: {med.instructions}</p>}
@@ -991,4 +991,3 @@ export function MedicalHistoryTab({
     </div>
   );
 }
-

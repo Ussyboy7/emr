@@ -335,7 +335,7 @@ export function PrescriptionOrderModal({
             Add Prescription
           </DialogTitle>
           <DialogDescription>
-            Search and select medications, then configure dosage details for each. All medications will be sent as one prescription order to Pharmacy queue.
+            Search and select medications, then configure dose details for each. All medications will be sent as one prescription order to Pharmacy queue.
           </DialogDescription>
         </DialogHeader>
 
@@ -443,7 +443,7 @@ export function PrescriptionOrderModal({
               <div className="flex items-center justify-between">
                 <div>
                   <Label className="text-sm font-semibold">Configure Prescriptions</Label>
-                  <p className="text-xs text-muted-foreground mt-1">Set strength, dosage frequency, duration, and route for each selected medication</p>
+                  <p className="text-xs text-muted-foreground mt-1">Set strength, frequency, duration, and route for each selected medication</p>
                 </div>
                 <Badge variant="outline" className="text-xs">
                   {selectedMedications.length} medication{selectedMedications.length > 1 ? "s" : ""} selected
@@ -510,7 +510,7 @@ export function PrescriptionOrderModal({
                         </div>
                         <div className="space-y-1">
                           <Label className="text-xs">
-                            Dosage (times/day) <span className="text-red-500">*</span>
+                            Frequency <span className="text-red-500">*</span>
                           </Label>
                           <Select value={cfg.frequency || "Once daily (OD)"} onValueChange={(v) => updateMedicationConfig(medId, "frequency", v)}>
                             <SelectTrigger className="h-8 text-xs">

@@ -375,7 +375,7 @@ class PrescriptionItem(models.Model):
     unit = models.CharField(max_length=50)
     dosage_form = models.CharField(max_length=100, blank=True, help_text="e.g., tablet, capsule, syrup")
     strength = models.CharField(max_length=100, blank=True, help_text="e.g., 20/120mg")
-    dosage = models.CharField(max_length=200, blank=True, help_text="e.g., 1 tablet twice daily")
+    dose = models.CharField(max_length=200, blank=True, help_text="e.g., 1 tablet")
     frequency = models.CharField(max_length=100, blank=True)
     duration = models.CharField(max_length=100, blank=True, help_text="e.g., 7 days")
     route = models.CharField(max_length=50, blank=True, help_text="e.g., Oral, IV")
@@ -396,7 +396,7 @@ class PrescriptionItem(models.Model):
             return f"{self.generic.name} - {self.quantity} {self.unit}"
     
     def recalculate_quantity(self):
-        """Recalculate quantity based on dosage, frequency, and duration."""
+        """Recalculate quantity based on dose, frequency, and duration."""
         import re
         from decimal import Decimal
         
@@ -415,12 +415,12 @@ class PrescriptionItem(models.Model):
             'STAT (Single dose)': 0,
         }
         
-        # Extract numeric dosage value (e.g., "2" or "2 tablets" -> 2)
-        dosage_value = 1
-        if self.dosage:
-            dosage_match = re.search(r'(\d+(?:\.\d+)?)', str(self.dosage))
-            if dosage_match:
-                dosage_value = float(dosage_match.group(1))
+        # Extract numeric dose value (e.g., "2" or "2 tablets" -> 2)
+        dose_value = 1
+        if self.dose:
+            dose_match = re.search(r'(\d+(?:\.\d+)?)', str(self.dose))
+            if dose_match:
+                dose_value = float(dose_match.group(1))
         
         # Get frequency multiplier
         frequency = self.frequency or ''
@@ -435,9 +435,9 @@ class PrescriptionItem(models.Model):
         
         # Calculate quantity
         if frequency == 'STAT (Single dose)':
-            new_quantity = Decimal(str(dosage_value))
+            new_quantity = Decimal(str(dose_value))
         else:
-            new_quantity = Decimal(str(dosage_value * daily_doses * duration_days))
+            new_quantity = Decimal(str(dose_value * daily_doses * duration_days))
         
         # Only update if not dispensed or if dispensed quantity is less than new quantity
         if self.dispensed_quantity == 0 or self.dispensed_quantity < new_quantity:

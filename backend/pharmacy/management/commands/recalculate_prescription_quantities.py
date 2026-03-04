@@ -1,13 +1,13 @@
 """
 Management command to recalculate prescription item quantities
-based on dosage, frequency, and duration for existing prescriptions.
+based on dose, frequency, and duration for existing prescriptions.
 """
 from django.core.management.base import BaseCommand
 from pharmacy.models import PrescriptionItem
 
 
 class Command(BaseCommand):
-    help = 'Recalculate prescription item quantities based on dosage, frequency, and duration'
+    help = 'Recalculate prescription item quantities based on dose, frequency, and duration'
 
     def add_arguments(self, parser):
         parser.add_argument(

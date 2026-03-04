@@ -548,7 +548,7 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
                         <table className="w-full text-sm">
                           <thead><tr className="border-b bg-muted/50">
                             <th className="text-left p-3 font-medium">Medication</th>
-                            <th className="text-left p-3 font-medium">Dosage</th>
+                            <th className="text-left p-3 font-medium">Dose</th>
                             <th className="text-left p-3 font-medium">Frequency</th>
                             <th className="text-left p-3 font-medium">Duration</th>
                             <th className="text-left p-3 font-medium">Instructions</th>

@@ -41,7 +41,7 @@ const faqs = [
   {
     category: 'Consultation',
     questions: [
-      { q: 'How do I write prescriptions?', a: 'During a consultation session, go to the "Prescriptions" tab. Search for the medication, set dosage and duration, then click "Add". The prescription will be sent to the pharmacy queue.' },
+      { q: 'How do I write prescriptions?', a: 'During a consultation session, go to the "Prescriptions" tab. Search for the medication, set dose and duration, then click "Add". The prescription will be sent to the pharmacy queue.' },
       { q: 'How do I order lab tests?', a: 'In the consultation session, navigate to the "Lab Orders" tab. Select the required tests, set priority, and add clinical notes. Click "Add Order" to send to the laboratory.' },
       { q: 'How do I end a consultation session?', a: 'Click "End Session" at the top of the consultation page. Confirm the action. The session will be saved and the patient will be discharged from your queue.' },
     ]

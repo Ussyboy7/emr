@@ -15,6 +15,45 @@ class GenericMedicationSerializer(serializers.ModelSerializer):
             return None
         return value
 
+    def validate(self, attrs):
+        def infer_route(dosage_form: str) -> str:
+            f = (dosage_form or "").strip().lower()
+            if any(k in f for k in ["tablet", "capsule", "syrup", "suspension", "powder", "sachet", "solution"]):
+                return "Oral"
+            if any(k in f for k in ["injection", "vial", "ampoule", "infusion"]):
+                return "IV"
+            if any(k in f for k in ["inhaler", "nebul"]):
+                return "Inhalation"
+            if any(k in f for k in ["cream", "ointment", "gel", "lotion"]):
+                return "Topical"
+            if "eye" in f or "ophthalmic" in f:
+                return "Ophthalmic"
+            if "ear" in f or "otic" in f:
+                return "Otic"
+            if "nasal" in f:
+                return "Nasal"
+            if "suppository" in f:
+                return "Rectal"
+            return "Oral"
+
+        # Keep generic records as single variants (one strength, one form, one route).
+        for field in ("strength", "dosage_form", "route"):
+            raw = attrs.get(field)
+            if not isinstance(raw, str):
+                continue
+            cleaned = " ".join(raw.strip().split())
+            attrs[field] = cleaned
+            if "," in cleaned:
+                raise serializers.ValidationError({
+                    field: f"Use a single {field} value per generic (no comma-separated lists)."
+                })
+        form_value = attrs.get("dosage_form")
+        route_value = attrs.get("route")
+        if isinstance(form_value, str) and form_value.strip():
+            if not isinstance(route_value, str) or not route_value.strip():
+                attrs["route"] = infer_route(form_value)
+        return attrs
+
     class Meta:
         model = GenericMedication
         fields = '__all__'
@@ -84,6 +123,9 @@ class PrescriptionItemSerializer(serializers.ModelSerializer):
     medication_name = serializers.SerializerMethodField()
     medication_code = serializers.SerializerMethodField()
     medication_details = serializers.SerializerMethodField()
+    dosage = serializers.SerializerMethodField()  # Legacy read alias for dose
+    stock_dispensed_quantity = serializers.SerializerMethodField()
+    stock_dispensed_unit = serializers.SerializerMethodField()
     prescription = serializers.PrimaryKeyRelatedField(read_only=True)  # Make prescription read-only for nested writes
     
     generic = serializers.PrimaryKeyRelatedField(
@@ -95,6 +137,13 @@ class PrescriptionItemSerializer(serializers.ModelSerializer):
         required=False,
         allow_null=True
     )
+
+    def to_internal_value(self, data):
+        # Backward compatibility: accept legacy 'dosage' input and map to 'dose'
+        if isinstance(data, dict) and 'dose' not in data and 'dosage' in data:
+            data = dict(data)
+            data['dose'] = data.get('dosage')
+        return super().to_internal_value(data)
 
     def validate(self, attrs):
         generic = attrs.get('generic') or getattr(self.instance, 'generic', None)
@@ -171,6 +220,7 @@ class PrescriptionItemSerializer(serializers.ModelSerializer):
                     'unit': getattr(medication, 'unit', None),
                     'strength': getattr(medication, 'strength', None),
                     'form': getattr(medication, 'form', None),
+                    'pack_size': getattr(medication, 'pack_size', None),
                     'type': 'brand',
                     'medication_id': getattr(medication, 'id', None)  # Include medication_id for reference
                 }
@@ -189,13 +239,36 @@ class PrescriptionItemSerializer(serializers.ModelSerializer):
             return None
         except (AttributeError, TypeError, ValueError):
             return None
+
+    def get_dosage(self, obj):
+        return getattr(obj, 'dose', '') or ''
+
+    def get_stock_dispensed_quantity(self, obj):
+        try:
+            total = 0.0
+            for d in obj.dispenses.all():
+                total += float(getattr(d, 'quantity', 0) or 0)
+            return total
+        except (AttributeError, TypeError, ValueError):
+            return 0.0
+
+    def get_stock_dispensed_unit(self, obj):
+        try:
+            if obj.medication and getattr(obj.medication, 'unit', None):
+                return obj.medication.unit
+            first = obj.dispenses.all().first()
+            if first and getattr(first, 'unit', None):
+                return first.unit
+            return obj.unit
+        except (AttributeError, TypeError, ValueError):
+            return obj.unit if getattr(obj, 'unit', None) else ''
     
     class Meta:
         model = PrescriptionItem
         fields = [
             'id', 'prescription', 'medication', 'generic', 'medication_name', 'medication_code',
-            'medication_details', 'quantity', 'unit', 'dosage_form', 'strength', 'dosage', 'frequency', 'duration', 'route',
-            'instructions', 'dispensed_quantity', 'is_dispensed',
+            'medication_details', 'quantity', 'unit', 'dosage_form', 'strength', 'dose', 'dosage', 'frequency', 'duration', 'route',
+            'instructions', 'dispensed_quantity', 'stock_dispensed_quantity', 'stock_dispensed_unit', 'is_dispensed',
         ]
         read_only_fields = ['prescription']
 
@@ -290,6 +363,52 @@ class DispenseSerializer(serializers.ModelSerializer):
     patient_name = serializers.CharField(source='prescription.patient.get_full_name', read_only=True)
     dispensed_by_name = serializers.CharField(source='dispensed_by.get_full_name', read_only=True, allow_null=True)
     prescription_details = PrescriptionSerializer(source='prescription', read_only=True)
+    prescribed_generic_name = serializers.SerializerMethodField()
+    prescribed_medication_name = serializers.SerializerMethodField()
+    prescribed_unit = serializers.SerializerMethodField()
+    dispense_context = serializers.SerializerMethodField()
+
+    def get_prescribed_generic_name(self, obj):
+        try:
+            if obj.prescription_item and obj.prescription_item.generic:
+                return obj.prescription_item.generic.name
+        except Exception:
+            pass
+        return ''
+
+    def get_prescribed_medication_name(self, obj):
+        try:
+            if obj.prescription_item and obj.prescription_item.medication:
+                return obj.prescription_item.medication.name
+        except Exception:
+            pass
+        return ''
+
+    def get_prescribed_unit(self, obj):
+        try:
+            if obj.prescription_item and obj.prescription_item.unit:
+                return obj.prescription_item.unit
+        except Exception:
+            pass
+        return ''
+
+    def get_dispense_context(self, obj):
+        """
+        as_selected_brand: dispensed brand equals prescribed brand on item
+        brand_selected_from_generic: item prescribed as generic, brand selected at dispense
+        substituted: dispensed brand differs from prescribed brand on item
+        """
+        try:
+            item = obj.prescription_item
+            if not item:
+                return 'as_selected_brand'
+            if not item.medication_id:
+                return 'brand_selected_from_generic'
+            if obj.medication_id and item.medication_id != obj.medication_id:
+                return 'substituted'
+            return 'as_selected_brand'
+        except Exception:
+            return 'as_selected_brand'
     
     class Meta:
         model = Dispense

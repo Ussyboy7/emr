@@ -110,6 +110,34 @@ class Command(BaseCommand):
     def _import_generics(self, csv_path: str):
         self.stdout.write("\n--- Importing Generics from CSV ---")
 
+        def first_option(value: str) -> str:
+            raw = (value or "").strip()
+            if not raw or raw in {"-", "N/A", "n/a"}:
+                return ""
+            return raw.replace(";", ",").split(",")[0].strip()
+
+        def infer_route(dosage_form: str) -> str:
+            f = (dosage_form or "").strip().lower()
+            if not f:
+                return ""
+            if any(k in f for k in ["tablet", "capsule", "syrup", "suspension", "powder", "sachet", "solution"]):
+                return "Oral"
+            if any(k in f for k in ["injection", "vial", "ampoule", "infusion"]):
+                return "IV"
+            if any(k in f for k in ["inhaler", "nebul"]):
+                return "Inhalation"
+            if any(k in f for k in ["cream", "ointment", "gel", "lotion"]):
+                return "Topical"
+            if "eye" in f or "ophthalmic" in f:
+                return "Ophthalmic"
+            if "ear" in f or "otic" in f:
+                return "Otic"
+            if "nasal" in f:
+                return "Nasal"
+            if "suppository" in f:
+                return "Rectal"
+            return ""
+
         # Resolve absolute path inside container or host
         path = os.path.abspath(csv_path)
         if not os.path.exists(path):
@@ -138,18 +166,15 @@ class Command(BaseCommand):
                 name = (row.get("Generic_Name") or "").strip()
                 active_ingredient = (row.get("Active_Ingredient") or "").strip()
                 category = (row.get("Category") or "").strip() or "Other"
-                strength = (row.get("Strengths_Available") or "").strip()
-                dosage_form = (row.get("Dosage_Forms") or "").strip()
-                route = (row.get("Route") or "").strip()
+                strength = first_option(row.get("Strengths_Available") or "")
+                dosage_form = first_option(row.get("Dosage_Forms") or "")
+                route = first_option(row.get("Route") or "") or infer_route(dosage_form) or "Oral"
 
                 if not name:
                     skipped += 1
                     continue
-                # Enforce required fields (no fallback)
-                if not strength or strength == "-":
-                    skipped += 1
-                    continue
-                if not dosage_form or dosage_form == "-":
+                # Enforce dosage form (required for generic variant identity)
+                if not dosage_form:
                     skipped += 1
                     continue
 

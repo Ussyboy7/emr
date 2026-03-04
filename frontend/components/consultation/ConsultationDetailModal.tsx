@@ -1812,7 +1812,7 @@ export const ConsultationDetailModal = React.memo(function ConsultationDetailMod
                         <thead>
                           <tr className="border-b border-gray-300 dark:border-gray-700">
                             <th className="text-left py-2 px-3 font-semibold text-gray-700 dark:text-gray-300">Medication</th>
-                            <th className="text-left py-2 px-3 font-semibold text-gray-700 dark:text-gray-300">Dosage</th>
+                            <th className="text-left py-2 px-3 font-semibold text-gray-700 dark:text-gray-300">Dose</th>
                             <th className="text-left py-2 px-3 font-semibold text-gray-700 dark:text-gray-300">Frequency</th>
                             <th className="text-left py-2 px-3 font-semibold text-gray-700 dark:text-gray-300">Duration</th>
                             <th className="text-left py-2 px-3 font-semibold text-gray-700 dark:text-gray-300">Instructions</th>
@@ -2152,4 +2152,3 @@ export const ConsultationDetailModal = React.memo(function ConsultationDetailMod
     </Dialog>
   );
 });
-

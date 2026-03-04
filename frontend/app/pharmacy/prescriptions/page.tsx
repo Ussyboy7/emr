@@ -209,7 +209,7 @@ export default function PrescriptionsPage() {
       const transformedMed = {
         id: med.id.toString(),
         name: med.medication_name || med.medication_details?.name || '',
-        dosage: med.dosage || '',
+        dosage: med.dose || med.dosage || '',
         frequency: med.frequency || med.frequency_display || '',
         duration: med.duration || '',
         quantity: Number(med.quantity || 0),
@@ -217,6 +217,8 @@ export default function PrescriptionsPage() {
         dosage_form: med.dosage_form || med.medication_details?.form || '',
         strength: med.strength || med.medication_details?.strength || '',
         dispensed_quantity: Number(med.dispensed_quantity || 0),
+        stock_dispensed_quantity: Number(med.stock_dispensed_quantity || 0),
+        stock_dispensed_unit: med.stock_dispensed_unit || med.medication_details?.unit || '',
         remaining_quantity: Math.max(0, Number(med.quantity || 0) - Number(med.dispensed_quantity || 0)),
         route: med.route || med.route_display || 'Oral',
         instructions: med.instructions || '',
@@ -397,6 +399,7 @@ export default function PrescriptionsPage() {
   const [showDispenseModal, setShowDispenseModal] = useState(false);
   const [selectedMedications, setSelectedMedications] = useState<string[]>([]);
   const [dispenseQuantities, setDispenseQuantities] = useState<Record<string, number>>({});
+  const [dispenseCoverageQuantities, setDispenseCoverageQuantities] = useState<Record<string, number>>({});
   const [dispenseNotes, setDispenseNotes] = useState('');
   const [selectedBatches, setSelectedBatches] = useState<Record<string, string>>({});
   const [medicationBatches, setMedicationBatches] = useState<Record<string, MedicationBatch[]>>({});
@@ -444,43 +447,32 @@ export default function PrescriptionsPage() {
     return v;
   };
 
-  /**
-   * Calculate auto-adjusted dispense quantity based on strength difference
-   * between prescribed generic and selected brand.
-   * 
-   * Formula: prescribed_qty × (prescribed_strength / brand_strength)
-   * 
-   * Example:
-   * - Prescribed: Paracetamol 500mg, 6 tablets
-   * - Brand selected: Panadol 1000mg
-   * - Auto-calculated: 6 × (500/1000) = 3 tablets
-   */
-  const calculateAutoQuantity = (med: any): number => {
-    // If user has already set a quantity, use it
-    if (dispenseQuantities[med.id]) {
-      return dispenseQuantities[med.id];
-    }
+  const isClinicalLiquidUnit = (unit?: string): boolean => {
+    const normalized = String(unit || '').trim().toLowerCase();
+    return normalized === 'ml' || normalized === 'milliliter' || normalized === 'milliliters';
+  };
 
-    // Get prescribed quantity and strength
-    const prescribedQty = Number(med.quantity || 0);
-    const prescribedStrength = med.strength || '';
-    
-    // If no brand is selected yet, return prescribed quantity
-    if (!med.medication || !prescribedStrength) {
-      return Math.max(0, Number(med.remaining_quantity ?? med.quantity ?? 0));
-    }
+  const isPackDispenseMedication = (med: any): boolean => {
+    const inventoryUnit = String(med?.medication_details?.unit || '').trim().toLowerCase();
+    const hasPackUnit = inventoryUnit === 'bottle' || inventoryUnit === 'bottles';
+    return isClinicalLiquidUnit(med?.unit) && hasPackUnit;
+  };
 
-    // Extract numeric value from strength (e.g., "500mg" -> 500)
-    const parseStrength = (strengthStr: string): number => {
-      const match = strengthStr.match(/(\d+(?:\.\d+)?)/);
-      return match ? parseFloat(match[1]) : 0;
-    };
+  const getPackSizeMl = (med: any): number | null => {
+    const raw = Number(med?.medication_details?.pack_size);
+    return Number.isFinite(raw) && raw > 0 ? raw : null;
+  };
 
-    const prescribedStrengthValue = parseStrength(prescribedStrength);
-    
-    // For now, return prescribed quantity
-    // In future, when brand selection is implemented, we can compare strengths
-    return Math.max(0, Number(med.remaining_quantity ?? med.quantity ?? 0));
+  const getDefaultDispenseQuantity = (med: any): number => {
+    const remaining = Math.max(0, Number((med as any).remaining_quantity ?? med?.quantity ?? 0));
+    if (!isPackDispenseMedication(med)) return remaining;
+    const packSizeMl = getPackSizeMl(med);
+    if (packSizeMl) return Math.max(1, Math.ceil(remaining / packSizeMl));
+    return 1;
+  };
+
+  const getDefaultCoverageQuantity = (med: any): number => {
+    return Math.max(0, Number((med as any).remaining_quantity ?? med?.quantity ?? 0));
   };
 
   /**
@@ -734,32 +726,25 @@ export default function PrescriptionsPage() {
 
   const handleViewDetails = async (prescription: Prescription) => {
     // Always fetch fresh prescription data to ensure we have latest changes
-    console.log(`Fetching fresh prescription details for RX: ${prescription.id}`);
     try {
       const freshPrescription = await pharmacyService.getPrescription(Number(prescription.id));
-      
-      // Debug: Log the raw prescription data
-      console.log('Raw prescription data:', JSON.stringify(freshPrescription, null, 2));
-      
-      // Debug: Log each medication's structure
-      freshPrescription.medications?.forEach((med: any, index: number) => {
-        console.log(`Medication ${index + 1}:`, {
-          id: med.id,
-          generic: med.generic,
-          medication: med.medication,
-          medication_name: med.medication_name,
-          medication_details: med.medication_details
-        });
-      });
 
       // Apply the same transformation as the prescription list
       const transformedMedications = transformMedications(freshPrescription.medications || [], freshPrescription.status);
-      
-      // Debug: Log transformed medications
-      console.log('Transformed medications:', transformedMedications);
 
-      // Store the prescription (using type assertion for compatibility)
-      setSelectedPrescription(freshPrescription as any);
+      // Hydrate modal-friendly status from API value
+      const hydratedPrescription = {
+        ...prescription,
+        ...(freshPrescription as any),
+        medications: transformedMedications,
+        status:
+          freshPrescription.status === 'pending' ? 'Pending' :
+          freshPrescription.status === 'dispensing' ? 'Processing' :
+          freshPrescription.status === 'dispensed' ? 'Dispensed' :
+          freshPrescription.status === 'partially_dispensed' ? 'Partially Dispensed' :
+          prescription.status,
+      };
+      setSelectedPrescription(hydratedPrescription as any);
       setSelectedPrescriptionMedications(transformedMedications);
     } catch (error) {
       console.error('Error fetching prescription details:', error);
@@ -787,16 +772,18 @@ export default function PrescriptionsPage() {
     setSelectedPrescriptionMedications(transformedMedications);
 
     const initialQuantities: Record<string, number> = {};
+    const initialCoverageQuantities: Record<string, number> = {};
     const initialSelection: string[] = [];
     const initialBatches: Record<string, string> = {};
     const loadedBatches: Record<string, MedicationBatch[]> = {};
+    const loadedMedicationMeta: Record<string, any> = {};
 
     // Load batches for each medication
     const batchPromises = transformedMedications.map(async (med) => {
       // Include Pending items (Generics) so they appear in the list, but don't try to load batches for them yet
       if (med.status === 'Available' || med.status === 'Low Stock' || med.status === 'Pending') {
-        // Use remaining quantity for partial dispensing, full quantity for new dispensing
-        initialQuantities[med.id] = med.remaining_quantity > 0 ? med.remaining_quantity : med.quantity;
+        initialQuantities[med.id] = getDefaultDispenseQuantity(med);
+        initialCoverageQuantities[med.id] = getDefaultCoverageQuantity(med);
         // Don't auto-select Pending items (Generics) as they need brand selection first
         if (med.status !== 'Pending') {
              initialSelection.push(med.id);
@@ -806,20 +793,11 @@ export default function PrescriptionsPage() {
         try {
           let medicationIdToUse: string | number | undefined;
 
-          // For substituted medications, we need to get the actual medication ID
           if (med.substitution) {
-            // ... (existing substitution logic) ...
-            console.log(`Loading batches for substituted medication: ${med.name}, original: ${med.originalMedication}`);
-            // This is a substituted medication - get the medication ID by searching
-            // Try exact match first
-            console.log(`🔍 Searching for substituted medication: "${med.name}"`);
-            let medSearch = await pharmacyService.getMedications({ search: med.name, page_size: 5 });
-            
-             // ... (abbreviated for search logic) ...
-             // I'll keep the existing logic structure but make it safe
-             if (medSearch.results.length > 0) {
-                 medicationIdToUse = medSearch.results[0].id;
-             }
+            const medSearch = await pharmacyService.getMedications({ search: med.name, page_size: 5 });
+            if (medSearch.results.length > 0) {
+              medicationIdToUse = medSearch.results[0].id;
+            }
           } else {
             // Regular medication - get from prescription details
             const prescriptionId = parseInt(prescription.id) || prescription.id;
@@ -829,9 +807,7 @@ export default function PrescriptionsPage() {
             if (rxMed && rxMed.medication) {
               medicationIdToUse = rxMed.medication;
             } else if (rxMed && rxMed.generic) {
-                // It's a generic! We can't load batches yet.
-                console.log(`Medication ${med.name} is a generic, skipping batch load.`);
-                return;
+              return;
             } else {
               console.warn(`Could not find medication in prescription details for: ${med.name}`);
               return;
@@ -839,9 +815,14 @@ export default function PrescriptionsPage() {
           }
 
           if (medicationIdToUse) {
+              try {
+                const medMeta = await pharmacyService.getMedication(Number(medicationIdToUse));
+                loadedMedicationMeta[med.id] = medMeta;
+              } catch (metaErr) {
+                console.warn(`Could not load medication metadata for ${med.name}:`, metaErr);
+              }
               const batches = await pharmacyService.getMedicationBatches(Number(medicationIdToUse));
               loadedBatches[med.id] = batches;
-              console.log(`Loaded ${batches.length} batches for medication ${med.name} (ID: ${med.id})`);
               if (batches.length > 0) {
                 initialBatches[med.id] = batches[0].id; // Default to first batch
               }
@@ -857,6 +838,20 @@ export default function PrescriptionsPage() {
 
     const medsWithDispensaryStock = transformedMedications.map((m: any) => {
       const batches = loadedBatches[m.id];
+      const medMeta = loadedMedicationMeta[m.id];
+      const enrichedMedicationDetails = medMeta
+        ? {
+            ...(m.medication_details || {}),
+            id: medMeta.id,
+            medication_id: medMeta.id,
+            name: medMeta.name || m.medication_details?.name,
+            unit: medMeta.unit || m.medication_details?.unit,
+            form: medMeta.form || m.medication_details?.form,
+            strength: medMeta.strength || m.medication_details?.strength,
+            pack_size: medMeta.pack_size ?? m.medication_details?.pack_size,
+            type: 'brand',
+          }
+        : m.medication_details;
       if (!Array.isArray(batches)) return m;
       const stock = batches.reduce((total, b) => total + Number(b.quantity || 0), 0);
 
@@ -873,6 +868,7 @@ export default function PrescriptionsPage() {
 
       return {
         ...m,
+        medication_details: enrichedMedicationDetails,
         stockLevel: stock,
         status,
       };
@@ -886,6 +882,7 @@ export default function PrescriptionsPage() {
     setInteractionAcknowledged(interactions.length === 0);
     
     setDispenseQuantities(initialQuantities);
+    setDispenseCoverageQuantities(initialCoverageQuantities);
     setSelectedMedications(initialSelection);
     setSelectedBatches(initialBatches);
     setDispenseNotes('');
@@ -894,8 +891,12 @@ export default function PrescriptionsPage() {
 
   const handleMedicationSelection = async (medId: string, checked: boolean, quantity: number) => {
     if (checked) {
+      const med = selectedPrescriptionMedications.find(m => m.id === medId);
+      const defaultDispenseQty = med ? getDefaultDispenseQuantity(med) : quantity;
+      const defaultCoverageQty = med ? getDefaultCoverageQuantity(med) : quantity;
       setSelectedMedications(prev => [...prev, medId]);
-      setDispenseQuantities(prev => ({ ...prev, [medId]: quantity }));
+      setDispenseQuantities(prev => ({ ...prev, [medId]: defaultDispenseQty }));
+      setDispenseCoverageQuantities(prev => ({ ...prev, [medId]: defaultCoverageQty }));
       
       // Load batches for this medication when selected
       if (selectedPrescription) {
@@ -924,6 +925,11 @@ export default function PrescriptionsPage() {
         const newQty = { ...prev };
         delete newQty[medId];
         return newQty;
+      });
+      setDispenseCoverageQuantities(prev => {
+        const next = { ...prev };
+        delete next[medId];
+        return next;
       });
       setSelectedBatches(prev => {
         const newBatches = { ...prev };
@@ -967,15 +973,16 @@ export default function PrescriptionsPage() {
       return;
     }
 
-    // Check if quantities are valid (allow any positive quantity)
+    // Check if quantities are valid
     const invalidQuantities = selectedMedications.filter(medId => {
       const med = selectedPrescriptionMedications.find(m => m.id === medId);
-      const quantity = dispenseQuantities[medId] ?? med?.remaining_quantity ?? 0;
-      return med && quantity < 0; // Only reject negative quantities
+      const quantity = dispenseQuantities[medId] ?? (med ? getDefaultDispenseQuantity(med) : 0);
+      const coverageQty = dispenseCoverageQuantities[medId] ?? (med ? getDefaultCoverageQuantity(med) : 0);
+      return !med || quantity <= 0 || coverageQty <= 0;
     });
 
     if (invalidQuantities.length > 0) {
-      toast.error('Please enter valid dispense quantities');
+      toast.error('Please enter valid dispense and coverage quantities');
       return;
     }
 
@@ -995,7 +1002,8 @@ export default function PrescriptionsPage() {
           throw new Error(`Medication ${medId} not found in prescription`);
         }
 
-        const quantity = dispenseQuantities[medId] ?? med.remaining_quantity ?? med.quantity;
+        const quantity = dispenseQuantities[medId] ?? getDefaultDispenseQuantity(med);
+        const coverageQuantity = dispenseCoverageQuantities[medId] ?? getDefaultCoverageQuantity(med);
         
         // Use manually selected batch OR fetch auto-selected batch (FEFO)
         let inventoryId = selectedBatches[medId] ? parseInt(selectedBatches[medId]) : undefined;
@@ -1017,7 +1025,8 @@ export default function PrescriptionsPage() {
             parseInt(medId),
             quantity,
             inventoryId,
-            dispenseNotes
+            dispenseNotes,
+            coverageQuantity
           );
         } catch (err: any) {
           console.error(`Error dispensing ${med.name}:`, err);
@@ -1039,15 +1048,14 @@ export default function PrescriptionsPage() {
       setSelectedPrescription(null);
       setSelectedMedications([]);
       setDispenseQuantities({});
+      setDispenseCoverageQuantities({});
       setDispenseNotes('');
       setSelectedBatches({});
 
       // Force a status recalculation on the backend first
       try {
         if (selectedPrescription?.id) {
-          console.log('🔄 Recalculating prescription status on backend...');
           await pharmacyService.recalculatePrescriptionStatus(selectedPrescription.id);
-          console.log('✅ Prescription status recalculated on backend');
         }
       } catch (recalcError) {
         console.warn('⚠️ Status recalculation failed:', recalcError);
@@ -1055,15 +1063,11 @@ export default function PrescriptionsPage() {
       }
 
       // Single reload after both dispensing and recalculation
-      console.log('🔄 Reloading prescriptions after dispense and recalculation...');
       await loadPrescriptions();
-      console.log('✅ Prescriptions reloaded successfully');
     } catch (err: any) {
       const errorMessage = err.message || 'Failed to dispense medications';
       toast.error(errorMessage);
       console.error('Error dispensing medications:', err);
-    } finally {
-      // Status update removed - automatic status management
     }
   };
 
@@ -1104,7 +1108,8 @@ export default function PrescriptionsPage() {
       
       // Dispense each available medication
       const dispensePromises = availableMeds.map(async (med) => {
-        const quantity = med.quantity;
+        const quantity = getDefaultDispenseQuantity(med);
+        const coverageQuantity = getDefaultCoverageQuantity(med);
         const inventoryId = batchMap[med.id];
         
         try {
@@ -1113,7 +1118,8 @@ export default function PrescriptionsPage() {
             parseInt(med.id),
             quantity,
             inventoryId,
-            'Quick dispense'
+            'Quick dispense',
+            coverageQuantity
           );
         } catch (err: any) {
           console.error(`Error dispensing ${med.name}:`, err);
@@ -1123,18 +1129,14 @@ export default function PrescriptionsPage() {
 
       await Promise.all(dispensePromises);
 
-      console.log('✅ Dispensing completed successfully, reloading prescriptions...');
-
       toast.success(`${availableMeds.length} medication(s) dispensed successfully for ${prescription.patient.name}`);
 
       // Small delay to prevent UI freeze, then reload prescriptions
       setTimeout(async () => {
-        console.log('🔄 Starting prescription reload after dispense...');
         try {
           await loadPrescriptions();
-          console.log('✅ Prescription reload completed');
         } catch (err) {
-          console.error('❌ Error reloading prescriptions after dispense:', err);
+          console.error('Error reloading prescriptions after dispense:', err);
         }
       }, 100);
     } catch (err: any) {
@@ -1268,7 +1270,7 @@ export default function PrescriptionsPage() {
             ${transformedMeds.map(med => `
               <div class="medication-item">
                 <strong>${med.name}</strong><br>
-                Dosage: ${med.dosage}<br>
+                Dose: ${med.dosage}<br>
                 Quantity: ${med.quantity}<br>
                 Route: ${med.route}<br>
                 Frequency: ${med.frequency}<br>
@@ -1619,14 +1621,28 @@ export default function PrescriptionsPage() {
                 </div>
 
                 {/* Patient Info */}
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-4 bg-muted/50 rounded-lg p-4 text-sm">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 bg-muted/50 rounded-lg p-4 text-sm">
                   <div><span className="text-muted-foreground">Patient ID:</span> <span className="font-medium">{(selectedPrescription as any).patient_details?.patient_id || selectedPrescription.patient}</span></div>
                   <div><span className="text-muted-foreground">Age/Gender:</span> <span className="font-medium">{(selectedPrescription as any).patient_details?.age || 'Unknown'} / {(selectedPrescription as any).patient_details?.gender || 'Unknown'}</span></div>
                   <div><span className="text-muted-foreground">Phone:</span> <span className="font-medium">{(selectedPrescription as any).patient_details?.phone || 'Not provided'}</span></div>
                   <div><span className="text-muted-foreground">Doctor:</span> <span className="font-medium">{(selectedPrescription as any).doctor_name || selectedPrescription.doctor}</span></div>
                   <div><span className="text-muted-foreground">Clinic:</span> <span className="font-medium">{(selectedPrescription as any).visit_details?.clinic || selectedPrescription.clinic || 'Not specified'}</span></div>
-                  <div><span className="text-muted-foreground">Date:</span> <span className="font-medium">{selectedPrescription.date} {selectedPrescription.time}</span></div>
-                  <div><span className="text-muted-foreground">Wait Time:</span> <span className="font-medium text-orange-600">{selectedPrescription.waitTime} min</span></div>
+                  <div>
+                    <span className="text-muted-foreground">Date:</span>{' '}
+                    <span className="font-medium">
+                      {selectedPrescription.prescribed_at
+                        ? `${new Date(selectedPrescription.prescribed_at).toLocaleDateString()} ${new Date(selectedPrescription.prescribed_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`
+                        : `${selectedPrescription.date || ''} ${selectedPrescription.time || ''}`}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Wait Time:</span>{' '}
+                    <span className="font-medium text-orange-600">
+                      {selectedPrescription.prescribed_at
+                        ? Math.max(0, Math.floor((Date.now() - new Date(selectedPrescription.prescribed_at).getTime()) / 60000))
+                        : selectedPrescription.waitTime} min
+                    </span>
+                  </div>
                 </div>
 
                 {/* Allergies */}
@@ -1694,11 +1710,25 @@ export default function PrescriptionsPage() {
                             {med.status || 'Unknown'}
                           </Badge>
                         </div>
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
-                          <div><span className="text-muted-foreground">Dosage:</span> <span className="font-medium">{med.dosage || 'As prescribed'}</span></div>
-                          <div><span className="text-muted-foreground">Quantity:</span> <span className="font-medium">{med.quantity || 'N/A'}</span></div>
-                          <div><span className="text-muted-foreground">Dispensed:</span> <span className="font-medium text-blue-600">{med.dispensed_quantity || med.dispensed || 0}</span></div>
-                          <div><span className="text-muted-foreground">Remaining:</span> <span className={`font-medium ${(med.quantity - (med.dispensed_quantity || med.dispensed || 0)) <= 0 ? 'text-green-600' : 'text-orange-600'}`}>{Math.max(0, (med.quantity - (med.dispensed_quantity || med.dispensed || 0)))}</span></div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                          <div><span className="text-muted-foreground">Dose:</span> <span className="font-medium">{med.dosage || 'As prescribed'}</span></div>
+                          <div><span className="text-muted-foreground">Prescribed:</span> <span className="font-medium">{med.quantity || 'N/A'} {med.unit || ''}</span></div>
+                          <div>
+                            <span className="text-muted-foreground">Dispensed:</span>{' '}
+                            <span className="font-medium text-blue-600">
+                              {med.dispensed_quantity || med.dispensed || 0}
+                              {med.unit ? ` ${med.unit}` : ''}
+                              {Number(med.stock_dispensed_quantity || 0) > 0 && med.stock_dispensed_unit
+                                ? ` (${med.stock_dispensed_quantity} ${med.stock_dispensed_unit})`
+                                : ''}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-muted-foreground">Remaining:</span>{' '}
+                            <span className={`font-medium ${(med.quantity - (med.dispensed_quantity || med.dispensed || 0)) <= 0 ? 'text-green-600' : 'text-orange-600'}`}>
+                              {Math.max(0, (med.quantity - (med.dispensed_quantity || med.dispensed || 0)))} {med.unit || ''}
+                            </span>
+                          </div>
                         </div>
                         {(med.instructions || med.medication_details?.instructions) && (
                           <div className="mt-2 text-sm">
@@ -1739,13 +1769,7 @@ export default function PrescriptionsPage() {
         </Dialog>
 
         {/* Enhanced Dispense Modal */}
-        <Dialog open={showDispenseModal} onOpenChange={(open) => {
-          console.log('Dispense modal onOpenChange:', open);
-          setShowDispenseModal(open);
-          if (!open) {
-            console.log('Modal closing, cleaning up state...');
-          }
-        }}>
+        <Dialog open={showDispenseModal} onOpenChange={setShowDispenseModal}>
           <DialogContent className="w-[95vw] sm:max-w-[1000px] max-h-[90vh] overflow-hidden flex flex-col">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
@@ -1883,10 +1907,10 @@ export default function PrescriptionsPage() {
                       const isSelected = selectedMedications.includes(med.id);
                       const isAvailable = (med as any).status === 'Available' || (med as any).status === 'Low Stock' || (med as any).status === 'Partially Dispensed';
                       const isPendingGeneric = (med as any).status === 'Pending'; // Generics need selection
+                      const usesPackDispensing = isPackDispenseMedication(med);
+                      const packSizeMl = getPackSizeMl(med);
                                       const batches = medicationBatches[med.id] || [];
-                                      if ((med as any).substitution) {
-                                        console.log(`🔄 Substituted med ${med.name}: ${batches.length} batches available`);
-                                      }
+                                      // Substitution details are displayed in UI; no runtime logging needed.
                       const hasSubstitute = false;
                       
                       return (
@@ -2073,10 +2097,12 @@ export default function PrescriptionsPage() {
                               
                               {isSelected && isAvailable && (
                                 <div className="space-y-3 mt-3 pt-3 border-t" onClick={(e) => e.stopPropagation()}>
-                                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                                     {/* Quantity */}
                                     <div>
-                                      <Label className="text-xs">Quantity to Dispense</Label>
+                                      <Label className="text-xs">
+                                        Quantity to Dispense {usesPackDispensing ? '(bottles)' : ''}
+                                      </Label>
                                       {(med as any).remaining_quantity <= 0 ? (
                                         <div className="h-8 mt-1 flex items-center px-3 bg-muted text-muted-foreground text-sm rounded">
                                           Fully dispensed
@@ -2084,10 +2110,11 @@ export default function PrescriptionsPage() {
                                       ) : (
                                         <Input
                                           type="number"
-                                          min="0"
-                                          value={dispenseQuantities[med.id] ?? Math.max(0, Number((med as any).remaining_quantity ?? med.quantity ?? 0))}
+                                          min="1"
+                                          step="1"
+                                          value={dispenseQuantities[med.id] ?? getDefaultDispenseQuantity(med)}
                                           onChange={(e) => {
-                                            const inputValue = Math.max(0, parseInt(e.target.value) || 0);
+                                            const inputValue = Math.max(1, parseInt(e.target.value) || 1);
                                             setDispenseQuantities(prev => ({
                                               ...prev,
                                               [med.id]: inputValue
@@ -2100,6 +2127,12 @@ export default function PrescriptionsPage() {
                                         <div>
                                           Prescribed: {med.quantity} • Available: {Array.isArray(batches) ? batches.reduce((total, b) => total + Number(b.quantity || 0), 0) : '—'}
                                         </div>
+                                        {usesPackDispensing && (
+                                          <div>
+                                            Clinical unit: {med.unit || 'ml'}
+                                            {packSizeMl ? ` • Pack size: ${packSizeMl} ml per bottle` : ' • Pack size not set'}
+                                          </div>
+                                        )}
                                         {(med as any).dispensed_quantity > 0 && (
                                         <div className={(med as any).remaining_quantity < 0 ? "text-red-600 dark:text-red-400" : "text-blue-600 dark:text-blue-400"}>
                                           Already dispensed: {(med as any).dispensed_quantity} • Remaining: {Math.max(0, (med as any).remaining_quantity)}
@@ -2108,6 +2141,34 @@ export default function PrescriptionsPage() {
                                         )}
                                       </div>
                                     </div>
+
+                                    {usesPackDispensing && (
+                                      <div>
+                                        <Label className="text-xs">Clinical Quantity Covered ({med.unit || 'ml'})</Label>
+                                        {(med as any).remaining_quantity <= 0 ? (
+                                          <div className="h-8 mt-1 flex items-center px-3 bg-muted text-muted-foreground text-sm rounded">
+                                            Fully covered
+                                          </div>
+                                        ) : (
+                                          <Input
+                                            type="number"
+                                            min="1"
+                                            value={dispenseCoverageQuantities[med.id] ?? getDefaultCoverageQuantity(med)}
+                                            onChange={(e) => {
+                                              const inputValue = Math.max(1, parseInt(e.target.value) || 1);
+                                              setDispenseCoverageQuantities(prev => ({
+                                                ...prev,
+                                                [med.id]: inputValue
+                                              }));
+                                            }}
+                                            className="h-8 mt-1"
+                                          />
+                                        )}
+                                        <div className="text-[10px] text-muted-foreground mt-1">
+                                          Use this to mark how much prescribed volume this bottle quantity covers.
+                                        </div>
+                                      </div>
+                                    )}
                                     
                                     {/* Stock Info */}
                                     <div>
@@ -2168,7 +2229,18 @@ export default function PrescriptionsPage() {
             )}
 
             <DialogFooter className="flex flex-col sm:flex-row gap-2">
-              <Button variant="outline" onClick={() => setShowDispenseModal(false)}>Cancel</Button>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShowDispenseModal(false);
+                  setSelectedMedications([]);
+                  setDispenseQuantities({});
+                  setDispenseCoverageQuantities({});
+                  setSelectedBatches({});
+                }}
+              >
+                Cancel
+              </Button>
               <Button
                 variant="outline"
                 className="gap-2"
@@ -2545,6 +2617,7 @@ export default function PrescriptionsPage() {
                       let transformed = transformMedications(refreshed.medications as any, selectedPrescription.status);
 
                       if (substitutionMed) {
+                        const selectedMedicationDetails = await pharmacyService.getMedication(Number(medicationIdToUse));
                         const batches = await pharmacyService.getMedicationBatches(Number(medicationIdToUse));
                         setMedicationBatches(prev => ({
                           ...prev,
@@ -2578,6 +2651,17 @@ export default function PrescriptionsPage() {
                             ...m,
                             name: resolvedMedicationName,
                             medication: Number(medicationIdToUse),
+                            medication_details: {
+                              ...(m.medication_details || {}),
+                              id: selectedMedicationDetails.id,
+                              medication_id: selectedMedicationDetails.id,
+                              name: selectedMedicationDetails.name,
+                              unit: selectedMedicationDetails.unit || m.medication_details?.unit,
+                              form: selectedMedicationDetails.form || m.medication_details?.form,
+                              strength: selectedMedicationDetails.strength || m.medication_details?.strength,
+                              pack_size: selectedMedicationDetails.pack_size ?? m.medication_details?.pack_size,
+                              type: 'brand',
+                            },
                             stockLevel: stock,
                             status,
                             substitution: {

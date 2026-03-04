@@ -22,7 +22,15 @@ interface DispenseHistoryRecord {
   id: string;
   prescriptionId: string;
   patient: { name: string; id: string; mrn: string; age: number; gender: string };
-  medications: Array<{ prescribed: string; dispensed: string; quantity: number; isSubstituted: boolean }>;
+  medications: Array<{
+    prescribed: string;
+    dispensed: string;
+    quantity: number;
+    unit?: string;
+    prescribedUnit?: string;
+    isSubstituted: boolean;
+    context?: 'as_selected_brand' | 'brand_selected_from_generic' | 'substituted';
+  }>;
   doctor: string;
   pharmacist: string;
   date: string;
@@ -77,33 +85,25 @@ export default function DispenseHistoryPage() {
         // Extract doctor details
         const doctorName = prescription.prescribed_by_name || prescription.doctor_name || '';
         
-        // Extract medications from prescription items
-        const prescriptionItems = prescription.items || [];
-        const medications = prescriptionItems.map((item: any) => {
-          const prescribed = item.medication_name || item.medication_details?.name || '';
-          const dispensed = item.substituted_with_details?.name || item.substituted_with_details?.medication_name || prescribed;
-          const isSubstituted = !!item.substituted_with || !!item.substituted_with_details;
-          
-          return {
-            prescribed,
-            dispensed,
-            quantity: Number(item.dispensed_quantity || item.quantity || dispense.quantity),
-            isSubstituted,
-          };
-        });
-        
-        // If no medications from prescription items, use dispense data
-        if (medications.length === 0) {
-          medications.push({
-            prescribed: dispense.medication_name || '',
-            dispensed: dispense.medication_name || '',
-            quantity: Number(dispense.quantity),
-            isSubstituted: false,
-          });
-        }
+        const context = (dispense.dispense_context || 'as_selected_brand') as 'as_selected_brand' | 'brand_selected_from_generic' | 'substituted';
+        const prescribedName =
+          dispense.prescribed_generic_name ||
+          dispense.prescribed_medication_name ||
+          dispense.medication_name ||
+          '';
+        const dispensedName = dispense.medication_name || '';
+        const medications = [{
+          prescribed: prescribedName,
+          dispensed: dispensedName,
+          quantity: Number(dispense.quantity || 0),
+          unit: dispense.unit || '',
+          prescribedUnit: dispense.prescribed_unit || '',
+          isSubstituted: context === 'substituted',
+          context,
+        }];
         
         // Count substitutions
-        const substitutions = medications.filter((m: any) => m.isSubstituted).length;
+        const substitutions = medications.filter((m: any) => m.context === 'substituted').length;
         
         // Calculate wait time (if prescription has prescribed_at)
         let waitTime = '0 min';
@@ -485,15 +485,15 @@ export default function DispenseHistoryPage() {
                       >
                         <div className="flex items-start justify-between">
                           <div className="flex-1">
-                            {med.isSubstituted ? (
+                            {med.context === 'substituted' || med.context === 'brand_selected_from_generic' ? (
                               <div className="space-y-2">
-                                {/* Show prescribed (crossed out) and what was dispensed */}
+                                {/* Show prescribed and what was actually dispensed */}
                                 <div className="flex items-center gap-2">
                                   <div className="w-6 h-6 bg-amber-100 dark:bg-amber-900/50 rounded-full flex items-center justify-center flex-shrink-0">
                                     <Pill className="h-3 w-3 text-amber-600" />
                                   </div>
                                   <div>
-                                    <p className="text-sm text-muted-foreground line-through">{med.prescribed}</p>
+                                    <p className="text-sm text-muted-foreground">{med.prescribed}</p>
                                     <p className="text-xs text-muted-foreground">Prescribed</p>
                                   </div>
                                 </div>
@@ -503,11 +503,13 @@ export default function DispenseHistoryPage() {
                                   </div>
                                   <div>
                                     <p className="font-semibold text-emerald-900 dark:text-emerald-400">{med.dispensed}</p>
-                                    <p className="text-xs text-emerald-600 dark:text-emerald-400">Dispensed (Substitute)</p>
+                                    <p className="text-xs text-emerald-600 dark:text-emerald-400">
+                                      {med.context === 'substituted' ? 'Dispensed (Substituted)' : 'Dispensed (Brand selected)'}
+                                    </p>
                                   </div>
                                 </div>
                                 <Badge className="bg-amber-100 text-amber-800 border-amber-200 dark:bg-amber-900/50 dark:text-amber-400 ml-8" variant="outline">
-                                  Substituted
+                                  {med.context === 'substituted' ? 'Substituted' : 'Brand selected'}
                                 </Badge>
                               </div>
                             ) : (
@@ -523,7 +525,7 @@ export default function DispenseHistoryPage() {
                             )}
                           </div>
                           <div className="flex items-center gap-2 ml-4">
-                            <span className="font-bold text-lg">×{med.quantity}</span>
+                            <span className="font-bold text-lg">×{med.quantity}{med.unit ? ` ${med.unit}` : ''}</span>
                           </div>
                         </div>
                       </div>

@@ -260,7 +260,7 @@ export function ConsultationReportModal({
                       <thead className="bg-violet-50 dark:bg-violet-900/20">
                         <tr>
                           <th className="px-3 py-2 text-left font-medium">Medication</th>
-                          <th className="px-3 py-2 text-left font-medium">Dosage</th>
+                          <th className="px-3 py-2 text-left font-medium">Dose</th>
                           <th className="px-3 py-2 text-left font-medium">Frequency</th>
                           <th className="px-3 py-2 text-left font-medium">Duration</th>
                           <th className="px-3 py-2 text-center font-medium">Qty</th>

@@ -91,7 +91,7 @@ export function CurrentCareTab({
                               <Badge variant="default" className="bg-green-600">Active</Badge>
                             </div>
                             <div className="text-sm text-muted-foreground space-y-1">
-                              <p>Dosage: {med.dosage}</p>
+                              <p>Dose: {med.dosage}</p>
                               <p>Frequency: {med.frequency}</p>
                               <p>Prescribed by: {med.prescribedBy}</p>
                               <p>Started: {new Date(med.startDate).toLocaleDateString()}</p>
@@ -134,7 +134,7 @@ export function CurrentCareTab({
                                 <p className="font-medium">{med.name}</p>
                               </div>
                               <div className="text-sm text-muted-foreground space-y-1">
-                                <p>Dosage: {med.dosage} • Frequency: {med.frequency}</p>
+                                <p>Dose: {med.dosage} • Frequency: {med.frequency}</p>
                                 {med.duration && <p>Duration: {med.duration}</p>}
                                 <p>Quantity: {med.quantity} {med.unit}</p>
                               </div>
@@ -234,4 +234,3 @@ export function CurrentCareTab({
     </div>
   );
 }
-
