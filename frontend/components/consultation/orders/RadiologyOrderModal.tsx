@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -42,6 +42,9 @@ export function RadiologyOrderModal({
   onSubmit: (payload: RadiologyOrderSubmitInput) => Promise<void>;
   confirmLabel?: string;
 }) {
+  const searchRequestIdRef = useRef(0);
+  const dropdownContainerRef = useRef<HTMLDivElement>(null);
+  const initialTemplatesRef = useRef<RadiologyTemplateLike[]>([]);
   const [templates, setTemplates] = useState<RadiologyTemplateLike[]>([]);
   const [loadingTemplates, setLoadingTemplates] = useState(false);
   const [templatesError, setTemplatesError] = useState<string | null>(null);
@@ -50,6 +53,7 @@ export function RadiologyOrderModal({
   const [search, setSearch] = useState("");
   const [showDropdown, setShowDropdown] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [selectedDetails, setSelectedDetails] = useState<Map<number, RadiologyTemplateLike>>(new Map());
 
   const [priority, setPriority] = useState<"routine" | "urgent" | "stat">("routine");
   const [clinicalIndication, setClinicalIndication] = useState("");
@@ -60,6 +64,10 @@ export function RadiologyOrderModal({
     setSearch("");
     setShowDropdown(false);
     setSelected(new Set());
+    setSelectedDetails(new Map());
+    setTemplates([]);
+    initialTemplatesRef.current = [];
+    setTemplatesError(null);
     setPriority("routine");
     setClinicalIndication("");
     setProvisionalDiagnosis("");
@@ -67,39 +75,88 @@ export function RadiologyOrderModal({
     setSubmitting(false);
   }, []);
 
+  // Load initial templates when modal opens (so dropdown can show list before/without typing)
   useEffect(() => {
     if (!open) return;
-    const load = async () => {
+    let cancelled = false;
+    (async () => {
       try {
         setLoadingTemplates(true);
         setTemplatesError(null);
-        const res = await radiologyService.getTemplates({ page_size: 500 } as any);
-        setTemplates((res as any)?.results || []);
+        const res = await radiologyService.getTemplates({ page_size: 50 } as any);
+        if (cancelled) return;
+        const list = (res as any)?.results || [];
+        initialTemplatesRef.current = list;
+        setTemplates(list);
       } catch (err: any) {
-        console.error("Failed to load radiology templates:", err);
-        toast.error(isAuthenticationError(err) ? "Authentication required. Please log in again." : "Failed to load radiology templates");
+        if (cancelled) return;
         setTemplates([]);
         setTemplatesError(isAuthenticationError(err) ? "Authentication required. Please log in again." : "Failed to load radiology templates");
+        toast.error(isAuthenticationError(err) ? "Authentication required. Please log in again." : "Failed to load radiology templates");
       } finally {
-        setLoadingTemplates(false);
+        if (!cancelled) setLoadingTemplates(false);
       }
-    };
-    load();
+    })();
+    return () => { cancelled = true; };
   }, [open]);
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return templates;
-    return templates.filter((t) => {
-      return (
-        (t.name || "").toLowerCase().includes(q) ||
-        (t.code || "").toLowerCase().includes(q) ||
-        (t.body_part || "").toLowerCase().includes(q) ||
-        (t.modality || "").toLowerCase().includes(q) ||
-        (t.category || "").toLowerCase().includes(q)
-      );
+  // Debounced search: when user types, search; when search cleared, show initial list again
+  useEffect(() => {
+    if (!open || !showDropdown) return;
+    const searchTerm = search.trim();
+    if (!searchTerm) {
+      setTemplates(initialTemplatesRef.current);
+      setTemplatesError(null);
+      return;
+    }
+    const requestId = ++searchRequestIdRef.current;
+    const timeout = setTimeout(async () => {
+      try {
+        setLoadingTemplates(true);
+        setTemplatesError(null);
+        const res = await radiologyService.getTemplates({ search: searchTerm, page_size: 50 } as any);
+        if (requestId === searchRequestIdRef.current) {
+          setTemplates((res as any)?.results || []);
+        }
+      } catch (err: any) {
+        if (requestId === searchRequestIdRef.current) {
+          setTemplates([]);
+          setTemplatesError(isAuthenticationError(err) ? "Authentication required. Please log in again." : "Failed to load radiology templates");
+          toast.error(isAuthenticationError(err) ? "Authentication required. Please log in again." : "Failed to load radiology templates");
+        }
+      } finally {
+        if (requestId === searchRequestIdRef.current) {
+          setLoadingTemplates(false);
+        }
+      }
+    }, 300);
+    return () => clearTimeout(timeout);
+  }, [open, showDropdown, search]);
+
+  // Close dropdown when clicking outside the search block
+  useEffect(() => {
+    if (!open || !showDropdown) return;
+    const handlePointerDown = (e: PointerEvent) => {
+      const target = e.target as Node;
+      const el = dropdownContainerRef.current;
+      if (el && !el.contains(target)) setShowDropdown(false);
+    };
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    return () => document.removeEventListener("pointerdown", handlePointerDown, true);
+  }, [open, showDropdown]);
+
+  const addSelection = (t: RadiologyTemplateLike) => {
+    setSelected((prev) => new Set([...prev, t.id]));
+    setSelectedDetails((d) => new Map(d).set(t.id, t));
+  };
+  const removeSelection = (id: number) => {
+    setSelected((prev) => new Set(Array.from(prev).filter((x) => x !== id)));
+    setSelectedDetails((d) => {
+      const m = new Map(d);
+      m.delete(id);
+      return m;
     });
-  }, [templates, search]);
+  };
 
   const handleConfirm = async () => {
     if (selected.size === 0) {
@@ -111,7 +168,9 @@ export function RadiologyOrderModal({
       return;
     }
 
-    const selectedTemplates = templates.filter((t) => selected.has(t.id));
+    const selectedTemplates = Array.from(selected)
+      .map((id) => selectedDetails.get(id) || templates.find((t) => t.id === id))
+      .filter((t): t is RadiologyTemplateLike => !!t);
 
     try {
       setSubmitting(true);
@@ -153,7 +212,7 @@ export function RadiologyOrderModal({
           {/* Template selection */}
           <div className="space-y-2">
             <Label>Search and Select Imaging Studies *</Label>
-            <div className="relative">
+            <div className="relative" ref={dropdownContainerRef}>
               <Input
                 placeholder="Search imaging studies by name, code, or modality..."
                 value={search}
@@ -165,7 +224,7 @@ export function RadiologyOrderModal({
                 onFocus={() => setShowDropdown(true)}
               />
 
-              {showDropdown && search.trim() && (
+              {showDropdown && (
                 <div className="absolute top-full left-0 right-0 z-50 bg-background border rounded-md shadow-lg max-h-60 overflow-y-auto">
                   {loadingTemplates ? (
                     <div className="p-4 text-center text-muted-foreground">
@@ -174,46 +233,24 @@ export function RadiologyOrderModal({
                     </div>
                   ) : templates.length === 0 ? (
                     <div className="p-4 text-center text-muted-foreground">
-                      <p className="text-xs">{templatesError || "No templates found"}</p>
+                      <p className="text-xs">
+                        {templatesError ||
+                          (search.trim()
+                            ? `No studies match "${search.trim()}". Try a different term or clear the search to browse all.`
+                            : "No imaging studies available. Try again later.")}
+                      </p>
                     </div>
                   ) : (
                     <div className="p-2">
-                      {selected.size > 0 && (
-                        <div className="mb-3 pb-2 border-b">
-                          <p className="text-xs font-medium text-muted-foreground mb-2">Selected ({selected.size})</p>
-                          <div className="flex flex-wrap gap-1">
-                            {Array.from(selected).map((id) => {
-                              const t = templates.find((x) => x.id === id);
-                              if (!t) return null;
-                              return (
-                                <Badge
-                                  key={id}
-                                  variant="default"
-                                  className="text-xs cursor-pointer hover:bg-destructive hover:text-destructive-foreground"
-                                  onClick={() => setSelected((prev) => new Set(Array.from(prev).filter((x) => x !== id)))}
-                                >
-                                  {t.code} - {t.name}
-                                  <X className="h-3 w-3 ml-1" />
-                                </Badge>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      )}
-
                       <div className="space-y-1">
-                        {filtered
+                        {templates
                           .filter((t) => !selected.has(t.id))
-                          .slice(0, 20)
+                          .slice(0, 30)
                           .map((t) => (
                             <div
                               key={t.id}
                               className="flex items-center justify-between p-2 rounded hover:bg-muted cursor-pointer"
-                              onClick={() => {
-                                setSelected((prev) => new Set([...prev, t.id]));
-                                setSearch("");
-                                setShowDropdown(false);
-                              }}
+                              onClick={() => addSelection(t)}
                             >
                               <div className="flex-1 min-w-0">
                                 <div className="flex items-center gap-2">
@@ -250,7 +287,7 @@ export function RadiologyOrderModal({
                 <p className="text-sm font-medium">Selected Studies ({selected.size})</p>
                 <div className="space-y-1 max-h-32 overflow-y-auto">
                   {Array.from(selected).map((id) => {
-                    const t = templates.find((x) => x.id === id);
+                    const t = selectedDetails.get(id) || templates.find((x) => x.id === id);
                     if (!t) return null;
                     return (
                       <div key={id} className="flex items-center justify-between p-2 bg-muted rounded text-sm">
@@ -269,7 +306,7 @@ export function RadiologyOrderModal({
                           variant="ghost"
                           size="sm"
                           className="h-6 w-6 p-0 text-destructive hover:text-destructive"
-                          onClick={() => setSelected((prev) => new Set(Array.from(prev).filter((x) => x !== id)))}
+                          onClick={() => removeSelection(id)}
                         >
                           <X className="h-3 w-3" />
                         </Button>

@@ -225,7 +225,7 @@ export default function ConsultationHistoryPage() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [dateFilter, setDateFilter] = useState("all"); // Changed from "today" to "all" to show all data by default
+  const [dateFilter, setDateFilter] = useState("today");
   const [clinicFilter, setClinicFilter] = useState("all");
   
   // Pagination state
@@ -307,11 +307,13 @@ export default function ConsultationHistoryPage() {
           end_date = yyyyMmDd(today);
         }
         
+        // Backend expects status: 'active' | 'completed' | 'cancelled' (not 'in-progress')
+        const apiStatus = statusFilter === 'all' ? undefined : statusFilter === 'in-progress' ? 'active' : statusFilter === 'completed' ? 'completed' : statusFilter;
         const sessionsResult = await consultationService.getSessions({
           page: currentPage,
           page_size: itemsPerPage,
           search: searchQuery || undefined,
-          status: statusFilter !== 'all' ? statusFilter : undefined,
+          status: apiStatus,
           clinic: clinicFilter !== "all" ? clinicFilter : undefined,
           date,
           start_date,
@@ -350,6 +352,8 @@ export default function ConsultationHistoryPage() {
             const doctorName = (session.doctor_name && String(session.doctor_name).trim()) ? String(session.doctor_name).trim() : 'Unknown';
             const doctorId = String(session.doctor || '');
 
+            const presentationComplaint = session.presentation_complaint || '';
+
             return {
               id: String(session.id),
               patient: session.patient_name || 'Unknown',
@@ -366,6 +370,7 @@ export default function ConsultationHistoryPage() {
               room: session.room_name || 'Unknown',
               diagnosis,
               diagnosisCodes,
+              presentationComplaint,
               status: session.status === 'completed' ? 'Completed' as const : 'In Progress' as const,
               priority: (() => {
                 const p = session.priority;
@@ -416,30 +421,39 @@ export default function ConsultationHistoryPage() {
     setCurrentPage(1);
   }, [itemsPerPage, searchQuery, statusFilter, dateFilter, clinicFilter]);
 
-  // Stats
+  // Stats (from current result set)
   const stats = useMemo(() => {
     const filtered = consultations;
-
-    // Fix today calculation with proper date comparison
     const today = new Date();
     today.setHours(0, 0, 0, 0);
+    const weekAgo = new Date(today);
+    weekAgo.setDate(weekAgo.getDate() - 7);
 
     const todayCount = filtered.filter(c => {
       try {
-        const consultationDate = new Date(c.date + 'T' + (c.time || '00:00:00'));
-        consultationDate.setHours(0, 0, 0, 0);
-        return consultationDate.getTime() === today.getTime();
+        const d = new Date(c.date + 'T' + (c.time || '00:00:00'));
+        d.setHours(0, 0, 0, 0);
+        return d.getTime() === today.getTime();
       } catch {
-        // Fallback to date-only comparison if time parsing fails
         return c.date === today.toISOString().split('T')[0];
       }
     }).length;
 
+    const weekCount = filtered.filter(c => {
+      try {
+        const d = new Date(c.date + 'T' + (c.time || '00:00:00'));
+        d.setHours(0, 0, 0, 0);
+        return d.getTime() >= weekAgo.getTime() && d.getTime() <= today.getTime();
+      } catch {
+        return true;
+      }
+    }).length;
+
     return {
-      total: filtered.length,
       today: todayCount,
-      completed: filtered.filter(c => c.status === "Completed").length,
+      thisWeek: weekCount,
       inProgress: filtered.filter(c => c.status === "In Progress").length,
+      completed: filtered.filter(c => c.status === "Completed").length,
     };
   }, [consultations]);
 
@@ -508,33 +522,61 @@ export default function ConsultationHistoryPage() {
     setShowEditModal(true);
   };
 
-  // Load orders for Edit modal when it opens (by consultation_session)
+  // Load orders, session notes, and diagnoses for Edit modal when it opens (synced with backend)
   useEffect(() => {
     if (!showEditModal || !selectedConsultation) return;
     const sessionId = parseInt(selectedConsultation.id, 10);
     if (isNaN(sessionId)) return;
 
-    const loadOrders = async () => {
+    const loadOrdersAndSession = async () => {
       setLoadingOrders(true);
       try {
-        const [rxRes, labRes, radRes, physioRes] = await Promise.all([
+        const [rxRes, labRes, radRes, physioRes, session, diagnosesRes] = await Promise.all([
           pharmacyService.getPrescriptions({ consultation_session: sessionId, page_size: 100 }),
           labService.getOrders({ consultation_session: sessionId, page_size: 100 }),
           radiologyService.getOrders({ consultation_session: sessionId, page_size: 100 }),
           physioService.getOrders({ consultation_session: sessionId, page_size: 100 }),
+          consultationService.getSession(sessionId),
+          consultationService.getDiagnoses({ session: sessionId, page_size: 100 }),
         ]);
         setEditPrescriptions(rxRes.results || []);
         setEditLabOrders(labRes.results || []);
         setEditRadiologyOrders(radRes.results || []);
         setEditPhysioOrders(physioRes.results || []);
+
+        // Sync edit form with backend: notes and diagnoses (so Edit shows what was saved in the session)
+        const diagnosisList = diagnosesRes?.results || [];
+        const diagnosisCodes = diagnosisList.map((d: { id: number; certainty?: string; icd10_code_details?: { code: string; description: string }; diagnosis_text?: string; notes?: string }) => {
+          const details = d.icd10_code_details;
+          const type = (d.certainty === 'confirmed' ? 'Primary' : d.certainty === 'probable' ? 'Secondary' : 'Differential') as 'Primary' | 'Secondary' | 'Differential';
+          return {
+            id: String(d.id),
+            code: details?.code ?? '',
+            name: details?.description ?? d.diagnosis_text ?? '',
+            type,
+            notes: d.notes ?? '',
+          };
+        });
+        // Coerce session note fields to string; form always reflects backend after fetch
+        const safeStr = (v: unknown): string => (v != null && typeof v === 'string' ? v : '');
+        setEditForm((prev) => ({
+          ...prev,
+          presentationComplaint: safeStr(session.presentation_complaint),
+          historyOfPresentIllness: safeStr(session.history_of_presenting_illness),
+          physicalExamination: safeStr(session.physical_examination),
+          assessment: safeStr(session.assessment),
+          plan: safeStr(session.plan),
+          status: session.status === 'completed' ? 'Completed' : 'In Progress',
+          diagnosisCodes,
+        }));
       } catch (err) {
-        console.error('Error loading orders for edit:', err);
+        console.error('Error loading orders/session for edit:', err);
         toast.error('Failed to load prescriptions and orders');
       } finally {
         setLoadingOrders(false);
       }
     };
-    loadOrders();
+    loadOrdersAndSession();
   }, [showEditModal, selectedConsultation?.id]);
 
   const loadEditOrdersRefetch = async () => {
@@ -818,7 +860,7 @@ export default function ConsultationHistoryPage() {
           </div>
         </div>
 
-        {/* Stats */}
+        {/* Stats: Today | This Week | In Progress | Completed */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <Card className="border-l-4 border-l-blue-500">
             <CardContent className="p-4">
@@ -827,7 +869,18 @@ export default function ConsultationHistoryPage() {
                   <p className="text-sm text-muted-foreground">Today</p>
                   <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">{stats.today}</p>
                 </div>
-                <Calendar className="h-8 w-8 text-blue-500" />
+                <Calendar className="h-8 w-8 text-blue-500/80" />
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="border-l-4 border-l-slate-500">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">This Week</p>
+                  <p className="text-2xl font-bold text-slate-600 dark:text-slate-400">{stats.thisWeek}</p>
+                </div>
+                <History className="h-8 w-8 text-slate-500/80" />
               </div>
             </CardContent>
           </Card>
@@ -838,7 +891,7 @@ export default function ConsultationHistoryPage() {
                   <p className="text-sm text-muted-foreground">In Progress</p>
                   <p className="text-2xl font-bold text-amber-600 dark:text-amber-400">{stats.inProgress}</p>
                 </div>
-                <Activity className="h-8 w-8 text-amber-500" />
+                <Activity className="h-8 w-8 text-amber-500/80" />
               </div>
             </CardContent>
           </Card>
@@ -849,18 +902,7 @@ export default function ConsultationHistoryPage() {
                   <p className="text-sm text-muted-foreground">Completed</p>
                   <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{stats.completed}</p>
                 </div>
-                <CheckCircle2 className="h-8 w-8 text-emerald-500" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="border-l-4 border-l-purple-500">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Total</p>
-                  <p className="text-2xl font-bold text-purple-600 dark:text-purple-400">{stats.total}</p>
-                </div>
-                <History className="h-8 w-8 text-purple-500" />
+                <CheckCircle2 className="h-8 w-8 text-emerald-500/80" />
               </div>
             </CardContent>
           </Card>
@@ -1081,24 +1123,46 @@ export default function ConsultationHistoryPage() {
         <Dialog open={showEditModal} onOpenChange={setShowEditModal}>
           <DialogContent className="w-[95vw] sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle className="flex items-center gap-2"><Edit className="h-5 w-5 text-emerald-500" />Edit Consultation</DialogTitle>
-              <DialogDescription>Update consultation details and add prescriptions or investigations for {selectedConsultation?.patient}</DialogDescription>
+              <DialogTitle className="flex items-center gap-2">
+                <Edit className="h-5 w-5 text-emerald-500" />
+                Edit Consultation
+              </DialogTitle>
+              <DialogDescription className="space-y-1">
+                <span>Update consultation details and add prescriptions or investigations for <strong className="text-foreground">{selectedConsultation?.patient ?? 'Unknown'}</strong>.</span>
+                {selectedConsultation && (
+                  <span className="block text-xs text-muted-foreground mt-1">
+                    Session #{selectedConsultation.id} · {selectedConsultation.date}{selectedConsultation.time ? ` · ${selectedConsultation.time}` : ''}
+                  </span>
+                )}
+              </DialogDescription>
             </DialogHeader>
             {selectedConsultation && (
-              <Tabs value={editActiveTab} onValueChange={setEditActiveTab} className="w-full">
-                <TabsList className="grid w-full grid-cols-5">
-                  <TabsTrigger value="notes" className="text-xs">Notes</TabsTrigger>
-                  <TabsTrigger value="prescriptions" className="text-xs">Prescriptions</TabsTrigger>
-                  <TabsTrigger value="lab" className="text-xs">Lab</TabsTrigger>
-                  <TabsTrigger value="radiology" className="text-xs">Radiology</TabsTrigger>
-                  <TabsTrigger value="physio" className="text-xs">Physio</TabsTrigger>
+              <Tabs value={editActiveTab} onValueChange={setEditActiveTab} className="w-full mt-2">
+                <TabsList className="grid w-full grid-cols-5 h-10 gap-1 p-1">
+                  <TabsTrigger value="notes" className="text-xs sm:text-sm">Notes</TabsTrigger>
+                  <TabsTrigger value="prescriptions" className="text-xs sm:text-sm">Prescriptions</TabsTrigger>
+                  <TabsTrigger value="lab" className="text-xs sm:text-sm">Lab</TabsTrigger>
+                  <TabsTrigger value="radiology" className="text-xs sm:text-sm">Radiology</TabsTrigger>
+                  <TabsTrigger value="physio" className="text-xs sm:text-sm">Physio</TabsTrigger>
                 </TabsList>
-                <TabsContent value="notes" className="space-y-4 mt-4">
-                  <div className="p-3 bg-muted/50 rounded-lg text-sm">
-                    <span className="text-muted-foreground">ID:</span> <span className="font-medium">{selectedConsultation.id}</span>
-                    <span className="ml-4 text-muted-foreground">Date:</span> <span className="font-medium">{selectedConsultation.date}</span>
-                  </div>
+                <TabsContent value="notes" className="space-y-5 mt-5">
+                  {/* Match consultation room order: Presentation → HPI → Exam → Diagnosis → Assessment → Plan → Status */}
                   <div className="space-y-3">
+                    <div className="space-y-1.5">
+                      <Label>Presentation Complaint</Label>
+                      <Textarea value={editForm.presentationComplaint} onChange={(e) => setEditForm(prev => ({ ...prev, presentationComplaint: e.target.value }))} placeholder="Chief complaint or presenting symptoms..." rows={3} className="mt-0" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>History of Present Illness</Label>
+                      <Textarea value={editForm.historyOfPresentIllness} onChange={(e) => setEditForm(prev => ({ ...prev, historyOfPresentIllness: e.target.value }))} placeholder="Detailed history..." rows={4} className="mt-0" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Physical Examination</Label>
+                      <Textarea value={editForm.physicalExamination} onChange={(e) => setEditForm(prev => ({ ...prev, physicalExamination: e.target.value }))} placeholder="Examination findings..." rows={4} className="mt-0" />
+                    </div>
+                  </div>
+
+                  <div className="space-y-3 pt-2 border-t">
                     <div className="flex items-center justify-between">
                       <Label className="text-base font-semibold">Diagnosis (ICD-10)</Label>
                       <Button variant="outline" size="sm" onClick={() => setShowAddDiagnosisInEdit(true)}>
@@ -1109,44 +1173,48 @@ export default function ConsultationHistoryPage() {
                       <div className="p-4 rounded-lg border border-dashed text-center text-muted-foreground">
                         <Stethoscope className="h-8 w-8 mx-auto mb-2 opacity-50" />
                         <p className="text-sm">No diagnoses added yet</p>
-                        <p className="text-xs">Click "Add Diagnosis" to add ICD-10 codes</p>
+                        <p className="text-xs">Click &quot;Add Diagnosis&quot; to add ICD-10 codes</p>
                       </div>
                     ) : (
                       <div className="space-y-2">
-                        {editForm.diagnosisCodes.map((dx) => (
-                          <div key={dx.id} className={`p-3 rounded-lg border flex items-start justify-between gap-3 ${
-                            dx.type === 'Primary' ? 'bg-rose-50 dark:bg-rose-900/20 border-rose-200 dark:border-rose-800' :
-                            dx.type === 'Secondary' ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800' :
-                            'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800'
-                          }`}>
-                            <div className="flex-1">
-                              <div className="flex items-center gap-2 mb-1">
-                                <Badge variant="outline" className={`text-xs ${
-                                  dx.type === 'Primary' ? 'bg-rose-500/10 text-rose-600 border-rose-500/30' :
-                                  dx.type === 'Secondary' ? 'bg-amber-500/10 text-amber-600 border-amber-500/30' :
-                                  'bg-blue-500/10 text-blue-600 border-blue-500/30'
-                                }`}>{dx.type}</Badge>
-                                <span className="font-mono text-sm font-medium">{dx.code}</span>
+                        {editForm.diagnosisCodes.map((dx) => {
+                          const typeStyles = dx.type === 'Primary' ? 'bg-rose-50 dark:bg-rose-900/20 border-rose-200 dark:border-rose-800' : dx.type === 'Secondary' ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800' : 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800';
+                          const typeBadgeStyles = dx.type === 'Primary' ? 'bg-rose-500/15 text-rose-700 dark:text-rose-300 border-rose-300 dark:border-rose-700' : dx.type === 'Secondary' ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-700' : 'bg-blue-500/15 text-blue-700 dark:text-blue-300 border-blue-300 dark:border-blue-700';
+                          return (
+                            <div key={dx.id} className={`p-3 rounded-lg border flex items-start justify-between gap-3 ${typeStyles}`}>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex flex-wrap items-center gap-2 mb-1.5">
+                                  <Badge variant="outline" className={`text-xs font-medium shrink-0 ${typeBadgeStyles}`}>{dx.type}</Badge>
+                                  <span className="font-mono text-sm font-semibold text-foreground">{dx.code}</span>
+                                </div>
+                                <p className="text-sm text-foreground/90 leading-snug">{dx.name}</p>
+                                {dx.notes && <p className="text-xs text-muted-foreground mt-1.5">{dx.notes}</p>}
                               </div>
-                              <p className="text-sm font-medium">{dx.name}</p>
-                              {dx.notes && <p className="text-xs text-muted-foreground mt-1">{dx.notes}</p>}
+                              <Button variant="ghost" size="sm" className="h-8 w-8 p-0 shrink-0 rounded-full" onClick={() => setEditForm(prev => ({ ...prev, diagnosisCodes: prev.diagnosisCodes.filter(d => d.id !== dx.id) }))} title="Remove diagnosis">
+                                <X className="h-4 w-4" />
+                              </Button>
                             </div>
-                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setEditForm(prev => ({ ...prev, diagnosisCodes: prev.diagnosisCodes.filter(d => d.id !== dx.id) }))}>
-                              <X className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </div>
-                  <div><Label>Presentation Complaint</Label><Textarea value={editForm.presentationComplaint} onChange={(e) => setEditForm(prev => ({ ...prev, presentationComplaint: e.target.value }))} placeholder="Chief complaint or presenting symptoms..." rows={2} className="mt-1" /></div>
-                  <div><Label>History of Present Illness</Label><Textarea value={editForm.historyOfPresentIllness} onChange={(e) => setEditForm(prev => ({ ...prev, historyOfPresentIllness: e.target.value }))} placeholder="Detailed history..." rows={3} className="mt-1" /></div>
-                  <div><Label>Physical Examination</Label><Textarea value={editForm.physicalExamination} onChange={(e) => setEditForm(prev => ({ ...prev, physicalExamination: e.target.value }))} placeholder="Examination findings..." rows={3} className="mt-1" /></div>
-                  <div><Label>Assessment</Label><Textarea value={editForm.assessment} onChange={(e) => setEditForm(prev => ({ ...prev, assessment: e.target.value }))} placeholder="Clinical assessment and reasoning..." rows={3} className="mt-1" /></div>
-                  <div><Label>Plan</Label><Textarea value={editForm.plan} onChange={(e) => setEditForm(prev => ({ ...prev, plan: e.target.value }))} rows={3} className="mt-1" /></div>
-                  <div><Label>Status</Label>
+
+                  <div className="space-y-3 pt-2 border-t">
+                    <div className="space-y-1.5">
+                      <Label>Assessment</Label>
+                      <Textarea value={editForm.assessment} onChange={(e) => setEditForm(prev => ({ ...prev, assessment: e.target.value }))} placeholder="Clinical assessment and reasoning..." rows={3} className="mt-0" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Plan</Label>
+                      <Textarea value={editForm.plan} onChange={(e) => setEditForm(prev => ({ ...prev, plan: e.target.value }))} placeholder="Treatment plan, follow-up instructions..." rows={4} className="mt-0" />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5 pt-2 border-t">
+                    <Label>Status</Label>
                     <Select value={editForm.status} onValueChange={(v) => setEditForm(prev => ({ ...prev, status: v as "Completed" | "In Progress" }))}>
-                      <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                      <SelectTrigger className="mt-0 w-full max-w-[200px]"><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="In Progress">In Progress</SelectItem>
                         <SelectItem value="Completed">Completed</SelectItem>
@@ -1171,15 +1239,14 @@ export default function ConsultationHistoryPage() {
                             const items = rx.medications || rx.items || [];
                             return (
                               <li key={rx.id} className="p-3 rounded-lg border bg-muted/30 text-sm">
-                                <span className="font-medium">{rx.prescription_id || `#${rx.id}`}</span>
                                 {items.length ? (
-                                  <ul className="mt-1 text-muted-foreground">
+                                  <ul className="space-y-0.5">
                                     {items.map((m: any, i: number) => (
                                       <li key={i}>{m.medication_name || m.name} — {m.dosage} {m.frequency} {m.duration}</li>
                                     ))}
                                   </ul>
                                 ) : (
-                                  <p className="mt-1 text-muted-foreground">—</p>
+                                  <p className="text-muted-foreground">—</p>
                                 )}
                               </li>
                             );

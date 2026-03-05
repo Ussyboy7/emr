@@ -67,6 +67,7 @@ class Command(BaseCommand):
             # Create wards and beds after users (for head nurse assignment)
             wards_created, beds_created = self._create_wards_and_beds(clinic, users.get('admin'))
             lab_templates = self._create_lab_templates()
+            self._create_radiology_templates()
             medications = self._create_medications()
             icd10_codes = self._create_icd10_codes()
             # self._create_diagnoses(users, icd10_codes)  # Disabled - no demo diagnosis data
@@ -705,6 +706,15 @@ class Command(BaseCommand):
         templates = list(LabTemplate.objects.all())
         self.stdout.write(f"  ✓ Loaded {len(templates)} lab templates")
         return templates
+
+    def _create_radiology_templates(self):
+        """Seed radiology imaging templates (X-Ray, Ultrasound, MRI, CT, etc.) so Order Imaging Study has options."""
+        self.stdout.write("Seeding radiology templates...")
+        call_command("populate_radiology_templates")
+        from radiology.models import RadiologyTemplate
+        count = RadiologyTemplate.objects.count()
+        self.stdout.write(f"  ✓ Loaded {count} radiology templates")
+        return count
 
     def _create_medications(self):
         self.stdout.write("Creating medications...")

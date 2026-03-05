@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -38,6 +38,8 @@ export function LabOrderModal({
   onSubmit: (payload: LabOrderSubmitInput) => Promise<void>;
   confirmLabel?: string;
 }) {
+  const searchRequestIdRef = useRef(0);
+  const dropdownContainerRef = useRef<HTMLDivElement>(null);
   const [templates, setTemplates] = useState<LabTemplateLike[]>([]);
   const [loadingTemplates, setLoadingTemplates] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -45,6 +47,7 @@ export function LabOrderModal({
   const [search, setSearch] = useState("");
   const [showDropdown, setShowDropdown] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [selectedDetails, setSelectedDetails] = useState<Map<number, LabTemplateLike>>(new Map());
 
   const [priority, setPriority] = useState<"routine" | "urgent" | "stat">("routine");
   const [clinicalNotes, setClinicalNotes] = useState("");
@@ -53,52 +56,69 @@ export function LabOrderModal({
     setSearch("");
     setShowDropdown(false);
     setSelected(new Set());
+    setSelectedDetails(new Map());
+    setTemplates([]);
     setPriority("routine");
     setClinicalNotes("");
     setSubmitting(false);
   }, []);
 
+  // Debounced search (same pattern as Prescription): search as you type, 300ms
   useEffect(() => {
-    if (!open) return;
-    const load = async () => {
+    if (!open || !showDropdown) return;
+    const searchTerm = search.trim();
+    if (!searchTerm) {
+      setTemplates([]);
+      return;
+    }
+    const requestId = ++searchRequestIdRef.current;
+    const timeout = setTimeout(async () => {
       try {
         setLoadingTemplates(true);
-        const res = await labService.getTemplates({ page_size: 500 } as any);
-        setTemplates((res as any)?.results || []);
+        const res = await labService.getTemplates({ search: searchTerm, page_size: 50 } as any);
+        if (requestId === searchRequestIdRef.current) {
+          setTemplates((res as any)?.results || []);
+        }
       } catch (err: any) {
-        console.error("Failed to load lab templates:", err);
-        toast.error("Failed to load lab templates");
-        setTemplates([]);
+        if (requestId === searchRequestIdRef.current) {
+          console.error("Failed to search lab templates:", err);
+          toast.error("Failed to load lab templates");
+          setTemplates([]);
+        }
       } finally {
-        setLoadingTemplates(false);
+        if (requestId === searchRequestIdRef.current) {
+          setLoadingTemplates(false);
+        }
       }
-    };
-    load();
-  }, [open]);
+    }, 300);
+    return () => clearTimeout(timeout);
+  }, [open, showDropdown, search]);
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return templates;
-    return templates.filter((t) => {
-      return (
-        (t.name || "").toLowerCase().includes(q) ||
-        (t.code || "").toLowerCase().includes(q) ||
-        (t.sample_type || "").toLowerCase().includes(q) ||
-        (t.description || "").toLowerCase().includes(q)
-      );
-    });
-  }, [templates, search]);
+  // Close dropdown when clicking outside the search block
+  useEffect(() => {
+    if (!open || !showDropdown) return;
+    const handlePointerDown = (e: PointerEvent) => {
+      const target = e.target as Node;
+      const el = dropdownContainerRef.current;
+      if (el && !el.contains(target)) setShowDropdown(false);
+    };
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    return () => document.removeEventListener("pointerdown", handlePointerDown, true);
+  }, [open, showDropdown]);
 
   const toggle = (t: LabTemplateLike) => {
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(t.id)) {
         next.delete(t.id);
+        setSelectedDetails((d) => {
+          const m = new Map(d);
+          m.delete(t.id);
+          return m;
+        });
       } else {
         next.add(t.id);
-        // Match consultation session behavior: clear search + close dropdown on select
-        setShowDropdown(false);
-        setSearch("");
+        setSelectedDetails((d) => new Map(d).set(t.id, t));
       }
       return next;
     });
@@ -110,7 +130,9 @@ export function LabOrderModal({
       return;
     }
 
-    const selectedTemplates = templates.filter((t) => selected.has(t.id));
+    const selectedTemplates = Array.from(selected)
+      .map((id) => selectedDetails.get(id) || templates.find((t) => t.id === id))
+      .filter((t): t is LabTemplateLike => !!t);
 
     try {
       setSubmitting(true);
@@ -149,16 +171,17 @@ export function LabOrderModal({
         <div className="space-y-4 py-2">
           <div className="space-y-2">
             <Label>Search and Select Tests *</Label>
-            <div className="relative">
+            <div className="relative" ref={dropdownContainerRef}>
               <Input
                 placeholder="Search tests by name, code, or sample type..."
                 value={search}
                 onChange={(e) => {
                   const v = e.target.value;
                   setSearch(v);
-                  setShowDropdown(!!v.trim());
+                  if (v.trim()) setShowDropdown(true);
+                  else setShowDropdown(false);
                 }}
-                onFocus={() => setShowDropdown(!!search.trim())}
+                onFocus={() => { if (search.trim()) setShowDropdown(true); }}
               />
 
               {showDropdown && search.trim() && (
@@ -168,10 +191,10 @@ export function LabOrderModal({
                       <Loader2 className="h-4 w-4 animate-spin mx-auto mb-2" />
                       Loading tests...
                     </div>
-                  ) : filtered.length === 0 ? (
-                    <div className="p-4 text-center text-sm text-muted-foreground">No tests found.</div>
+                  ) : templates.length === 0 ? (
+                    <div className="p-4 text-center text-sm text-muted-foreground">No tests found. Try a different search term.</div>
                   ) : (
-                    filtered.slice(0, 30).map((t) => {
+                    templates.map((t) => {
                       const isSelected = selected.has(t.id);
                       return (
                         <div
@@ -203,7 +226,7 @@ export function LabOrderModal({
                 <p className="text-sm font-medium">Selected Tests ({selected.size})</p>
                 <div className="flex flex-wrap gap-2">
                   {Array.from(selected).map((id) => {
-                    const t = templates.find((x) => x.id === id);
+                    const t = selectedDetails.get(id) || templates.find((x) => x.id === id);
                     if (!t) return null;
                     return (
                       <Badge key={id} variant="secondary" className="flex items-center gap-1">
@@ -213,7 +236,7 @@ export function LabOrderModal({
                     );
                   })}
                 </div>
-                <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())} className="text-xs">
+                <Button variant="ghost" size="sm" onClick={() => { setSelected(new Set()); setSelectedDetails(new Map()); }} className="text-xs">
                   Clear All
                 </Button>
               </div>

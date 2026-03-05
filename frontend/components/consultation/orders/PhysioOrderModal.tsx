@@ -15,7 +15,7 @@ export type PhysioOrderSubmitInput = {
   chiefComplaint: string;
   treatmentGoal: string;
   specialInstructions: string;
-  priority: "routine" | "urgent";
+  priority: "routine" | "urgent" | "stat";
 };
 
 export function PhysioOrderModal({
@@ -34,10 +34,10 @@ export function PhysioOrderModal({
     treatmentGoal: "",
     specialInstructions: "",
     priority: "routine",
-  });
+  } as PhysioOrderSubmitInput);
 
   const reset = useCallback(() => {
-    setForm({ diagnosis: "", chiefComplaint: "", treatmentGoal: "", specialInstructions: "", priority: "routine" });
+    setForm({ diagnosis: "", chiefComplaint: "", treatmentGoal: "", specialInstructions: "", priority: "routine" } as PhysioOrderSubmitInput);
     setSubmitting(false);
   }, []);
 
@@ -95,25 +95,26 @@ export function PhysioOrderModal({
 
           <div className="space-y-2">
             <Label>Treatment Goal</Label>
-            <Textarea value={form.treatmentGoal} onChange={(e) => setForm((p) => ({ ...p, treatmentGoal: e.target.value }))} placeholder="Expected goals of physiotherapy..." rows={2} />
-          </div>
-
-          <div className="space-y-2">
-            <Label>Special Instructions</Label>
-            <Textarea value={form.specialInstructions} onChange={(e) => setForm((p) => ({ ...p, specialInstructions: e.target.value }))} placeholder="Any special notes or contraindications..." rows={2} />
+            <Textarea value={form.treatmentGoal} onChange={(e) => setForm((p) => ({ ...p, treatmentGoal: e.target.value }))} placeholder="Expected outcomes and treatment objectives..." rows={2} />
           </div>
 
           <div className="space-y-2">
             <Label>Priority</Label>
-            <Select value={form.priority} onValueChange={(v) => setForm((p) => ({ ...p, priority: v as any }))}>
+            <Select value={form.priority} onValueChange={(v) => setForm((p) => ({ ...p, priority: v as "routine" | "urgent" | "stat" }))}>
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="routine">Routine</SelectItem>
                 <SelectItem value="urgent">Urgent</SelectItem>
+                <SelectItem value="stat">STAT</SelectItem>
               </SelectContent>
             </Select>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Special Instructions</Label>
+            <Textarea value={form.specialInstructions} onChange={(e) => setForm((p) => ({ ...p, specialInstructions: e.target.value }))} placeholder="Any special requirements, contraindications, or notes for physiotherapist..." rows={2} />
           </div>
         </div>
 

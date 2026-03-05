@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -12,6 +12,17 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { AlertTriangle, Loader2, Pill, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 import { pharmacyService } from "@/lib/services";
+
+/** Match consultation room: "Name (strength, form)" */
+function formatMedicationVariantLabel(med: { name?: string; strength?: string; form?: string; dosage_form?: string }): string {
+  const name = med?.name || "";
+  const strength = (med?.strength || "").toString().trim();
+  const form = (med?.dosage_form || med?.form || "").toString().trim();
+  if (strength && form) return `${name} (${strength}, ${form})`;
+  if (strength) return `${name} (${strength})`;
+  if (form) return `${name} (${form})`;
+  return name;
+}
 
 const frequencyToDailyDoses: Record<string, number> = {
   "Once daily (OD)": 1,
@@ -67,6 +78,8 @@ type MedicationConfig = {
   form: string;
   quantity?: number;
   instructions: string;
+  name?: string;
+  generic_name?: string;
 };
 
 const PRESCRIPTION_UNIT_OPTIONS = [
@@ -117,35 +130,62 @@ export function PrescriptionOrderModal({
   const [priority, setPriority] = useState<"Routine" | "Urgent" | "STAT">("Routine");
   const [clinicalIndication, setClinicalIndication] = useState("");
 
+  const searchRequestIdRef = useRef(0);
+  const medicationDropdownRef = useRef<HTMLDivElement>(null);
+
   const reset = useCallback(() => {
     setMedicationSearch("");
     setShowMedicationDropdown(false);
     setSelectedMedications([]);
     setMedicationConfigs(new Map());
+    setMedications([]);
     setPriority("Routine");
     setClinicalIndication("");
     setSubmitting(false);
   }, []);
 
+  // Debounced search (same as consultation room): search as you type, 300ms
   useEffect(() => {
-    if (!open) return;
-
-    const load = async () => {
+    if (!open || !showMedicationDropdown) return;
+    const searchTerm = medicationSearch.trim();
+    if (!searchTerm) {
+      setMedications([]);
+      return;
+    }
+    const requestId = ++searchRequestIdRef.current;
+    const timeout = setTimeout(async () => {
       try {
         setLoadingMedications(true);
-        const res = await pharmacyService.getMedications({ page_size: 500 } as any);
-        setMedications((res as any)?.results || []);
+        const res = await pharmacyService.getMedications({ search: searchTerm, page_size: 50 } as any);
+        if (requestId === searchRequestIdRef.current) {
+          setMedications((res as any)?.results || []);
+        }
       } catch (err: any) {
-        console.error("Failed to load medications:", err);
-        toast.error("Failed to load medications");
-        setMedications([]);
+        if (requestId === searchRequestIdRef.current) {
+          console.error("Failed to search medications:", err);
+          toast.error("Failed to load medication search results.");
+          setMedications([]);
+        }
       } finally {
-        setLoadingMedications(false);
+        if (requestId === searchRequestIdRef.current) {
+          setLoadingMedications(false);
+        }
       }
-    };
+    }, 300);
+    return () => clearTimeout(timeout);
+  }, [open, showMedicationDropdown, medicationSearch]);
 
-    load();
-  }, [open]);
+  // Close dropdown when clicking outside the search block
+  useEffect(() => {
+    if (!open || !showMedicationDropdown) return;
+    const handlePointerDown = (e: PointerEvent) => {
+      const target = e.target as Node;
+      const el = medicationDropdownRef.current;
+      if (el && !el.contains(target)) setShowMedicationDropdown(false);
+    };
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    return () => document.removeEventListener("pointerdown", handlePointerDown, true);
+  }, [open, showMedicationDropdown]);
 
   const normalizeMedicationId = (id: number | string | undefined): number | null => {
     if (id == null) return null;
@@ -173,9 +213,7 @@ export function PrescriptionOrderModal({
         // Add to beginning of array (newest first)
         const next = [medId, ...prev];
 
-        // Close dropdown and clear search when medication is selected
-        setShowMedicationDropdown(false);
-        setMedicationSearch("");
+        // Keep dropdown and search open so user can multi-select
 
         // ensure config exists
         setMedicationConfigs((prevConfigs) => {
@@ -194,6 +232,8 @@ export function PrescriptionOrderModal({
               strength: strengthOptions[0] || "",
               form: formOptions[0] || "",
               instructions: "",
+              name: med.name,
+              generic_name: med.generic_name,
             });
           }
           return nextConfigs;
@@ -235,16 +275,8 @@ export function PrescriptionOrderModal({
       : Math.ceil(dosageValue * dailyDoses * Math.max(days || 1, 1));
   }, []);
 
-  const filteredMedications = useMemo(() => {
-    const q = medicationSearch.trim().toLowerCase();
-    if (!q) return medications;
-    return medications.filter((m) => {
-      const name = (m.name || "").toLowerCase();
-      const generic = (m.generic_name || "").toLowerCase();
-      const form = ((m.form || m.dosage_form || (m as any).dosageForm || "") as string).toLowerCase();
-      return name.includes(q) || generic.includes(q) || form.includes(q);
-    });
-  }, [medications, medicationSearch]);
+  // Results come from API search; no client-side filter needed
+  const filteredMedications = medications;
 
   const buildSubmitPayload = (): PrescriptionOrderSubmitInput | null => {
     if (selectedMedications.length === 0) {
@@ -262,11 +294,12 @@ export function PrescriptionOrderModal({
     for (const medId of selectedMedications) {
       const med = medications.find((m) => normalizeMedicationId(m.id) === medId);
       const cfg = medicationConfigs.get(medId);
-      if (!cfg?.dosage?.trim()) missing.push(`${med?.name || "Medication"} - dosage required`);
-      if (!cfg?.frequency) missing.push(`${med?.name || "Medication"} - frequency required`);
-      if (!cfg?.unit?.trim()) missing.push(`${med?.name || "Medication"} - unit required`);
-      if (!cfg?.form?.trim()) missing.push(`${med?.name || "Medication"} - form required`);
-      if (!cfg?.strength?.trim()) missing.push(`${med?.name || "Medication"} - strength required`);
+      const displayName = med?.name || cfg?.name || "Medication";
+      if (!cfg?.dosage?.trim()) missing.push(`${displayName} - dose required`);
+      if (!cfg?.frequency) missing.push(`${displayName} - frequency required`);
+      if (!cfg?.unit?.trim()) missing.push(`${displayName} - dose unit required`);
+      if (!cfg?.form?.trim()) missing.push(`${displayName} - form required`);
+      if (!cfg?.strength?.trim()) missing.push(`${displayName} - strength required`);
       if (!cfg) continue;
 
       // Quantity is inferred from dosage + frequency + durationDays (like room page)
@@ -293,7 +326,7 @@ export function PrescriptionOrderModal({
     }
 
     if (missing.length > 0) {
-      toast.error("Please complete required fields for each medication (dosage, frequency, unit, form, strength).");
+      toast.error("Please complete required fields for each medication (dose, frequency, dose unit).");
       return null;
     }
 
@@ -354,16 +387,17 @@ export function PrescriptionOrderModal({
           {/* Medication Search */}
           <div className="space-y-2">
             <Label>Search and Select Medications *</Label>
-            <div className="relative">
+            <div className="relative" ref={medicationDropdownRef}>
               <Input
-                placeholder="Search medications by name or generic name..."
+                placeholder="Search medications by name, generic name, or category..."
                 value={medicationSearch}
                 onChange={(e) => {
                   const v = e.target.value;
                   setMedicationSearch(v);
-                  setShowMedicationDropdown(!!v.trim());
+                  if (v.trim()) setShowMedicationDropdown(true);
+                  else setShowMedicationDropdown(false);
                 }}
-                onFocus={() => setShowMedicationDropdown(!!medicationSearch.trim())}
+                onFocus={() => { if (medicationSearch.trim()) setShowMedicationDropdown(true); }}
               />
               {showMedicationDropdown && medicationSearch.trim() && (
                 <div className="absolute z-50 w-full mt-1 bg-white dark:bg-gray-800 border rounded-md shadow-lg max-h-[300px] overflow-y-auto">
@@ -373,9 +407,9 @@ export function PrescriptionOrderModal({
                       Loading medications...
                     </div>
                   ) : filteredMedications.length === 0 ? (
-                    <div className="p-4 text-center text-sm text-muted-foreground">No medications found.</div>
+                    <div className="p-4 text-center text-sm text-muted-foreground">No medications found. Try a different search term.</div>
                   ) : (
-                    filteredMedications.slice(0, 50).map((med) => {
+                    filteredMedications.map((med) => {
                       const id = normalizeMedicationId(med.id);
                       if (!id) return null;
                       const isSelected = selectedMedications.includes(id);
@@ -389,11 +423,10 @@ export function PrescriptionOrderModal({
                         >
                           <Checkbox checked={isSelected} onCheckedChange={() => toggleMedicationSelection(med)} />
                           <div className="flex-1 min-w-0">
-                            <div className="font-medium text-sm">{med.name}</div>
-                            <div className="text-xs text-muted-foreground mt-1">
-                              {(med.generic_name || "").trim() ? `${med.generic_name}` : ""}
-                              {med.strength ? ` • ${med.strength}` : ""}
-                            </div>
+                            <div className="font-medium text-sm">{formatMedicationVariantLabel(med)}</div>
+                            {(med.generic_name || "").trim() ? (
+                              <div className="text-xs text-muted-foreground mt-1">{med.generic_name}</div>
+                            ) : null}
                           </div>
                         </div>
                       );
@@ -407,20 +440,17 @@ export function PrescriptionOrderModal({
               <div className="mt-2 space-y-2">
                 <div className="text-sm font-medium">Selected Medications ({selectedMedications.length}):</div>
                 <div className="flex flex-wrap gap-2">
-                  {medications
-                    .filter((m) => {
-                      const id = normalizeMedicationId(m.id);
-                      return id != null && selectedMedications.includes(id);
-                    })
-                    .map((med) => {
-                      const id = normalizeMedicationId(med.id)!;
-                      return (
-                        <Badge key={id} variant="secondary" className="flex items-center gap-1">
-                          {med.name}
-                          <X className="h-3 w-3 cursor-pointer" onClick={() => toggleMedicationSelection(med)} />
-                        </Badge>
-                      );
-                    })}
+                  {selectedMedications.map((medId) => {
+                    const med = medications.find((m) => normalizeMedicationId(m.id) === medId);
+                    const cfg = medicationConfigs.get(medId);
+                    const displayName = med ? formatMedicationVariantLabel(med) : (cfg ? formatMedicationVariantLabel({ name: cfg.name, strength: cfg.strength, form: cfg.form }) : "Medication");
+                    return (
+                      <Badge key={medId} variant="secondary" className="flex items-center gap-1">
+                        {displayName}
+                        <X className="h-3 w-3 cursor-pointer" onClick={() => toggleMedicationSelection(med || { id: medId })} />
+                      </Badge>
+                    );
+                  })}
                 </div>
                 <Button
                   variant="ghost"
@@ -443,7 +473,7 @@ export function PrescriptionOrderModal({
               <div className="flex items-center justify-between">
                 <div>
                   <Label className="text-sm font-semibold">Configure Prescriptions</Label>
-                  <p className="text-xs text-muted-foreground mt-1">Set strength, frequency, duration, and route for each selected medication</p>
+                  <p className="text-xs text-muted-foreground mt-1">Set dose, frequency, duration, and route for each selected medication</p>
                 </div>
                 <Badge variant="outline" className="text-xs">
                   {selectedMedications.length} medication{selectedMedications.length > 1 ? "s" : ""} selected
@@ -453,116 +483,125 @@ export function PrescriptionOrderModal({
               <div className="space-y-3">
                 {selectedMedications.map((medId) => {
                   const med = medications.find((m) => normalizeMedicationId(m.id) === medId);
-                  if (!med) return null;
-                  const cfg = medicationConfigs.get(medId) || {
+                  const cfg = medicationConfigs.get(medId);
+                  if (!cfg) return null;
+                  const displayMed = med || { id: medId, name: cfg.name, generic_name: cfg.generic_name, strength: cfg.strength, form: cfg.form, dosage_form: cfg.form };
+                  const defaultCfg = {
                     dosage: "",
-                    frequency: "Once daily (OD)",
+                    frequency: "Once daily (OD)" as const,
                     durationDays: "" as const,
                     route: "Oral",
-                    unit: med.unit || parseMedicationOptions(med.dosage_form || med.form || (med as any).dosageForm)[0] || "tablet",
-                    strength: parseMedicationOptions(med.strength)[0] || "",
-                    form: parseMedicationOptions(med.dosage_form || med.form || (med as any).dosageForm)[0] || "",
+                    unit: med?.unit || parseMedicationOptions(med?.dosage_form || med?.form || (med as any)?.dosageForm)[0] || "tablet",
+                    strength: med ? parseMedicationOptions(med.strength)[0] || "" : cfg.strength,
+                    form: med ? parseMedicationOptions(med.dosage_form || med.form || (med as any)?.dosageForm)[0] || "" : cfg.form,
                     quantity: 0,
                     instructions: "",
                   };
-                  const formOptions = parseMedicationOptions(med.dosage_form || med.form || (med as any).dosageForm);
-                  const strengthOptions = parseMedicationOptions(med.strength);
-                  const calculatedQuantity = getCalculatedQuantity(cfg);
+                  const mergedCfg = { ...defaultCfg, ...cfg };
 
                   return (
                     <div key={medId} className="rounded-lg border border-l-4 border-l-violet-500 p-4">
                       <div className="flex items-start justify-between mb-3">
                         <div>
-                          <div className="font-medium text-sm">{med.name}</div>
-                          {med.generic_name && (
-                            <div className="text-xs text-muted-foreground">
-                              {med.generic_name}
-                            </div>
+                          <div className="font-medium text-sm">{formatMedicationVariantLabel(displayMed)}</div>
+                          {(displayMed.generic_name || cfg.generic_name) && (
+                            <div className="text-xs text-muted-foreground">{displayMed.generic_name || cfg.generic_name}</div>
                           )}
                         </div>
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => toggleMedicationSelection(med)}
+                          onClick={() => toggleMedicationSelection(med || { id: medId })}
                           className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
                         >
                           <X className="h-3 w-3" />
                         </Button>
                       </div>
 
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                        <div className="space-y-1">
-                          <Label className="text-xs">
-                            Strength <span className="text-red-500">*</span>
-                          </Label>
-                          <Select value={cfg.unit || "tablet"} onValueChange={(v) => updateMedicationConfig(medId, "unit", v)}>
-                            <SelectTrigger className="h-8 text-xs">
-                              <SelectValue placeholder="Select strength" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {strengthOptions.map((strength) => (
-                                <SelectItem key={strength} value={strength}>
-                                  {strength}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                      <div className="space-y-3">
+                        <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
+                          <div className="space-y-1 md:col-span-4">
+                            <Label className="text-xs">Dose per administration</Label>
+                            <Input
+                              type="text"
+                              inputMode="decimal"
+                              min={0.1}
+                              step={0.1}
+                              placeholder="e.g., 1, 5"
+                              className="h-8 text-xs"
+                              value={mergedCfg.dosage}
+                              onChange={(e) => updateMedicationConfig(medId, "dosage", e.target.value)}
+                            />
+                          </div>
+                          <div className="space-y-1 md:col-span-3">
+                            <Label className="text-xs">Dose unit <span className="text-red-500">*</span></Label>
+                            <Select value={mergedCfg.unit || "tablet"} onValueChange={(v) => updateMedicationConfig(medId, "unit", v)}>
+                              <SelectTrigger className="h-8 text-xs">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {PRESCRIPTION_UNIT_OPTIONS.map((u) => (
+                                  <SelectItem key={u} value={u}>{u}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-1 md:col-span-5">
+                            <Label className="text-xs">Frequency <span className="text-red-500">*</span></Label>
+                            <Select value={mergedCfg.frequency || "Once daily (OD)"} onValueChange={(v) => updateMedicationConfig(medId, "frequency", v)}>
+                              <SelectTrigger className="h-8 text-xs">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="Once daily (OD)">Once daily (OD)</SelectItem>
+                                <SelectItem value="Twice daily (BD)">Twice daily (BD)</SelectItem>
+                                <SelectItem value="Three times daily (TDS)">Three times daily (TDS)</SelectItem>
+                                <SelectItem value="Four times daily (QDS)">Four times daily (QDS)</SelectItem>
+                                <SelectItem value="Every 6 hours (Q6H)">Every 6 hours</SelectItem>
+                                <SelectItem value="Every 8 hours (Q8H)">Every 8 hours</SelectItem>
+                                <SelectItem value="Every 12 hours (Q12H)">Every 12 hours</SelectItem>
+                                <SelectItem value="As needed (PRN)">As needed (PRN)</SelectItem>
+                                <SelectItem value="STAT (Single dose)">STAT (Single dose)</SelectItem>
+                                <SelectItem value="Weekly">Weekly</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
                         </div>
-                        <div className="space-y-1">
-                          <Label className="text-xs">
-                            Frequency <span className="text-red-500">*</span>
-                          </Label>
-                          <Select value={cfg.frequency || "Once daily (OD)"} onValueChange={(v) => updateMedicationConfig(medId, "frequency", v)}>
-                            <SelectTrigger className="h-8 text-xs">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="Once daily (OD)">Once daily (OD)</SelectItem>
-                              <SelectItem value="Twice daily (BD)">Twice daily (BD)</SelectItem>
-                              <SelectItem value="Three times daily (TDS)">Three times daily (TDS)</SelectItem>
-                              <SelectItem value="Four times daily (QDS)">Four times daily (QDS)</SelectItem>
-                              <SelectItem value="Every 6 hours (Q6H)">Every 6 hours</SelectItem>
-                              <SelectItem value="Every 8 hours (Q8H)">Every 8 hours</SelectItem>
-                              <SelectItem value="Every 12 hours (Q12H)">Every 12 hours</SelectItem>
-                              <SelectItem value="As needed (PRN)">As needed (PRN)</SelectItem>
-                              <SelectItem value="STAT (Single dose)">STAT (Single dose)</SelectItem>
-                              <SelectItem value="Weekly">Weekly</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="space-y-1">
-                          <Label className="text-xs">Duration (days)</Label>
-                          <Input
-                            type="number"
-                            min="1"
-                            placeholder="e.g., 7"
-                            className="h-8 text-xs"
-                            value={cfg.durationDays === "" ? "" : String(cfg.durationDays)}
-                            onChange={(e) => {
-                              const value = e.target.value;
-                              const days = value === "" ? "" : parseInt(value, 10) || "";
-                              updateMedicationConfig(medId, "durationDays", days);
-                            }}
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <Label className="text-xs">Route</Label>
-                          <Select value={cfg.route || "Oral"} onValueChange={(v) => updateMedicationConfig(medId, "route", v)}>
-                            <SelectTrigger className="h-8 text-xs">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="Oral">Oral</SelectItem>
-                              <SelectItem value="IV">Intravenous (IV)</SelectItem>
-                              <SelectItem value="IM">Intramuscular (IM)</SelectItem>
-                              <SelectItem value="SC">Subcutaneous (SC)</SelectItem>
-                              <SelectItem value="Topical">Topical</SelectItem>
-                              <SelectItem value="Inhalation">Inhalation</SelectItem>
-                              <SelectItem value="Rectal">Rectal</SelectItem>
-                              <SelectItem value="Ophthalmic">Ophthalmic</SelectItem>
-                              <SelectItem value="Otic">Otic</SelectItem>
-                            </SelectContent>
-                          </Select>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          <div className="space-y-1">
+                            <Label className="text-xs">Duration (days)</Label>
+                            <Input
+                              type="number"
+                              min={1}
+                              placeholder="e.g., 7"
+                              className="h-8 text-xs"
+                              value={mergedCfg.durationDays === "" ? "" : String(mergedCfg.durationDays)}
+                              onChange={(e) => {
+                                const value = e.target.value;
+                                const days = value === "" ? "" : parseInt(value, 10) || "";
+                                updateMedicationConfig(medId, "durationDays", days);
+                              }}
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs">Route</Label>
+                            <Select value={mergedCfg.route || "Oral"} onValueChange={(v) => updateMedicationConfig(medId, "route", v)}>
+                              <SelectTrigger className="h-8 text-xs">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="Oral">Oral</SelectItem>
+                                <SelectItem value="IV">Intravenous (IV)</SelectItem>
+                                <SelectItem value="IM">Intramuscular (IM)</SelectItem>
+                                <SelectItem value="SC">Subcutaneous (SC)</SelectItem>
+                                <SelectItem value="Topical">Topical</SelectItem>
+                                <SelectItem value="Inhalation">Inhalation</SelectItem>
+                                <SelectItem value="Rectal">Rectal</SelectItem>
+                                <SelectItem value="Ophthalmic">Ophthalmic</SelectItem>
+                                <SelectItem value="Otic">Otic</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
                         </div>
                       </div>
                     </div>

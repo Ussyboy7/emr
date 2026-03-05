@@ -60,7 +60,7 @@ class ConsultationSessionViewSet(viewsets.ModelViewSet):
     serializer_class = ConsultationSessionSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['room', 'patient', 'doctor', 'status', 'visit']
-    search_fields = ['session_id', 'notes']
+    search_fields = ['session_id', 'notes', 'patient__first_name', 'patient__surname', 'patient__patient_id']
     ordering_fields = ['started_at', 'ended_at']
     ordering = ['-started_at']
     
