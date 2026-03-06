@@ -25,6 +25,7 @@ export default function DrugMasterPage() {
   const [addDrugError, setAddDrugError] = useState<string | null>(null);
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingMedication, setEditingMedication] = useState<Medication | null>(null);
+  const [editModalLoading, setEditModalLoading] = useState(false);
   const [editDrugError, setEditDrugError] = useState<string | null>(null);
   const [selectedDrug, setSelectedDrug] = useState<Medication | null>(null);
   const [showDrugDetailsModal, setShowDrugDetailsModal] = useState(false);
@@ -32,7 +33,7 @@ export default function DrugMasterPage() {
   const [drugCurrentPage, setDrugCurrentPage] = useState(1);
   const [drugItemsPerPage, setDrugItemsPerPage] = useState(10);
 
-  const [generics, setGenerics] = useState<Array<{ id: number; name: string }>>([]);
+  const [generics, setGenerics] = useState<Array<{ id: number; name: string; unit?: string }>>([]);
   const [newGenericName, setNewGenericName] = useState("");
 
   const [formData, setFormData] = useState({
@@ -72,7 +73,7 @@ export default function DrugMasterPage() {
   const loadGenerics = async () => {
     try {
       const res = await pharmacyService.getGenerics({ page: 1, page_size: 1000 });
-      setGenerics((res.results || []).map((g: any) => ({ id: g.id, name: g.name })));
+      setGenerics((res.results || []).map((g: any) => ({ id: g.id, name: g.name, unit: g.unit })));
     } catch {
       // silent
     }
@@ -166,24 +167,46 @@ export default function DrugMasterPage() {
     }
   };
 
-  const openEditModal = (med: Medication) => {
+  const openEditModal = async (med: Medication) => {
     setEditingMedication(med);
     setEditDrugError(null);
-    setEditFormData({
-      name: med.name || "",
-      generic_id: med.generic?.id ? String(med.generic.id) : "",
-      code: med.code || "",
-      unit: med.unit || "tablet",
-      strength: med.strength || "",
-      strengthCustom: "",
-      form: med.form || "",
-      category: med.category || "",
-      pack_size: typeof med.pack_size === "number" ? String(med.pack_size) : "",
-      manufacturer: med.manufacturer || "",
-      min_stock_level: med.min_stock_level !== undefined && med.min_stock_level !== null ? String(Number(med.min_stock_level)) : "0",
-      is_active: med.is_active ?? true,
-    });
     setShowEditModal(true);
+    setEditModalLoading(true);
+    try {
+      const latest = await pharmacyService.getMedication(med.id);
+      setEditFormData({
+        name: latest.name || "",
+        generic_id: latest.generic?.id ? String(latest.generic.id) : "",
+        code: latest.code || "",
+        unit: latest.unit || "tablet",
+        strength: latest.strength || "",
+        strengthCustom: "",
+        form: latest.form || "",
+        category: (latest.category || "").trim(),
+        pack_size: typeof latest.pack_size === "number" ? String(latest.pack_size) : "",
+        manufacturer: latest.manufacturer || "",
+        min_stock_level: latest.min_stock_level !== undefined && latest.min_stock_level !== null ? String(Number(latest.min_stock_level)) : "0",
+        is_active: latest.is_active ?? true,
+      });
+      setMedications((prev) => prev.map((m) => (m.id === latest.id ? latest : m)));
+    } catch {
+      setEditFormData({
+        name: med.name || "",
+        generic_id: med.generic?.id ? String(med.generic.id) : "",
+        code: med.code || "",
+        unit: med.unit || "tablet",
+        strength: med.strength || "",
+        strengthCustom: "",
+        form: med.form || "",
+        category: (med.category || "").trim(),
+        pack_size: typeof med.pack_size === "number" ? String(med.pack_size) : "",
+        manufacturer: med.manufacturer || "",
+        min_stock_level: med.min_stock_level !== undefined && med.min_stock_level !== null ? String(Number(med.min_stock_level)) : "0",
+        is_active: med.is_active ?? true,
+      });
+    } finally {
+      setEditModalLoading(false);
+    }
   };
 
   const extractStrengthFromName = (name: string) => {
@@ -476,7 +499,17 @@ export default function DrugMasterPage() {
               </div>
               <div>
                 <Label>Generic Medication</Label>
-                <Select value={formData.generic_id} onValueChange={(val) => setFormData({ ...formData, generic_id: val })}>
+                <Select
+                  value={formData.generic_id}
+                  onValueChange={(val) => {
+                    const g = generics.find((x) => String(x.id) === val);
+                    setFormData({
+                      ...formData,
+                      generic_id: val,
+                      ...(g?.unit ? { unit: g.unit.toLowerCase() } : {}),
+                    });
+                  }}
+                >
                   <SelectTrigger className="mt-1">
                     <SelectValue placeholder="Select generic" />
                   </SelectTrigger>
@@ -499,8 +532,8 @@ export default function DrugMasterPage() {
                       }
                       try {
                         const g = await pharmacyService.createGeneric({ name: newGenericName.trim() });
-                        setGenerics((prev) => [{ id: g.id, name: g.name }, ...prev]);
-                        setFormData({ ...formData, generic_id: String(g.id) });
+                        setGenerics((prev) => [{ id: g.id, name: g.name, unit: (g as any).unit || "tablet" }, ...prev]);
+                        setFormData({ ...formData, generic_id: String(g.id), ...((g as any).unit ? { unit: String((g as any).unit).toLowerCase() } : {}) });
                         setNewGenericName("");
                         toast.success("Generic created");
                       } catch (e: any) {
@@ -638,6 +671,13 @@ export default function DrugMasterPage() {
             {editDrugError && (
               <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{editDrugError}</div>
             )}
+            {editModalLoading && (
+              <div className="flex items-center justify-center py-8 text-muted-foreground">
+                <Loader2 className="h-6 w-6 animate-spin mr-2" />
+                Loading drug details…
+              </div>
+            )}
+            {!editModalLoading && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <Label>Name *</Label>
@@ -666,7 +706,7 @@ export default function DrugMasterPage() {
                 <Label>Unit *</Label>
                 <Select value={editFormData.unit} onValueChange={(val) => setEditFormData({ ...editFormData, unit: val })}>
                   <SelectTrigger className="mt-1">
-                    <SelectValue />
+                    <SelectValue placeholder="Select unit" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="tablet">Tablet</SelectItem>
@@ -763,12 +803,13 @@ export default function DrugMasterPage() {
                 </label>
               </div>
             </div>
+            )}
 
             <DialogFooter>
-              <Button variant="outline" onClick={() => setShowEditModal(false)}>
+              <Button variant="outline" onClick={() => setShowEditModal(false)} disabled={editModalLoading}>
                 Cancel
               </Button>
-              <Button onClick={handleUpdateMedication} className="bg-violet-600 hover:bg-violet-700">
+              <Button onClick={handleUpdateMedication} className="bg-violet-600 hover:bg-violet-700" disabled={editModalLoading}>
                 Save Changes
               </Button>
             </DialogFooter>
@@ -799,6 +840,10 @@ export default function DrugMasterPage() {
                 <div>
                   <p className="text-muted-foreground">Form</p>
                   <p className="font-medium">{selectedDrug.form || "—"}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Unit</p>
+                  <p className="font-medium">{selectedDrug.unit || "—"}</p>
                 </div>
                 <div>
                   <p className="text-muted-foreground">Category</p>

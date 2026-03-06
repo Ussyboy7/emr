@@ -342,7 +342,7 @@ export default function WarehouseStorePage() {
   const downloadBulkTemplate = () => {
     const csv = [
       "medication_id,batch_number,expiry_date,quantity,unit,supplier,min_stock_level",
-      "123,BT-2026-001,2028-01-22,100,tablet,Default Supplier,50",
+      "123,BT-2026-001,2028-01-22,100,tablet,Acme Pharma,50",
     ].join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);

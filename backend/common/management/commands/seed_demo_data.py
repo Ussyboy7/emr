@@ -19,7 +19,10 @@ from django.contrib.auth import get_user_model
 
 from accounts.models import User
 from laboratory.models import LabTemplate, LabOrder, LabTest
-from pharmacy.models import GenericMedication, Medication, MedicationInventory, Prescription, PrescriptionItem
+from pharmacy.models import (
+    GenericMedication, Medication, MedicationInventory, Prescription, PrescriptionItem,
+    StockRequest, StockRequestItem, StockIssue, StockIssueLine, DispensaryReceiptLine,
+)
 from radiology.models import RadiologyOrder, RadiologyStudy
 from consultation.models import ConsultationRoom, ConsultationSession, ConsultationQueue, ICD10Code, Diagnosis
 from nursing.models import NursingOrder
@@ -733,6 +736,7 @@ class Command(BaseCommand):
                 + ", ".join(missing)
             )
 
+        # Maps CSV/display category to Medication.CATEGORY_CHOICES so DB only stores valid choices.
         category_map = {
             "Antibiotic": "Antibiotics",
             "Antimalarial": "Antimalarials",
@@ -743,6 +747,8 @@ class Command(BaseCommand):
             "Antidepressant": "Antidepressants",
             "Diuretic": "Diuretics",
             "Antihypertensive": "Antihypertensives",
+            "Antihypertensive (CCB)": "Antihypertensives",
+            "Antihypertensive (Beta Blocker)": "Antihypertensives",
             "Ophthalmic": "Ophthalmic",
             "Cough": "Antitussives",
             "Haematinics": "Haematinics",
@@ -763,8 +769,16 @@ class Command(BaseCommand):
             "Hypnotic": "Sedatives",
             "Antimigraine": "AntiMigraine",
             "Lipid": "LipidLowering",
+            "Lipid Lowering (Statin)": "LipidLowering",
             "Otic": "Otic",
             "Hepatoprotective": "Hepatoprotective",
+            "GI (Antacid)": "Antacids",
+            "Antibiotic (Macrolide)": "Antibiotics",
+            "Diuretic (Thiazide)": "Diuretics",
+            "Topical Combination": "Dermatological",
+            "Corticosteroid/Antibiotic": "Corticosteroids",
+            "Antiglaucoma": "AntiGlaucoma",
+            "Anticancer (Antiandrogen)": "Cytotoxic",
         }
 
         def first_option(value: str) -> str:
@@ -800,6 +814,33 @@ class Command(BaseCommand):
             unit = first_option(unit)
             form = first_option(form)
             return unit or form or "unit"
+
+        def infer_generic_unit(dosage_form: str) -> str:
+            """Infer default unit from dosage form for GenericMedication."""
+            f = (dosage_form or "").strip().lower()
+            if not f:
+                return ""
+            if any(k in f for k in ["tablet", "caplet", "chewable"]):
+                return "tablet"
+            if any(k in f for k in ["capsule", "softgel"]):
+                return "capsule"
+            if any(k in f for k in ["syrup", "suspension", "solution", "oral liquid"]):
+                return "bottle"
+            if any(k in f for k in ["injection", "vial", "ampoule"]):
+                return "vial"
+            if any(k in f for k in ["inhaler", "puff"]):
+                return "puff"
+            if any(k in f for k in ["cream", "ointment", "gel", "lotion"]):
+                return "tube"
+            if any(k in f for k in ["drop", "eye", "ear", "otic"]):
+                return "drop"
+            if "sachet" in f:
+                return "sachet"
+            if "suppository" in f:
+                return "suppository"
+            if "patch" in f:
+                return "patch"
+            return f or "tablet"
 
         def resolve_generic_variant(generic_id: str, generic_name: str, strength: str, form: str, category: str):
             base_generic = None
@@ -851,7 +892,8 @@ class Command(BaseCommand):
                     generic_id = (row.get("Generic_ID") or "").strip()
                     name = (row.get("Generic_Name") or "").strip()
                     active_ingredient = (row.get("Active_Ingredient") or "").strip()
-                    category = (row.get("Category") or "").strip() or "Other"
+                    category_raw = (row.get("Category") or "").strip()
+                    category = category_map.get(category_raw, category_raw) or category_raw or "Other"
                     strength = first_option(row.get("Strengths_Available") or "")
                     dosage_form = first_option(row.get("Dosage_Forms") or "")
                     route = first_option(row.get("Route") or "") or infer_route(dosage_form) or "Oral"
@@ -860,12 +902,14 @@ class Command(BaseCommand):
                         skipped += 1
                         continue
 
+                    generic_unit = infer_generic_unit(dosage_form)
                     defaults = {
                         "name": name,
                         "active_ingredient": active_ingredient,
                         "category": category,
                         "strength": strength,
                         "dosage_form": dosage_form,
+                        "unit": generic_unit,
                         "route": route,
                         "is_active": True,
                     }
@@ -889,6 +933,7 @@ class Command(BaseCommand):
                         defaults={
                             "active_ingredient": active_ingredient,
                             "category": category,
+                            "unit": infer_generic_unit(dosage_form),
                             "is_active": True,
                         },
                     )
@@ -912,6 +957,17 @@ class Command(BaseCommand):
                     strength = first_option(row.get("Strength") or "")
                     form = first_option(row.get("Form") or "")
                     unit = normalize_unit(row.get("Unit") or "", form)
+                    # Canonical unit: one of the values the drug-master frontend expects (lowercase)
+                    _allowed_units = ("tablet", "capsule", "ml", "vial", "box", "pack")
+                    _ul = (unit or "tablet").strip().lower()
+                    if _ul in _allowed_units:
+                        unit = _ul
+                    elif _ul in ("bottle", "bottles", "suspension", "syrup"):
+                        unit = "pack"
+                    elif _ul in ("tube", "tubes"):
+                        unit = "box"
+                    else:
+                        unit = "tablet"
                     category_raw = (row.get("Category") or "").strip()
                     manufacturer = (row.get("Manufacturer") or "").strip()
                     pack_size_raw = (row.get("Pack_Size") or "").strip()
@@ -925,18 +981,24 @@ class Command(BaseCommand):
                     except ValueError:
                         pack_size = None
 
-                    category = category_map.get(category_raw, category_raw)
+                    category = category_map.get(category_raw, category_raw) or category_raw
 
                     generic = resolve_generic_variant(
                         generic_id=generic_id,
                         generic_name=generic_name,
                         strength=strength,
                         form=form,
-                        category=category,
+                        category=category or "Other",
                     )
                     if not generic:
                         skipped += 1
                         continue
+
+                    # If CSV had no category, use generic's category so brand shows a category (e.g. Antacid)
+                    if not category and getattr(generic, "category", None):
+                        category = generic.category
+                    # Normalize to Medication.CATEGORY_CHOICES so DB never stores invalid values (e.g. GI (Antacid) -> Antacids)
+                    category = category_map.get(category, category) or category
 
                     if not strength:
                         strength = first_option(generic.strength or "") or "N/A"
@@ -952,6 +1014,8 @@ class Command(BaseCommand):
                     target = by_code or by_brand
                     if not target:
                         try:
+                            brand_category = category or getattr(generic, "category", "") or ""
+                            brand_category = category_map.get(brand_category, brand_category) or brand_category
                             Medication.objects.create(
                                 name=brand_name,
                                 generic=generic,
@@ -960,7 +1024,7 @@ class Command(BaseCommand):
                                 unit=unit,
                                 strength=strength,
                                 form=form,
-                                category=category,
+                                category=brand_category,
                                 manufacturer=manufacturer,
                                 pack_size=pack_size,
                                 prescription_required=False,
@@ -979,7 +1043,8 @@ class Command(BaseCommand):
                     target.unit = unit
                     target.strength = strength
                     target.form = form
-                    target.category = category
+                    target.category = category or getattr(generic, "category", "") or target.category
+                    target.category = category_map.get(target.category, target.category) or target.category
                     target.manufacturer = manufacturer
                     target.pack_size = pack_size
                     target.prescription_required = False
@@ -1049,7 +1114,7 @@ class Command(BaseCommand):
                         "quantity": default_quantity,
                         "unit": med.unit or "unit",
                         "min_stock_level": default_min_stock,
-                        "supplier": "Default Supplier",
+                        "supplier": (med.manufacturer or "").strip(),
                     },
                 )
                 if created:
@@ -1066,7 +1131,7 @@ class Command(BaseCommand):
                         "quantity": default_quantity,
                         "unit": med.unit or "unit",
                         "min_stock_level": default_min_stock,
-                        "supplier": "Default Supplier",
+                        "supplier": (med.manufacturer or "").strip(),
                     },
                 )
                 if created:
@@ -1074,56 +1139,67 @@ class Command(BaseCommand):
 
         today = timezone.now().date()
         dispensary_quantity = Decimal("10000")
-        dispensary_has_any = MedicationInventory.objects.filter(location="Dispensary").exists()
+        dispensary_has_any = DispensaryReceiptLine.objects.filter(quantity_remaining__gt=0).exists()
         should_seed_dispensary = self._force_pharmacy_inventory or not dispensary_has_any
         created_disp = 0
-        updated_disp = 0
         if should_seed_dispensary:
-            for med in meds.order_by("name"):
-                source = (
-                    MedicationInventory.objects.filter(
-                        medication=med,
-                        location="Store",
-                        expiry_date__gt=today,
-                    )
-                    .order_by("expiry_date")
-                    .first()
+            # Seed Dispensary via Central Store flow: StockRequest -> StockIssue -> DispensaryReceiptLine
+            seed_user = User.objects.filter(is_active=True).first()
+            with transaction.atomic():
+                req = StockRequest.objects.create(
+                    status="fulfilled",
+                    from_location="Store",
+                    to_location="Dispensary",
+                    requested_by=seed_user,
+                    notes="Seeded from Central Store",
                 )
-                if not source:
-                    continue
-
-                if self._force_pharmacy_inventory:
-                    _, created = MedicationInventory.objects.update_or_create(
-                        medication=med,
-                        batch_number=source.batch_number,
-                        location="Dispensary",
-                        defaults={
-                            "expiry_date": source.expiry_date,
-                            "quantity": dispensary_quantity,
-                            "min_stock_level": source.min_stock_level,
-                            "unit": source.unit,
-                            "supplier": source.supplier,
-                        },
-                    )
-                    if created:
-                        created_disp += 1
-                    else:
-                        updated_disp += 1
-                    continue
-
-                _, created = MedicationInventory.objects.get_or_create(
-                    medication=med,
-                    batch_number=source.batch_number,
-                    location="Dispensary",
-                    defaults={
-                        "expiry_date": source.expiry_date,
-                        "quantity": dispensary_quantity,
-                        "min_stock_level": source.min_stock_level,
-                        "unit": source.unit,
-                        "supplier": source.supplier,
-                    },
+                issue = StockIssue.objects.create(
+                    request=req,
+                    issued_by=seed_user,
+                    notes=f"Seeded request {req.request_id}",
                 )
-                if created:
+                for med in meds.order_by("name"):
+                    source = (
+                        MedicationInventory.objects.filter(
+                            medication=med,
+                            location="Store",
+                            quantity__gt=0,
+                            expiry_date__gt=today,
+                        )
+                        .order_by("expiry_date")
+                        .first()
+                    )
+                    if not source:
+                        continue
+                    transfer_qty = min(source.quantity, dispensary_quantity)
+                    if transfer_qty <= 0:
+                        continue
+                    item = StockRequestItem.objects.create(
+                        request=req,
+                        medication=med,
+                        quantity=transfer_qty,
+                        fulfilled_quantity=transfer_qty,
+                    )
+                    source.quantity -= transfer_qty
+                    source.save(update_fields=["quantity"])
+                    issue_line = StockIssueLine.objects.create(
+                        issue=issue,
+                        medication=med,
+                        source_inventory_item=source,
+                        destination_inventory_item=None,
+                        quantity=transfer_qty,
+                    )
+                    DispensaryReceiptLine.objects.create(
+                        medication=med,
+                        quantity=transfer_qty,
+                        quantity_remaining=transfer_qty,
+                        received_at=issue.issued_at,
+                        request=req,
+                        issue=issue,
+                        stock_issue_line=issue_line,
+                        batch_number=source.batch_number or "",
+                        expiry_date=source.expiry_date,
+                    )
                     created_disp += 1
 
         if self._force_pharmacy_inventory:
@@ -1131,12 +1207,9 @@ class Command(BaseCommand):
         else:
             self.stdout.write(f"  ✓ Seeded Store inventory for {meds.count()} medications (created {created_store}, unchanged {meds.count() - created_store})")
         if should_seed_dispensary:
-            if self._force_pharmacy_inventory:
-                self.stdout.write(f"  ✓ Seeded Dispensary inventory for {meds.count()} medications (created {created_disp}, updated {updated_disp})")
-            else:
-                self.stdout.write(f"  ✓ Seeded Dispensary inventory for {meds.count()} medications (created {created_disp}, unchanged {meds.count() - created_disp})")
+            self.stdout.write(f"  ✓ Seeded Dispensary from Central Store: {created_disp} receipt lines (request {req.request_id})")
         else:
-            self.stdout.write("  ✓ Skipped Dispensary inventory seeding (already has stock)")
+            self.stdout.write("  ✓ Skipped Dispensary seeding (already has receipt stock)")
         self.stdout.write(f"  ✓ Total medications: {Medication.objects.count()}")
         return list(meds)
 

@@ -95,7 +95,28 @@ const PRESCRIPTION_UNIT_OPTIONS = [
   "suppository",
   "puff",
   "patch",
+  "tube",
+  "bottle",
 ];
+
+/** Normalize API unit (e.g. "Tablet") to a value that exists in PRESCRIPTION_UNIT_OPTIONS so the Select displays correctly. */
+function normalizeDoseUnit(unit: string | undefined): string {
+  if (!unit || typeof unit !== "string") return "tablet";
+  const u = unit.trim().toLowerCase();
+  if (PRESCRIPTION_UNIT_OPTIONS.includes(u)) return u;
+  if (u === "tablets") return "tablet";
+  if (u === "capsules") return "capsule";
+  if (u === "vials") return "vial";
+  if (u === "puffs") return "puff";
+  if (u === "drops") return "drop";
+  if (u === "tubes") return "tube";
+  if (u === "bottles") return "bottle";
+  if (u === "sachets") return "sachet";
+  if (u === "suppositories") return "suppository";
+  if (u === "patches") return "patch";
+  if (u === "ampoules") return "ampoule";
+  return "tablet";
+}
 
 const parseMedicationOptions = (value: unknown): string[] => {
   if (typeof value !== "string") return [];
@@ -228,7 +249,7 @@ export function PrescriptionOrderModal({
               frequency: "Once daily (OD)",
               durationDays: "",
               route: defaultRoute,
-              unit: med.unit || formOptions[0] || "tablet",
+              unit: normalizeDoseUnit(med.unit || formOptions[0] || undefined),
               strength: strengthOptions[0] || "",
               form: formOptions[0] || "",
               instructions: "",
@@ -491,7 +512,7 @@ export function PrescriptionOrderModal({
                     frequency: "Once daily (OD)" as const,
                     durationDays: "" as const,
                     route: "Oral",
-                    unit: med?.unit || parseMedicationOptions(med?.dosage_form || med?.form || (med as any)?.dosageForm)[0] || "tablet",
+                    unit: normalizeDoseUnit(med?.unit || parseMedicationOptions(med?.dosage_form || med?.form || (med as any)?.dosageForm)[0] || undefined),
                     strength: med ? parseMedicationOptions(med.strength)[0] || "" : cfg.strength,
                     form: med ? parseMedicationOptions(med.dosage_form || med.form || (med as any)?.dosageForm)[0] || "" : cfg.form,
                     quantity: 0,
@@ -535,7 +556,7 @@ export function PrescriptionOrderModal({
                           </div>
                           <div className="space-y-1 md:col-span-3">
                             <Label className="text-xs">Dose unit <span className="text-red-500">*</span></Label>
-                            <Select value={mergedCfg.unit || "tablet"} onValueChange={(v) => updateMedicationConfig(medId, "unit", v)}>
+                            <Select value={normalizeDoseUnit(mergedCfg.unit) || "tablet"} onValueChange={(v) => updateMedicationConfig(medId, "unit", v)}>
                               <SelectTrigger className="h-8 text-xs">
                                 <SelectValue />
                               </SelectTrigger>

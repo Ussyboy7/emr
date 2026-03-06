@@ -16,11 +16,12 @@ from django.utils.decorators import method_decorator
 from django.views.decorators.cache import never_cache
 from decimal import Decimal, InvalidOperation
 
-from .models import GenericMedication, Medication, MedicationInventory, Prescription, PrescriptionItem, Dispense, StockRequest, StockRequestItem, StockIssue, StockIssueLine
+from .models import GenericMedication, Medication, MedicationInventory, Prescription, PrescriptionItem, Dispense, StockRequest, StockRequestItem, StockIssue, StockIssueLine, DispensaryReceiptLine
 from .serializers import (
     GenericMedicationSerializer,
     MedicationSerializer,
     MedicationInventorySerializer,
+    DispensaryReceiptLineSerializer,
     PrescriptionSerializer,
     PrescriptionItemSerializer,
     DispenseSerializer,
@@ -222,11 +223,18 @@ class MedicationInventoryViewSet(viewsets.ModelViewSet):
     search_fields = ['medication__name', 'batch_number']
     ordering_fields = ['expiry_date', 'created_at']
     ordering = ['expiry_date']
-    
+
+    def _is_dispensary_request(self):
+        loc = (self.request.query_params.get('location') or '').strip().lower()
+        return loc == 'dispensary'
+
     def get_queryset(self):
+        if self._is_dispensary_request():
+            return DispensaryReceiptLine.objects.filter(quantity_remaining__gt=0).select_related(
+                'medication', 'medication__generic', 'request', 'issue', 'issue__request',
+                'stock_issue_line', 'stock_issue_line__source_inventory_item'
+            ).order_by('received_at')
         queryset = MedicationInventory.objects.all().select_related('medication')
-        
-        # Stock status filtering
         stock_status = self.request.query_params.get('stock_status')
         if stock_status:
             if stock_status == 'out':
@@ -234,18 +242,48 @@ class MedicationInventoryViewSet(viewsets.ModelViewSet):
             elif stock_status == 'low':
                 queryset = queryset.filter(quantity__gt=0, quantity__lte=F('min_stock_level'))
             elif stock_status == 'normal':
-                # Normal stock: > min_stock AND (<= max_stock OR max_stock is null)
-                # If max_stock is set, check it. If not, just check min_stock.
                 queryset = queryset.filter(quantity__gt=F('min_stock_level'))
                 queryset = queryset.filter(
-                    Q(max_stock_level__isnull=True) | 
+                    Q(max_stock_level__isnull=True) |
                     Q(quantity__lte=F('max_stock_level'))
                 )
             elif stock_status == 'over':
                 queryset = queryset.filter(quantity__gt=F('max_stock_level'))
-                
         return queryset
-    
+
+    def list(self, request, *args, **kwargs):
+        if self._is_dispensary_request():
+            return self._list_dispensary_receipts(request, *args, **kwargs)
+        return super().list(request, *args, **kwargs)
+
+    def _list_dispensary_receipts(self, request, *args, **kwargs):
+        from rest_framework.response import Response
+        queryset = self.get_queryset()
+        search = (request.query_params.get('search') or '').strip()
+        if search:
+            queryset = queryset.filter(
+                Q(medication__name__icontains=search) |
+                Q(medication__code__icontains=search) |
+                Q(batch_number__icontains=search)
+            )
+        category = request.query_params.get('medication__category', '').strip()
+        if category:
+            queryset = queryset.filter(medication__category=category)
+        stock_status = request.query_params.get('stock_status')
+        if stock_status == 'out':
+            queryset = queryset.filter(quantity_remaining=0)
+        elif stock_status == 'low':
+            queryset = queryset.filter(quantity_remaining__gt=0, quantity_remaining__lte=F('medication__min_stock_level'))
+        elif stock_status == 'normal':
+            queryset = queryset.filter(quantity_remaining__gt=F('medication__min_stock_level'))
+        queryset = queryset.order_by('received_at')
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = DispensaryReceiptLineSerializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        serializer = DispensaryReceiptLineSerializer(queryset, many=True)
+        return Response(serializer.data)
+
     def perform_create(self, serializer):
         """Create inventory item and log audit."""
         inventory = serializer.save()
@@ -437,19 +475,25 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
         inventory_id = request.data.get('inventory_id')
-        
+        receipt_line_id = request.data.get('receipt_line_id')
+        inventory = None
+        receipt_line = None
+
         try:
             item = prescription.medications.get(id=item_id)
+            dispensed_medication = item.medication
 
-            # Pharmacy has discretion to determine appropriate quantity based on:
-            # - Available brand packaging (different pack sizes)
-            # - Stock availability
-            # - Professional judgment
-            # - Patient needs
-            # No validation against prescribed quantity - pharmacist decides
-
-            # Check if enough quantity available in stock
-            if inventory_id:
+            if receipt_line_id:
+                receipt_line = DispensaryReceiptLine.objects.select_related('medication').get(id=receipt_line_id)
+                if receipt_line.quantity_remaining < quantity:
+                    return Response(
+                        {'error': 'Insufficient stock'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+                dispensed_medication = receipt_line.medication
+                receipt_line.quantity_remaining -= quantity
+                receipt_line.save(update_fields=['quantity_remaining'])
+            elif inventory_id:
                 inventory = MedicationInventory.objects.get(id=inventory_id)
                 if inventory.quantity < quantity:
                     return Response(
@@ -458,16 +502,10 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
                     )
                 inventory.quantity -= quantity
                 inventory.save()
-            
-            # Determine medication to dispense (Brand)
-            dispensed_medication = item.medication
-            if inventory_id:
-                 # If inventory is selected, that defines the brand being dispensed
-                 dispensed_medication = inventory.medication
-            
-            if not dispensed_medication:
+                dispensed_medication = inventory.medication
+            elif not dispensed_medication:
                 return Response(
-                    {'error': 'Cannot determine medication brand. Please select specific inventory batch.'},
+                    {'error': 'Cannot determine medication brand. Please select specific inventory or receipt.'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
@@ -487,15 +525,21 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
                     # Never fail dispense because of fallback inference
                     pass
 
-            # Create dispense record
+            batch_number = ''
+            if receipt_line:
+                batch_number = receipt_line.batch_number or ''
+            elif inventory:
+                batch_number = inventory.batch_number or ''
+
             dispense = Dispense.objects.create(
                 prescription=prescription,
                 prescription_item=item,
                 medication=dispensed_medication,
-                inventory_item=inventory if inventory_id else None,
+                inventory_item=inventory,
+                dispensary_receipt_line=receipt_line,
                 quantity=quantity,
                 unit=getattr(dispensed_medication, 'unit', None) or item.unit,
-                batch_number=inventory.batch_number if inventory_id else '',
+                batch_number=batch_number,
                 dispensed_by=request.user,
                 notes=request.data.get('notes', '')
             )
@@ -524,7 +568,7 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
                 new_values={'status': prescription.status, 'item_dispensed_quantity': float(item.dispensed_quantity)},
                 metadata={
                     'dispense_id': str(dispense.id),
-                    'batch_number': inventory.batch_number if inventory_id else '',
+                    'batch_number': batch_number,
                     'coverage_quantity': float(coverage_quantity),
                     'coverage_unit': item.unit,
                 },
@@ -532,7 +576,7 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
             )
             
             return Response(DispenseSerializer(dispense).data)
-        except (PrescriptionItem.DoesNotExist, MedicationInventory.DoesNotExist) as e:
+        except (PrescriptionItem.DoesNotExist, MedicationInventory.DoesNotExist, DispensaryReceiptLine.DoesNotExist) as e:
             return Response(
                 {'error': str(e)},
                 status=status.HTTP_404_NOT_FOUND
@@ -1026,37 +1070,62 @@ class StockRequestViewSet(viewsets.ModelViewSet):
                 inv_item.quantity -= transfer_qty
                 inv_item.save()
                 
-                # 2. Add to destination
-                dest_inv, created = MedicationInventory.objects.get_or_create(
-                    medication=item.medication,
-                    batch_number=inv_item.batch_number,
-                    location=stock_request.to_location,
-                    defaults={
-                        'expiry_date': inv_item.expiry_date,
-                        'quantity': 0,
-                        'min_stock_level': inv_item.min_stock_level,
-                        'unit': inv_item.unit,
-                        'supplier': inv_item.supplier
-                    }
+                # 2 & 3. Destination: Store→Dispensary uses DispensaryReceiptLine; else MedicationInventory
+                is_store_to_dispensary = (
+                    stock_request.from_location and 'store' in stock_request.from_location.lower()
+                ) and (
+                    stock_request.to_location and 'dispensary' in stock_request.to_location.lower()
                 )
-                
-                if not created:
-                    dest_inv.quantity += transfer_qty
-                    if dest_inv.min_stock_level == 0 and inv_item.min_stock_level:
-                        dest_inv.min_stock_level = inv_item.min_stock_level
-                    dest_inv.save()
+
+                if is_store_to_dispensary:
+                    # Receipt-centric: create issue line with no destination inventory, then DispensaryReceiptLine
+                    issue_line = StockIssueLine.objects.create(
+                        issue=issue,
+                        medication=item.medication,
+                        source_inventory_item=inv_item,
+                        destination_inventory_item=None,
+                        quantity=transfer_qty
+                    )
+                    DispensaryReceiptLine.objects.create(
+                        medication=item.medication,
+                        quantity=transfer_qty,
+                        quantity_remaining=transfer_qty,
+                        received_at=issue.issued_at,
+                        request=stock_request,
+                        issue=issue,
+                        stock_issue_line=issue_line,
+                        batch_number=inv_item.batch_number or '',
+                        expiry_date=inv_item.expiry_date
+                    )
                 else:
-                    dest_inv.quantity = transfer_qty
-                    dest_inv.save()
-                
-                # 3. Create Issue Line
-                StockIssueLine.objects.create(
-                    issue=issue,
-                    medication=item.medication,
-                    source_inventory_item=inv_item,
-                    destination_inventory_item=dest_inv,
-                    quantity=transfer_qty
-                )
+                    dest_supplier = inv_item.supplier
+                    dest_inv, created = MedicationInventory.objects.get_or_create(
+                        medication=item.medication,
+                        batch_number=inv_item.batch_number,
+                        location=stock_request.to_location,
+                        defaults={
+                            'expiry_date': inv_item.expiry_date,
+                            'quantity': 0,
+                            'min_stock_level': inv_item.min_stock_level,
+                            'unit': inv_item.unit,
+                            'supplier': dest_supplier
+                        }
+                    )
+                    if not created:
+                        dest_inv.quantity += transfer_qty
+                        if dest_inv.min_stock_level == 0 and inv_item.min_stock_level:
+                            dest_inv.min_stock_level = inv_item.min_stock_level
+                        dest_inv.save()
+                    else:
+                        dest_inv.quantity = transfer_qty
+                        dest_inv.save()
+                    StockIssueLine.objects.create(
+                        issue=issue,
+                        medication=item.medication,
+                        source_inventory_item=inv_item,
+                        destination_inventory_item=dest_inv,
+                        quantity=transfer_qty
+                    )
                 
                 qty_to_fulfill -= transfer_qty
                 lines_created += 1
@@ -1117,3 +1186,18 @@ class StockRequestViewSet(viewsets.ModelViewSet):
             'message': 'Stock receipt confirmed',
             'request': StockRequestSerializer(stock_request).data
         })
+
+
+class StockIssueViewSet(viewsets.ReadOnlyModelViewSet):
+    """ViewSet for listing stock issues (e.g. receipts from Central Store to Dispensary)."""
+    queryset = StockIssue.objects.select_related('request', 'issued_by').prefetch_related('lines__medication').all()
+    permission_classes = [IsAuthenticated]
+    serializer_class = StockIssueSerializer
+    pagination_class = FlexiblePageNumberPagination
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        to_location = self.request.query_params.get('to_location', '').strip()
+        if to_location:
+            qs = qs.filter(request__to_location__icontains=to_location)
+        return qs.order_by('-issued_at')

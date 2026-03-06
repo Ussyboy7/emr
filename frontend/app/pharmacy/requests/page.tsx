@@ -145,13 +145,15 @@ export default function DispensaryRequestsPage() {
       toast.error("Please select a medication");
       return;
     }
-    const qty = parseInt(requestQuantity, 10);
-    if (isNaN(qty) || qty < 1) {
+    const packSize = selectedMedication.pack_size ?? 1;
+    const inputVal = parseInt(requestQuantity, 10);
+    if (isNaN(inputVal) || inputVal < 1) {
       toast.error("Please enter a valid quantity (min 1)");
       return;
     }
+    const qty = packSize > 1 ? inputVal * packSize : inputVal;
     if (qty > MAX_QUANTITY) {
-      toast.error(`Quantity must not exceed ${MAX_QUANTITY.toLocaleString()}`);
+      toast.error(`Quantity must not exceed ${MAX_QUANTITY.toLocaleString()} units`);
       return;
     }
     if (requestItems.find((i) => i.medication === selectedMedication.id)) {
@@ -194,8 +196,7 @@ export default function DispensaryRequestsPage() {
       setShowConfirmModal(false);
       setConfirmNotes("");
       if (res?.request) setSelectedRequest(res.request);
-      await loadRequests();
-      await loadStats();
+      await Promise.all([loadRequests(), loadStats()]);
     } catch (err: any) {
       toast.error(err?.apiMessage || err?.message || "Failed to confirm receipt");
     } finally {
@@ -214,11 +215,13 @@ export default function DispensaryRequestsPage() {
       .slice(0, MEDICATION_SEARCH_LIMIT);
   }, [medications, debouncedMedSearch]);
 
-  const getItemUnit = (item: any) => {
-    if (item.unit) return item.unit;
-    const med = medications.find((m) => m.id === item.medication);
-    return med?.unit || "units";
+  const formatPackDisplay = (units: number, packSize: number | undefined | null) => {
+    if (!packSize || packSize <= 1) return `${units.toLocaleString()} units`;
+    const packs = Math.floor(units / packSize);
+    return `${packs.toLocaleString()} packs (${units.toLocaleString()} units)`;
   };
+
+  const packSizeForItem = (item: any) => item.medication_pack_size ?? medications.find((m) => m.id === item.medication)?.pack_size ?? null;
 
   const getStatusBadge = (status: string) => {
     const map: Record<string, { label: string; cls: string; tip?: string }> = {
@@ -441,14 +444,18 @@ export default function DispensaryRequestsPage() {
                   )}
                   {selectedMedication && (
                     <div>
-                      <Label className="text-xs">Quantity (1–{MAX_QUANTITY.toLocaleString()})</Label>
+                      <Label className="text-xs">
+                        {(selectedMedication.pack_size ?? 1) > 1
+                          ? `Packs (×${selectedMedication.pack_size} units each, max ${Math.floor(MAX_QUANTITY / (selectedMedication.pack_size ?? 1)).toLocaleString()} packs)`
+                          : `Quantity (1–${MAX_QUANTITY.toLocaleString()} units)`}
+                      </Label>
                       <Input
                         type="number"
                         min={1}
-                        max={MAX_QUANTITY}
+                        max={(selectedMedication.pack_size ?? 1) > 1 ? Math.floor(MAX_QUANTITY / (selectedMedication.pack_size ?? 1)) : MAX_QUANTITY}
                         value={requestQuantity}
                         onChange={(e) => setRequestQuantity(e.target.value)}
-                        placeholder="100"
+                        placeholder={(selectedMedication.pack_size ?? 1) > 1 ? "10" : "100"}
                         className="mt-1"
                       />
                     </div>
@@ -464,11 +471,12 @@ export default function DispensaryRequestsPage() {
                       <p className="text-sm font-medium">Items Added ({requestItems.length})</p>
                       {requestItems.map((item, idx) => {
                         const med = medications.find((m) => m.id === item.medication);
+                        const packSize = med?.pack_size ?? null;
                         return (
                           <div key={idx} className="flex items-center justify-between p-2 bg-green-50 dark:bg-green-950/30 rounded border border-green-200 dark:border-green-900">
                             <div>
                               <p className="text-sm font-medium">{med?.name}</p>
-                              <p className="text-xs text-muted-foreground">{item.quantity} {med?.unit || "units"}</p>
+                              <p className="text-xs text-muted-foreground">{formatPackDisplay(item.quantity, packSize)}</p>
                             </div>
                             <Button variant="ghost" size="sm" onClick={() => setRequestItems(requestItems.filter((_, i) => i !== idx))} className="h-6 w-6 p-0">×</Button>
                           </div>
@@ -530,9 +538,9 @@ export default function DispensaryRequestsPage() {
                       <div key={idx} className="border rounded-lg p-3 text-sm flex justify-between items-start">
                         <div>
                           <p className="font-medium">{item.medication_name || "Unknown"}</p>
-                          <p className="text-xs text-muted-foreground">Requested: {item.quantity} {getItemUnit(item)}</p>
+                          <p className="text-xs text-muted-foreground">Requested: {formatPackDisplay(Number(item.quantity), packSizeForItem(item))}</p>
                         </div>
-                        {item.fulfilled_quantity > 0 && <span className="text-xs font-medium text-green-600">✓ {item.fulfilled_quantity}</span>}
+                        {item.fulfilled_quantity > 0 && <span className="text-xs font-medium text-green-600">✓ {formatPackDisplay(Number(item.fulfilled_quantity), packSizeForItem(item))}</span>}
                       </div>
                     ))}
                   </div>
@@ -553,7 +561,7 @@ export default function DispensaryRequestsPage() {
 
         {/* Confirm Receipt Modal */}
         <Dialog open={showConfirmModal} onOpenChange={setShowConfirmModal}>
-          <DialogContent className="w-[95vw] sm:max-w-[500px]">
+          <DialogContent className="w-[95vw] sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Confirm Stock Receipt</DialogTitle>
               <DialogDescription>Verify that you have received the issued stock</DialogDescription>
@@ -566,7 +574,7 @@ export default function DispensaryRequestsPage() {
                     {(selectedRequest.items || []).map((item: any, idx: number) => (
                       <div key={idx} className="flex justify-between">
                         <span>{item.medication_name}</span>
-                        <span className="font-medium">{item.fulfilled_quantity || item.quantity} {getItemUnit(item)}</span>
+                        <span className="font-medium">{formatPackDisplay(Number(item.fulfilled_quantity || item.quantity), packSizeForItem(item))}</span>
                       </div>
                     ))}
                   </div>

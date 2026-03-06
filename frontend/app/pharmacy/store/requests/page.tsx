@@ -193,7 +193,12 @@ export default function StoreRequestsPage() {
 
   const paginatedRequests = requests;
 
-  const getItemUnit = (item: any) => item.unit || "units";
+  const formatPackDisplay = (units: number, packSize: number | undefined | null) => {
+    if (!packSize || packSize <= 1) return `${units.toLocaleString()} units`;
+    const packs = Math.floor(units / packSize);
+    return `${packs.toLocaleString()} packs (${units.toLocaleString()} units)`;
+  };
+  const packSizeForItem = (item: any) => item.medication_pack_size ?? null;
 
   const getStatusBadge = (status: string) => {
     const map: Record<string, { label: string; cls: string; tip?: string }> = {
@@ -405,14 +410,14 @@ export default function StoreRequestsPage() {
                       const canEdit = selectedRequest.status === "pending" || selectedRequest.status === "approved";
                       const fulfilled = Number(item.fulfilled_quantity || 0);
                       const qty = editedQuantities[item.id!] ?? Number(item.quantity);
-                      const unit = getItemUnit(item);
+                      const packSize = packSizeForItem(item);
                       return (
                         <div key={item.id} className="border rounded-lg p-3 bg-muted/30 flex justify-between items-center gap-3">
                           <div className="min-w-0 flex-1">
                             <p className="font-medium text-sm">{item.medication_name}</p>
                             <p className="text-xs text-muted-foreground">
-                              Requested: {Number(item.quantity)} {unit}
-                              {fulfilled > 0 && <> • Issued: {fulfilled}</>}
+                              Requested: {formatPackDisplay(Number(item.quantity), packSize)}
+                              {fulfilled > 0 && <> • Issued: {formatPackDisplay(fulfilled, packSize)}</>}
                             </p>
                           </div>
                           {canEdit && fulfilled === 0 ? (
@@ -432,9 +437,9 @@ export default function StoreRequestsPage() {
                               </Button>
                             </div>
                           ) : fulfilled > 0 ? (
-                            <span className="text-xs font-medium text-green-600">✓ {fulfilled} issued</span>
+                            <span className="text-xs font-medium text-green-600">✓ {formatPackDisplay(fulfilled, packSize)} issued</span>
                           ) : (
-                            <span className="text-xs text-muted-foreground">{qty} {unit}</span>
+                            <span className="text-xs text-muted-foreground">{formatPackDisplay(qty, packSize)}</span>
                           )}
                         </div>
                       );

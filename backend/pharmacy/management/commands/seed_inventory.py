@@ -61,7 +61,7 @@ class Command(BaseCommand):
                     'quantity': Decimal(default_quantity),
                     'unit': unit,
                     'min_stock_level': Decimal(default_min_stock),
-                    'supplier': 'Default Supplier',
+                    'supplier': (medication.manufacturer or '').strip(),
                 }
             )
             

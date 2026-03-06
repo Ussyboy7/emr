@@ -2,7 +2,7 @@
 Serializers for the Pharmacy app.
 """
 from rest_framework import serializers
-from .models import GenericMedication, Medication, MedicationInventory, Prescription, PrescriptionItem, Dispense, StockRequest, StockRequestItem, StockIssue, StockIssueLine
+from .models import GenericMedication, Medication, MedicationInventory, Prescription, PrescriptionItem, Dispense, StockRequest, StockRequestItem, StockIssue, StockIssueLine, DispensaryReceiptLine
 
 
 class GenericMedicationSerializer(serializers.ModelSerializer):
@@ -90,6 +90,11 @@ class MedicationSerializer(serializers.ModelSerializer):
                 qs_code = qs_code.exclude(pk=self.instance.pk)
             if qs_code.exists():
                 raise serializers.ValidationError({'detail': 'Medication code must be unique.'})
+        # Canonical unit: store one of the values the frontend dropdown expects (lowercase)
+        allowed_units = ('tablet', 'capsule', 'ml', 'vial', 'box', 'pack')
+        if 'unit' in attrs:
+            raw = (attrs.get('unit') or '').strip().lower()
+            attrs['unit'] = raw if raw in allowed_units else 'tablet'
         return attrs
 
     class Meta:
@@ -105,16 +110,94 @@ class MedicationSerializer(serializers.ModelSerializer):
 
 class MedicationInventorySerializer(serializers.ModelSerializer):
     """Serializer for MedicationInventory model."""
-    
+
     medication_name = serializers.CharField(source='medication.name', read_only=True)
     is_low_stock = serializers.ReadOnlyField()
     is_expired = serializers.ReadOnlyField()
     medication = MedicationSerializer(read_only=True)
-    
+    source_from_central_store = serializers.SerializerMethodField()
+
+    def get_source_from_central_store(self, obj):
+        """When batch was received from Central Store, return request/issue info."""
+        from .models import StockIssueLine
+        line = StockIssueLine.objects.filter(destination_inventory_item=obj).select_related('issue', 'issue__request').first()
+        if not line or not line.issue:
+            return None
+        req = line.issue.request
+        return {
+            'request_id': req.request_id if req else None,
+            'issue_id': line.issue.issue_id,
+            'issued_at': line.issue.issued_at.isoformat() if line.issue.issued_at else None,
+        }
+
     class Meta:
         model = MedicationInventory
-        fields = '__all__'
+        fields = [
+            'id', 'medication', 'medication_name', 'batch_number', 'expiry_date', 'quantity',
+            'unit', 'min_stock_level', 'max_stock_level', 'location', 'supplier', 'purchase_price',
+            'created_at', 'updated_at', 'is_low_stock', 'is_expired', 'source_from_central_store',
+        ]
         read_only_fields = ['created_at', 'updated_at']
+
+
+class DispensaryReceiptLineSerializer(serializers.ModelSerializer):
+    """
+    Serializer for Dispensary receipt lines, outputting a shape compatible with inventory list
+    (so frontend can use the same transform). quantity is quantity_remaining.
+    """
+    medication = MedicationSerializer(read_only=True)
+    medication_name = serializers.CharField(source='medication.name', read_only=True)
+    source_from_central_store = serializers.SerializerMethodField()
+    supplier = serializers.SerializerMethodField()
+
+    @staticmethod
+    def _resolve_source_location(obj):
+        if obj.request and obj.request.from_location:
+            return obj.request.from_location
+        if obj.issue and obj.issue.request and obj.issue.request.from_location:
+            return obj.issue.request.from_location
+        return None
+
+    def get_source_from_central_store(self, obj):
+        if not obj.issue:
+            return None
+        req = obj.request
+        from_location = self._resolve_source_location(obj)
+        return {
+            'request_id': req.request_id if req else None,
+            'issue_id': obj.issue.issue_id,
+            'issued_at': obj.issue.issued_at.isoformat() if obj.issue.issued_at else None,
+            'from_location': from_location,
+        }
+
+    def get_supplier(self, obj):
+        source_location = self._resolve_source_location(obj)
+        if source_location:
+            return source_location
+        if obj.stock_issue_line and obj.stock_issue_line.source_inventory_item:
+            return obj.stock_issue_line.source_inventory_item.supplier or ''
+        return ''
+
+    class Meta:
+        model = DispensaryReceiptLine
+        fields = [
+            'id', 'medication', 'medication_name', 'batch_number', 'expiry_date',
+            'quantity', 'quantity_remaining', 'received_at', 'request', 'issue',
+            'supplier', 'source_from_central_store',
+        ]
+        read_only_fields = ['quantity', 'quantity_remaining', 'received_at', 'request', 'issue']
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        # Expose quantity_remaining as quantity for inventory list compatibility
+        data['quantity'] = float(instance.quantity_remaining)
+        # Add unit and min_stock_level from medication for frontend
+        med = instance.medication
+        data['unit'] = getattr(med, 'unit', '') or ''
+        data['min_stock_level'] = float(getattr(med, 'min_stock_level', 0) or 0)
+        data['created_at'] = instance.received_at.isoformat() if instance.received_at else None
+        data['updated_at'] = instance.received_at.isoformat() if instance.received_at else None
+        return data
 
 
 class PrescriptionItemSerializer(serializers.ModelSerializer):
@@ -418,13 +501,17 @@ class DispenseSerializer(serializers.ModelSerializer):
 
 class StockRequestItemSerializer(serializers.ModelSerializer):
     medication_name = serializers.SerializerMethodField(read_only=True)
+    medication_pack_size = serializers.SerializerMethodField(read_only=True)
 
     def get_medication_name(self, obj):
         return obj.medication.name if obj.medication else ''
-    
+
+    def get_medication_pack_size(self, obj):
+        return getattr(obj.medication, 'pack_size', None) if obj.medication else None
+
     class Meta:
         model = StockRequestItem
-        fields = '__all__'
+        fields = ['id', 'request', 'medication', 'quantity', 'fulfilled_quantity', 'notes', 'medication_name', 'medication_pack_size']
         read_only_fields = ['request']
 
 
@@ -458,17 +545,26 @@ class StockRequestSerializer(serializers.ModelSerializer):
 
 class StockIssueLineSerializer(serializers.ModelSerializer):
     medication_name = serializers.CharField(source='medication.name', read_only=True)
-    
+    medication_pack_size = serializers.SerializerMethodField(read_only=True)
+
+    def get_medication_pack_size(self, obj):
+        return getattr(obj.medication, 'pack_size', None) if obj.medication else None
+
     class Meta:
         model = StockIssueLine
-        fields = '__all__'
+        fields = ['id', 'issue', 'medication', 'medication_name', 'medication_pack_size',
+                  'source_inventory_item', 'destination_inventory_item', 'quantity']
 
 
 class StockIssueSerializer(serializers.ModelSerializer):
     lines = StockIssueLineSerializer(many=True, read_only=True)
     issued_by_name = serializers.CharField(source='issued_by.get_full_name', read_only=True)
-    
+    request_id = serializers.SerializerMethodField(read_only=True)
+
+    def get_request_id(self, obj):
+        return obj.request.request_id if obj.request else None
+
     class Meta:
         model = StockIssue
-        fields = '__all__'
+        fields = ['id', 'issue_id', 'request', 'request_id', 'issued_by', 'issued_by_name', 'issued_at', 'notes', 'lines']
         read_only_fields = ['issue_id', 'issued_at', 'issued_by']

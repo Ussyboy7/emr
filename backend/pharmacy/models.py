@@ -16,6 +16,7 @@ class GenericMedication(models.Model):
     category = models.CharField(max_length=100, blank=True, default='Other')
     strength = models.CharField(max_length=100, blank=True)
     dosage_form = models.CharField(max_length=50, blank=True)
+    unit = models.CharField(max_length=50, blank=True, help_text="Default unit per dose, e.g. tablet, capsule, ml")
     route = models.CharField(max_length=50, blank=True)
     atc_code = models.CharField(max_length=20, blank=True, null=True, unique=True)
     is_active = models.BooleanField(default=True)
@@ -456,7 +457,12 @@ class Dispense(models.Model):
     prescription_item = models.ForeignKey(PrescriptionItem, on_delete=models.CASCADE, related_name='dispenses')
     medication = models.ForeignKey(Medication, on_delete=models.PROTECT, related_name='dispenses')
     inventory_item = models.ForeignKey(MedicationInventory, on_delete=models.PROTECT, related_name='dispenses', null=True, blank=True)
-    
+    dispensary_receipt_line = models.ForeignKey(
+        'DispensaryReceiptLine', on_delete=models.PROTECT, related_name='dispenses',
+        null=True, blank=True,
+        help_text='Set when dispensed from Dispensary (receipt-centric inventory).'
+    )
+
     quantity = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0)])
     unit = models.CharField(max_length=50)
     batch_number = models.CharField(max_length=100, blank=True)
@@ -585,12 +591,52 @@ class StockIssue(models.Model):
 class StockIssueLine(models.Model):
     """
     Line item for stock issue, tracking specific inventory movements.
+    destination_inventory_item is null when stock is issued to Dispensary (tracked via DispensaryReceiptLine).
     """
     issue = models.ForeignKey(StockIssue, on_delete=models.CASCADE, related_name='lines')
     medication = models.ForeignKey(Medication, on_delete=models.PROTECT)
     source_inventory_item = models.ForeignKey(MedicationInventory, on_delete=models.PROTECT, related_name='issues_from')
-    destination_inventory_item = models.ForeignKey(MedicationInventory, on_delete=models.PROTECT, related_name='issues_to')
+    destination_inventory_item = models.ForeignKey(
+        MedicationInventory, on_delete=models.PROTECT, related_name='issues_to',
+        null=True, blank=True,
+        help_text='Null when issued to Dispensary (stock tracked in DispensaryReceiptLine).'
+    )
     quantity = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0)])
 
     class Meta:
         db_table = 'stock_issue_lines'
+
+
+class DispensaryReceiptLine(models.Model):
+    """
+    Receipt-centric inventory for Dispensary: one row per chunk received from Central Store.
+    Replaces MedicationInventory for Dispensary; stock = sum of quantity_remaining per medication.
+    """
+    medication = models.ForeignKey(Medication, on_delete=models.PROTECT, related_name='dispensary_receipt_lines')
+    quantity = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0)], help_text='Total received')
+    quantity_remaining = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0)], help_text='Remaining after dispensing')
+    received_at = models.DateTimeField(auto_now_add=False)  # Set from issue.issued_at
+    request = models.ForeignKey(StockRequest, on_delete=models.SET_NULL, null=True, blank=True, related_name='dispensary_receipt_lines')
+    issue = models.ForeignKey(StockIssue, on_delete=models.SET_NULL, null=True, blank=True, related_name='dispensary_receipt_lines')
+    stock_issue_line = models.OneToOneField(
+        StockIssueLine, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='dispensary_receipt_line'
+    )
+    # Snapshot from source for display/FIFO (optional)
+    batch_number = models.CharField(max_length=100, blank=True)
+    expiry_date = models.DateField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'dispensary_receipt_lines'
+        ordering = ['received_at']
+        indexes = [
+            models.Index(fields=['medication']),
+            models.Index(fields=['received_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.medication.name} received {self.received_at.date()} (req {self.request_id})"
+
+    @property
+    def request_id(self):
+        return self.request.request_id if self.request else None

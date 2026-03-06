@@ -103,6 +103,7 @@ export interface GenericMedication {
   category?: string;
   strength?: string;
   dosage_form?: string;
+  unit?: string;
   route?: string;
   atc_code?: string | null;
   is_active: boolean;
@@ -164,6 +165,7 @@ export interface StockRequestItem {
   request?: number;
   medication: number;
   medication_name?: string;
+  medication_pack_size?: number | null;
   quantity: number;
   unit?: string;
   fulfilled_quantity?: number;
@@ -196,6 +198,7 @@ export interface StockIssueLine {
   issue: number;
   medication: number;
   medication_name?: string;
+  medication_pack_size?: number | null;
   source_inventory_item: number;
   destination_inventory_item: number;
   source_batch?: string;
@@ -208,6 +211,7 @@ export interface StockIssue {
   id: number;
   issue_id: string;
   request?: number;
+  request_id?: string | null;
   issued_by?: number;
   issued_by_name?: string;
   issued_at: string;
@@ -267,19 +271,28 @@ class PharmacyService {
     prescriptionId: number,
     itemId: number,
     quantity: number,
-    inventoryId?: number,
+    batchOrInventoryId?: number,
     notes?: string,
-    coverageQuantity?: number
+    coverageQuantity?: number,
+    options?: { useReceiptLine?: boolean }
   ): Promise<Dispense> {
+    const body: Record<string, unknown> = {
+      item_id: itemId,
+      quantity,
+      coverage_quantity: coverageQuantity,
+      notes: notes || '',
+    };
+    // Prescription dispensing uses Dispensary batches (DispensaryReceiptLine); send as receipt_line_id
+    if (batchOrInventoryId != null) {
+      if (options?.useReceiptLine !== false) {
+        body.receipt_line_id = batchOrInventoryId;
+      } else {
+        body.inventory_id = batchOrInventoryId;
+      }
+    }
     return apiFetch<Dispense>(`/v1/pharmacy/prescriptions/${prescriptionId}/dispense/`, {
       method: 'POST',
-      body: JSON.stringify({
-        item_id: itemId,
-        quantity,
-        coverage_quantity: coverageQuantity,
-        inventory_id: inventoryId,
-        notes: notes || '',
-      }),
+      body: JSON.stringify(body),
     });
   }
 
@@ -674,6 +687,18 @@ class PharmacyService {
       method: 'POST',
       body: JSON.stringify({ confirmed_notes: confirmedNotes || '' }),
     });
+  }
+
+  /**
+   * Stock issues (receipt history from Central Store to Dispensary)
+   */
+  async getStockIssues(params?: {
+    to_location?: string;
+    page?: number;
+    page_size?: number;
+  }): Promise<{ results: StockIssue[]; count: number }> {
+    const query = buildQueryString(params || {});
+    return apiFetch<{ results: StockIssue[]; count: number }>(`/v1/pharmacy/stock-issues/${query}`);
   }
 
   /**

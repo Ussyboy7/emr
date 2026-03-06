@@ -11,17 +11,14 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
-import { Textarea } from "@/components/ui/textarea";
-import { toast } from "sonner";
-import { pharmacyService, type StockRequest } from '@/lib/services';
+import { pharmacyService } from '@/lib/services';
 import { PHARMACY_LOCATIONS } from '@/lib/constants/pharmacy-locations';
 import { 
-  Database, Search, Plus, Pill, Package, AlertTriangle, Eye, Edit,
-  Layers, Calendar, CheckCircle2, XCircle, TrendingUp,
-  Upload, Hash, Minus, ArrowUpDown, Clock, Loader2
+  Database, Search, Pill, Package, AlertTriangle, Eye,
+  Layers, XCircle, TrendingUp, Hash, Clock, Loader2
 } from 'lucide-react';
 
-import { MEDICATION_CATEGORIES, DOSAGE_FORMS, MEDICATION_STRENGTHS, MEDICATION_MANUFACTURERS } from '@/lib/constants/pharmacy';
+import { MEDICATION_CATEGORIES } from '@/lib/constants/pharmacy';
 
 // Batch interface
 interface MedicationBatch {
@@ -31,18 +28,8 @@ interface MedicationBatch {
   expiryDate: string;
   receivedDate: string;
   supplier: string;
+  sourceFromCentralStore?: { request_id?: string; issue_id?: string; issued_at?: string; from_location?: string } | null;
 }
-
-// Stock adjustment reasons
-const adjustmentReasons = [
-  'Physical count adjustment',
-  'Damaged/Expired removal',
-  'Return from patient',
-  'Transfer to another location',
-  'Wastage/Spillage',
-  'Theft/Loss',
-  'Other',
-];
 
 // Type definitions
 interface MedicationInventoryItem {
@@ -64,8 +51,6 @@ interface MedicationInventoryItem {
 
 const categories = MEDICATION_CATEGORIES;
 
-const dosageForms = DOSAGE_FORMS;
-
 export default function InventoryPage() {
   const location = PHARMACY_LOCATIONS.DISPENSARY;
   const [inventory, setInventory] = useState<MedicationInventoryItem[]>([]);
@@ -76,14 +61,6 @@ export default function InventoryPage() {
   const [categoryFilter, setCategoryFilter] = useState('All Categories');
   const [stockFilter, setStockFilter] = useState('all');
 
-  const [incomingLoading, setIncomingLoading] = useState(true);
-  const [incomingRequests, setIncomingRequests] = useState<StockRequest[]>([]);
-  const [selectedRequest, setSelectedRequest] = useState<StockRequest | null>(null);
-  const [showRequestDetailsModal, setShowRequestDetailsModal] = useState(false);
-  const [showConfirmReceiptModal, setShowConfirmReceiptModal] = useState(false);
-  const [confirmNotes, setConfirmNotes] = useState("");
-  const [confirmingReceipt, setConfirmingReceipt] = useState(false);
-
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
@@ -92,7 +69,6 @@ export default function InventoryPage() {
   // Load all inventory for stats (separate from paginated data)
   useEffect(() => {
     loadAllInventoryForStats();
-    loadIncomingRequests();
   }, []);
 
   // Load inventory from API
@@ -112,51 +88,6 @@ export default function InventoryPage() {
       setAllInventoryForStats(transformed);
     } catch (err) {
       console.error('Error loading all inventory for stats:', err);
-    }
-  };
-
-  const loadIncomingRequests = async () => {
-    try {
-      setIncomingLoading(true);
-      const [fulfilled, partial] = await Promise.all([
-        pharmacyService.getStockRequests({ status: "fulfilled", page: 1, page_size: 50 }),
-        pharmacyService.getStockRequests({ status: "partially_fulfilled", page: 1, page_size: 50 }),
-      ]);
-      const combined = [...(fulfilled.results || []), ...(partial.results || [])]
-        .filter((r) => r.to_location === PHARMACY_LOCATIONS.DISPENSARY)
-        .sort((a, b) => String(b.updated_at || b.created_at).localeCompare(String(a.updated_at || a.created_at)));
-      setIncomingRequests(combined);
-    } catch (err: any) {
-      toast.error(err?.message || "Failed to load incoming requests");
-    } finally {
-      setIncomingLoading(false);
-    }
-  };
-
-  const openRequestDetails = (req: StockRequest) => {
-    setSelectedRequest(req);
-    setShowRequestDetailsModal(true);
-  };
-
-  const openConfirmReceipt = (req: StockRequest) => {
-    setSelectedRequest(req);
-    setConfirmNotes("");
-    setShowConfirmReceiptModal(true);
-  };
-
-  const handleConfirmReceipt = async () => {
-    if (!selectedRequest) return;
-    try {
-      setConfirmingReceipt(true);
-      await pharmacyService.confirmStockRequest(selectedRequest.id, confirmNotes);
-      toast.success("Receipt confirmed");
-      setShowConfirmReceiptModal(false);
-      setShowRequestDetailsModal(false);
-      await Promise.all([loadIncomingRequests(), loadInventory(), loadAllInventoryForStats()]);
-    } catch (err: any) {
-      toast.error(err?.message || "Failed to confirm receipt");
-    } finally {
-      setConfirmingReceipt(false);
     }
   };
 
@@ -197,8 +128,9 @@ export default function InventoryPage() {
             batchNumber: item.batch_number,
             quantity: Number(item.quantity),
             expiryDate: item.expiry_date,
-            receivedDate: (item as any).created_at?.split('T')[0] || '',
+            receivedDate: (item.source_from_central_store?.issued_at?.split('T')[0]) || (item as any).created_at?.split('T')[0] || '',
             supplier: item.supplier || '',
+            sourceFromCentralStore: item.source_from_central_store || null,
           }] as MedicationBatch[],
       };
     });
@@ -238,34 +170,9 @@ export default function InventoryPage() {
   };
   
   // Modal states
-  const [showAddModal, setShowAddModal] = useState(false);
   const [showViewModal, setShowViewModal] = useState(false);
-  const [showAddStockModal, setShowAddStockModal] = useState(false);
-  const [showAdjustStockModal, setShowAdjustStockModal] = useState(false);
   const [showBatchesModal, setShowBatchesModal] = useState(false);
   const [selectedMedication, setSelectedMedication] = useState<MedicationInventoryItem | null>(null);
-  
-  // Add stock form
-  const [newBatch, setNewBatch] = useState({
-    batchNumber: '',
-    quantity: 0,
-    expiryDate: '',
-    supplier: '',
-  });
-  
-  // Stock adjustment form
-  const [adjustmentForm, setAdjustmentForm] = useState({
-    type: 'decrease' as 'increase' | 'decrease',
-    quantity: 0,
-    reason: '',
-    notes: '',
-  });
-  
-  // New medication form
-  const [newMedication, setNewMedication] = useState({
-    name: '', genericName: '', category: 'Analgesics', strength: '', dosageForm: 'Tablet',
-    packSize: 10, manufacturer: '', minimumStock: 100
-  });
   
   // Filter inventory (backend handles filtering now)
   const filteredInventory = inventory;
@@ -346,34 +253,6 @@ export default function InventoryPage() {
     setShowViewModal(true);
   };
 
-  const handleAddStock = (med: MedicationInventoryItem) => {
-    setSelectedMedication(med);
-    setShowAddStockModal(true);
-  };
-
-  const handleAddMedication = async () => {
-    const newId = `MED-${String(inventory.length + 1).padStart(3, '0')}`;
-    const medication = {
-      ...newMedication,
-      id: newId,
-      currentStock: 0,
-      lastRestocked: '-',
-      expiryDate: '-'
-    };
-    
-    setInventory(prev => [...prev, medication] as MedicationInventoryItem[]);
-    
-    // Reload all inventory for stats
-    await loadAllInventoryForStats();
-    
-    toast.success(`${newMedication.name} added to inventory`);
-    setShowAddModal(false);
-    setNewMedication({
-      name: '', genericName: '', category: 'Analgesics', strength: '', dosageForm: 'Tablet',
-      packSize: 10, manufacturer: '', minimumStock: 100
-      });
-  };
-
   return (
     <DashboardLayout>
       <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
@@ -395,54 +274,6 @@ export default function InventoryPage() {
             </Button>
           </div>
         </div>
-
-        <Card>
-          <CardContent className="p-4 space-y-3">
-            <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <p className="font-semibold text-foreground">Incoming from Central store</p>
-                <p className="text-sm text-muted-foreground">Confirm stock issued by Central store</p>
-              </div>
-              <Button variant="outline" onClick={loadIncomingRequests} disabled={incomingLoading}>
-                {incomingLoading ? "Loading..." : "Refresh"}
-              </Button>
-            </div>
-
-            {incomingLoading ? (
-              <div className="text-sm text-muted-foreground">Loading incoming requests…</div>
-            ) : incomingRequests.length > 0 ? (
-              <div className="space-y-2">
-                {incomingRequests.map((req) => (
-                  <div key={req.id} className="flex items-center justify-between gap-3 rounded-lg border p-3">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-medium">{req.request_id}</span>
-                        <Badge className={req.status === "partially_fulfilled" ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800"}>
-                          {req.status === "partially_fulfilled" ? "Partially Issued" : "Issued"}
-                        </Badge>
-                        <span className="text-xs text-muted-foreground">{new Date(req.updated_at || req.created_at).toLocaleString()}</span>
-                      </div>
-                      <div className="text-xs text-muted-foreground mt-1">
-                        {req.items?.length || 0} item(s)
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => openRequestDetails(req)}>
-                        <Eye className="h-4 w-4" />
-                      </Button>
-                      <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" onClick={() => openConfirmReceipt(req)}>
-                        <CheckCircle2 className="h-4 w-4 mr-2" />
-                        Confirm
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="text-sm text-muted-foreground">No issued requests awaiting confirmation.</div>
-            )}
-          </CardContent>
-        </Card>
 
         {/* Stats Cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -621,11 +452,8 @@ export default function InventoryPage() {
                             <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => handleViewDetails(med)} title="View Details">
                               <Eye className="h-4 w-4 text-muted-foreground hover:text-primary" />
                             </Button>
-                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => { setSelectedMedication(med); setShowBatchesModal(true); }} title="View Batches">
+                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => { setSelectedMedication(med); setShowBatchesModal(true); }} title={location === PHARMACY_LOCATIONS.DISPENSARY ? 'View Receipts' : 'View Batches'}>
                               <Layers className="h-4 w-4 text-muted-foreground hover:text-violet-500" />
-                            </Button>
-                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => { setSelectedMedication(med); setShowAdjustStockModal(true); }} title="Adjust Stock">
-                              <ArrowUpDown className="h-4 w-4 text-muted-foreground hover:text-amber-500" />
                             </Button>
                           </div>
                         </div>
@@ -744,325 +572,6 @@ export default function InventoryPage() {
           </DialogContent>
         </Dialog>
 
-        {/* Enhanced Add Stock Modal with Batch Tracking */}
-        <Dialog open={showAddStockModal} onOpenChange={setShowAddStockModal}>
-          <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                <Plus className="h-5 w-5 text-emerald-500" />
-                Receive Stock
-              </DialogTitle>
-              <DialogDescription>
-                Add new stock batch for {selectedMedication?.name}
-              </DialogDescription>
-            </DialogHeader>
-            
-            {selectedMedication && (
-              <div className="space-y-4">
-                <div className="bg-muted/50 rounded-lg p-4 text-sm">
-                  <div className="flex justify-between mb-2">
-                    <span className="text-muted-foreground">Current Stock:</span>
-                    <span className="font-medium">
-                      {formatPackDisplay(selectedMedication.currentStock, selectedMedication.packSize)}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <Label className="flex items-center gap-1">
-                      <Hash className="h-3 w-3" />
-                      Batch Number *
-                    </Label>
-                    <Input
-                      value={newBatch.batchNumber}
-                      onChange={(e) => setNewBatch({ ...newBatch, batchNumber: e.target.value })}
-                      placeholder="e.g., BT-2024-XXX"
-                      className="mt-1"
-                    />
-                  </div>
-                  <div>
-                    <Label>Quantity (Packs) *</Label>
-                    <Input
-                      type="number"
-                      min="1"
-                      value={newBatch.quantity || ''}
-                      onChange={(e) => setNewBatch({ ...newBatch, quantity: parseInt(e.target.value) || 0 })}
-                      placeholder="Enter quantity"
-                      className="mt-1"
-                    />
-                    {newBatch.quantity > 0 && selectedMedication?.packSize && (
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Total: {(newBatch.quantity * (selectedMedication.packSize || 1)).toLocaleString()} units
-                      </p>
-                    )}
-                  </div>
-                  <div>
-                    <Label className="flex items-center gap-1">
-                      <Calendar className="h-3 w-3" />
-                      Expiry Date *
-                    </Label>
-                    <Input
-                      type="date"
-                      value={newBatch.expiryDate}
-                      onChange={(e) => setNewBatch({ ...newBatch, expiryDate: e.target.value })}
-                      className="mt-1"
-                    />
-                  </div>
-                  <div>
-                    <Label>Supplier</Label>
-                    <Input
-                      value={newBatch.supplier}
-                      onChange={(e) => setNewBatch({ ...newBatch, supplier: e.target.value })}
-                      placeholder="Supplier name"
-                      className="mt-1"
-                    />
-                  </div>
-                </div>
-
-                {newBatch.quantity > 0 && (
-                  <div className="p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg text-sm">
-                    <p className="text-emerald-700 dark:text-emerald-400">
-                      New total stock: <strong>
-                        {formatPackDisplay(selectedMedication.currentStock + (newBatch.quantity * (selectedMedication.packSize || 1)), selectedMedication.packSize)}
-                      </strong>
-                    </p>
-                  </div>
-                )}
-              </div>
-            )}
-            
-            <DialogFooter>
-              <Button variant="outline" onClick={() => {
-                setShowAddStockModal(false);
-                setNewBatch({ batchNumber: '', quantity: 0, expiryDate: '', supplier: '' });
-              }}>Cancel</Button>
-              <Button 
-                className="bg-emerald-600 hover:bg-emerald-700"
-                onClick={async () => {
-                  if (!newBatch.batchNumber || !newBatch.quantity || !newBatch.expiryDate) {
-                    toast.error('Please fill in all required fields');
-                    return;
-                  }
-                  
-                  try {
-                    // Get current inventory item to find medication ID
-                    const currentItem = inventory.find(m => m.id === selectedMedication?.id);
-                    if (!currentItem) {
-                      toast.error('Medication not found');
-                      return;
-                    }
-                    
-                    // Get medication ID from the inventory API response
-                    // Fetch the specific inventory item by ID to get the medication reference
-                    const inventoryItems = await pharmacyService.getInventory({ search: currentItem.name, location });
-                    const matchingItem = inventoryItems.results.find((item: any) => {
-                      // Match by name or by ID if available
-                      return item.medication_name === currentItem.name || 
-                             item.id?.toString() === selectedMedication?.id;
-                    });
-                    
-                    if (!matchingItem) {
-                      toast.error('Could not find medication in inventory. Please try adding the medication first.');
-                      return;
-                    }
-                    
-                    // Get medication ID - it should be in the medication field
-                    const medicationId = matchingItem.medication;
-                    if (!medicationId) {
-                      toast.error('Could not find medication ID. Please try adding the medication first.');
-                      return;
-                    }
-                    
-                    // Create new inventory batch entry via API
-                    await pharmacyService.createInventoryItem({
-                      medication: typeof medicationId === 'number' ? medicationId : parseInt(medicationId),
-                      batch_number: newBatch.batchNumber,
-                      expiry_date: newBatch.expiryDate,
-                      quantity: newBatch.quantity * (currentItem.packSize || 1),
-                      unit: currentItem.dosageForm || 'unit',
-                      min_stock_level: currentItem.minimumStock,
-                      supplier: newBatch.supplier,
-                      location,
-                    });
-                    
-                    toast.success(`Added ${newBatch.quantity} packs of ${selectedMedication?.name} (Batch: ${newBatch.batchNumber})`);
-                    setShowAddStockModal(false);
-                    setNewBatch({ batchNumber: '', quantity: 0, expiryDate: '', supplier: '' });
-                    await loadInventory(); // Reload inventory
-                    await loadAllInventoryForStats(); // Reload stats
-                  } catch (err: any) {
-                    toast.error(err.message || 'Failed to add stock');
-                    console.error('Error adding stock:', err);
-                  }
-                }}
-                disabled={!newBatch.batchNumber || !newBatch.quantity || !newBatch.expiryDate}
-              >
-                <CheckCircle2 className="h-4 w-4 mr-2" />
-                Receive Stock
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-
-        {/* Stock Adjustment Modal */}
-        <Dialog open={showAdjustStockModal} onOpenChange={setShowAdjustStockModal}>
-          <DialogContent className="w-[95vw] sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                <ArrowUpDown className="h-5 w-5 text-amber-500" />
-                Adjust Stock
-              </DialogTitle>
-              <DialogDescription>
-                Adjust stock for {selectedMedication?.name}
-              </DialogDescription>
-            </DialogHeader>
-            
-            {selectedMedication && (
-              <div className="space-y-4">
-                <div className="bg-muted/50 rounded-lg p-4 text-sm text-center">
-                  <p className="text-muted-foreground">Current Stock</p>
-                  <p className="text-2xl sm:text-3xl font-bold">
-                    {formatPackDisplay(selectedMedication.currentStock, selectedMedication.packSize)}
-                  </p>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2">
-                  <Button
-                    variant={adjustmentForm.type === 'increase' ? 'default' : 'outline'}
-                    className={adjustmentForm.type === 'increase' ? 'bg-emerald-500 hover:bg-emerald-600' : ''}
-                    onClick={() => setAdjustmentForm({ ...adjustmentForm, type: 'increase' })}
-                  >
-                    <Plus className="h-4 w-4 mr-2" />
-                    Increase
-                  </Button>
-                  <Button
-                    variant={adjustmentForm.type === 'decrease' ? 'default' : 'outline'}
-                    className={adjustmentForm.type === 'decrease' ? 'bg-red-500 hover:bg-red-600' : ''}
-                    onClick={() => setAdjustmentForm({ ...adjustmentForm, type: 'decrease' })}
-                  >
-                    <Minus className="h-4 w-4 mr-2" />
-                    Decrease
-                  </Button>
-                </div>
-
-                <div>
-                  <Label>Quantity (Packs) *</Label>
-                  <Input
-                    type="number"
-                    min="1"
-                    max={adjustmentForm.type === 'decrease' ? Math.floor(selectedMedication.currentStock / (selectedMedication.packSize || 1)) : undefined}
-                    value={adjustmentForm.quantity || ''}
-                    onChange={(e) => setAdjustmentForm({ ...adjustmentForm, quantity: parseInt(e.target.value) || 0 })}
-                    placeholder="Enter quantity"
-                    className="mt-1"
-                  />
-                  {adjustmentForm.quantity > 0 && selectedMedication?.packSize && (
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Total: {(adjustmentForm.quantity * (selectedMedication.packSize || 1)).toLocaleString()} units
-                    </p>
-                  )}
-                </div>
-
-                <div>
-                  <Label>Reason *</Label>
-                  <Select value={adjustmentForm.reason} onValueChange={(v) => setAdjustmentForm({ ...adjustmentForm, reason: v })}>
-                    <SelectTrigger className="mt-1"><SelectValue placeholder="Select reason" /></SelectTrigger>
-                    <SelectContent>
-                      {adjustmentReasons.map(reason => (
-                        <SelectItem key={reason} value={reason}>{reason}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div>
-                  <Label>Notes (Optional)</Label>
-                  <Textarea
-                    value={adjustmentForm.notes}
-                    onChange={(e) => setAdjustmentForm({ ...adjustmentForm, notes: e.target.value })}
-                    placeholder="Add any additional notes..."
-                    rows={2}
-                    className="mt-1"
-                  />
-                </div>
-
-                {adjustmentForm.quantity > 0 && (
-                  <div className={`p-3 rounded-lg text-sm ${adjustmentForm.type === 'increase' ? 'bg-emerald-50 dark:bg-emerald-900/20' : 'bg-red-50 dark:bg-red-900/20'}`}>
-                    <p className={adjustmentForm.type === 'increase' ? 'text-emerald-700 dark:text-emerald-400' : 'text-red-700 dark:text-red-400'}>
-                      New stock level: <strong>
-                        {(() => {
-                          const current = selectedMedication.currentStock;
-                          const packSize = selectedMedication.packSize || 1;
-                          const adjustPacks = adjustmentForm.quantity;
-                          const adjustUnits = adjustPacks * packSize;
-                          const next =
-                            adjustmentForm.type === 'increase'
-                              ? current + adjustUnits
-                              : current - adjustUnits;
-                          return formatPackDisplay(Math.max(0, next), packSize);
-                        })()}
-                      </strong>
-                    </p>
-                  </div>
-                )}
-              </div>
-            )}
-            
-            <DialogFooter>
-              <Button variant="outline" onClick={() => {
-                setShowAdjustStockModal(false);
-                setAdjustmentForm({ type: 'decrease', quantity: 0, reason: '', notes: '' });
-              }}>Cancel</Button>
-              <Button 
-                className={adjustmentForm.type === 'increase' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-600 hover:bg-red-700'}
-                onClick={async () => {
-                  if (!adjustmentForm.quantity || !adjustmentForm.reason) {
-                    toast.error('Please fill in all required fields');
-                    return;
-                  }
-                  
-                  const packSize = selectedMedication!.packSize || 1;
-                  const adjustUnits = adjustmentForm.quantity * packSize;
-                  
-                  const newStock = adjustmentForm.type === 'increase' 
-                    ? selectedMedication!.currentStock + adjustUnits
-                    : selectedMedication!.currentStock - adjustUnits;
-                  
-                  if (newStock < 0) {
-                    toast.error('Stock cannot be negative');
-                    return;
-                  }
-
-                  try {
-                    // Update inventory item via API
-                    const inventoryId = parseInt(selectedMedication?.id || '');
-                    if (!inventoryId) {
-                      toast.error('Invalid inventory item ID');
-                      return;
-                    }
-                    
-                    await pharmacyService.updateInventoryItem(inventoryId, {
-                      quantity: newStock,
-                    });
-                    
-                    toast.success(`Stock ${adjustmentForm.type === 'increase' ? 'increased' : 'decreased'} by ${adjustmentForm.quantity} packs (${adjustUnits} units)`);
-                    setShowAdjustStockModal(false);
-                    setAdjustmentForm({ type: 'decrease', quantity: 0, reason: '', notes: '' });
-                    await loadInventory(); // Reload inventory
-                  } catch (err: any) {
-                    toast.error(err.message || 'Failed to adjust stock');
-                    console.error('Error adjusting stock:', err);
-                  }
-                }}
-                disabled={!adjustmentForm.quantity || !adjustmentForm.reason}
-              >
-                <CheckCircle2 className="h-4 w-4 mr-2" />
-                Confirm Adjustment
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
 
         {/* View Batches Modal */}
         <Dialog open={showBatchesModal} onOpenChange={setShowBatchesModal}>
@@ -1070,10 +579,10 @@ export default function InventoryPage() {
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Layers className="h-5 w-5 text-violet-500" />
-                Batch Details - {selectedMedication?.name}
+                {location === PHARMACY_LOCATIONS.DISPENSARY ? 'Dispensary Receipts' : 'Batch Details'} - {selectedMedication?.name}
               </DialogTitle>
               <DialogDescription>
-                View all batches and expiry information
+                {location === PHARMACY_LOCATIONS.DISPENSARY ? 'View transfer receipts and expiry information' : 'View all batches and expiry information'}
               </DialogDescription>
             </DialogHeader>
             
@@ -1084,6 +593,9 @@ export default function InventoryPage() {
                     const daysUntilExpiry = getDaysUntilExpiry(batch.expiryDate);
                     const isExpired = daysUntilExpiry < 0;
                     const isExpiringSoon = daysUntilExpiry >= 0 && daysUntilExpiry <= 90;
+                    const sourceLabel = batch.sourceFromCentralStore?.from_location || batch.supplier || 'N/A';
+                    const requestId = batch.sourceFromCentralStore?.request_id || '—';
+                    const issuedDate = batch.sourceFromCentralStore?.issued_at?.split('T')[0] || '—';
                     
                     return (
                       <Card key={batch.id} className={`border-l-4 ${
@@ -1114,10 +626,20 @@ export default function InventoryPage() {
                               <span className="font-medium">{batch.receivedDate}</span>
                             </div>
                             <div>
-                              <span className="text-muted-foreground">Supplier:</span>{' '}
-                              <span className="font-medium">{batch.supplier || 'N/A'}</span>
+                              <span className="text-muted-foreground">Source:</span>{' '}
+                              <span className="font-medium">{sourceLabel}</span>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground">Request:</span>{' '}
+                              <span className="font-medium">{requestId}</span>
                             </div>
                           </div>
+                          {batch.sourceFromCentralStore && (
+                            <div className="mt-2 text-xs">
+                              <span className="text-muted-foreground">Issued:</span>{' '}
+                              <span className="font-medium">{issuedDate}</span>
+                            </div>
+                          )}
                         </CardContent>
                       </Card>
                     );
@@ -1137,216 +659,6 @@ export default function InventoryPage() {
           </DialogContent>
         </Dialog>
 
-        {/* Add Medication Modal */}
-        <Dialog open={showAddModal} onOpenChange={setShowAddModal}>
-          <DialogContent className="w-[95vw] sm:max-w-[800px] max-h-[90vh] overflow-hidden flex flex-col">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                <Plus className="h-5 w-5 text-violet-500" />
-                Add New Medication
-              </DialogTitle>
-            </DialogHeader>
-            
-            <div className="overflow-y-auto max-h-[60vh] space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label>Brand Name *</Label>
-                  <Input
-                    value={newMedication.name}
-                    onChange={(e) => setNewMedication({...newMedication, name: e.target.value})}
-                    placeholder="e.g., Amoxil"
-                    className="mt-1"
-                  />
-                </div>
-                <div>
-                  <Label>Generic Name *</Label>
-                  <Input
-                    value={newMedication.genericName}
-                    onChange={(e) => setNewMedication({...newMedication, genericName: e.target.value})}
-                    placeholder="e.g., Amoxicillin"
-                    className="mt-1"
-                  />
-                </div>
-                <div>
-                  <Label>Category *</Label>
-                  <Select value={newMedication.category} onValueChange={(v) => setNewMedication({...newMedication, category: v})}>
-                    <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {categories.filter(c => c.value !== 'All Categories').map(cat => (
-                        <SelectItem key={cat.value} value={cat.value}>{cat.label}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label>Strength *</Label>
-                  <Select value={newMedication.strength} onValueChange={(v) => setNewMedication({...newMedication, strength: v})}>
-                    <SelectTrigger className="mt-1">
-                      <SelectValue placeholder="Select strength" />
-                    </SelectTrigger>
-                    <SelectContent className="max-h-[200px]">
-                      {MEDICATION_STRENGTHS.map((strength) => (
-                        <SelectItem key={strength} value={strength}>{strength}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label>Dosage Form *</Label>
-                  <Select value={newMedication.dosageForm} onValueChange={(v) => setNewMedication({...newMedication, dosageForm: v})}>
-                    <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {dosageForms.map(form => (
-                        <SelectItem key={form} value={form}>{form}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label>Pack Size</Label>
-                  <Input
-                    type="number"
-                    value={newMedication.packSize}
-                    onChange={(e) => setNewMedication({...newMedication, packSize: parseInt(e.target.value) || 10})}
-                    className="mt-1"
-                  />
-                </div>
-                <div>
-                  <Label>Manufacturer</Label>
-                  <Select value={newMedication.manufacturer} onValueChange={(v) => setNewMedication({...newMedication, manufacturer: v})}>
-                    <SelectTrigger className="mt-1">
-                      <SelectValue placeholder="Select manufacturer" />
-                    </SelectTrigger>
-                    <SelectContent className="max-h-[200px]">
-                      {MEDICATION_MANUFACTURERS.map((manufacturer) => (
-                        <SelectItem key={manufacturer} value={manufacturer}>{manufacturer}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label>Minimum Stock</Label>
-                  <Input
-                    type="number"
-                    value={newMedication.minimumStock}
-                    onChange={(e) => setNewMedication({...newMedication, minimumStock: parseInt(e.target.value) || 0})}
-                    className="mt-1"
-                  />
-                </div>
-              </div>
-            </div>
-            
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setShowAddModal(false)}>Cancel</Button>
-              <Button 
-                className="bg-violet-600 hover:bg-violet-700"
-                onClick={handleAddMedication}
-                disabled={!newMedication.name || !newMedication.genericName || !newMedication.strength}
-              >
-                <Plus className="h-4 w-4 mr-2" />
-                Add Medication
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-
-        <Dialog open={showRequestDetailsModal} onOpenChange={setShowRequestDetailsModal}>
-          <DialogContent className="w-[95vw] sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                <Eye className="h-5 w-5 text-violet-500" />
-                Request Details
-              </DialogTitle>
-            </DialogHeader>
-            {selectedRequest && (
-              <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-4 bg-muted/50 rounded-lg p-4 text-sm">
-                  <div>
-                    <p className="text-muted-foreground">Request ID</p>
-                    <p className="font-medium">{selectedRequest.request_id}</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground">Status</p>
-                    <p className="font-medium">{selectedRequest.status}</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground">From</p>
-                    <p className="font-medium">{selectedRequest.from_location}</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground">To</p>
-                    <p className="font-medium">{selectedRequest.to_location}</p>
-                  </div>
-                </div>
-
-                {selectedRequest.notes && (
-                  <div className="rounded-lg border p-3 text-sm">
-                    <p className="text-muted-foreground">Notes</p>
-                    <p className="mt-1">{selectedRequest.notes}</p>
-                  </div>
-                )}
-
-                <div className="space-y-2">
-                  <p className="font-medium">Items</p>
-                  <div className="space-y-2">
-                    {(selectedRequest.items || []).map((it) => (
-                      <div key={it.id || `${it.medication}-${it.medication_name}`} className="rounded-lg border p-3 text-sm">
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="min-w-0">
-                            <p className="font-medium truncate">{it.medication_name || `Medication ${it.medication}`}</p>
-                            <p className="text-xs text-muted-foreground mt-1">
-                              Requested: {it.quantity} {it.unit || "unit"} • Issued: {Number(it.fulfilled_quantity || 0)} {it.unit || "unit"}
-                            </p>
-                          </div>
-                          {Number(it.fulfilled_quantity || 0) >= it.quantity ? (
-                            <Badge className="bg-emerald-100 text-emerald-800">Full</Badge>
-                          ) : (
-                            <Badge className="bg-amber-100 text-amber-800">Partial</Badge>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setShowRequestDetailsModal(false)}>
-                Close
-              </Button>
-              {selectedRequest && (selectedRequest.status === "fulfilled" || selectedRequest.status === "partially_fulfilled") && (
-                <Button onClick={() => openConfirmReceipt(selectedRequest)} className="bg-emerald-600 hover:bg-emerald-700">
-                  <CheckCircle2 className="h-4 w-4 mr-2" />
-                  Confirm Receipt
-                </Button>
-              )}
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-
-        <Dialog open={showConfirmReceiptModal} onOpenChange={setShowConfirmReceiptModal}>
-          <DialogContent className="w-[95vw] sm:max-w-[600px]">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                <CheckCircle2 className="h-5 w-5 text-emerald-600" />
-                Confirm Received Stock
-              </DialogTitle>
-              <DialogDescription>Confirm that the dispensary has received the issued stock.</DialogDescription>
-            </DialogHeader>
-            <div className="space-y-2">
-              <Label>Confirmation Notes (optional)</Label>
-              <Textarea value={confirmNotes} onChange={(e) => setConfirmNotes(e.target.value)} placeholder="e.g., Received complete, no discrepancies" />
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setShowConfirmReceiptModal(false)}>
-                Cancel
-              </Button>
-              <Button onClick={handleConfirmReceipt} disabled={confirmingReceipt} className="bg-emerald-600 hover:bg-emerald-700">
-                {confirmingReceipt ? "Confirming..." : "Confirm Receipt"}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
       </div>
     </DashboardLayout>
   );

@@ -246,3 +246,13 @@ Brand_ID,Brand_Name,Generic_ID,Generic_Name,Product_Code,Unit,Strength,Form,Cate
 245,Zyloric 300mg,G146,Allopurinol,ZYL300,Tablet,300mg,Tablet,Antigout,GSK,10
 246,Zyncef Syrup,G023,Cetirizine,ZYN5S,Bottle,5mg/5ml,Syrup,Antihistamines,,1
 247,Zyncef Tablets,G023,Cetirizine,ZYN10,Tablet,10mg,Tablet,Antihistamines,,10
+248,Daravite Forte,G016,Multivitamins,DAR-F,Tablet,Multivitamin + Mineral Forte,Tablet,Vitamins,,10
+249,Max Omega,G156,Omega-3,MAX-OMG,Capsule,1000mg,Capsule,Vitamins,,10
+250,Well Man,G016,Multivitamins,WLM-M,Tablet,Multivitamin for Men,Tablet,Vitamins,Vitabiotics,10
+251,Well Woman,G016,Multivitamins,WLW-M,Tablet,Multivitamin for Women,Tablet,Vitamins,Vitabiotics,10
+252,Ginsomin,G157,Ginseng,GIN-C,Capsule,Ginseng extract,Capsule,Vitamins,,10
+253,Vitacap,G016,Multivitamins,VTC-C,Capsule,Multivitamin + Minerals,Capsule,Vitamins,,10
+254,Reload,G016,Multivitamins,REL-T,Tablet,Multivitamin + Energy,Tablet,Vitamins,,10
+255,Alphabetic,G016,Multivitamins,ALP-T,Tablet,Vit A 5000IU + Vit C 75mg,Tablet,Vitamins,,10
+256,Diosmin 500mg,G155,Diosmin,DIO500,Tablet,500mg,Tablet,Other,,10
+257,Diosmin 1000mg,G155,Diosmin,DIO1000,Tablet,1000mg,Tablet,Other,,10

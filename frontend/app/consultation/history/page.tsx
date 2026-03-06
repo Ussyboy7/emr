@@ -231,7 +231,6 @@ export default function ConsultationHistoryPage() {
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
-  const [totalCount, setTotalCount] = useState(0);
   
   // Modal states
   const [selectedConsultation, setSelectedConsultation] = useState<ConsultationRecordWithGender | null>(null);
@@ -308,18 +307,17 @@ export default function ConsultationHistoryPage() {
         }
         
         // Backend expects status: 'active' | 'completed' | 'cancelled' (not 'in-progress')
+        // Load all for date range (like Nursing Pool Queue) - search is client-side
         const apiStatus = statusFilter === 'all' ? undefined : statusFilter === 'in-progress' ? 'active' : statusFilter === 'completed' ? 'completed' : statusFilter;
         const sessionsResult = await consultationService.getSessions({
-          page: currentPage,
-          page_size: itemsPerPage,
-          search: searchQuery || undefined,
+          page: 1,
+          page_size: dateFilter === "month" ? 1000 : 500,
           status: apiStatus,
           clinic: clinicFilter !== "all" ? clinicFilter : undefined,
           date,
           start_date,
           end_date,
         });
-        setTotalCount(sessionsResult.count || sessionsResult.results.length);
         const sessions = sessionsResult.results || [];
         
         // Transform sessions to consultation records
@@ -411,19 +409,46 @@ export default function ConsultationHistoryPage() {
     };
     
     loadConsultations();
-  }, [currentPage, itemsPerPage, searchQuery, statusFilter, dateFilter, clinicFilter]);
+  }, [statusFilter, dateFilter, clinicFilter]);
 
-  // With server-side pagination, consultations array contains only current page results
-  const paginatedConsultations = consultations;
+  // Client-side filter and pagination (same as Nursing Pool Queue)
+  const filteredConsultations = useMemo(() => {
+    const searchLower = searchQuery.toLowerCase().trim();
+    if (!searchLower) return consultations;
+    return consultations.filter(
+      (c) =>
+        (c.patient && c.patient.toLowerCase().includes(searchLower)) ||
+        (c.patientId && String(c.patientId).toLowerCase().includes(searchLower)) ||
+        (c.visitId != null && String(c.visitId).toLowerCase().includes(searchLower)) ||
+        (c.visitDisplayId && c.visitDisplayId.toLowerCase().includes(searchLower)) ||
+        (c.doctor && c.doctor.toLowerCase().includes(searchLower)) ||
+        (c.clinic && c.clinic.toLowerCase().includes(searchLower))
+    );
+  }, [consultations, searchQuery]);
+
+  const sortedConsultations = useMemo(
+    () =>
+      [...filteredConsultations].sort((a, b) => {
+        const keyA = `${a.date}T${a.time || "00:00"}`;
+        const keyB = `${b.date}T${b.time || "00:00"}`;
+        return new Date(keyB).getTime() - new Date(keyA).getTime();
+      }),
+    [filteredConsultations]
+  );
+
+  const paginatedConsultations = useMemo(() => {
+    const start = (currentPage - 1) * itemsPerPage;
+    return sortedConsultations.slice(start, start + itemsPerPage);
+  }, [sortedConsultations, currentPage, itemsPerPage]);
 
   // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [itemsPerPage, searchQuery, statusFilter, dateFilter, clinicFilter]);
+  }, [searchQuery, statusFilter, dateFilter, clinicFilter, itemsPerPage]);
 
-  // Stats (from current result set)
+  // Stats (from filtered result set, like pool queue)
   const stats = useMemo(() => {
-    const filtered = consultations;
+    const filtered = filteredConsultations;
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const weekAgo = new Date(today);
@@ -455,7 +480,7 @@ export default function ConsultationHistoryPage() {
       inProgress: filtered.filter(c => c.status === "In Progress").length,
       completed: filtered.filter(c => c.status === "Completed").length,
     };
-  }, [consultations]);
+  }, [filteredConsultations]);
 
   const openViewModal = (consultation: ConsultationRecord) => {
     setSelectedConsultation(consultation);
@@ -915,7 +940,7 @@ export default function ConsultationHistoryPage() {
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input 
-                  placeholder="Search patient, ID..." 
+                  placeholder="Search by patient name, visit ID, or patient ID..." 
                   value={searchQuery} 
                   onChange={(e) => setSearchQuery(e.target.value)} 
                   className="pl-10" 
@@ -1102,7 +1127,7 @@ export default function ConsultationHistoryPage() {
           <Card className="p-4">
             <StandardPagination
               currentPage={currentPage}
-              totalItems={totalCount}
+              totalItems={sortedConsultations.length}
               itemsPerPage={itemsPerPage}
               onPageChange={setCurrentPage}
               onItemsPerPageChange={setItemsPerPage}

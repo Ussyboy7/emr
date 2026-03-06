@@ -45,6 +45,15 @@ class Command(BaseCommand):
             self.stdout.write(self.style.ERROR("No locations provided. Example: --locations Store,Dispensary"))
             return
 
+        # Dispensary is receipt-based; do not create MedicationInventory for it
+        if "Dispensary" in locations:
+            locations = [loc for loc in locations if loc != "Dispensary"]
+            self.stdout.write(
+                self.style.WARNING("Dispensary is receipt-based. Skipping Dispensary here. Use seed_demo_data or seed_dispensary_from_store to seed from Central Store.")
+            )
+        if not locations:
+            return
+
         medications = Medication.objects.filter(is_active=True).only("id", "name", "code", "unit")
         if not medications.exists():
             self.stdout.write(self.style.WARNING("No active medications found. Run seed_medications first."))
@@ -67,7 +76,7 @@ class Command(BaseCommand):
                         "quantity": default_quantity,
                         "unit": unit,
                         "min_stock_level": default_min_stock,
-                        "supplier": "Default Supplier",
+                        "supplier": (medication.manufacturer or "").strip(),
                     },
                 )
                 if created:
