@@ -17,6 +17,7 @@ interface PatientData {
   patient_id: string;
   status?: string;
   age?: number;
+  age_display?: string;
   gender?: string;
   date_of_birth?: string;
 }
@@ -101,6 +102,7 @@ export default function MedicalRecordsPage() {
             patient_id: p.patient_id,
             status: 'Active',
             age: p.age,
+            age_display: p.age_display,
             gender: p.gender,
             date_of_birth: p.date_of_birth,
           }));
@@ -373,9 +375,9 @@ export default function MedicalRecordsPage() {
                         <p className="text-xs text-muted-foreground">
                           ID: {patient.patient_id}
                         </p>
-                        {patient.age && (
+                        {(patient.age_display || patient.age) && (
                           <p className="text-xs text-muted-foreground mt-1">
-                            {patient.age} years • {patient.gender || 'N/A'}
+                            {patient.age_display || `${patient.age} years`} • {patient.gender || 'N/A'}
                           </p>
                         )}
                       </div>

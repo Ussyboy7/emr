@@ -15,13 +15,14 @@ import { Progress } from "@/components/ui/progress";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "sonner";
 import { Checkbox } from "@/components/ui/checkbox";
+import { AdvancedDateRangeDialog } from '@/components/AdvancedDateRangeDialog';
 import { labService, type LabOrder as ApiLabOrder, type LabTest as ApiLabTest } from '@/lib/services';
 import { transformLabTestStatus, transformPriority, transformToBackendPriority, transformProcessingMethod, transformToBackendProcessingMethod } from '@/lib/services/transformers';
 import { PatientAvatar } from "@/components/PatientAvatar";
 import {
   TestTube, Search, Eye, Clock, CheckCircle2, Activity, FlaskConical, Loader2,
   Beaker, AlertTriangle, User, Calendar, FileText, Play, Stethoscope,
-  ClipboardList, RefreshCw, Upload, Download, Building2, Truck, X, Droplets, Pipette, RotateCcw, XCircle
+  ClipboardList, RefreshCw, Upload, Download, Building2, Truck, X, Droplets, Pipette, RotateCcw, XCircle, Filter
 } from 'lucide-react';
 
 // ==========================================
@@ -677,6 +678,8 @@ export default function LabOrdersPage() {
   const [dateFilter, setDateFilter] = useState('today');
   const [genderFilter, setGenderFilter] = useState('all');
   const [activeTab, setActiveTab] = useState('pending');
+  const [isDateFilterDialogOpen, setIsDateFilterDialogOpen] = useState(false);
+  const [dateRange, setDateRange] = useState({ from: '', to: '' });
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -853,11 +856,31 @@ export default function LabOrdersPage() {
     return true;
   };
 
+  const matchesCustomDateRange = (isoDate: string | undefined): boolean => {
+    if (!dateRange.from && !dateRange.to) return true;
+    if (!isoDate) return false;
+
+    const dt = new Date(isoDate);
+    if (Number.isNaN(dt.getTime())) return false;
+
+    if (dateRange.from) {
+      const from = new Date(`${dateRange.from}T00:00:00`);
+      if (dt < from) return false;
+    }
+
+    if (dateRange.to) {
+      const to = new Date(`${dateRange.to}T23:59:59.999`);
+      if (dt > to) return false;
+    }
+
+    return true;
+  };
+
   // Client-side filtering for all filters
   const filteredOrders = useMemo(() => {
     return orders.filter(order => {
       // Date filter
-      if (!matchesDateFilter(order.orderedAt, dateFilter)) {
+      if (!matchesDateFilter(order.orderedAt, dateFilter) || !matchesCustomDateRange(order.orderedAt)) {
         return false;
       }
 
@@ -876,7 +899,7 @@ export default function LabOrdersPage() {
       if (activeTab === 'rejected') return order.tests.some(t => t.status === 'Rejected');
       return true; // All tab shows everything
     });
-  }, [orders, activeTab, dateFilter, genderFilter]);
+  }, [orders, activeTab, dateFilter, genderFilter, dateRange.from, dateRange.to]);
 
   // With server-side pagination, orders array contains only current page results
   const paginatedOrders = filteredOrders;
@@ -884,7 +907,12 @@ export default function LabOrdersPage() {
   // Reset to page 1 when filters change or items per page changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, priorityFilter, dateFilter, genderFilter, activeTab, itemsPerPage]);
+  }, [searchQuery, priorityFilter, dateFilter, genderFilter, activeTab, itemsPerPage, dateRange.from, dateRange.to]);
+
+  const clearDateRangeFilters = () => {
+    setDateRange({ from: '', to: '' });
+    setIsDateFilterDialogOpen(false);
+  };
 
   // Load orders function - memoized to prevent infinite loops
   const loadOrders = useCallback(async () => {
@@ -1491,6 +1519,10 @@ export default function LabOrdersPage() {
                     className="pl-10" 
                   />
                 </div>
+                <Button variant="outline" onClick={() => setIsDateFilterDialogOpen(true)}>
+                  <Filter className="h-4 w-4 mr-2" />
+                  Filters
+                </Button>
                 <div className="flex flex-wrap gap-2">
                   <Select value={dateFilter} onValueChange={setDateFilter} >
                     <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
@@ -1523,6 +1555,16 @@ export default function LabOrdersPage() {
             </div>
           </CardContent>
         </Card>
+
+        <AdvancedDateRangeDialog
+          open={isDateFilterDialogOpen}
+          onOpenChange={setIsDateFilterDialogOpen}
+          description="Apply a custom order date range to narrow down laboratory orders."
+          label="Order Date Range"
+          value={dateRange}
+          onChange={setDateRange}
+          onClear={clearDateRangeFilters}
+        />
 
         {/* Orders List */}
         <div className="space-y-3">

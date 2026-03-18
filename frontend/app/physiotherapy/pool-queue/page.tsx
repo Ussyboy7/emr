@@ -20,11 +20,12 @@ import { useCurrentUser } from '@/hooks/use-current-user';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { PatientAvatar } from "@/components/PatientAvatar";
 import { apiFetch } from '@/lib/api-client';
+import { AdvancedDateRangeDialog } from '@/components/AdvancedDateRangeDialog';
 
 import {
   Users, Search, Stethoscope, Calendar, Clock, CheckCircle, CheckCircle2,
   Eye, Play, AlertTriangle, Loader2, Activity, RefreshCw, XCircle,
-  FileText, Target, ClipboardList, Plus, User, Lightbulb, Heart, Pencil
+  FileText, Target, ClipboardList, Plus, User, Lightbulb, Heart, Pencil, Filter
 } from 'lucide-react';
 
 // Helper function to format relative time
@@ -69,6 +70,8 @@ export default function PhysioPoolQueuePage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState('pending');
   const [dateFilter, setDateFilter] = useState('today');
+  const [isDateFilterDialogOpen, setIsDateFilterDialogOpen] = useState(false);
+  const [dateRange, setDateRange] = useState({ from: '', to: '' });
 
   // Pagination
   const [currentPage, setCurrentPage] = useState(1);
@@ -223,7 +226,12 @@ export default function PhysioPoolQueuePage() {
   // Reset page when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, activeTab, dateFilter, itemsPerPage]);
+  }, [searchQuery, activeTab, dateFilter, itemsPerPage, dateRange.from, dateRange.to]);
+
+  const clearDateRangeFilters = () => {
+    setDateRange({ from: '', to: '' });
+    setIsDateFilterDialogOpen(false);
+  };
 
   const openEditSession = (session: PhysioSession) => {
     const s = session as any;
@@ -316,6 +324,19 @@ export default function PhysioPoolQueuePage() {
           const monthAgo = new Date(today);
           monthAgo.setMonth(monthAgo.getMonth() - 1);
           if (orderedDate < monthAgo) return false;
+        }
+      }
+
+      if (dateRange.from || dateRange.to) {
+        const orderedDate = new Date(order.ordered_at);
+        if (Number.isNaN(orderedDate.getTime())) return false;
+        if (dateRange.from) {
+          const from = new Date(`${dateRange.from}T00:00:00`);
+          if (orderedDate < from) return false;
+        }
+        if (dateRange.to) {
+          const to = new Date(`${dateRange.to}T23:59:59.999`);
+          if (orderedDate > to) return false;
         }
       }
 
@@ -967,6 +988,10 @@ export default function PhysioPoolQueuePage() {
                       className="pl-10"
                     />
                   </div>
+                  <Button variant="outline" onClick={() => setIsDateFilterDialogOpen(true)}>
+                    <Filter className="h-4 w-4 mr-2" />
+                    Filters
+                  </Button>
                   <div className="flex flex-wrap gap-2">
                     <Select value={dateFilter} onValueChange={setDateFilter}>
                       <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
@@ -982,6 +1007,16 @@ export default function PhysioPoolQueuePage() {
               </div>
             </CardContent>
           </Card>
+
+          <AdvancedDateRangeDialog
+            open={isDateFilterDialogOpen}
+            onOpenChange={setIsDateFilterDialogOpen}
+            description="Apply a custom order date range to narrow down physiotherapy orders."
+            label="Order Date Range"
+            value={dateRange}
+            onChange={setDateRange}
+            onClear={clearDateRangeFilters}
+          />
 
           {/* Orders List */}
           <div className="space-y-3">

@@ -17,11 +17,12 @@ import { useRouter } from 'next/navigation';
 import { visitService, type Visit } from '@/lib/services';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
-import { 
+import {
   Search, Plus, Calendar, Clock, CheckCircle2, MapPin,
-  Edit, Send, AlertTriangle, Loader2, Eye, X
+  Edit, Send, AlertTriangle, Loader2, Eye, X, Filter
 } from 'lucide-react';
 import { StandardPagination } from '@/components/StandardPagination';
+import { AdvancedDateRangeDialog } from '@/components/AdvancedDateRangeDialog';
 import { getAllClinicsWithAll, CLINICS } from '@/lib/constants/clinics';
 import { clinicMatches, normalizeClinicName } from '@/lib/utils/clinic-utils';
 import { useLocationOptions } from '@/lib/hooks/use-location-options';
@@ -49,6 +50,8 @@ export default function VisitsPage() {
   const [typeFilter, setTypeFilter] = useState('all');
   const [clinicFilter, setClinicFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('today'); // Default to today
+  const [isDateFilterDialogOpen, setIsDateFilterDialogOpen] = useState(false);
+  const [dateRange, setDateRange] = useState({ from: '', to: '' });
   
   // Modal states
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -95,6 +98,10 @@ export default function VisitsPage() {
     department: visit.clinic || 'GOPD',
     notes: visit.clinical_notes || '',
     location: visit.location || '',
+    isNewRegistration: Boolean(visit.is_new_registration),
+    isFirstVisit: Boolean(visit.is_first_visit),
+    isReturningVisit: Boolean(visit.is_returning_visit),
+    patientVisitStatus: visit.patient_visit_status || '',
   });
 
   // Helper function to build date filter parameters
@@ -103,7 +110,10 @@ export default function VisitsPage() {
     let startDate: string | undefined = undefined;
     let endDate: string | undefined = undefined;
     
-    if (dateFilter === 'today') {
+    if (dateRange.from || dateRange.to) {
+      startDate = dateRange.from || undefined;
+      endDate = dateRange.to || undefined;
+    } else if (dateFilter === 'today') {
       const today = new Date().toISOString().split('T')[0];
       dateParam = today;
     } else if (dateFilter === 'week') {
@@ -121,7 +131,7 @@ export default function VisitsPage() {
     // 'all' means no date filter
 
     return { dateParam, startDate, endDate };
-  }, [dateFilter]);
+  }, [dateFilter, dateRange.from, dateRange.to]);
 
   // Load stats - separate from pagination to get accurate counts
   const loadStats = useCallback(async () => {
@@ -220,7 +230,12 @@ export default function VisitsPage() {
   // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, statusFilter, typeFilter, clinicFilter, dateFilter]);
+  }, [searchQuery, statusFilter, typeFilter, clinicFilter, dateFilter, dateRange.from, dateRange.to]);
+
+  const clearDateRangeFilters = () => {
+    setDateRange({ from: '', to: '' });
+    setIsDateFilterDialogOpen(false);
+  };
 
   // Stats - 4 cards with useful metrics (now from separate API calls for accuracy)
   const stats = useMemo(() => {
@@ -385,6 +400,31 @@ export default function VisitsPage() {
     }
   };
 
+  const getPatientVisitStatusBadge = (visit: TransformedVisit) => {
+    if (visit.isFirstVisit) {
+      return {
+        label: 'First Visit',
+        className: 'border-indigo-500/50 text-indigo-600 dark:text-indigo-400 bg-indigo-500/10',
+      };
+    }
+
+    if (visit.isNewRegistration) {
+      return {
+        label: 'New Registration',
+        className: 'border-cyan-500/50 text-cyan-600 dark:text-cyan-400 bg-cyan-500/10',
+      };
+    }
+
+    if (visit.isReturningVisit) {
+      return {
+        label: 'Returning',
+        className: 'border-slate-500/50 text-slate-600 dark:text-slate-300 bg-slate-500/10',
+      };
+    }
+
+    return null;
+  };
+
   return (
     <DashboardLayout>
       <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
@@ -456,6 +496,10 @@ export default function VisitsPage() {
                   className="pl-10" 
                 />
               </div>
+              <Button variant="outline" onClick={() => setIsDateFilterDialogOpen(true)}>
+                <Filter className="h-4 w-4 mr-2" />
+                Filters
+              </Button>
               <div className="flex flex-wrap gap-2">
                 <Select value={dateFilter} onValueChange={setDateFilter}>
                   <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
@@ -498,6 +542,16 @@ export default function VisitsPage() {
         </Card>
         )}
 
+        <AdvancedDateRangeDialog
+          open={isDateFilterDialogOpen}
+          onOpenChange={setIsDateFilterDialogOpen}
+          description="Apply a custom visit date range to narrow down the visit list."
+          label="Visit Date Range"
+          value={dateRange}
+          onChange={setDateRange}
+          onClear={clearDateRangeFilters}
+        />
+
         {/* Results Count */}
         {!loading && (
           <>
@@ -510,7 +564,9 @@ export default function VisitsPage() {
             {/* Visit Cards */}
             <div className="space-y-2">
               {paginatedVisits.length > 0 ? (
-                paginatedVisits.map((visit) => (
+                paginatedVisits.map((visit) => {
+                  const visitLifecycleBadge = getPatientVisitStatusBadge(visit);
+                  return (
             <Card key={visit.id} className={`border-l-4 ${getTypeColor(visit.type)} hover:shadow-md transition-shadow`}>
               <CardContent className="py-3 px-4">
                 <div className="flex items-center gap-3">
@@ -540,6 +596,11 @@ export default function VisitsPage() {
                       <Badge variant="outline" className={`text-[10px] px-1.5 py-0 h-5 ${getStatusBadge(visit.status)}`}>
                         {visit.status === 'Scheduled' ? 'Pending' : visit.status}
                       </Badge>
+                      {visitLifecycleBadge && (
+                        <Badge variant="outline" className={`text-[10px] px-1.5 py-0 h-5 ${visitLifecycleBadge.className}`}>
+                          {visitLifecycleBadge.label}
+                        </Badge>
+                      )}
                     </div>
                     
                     {/* Row 2: IDs + Clinic(s) + Location + Date/Time */}
@@ -621,8 +682,9 @@ export default function VisitsPage() {
                   </div>
                 </div>
                   </CardContent>
-                </Card>
-              ))
+            </Card>
+                  );
+                })
               ) : (
                 <Card>
                   <CardContent className="py-12 text-center">

@@ -33,12 +33,29 @@ interface AttendanceSummary {
   total_male: number;
   total_female: number;
   grand_total: number;
+  new_registrations: number;
+  first_time_patients: number;
+  returning_patients: number;
+  total_unique_patients_seen: number;
+  total_visits: number;
 }
 
 export default function AttendanceSummaryReport() {
   const router = useRouter();
   const [data, setData] = useState<AttendanceData[]>([]);
-  const [summary, setSummary] = useState<AttendanceSummary>({ total_employee: 0, total_non_employee: 0, total_male: 0, total_female: 0, grand_total: 0 });
+  const emptySummary: AttendanceSummary = {
+    total_employee: 0,
+    total_non_employee: 0,
+    total_male: 0,
+    total_female: 0,
+    grand_total: 0,
+    new_registrations: 0,
+    first_time_patients: 0,
+    returning_patients: 0,
+    total_unique_patients_seen: 0,
+    total_visits: 0,
+  };
+  const [summary, setSummary] = useState<AttendanceSummary>(emptySummary);
   const [isLoading, setIsLoading] = useState(true);
   
   // Filters
@@ -81,12 +98,12 @@ export default function AttendanceSummaryReport() {
 
       const response = await apiFetch<{ data: AttendanceData[]; summary: AttendanceSummary }>(url);
       setData(response.data || []);
-      setSummary(response.summary || { total_employee: 0, total_non_employee: 0, total_male: 0, total_female: 0, grand_total: 0 });
+      setSummary(response.summary || emptySummary);
     } catch (error: any) {
       console.error("Error fetching report:", error);
       toast.error(error.message || "Failed to load attendance report");
       setData([]);
-      setSummary({ total_employee: 0, total_non_employee: 0, total_male: 0, total_female: 0, grand_total: 0 });
+      setSummary(emptySummary);
     } finally {
       setIsLoading(false);
     }
@@ -346,6 +363,44 @@ export default function AttendanceSummaryReport() {
           </Card>
         </div>
 
+        <div className="grid gap-4 md:grid-cols-5">
+          <Card className="border-l-4 border-l-indigo-500">
+            <CardContent className="p-4">
+              <p className="text-sm text-muted-foreground">First-Time Visitors</p>
+              <p className="text-2xl sm:text-3xl font-bold text-indigo-600 dark:text-indigo-400">{summary.first_time_patients.toLocaleString()}</p>
+              <p className="text-xs text-muted-foreground mt-1">Earliest hospital visit in selected period</p>
+            </CardContent>
+          </Card>
+          <Card className="border-l-4 border-l-cyan-500">
+            <CardContent className="p-4">
+              <p className="text-sm text-muted-foreground">New Registrations</p>
+              <p className="text-2xl sm:text-3xl font-bold text-cyan-600 dark:text-cyan-400">{summary.new_registrations.toLocaleString()}</p>
+              <p className="text-xs text-muted-foreground mt-1">Patients registered in selected period</p>
+            </CardContent>
+          </Card>
+          <Card className="border-l-4 border-l-slate-500">
+            <CardContent className="p-4">
+              <p className="text-sm text-muted-foreground">Returning Patients</p>
+              <p className="text-2xl sm:text-3xl font-bold text-slate-700 dark:text-slate-300">{summary.returning_patients.toLocaleString()}</p>
+              <p className="text-xs text-muted-foreground mt-1">Seen this period with prior visit history</p>
+            </CardContent>
+          </Card>
+          <Card className="border-l-4 border-l-amber-500">
+            <CardContent className="p-4">
+              <p className="text-sm text-muted-foreground">Unique Patients Seen</p>
+              <p className="text-2xl sm:text-3xl font-bold text-amber-600 dark:text-amber-400">{summary.total_unique_patients_seen.toLocaleString()}</p>
+              <p className="text-xs text-muted-foreground mt-1">Distinct patients with visits in period</p>
+            </CardContent>
+          </Card>
+          <Card className="border-l-4 border-l-emerald-500">
+            <CardContent className="p-4">
+              <p className="text-sm text-muted-foreground">Total Visits</p>
+              <p className="text-2xl sm:text-3xl font-bold text-emerald-600 dark:text-emerald-400">{summary.total_visits.toLocaleString()}</p>
+              <p className="text-xs text-muted-foreground mt-1">All visit records in selected period</p>
+            </CardContent>
+          </Card>
+        </div>
+
         {/* Data Table */}
         <Card>
           <CardHeader>
@@ -410,4 +465,3 @@ export default function AttendanceSummaryReport() {
     </DashboardLayout>
   );
 }
-

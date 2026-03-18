@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { toast } from "sonner";
 import { radiologyService, adminService } from '@/lib/services';
 import { PatientAvatar } from "@/components/PatientAvatar";
+import { AdvancedDateRangeDialog } from '@/components/AdvancedDateRangeDialog';
 
 import {
   CheckCircle2, Search, Eye, Clock, AlertTriangle,
@@ -52,6 +53,8 @@ export default function CompletedReportsPage() {
   const [dateFilter, setDateFilter] = useState('today');
   const [clinicFilter, setClinicFilter] = useState('all');
   const [genderFilter, setGenderFilter] = useState('all');
+  const [isDateFilterDialogOpen, setIsDateFilterDialogOpen] = useState(false);
+  const [dateRange, setDateRange] = useState({ from: '', to: '' });
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -192,7 +195,7 @@ export default function CompletedReportsPage() {
     } finally {
       setLoading(false);
     }
-  }, [currentPage, itemsPerPage, statusFilter, searchQuery, dateFilter, genderFilter]);
+  }, [currentPage, itemsPerPage, statusFilter, searchQuery, dateFilter, genderFilter, dateRange.from, dateRange.to]);
 
   // Load clinics on component mount
   useEffect(() => {
@@ -207,7 +210,12 @@ export default function CompletedReportsPage() {
   // Reset to page 1 when filters change or items per page changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, statusFilter, dateFilter, genderFilter, itemsPerPage]);
+  }, [searchQuery, statusFilter, dateFilter, genderFilter, itemsPerPage, dateRange.from, dateRange.to]);
+
+  const clearDateRangeFilters = () => {
+    setDateRange({ from: '', to: '' });
+    setIsDateFilterDialogOpen(false);
+  };
 
   // The API handles pagination, but we still filter client-side for search
   const filteredReports = useMemo(() => reports.filter(report => {
@@ -219,7 +227,21 @@ export default function CompletedReportsPage() {
 
     // Date filtering
     let matchesDate = true;
-    if (dateFilter !== 'all') {
+    if (dateRange.from || dateRange.to) {
+      const reportDate = new Date(report.completedAt);
+      if (Number.isNaN(reportDate.getTime())) {
+        matchesDate = false;
+      } else {
+        if (dateRange.from) {
+          const from = new Date(`${dateRange.from}T00:00:00`);
+          if (reportDate < from) matchesDate = false;
+        }
+        if (dateRange.to) {
+          const to = new Date(`${dateRange.to}T23:59:59.999`);
+          if (reportDate > to) matchesDate = false;
+        }
+      }
+    } else if (dateFilter !== 'all') {
       const reportDate = new Date(report.completedAt);
       const today = new Date();
 
@@ -241,7 +263,7 @@ export default function CompletedReportsPage() {
     }
 
     return matchesSearch && matchesStatus && matchesGender && matchesDate;
-  }), [reports, searchQuery, statusFilter, dateFilter, genderFilter]);
+  }), [reports, searchQuery, statusFilter, dateFilter, genderFilter, dateRange.from, dateRange.to]);
 
   const paginatedReports = filteredReports.slice(
     (currentPage - 1) * itemsPerPage,
@@ -435,6 +457,9 @@ export default function CompletedReportsPage() {
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input placeholder="Search by patient, report ID, or study..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-10" />
               </div>
+              <Button variant="outline" onClick={() => setIsDateFilterDialogOpen(true)}>
+                Filters
+              </Button>
               <Select value={dateFilter} onValueChange={setDateFilter}>
                 <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -473,6 +498,16 @@ export default function CompletedReportsPage() {
             </div>
           </CardContent>
         </Card>
+
+        <AdvancedDateRangeDialog
+          open={isDateFilterDialogOpen}
+          onOpenChange={setIsDateFilterDialogOpen}
+          description="Apply a custom completed date range to narrow down radiology reports."
+          label="Completed Date Range"
+          value={dateRange}
+          onChange={setDateRange}
+          onClear={clearDateRangeFilters}
+        />
 
         {/* Reports List */}
         <div className="space-y-3">

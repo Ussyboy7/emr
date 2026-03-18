@@ -6,7 +6,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.utils import timezone
 from datetime import datetime, timedelta
-from django.db.models import Count, Q, Sum, Avg, F
+from django.db.models import Count, Q, Sum, Avg, F, OuterRef, Subquery, DateField
 from django.http import HttpResponse
 import csv
 import json
@@ -19,6 +19,73 @@ from nursing.models import NursingOrder, Procedure
 from consultation.models import Referral, ConsultationSession
 from django.db.models.functions import ExtractMonth, ExtractYear, TruncMonth
 from django.db.models import Q
+
+
+def _resolve_period_bounds(year=None, start_date=None, end_date=None, default_to_current_year=False):
+    """Resolve report period bounds as dates."""
+    if start_date and end_date:
+        return start_date, end_date
+
+    if year:
+        try:
+            year_int = int(year)
+            return datetime(year_int, 1, 1).date(), datetime(year_int, 12, 31).date()
+        except (ValueError, TypeError):
+            pass
+
+    if default_to_current_year:
+        current_year = timezone.now().year
+        return datetime(current_year, 1, 1).date(), datetime(current_year, 12, 31).date()
+
+    return None, None
+
+
+def _build_visit_lifecycle_summary(period_visits_queryset, history_visits_queryset, start_date, end_date):
+    """
+    Build patient lifecycle metrics for a visit cohort.
+
+    - new_registrations: patients seen in period who were registered in period
+    - first_time_patients: patients whose earliest scoped visit falls in period
+    - returning_patients: seen in period but earliest scoped visit was before period
+    """
+    patient_ids = period_visits_queryset.values_list('patient_id', flat=True).distinct()
+    patients_qs = Patient.objects.filter(id__in=patient_ids)
+
+    if not start_date or not end_date:
+        total_seen = patients_qs.count()
+        return {
+            'new_registrations': 0,
+            'first_time_patients': 0,
+            'returning_patients': total_seen,
+            'total_unique_patients_seen': total_seen,
+            'total_visits': period_visits_queryset.count(),
+        }
+
+    first_visit_date_subquery = history_visits_queryset.filter(
+        patient=OuterRef('pk')
+    ).order_by('date', 'time', 'created_at', 'id').values('date')[:1]
+
+    patients_qs = patients_qs.annotate(
+        first_scoped_visit_date=Subquery(first_visit_date_subquery, output_field=DateField())
+    )
+
+    total_seen = patients_qs.count()
+    first_time_patients = patients_qs.filter(
+        first_scoped_visit_date__gte=start_date,
+        first_scoped_visit_date__lte=end_date,
+    ).count()
+    new_registrations = patients_qs.filter(
+        created_at__date__gte=start_date,
+        created_at__date__lte=end_date,
+    ).count()
+
+    return {
+        'new_registrations': new_registrations,
+        'first_time_patients': first_time_patients,
+        'returning_patients': max(total_seen - first_time_patients, 0),
+        'total_unique_patients_seen': total_seen,
+        'total_visits': period_visits_queryset.count(),
+    }
 
 
 class PatientDemographicsReportView(views.APIView):
@@ -347,21 +414,21 @@ class AttendanceSummaryReportView(views.APIView):
     def get(self, request):
         """Generate attendance summary with optional date filtering."""
         from django.utils.dateparse import parse_date
-        from django.db.models import Count
         
         # Parse query parameters
         year = request.query_params.get('year')
         start_date = request.query_params.get('start_date')
         end_date = request.query_params.get('end_date')
+        parsed_start_date = parse_date(start_date) if start_date else None
+        parsed_end_date = parse_date(end_date) if end_date else None
         
         # Build date filter
-        visits_queryset = Visit.objects.filter(status__in=['completed', 'in_progress']).select_related('patient')
+        history_queryset = Visit.objects.filter(status__in=['completed', 'in_progress']).select_related('patient')
+        visits_queryset = history_queryset
         
         if start_date and end_date:
-            start = parse_date(start_date)
-            end = parse_date(end_date)
-            if start and end:
-                visits_queryset = visits_queryset.filter(date__gte=start, date__lte=end)
+            if parsed_start_date and parsed_end_date:
+                visits_queryset = visits_queryset.filter(date__gte=parsed_start_date, date__lte=parsed_end_date)
         elif year:
             try:
                 year_int = int(year)
@@ -372,6 +439,19 @@ class AttendanceSummaryReportView(views.APIView):
             # Default to current year
             current_year = timezone.now().year
             visits_queryset = visits_queryset.filter(date__year=current_year)
+
+        period_start, period_end = _resolve_period_bounds(
+            year=year,
+            start_date=parsed_start_date,
+            end_date=parsed_end_date,
+            default_to_current_year=True,
+        )
+        lifecycle_summary = _build_visit_lifecycle_summary(
+            period_visits_queryset=visits_queryset,
+            history_visits_queryset=history_queryset,
+            start_date=period_start,
+            end_date=period_end,
+        )
         
         # Get unique patients per category using distinct on patient
         # Officers
@@ -529,7 +609,8 @@ class AttendanceSummaryReportView(views.APIView):
                 'total_non_employee': total_non_employee,
                 'total_male': total_male,
                 'total_female': total_female,
-                'grand_total': grand_total
+                'grand_total': grand_total,
+                **lifecycle_summary,
             }
         })
 
@@ -920,29 +1001,39 @@ class ClinicAttendanceReportView(views.APIView):
         year = request.query_params.get('year')
         start_date_str = request.query_params.get('start_date')
         end_date_str = request.query_params.get('end_date')
+        from django.utils.dateparse import parse_date
         
         # Filter visits by clinic
-        visits_queryset = Visit.objects.filter(
+        history_queryset = Visit.objects.filter(
             status__in=['completed', 'in_progress'],
             clinic__icontains=clinic_type
         ).select_related('patient')
+        visits_queryset = history_queryset
         
         # Apply date filtering
+        parsed_start_date = parse_date(start_date_str) if start_date_str else None
+        parsed_end_date = parse_date(end_date_str) if end_date_str else None
         if start_date_str and end_date_str:
-            try:
-                from django.utils.dateparse import parse_date
-                start_date = parse_date(start_date_str)
-                end_date = parse_date(end_date_str)
-                if start_date and end_date:
-                    visits_queryset = visits_queryset.filter(date__gte=start_date, date__lte=end_date)
-            except (ValueError, TypeError):
-                pass
+            if parsed_start_date and parsed_end_date:
+                visits_queryset = visits_queryset.filter(date__gte=parsed_start_date, date__lte=parsed_end_date)
         elif year:
             try:
                 year_int = int(year)
                 visits_queryset = visits_queryset.filter(date__year=year_int)
             except (ValueError, TypeError):
                 pass
+
+        period_start, period_end = _resolve_period_bounds(
+            year=year,
+            start_date=parsed_start_date,
+            end_date=parsed_end_date,
+        )
+        lifecycle_summary = _build_visit_lifecycle_summary(
+            period_visits_queryset=visits_queryset,
+            history_visits_queryset=history_queryset,
+            start_date=period_start,
+            end_date=period_end,
+        )
         
         # Monthly breakdown
         months = ['January', 'February', 'March', 'April', 'May', 'June',
@@ -1001,7 +1092,8 @@ class ClinicAttendanceReportView(views.APIView):
             'summary': {
                 'total_employee': total_employee,
                 'total_non_employee': total_non_employee,
-                'grand_total': grand_total
+                'grand_total': grand_total,
+                **lifecycle_summary,
             }
         })
 
@@ -1281,20 +1373,41 @@ class GOPAttendanceReportView(views.APIView):
     permission_classes = [IsAuthenticated]
     
     def get(self, request):
-        year = request.query_params.get('year', timezone.now().year)
+        year = request.query_params.get('year')
+        start_date_str = request.query_params.get('start_date')
+        end_date_str = request.query_params.get('end_date')
         try:
-            year_int = int(year)
+            year_int = int(year) if year else timezone.now().year
         except (ValueError, TypeError):
             year_int = timezone.now().year
+        from django.utils.dateparse import parse_date
         
         # G.O.P typically means general outpatient visits (consultation type, general clinic, or routine visits)
-        visits = Visit.objects.filter(
-            date__year=year_int,
+        history_visits = Visit.objects.filter(
             status__in=['completed', 'in_progress']
         ).filter(
             Q(visit_type='consultation') | Q(clinic__icontains='general') | Q(clinic__icontains='outpatient')
         ).select_related('patient').annotate(
             month=ExtractMonth('date')
+        )
+        visits = history_visits.filter(date__year=year_int)
+
+        parsed_start_date = parse_date(start_date_str) if start_date_str else None
+        parsed_end_date = parse_date(end_date_str) if end_date_str else None
+        if parsed_start_date and parsed_end_date:
+            visits = history_visits.filter(date__gte=parsed_start_date, date__lte=parsed_end_date)
+
+        period_start, period_end = _resolve_period_bounds(
+            year=year_int,
+            start_date=parsed_start_date,
+            end_date=parsed_end_date,
+            default_to_current_year=not bool(year),
+        )
+        lifecycle_summary = _build_visit_lifecycle_summary(
+            period_visits_queryset=visits,
+            history_visits_queryset=history_visits,
+            start_date=period_start,
+            end_date=period_end,
         )
         
         months = ['January', 'February', 'March', 'April', 'May', 'June',
@@ -1413,7 +1526,8 @@ class GOPAttendanceReportView(views.APIView):
         return Response({
             'data': monthly_data,
             'totals': totals,
-            'grand_total': grand_total
+            'grand_total': grand_total,
+            'summary': lifecycle_summary,
         })
 
 
@@ -1494,4 +1608,3 @@ class WeekendCallDutyReportView(views.APIView):
             },
             'monthly_data': monthly_data
         })
-

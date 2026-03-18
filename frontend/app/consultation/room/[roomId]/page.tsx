@@ -4338,7 +4338,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                     <CardTitle className="text-2xl mb-1">{currentPatient.name}</CardTitle>
                     <div className="flex items-center gap-4 text-sm text-muted-foreground">
                       <span><strong>Patient ID:</strong> {currentPatient.patientId}</span>
-                      <span><strong>Age:</strong> {currentPatient.age} years</span>
+                      <span><strong>Age:</strong> {(currentPatient as any).ageDisplay || (currentPatient as any).age_display || `${currentPatient.age} years`}</span>
                       <span><strong>Gender:</strong> {currentPatient.gender}</span>
                     </div>
                   </div>

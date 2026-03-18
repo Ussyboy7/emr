@@ -18,6 +18,7 @@ import { patientService, wardService } from '@/lib/services';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { useCurrentUser } from '@/hooks/use-current-user';
 import { isAuthenticationError } from '@/lib/auth-errors';
+import { AdvancedDateRangeDialog } from '@/components/AdvancedDateRangeDialog';
 import {
   Syringe, Bandage, Pill, Search, Users, Clock, CheckCircle2, AlertTriangle,
   Eye, Calendar, Loader2, Save, Activity, History, ArrowRight, User, Stethoscope, Building2, DoorOpen
@@ -105,6 +106,8 @@ export default function ProceduresQueuePage() {
   const [priorityFilter, setPriorityFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('today');
   const [genderFilter, setGenderFilter] = useState('all');
+  const [isDateFilterDialogOpen, setIsDateFilterDialogOpen] = useState(false);
+  const [dateRange, setDateRange] = useState({ from: '', to: '' });
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -199,7 +202,19 @@ export default function ProceduresQueuePage() {
         const matchesGender = genderFilter === 'all' || p.gender.toLowerCase() === genderFilter.toLowerCase();
         
         // Date filter (filter by ordered date)
-        if (dateFilter !== 'all') {
+        if (dateRange.from || dateRange.to) {
+          const dateSource = (p.status === 'completed' && p.completedAt) ? p.completedAt : p.orderedAt;
+          const orderedDate = new Date(dateSource);
+          if (Number.isNaN(orderedDate.getTime())) return false;
+          if (dateRange.from) {
+            const from = new Date(`${dateRange.from}T00:00:00`);
+            if (orderedDate < from) return false;
+          }
+          if (dateRange.to) {
+            const to = new Date(`${dateRange.to}T23:59:59.999`);
+            if (orderedDate > to) return false;
+          }
+        } else if (dateFilter !== 'all') {
           const dateSource = (p.status === 'completed' && p.completedAt) ? p.completedAt : p.orderedAt;
           const orderedDate = new Date(dateSource);
           const today = new Date();
@@ -231,7 +246,7 @@ export default function ProceduresQueuePage() {
         const bTime = new Date((b.status === 'completed' && b.completedAt) ? b.completedAt : b.orderedAt).getTime();
         return aTime - bTime;
       });
-  }, [procedures, searchQuery, statusFilter, typeFilter, priorityFilter, dateFilter, genderFilter]);
+  }, [procedures, searchQuery, statusFilter, typeFilter, priorityFilter, dateFilter, genderFilter, dateRange.from, dateRange.to]);
 
   // Paginated procedures
   const paginatedProcedures = useMemo(() => {
@@ -242,7 +257,12 @@ export default function ProceduresQueuePage() {
   // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, typeFilter, priorityFilter, dateFilter, genderFilter]);
+  }, [searchQuery, typeFilter, priorityFilter, dateFilter, genderFilter, dateRange.from, dateRange.to]);
+
+  const clearDateRangeFilters = () => {
+    setDateRange({ from: '', to: '' });
+    setIsDateFilterDialogOpen(false);
+  };
 
   // ==================== HANDLERS ====================
   const loadOrders = async () => {
@@ -656,6 +676,9 @@ export default function ProceduresQueuePage() {
                 <Input placeholder="Search patients..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-10" />
               </div>
               <div className="flex flex-wrap gap-2">
+                <Button variant="outline" onClick={() => setIsDateFilterDialogOpen(true)}>
+                  Filters
+                </Button>
                 <Select value={dateFilter} onValueChange={setDateFilter}>
                   <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
                   <SelectContent>
@@ -819,8 +842,18 @@ export default function ProceduresQueuePage() {
               onItemsPerPageChange={setItemsPerPage}
               itemName="procedures"
             />
-          </Card>
-        )}
+            </Card>
+          )}
+
+          <AdvancedDateRangeDialog
+            open={isDateFilterDialogOpen}
+            onOpenChange={setIsDateFilterDialogOpen}
+            description="Apply a custom procedure date range to narrow down nursing procedures."
+            label="Procedure Date Range"
+            value={dateRange}
+            onChange={setDateRange}
+            onClear={clearDateRangeFilters}
+          />
 
         {/* Perform Dialog */}
         <Dialog open={isPerformDialogOpen} onOpenChange={setIsPerformDialogOpen}>

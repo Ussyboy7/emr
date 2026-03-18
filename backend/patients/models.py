@@ -193,12 +193,46 @@ class Patient(models.Model):
             parts.append(self.surname)
         
         return ' '.join(filter(None, parts))
+
+    def get_age_components(self):
+        """Return medically useful age components as years and months."""
+        today = timezone.now().date()
+        if not self.date_of_birth or self.date_of_birth > today:
+            return 0, 0
+
+        years = today.year - self.date_of_birth.year
+        months = today.month - self.date_of_birth.month
+
+        if today.day < self.date_of_birth.day:
+            months -= 1
+
+        if months < 0:
+            years -= 1
+            months += 12
+
+        if years < 0:
+            return 0, 0
+
+        return years, months
     
     @property
     def age(self):
-        """Calculate age from date of birth."""
-        today = timezone.now().date()
-        return today.year - self.date_of_birth.year - ((today.month, today.day) < (self.date_of_birth.month, self.date_of_birth.day))
+        """Return completed years for compatibility with existing consumers."""
+        years, _months = self.get_age_components()
+        return years
+
+    @property
+    def age_display(self):
+        """Return a medically useful age string using years and months."""
+        years, months = self.get_age_components()
+
+        if years <= 0:
+            return f"{months} month{'s' if months != 1 else ''}"
+
+        if months <= 0:
+            return f"{years} year{'s' if years != 1 else ''}"
+
+        return f"{years} year{'s' if years != 1 else ''} {months} month{'s' if months != 1 else ''}"
     
     def generate_patient_id(self):
         """

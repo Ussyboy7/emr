@@ -27,27 +27,45 @@ interface GOPMonthlyData {
   total: number;
 }
 
+interface GOPLifecycleSummary {
+  new_registrations: number;
+  first_time_patients: number;
+  returning_patients: number;
+  total_unique_patients_seen: number;
+  total_visits: number;
+}
+
 export default function GOPAttendanceReport() {
   const router = useRouter();
   const [year, setYear] = useState(new Date().getFullYear().toString());
   const [data, setData] = useState<GOPMonthlyData[]>([]);
   const [totals, setTotals] = useState({ officers: 0, staff: 0, dependents: 0, retirees: 0, police: 0, non_npa: 0 });
   const [grandTotal, setGrandTotal] = useState(0);
+  const emptySummary: GOPLifecycleSummary = {
+    new_registrations: 0,
+    first_time_patients: 0,
+    returning_patients: 0,
+    total_unique_patients_seen: 0,
+    total_visits: 0,
+  };
+  const [summary, setSummary] = useState<GOPLifecycleSummary>(emptySummary);
   const [isLoading, setIsLoading] = useState(true);
 
   const fetchReport = async () => {
     setIsLoading(true);
     try {
-      const response = await apiFetch<{ data: GOPMonthlyData[]; totals: typeof totals; grand_total: number }>(`/reports/gop-attendance/?year=${year}`);
+      const response = await apiFetch<{ data: GOPMonthlyData[]; totals: typeof totals; grand_total: number; summary: GOPLifecycleSummary }>(`/reports/gop-attendance/?year=${year}`);
       setData(response.data || []);
       setTotals(response.totals || { officers: 0, staff: 0, dependents: 0, retirees: 0, police: 0, non_npa: 0 });
       setGrandTotal(response.grand_total || 0);
+      setSummary(response.summary || emptySummary);
     } catch (error: any) {
       console.error("Error fetching G.O.P report:", error);
       toast.error(error.message || "Failed to load G.O.P attendance report");
       setData([]);
       setTotals({ officers: 0, staff: 0, dependents: 0, retirees: 0, police: 0, non_npa: 0 });
       setGrandTotal(0);
+      setSummary(emptySummary);
     } finally {
       setIsLoading(false);
     }
@@ -191,6 +209,49 @@ export default function GOPAttendanceReport() {
           </Card>
         </div>
 
+        <div className="grid gap-4 md:grid-cols-5">
+          <Card className="border-l-4 border-l-indigo-500">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-xs font-medium text-muted-foreground">First-Time GOP</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-indigo-600 dark:text-indigo-400">{summary.first_time_patients.toLocaleString()}</div>
+            </CardContent>
+          </Card>
+          <Card className="border-l-4 border-l-cyan-500">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-xs font-medium text-muted-foreground">New Registrations</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-cyan-600 dark:text-cyan-400">{summary.new_registrations.toLocaleString()}</div>
+            </CardContent>
+          </Card>
+          <Card className="border-l-4 border-l-slate-500">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-xs font-medium text-muted-foreground">Returning GOP</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-slate-700 dark:text-slate-300">{summary.returning_patients.toLocaleString()}</div>
+            </CardContent>
+          </Card>
+          <Card className="border-l-4 border-l-amber-500">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-xs font-medium text-muted-foreground">Unique Patients</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-amber-600 dark:text-amber-400">{summary.total_unique_patients_seen.toLocaleString()}</div>
+            </CardContent>
+          </Card>
+          <Card className="border-l-4 border-l-emerald-500">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-xs font-medium text-muted-foreground">Total Visits</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{summary.total_visits.toLocaleString()}</div>
+            </CardContent>
+          </Card>
+        </div>
+
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -261,4 +322,3 @@ export default function GOPAttendanceReport() {
     </DashboardLayout>
   );
 }
-

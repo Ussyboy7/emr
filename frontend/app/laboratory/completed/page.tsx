@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import { labService, type LabTest as ApiLabTest } from '@/lib/services';
 import { transformPriority } from '@/lib/services/transformers';
 import { PatientAvatar } from "@/components/PatientAvatar";
+import { AdvancedDateRangeDialog } from '@/components/AdvancedDateRangeDialog';
 
 // Import test templates from orders page
 const testTemplates: Record<string, { name: string; fields: { name: string; unit: string; normalRange: string; }[] }> = {
@@ -83,6 +84,8 @@ export default function CompletedTestsPage() {
   const [dateFilter, setDateFilter] = useState('today');
   const [clinicFilter, setClinicFilter] = useState('all');
   const [genderFilter, setGenderFilter] = useState('all');
+  const [isDateFilterDialogOpen, setIsDateFilterDialogOpen] = useState(false);
+  const [dateRange, setDateRange] = useState({ from: '', to: '' });
   const [stats, setStats] = useState<{ total: number; normal: number; abnormal: number; critical: number }>({
     total: 0,
     normal: 0,
@@ -117,7 +120,10 @@ export default function CompletedTestsPage() {
       let start_date: string | undefined;
       let end_date: string | undefined;
 
-      if (dateFilter === 'today') {
+      if (dateRange.from || dateRange.to) {
+        start_date = dateRange.from || undefined;
+        end_date = dateRange.to || undefined;
+      } else if (dateFilter === 'today') {
         date = yyyyMmDd(today);
       } else if (dateFilter === 'week') {
         const weekAgo = new Date(today);
@@ -432,7 +438,7 @@ export default function CompletedTestsPage() {
     } finally {
       setLoading(false);
     }
-  }, [currentPage, itemsPerPage, debouncedSearchQuery, statusFilter, clinicFilter, genderFilter, dateFilter]);
+  }, [currentPage, itemsPerPage, debouncedSearchQuery, statusFilter, clinicFilter, genderFilter, dateFilter, dateRange.from, dateRange.to]);
 
   // Load completed tests from API when page changes
   useEffect(() => {
@@ -445,7 +451,12 @@ export default function CompletedTestsPage() {
   // Reset to page 1 when filters change or items per page changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [debouncedSearchQuery, statusFilter, clinicFilter, dateFilter, genderFilter, itemsPerPage]);
+  }, [debouncedSearchQuery, statusFilter, clinicFilter, dateFilter, genderFilter, itemsPerPage, dateRange.from, dateRange.to]);
+
+  const clearDateRangeFilters = () => {
+    setDateRange({ from: '', to: '' });
+    setIsDateFilterDialogOpen(false);
+  };
 
   const getOverallStatusBadge = (status: string) => {
     switch (status) {
@@ -560,6 +571,9 @@ export default function CompletedTestsPage() {
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input placeholder="Search by patient, order ID, or test..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-10" />
+                <Button variant="outline" onClick={() => setIsDateFilterDialogOpen(true)} className="mt-2">
+                  Filters
+                </Button>
               </div>
               <Select value={dateFilter} onValueChange={setDateFilter}>
                 <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
@@ -597,6 +611,16 @@ export default function CompletedTestsPage() {
             </div>
           </CardContent>
         </Card>
+
+        <AdvancedDateRangeDialog
+          open={isDateFilterDialogOpen}
+          onOpenChange={setIsDateFilterDialogOpen}
+          description="Apply a custom verified date range to narrow down completed laboratory tests."
+          label="Verified Date Range"
+          value={dateRange}
+          onChange={setDateRange}
+          onClear={clearDateRangeFilters}
+        />
 
         {/* Tests List */}
         <div className="space-y-3">

@@ -28,6 +28,7 @@ interface Patient {
   employeeType?: string;
   division?: string;
   age: number;
+  ageDisplay?: string;
   gender: string;
   dob: string;
   phone: string;
@@ -53,6 +54,7 @@ interface PatientDetail {
   middleName: string;
   dateOfBirth: string;
   age: number;
+  ageDisplay?: string;
   gender: string;
   maritalStatus: string;
   religion?: string;
@@ -422,6 +424,7 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
         middleName: apiPatient.middle_name || '',
         dateOfBirth: formattedDateOfBirth,
         age: apiPatient.age || 0,
+        ageDisplay: (apiPatient as any).age_display || undefined,
         gender: apiPatient.gender === 'male' ? 'Male' : 'Female',
         maritalStatus: apiPatient.marital_status || '',
         religion: (apiPatient as any).religion || '',
@@ -677,7 +680,7 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
                               </div>
                               <div className="flex justify-between">
                                 <span className="text-muted-foreground">Age</span>
-                                <span>{patientDetail.age} years</span>
+                                <span>{patientDetail.ageDisplay || `${patientDetail.age} years`}</span>
                               </div>
                               <div className="flex justify-between">
                                 <span className="text-muted-foreground">Gender</span>

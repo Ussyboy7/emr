@@ -20,6 +20,7 @@ export function sanitizePatientForRendering(patient: any): any {
     patientId: String(patient.patient_id ?? patient.patientId ?? ''),
     name: typeof patient.full_name === 'string' ? String(patient.full_name) : (typeof patient.name === 'string' ? String(patient.name) : ''),
     age: typeof patient.age === 'number' ? patient.age : parseInt(String(patient.age || '0')) || 0,
+    ageDisplay: patient.age_display ? String(patient.age_display) : undefined,
     gender: String(patient.gender || ''),
     mrn: String(patient.patient_id ?? ''),
     personalNumber: String(patient.personal_number || ''),
@@ -60,6 +61,7 @@ export interface Patient {
   gender: 'male' | 'female';
   date_of_birth: string;
   age?: number;
+  age_display?: string;
   marital_status?: string;
   religion?: string;
   tribe?: string;
@@ -111,6 +113,10 @@ export interface Visit {
   doctor?: number;
   doctor_name?: string;
   clinical_notes?: string;
+  is_new_registration?: boolean;
+  is_first_visit?: boolean;
+  is_returning_visit?: boolean;
+  patient_visit_status?: string;
 }
 
 export interface VitalReading {

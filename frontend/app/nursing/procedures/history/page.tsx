@@ -17,6 +17,7 @@ import { apiFetch } from '@/lib/api-client';
 import { patientService } from '@/lib/services';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
+import { AdvancedDateRangeDialog } from '@/components/AdvancedDateRangeDialog';
 
 // ==================== TYPES ====================
 interface CompletedProcedure {
@@ -86,6 +87,8 @@ export default function ProceduresHistoryPage() {
   const [typeFilter, setTypeFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('today');
   const [genderFilter, setGenderFilter] = useState('all');
+  const [isDateFilterDialogOpen, setIsDateFilterDialogOpen] = useState(false);
+  const [dateRange, setDateRange] = useState({ from: '', to: '' });
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -214,7 +217,18 @@ export default function ProceduresHistoryPage() {
         const matchesGender = genderFilter === 'all' || p.gender.toLowerCase() === genderFilter.toLowerCase();
         
         // Date filter
-        if (dateFilter !== 'all') {
+        if (dateRange.from || dateRange.to) {
+          const completedDate = new Date(p.completedAt);
+          if (Number.isNaN(completedDate.getTime())) return false;
+          if (dateRange.from) {
+            const from = new Date(`${dateRange.from}T00:00:00`);
+            if (completedDate < from) return false;
+          }
+          if (dateRange.to) {
+            const to = new Date(`${dateRange.to}T23:59:59.999`);
+            if (completedDate > to) return false;
+          }
+        } else if (dateFilter !== 'all') {
           const completedDate = new Date(p.completedAt);
           const today = new Date();
           today.setHours(0, 0, 0, 0);
@@ -235,7 +249,7 @@ export default function ProceduresHistoryPage() {
         return matchesSearch && matchesType && matchesGender;
       })
       .sort((a, b) => new Date(b.completedAt).getTime() - new Date(a.completedAt).getTime());
-  }, [history, searchQuery, typeFilter, dateFilter, genderFilter]);
+  }, [history, searchQuery, typeFilter, dateFilter, genderFilter, dateRange.from, dateRange.to]);
 
   // Paginated history
   const paginatedHistory = useMemo(() => {
@@ -246,7 +260,12 @@ export default function ProceduresHistoryPage() {
   // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, typeFilter, dateFilter, genderFilter]);
+  }, [searchQuery, typeFilter, dateFilter, genderFilter, dateRange.from, dateRange.to]);
+
+  const clearDateRangeFilters = () => {
+    setDateRange({ from: '', to: '' });
+    setIsDateFilterDialogOpen(false);
+  };
 
   const openViewDialog = (procedure: CompletedProcedure) => {
     setSelectedProcedure(procedure);
@@ -354,6 +373,9 @@ export default function ProceduresHistoryPage() {
                 <Input placeholder="Search patient, ID, or nurse..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-10" />
               </div>
               <div className="flex flex-wrap gap-2">
+                <Button variant="outline" onClick={() => setIsDateFilterDialogOpen(true)}>
+                  Filters
+                </Button>
                 <Select value={dateFilter} onValueChange={setDateFilter}>
                   <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
                   <SelectContent>
@@ -384,6 +406,16 @@ export default function ProceduresHistoryPage() {
             </div>
           </CardContent>
         </Card>
+
+        <AdvancedDateRangeDialog
+          open={isDateFilterDialogOpen}
+          onOpenChange={setIsDateFilterDialogOpen}
+          description="Apply a custom completed date range to narrow down procedure history."
+          label="Completed Date Range"
+          value={dateRange}
+          onChange={setDateRange}
+          onClear={clearDateRangeFilters}
+        />
 
         {/* History List */}
         {filteredHistory.length === 0 ? (

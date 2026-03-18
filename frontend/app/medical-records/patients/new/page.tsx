@@ -610,12 +610,32 @@ export default function NewPatientPage() {
     if (!formData.dateOfBirth) return '';
     const today = new Date();
     const birthDate = new Date(formData.dateOfBirth);
-    let age = today.getFullYear() - birthDate.getFullYear();
-    const monthDiff = today.getMonth() - birthDate.getMonth();
-    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
-      age--;
+
+    if (Number.isNaN(birthDate.getTime()) || birthDate > today) {
+      return '';
     }
-    return age > 0 ? `${age} years` : '';
+
+    let years = today.getFullYear() - birthDate.getFullYear();
+    let months = today.getMonth() - birthDate.getMonth();
+
+    if (today.getDate() < birthDate.getDate()) {
+      months -= 1;
+    }
+
+    if (months < 0) {
+      years -= 1;
+      months += 12;
+    }
+
+    if (years <= 0) {
+      return `${months} month${months === 1 ? '' : 's'}`;
+    }
+
+    if (months <= 0) {
+      return `${years} year${years === 1 ? '' : 's'}`;
+    }
+
+    return `${years} year${years === 1 ? '' : 's'} ${months} month${months === 1 ? '' : 's'}`;
   }, [formData.dateOfBirth]);
 
   const availableLGAs = NIGERIA_STATES_AND_LGAS.find(s => s.name === formData.stateOfOrigin)?.lgas || [];
@@ -682,21 +702,15 @@ export default function NewPatientPage() {
     setPrincipalValidation({ isValidating: true, isValid: null, message: 'Validating...' });
 
     try {
-      // First, try to find by patient_id (like E-A2000 or R-A2000)
+      // Principal Staff ID must be the principal's personal number (e.g. A2962).
       let foundPatient: any = null;
       let numericId: number | null = null;
 
-      // Try to find patient by various methods and get their numeric ID
       const searchResult = await patientService.getPatients({ search: trimmedId, page_size: 50 }).catch(() => ({ results: [] }));
       const results = searchResult.results || [];
 
       const matchPrincipal = (p: any) =>
-        p.patient_id === trimmedId ||
-        p.personal_number === trimmedId ||
-        p.employee_id === trimmedId ||
-        p.patient_id === `E-${trimmedId}` ||
-        p.patient_id === `R-${trimmedId}` ||
-        (p.patient_id && String(p.patient_id).toUpperCase().endsWith(`-${trimmedId}`));
+        p.personal_number === trimmedId;
 
       // Look for employee or retiree first
       foundPatient = results.find((p: any) => matchPrincipal(p) && (p.category === 'employee' || p.category === 'retiree'));
@@ -712,15 +726,7 @@ export default function NewPatientPage() {
         }
       }
 
-      // If still not found, try direct numeric ID
-      if (!foundPatient) {
-        const parsedId = parseInt(trimmedId, 10);
-        if (!isNaN(parsedId) && parsedId > 0) {
-          numericId = parsedId;
-        }
-      }
-
-      // Now get the full patient details using the numeric ID
+      // Now get the full patient details using the matched numeric ID
       let patient = null;
       if (numericId) {
         try {
@@ -735,7 +741,7 @@ export default function NewPatientPage() {
         setPrincipalValidation({
           isValidating: false,
           isValid: false,
-          message: `Staff ID "${trimmedId}" not found in the system`
+          message: `Personal number "${trimmedId}" not found in the system`
         });
         return;
       }
@@ -745,7 +751,7 @@ export default function NewPatientPage() {
         setPrincipalValidation({
           isValidating: false,
           isValid: false,
-          message: `ID "${trimmedId}" belongs to a ${patient.category}, not a staff member or retiree`
+          message: `Personal number "${trimmedId}" belongs to a ${patient.category}, not a staff member or retiree`
         });
         return;
       }
@@ -757,16 +763,14 @@ export default function NewPatientPage() {
         patient
       });
 
+      // Keep the field aligned to the principal's personal number once resolved.
+      const resolvedPersonalNumber = patient.personal_number?.trim() || '';
+      if (resolvedPersonalNumber && resolvedPersonalNumber !== trimmedId) {
+        setFormData(prev => ({ ...prev, principalStaffId: resolvedPersonalNumber }));
+      }
+
       // Auto-populate next of kin fields for dependents (only once to prevent overwrites)
       if (patientCategory === 'dependent' && !nokAutoPopulated) {
-        console.log('🔄 Auto-populating NOK for patient:', patient);
-        console.log('Patient fields:', {
-          surname: patient.surname,
-          first_name: patient.first_name,
-          phone: patient.phone,
-          residential_address: patient.residential_address,
-          category: patient.category
-        });
 
         setFormData(prev => {
           const updated = {
@@ -795,7 +799,7 @@ export default function NewPatientPage() {
       setPrincipalValidation({
         isValidating: false,
         isValid: false,
-        message: 'Error validating staff ID'
+        message: 'Error validating personal number'
       });
     }
   };
@@ -945,53 +949,29 @@ export default function NewPatientPage() {
       }
       
       if (patientCategory === 'dependent') {
-        // Enhanced principal staff validation (same as dependents management page)
+        // Principal Staff ID must resolve strictly from the principal's personal number.
         const principalIdStr = formData.principalStaffId.trim();
-
-        // First, try to find by patient_id (like E-A2000 or R-A2000)
-        let matchedPrincipal = await patientService.getPatients({ search: principalIdStr }).then(
-          result => result.results.find(p => p.patient_id === principalIdStr)
-        ).catch(() => null);
-
-        // If not found by patient_id, try by personal_number (like A2000)
-        if (!matchedPrincipal) {
-          const searchResult = await patientService.getPatients({ search: principalIdStr });
-          matchedPrincipal = searchResult.results.find(p => p.personal_number === principalIdStr);
-        }
-
-        // If still not found, try by employee_id
-        if (!matchedPrincipal) {
-          const searchResult = await patientService.getPatients({ search: principalIdStr });
-          matchedPrincipal = searchResult.results.find(p => p.employee_id === principalIdStr);
-        }
-
-        // Finally, try by database ID as fallback
-        if (!matchedPrincipal) {
-          const parsedId = parseInt(principalIdStr, 10);
-          if (!isNaN(parsedId) && parsedId > 0) {
-            try {
-              matchedPrincipal = await patientService.getPatient(parsedId);
-            } catch (err) {
-              // Ignore error, principal not found
-            }
-          }
-        }
+        const searchResult = await patientService.getPatients({ search: principalIdStr }).catch(() => ({ results: [] }));
+        const principalMatches = searchResult.results || [];
+        let matchedPrincipal = principalMatches.find(
+          p => p.personal_number === principalIdStr
+        ) || null;
 
         if (!matchedPrincipal) {
-          toast.error(`Principal Staff ID "${principalIdStr}" not found. Please enter a valid NPA staff or retiree ID.`);
+          toast.error(`Principal personal number "${principalIdStr}" not found. Please enter a valid staff or retiree personal number.`);
           setIsSubmitting(false);
           return;
         }
 
         // Validate that the principal is actually an employee or retiree
         if (matchedPrincipal.category !== 'employee' && matchedPrincipal.category !== 'retiree') {
-          toast.error(`Principal must be an NPA staff member or retiree. ID "${principalIdStr}" belongs to a ${matchedPrincipal.category}.`);
+          toast.error(`Principal must be an NPA staff member or retiree. Personal number "${principalIdStr}" belongs to a ${matchedPrincipal.category}.`);
           setIsSubmitting(false);
           return;
         }
 
         const principalStaffNumericId = matchedPrincipal.id;
-        
+
         payload.principal_staff = principalStaffNumericId;
         if (formData.dependentType) {
           payload.dependent_type = formData.dependentType.trim(); // Exact match: 'Employee Dependent', 'Retiree Dependent'
@@ -1533,7 +1513,7 @@ export default function NewPatientPage() {
                             <Input
                               value={formData.principalStaffId}
                               onChange={(e) => handleInputChange('principalStaffId', e.target.value)}
-                              placeholder="Enter NPA Staff ID (e.g., A2000 or 2001)"
+                              placeholder="Enter principal personal number (e.g., A2962)"
                               className={`flex-1 ${(() => {
                                 if (!formData.principalStaffId) return '';
                                 if (principalValidation.isValidating) return 'border-blue-500';
@@ -1550,7 +1530,7 @@ export default function NewPatientPage() {
                               Search
                             </Button>
                           </div>
-                          <p className="text-xs text-muted-foreground">Enter Staff ID and click Search to find the employee or retiree</p>
+                          <p className="text-xs text-muted-foreground">Use the principal&apos;s personal number only. Patient IDs like `E-A2962` are not accepted here.</p>
                           {formData.principalStaffId && (
                             <div className={`text-xs p-2 rounded-md border ${
                               principalValidation.isValidating ? 'bg-blue-50 border-blue-200 text-blue-700' :

@@ -20,11 +20,12 @@ import { getPriorityFromVisitType } from '@/lib/utils/priority';
 import {
   Users, Search, Stethoscope, UserCheck, ArrowRight, Clock, AlertTriangle,
   Eye, Edit, CheckCircle2, Calendar, Activity, Thermometer,
-  Heart, Wind, Droplets, Scale, Loader2, Save, X
+  Heart, Wind, Droplets, Scale, Loader2, Save, X, Filter
 } from 'lucide-react';
 import { getAllClinicsWithAll } from '@/lib/constants/clinics';
 import { clinicMatches } from '@/lib/utils/clinic-utils';
 import { PatientAvatar } from "@/components/PatientAvatar";
+import { AdvancedDateRangeDialog } from '@/components/AdvancedDateRangeDialog';
 
 // Format visit type for display
 const getVisitTypeLabel = (type: string) => {
@@ -125,6 +126,8 @@ export default function NursingPoolQueuePage() {
   const [dateFilter, setDateFilter] = useState('today');
   const [typeFilter, setTypeFilter] = useState('all');
   const [clinicFilter, setClinicFilter] = useState('all');
+  const [isDateFilterDialogOpen, setIsDateFilterDialogOpen] = useState(false);
+  const [dateRange, setDateRange] = useState({ from: '', to: '' });
 
   // Load visits and rooms from API - extracted as reusable function
   const loadData = useCallback(async () => {
@@ -150,7 +153,10 @@ export default function NursingPoolQueuePage() {
         let startDate: string | undefined = undefined;
         let endDate: string | undefined = undefined;
         
-        if (dateFilter === 'today') {
+        if (dateRange.from || dateRange.to) {
+          startDate = dateRange.from || undefined;
+          endDate = dateRange.to || undefined;
+        } else if (dateFilter === 'today') {
           const today = new Date().toISOString().split('T')[0];
           dateParam = today;
         } else if (dateFilter === 'week') {
@@ -466,7 +472,7 @@ export default function NursingPoolQueuePage() {
       } finally {
         setLoading(false);
       }
-  }, [dateFilter, statusFilter]);
+  }, [dateFilter, statusFilter, dateRange.from, dateRange.to]);
 
   // Load data when filters change
   useEffect(() => {
@@ -565,10 +571,21 @@ export default function NursingPoolQueuePage() {
     }
     
     // Date filter
-    if (dateFilter !== 'all') {
+    const dateSource = (p.nursingStatus === 'Sent to Room' && p.sentAt) ? p.sentAt : p.visitDate;
+    const visitDate = new Date(dateSource);
+
+    if (dateRange.from || dateRange.to) {
+      if (Number.isNaN(visitDate.getTime())) return false;
+      if (dateRange.from) {
+        const from = new Date(`${dateRange.from}T00:00:00`);
+        if (visitDate < from) return false;
+      }
+      if (dateRange.to) {
+        const to = new Date(`${dateRange.to}T23:59:59.999`);
+        if (visitDate > to) return false;
+      }
+    } else if (dateFilter !== 'all') {
       // For "Sent to Room", filter by the send timestamp (queued_at) when available.
-      const dateSource = (p.nursingStatus === 'Sent to Room' && p.sentAt) ? p.sentAt : p.visitDate;
-      const visitDate = new Date(dateSource);
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       
@@ -622,7 +639,12 @@ export default function NursingPoolQueuePage() {
   // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, statusFilter, dateFilter, typeFilter, clinicFilter]);
+  }, [searchQuery, statusFilter, dateFilter, typeFilter, clinicFilter, dateRange.from, dateRange.to]);
+
+  const clearDateRangeFilters = () => {
+    setDateRange({ from: '', to: '' });
+    setIsDateFilterDialogOpen(false);
+  };
 
   // Stats - Show all patients that have been to nursing
   const stats = {
@@ -1052,6 +1074,10 @@ export default function NursingPoolQueuePage() {
                   className="pl-10"
                 />
               </div>
+              <Button variant="outline" onClick={() => setIsDateFilterDialogOpen(true)}>
+                <Filter className="h-4 w-4 mr-2" />
+                Filters
+              </Button>
               <div className="flex flex-wrap gap-2">
                 <Select value={dateFilter} onValueChange={setDateFilter}>
                   <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
@@ -1093,6 +1119,16 @@ export default function NursingPoolQueuePage() {
           </CardContent>
         </Card>
         )}
+
+        <AdvancedDateRangeDialog
+          open={isDateFilterDialogOpen}
+          onOpenChange={setIsDateFilterDialogOpen}
+          description="Apply a custom visit date range to narrow down the nursing pool queue."
+          label="Visit Date Range"
+          value={dateRange}
+          onChange={setDateRange}
+          onClear={clearDateRangeFilters}
+        />
 
         {/* Results Count */}
         {!loading && (

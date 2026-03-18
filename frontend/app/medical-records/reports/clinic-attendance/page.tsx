@@ -25,6 +25,17 @@ interface MonthlyData {
   total: number;
 }
 
+interface ClinicAttendanceSummary {
+  total_employee: number;
+  total_non_employee: number;
+  grand_total: number;
+  new_registrations: number;
+  first_time_patients: number;
+  returning_patients: number;
+  total_unique_patients_seen: number;
+  total_visits: number;
+}
+
 export default function ClinicAttendanceReport() {
   const router = useRouter();
   const [selectedClinic, setSelectedClinic] = useState("Diamond");
@@ -33,7 +44,17 @@ export default function ClinicAttendanceReport() {
   const [endDate, setEndDate] = useState("");
   const [viewMode, setViewMode] = useState<"year" | "range">("year");
   const [data, setData] = useState<MonthlyData[]>([]);
-  const [summary, setSummary] = useState({ total_employee: 0, total_non_employee: 0, grand_total: 0 });
+  const emptySummary: ClinicAttendanceSummary = {
+    total_employee: 0,
+    total_non_employee: 0,
+    grand_total: 0,
+    new_registrations: 0,
+    first_time_patients: 0,
+    returning_patients: 0,
+    total_unique_patients_seen: 0,
+    total_visits: 0,
+  };
+  const [summary, setSummary] = useState<ClinicAttendanceSummary>(emptySummary);
   const [isLoading, setIsLoading] = useState(true);
 
   const clinics = CLINICS.map(clinic => ({
@@ -66,14 +87,14 @@ export default function ClinicAttendanceReport() {
         url += `&start_date=${startDate}&end_date=${endDate}`;
       }
 
-      const response = await apiFetch<{ data: MonthlyData[]; summary: typeof summary }>(url);
+      const response = await apiFetch<{ data: MonthlyData[]; summary: ClinicAttendanceSummary }>(url);
       setData(response.data || []);
-      setSummary(response.summary || { total_employee: 0, total_non_employee: 0, grand_total: 0 });
+      setSummary(response.summary || emptySummary);
     } catch (error: any) {
       console.error("Error fetching clinic report:", error);
       toast.error(error.message || "Failed to load clinic report");
       setData([]);
-      setSummary({ total_employee: 0, total_non_employee: 0, grand_total: 0 });
+      setSummary(emptySummary);
     } finally {
       setIsLoading(false);
     }
@@ -291,6 +312,37 @@ export default function ClinicAttendanceReport() {
           </Card>
         </div>
 
+        <div className="grid gap-4 md:grid-cols-4">
+          <Card className="border-l-4 border-l-indigo-500">
+            <CardContent className="p-4">
+              <p className="text-sm text-muted-foreground">First-Time to Clinic</p>
+              <p className="text-2xl sm:text-3xl font-bold text-indigo-600 dark:text-indigo-400">{summary.first_time_patients.toLocaleString()}</p>
+              <p className="text-xs text-muted-foreground mt-1">Earliest visit to this clinic in period</p>
+            </CardContent>
+          </Card>
+          <Card className="border-l-4 border-l-cyan-500">
+            <CardContent className="p-4">
+              <p className="text-sm text-muted-foreground">New Registrations</p>
+              <p className="text-2xl sm:text-3xl font-bold text-cyan-600 dark:text-cyan-400">{summary.new_registrations.toLocaleString()}</p>
+              <p className="text-xs text-muted-foreground mt-1">Patients seen here who were newly registered</p>
+            </CardContent>
+          </Card>
+          <Card className="border-l-4 border-l-slate-500">
+            <CardContent className="p-4">
+              <p className="text-sm text-muted-foreground">Returning to Clinic</p>
+              <p className="text-2xl sm:text-3xl font-bold text-slate-700 dark:text-slate-300">{summary.returning_patients.toLocaleString()}</p>
+              <p className="text-xs text-muted-foreground mt-1">Seen here with prior clinic history</p>
+            </CardContent>
+          </Card>
+          <Card className="border-l-4 border-l-emerald-500">
+            <CardContent className="p-4">
+              <p className="text-sm text-muted-foreground">Total Visits</p>
+              <p className="text-2xl sm:text-3xl font-bold text-emerald-600 dark:text-emerald-400">{summary.total_visits.toLocaleString()}</p>
+              <p className="text-xs text-muted-foreground mt-1">Visit records in selected clinic and period</p>
+            </CardContent>
+          </Card>
+        </div>
+
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -349,4 +401,3 @@ export default function ClinicAttendanceReport() {
     </DashboardLayout>
   );
 }
-

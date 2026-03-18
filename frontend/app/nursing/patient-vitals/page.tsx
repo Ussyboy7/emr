@@ -17,6 +17,7 @@ import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { PatientAvatar } from "@/components/PatientAvatar";
 import { VitalsDetailModal } from "@/components/VitalsDetailModal";
+import { AdvancedDateRangeDialog } from '@/components/AdvancedDateRangeDialog';
 import {
   Activity, Search, Eye, TrendingUp, TrendingDown, AlertTriangle,
   CheckCircle2, Heart, Thermometer, Wind, Droplets, Scale, Calendar,
@@ -68,6 +69,8 @@ export default function PatientVitalsPage() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('today');
   const [genderFilter, setGenderFilter] = useState('all');
+  const [isDateFilterDialogOpen, setIsDateFilterDialogOpen] = useState(false);
+  const [dateRange, setDateRange] = useState({ from: '', to: '' });
   
   // Load patients with vitals from API
   useEffect(() => {
@@ -83,7 +86,10 @@ export default function PatientVitalsPage() {
         let dateParam: string | undefined = undefined;
         let startDate: string | undefined = undefined;
         let endDate: string | undefined = undefined;
-        if (dateFilter === 'today') {
+        if (dateRange.from || dateRange.to) {
+          startDate = dateRange.from || undefined;
+          endDate = dateRange.to || undefined;
+        } else if (dateFilter === 'today') {
           dateParam = new Date().toISOString().split('T')[0];
         } else if (dateFilter === 'week') {
           const today = new Date();
@@ -293,7 +299,7 @@ export default function PatientVitalsPage() {
     };
     
     loadPatients();
-  }, [dateFilter]);
+  }, [dateFilter, dateRange.from, dateRange.to]);
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -316,7 +322,18 @@ export default function PatientVitalsPage() {
       const matchesGender = genderFilter === 'all' || p.gender.toLowerCase() === genderFilter.toLowerCase();
       
       // Date filter (filter by latest vitals recorded date)
-      if (dateFilter !== 'all' && p.latestVitals?.recordedAt) {
+      if ((dateRange.from || dateRange.to) && p.latestVitals?.recordedAt) {
+        const recordedDate = new Date(p.latestVitals.recordedAt);
+        if (Number.isNaN(recordedDate.getTime())) return false;
+        if (dateRange.from) {
+          const from = new Date(`${dateRange.from}T00:00:00`);
+          if (recordedDate < from) return false;
+        }
+        if (dateRange.to) {
+          const to = new Date(`${dateRange.to}T23:59:59.999`);
+          if (recordedDate > to) return false;
+        }
+      } else if (dateFilter !== 'all' && p.latestVitals?.recordedAt) {
         const recordedDate = new Date(p.latestVitals.recordedAt);
         const today = new Date();
         today.setHours(0, 0, 0, 0);
@@ -336,7 +353,7 @@ export default function PatientVitalsPage() {
       
       return matchesSearch && matchesStatus && matchesGender;
     });
-  }, [patients, searchQuery, statusFilter, dateFilter, genderFilter]);
+  }, [patients, searchQuery, statusFilter, dateFilter, genderFilter, dateRange.from, dateRange.to]);
 
   // Paginated patients
   const paginatedPatients = useMemo(() => {
@@ -347,7 +364,12 @@ export default function PatientVitalsPage() {
   // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, statusFilter, dateFilter, genderFilter]);
+  }, [searchQuery, statusFilter, dateFilter, genderFilter, dateRange.from, dateRange.to]);
+
+  const clearDateRangeFilters = () => {
+    setDateRange({ from: '', to: '' });
+    setIsDateFilterDialogOpen(false);
+  };
 
   // Stats
   const stats = useMemo(() => ({
@@ -498,6 +520,9 @@ export default function PatientVitalsPage() {
                 />
               </div>
               <div className="flex flex-wrap gap-2">
+                <Button variant="outline" onClick={() => setIsDateFilterDialogOpen(true)}>
+                  Filters
+                </Button>
                 <Select value={dateFilter} onValueChange={setDateFilter}>
                   <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
                   <SelectContent>
@@ -528,7 +553,18 @@ export default function PatientVitalsPage() {
             </div>
           </CardContent>
         </Card>
+
         )}
+
+        <AdvancedDateRangeDialog
+          open={isDateFilterDialogOpen}
+          onOpenChange={setIsDateFilterDialogOpen}
+          description="Apply a custom recorded date range to narrow down patient vitals."
+          label="Recorded Date Range"
+          value={dateRange}
+          onChange={setDateRange}
+          onClear={clearDateRangeFilters}
+        />
 
         {/* Results Count */}
         {!loading && (

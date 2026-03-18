@@ -10,13 +10,14 @@ class PatientSerializer(serializers.ModelSerializer):
     
     full_name = serializers.SerializerMethodField()
     age = serializers.ReadOnlyField()
+    age_display = serializers.ReadOnlyField()
     photo = serializers.SerializerMethodField()
     
     class Meta:
         model = Patient
         fields = [
             'id', 'patient_id', 'category', 'title', 'surname', 'first_name', 'middle_name',
-            'full_name', 'gender', 'date_of_birth', 'age', 'marital_status', 'religion', 'tribe', 'occupation', 'photo',
+            'full_name', 'gender', 'date_of_birth', 'age', 'age_display', 'marital_status', 'religion', 'tribe', 'occupation', 'photo',
             'personal_number', 'employee_type', 'division', 'location', 'location_clinic',
             'nonnpa_type', 'dependent_type', 'principal_staff',
             'email', 'phone', 'state_of_residence', 'residential_address',
@@ -69,6 +70,7 @@ class PatientSerializer(serializers.ModelSerializer):
         # Validate personal number uniqueness for Employee/Retiree
         personal_number = attrs.get('personal_number')
         category = attrs.get('category')
+        principal_staff = attrs.get('principal_staff', self.instance.principal_staff if self.instance else None)
         
         if personal_number and category in ['employee', 'retiree']:
             from .validators import validate_personal_number_uniqueness
@@ -77,6 +79,22 @@ class PatientSerializer(serializers.ModelSerializer):
                 patient_id=self.instance.id if self.instance else None,
                 category=category
             )
+
+        if category == 'dependent':
+            if not principal_staff:
+                raise serializers.ValidationError({
+                    'principal_staff': 'Principal staff is required for dependent patients.'
+                })
+
+            if principal_staff.category not in ['employee', 'retiree']:
+                raise serializers.ValidationError({
+                    'principal_staff': 'Principal staff must be an employee or retiree.'
+                })
+
+            if not (principal_staff.personal_number or '').strip():
+                raise serializers.ValidationError({
+                    'principal_staff': 'Principal staff must have a valid personal number.'
+                })
         
         return attrs
     
@@ -87,13 +105,14 @@ class PatientListSerializer(serializers.ModelSerializer):
     
     full_name = serializers.SerializerMethodField()
     age = serializers.ReadOnlyField()
+    age_display = serializers.ReadOnlyField()
     photo = serializers.SerializerMethodField()
     
     class Meta:
         model = Patient
         fields = [
             'id', 'patient_id', 'category', 'full_name', 'gender', 'age',
-            'phone', 'email', 'blood_group', 'is_active', 'created_at', 'photo',
+            'age_display', 'personal_number', 'phone', 'email', 'blood_group', 'is_active', 'created_at', 'photo',
         ]
         read_only_fields = ['id', 'patient_id', 'created_at', 'age']
     
@@ -115,6 +134,10 @@ class VisitSerializer(serializers.ModelSerializer):
     patient_name = serializers.CharField(source='patient.get_full_name', read_only=True)
     patient_id = serializers.CharField(source='patient.patient_id', read_only=True)
     doctor_name = serializers.CharField(source='doctor.get_full_name', read_only=True, allow_null=True)
+    is_new_registration = serializers.SerializerMethodField()
+    is_first_visit = serializers.SerializerMethodField()
+    is_returning_visit = serializers.SerializerMethodField()
+    patient_visit_status = serializers.SerializerMethodField()
     vitals = serializers.SerializerMethodField()
     
     def get_vitals(self, obj):
@@ -137,6 +160,30 @@ class VisitSerializer(serializers.ModelSerializer):
         return {
             'bp': '', 'pulse': '', 'temp': '', 'respRate': '', 'spo2': '', 'weight': '', 'height': '', 'bmi': ''
         }
+
+    def get_is_new_registration(self, obj):
+        patient = getattr(obj, 'patient', None)
+        if not patient or not patient.created_at:
+            return False
+        return patient.created_at.date() == obj.date
+
+    def get_is_first_visit(self, obj):
+        annotated_first_visit_id = getattr(obj, 'first_visit_id', None)
+        if annotated_first_visit_id is not None:
+            return annotated_first_visit_id == obj.id
+
+        first_visit = obj.patient.visits.order_by('date', 'time', 'created_at', 'id').values_list('id', flat=True).first()
+        return first_visit == obj.id
+
+    def get_is_returning_visit(self, obj):
+        return not self.get_is_first_visit(obj)
+
+    def get_patient_visit_status(self, obj):
+        if self.get_is_first_visit(obj):
+            return 'First Visit'
+        if self.get_is_new_registration(obj):
+            return 'Newly Registered'
+        return 'Returning'
     
     def validate_clinic(self, value):
         """Normalize clinic name before validation."""
@@ -220,6 +267,7 @@ class VisitSerializer(serializers.ModelSerializer):
             'id', 'visit_id', 'patient', 'patient_id', 'patient_name', 'visit_type', 'status',
             'date', 'time', 'clinic', 'clinics', 'completed_clinics', 'location', 'location_clinic', 'doctor', 'doctor_name',
             'clinical_notes', 'vitals',
+            'is_new_registration', 'is_first_visit', 'is_returning_visit', 'patient_visit_status',
             'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'visit_id', 'created_at', 'updated_at', 'vitals']

@@ -74,6 +74,7 @@ export interface ConsultationSession {
   patient_name?: string;
   patient_id?: string;
   patient_age?: number;
+  patient_age_display?: string;
   patient_gender?: string;
   doctor?: number;
   doctor_name?: string;
@@ -251,4 +252,3 @@ class ConsultationService {
 }
 
 export const consultationService = new ConsultationService();
-

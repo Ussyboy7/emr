@@ -322,17 +322,7 @@ export default function PatientsListPage() {
       setTotalCount(response.count || response.results.length);
       
       // Transform patients (visit data will be fetched on-demand when viewing patient details)
-      const transformedPatients = response.results.map(apiPatient => {
-        console.log('API Patient data:', {
-          id: apiPatient.id,
-          patient_id: apiPatient.patient_id,
-          location: apiPatient.location,
-          division: apiPatient.division,
-          employee_type: apiPatient.employee_type,
-          category: apiPatient.category
-        });
-        return transformPatient(apiPatient);
-      });
+      const transformedPatients = response.results.map(apiPatient => transformPatient(apiPatient));
       
       // Fetch employment details for Employee and Retiree patients
       await Promise.allSettled(

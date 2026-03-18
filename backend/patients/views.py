@@ -10,6 +10,7 @@ from rest_framework.pagination import PageNumberPagination
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django.shortcuts import get_object_or_404
+from django.db.models import OuterRef, Subquery
 
 from .models import Patient, Visit, VitalReading, MedicalHistory
 from .serializers import (
@@ -26,6 +27,14 @@ class PatientPagination(PageNumberPagination):
     page_size = 100
     page_size_query_param = 'page_size'
     max_page_size = 500
+
+
+def annotate_visit_history_flags(queryset):
+    """Annotate visits with each patient's earliest visit id for first-visit classification."""
+    first_visit_subquery = Visit.objects.filter(
+        patient=OuterRef('patient')
+    ).order_by('date', 'time', 'created_at', 'id').values('id')[:1]
+    return queryset.annotate(first_visit_id=Subquery(first_visit_subquery))
 
 
 class PatientViewSet(viewsets.ModelViewSet):
@@ -149,7 +158,7 @@ class PatientViewSet(viewsets.ModelViewSet):
     def visits(self, request, pk=None):
         """Get all visits for a patient."""
         patient = self.get_object()
-        visits = patient.visits.all().order_by('-date', '-time')
+        visits = annotate_visit_history_flags(patient.visits.all()).order_by('-date', '-time')
         serializer = VisitSerializer(visits, many=True)
         return Response(serializer.data)
     
@@ -211,7 +220,7 @@ class VisitViewSet(viewsets.ModelViewSet):
         elif end_date:
             queryset = queryset.filter(date__lte=end_date)
         
-        return queryset
+        return annotate_visit_history_flags(queryset)
 
     def perform_update(self, serializer):
         """

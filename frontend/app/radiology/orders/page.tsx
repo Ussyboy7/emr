@@ -19,6 +19,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { toast } from 'sonner';
 import { patientService, radiologyService } from '@/lib/services';
 import { PatientAvatar } from '@/components/PatientAvatar';
+import { AdvancedDateRangeDialog } from '@/components/AdvancedDateRangeDialog';
 import {
   ClipboardList, Search, Eye, Calendar, Clock, Activity, CheckCircle2,
   FileBarChart, AlertTriangle, ScanLine, User, ArrowRight,
@@ -35,6 +36,8 @@ export default function RadiologyOrdersPage() {
   const [dateFilter, setDateFilter] = useState('today');
   const [genderFilter, setGenderFilter] = useState('all');
   const [activeTab, setActiveTab] = useState('all');
+  const [isDateFilterDialogOpen, setIsDateFilterDialogOpen] = useState(false);
+  const [dateRange, setDateRange] = useState({ from: '', to: '' });
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -416,6 +419,25 @@ export default function RadiologyOrdersPage() {
   const baseFilteredOrders = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     console.log('Applying filters:', { dateFilter, priorityFilter, genderFilter, totalOrders: orders.length });
+    const matchesCustomDateRange = (orderedAt: string | undefined) => {
+      if (!dateRange.from && !dateRange.to) return true;
+      if (!orderedAt) return false;
+
+      const dt = new Date(orderedAt);
+      if (Number.isNaN(dt.getTime())) return false;
+
+      if (dateRange.from) {
+        const from = new Date(`${dateRange.from}T00:00:00`);
+        if (dt < from) return false;
+      }
+
+      if (dateRange.to) {
+        const to = new Date(`${dateRange.to}T23:59:59.999`);
+        if (dt > to) return false;
+      }
+
+      return true;
+    };
     
     return orders.filter(order => {
       // Debug: log order details
@@ -431,6 +453,10 @@ export default function RadiologyOrdersPage() {
       
       if (!matchesDateFilter(order.ordered_at, dateFilter)) {
         console.log('Date filter rejected:', order.ordered_at, dateFilter);
+        return false;
+      }
+
+      if (!matchesCustomDateRange(order.ordered_at)) {
         return false;
       }
 
@@ -469,7 +495,7 @@ export default function RadiologyOrdersPage() {
 
       return true;
     });
-  }, [orders, searchQuery, dateFilter, priorityFilter, genderFilter]);
+  }, [orders, searchQuery, dateFilter, priorityFilter, genderFilter, dateRange.from, dateRange.to]);
 
   // Tab/status filtering on top of base filters
   const filteredOrders = useMemo(() => {
@@ -491,7 +517,12 @@ export default function RadiologyOrdersPage() {
   // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, priorityFilter, dateFilter, genderFilter, activeTab]);
+  }, [searchQuery, priorityFilter, dateFilter, genderFilter, activeTab, dateRange.from, dateRange.to]);
+
+  const clearDateRangeFilters = () => {
+    setDateRange({ from: '', to: '' });
+    setIsDateFilterDialogOpen(false);
+  };
 
   // Calculate stats from current control filters (excluding tab)
   const stats = useMemo(() => {
@@ -731,6 +762,10 @@ export default function RadiologyOrdersPage() {
                   className="pl-10"
                 />
               </div>
+              <Button variant="outline" onClick={() => setIsDateFilterDialogOpen(true)}>
+                <Filter className="h-4 w-4 mr-2" />
+                Filters
+              </Button>
               <div className="flex flex-wrap gap-2">
                 <Select value={dateFilter} onValueChange={setDateFilter} >
                   <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
@@ -762,6 +797,16 @@ export default function RadiologyOrdersPage() {
             </div>
           </CardContent>
         </Card>
+
+        <AdvancedDateRangeDialog
+          open={isDateFilterDialogOpen}
+          onOpenChange={setIsDateFilterDialogOpen}
+          description="Apply a custom order date range to narrow down radiology orders."
+          label="Order Date Range"
+          value={dateRange}
+          onChange={setDateRange}
+          onClear={clearDateRangeFilters}
+        />
 
         {/* Orders List */}
         <div className="space-y-3">
