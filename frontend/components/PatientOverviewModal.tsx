@@ -7,6 +7,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from "sonner";
 import { patientService, labService, pharmacyService, consultationService, radiologyService, type Patient as ApiPatient } from '@/lib/services';
 import { VisitDetailModal } from '@/components/VisitDetailModal';
@@ -16,7 +20,7 @@ import { TimelineTab } from '@/components/patient-overview/TimelineTab';
 import {
   User, Phone, Calendar, AlertCircle, Activity, Pill, TestTube,
   ChevronRight, AlertTriangle, Loader2, Mail, MapPin, Droplets,
-  X, RefreshCw, ClipboardList, History, ScanLine, ChevronLeft, Download, Clock
+  X, RefreshCw, ClipboardList, History, ScanLine, ChevronLeft, Download, Clock, Users, UserPlus
 } from 'lucide-react';
 
 interface Patient {
@@ -49,6 +53,7 @@ interface Patient {
 interface PatientDetail {
   id: string;
   patientId: string;
+  title: string;
   firstName: string;
   lastName: string;
   middleName: string;
@@ -71,6 +76,11 @@ interface PatientDetail {
   photoUrl: string;
   category: string;
   personalNumber: string;
+  employeeType: string;
+  division: string;
+  location: string;
+  dependentType: string;
+  nonNpaType: string;
   allergies: string[];
   chronicConditions: string[];
   currentMedications: Array<{
@@ -85,13 +95,32 @@ interface PatientDetail {
     name: string;
     relationship: string;
     phone: string;
+    address: string;
   };
   nextOfKin: {
     name: string;
     relationship: string;
     phone: string;
+    address: string;
   };
+  residentialAddress: string;
+  permanentAddress: string;
+  stateOfResidence: string;
+  stateOfOrigin: string;
+  lga: string;
   numericId: number;
+}
+
+interface DependentPatient {
+  id: number;
+  patient_id: string;
+  full_name?: string;
+  gender: string;
+  age?: number;
+  age_display?: string;
+  dependent_type?: string;
+  phone?: string;
+  personal_number?: string;
 }
 
 interface Visit {
@@ -127,6 +156,21 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
   const [prescriptions, setPrescriptions] = useState<any[]>([]);
   const [consultationSessions, setConsultationSessions] = useState<any[]>([]);
   const [imagingResults, setImagingResults] = useState<any[]>([]);
+  const [dependents, setDependents] = useState<DependentPatient[]>([]);
+  const [dependentsLoading, setDependentsLoading] = useState(false);
+  const [isAddDependentOpen, setIsAddDependentOpen] = useState(false);
+  const [isCreatingDependent, setIsCreatingDependent] = useState(false);
+  const [dependentForm, setDependentForm] = useState({
+    dependentType: '',
+    surname: '',
+    firstName: '',
+    middleName: '',
+    gender: '',
+    dateOfBirth: '',
+    phone: '',
+    occupation: '',
+    residentialAddress: '',
+  });
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('overview');
   const [historySubTab, setHistorySubTab] = useState('background');
@@ -159,6 +203,36 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
     setSelectedVisit(visit);
     setIsVisitDetailModalOpen(true);
   };
+
+  const canManageDependents = patientDetail?.category === 'employee' || patientDetail?.category === 'retiree';
+
+  const getDefaultDependentType = useCallback(() => (
+    patientDetail?.category === 'retiree' ? 'Retiree Dependent' : 'Employee Dependent'
+  ), [patientDetail?.category]);
+
+  const resetDependentForm = useCallback(() => {
+    setDependentForm({
+      dependentType: getDefaultDependentType(),
+      surname: '',
+      firstName: '',
+      middleName: '',
+      gender: '',
+      dateOfBirth: '',
+      phone: '',
+      occupation: '',
+      residentialAddress: '',
+    });
+  }, [getDefaultDependentType]);
+
+  const handleAddDependent = useCallback(() => {
+    if (!canManageDependents || !patientDetail?.numericId) {
+      toast.error('Dependents can only be added from an employee or retiree record.');
+      return;
+    }
+    resetDependentForm();
+    setIsAddDependentOpen(true);
+  }, [canManageDependents, patientDetail?.numericId, resetDependentForm]);
+
 
   const loadPatientData = useCallback(async () => {
     if (!patient) return;
@@ -198,6 +272,25 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
         consultationService.getSessions({ patient: numericId }).catch(() => ({ results: [] })),
         radiologyService.getOrders({ patient: numericId.toString() }).catch(() => ({ results: [] })),
       ]);
+
+      if (apiPatient.category === 'employee' || apiPatient.category === 'retiree') {
+        setDependentsLoading(true);
+        try {
+          const dependentsResponse = await patientService.getPatients({
+            category: 'dependent',
+            principal_staff: numericId,
+            page_size: 100,
+          });
+          setDependents(dependentsResponse.results || []);
+        } catch {
+          setDependents([]);
+        } finally {
+          setDependentsLoading(false);
+        }
+      } else {
+        setDependents([]);
+        setDependentsLoading(false);
+      }
 
       // Process visits
       if (visitsData.status === 'fulfilled') {
@@ -419,6 +512,7 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
       const detail: PatientDetail = {
         id: apiPatient.id.toString(),
         patientId: apiPatient.patient_id || apiPatient.id.toString(),
+        title: apiPatient.title || '',
         firstName: apiPatient.first_name || '',
         lastName: apiPatient.surname || '',
         middleName: apiPatient.middle_name || '',
@@ -457,6 +551,11 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
         })(),
         category: apiPatient.category || '',
         personalNumber: apiPatient.personal_number || '',
+        employeeType: apiPatient.employee_type || '',
+        division: apiPatient.division || '',
+        location: apiPatient.location || '',
+        dependentType: apiPatient.dependent_type || '',
+        nonNpaType: apiPatient.nonnpa_type || '',
         allergies,
         chronicConditions: conditions,
         currentMedications: medications,
@@ -464,12 +563,19 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
           name: nokName,
           relationship: apiPatient.nok_relationship || '',
           phone: apiPatient.nok_phone || '',
+          address: apiPatient.nok_address || '',
         },
         nextOfKin: {
           name: nokName,
           relationship: apiPatient.nok_relationship || '',
           phone: apiPatient.nok_phone || '',
+          address: apiPatient.nok_address || '',
         },
+        residentialAddress: apiPatient.residential_address || '',
+        permanentAddress: apiPatient.permanent_address || '',
+        stateOfResidence: apiPatient.state_of_residence || '',
+        stateOfOrigin: apiPatient.state_of_origin || '',
+        lga: apiPatient.lga || '',
         numericId,
       };
       
@@ -489,6 +595,44 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
       setHistorySubTab('background');
     }
   }, [isOpen, patient, loadPatientData]);
+
+  const handleCreateDependent = useCallback(async () => {
+    if (!patientDetail?.numericId) {
+      toast.error('Principal patient context is missing.');
+      return;
+    }
+    if (!dependentForm.surname.trim() || !dependentForm.firstName.trim() || !dependentForm.gender || !dependentForm.dateOfBirth) {
+      toast.error('Surname, first name, gender, and date of birth are required.');
+      return;
+    }
+
+    setIsCreatingDependent(true);
+    try {
+      await patientService.createPatient({
+        category: 'dependent',
+        principal_staff: patientDetail.numericId,
+        dependent_type: dependentForm.dependentType || getDefaultDependentType(),
+        surname: dependentForm.surname.trim(),
+        first_name: dependentForm.firstName.trim(),
+        middle_name: dependentForm.middleName.trim(),
+        gender: dependentForm.gender as 'male' | 'female',
+        date_of_birth: dependentForm.dateOfBirth,
+        phone: dependentForm.phone.trim(),
+        occupation: dependentForm.occupation.trim(),
+        residential_address: dependentForm.residentialAddress.trim(),
+      });
+
+      toast.success('Dependent registered successfully.');
+      setIsAddDependentOpen(false);
+      setActiveTab('dependents');
+      resetDependentForm();
+      await loadPatientData();
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to register dependent.');
+    } finally {
+      setIsCreatingDependent(false);
+    }
+  }, [dependentForm, getDefaultDependentType, loadPatientData, patientDetail?.numericId, resetDependentForm]);
 
 
   const getCategoryBadge = (category: string) => {
@@ -556,6 +700,9 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
                 <TabsTrigger value="timeline" className="data-[state=active]:bg-primary/20 data-[state=active]:text-primary">
                   <Clock className="h-4 w-4 mr-2" />Timeline
                 </TabsTrigger>
+                <TabsTrigger value="dependents" className="data-[state=active]:bg-primary/20 data-[state=active]:text-primary">
+                  <Users className="h-4 w-4 mr-2" />Dependents
+                </TabsTrigger>
                 <TabsTrigger value="medical-history" className="data-[state=active]:bg-primary/20 data-[state=active]:text-primary">
                   <History className="h-4 w-4 mr-2" />Medical History
                 </TabsTrigger>
@@ -563,230 +710,295 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
             </div>
 
             <TabsContent value="overview" className="flex-1 overflow-y-auto px-6 py-4 space-y-6 mt-0">
-                  {patientDetail ? (
-                    <>
-                      <div className="grid gap-6 lg:grid-cols-3">
-                        <div className="space-y-6 lg:col-span-2">
-                          <div className="grid grid-cols-3 gap-4">
-                            {[
-                              { icon: Calendar, value: visits.length, label: 'Total Visits', color: 'text-blue-500' },
-                              { icon: Pill, value: patientDetail?.currentMedications?.length || 0, label: 'Active Meds', color: 'text-violet-500' },
-                              { icon: TestTube, value: labResults.length, label: 'Lab Tests', color: 'text-amber-500' }
-                            ].map((stat, i) => (
-                              <Card key={i}>
-                                <CardContent className="p-4 text-center">
-                                  <stat.icon className={`h-6 w-6 ${stat.color} mx-auto mb-2`} />
-                                  <p className="text-2xl font-bold">{stat.value}</p>
-                                  <p className="text-xs text-muted-foreground">{stat.label}</p>
-                                </CardContent>
-                              </Card>
-                            ))}
+              {patientDetail ? (
+                <>
+                  <div className="grid gap-4 md:grid-cols-4">
+                    {[
+                      { icon: Calendar, value: visits.length, label: 'Total Visits', color: 'text-blue-500' },
+                      { icon: Pill, value: patientDetail.currentMedications.length, label: 'Active Meds', color: 'text-violet-500' },
+                      { icon: TestTube, value: labResults.length, label: 'Lab Tests', color: 'text-amber-500' },
+                      { icon: Users, value: canManageDependents ? dependents.length : 0, label: 'Dependents', color: 'text-emerald-500' },
+                    ].map((stat, i) => (
+                      <Card key={i}>
+                        <CardContent className="p-4 text-center">
+                          <stat.icon className={`h-6 w-6 ${stat.color} mx-auto mb-2`} />
+                          <p className="text-2xl font-bold">{stat.value}</p>
+                          <p className="text-xs text-muted-foreground">{stat.label}</p>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+
+                  <div className="grid gap-6 xl:grid-cols-[1.35fr_0.95fr]">
+                    <div className="space-y-6">
+                      <Card>
+                        <CardHeader>
+                          <CardTitle className="flex items-center gap-2">
+                            <ClipboardList className="h-5 w-5 text-indigo-500" />Registration Summary
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent className="grid gap-3 md:grid-cols-2 text-sm">
+                          <div className="space-y-1">
+                            <p className="text-muted-foreground">Patient ID</p>
+                            <p className="font-medium">{patientDetail.patientId}</p>
                           </div>
-
-                          <Card>
-                            <CardHeader className="flex flex-row items-center justify-between">
-                              <CardTitle className="flex items-center gap-2">
-                                <Calendar className="h-5 w-5 text-blue-500" />Recent Visits
-                              </CardTitle>
-                              <Button variant="ghost" size="sm" onClick={() => {
-                                setActiveTab('medical-history');
-                                setHistorySubTab('consultations');
-                              }}>
-                                View All<ChevronRight className="h-4 w-4 ml-1" />
-                              </Button>
-                            </CardHeader>
-                            <CardContent className="space-y-3">
-                              {visits.slice(0, 3).map((visit) => (
-                                <div 
-                                  key={visit.id} 
-                                  onClick={() => handleViewVisit(visit)}
-                                  className="flex items-center justify-between p-3 rounded-lg border hover:bg-muted/50 transition-all cursor-pointer"
-                                >
-                                  <div className="flex items-center gap-3">
-                                    <div className={`w-2 h-2 rounded-full ${
-                                      visit.type === 'Emergency' ? 'bg-rose-500' : 
-                                      visit.type === 'OPD' ? 'bg-emerald-500' : 
-                                      'bg-blue-500'
-                                    }`} />
-                                    <div>
-                                      <p className="font-medium">{visit.type}</p>
-                                      <p className="text-xs text-muted-foreground">
-                                        {visit.date} {visit.doctor && visit.doctor !== 'Unknown' && `• ${visit.doctor}`} {visit.clinic && visit.clinic !== 'Unknown' && `• ${visit.clinic}`}
-                                      </p>
-                                    </div>
-                                  </div>
-                                  <Badge variant="outline">{visit.type}</Badge>
-                                </div>
-                              ))}
-                              {visits.length === 0 && (
-                                <p className="text-sm text-muted-foreground text-center py-4">No visits recorded</p>
-                              )}
-                            </CardContent>
-                          </Card>
-
-                          <div className="grid md:grid-cols-2 gap-6">
-                            <Card>
-                              <CardHeader>
-                                <CardTitle className="flex items-center gap-2">
-                                  <Activity className="h-5 w-5 text-rose-500" />Active Conditions
-                                </CardTitle>
-                              </CardHeader>
-                              <CardContent className="space-y-2">
-                                {patientDetail.chronicConditions.length > 0 ? (
-                                  patientDetail.chronicConditions.map((c, i) => (
-                                    <div key={i} className="flex items-center gap-2 p-2 rounded bg-muted/50">
-                                      <div className="w-2 h-2 rounded-full bg-rose-500" />
-                                      <span>{c}</span>
-                                    </div>
-                                  ))
-                                ) : (
-                                  <p className="text-sm text-muted-foreground">No chronic conditions recorded</p>
-                                )}
-                              </CardContent>
-                            </Card>
-                            <Card>
-                              <CardHeader>
-                                <CardTitle className="flex items-center gap-2">
-                                  <AlertTriangle className="h-5 w-5 text-amber-500" />Allergies
-                                </CardTitle>
-                              </CardHeader>
-                              <CardContent className="space-y-2">
-                                {patientDetail.allergies.length > 0 ? (
-                                  patientDetail.allergies.map((a, i) => (
-                                    <div key={i} className="flex items-center gap-2 p-2 rounded bg-destructive/10">
-                                      <AlertTriangle className="h-4 w-4 text-destructive" />
-                                      <span>{a}</span>
-                                    </div>
-                                  ))
-                                ) : (
-                                  <p className="text-sm text-muted-foreground">No allergies recorded</p>
-                                )}
-                              </CardContent>
-                            </Card>
+                          <div className="space-y-1">
+                            <p className="text-muted-foreground">Category</p>
+                            <p className="capitalize">{patientDetail.category || 'Not provided'}</p>
                           </div>
-                        </div>
+                          <div className="space-y-1">
+                            <p className="text-muted-foreground">Personal Number</p>
+                            <p>{patientDetail.personalNumber || 'Not provided'}</p>
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-muted-foreground">Title</p>
+                            <p>{patientDetail.title || 'Not provided'}</p>
+                          </div>
+                          {patientDetail.dependentType ? (
+                            <div className="space-y-1">
+                              <p className="text-muted-foreground">Dependent Type</p>
+                              <p>{patientDetail.dependentType}</p>
+                            </div>
+                          ) : null}
+                          {patientDetail.nonNpaType ? (
+                            <div className="space-y-1">
+                              <p className="text-muted-foreground">Non-NPA Type</p>
+                              <p>{patientDetail.nonNpaType}</p>
+                            </div>
+                          ) : null}
+                        </CardContent>
+                      </Card>
 
-                        <div className="space-y-6">
-                          <Card>
-                            <CardHeader>
-                              <CardTitle className="flex items-center gap-2">
-                                <User className="h-5 w-5 text-blue-500" />Demographics
-                              </CardTitle>
-                            </CardHeader>
-                            <CardContent className="space-y-3 text-sm">
-                              <div className="flex justify-between">
-                                <span className="text-muted-foreground">Date of Birth</span>
-                                <span>{patientDetail.dateOfBirth || 'Not provided'}</span>
-                              </div>
-                              <div className="flex justify-between">
-                                <span className="text-muted-foreground">Age</span>
-                                <span>{patientDetail.ageDisplay || `${patientDetail.age} years`}</span>
-                              </div>
-                              <div className="flex justify-between">
-                                <span className="text-muted-foreground">Gender</span>
-                                <span>{patientDetail.gender}</span>
-                              </div>
-                              {patientDetail.maritalStatus && (
-                                <div className="flex justify-between">
-                                  <span className="text-muted-foreground">Marital Status</span>
-                                  <span className="capitalize">{patientDetail.maritalStatus}</span>
-                                </div>
-                              )}
-                              {patientDetail.religion && (
-                                <div className="flex justify-between">
-                                  <span className="text-muted-foreground">Religion</span>
-                                  <span>{patientDetail.religion}</span>
-                                </div>
-                              )}
-                              {patientDetail.tribe && (
-                                <div className="flex justify-between">
-                                  <span className="text-muted-foreground">Tribe</span>
-                                  <span>{patientDetail.tribe}</span>
-                                </div>
-                              )}
-                              {patientDetail.occupation && (
-                                <div className="flex justify-between">
-                                  <span className="text-muted-foreground">Occupation</span>
-                                  <span>{patientDetail.occupation}</span>
-                                </div>
-                              )}
-                              <div className="flex justify-between">
-                                <span className="text-muted-foreground">Blood Group</span>
-                                <span className="flex items-center gap-1">
-                                  <Droplets className="h-3 w-3 text-rose-500" />
-                                  {patientDetail.bloodGroup || 'Not provided'}
-                                </span>
-                              </div>
-                              <div className="flex justify-between">
-                                <span className="text-muted-foreground">Genotype</span>
-                                <span>{patientDetail.genotype || 'Not provided'}</span>
-                              </div>
-                              <Separator />
-                              <div>
-                                <p className="text-muted-foreground mb-1">Address</p>
-                                {patientDetail.address ? (
-                                  <p className="whitespace-pre-line">{patientDetail.address}</p>
-                                ) : (
-                                  <p className="text-muted-foreground">Not provided</p>
-                                )}
-                              </div>
-                            </CardContent>
-                          </Card>
+                      <Card>
+                        <CardHeader>
+                          <CardTitle className="flex items-center gap-2">
+                            <User className="h-5 w-5 text-blue-500" />Demographics
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent className="grid gap-3 md:grid-cols-2 text-sm">
+                          <div className="space-y-1">
+                            <p className="text-muted-foreground">Date of Birth</p>
+                            <p>{patientDetail.dateOfBirth || 'Not provided'}</p>
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-muted-foreground">Age</p>
+                            <p>{patientDetail.ageDisplay || `${patientDetail.age} years`}</p>
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-muted-foreground">Gender</p>
+                            <p>{patientDetail.gender}</p>
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-muted-foreground">Marital Status</p>
+                            <p className="capitalize">{patientDetail.maritalStatus || 'Not provided'}</p>
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-muted-foreground">Religion</p>
+                            <p>{patientDetail.religion || 'Not provided'}</p>
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-muted-foreground">Tribe</p>
+                            <p>{patientDetail.tribe || 'Not provided'}</p>
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-muted-foreground">Blood Group</p>
+                            <p className="flex items-center gap-1">
+                              <Droplets className="h-3 w-3 text-rose-500" />
+                              {patientDetail.bloodGroup || 'Not provided'}
+                            </p>
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-muted-foreground">Genotype</p>
+                            <p>{patientDetail.genotype || 'Not provided'}</p>
+                          </div>
+                          <div className="space-y-1 md:col-span-2">
+                            <p className="text-muted-foreground">Occupation</p>
+                            <p>{patientDetail.occupation || 'Not provided'}</p>
+                          </div>
+                        </CardContent>
+                      </Card>
 
-                          <Card>
-                            <CardHeader>
-                              <CardTitle className="flex items-center gap-2">
-                                <AlertCircle className="h-5 w-5 text-rose-500" />Next of Kin
-                              </CardTitle>
-                            </CardHeader>
-                            <CardContent className="space-y-2 text-sm">
-                              <div>
-                                <p className="text-muted-foreground">Name</p>
-                                <p className="font-medium">{patientDetail.nextOfKin.name || 'Not provided'}</p>
-                              </div>
-                              <div>
-                                <p className="text-muted-foreground">Relationship</p>
-                                <p>{patientDetail.nextOfKin.relationship || 'Not provided'}</p>
-                              </div>
-                              <div>
-                                <p className="text-muted-foreground">Phone</p>
-                                <p className="text-primary">{patientDetail.nextOfKin.phone || 'Not provided'}</p>
-                              </div>
-                            </CardContent>
-                          </Card>
-
-                          <Card>
-                            <CardHeader>
-                              <CardTitle className="flex items-center gap-2">
-                                <Phone className="h-5 w-5 text-teal-500" />Contact
-                              </CardTitle>
-                            </CardHeader>
-                            <CardContent className="space-y-2 text-sm">
-                              <div className="flex items-center gap-2">
-                                <Phone className="h-4 w-4 text-muted-foreground" />
-                                <span>{patientDetail.phone || 'Not provided'}</span>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <Mail className="h-4 w-4 text-muted-foreground" />
-                                <span>{patientDetail.email || 'Not provided'}</span>
-                              </div>
-                              {patientDetail.state && (
-                                <div className="flex items-start gap-2">
-                                  <MapPin className="h-4 w-4 text-muted-foreground mt-0.5" />
-                                  <span>{patientDetail.state}</span>
+                      <Card>
+                        <CardHeader className="flex flex-row items-center justify-between">
+                          <CardTitle className="flex items-center gap-2">
+                            <Calendar className="h-5 w-5 text-blue-500" />Recent Visits
+                          </CardTitle>
+                          <Button variant="ghost" size="sm" onClick={() => {
+                            setActiveTab('medical-history');
+                            setHistorySubTab('consultations');
+                          }}>
+                            View All<ChevronRight className="h-4 w-4 ml-1" />
+                          </Button>
+                        </CardHeader>
+                        <CardContent className="space-y-3">
+                          {visits.slice(0, 3).map((visit) => (
+                            <div
+                              key={visit.id}
+                              onClick={() => handleViewVisit(visit)}
+                              className="flex items-center justify-between p-3 rounded-lg border hover:bg-muted/50 transition-all cursor-pointer"
+                            >
+                              <div className="flex items-center gap-3">
+                                <div className={`w-2 h-2 rounded-full ${
+                                  visit.type === 'Emergency' ? 'bg-rose-500' :
+                                  visit.type === 'OPD' ? 'bg-emerald-500' :
+                                  'bg-blue-500'
+                                }`} />
+                                <div>
+                                  <p className="font-medium">{visit.type}</p>
+                                  <p className="text-xs text-muted-foreground">
+                                    {visit.date} {visit.doctor && visit.doctor !== 'Unknown' && `• ${visit.doctor}`} {visit.clinic && visit.clinic !== 'Unknown' && `• ${visit.clinic}`}
+                                  </p>
                                 </div>
-                              )}
-                            </CardContent>
-                          </Card>
-                        </div>
+                              </div>
+                              <Badge variant="outline">{visit.type}</Badge>
+                            </div>
+                          ))}
+                          {visits.length === 0 && (
+                            <p className="text-sm text-muted-foreground text-center py-4">No visits recorded</p>
+                          )}
+                        </CardContent>
+                      </Card>
+
+                      <div className="grid md:grid-cols-2 gap-6">
+                        <Card>
+                          <CardHeader>
+                            <CardTitle className="flex items-center gap-2">
+                              <Activity className="h-5 w-5 text-rose-500" />Active Conditions
+                            </CardTitle>
+                          </CardHeader>
+                          <CardContent className="space-y-2">
+                            {patientDetail.chronicConditions.length > 0 ? (
+                              patientDetail.chronicConditions.map((c, i) => (
+                                <div key={i} className="flex items-center gap-2 p-2 rounded bg-muted/50">
+                                  <div className="w-2 h-2 rounded-full bg-rose-500" />
+                                  <span>{c}</span>
+                                </div>
+                              ))
+                            ) : (
+                              <p className="text-sm text-muted-foreground">No chronic conditions recorded</p>
+                            )}
+                          </CardContent>
+                        </Card>
+                        <Card>
+                          <CardHeader>
+                            <CardTitle className="flex items-center gap-2">
+                              <AlertTriangle className="h-5 w-5 text-amber-500" />Allergies
+                            </CardTitle>
+                          </CardHeader>
+                          <CardContent className="space-y-2">
+                            {patientDetail.allergies.length > 0 ? (
+                              patientDetail.allergies.map((a, i) => (
+                                <div key={i} className="flex items-center gap-2 p-2 rounded bg-destructive/10">
+                                  <AlertTriangle className="h-4 w-4 text-destructive" />
+                                  <span>{a}</span>
+                                </div>
+                              ))
+                            ) : (
+                              <p className="text-sm text-muted-foreground">No allergies recorded</p>
+                            )}
+                          </CardContent>
+                        </Card>
                       </div>
-                    </>
-                  ) : (
-                    <div className="text-center py-12">
-                      <Loader2 className="h-8 w-8 animate-spin text-muted-foreground mx-auto mb-4" />
-                      <p className="text-muted-foreground">Loading patient details...</p>
                     </div>
-                  )}
+
+                    <div className="space-y-6">
+                      <Card>
+                        <CardHeader>
+                          <CardTitle className="flex items-center gap-2">
+                            <MapPin className="h-5 w-5 text-emerald-500" />Contact And Address
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent className="grid gap-3 text-sm">
+                          <div className="flex items-center gap-2">
+                            <Phone className="h-4 w-4 text-muted-foreground" />
+                            <span>{patientDetail.phone || 'Not provided'}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Mail className="h-4 w-4 text-muted-foreground" />
+                            <span>{patientDetail.email || 'Not provided'}</span>
+                          </div>
+                          <Separator />
+                          <div className="space-y-1">
+                            <p className="text-muted-foreground">Residential Address</p>
+                            <p className="whitespace-pre-line">{patientDetail.residentialAddress || 'Not provided'}</p>
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-muted-foreground">Permanent Address</p>
+                            <p className="whitespace-pre-line">{patientDetail.permanentAddress || 'Not provided'}</p>
+                          </div>
+                          <div className="grid gap-3 md:grid-cols-1">
+                            <div className="space-y-1">
+                              <p className="text-muted-foreground">State of Residence</p>
+                              <p>{patientDetail.stateOfResidence || 'Not provided'}</p>
+                            </div>
+                            <div className="space-y-1">
+                              <p className="text-muted-foreground">State of Origin</p>
+                              <p>{patientDetail.stateOfOrigin || 'Not provided'}</p>
+                            </div>
+                            <div className="space-y-1">
+                              <p className="text-muted-foreground">LGA</p>
+                              <p>{patientDetail.lga || 'Not provided'}</p>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+
+                      <Card>
+                        <CardHeader>
+                          <CardTitle className="flex items-center gap-2">
+                            <MapPin className="h-5 w-5 text-sky-500" />Work And Organization
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent className="grid gap-3 text-sm">
+                          <div className="space-y-1">
+                            <p className="text-muted-foreground">Employee Type</p>
+                            <p>{patientDetail.employeeType || 'Not provided'}</p>
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-muted-foreground">Division</p>
+                            <p>{patientDetail.division || 'Not provided'}</p>
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-muted-foreground">Location</p>
+                            <p>{patientDetail.location || 'Not provided'}</p>
+                          </div>
+                        </CardContent>
+                      </Card>
+
+                      <Card>
+                        <CardHeader className="flex flex-row items-center justify-between">
+                          <CardTitle className="flex items-center gap-2">
+                            <AlertCircle className="h-5 w-5 text-rose-500" />Next Of Kin
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-2 text-sm">
+                          <div>
+                            <p className="text-muted-foreground">Name</p>
+                            <p className="font-medium">{patientDetail.nextOfKin.name || 'Not provided'}</p>
+                          </div>
+                          <div>
+                            <p className="text-muted-foreground">Relationship</p>
+                            <p>{patientDetail.nextOfKin.relationship || 'Not provided'}</p>
+                          </div>
+                          <div>
+                            <p className="text-muted-foreground">Phone</p>
+                            <p className="text-primary">{patientDetail.nextOfKin.phone || 'Not provided'}</p>
+                          </div>
+                          <div>
+                            <p className="text-muted-foreground">Address</p>
+                            <p>{patientDetail.nextOfKin.address || 'Not provided'}</p>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="text-center py-12">
+                  <Loader2 className="h-8 w-8 animate-spin text-muted-foreground mx-auto mb-4" />
+                  <p className="text-muted-foreground">Loading patient details...</p>
+                </div>
+              )}
             </TabsContent>
 
             {/* TIMELINE TAB */}
@@ -807,6 +1019,75 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
                 prescriptions={prescriptions}
                 vitalSigns={vitalSigns}
               />
+            </TabsContent>
+
+            <TabsContent value="dependents" className="flex-1 overflow-y-auto px-6 py-4 mt-0 space-y-6">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h3 className="text-lg font-semibold">Dependents</h3>
+                  <p className="text-sm text-muted-foreground">
+                    View dependents linked to this principal record and register new dependents from here.
+                  </p>
+                </div>
+                {canManageDependents ? (
+                  <Button onClick={handleAddDependent}>
+                    <UserPlus className="h-4 w-4 mr-2" />
+                    Add Dependent
+                  </Button>
+                ) : null}
+              </div>
+
+              {!canManageDependents ? (
+                <Card>
+                  <CardContent className="py-8 text-center text-sm text-muted-foreground">
+                    Dependents can only be managed from employee or retiree records.
+                  </CardContent>
+                </Card>
+              ) : dependentsLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                  <span className="ml-3 text-sm text-muted-foreground">Loading dependents...</span>
+                </div>
+              ) : dependents.length === 0 ? (
+                <Card>
+                  <CardContent className="py-10 text-center space-y-3">
+                    <Users className="h-10 w-10 text-muted-foreground mx-auto" />
+                    <div>
+                      <p className="font-medium">No dependents linked</p>
+                      <p className="text-sm text-muted-foreground">
+                        Register the principal&apos;s dependents directly from this patient record.
+                      </p>
+                    </div>
+                    <Button variant="outline" onClick={handleAddDependent}>
+                      <UserPlus className="h-4 w-4 mr-2" />
+                      Register First Dependent
+                    </Button>
+                  </CardContent>
+                </Card>
+              ) : (
+                <div className="grid gap-4 md:grid-cols-2">
+                  {dependents.map((dependent) => (
+                    <Card key={dependent.id}>
+                      <CardContent className="p-5 space-y-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="font-semibold">{dependent.full_name || dependent.patient_id}</p>
+                            <p className="text-sm text-muted-foreground">{dependent.patient_id}</p>
+                          </div>
+                          <Badge variant="outline">
+                            {dependent.dependent_type || 'Dependent'}
+                          </Badge>
+                        </div>
+                        <div className="grid gap-2 text-sm text-muted-foreground">
+                          <p>{dependent.age_display || `${dependent.age || 0} years`} • {dependent.gender}</p>
+                          <p>{dependent.phone || 'No phone'}</p>
+                          {dependent.personal_number ? <p>Personal Number: {dependent.personal_number}</p> : null}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              )}
             </TabsContent>
 
             {/* MEDICAL HISTORY TAB */}
@@ -857,6 +1138,151 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
           }
         }}
       />
+
+      <Dialog open={isAddDependentOpen} onOpenChange={(open) => {
+        setIsAddDependentOpen(open);
+        if (!open) {
+          resetDependentForm();
+        }
+      }}>
+        <DialogContent className="sm:max-w-[640px]">
+          <DialogHeader>
+            <DialogTitle>Add Dependent</DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-6">
+            <Card className="border-dashed">
+              <CardContent className="p-4 text-sm space-y-1">
+                <p className="font-medium">{patientDetail?.firstName} {patientDetail?.middleName} {patientDetail?.lastName}</p>
+                <p className="text-muted-foreground">
+                  Principal: {patientDetail?.patientId} {patientDetail?.personalNumber ? `• ${patientDetail.personalNumber}` : ''}
+                </p>
+              </CardContent>
+            </Card>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="dependent-type">Dependent Type</Label>
+                <Select
+                  value={dependentForm.dependentType}
+                  onValueChange={(value) => setDependentForm(prev => ({ ...prev, dependentType: value }))}
+                >
+                  <SelectTrigger id="dependent-type">
+                    <SelectValue placeholder="Select dependent type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Employee Dependent">Employee Dependent</SelectItem>
+                    <SelectItem value="Retiree Dependent">Retiree Dependent</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="dependent-gender">Gender</Label>
+                <Select
+                  value={dependentForm.gender}
+                  onValueChange={(value) => setDependentForm(prev => ({ ...prev, gender: value }))}
+                >
+                  <SelectTrigger id="dependent-gender">
+                    <SelectValue placeholder="Select gender" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="male">Male</SelectItem>
+                    <SelectItem value="female">Female</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="dependent-surname">Surname</Label>
+                <Input
+                  id="dependent-surname"
+                  value={dependentForm.surname}
+                  onChange={(e) => setDependentForm(prev => ({ ...prev, surname: e.target.value }))}
+                  placeholder="Surname"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="dependent-first-name">First Name</Label>
+                <Input
+                  id="dependent-first-name"
+                  value={dependentForm.firstName}
+                  onChange={(e) => setDependentForm(prev => ({ ...prev, firstName: e.target.value }))}
+                  placeholder="First name"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="dependent-middle-name">Middle Name</Label>
+                <Input
+                  id="dependent-middle-name"
+                  value={dependentForm.middleName}
+                  onChange={(e) => setDependentForm(prev => ({ ...prev, middleName: e.target.value }))}
+                  placeholder="Middle name"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="dependent-dob">Date Of Birth</Label>
+                <Input
+                  id="dependent-dob"
+                  type="date"
+                  value={dependentForm.dateOfBirth}
+                  onChange={(e) => setDependentForm(prev => ({ ...prev, dateOfBirth: e.target.value }))}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="dependent-phone">Phone</Label>
+                <Input
+                  id="dependent-phone"
+                  value={dependentForm.phone}
+                  onChange={(e) => setDependentForm(prev => ({ ...prev, phone: e.target.value }))}
+                  placeholder="08012345678"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="dependent-occupation">Occupation</Label>
+                <Input
+                  id="dependent-occupation"
+                  value={dependentForm.occupation}
+                  onChange={(e) => setDependentForm(prev => ({ ...prev, occupation: e.target.value }))}
+                  placeholder="Optional"
+                />
+              </div>
+
+              <div className="space-y-2 md:col-span-2">
+                <Label htmlFor="dependent-address">Residential Address</Label>
+                <Textarea
+                  id="dependent-address"
+                  value={dependentForm.residentialAddress}
+                  onChange={(e) => setDependentForm(prev => ({ ...prev, residentialAddress: e.target.value }))}
+                  placeholder="Residential address"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setIsAddDependentOpen(false);
+                  resetDependentForm();
+                }}
+                disabled={isCreatingDependent}
+              >
+                Cancel
+              </Button>
+              <Button onClick={handleCreateDependent} disabled={isCreatingDependent}>
+                {isCreatingDependent ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <UserPlus className="h-4 w-4 mr-2" />}
+                Save Dependent
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </Dialog>
   );
 }

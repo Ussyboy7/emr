@@ -14,7 +14,7 @@ import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 import { patientService } from '@/lib/services/patient-service';
 import { 
@@ -486,6 +486,7 @@ const STEPS: { id: FormStep; label: string; icon: React.ReactNode }[] = [
 
 export default function NewPatientPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { locations: locationOptions } = useLocationOptions();
   const [patientCategory, setPatientCategory] = useState<'employee' | 'retiree' | 'nonnpa' | 'dependent'>('employee');
   const [currentStep, setCurrentStep] = useState<FormStep>('personal');
@@ -546,6 +547,24 @@ export default function NewPatientPage() {
       setFormData(prev => ({ ...prev, employeeType: '', division: '', location: '' }));
     }
   }, [patientCategory]);
+
+  useEffect(() => {
+    const prefilledCategory = searchParams.get('category');
+    const principalStaffId = searchParams.get('principal_staff_id');
+    const dependentType = searchParams.get('dependent_type');
+
+    if (prefilledCategory === 'dependent') {
+      setPatientCategory('dependent');
+    }
+
+    if (principalStaffId || dependentType) {
+      setFormData(prev => ({
+        ...prev,
+        principalStaffId: principalStaffId?.trim() || prev.principalStaffId,
+        dependentType: dependentType?.trim() || prev.dependentType,
+      }));
+    }
+  }, [searchParams]);
 
   const handleInputChange = (field: string, value: string) => {
     setFormData((prev) => {
@@ -731,7 +750,6 @@ export default function NewPatientPage() {
       if (numericId) {
         try {
           patient = await patientService.getPatient(numericId);
-          console.log('Full patient details retrieved:', patient);
         } catch (err) {
           console.error('Failed to get full patient details:', err);
         }
@@ -782,13 +800,6 @@ export default function NewPatientPage() {
             nokPhone: patient.phone || prev.nokPhone || '',
             nokAddress: patient.residential_address || prev.nokAddress || '',
           };
-
-          console.log('Updated NOK fields:', {
-            nokSurname: updated.nokSurname,
-            nokFirstName: updated.nokFirstName,
-            nokPhone: updated.nokPhone,
-            nokAddress: updated.nokAddress,
-          });
 
           return updated;
         });
@@ -1025,7 +1036,6 @@ export default function NewPatientPage() {
         const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001/api';
         const baseUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
         
-        console.log('[Patient Registration] Uploading patient with photo...');
         const response = await fetch(`${baseUrl}/patients/`, {
           method: 'POST',
           headers: {

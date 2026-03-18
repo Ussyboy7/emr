@@ -147,6 +147,7 @@ class PatientService {
     gender?: string;
     blood_group?: string;
     location?: string;
+    principal_staff?: number;
     search?: string;
     page?: number;
     page_size?: number;

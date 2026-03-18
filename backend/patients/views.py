@@ -53,7 +53,7 @@ class PatientViewSet(viewsets.ModelViewSet):
     parser_classes = [MultiPartParser, FormParser, JSONParser]  # Support file uploads
     pagination_class = PatientPagination
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['category', 'gender', 'blood_group', 'is_active', 'location']
+    filterset_fields = ['category', 'gender', 'blood_group', 'is_active', 'location', 'principal_staff']
     search_fields = ['patient_id', 'surname', 'first_name', 'middle_name', 'personal_number', 'phone', 'email']
     ordering_fields = ['created_at', 'surname', 'first_name']
     ordering = ['-created_at']
