@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  ArrowRight, Building2, Calendar, Clock, Eye, Filter,
+  ArrowRight, Building2, Calendar, Clock, Eye,
   RefreshCw, Search, Stethoscope, User, UserPlus,
   AlertTriangle, CheckCircle, XCircle, Clock4, Phone, Mail
 } from "lucide-react";
@@ -195,31 +195,20 @@ export default function ReferralsManagementPage() {
 
         {/* Filters */}
         <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Filter className="h-5 w-5" />
-              Filters
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              <div className="space-y-2">
-                <Label>Search</Label>
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    placeholder="Search referrals..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="pl-10"
-                  />
-                </div>
+          <CardContent className="p-4">
+            <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-3">
+              <div className="relative flex-1 min-w-[min(100%,16rem)]">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search referrals..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-10"
+                />
               </div>
-
-              <div className="space-y-2">
-                <Label>Status</Label>
+              <div className="flex flex-wrap items-center gap-2">
                 <Select value={statusFilter} onValueChange={setStatusFilter}>
-                  <SelectTrigger>
+                  <SelectTrigger className="w-[150px]">
                     <SelectValue placeholder="All Status" />
                   </SelectTrigger>
                   <SelectContent>
@@ -231,12 +220,8 @@ export default function ReferralsManagementPage() {
                     ))}
                   </SelectContent>
                 </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label>Specialty</Label>
                 <Select value={specialtyFilter} onValueChange={setSpecialtyFilter}>
-                  <SelectTrigger>
+                  <SelectTrigger className="w-[170px]">
                     <SelectValue placeholder="All Specialties" />
                   </SelectTrigger>
                   <SelectContent>
@@ -248,12 +233,8 @@ export default function ReferralsManagementPage() {
                     ))}
                   </SelectContent>
                 </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label>Urgency</Label>
                 <Select value={urgencyFilter} onValueChange={setUrgencyFilter}>
-                  <SelectTrigger>
+                  <SelectTrigger className="w-[160px]">
                     <SelectValue placeholder="All Urgencies" />
                   </SelectTrigger>
                   <SelectContent>

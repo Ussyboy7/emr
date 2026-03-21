@@ -22,6 +22,20 @@ class Command(BaseCommand):
         self.stdout.write('Creating lab templates...')
 
         templates_data = [
+            {
+                'name': 'Other (Others)',
+                'code': 'OTHER',
+                'category': 'chemistry',
+                'sample_type': 'See clinical notes',
+                'description': (
+                    'Use when the test is not in the catalog. Describe the exact test name, '
+                    'specimen, and instructions in the order clinical notes for laboratory staff.'
+                ),
+                'turnaround_time': 'Per laboratory',
+                'normal_range': {
+                    'Result': {'unit': '', 'range': '', 'dataType': 'text', 'required': False},
+                },
+            },
             # HEMATOLOGY
             {
                 'name': 'Full Blood Count (FBC)',

@@ -16,13 +16,14 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { toast } from "sonner";
 import { Checkbox } from "@/components/ui/checkbox";
 import { AdvancedDateRangeDialog } from '@/components/AdvancedDateRangeDialog';
+import { CustomDateRangeButton } from '@/components/CustomDateRangeButton';
 import { labService, type LabOrder as ApiLabOrder, type LabTest as ApiLabTest } from '@/lib/services';
 import { transformLabTestStatus, transformPriority, transformToBackendPriority, transformProcessingMethod, transformToBackendProcessingMethod } from '@/lib/services/transformers';
 import { PatientAvatar } from "@/components/PatientAvatar";
 import {
   TestTube, Search, Eye, Clock, CheckCircle2, Activity, FlaskConical, Loader2,
   Beaker, AlertTriangle, User, Calendar, FileText, Play, Stethoscope,
-  ClipboardList, RefreshCw, Upload, Download, Building2, Truck, X, Droplets, Pipette, RotateCcw, XCircle, Filter
+  ClipboardList, RefreshCw, Upload, Download, Building2, Truck, X, Droplets, Pipette, RotateCcw, XCircle
 } from 'lucide-react';
 
 // ==========================================
@@ -1214,6 +1215,12 @@ export default function LabOrdersPage() {
           );
           if (!confirmed) return;
         }
+      } else {
+        const hasValue = Object.values(resultValues).some((v) => String(v ?? "").trim() !== "");
+        if (!hasValue) {
+          toast.error("Enter a result value or switch to file upload");
+          return;
+        }
       }
     } else if (!uploadedFile) {
       toast.error('Please upload a result file');
@@ -1509,8 +1516,8 @@ export default function LabOrdersPage() {
                   <TabsTrigger value="all">All</TabsTrigger>
                 </TabsList>
               </Tabs>
-              <div className="flex flex-col gap-4">
-                <div className="relative flex-1">
+              <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-3">
+                <div className="relative flex-1 min-w-[min(100%,16rem)]">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input 
                     placeholder="Search orders..." 
@@ -1519,11 +1526,8 @@ export default function LabOrdersPage() {
                     className="pl-10" 
                   />
                 </div>
-                <Button variant="outline" onClick={() => setIsDateFilterDialogOpen(true)}>
-                  <Filter className="h-4 w-4 mr-2" />
-                  Filters
-                </Button>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <CustomDateRangeButton onClick={() => setIsDateFilterDialogOpen(true)} />
                   <Select value={dateFilter} onValueChange={setDateFilter} >
                     <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
                     <SelectContent>

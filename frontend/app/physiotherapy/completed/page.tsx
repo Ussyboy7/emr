@@ -398,8 +398,8 @@ export default function PhysioCompletedPage() {
         {/* Filters */}
         <Card>
           <CardContent className="p-4">
-            <div className="flex flex-col md:flex-row gap-3">
-              <div className="relative flex-1">
+            <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-3">
+              <div className="relative flex-1 min-w-[min(100%,16rem)]">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
                   placeholder="Search by patient name or ID..."
@@ -408,24 +408,24 @@ export default function PhysioCompletedPage() {
                   className="pl-10"
                 />
               </div>
-
-              <Select value={dateFilter} onValueChange={setDateFilter}>
-                <SelectTrigger className="w-[150px]"><SelectValue placeholder="Date Range" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Time</SelectItem>
-                  <SelectItem value="today">Today</SelectItem>
-                  <SelectItem value="week">This Week</SelectItem>
-                  <SelectItem value="month">This Month</SelectItem>
-                </SelectContent>
-              </Select>
-
-              <Select value={physiotherapistFilter} onValueChange={setPhysiotherapistFilter}>
-                <SelectTrigger className="w-[180px]"><SelectValue placeholder="Physiotherapist" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Physiotherapists</SelectItem>
-                  {/* TODO: Load actual physiotherapists */}
-                </SelectContent>
-              </Select>
+              <div className="flex flex-wrap items-center gap-2">
+                <Select value={dateFilter} onValueChange={setDateFilter}>
+                  <SelectTrigger className="w-[150px]"><SelectValue placeholder="Date Range" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Time</SelectItem>
+                    <SelectItem value="today">Today</SelectItem>
+                    <SelectItem value="week">This Week</SelectItem>
+                    <SelectItem value="month">This Month</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={physiotherapistFilter} onValueChange={setPhysiotherapistFilter}>
+                  <SelectTrigger className="w-[180px]"><SelectValue placeholder="Physiotherapist" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Physiotherapists</SelectItem>
+                    {/* TODO: Load actual physiotherapists */}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           </CardContent>
         </Card>

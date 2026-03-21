@@ -31,7 +31,7 @@ class RadiologyTemplateViewSet(viewsets.ModelViewSet):
     serializer_class = RadiologyTemplateSerializer
     pagination_class = FlexiblePageNumberPagination
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['category', 'modality', 'is_active']
+    filterset_fields = ['category', 'modality', 'is_active', 'code']
     search_fields = ['name', 'code', 'description']
     ordering_fields = ['name', 'category', 'created_at']
     ordering = ['category', 'name']

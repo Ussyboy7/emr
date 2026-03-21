@@ -248,6 +248,7 @@ class RadiologyService {
     category?: string;
     modality?: string;
     is_active?: boolean;
+    code?: string;
     search?: string;
     page?: number;
     page_size?: number;

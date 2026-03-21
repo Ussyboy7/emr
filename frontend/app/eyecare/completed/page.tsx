@@ -93,8 +93,8 @@ export default function EyeClinicCompletedPage() {
         {/* Filter */}
         <Card>
           <CardContent className="p-4">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <div className="relative max-w-full min-w-[min(100%,16rem)]">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
                 placeholder="Search by patient name or diagnosis..."
                 value={searchTerm}

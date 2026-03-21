@@ -11,7 +11,9 @@ import {
   Stethoscope, Printer, Edit, CheckCircle2, Loader2, User, Activity, FlaskConical, Syringe, Pill, Download, Calendar, FileText, ScanLine, AlertTriangle
 } from "lucide-react";
 import { apiFetch } from '@/lib/api-client';
-import { patientService, wardService, physioService } from '@/lib/services';
+import { patientService, wardService, physioService, labService } from '@/lib/services';
+import { toast } from 'sonner';
+import { LabOrderModal, type LabOrderSubmitInput } from '@/components/consultation/orders/LabOrderModal';
 
 // ==========================================
 // TYPE DEFINITIONS
@@ -1421,6 +1423,9 @@ const loadConsultationFromSession = async (sessionId: string | number): Promise<
       nursingOrders,
       timeline: generateTimeline(session, vitals, prescriptions, labOrders, nursingOrders),
       type: 'consultation',
+      /** For ordering labs from detail modal (same as consultation session API) */
+      patientIdNumeric: session.patient,
+      visitId: session.visit ?? undefined,
     };
   } catch (error) {
     console.error('Error loading consultation session data:', error);
@@ -1441,6 +1446,7 @@ export const ConsultationDetailModal = React.memo(function ConsultationDetailMod
 }: ConsultationDetailModalProps) {
   const [loadedConsultation, setLoadedConsultation] = useState<ConsultationRecord | null>(null);
   const [loading, setLoading] = useState(false);
+  const [showAddLabOrder, setShowAddLabOrder] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -1515,11 +1521,63 @@ export const ConsultationDetailModal = React.memo(function ConsultationDetailMod
     }
   }, [onComplete, safeConsultation]);
 
+  const canAddLabOrder = useMemo(() => {
+    if (!safeConsultation || safeConsultation.type !== 'consultation') return false;
+    if (safeConsultation.status !== 'In Progress') return false;
+    const pid = safeConsultation.patientIdNumeric;
+    if (typeof pid !== 'number' || Number.isNaN(pid)) return false;
+    const sid = Number(safeConsultation.id);
+    return !Number.isNaN(sid);
+  }, [safeConsultation]);
+
+  const handleSubmitLabOrder = useCallback(
+    async (payload: LabOrderSubmitInput) => {
+      if (!safeConsultation) return;
+      const patientId = safeConsultation.patientIdNumeric;
+      const sessionId = Number(safeConsultation.id);
+      if (typeof patientId !== 'number' || Number.isNaN(patientId) || Number.isNaN(sessionId)) {
+        toast.error('Cannot add lab order: missing patient or session');
+        return;
+      }
+      await labService.createOrder({
+        patient: patientId as any,
+        visit: safeConsultation.visitId ?? undefined,
+        consultation_session: sessionId,
+        priority: payload.priority,
+        clinical_notes: payload.clinicalNotes || undefined,
+        tests_data: payload.templates.map((t) => ({
+          name: t.name,
+          code:
+            t.code ||
+            t.name
+              .substring(0, 24)
+              .toUpperCase()
+              .replace(/[^A-Z0-9]+/g, '_')
+              .replace(/^_|_$/g, '') ||
+            'LAB',
+          sample_type: t.sample_type || 'Blood',
+          template: t.id,
+          status: 'pending',
+          notes: payload.clinicalNotes || '',
+        })),
+      } as any);
+      toast.success('Lab order added');
+      try {
+        const fresh = await loadConsultationFromSession(safeConsultation.id);
+        if (fresh) setLoadedConsultation(fresh);
+      } catch (e) {
+        console.warn('Reload after lab order failed:', e);
+      }
+    },
+    [safeConsultation]
+  );
+
   if (!safeConsultation && !loading) {
     return null;
   }
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         className="w-[95vw] sm:max-w-[1000px] lg:max-w-[1200px] max-h-[90vh] overflow-y-auto mx-2 sm:mx-4"
@@ -1837,36 +1895,55 @@ export const ConsultationDetailModal = React.memo(function ConsultationDetailMod
                 )}
 
                 {/* Laboratory Orders */}
-                {(safeConsultation.labOrders || []).length > 0 && (
+                {(canAddLabOrder || (safeConsultation.labOrders || []).length > 0) && (
                   <div className="border-b pb-4">
-                    <h3 className="text-lg font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
-                      <FlaskConical className="h-5 w-5 text-orange-500" />
-                      LABORATORY ORDERS
-                    </h3>
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-sm border-collapse">
-                        <thead>
-                          <tr className="border-b border-gray-300 dark:border-gray-700">
-                            <th className="text-left py-2 px-3 font-semibold text-gray-700 dark:text-gray-300">Test</th>
-                            <th className="text-left py-2 px-3 font-semibold text-gray-700 dark:text-gray-300">Priority</th>
-                            <th className="text-left py-2 px-3 font-semibold text-gray-700 dark:text-gray-300">Status</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {(safeConsultation.labOrders || []).map((l) => (
-                            <tr key={l.id} className="border-b border-gray-200 dark:border-gray-800">
-                              <td className="py-2 px-3 font-medium text-gray-800 dark:text-gray-200">{l.test}</td>
-                              <td className="py-2 px-3 text-gray-600 dark:text-gray-400">{l.priority}</td>
-                              <td className="py-2 px-3">
-                                <Badge variant="outline" className={l.status === 'Completed' || l.status === 'completed' ? 'bg-green-100 text-green-800 border-green-300 dark:bg-green-900/30 dark:text-green-400' : ''}>
-                                  {l.status}
-                                </Badge>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
+                      <h3 className="text-lg font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2">
+                        <FlaskConical className="h-5 w-5 text-orange-500" />
+                        LABORATORY ORDERS
+                      </h3>
+                      {canAddLabOrder && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="print:hidden shrink-0"
+                          onClick={() => setShowAddLabOrder(true)}
+                          aria-label="Add lab order for this session"
+                        >
+                          <FlaskConical className="h-4 w-4 mr-2" aria-hidden />
+                          Add lab order
+                        </Button>
+                      )}
                     </div>
+                    {(safeConsultation.labOrders || []).length > 0 ? (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm border-collapse">
+                          <thead>
+                            <tr className="border-b border-gray-300 dark:border-gray-700">
+                              <th className="text-left py-2 px-3 font-semibold text-gray-700 dark:text-gray-300">Test</th>
+                              <th className="text-left py-2 px-3 font-semibold text-gray-700 dark:text-gray-300">Priority</th>
+                              <th className="text-left py-2 px-3 font-semibold text-gray-700 dark:text-gray-300">Status</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(safeConsultation.labOrders || []).map((l) => (
+                              <tr key={l.id} className="border-b border-gray-200 dark:border-gray-800">
+                                <td className="py-2 px-3 font-medium text-gray-800 dark:text-gray-200">{l.test}</td>
+                                <td className="py-2 px-3 text-gray-600 dark:text-gray-400">{l.priority}</td>
+                                <td className="py-2 px-3">
+                                  <Badge variant="outline" className={l.status === 'Completed' || l.status === 'completed' ? 'bg-green-100 text-green-800 border-green-300 dark:bg-green-900/30 dark:text-green-400' : ''}>
+                                    {l.status}
+                                  </Badge>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">No lab orders recorded for this session yet.</p>
+                    )}
                   </div>
                 )}
 
@@ -2150,5 +2227,13 @@ export const ConsultationDetailModal = React.memo(function ConsultationDetailMod
         </DialogFooter>
       </DialogContent>
     </Dialog>
+
+    <LabOrderModal
+      open={showAddLabOrder}
+      onOpenChange={setShowAddLabOrder}
+      onSubmit={handleSubmitLabOrder}
+      confirmLabel="Submit lab order"
+    />
+    </>
   );
 });

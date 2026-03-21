@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -12,6 +12,9 @@ import { Loader2, Plus, ScanLine, X } from "lucide-react";
 import { toast } from "sonner";
 import { radiologyService } from "@/lib/services";
 import { isAuthenticationError } from "@/lib/auth-errors";
+
+/** Reserved catalog code for studies not listed — describe the real exam in clinical indication / notes. */
+export const RAD_OTHER_TEMPLATE_CODE = "OTHER";
 
 export type RadiologyTemplateLike = {
   id: number;
@@ -44,8 +47,8 @@ export function RadiologyOrderModal({
 }) {
   const searchRequestIdRef = useRef(0);
   const dropdownContainerRef = useRef<HTMLDivElement>(null);
-  const initialTemplatesRef = useRef<RadiologyTemplateLike[]>([]);
   const [templates, setTemplates] = useState<RadiologyTemplateLike[]>([]);
+  const [otherTemplate, setOtherTemplate] = useState<RadiologyTemplateLike | null>(null);
   const [loadingTemplates, setLoadingTemplates] = useState(false);
   const [templatesError, setTemplatesError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -60,13 +63,27 @@ export function RadiologyOrderModal({
   const [provisionalDiagnosis, setProvisionalDiagnosis] = useState("");
   const [lmp, setLmp] = useState("");
 
+  const templatesForDisplay = useMemo(() => {
+    const list = [...templates];
+    if (otherTemplate && !list.some((t) => t.id === otherTemplate.id)) {
+      list.unshift(otherTemplate);
+    }
+    return list;
+  }, [templates, otherTemplate]);
+
+  const selectionIncludesOther = useMemo(() => {
+    return Array.from(selected).some((id) => {
+      const t = selectedDetails.get(id);
+      return t && (t.code || "").toUpperCase() === RAD_OTHER_TEMPLATE_CODE;
+    });
+  }, [selected, selectedDetails]);
+
   const reset = useCallback(() => {
     setSearch("");
     setShowDropdown(false);
     setSelected(new Set());
     setSelectedDetails(new Map());
     setTemplates([]);
-    initialTemplatesRef.current = [];
     setTemplatesError(null);
     setPriority("routine");
     setClinicalIndication("");
@@ -75,37 +92,33 @@ export function RadiologyOrderModal({
     setSubmitting(false);
   }, []);
 
-  // Load initial templates when modal opens (so dropdown can show list before/without typing)
+  // Load pinned "Other" template (code OTHER) whenever modal opens — same pattern as lab orders.
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
     (async () => {
       try {
-        setLoadingTemplates(true);
-        setTemplatesError(null);
-        const res = await radiologyService.getTemplates({ page_size: 50 } as any);
-        if (cancelled) return;
-        const list = (res as any)?.results || [];
-        initialTemplatesRef.current = list;
-        setTemplates(list);
-      } catch (err: any) {
-        if (cancelled) return;
-        setTemplates([]);
-        setTemplatesError(isAuthenticationError(err) ? "Authentication required. Please log in again." : "Failed to load radiology templates");
-        toast.error(isAuthenticationError(err) ? "Authentication required. Please log in again." : "Failed to load radiology templates");
-      } finally {
-        if (!cancelled) setLoadingTemplates(false);
+        const res = await radiologyService.getTemplates({ code: RAD_OTHER_TEMPLATE_CODE, page_size: 1 });
+        const row = res.results?.[0];
+        if (!cancelled && row?.id) {
+          setOtherTemplate(row as RadiologyTemplateLike);
+        } else if (!cancelled) {
+          setOtherTemplate(null);
+        }
+      } catch {
+        if (!cancelled) setOtherTemplate(null);
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [open]);
 
-  // Debounced search: when user types, search; when search cleared, show initial list again
   useEffect(() => {
     if (!open || !showDropdown) return;
     const searchTerm = search.trim();
     if (!searchTerm) {
-      setTemplates(initialTemplatesRef.current);
+      setTemplates([]);
       setTemplatesError(null);
       return;
     }
@@ -121,8 +134,12 @@ export function RadiologyOrderModal({
       } catch (err: any) {
         if (requestId === searchRequestIdRef.current) {
           setTemplates([]);
-          setTemplatesError(isAuthenticationError(err) ? "Authentication required. Please log in again." : "Failed to load radiology templates");
-          toast.error(isAuthenticationError(err) ? "Authentication required. Please log in again." : "Failed to load radiology templates");
+          setTemplatesError(
+            isAuthenticationError(err) ? "Authentication required. Please log in again." : "Failed to load radiology templates"
+          );
+          toast.error(
+            isAuthenticationError(err) ? "Authentication required. Please log in again." : "Failed to load radiology templates"
+          );
         }
       } finally {
         if (requestId === searchRequestIdRef.current) {
@@ -133,7 +150,6 @@ export function RadiologyOrderModal({
     return () => clearTimeout(timeout);
   }, [open, showDropdown, search]);
 
-  // Close dropdown when clicking outside the search block
   useEffect(() => {
     if (!open || !showDropdown) return;
     const handlePointerDown = (e: PointerEvent) => {
@@ -163,20 +179,32 @@ export function RadiologyOrderModal({
       toast.error("Please select at least one imaging study");
       return;
     }
-    if (!clinicalIndication.trim()) {
+    const indication = clinicalIndication.trim();
+    if (!indication) {
       toast.error("Clinical indication is required");
       return;
     }
 
+    const hasOther = Array.from(selected).some((id) => {
+      const t = selectedDetails.get(id);
+      return t && (t.code || "").toUpperCase() === RAD_OTHER_TEMPLATE_CODE;
+    });
+    if (hasOther && indication.length < 8) {
+      toast.error(
+        'You selected "Other". Add a clearer clinical indication (exact study, body region, modality, clinical question).'
+      );
+      return;
+    }
+
     const selectedTemplates = Array.from(selected)
-      .map((id) => selectedDetails.get(id) || templates.find((t) => t.id === id))
+      .map((id) => selectedDetails.get(id) || templatesForDisplay.find((t) => t.id === id))
       .filter((t): t is RadiologyTemplateLike => !!t);
 
     try {
       setSubmitting(true);
       await onSubmit({
         priority,
-        clinicalIndication: clinicalIndication.trim(),
+        clinicalIndication: indication,
         provisionalDiagnosis: provisionalDiagnosis.trim(),
         lmp: lmp.trim() || undefined,
         templates: selectedTemplates,
@@ -205,76 +233,94 @@ export function RadiologyOrderModal({
             <ScanLine className="h-5 w-5 text-indigo-500" />
             Order Imaging Study
           </DialogTitle>
-          <DialogDescription>Search and select from radiology templates - orders will be sent to Radiology queue</DialogDescription>
+          <DialogDescription>
+            Search and select templates (including <strong>Other</strong> when the study is not listed). Describe the exact examination in{" "}
+            <strong>clinical indication</strong> for radiology staff.
+            {otherTemplate == null && (
+              <span className="block mt-2 text-amber-700 dark:text-amber-300 text-xs">
+                Tip: run migrations or ask an admin to add a radiology template with code <code className="px-1 bg-muted rounded">OTHER</code>.
+              </span>
+            )}
+          </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-2">
-          {/* Template selection */}
           <div className="space-y-2">
             <Label>Search and Select Imaging Studies *</Label>
             <div className="relative" ref={dropdownContainerRef}>
               <Input
-                placeholder="Search imaging studies by name, code, or modality..."
+                placeholder="Search imaging studies by name, code, or modality (try “Other”)…"
                 value={search}
                 onChange={(e) => {
                   const v = e.target.value;
                   setSearch(v);
-                  setShowDropdown(true);
+                  if (v.trim()) setShowDropdown(true);
+                  else setShowDropdown(false);
                 }}
-                onFocus={() => setShowDropdown(true)}
+                onFocus={() => {
+                  if (search.trim()) setShowDropdown(true);
+                }}
               />
 
-              {showDropdown && (
-                <div className="absolute top-full left-0 right-0 z-50 bg-background border rounded-md shadow-lg max-h-60 overflow-y-auto">
+              {showDropdown && search.trim() && (
+                <div className="absolute z-50 w-full mt-1 bg-white dark:bg-gray-800 border rounded-md shadow-lg max-h-[300px] overflow-y-auto">
                   {loadingTemplates ? (
                     <div className="p-4 text-center text-muted-foreground">
                       <Loader2 className="h-4 w-4 mx-auto mb-2 animate-spin" />
                       <p className="text-xs">Loading templates...</p>
                     </div>
-                  ) : templates.length === 0 ? (
+                  ) : templatesForDisplay.length === 0 ? (
                     <div className="p-4 text-center text-muted-foreground">
                       <p className="text-xs">
-                        {templatesError ||
-                          (search.trim()
-                            ? `No studies match "${search.trim()}". Try a different term or clear the search to browse all.`
-                            : "No imaging studies available. Try again later.")}
+                        {templatesError || `No studies match "${search.trim()}". Try a different search term.`}
                       </p>
                     </div>
                   ) : (
                     <div className="p-2">
                       <div className="space-y-1">
-                        {templates
+                        {templatesForDisplay
                           .filter((t) => !selected.has(t.id))
                           .slice(0, 30)
-                          .map((t) => (
-                            <div
-                              key={t.id}
-                              className="flex items-center justify-between p-2 rounded hover:bg-muted cursor-pointer"
-                              onClick={() => addSelection(t)}
-                            >
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2">
-                                  <span className="font-medium text-sm truncate">{t.name}</span>
-                                  <Badge variant="outline" className="text-[10px] px-1.5 py-0">
-                                    {t.code}
-                                  </Badge>
-                                </div>
-                                <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
-                                  <span>{t.category || "—"}</span>
-                                  <span>•</span>
-                                  <span>{t.body_part || "N/A"}</span>
-                                  {t.radiation_exposure === "high" && (
-                                    <>
-                                      <span>•</span>
-                                      <Badge variant="outline" className="text-[9px] px-1 py-0 text-amber-600">
-                                        High Rad
+                          .map((t) => {
+                            const isOtherRow = (t.code || "").toUpperCase() === RAD_OTHER_TEMPLATE_CODE;
+                            return (
+                              <div
+                                key={t.id}
+                                className="flex items-center justify-between p-2 rounded hover:bg-muted cursor-pointer"
+                                onClick={() => addSelection(t)}
+                              >
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="font-medium text-sm truncate">{t.name}</span>
+                                    <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                                      {t.code}
+                                    </Badge>
+                                    {isOtherRow && (
+                                      <Badge
+                                        variant="outline"
+                                        className="text-[10px] px-1.5 py-0 border-indigo-500/60 text-indigo-800 dark:text-indigo-200"
+                                      >
+                                        Describe in clinical indication
                                       </Badge>
-                                    </>
-                                  )}
+                                    )}
+                                  </div>
+                                  <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
+                                    <span>{t.category || "—"}</span>
+                                    <span>•</span>
+                                    <span>{t.body_part || "N/A"}</span>
+                                    {t.radiation_exposure === "high" && (
+                                      <>
+                                        <span>•</span>
+                                        <Badge variant="outline" className="text-[9px] px-1 py-0 text-amber-600">
+                                          High Rad
+                                        </Badge>
+                                      </>
+                                    )}
+                                  </div>
                                 </div>
                               </div>
-                            </div>
-                          ))}
+                            );
+                          })}
                       </div>
                     </div>
                   )}
@@ -287,7 +333,7 @@ export function RadiologyOrderModal({
                 <p className="text-sm font-medium">Selected Studies ({selected.size})</p>
                 <div className="space-y-1 max-h-32 overflow-y-auto">
                   {Array.from(selected).map((id) => {
-                    const t = selectedDetails.get(id) || templates.find((x) => x.id === id);
+                    const t = selectedDetails.get(id) || templatesForDisplay.find((x) => x.id === id);
                     if (!t) return null;
                     return (
                       <div key={id} className="flex items-center justify-between p-2 bg-muted rounded text-sm">
@@ -345,17 +391,24 @@ export function RadiologyOrderModal({
           </div>
 
           <div className="space-y-2">
-            <Label>Clinical Indication *</Label>
+            <Label>
+              Clinical indication *
+              {selectionIncludesOther && <span className="text-destructive"> (required detail for Other)</span>}
+            </Label>
             <Textarea
               value={clinicalIndication}
               onChange={(e) => setClinicalIndication(e.target.value)}
-              placeholder="Reason for imaging, clinical findings, suspected diagnosis..."
+              placeholder={
+                selectionIncludesOther
+                  ? "Required for Other: exact imaging study, anatomy, side, contrast, clinical question…"
+                  : "Reason for imaging, clinical findings, suspected diagnosis…"
+              }
               rows={3}
             />
           </div>
 
           <div className="space-y-2">
-            <Label>Provisional Diagnosis</Label>
+            <Label>Provisional diagnosis</Label>
             <Textarea
               value={provisionalDiagnosis}
               onChange={(e) => setProvisionalDiagnosis(e.target.value)}

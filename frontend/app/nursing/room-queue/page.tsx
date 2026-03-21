@@ -479,8 +479,8 @@ export default function RoomQueuePage() {
         {/* Filters */}
         <Card>
           <CardContent className="p-4">
-            <div className="flex flex-col gap-4">
-              <div className="relative flex-1">
+            <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-3">
+              <div className="relative flex-1 min-w-[min(100%,16rem)]">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input 
                   placeholder="Search patients by name, ID, or personal number..." 
@@ -489,7 +489,7 @@ export default function RoomQueuePage() {
                   className="pl-10" 
                 />
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <Select value={roomFilter} onValueChange={setRoomFilter}>
                   <SelectTrigger className="w-[200px]"><SelectValue placeholder="Filter by Room" /></SelectTrigger>
                   <SelectContent>

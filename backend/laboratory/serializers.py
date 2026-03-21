@@ -142,7 +142,13 @@ class LabTestSerializer(serializers.ModelSerializer):
 
 class LabTestCreateSerializer(serializers.ModelSerializer):
     """Serializer for creating LabTest as part of LabOrder (nested)."""
-    
+
+    template = serializers.PrimaryKeyRelatedField(
+        queryset=LabTemplate.objects.all(),
+        allow_null=True,
+        required=False,
+    )
+
     class Meta:
         model = LabTest
         fields = ['name', 'code', 'sample_type', 'status', 'template', 'notes']

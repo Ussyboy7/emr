@@ -9,6 +9,7 @@ import { Progress } from "@/components/ui/progress";
 import { adminService } from "@/lib/services";
 import { toast } from "sonner";
 import { GenericMedicationsModal } from "@/components/admin/GenericMedicationsModal";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   Users,
   Shield,
@@ -57,6 +58,7 @@ export default function AdminDashboardPage() {
   const [recentAuditEvents, setRecentAuditEvents] = useState<any[]>([]);
   const [systemHealth, setSystemHealth] = useState<any[]>([]);
   const [clinicStatus, setClinicStatus] = useState<any[]>([]);
+  const [expiringLicenses, setExpiringLicenses] = useState<any[]>([]);
 
   useEffect(() => {
     loadDashboardData();
@@ -96,6 +98,7 @@ export default function AdminDashboardPage() {
       }));
       setSystemHealth(systemHealthWithIcons);
       setClinicStatus(stats.clinicStatus);
+      setExpiringLicenses(stats.expiringLicenses ?? []);
     } catch (err: any) {
       setError(err.message || 'Failed to load dashboard data');
       toast.error('Failed to load dashboard. Please try again.');
@@ -154,27 +157,38 @@ export default function AdminDashboardPage() {
           </div>
         </div>
 
-        {/* System Summary */}
+        {error && (
+          <Alert variant="destructive">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertTitle>Could not refresh dashboard</AlertTitle>
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+
+        {/* System Summary — onlineNow is session-based (API returns 0 until tracking exists); avoid calling it "active users" (that is activeUsers) */}
         <Card className="bg-gradient-to-r from-slate-900/50 to-slate-800/50 border-slate-700/50">
           <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-4">
                 <div className="flex items-center gap-2">
                   <ShieldCheck className="h-5 w-5 text-green-500" />
                   <span className="text-sm font-medium text-green-400">System Status: Operational</span>
                 </div>
-                <div className="h-4 w-px bg-slate-600"></div>
+                <div className="hidden h-4 w-px bg-slate-600 sm:block" />
                 <div className="flex items-center gap-2">
                   <Activity className="h-4 w-4 text-blue-400" />
-                  <span className="text-sm text-slate-300">{systemStats.onlineNow} active users</span>
+                  <span className="text-sm text-slate-300">
+                    {systemStats.onlineNow} online now
+                    <span className="text-slate-500"> (API activity or login in last 15 min)</span>
+                  </span>
                 </div>
-                <div className="h-4 w-px bg-slate-600"></div>
+                <div className="hidden h-4 w-px bg-slate-600 sm:block" />
                 <div className="flex items-center gap-2">
                   <Building2 className="h-4 w-4 text-amber-400" />
                   <span className="text-sm text-slate-300">{systemStats.activeClinics} clinics operational</span>
                 </div>
               </div>
-              <div className="flex items-center gap-2 text-xs text-slate-400">
+              <div className="text-xs text-slate-400 sm:text-right">
                 <span>Last updated: {lastUpdated}</span>
               </div>
             </div>
@@ -184,7 +198,7 @@ export default function AdminDashboardPage() {
         {/* Key Stats */}
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
           {loading ? (
-            Array.from({ length: 5 }).map((_, i) => (
+            Array.from({ length: 6 }).map((_, i) => (
               <Card key={i}>
                 <CardContent className="p-4">
                   <div className="flex items-center justify-between">
@@ -390,8 +404,13 @@ export default function AdminDashboardPage() {
             {/* System Alerts */}
             <Card>
               <CardHeader className="pb-2">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-lg">System Alerts</CardTitle>
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <CardTitle className="text-lg">System Alerts</CardTitle>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      License warnings use staff license expiry data; backup row is a UI placeholder until backup status is wired.
+                    </p>
+                  </div>
                   <Link href="/admin/audit">
                     <Button variant="ghost" size="sm">View All <ChevronRight className="h-4 w-4 ml-1" /></Button>
                   </Link>
@@ -405,32 +424,49 @@ export default function AdminDashboardPage() {
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    <div className="flex items-center gap-3 p-3 rounded-lg bg-green-500/5 border border-green-500/10">
+                    <div className="flex items-center gap-3 p-3 rounded-lg bg-green-500/5 border border-green-500/10 dark:text-green-100">
                       <CheckCircle className="h-5 w-5 text-green-500 flex-shrink-0" />
                       <div className="flex-1">
-                        <p className="text-sm font-medium text-green-700">All Systems Operational</p>
-                        <p className="text-xs text-green-600">No critical issues detected</p>
+                        <p className="text-sm font-medium text-green-700 dark:text-green-300">All Systems Operational</p>
+                        <p className="text-xs text-green-600 dark:text-green-400/90">No critical issues detected</p>
                       </div>
-                      <span className="text-xs text-green-600">Live</span>
+                      <span className="text-xs text-green-600 dark:text-green-400">Live</span>
                     </div>
 
-                    <div className="flex items-center gap-3 p-3 rounded-lg bg-blue-500/5 border border-blue-500/10">
-                      <Activity className="h-5 w-5 text-blue-500 flex-shrink-0" />
+                    <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/40 border border-dashed border-border opacity-90">
+                      <Activity className="h-5 w-5 text-muted-foreground flex-shrink-0" />
                       <div className="flex-1">
-                        <p className="text-sm font-medium text-blue-700">Backup Completed</p>
-                        <p className="text-xs text-blue-600">Daily backup finished successfully</p>
+                        <p className="text-sm font-medium text-muted-foreground">Backup status</p>
+                        <p className="text-xs text-muted-foreground">Not connected — hook to backup jobs or monitoring to show real status.</p>
                       </div>
-                      <span className="text-xs text-blue-600">2h ago</span>
+                      <Badge variant="outline" className="text-[10px] shrink-0">Placeholder</Badge>
                     </div>
 
-                    <div className="flex items-center gap-3 p-3 rounded-lg bg-amber-500/5 border border-amber-500/10">
-                      <AlertTriangle className="h-5 w-5 text-amber-500 flex-shrink-0" />
-                      <div className="flex-1">
-                        <p className="text-sm font-medium text-amber-700">License Expiring Soon</p>
-                        <p className="text-xs text-amber-600">System license expires in 30 days</p>
+                    {expiringLicenses.length > 0 ? (
+                      expiringLicenses.slice(0, 3).map((lic, idx) => (
+                        <div
+                          key={`${lic.name}-${lic.expires}-${idx}`}
+                          className="flex items-center gap-3 p-3 rounded-lg bg-amber-500/5 border border-amber-500/10"
+                        >
+                          <AlertTriangle className="h-5 w-5 text-amber-500 flex-shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-amber-700 dark:text-amber-300">Staff license expiring</p>
+                            <p className="text-xs text-amber-600 dark:text-amber-400/90 truncate">
+                              {lic.name} — {lic.daysLeft} day{lic.daysLeft !== 1 ? "s" : ""} left
+                            </p>
+                          </div>
+                          <span className="text-xs text-amber-600 dark:text-amber-400 whitespace-nowrap">Warning</span>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="flex items-center gap-3 p-3 rounded-lg border border-border/60 bg-muted/20">
+                        <CheckCircle className="h-5 w-5 text-muted-foreground flex-shrink-0" />
+                        <div className="flex-1">
+                          <p className="text-sm font-medium text-foreground">No upcoming staff license expirations</p>
+                          <p className="text-xs text-muted-foreground">Next 90 days (from user license_expiry field)</p>
+                        </div>
                       </div>
-                      <span className="text-xs text-amber-600">Warning</span>
-                    </div>
+                    )}
                   </div>
                 )}
               </CardContent>
@@ -556,6 +592,9 @@ export default function AdminDashboardPage() {
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-lg">Performance Metrics</CardTitle>
+                <p className="text-xs text-muted-foreground font-normal">
+                  Illustrative values below — connect APM or analytics to replace with live data. &quot;Online now&quot; matches the summary bar (last 15 minutes, from user activity + login).
+                </p>
               </CardHeader>
               <CardContent>
                 {loading ? (
@@ -565,35 +604,36 @@ export default function AdminDashboardPage() {
                   </div>
                 ) : (
                   <div className="space-y-4">
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between gap-2">
                       <span className="text-sm text-muted-foreground">Response Time</span>
                       <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium">245ms</span>
-                        <div className="w-2 h-2 rounded-full bg-green-500"></div>
+                        <span className="text-sm font-medium tabular-nums">245ms</span>
+                        <Badge variant="outline" className="text-[10px] px-1.5 py-0">Demo</Badge>
                       </div>
                     </div>
 
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between gap-2">
                       <span className="text-sm text-muted-foreground">Error Rate</span>
                       <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium">0.02%</span>
-                        <div className="w-2 h-2 rounded-full bg-green-500"></div>
+                        <span className="text-sm font-medium tabular-nums">0.02%</span>
+                        <Badge variant="outline" className="text-[10px] px-1.5 py-0">Demo</Badge>
                       </div>
                     </div>
 
                     <div className="flex items-center justify-between">
-                      <span className="text-sm text-muted-foreground">Active Sessions</span>
+                      <span className="text-sm text-muted-foreground">Online now</span>
                       <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium">{systemStats.onlineNow}</span>
+                        <span className="text-sm font-medium tabular-nums">{systemStats.onlineNow}</span>
                         <Activity className="h-4 w-4 text-blue-500" />
                       </div>
                     </div>
 
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between gap-2">
                       <span className="text-sm text-muted-foreground">Data Processed</span>
                       <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium">2.4GB</span>
+                        <span className="text-sm font-medium tabular-nums">2.4GB</span>
                         <span className="text-xs text-muted-foreground">today</span>
+                        <Badge variant="outline" className="text-[10px] px-1.5 py-0">Demo</Badge>
                       </div>
                     </div>
                   </div>

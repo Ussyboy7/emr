@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -12,6 +12,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Loader2, Plus, TestTube, X } from "lucide-react";
 import { toast } from "sonner";
 import { labService } from "@/lib/services";
+
+/** Reserved catalog code for “not listed” tests — describe the real test in clinical notes. */
+export const LAB_OTHER_TEMPLATE_CODE = "OTHER";
 
 export type LabTemplateLike = {
   id: number;
@@ -41,6 +44,7 @@ export function LabOrderModal({
   const searchRequestIdRef = useRef(0);
   const dropdownContainerRef = useRef<HTMLDivElement>(null);
   const [templates, setTemplates] = useState<LabTemplateLike[]>([]);
+  const [otherTemplate, setOtherTemplate] = useState<LabTemplateLike | null>(null);
   const [loadingTemplates, setLoadingTemplates] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
@@ -51,6 +55,25 @@ export function LabOrderModal({
 
   const [priority, setPriority] = useState<"routine" | "urgent" | "stat">("routine");
   const [clinicalNotes, setClinicalNotes] = useState("");
+
+  const templatesForDropdown = useMemo(() => {
+    const list = [...templates];
+    if (otherTemplate && !list.some((t) => t.id === otherTemplate.id)) {
+      list.unshift(otherTemplate);
+    }
+    return list;
+  }, [templates, otherTemplate]);
+
+  const selectedList = useMemo(() => {
+    return Array.from(selected)
+      .map((id) => selectedDetails.get(id))
+      .filter((t): t is LabTemplateLike => !!t);
+  }, [selected, selectedDetails]);
+
+  const selectionIncludesOther = useMemo(
+    () => selectedList.some((t) => (t.code || "").toUpperCase() === LAB_OTHER_TEMPLATE_CODE),
+    [selectedList]
+  );
 
   const reset = useCallback(() => {
     setSearch("");
@@ -63,7 +86,29 @@ export function LabOrderModal({
     setSubmitting(false);
   }, []);
 
-  // Debounced search (same pattern as Prescription): search as you type, 300ms
+  // Load pinned "Other" template (code OTHER) whenever modal opens
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await labService.getTemplates({ code: LAB_OTHER_TEMPLATE_CODE, page_size: 1 });
+        const row = res.results?.[0];
+        if (!cancelled && row?.id) {
+          setOtherTemplate(row as LabTemplateLike);
+        } else if (!cancelled) {
+          setOtherTemplate(null);
+        }
+      } catch {
+        if (!cancelled) setOtherTemplate(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
+  // Debounced search
   useEffect(() => {
     if (!open || !showDropdown) return;
     const searchTerm = search.trim();
@@ -94,7 +139,6 @@ export function LabOrderModal({
     return () => clearTimeout(timeout);
   }, [open, showDropdown, search]);
 
-  // Close dropdown when clicking outside the search block
   useEffect(() => {
     if (!open || !showDropdown) return;
     const handlePointerDown = (e: PointerEvent) => {
@@ -107,6 +151,7 @@ export function LabOrderModal({
   }, [open, showDropdown]);
 
   const toggle = (t: LabTemplateLike) => {
+    if (t.id == null) return;
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(t.id)) {
@@ -125,20 +170,27 @@ export function LabOrderModal({
   };
 
   const handleConfirm = async () => {
-    if (selected.size === 0) {
-      toast.error("Please select at least one test");
+    const selectedTemplates = Array.from(selected)
+      .map((id) => selectedDetails.get(id) || templatesForDropdown.find((t) => t.id === id))
+      .filter((t): t is LabTemplateLike => !!t && typeof t.id === "number");
+
+    if (selectedTemplates.length === 0) {
+      toast.error("Select at least one laboratory test");
       return;
     }
 
-    const selectedTemplates = Array.from(selected)
-      .map((id) => selectedDetails.get(id) || templates.find((t) => t.id === id))
-      .filter((t): t is LabTemplateLike => !!t);
+    const notes = clinicalNotes.trim();
+    const hasOther = selectedTemplates.some((t) => (t.code || "").toUpperCase() === LAB_OTHER_TEMPLATE_CODE);
+    if (hasOther && !notes) {
+      toast.error('You selected "Other". Add clinical notes with the exact test name and instructions for the lab.');
+      return;
+    }
 
     try {
       setSubmitting(true);
       await onSubmit({
         priority,
-        clinicalNotes: clinicalNotes.trim(),
+        clinicalNotes: notes,
         templates: selectedTemplates,
       });
       onOpenChange(false);
@@ -165,7 +217,14 @@ export function LabOrderModal({
             <TestTube className="h-5 w-5 text-amber-500" />
             Order Lab Test(s)
           </DialogTitle>
-          <DialogDescription>Select one or more laboratory tests to order - will be sent to Lab Tech queue</DialogDescription>
+          <DialogDescription>
+            Search and select tests from the catalog (including <strong>Other</strong> when the test is not listed). Orders go to the Lab Tech queue.
+            {otherTemplate == null && (
+              <span className="block mt-2 text-amber-700 dark:text-amber-300 text-xs">
+                Tip: run migrations or ask an admin to ensure a lab template with code <code className="px-1 bg-muted rounded">OTHER</code> exists.
+              </span>
+            )}
+          </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-2">
@@ -173,7 +232,7 @@ export function LabOrderModal({
             <Label>Search and Select Tests *</Label>
             <div className="relative" ref={dropdownContainerRef}>
               <Input
-                placeholder="Search tests by name, code, or sample type..."
+                placeholder="Search by name, code, or sample type (try “Other”)…"
                 value={search}
                 onChange={(e) => {
                   const v = e.target.value;
@@ -181,7 +240,9 @@ export function LabOrderModal({
                   if (v.trim()) setShowDropdown(true);
                   else setShowDropdown(false);
                 }}
-                onFocus={() => { if (search.trim()) setShowDropdown(true); }}
+                onFocus={() => {
+                  if (search.trim()) setShowDropdown(true);
+                }}
               />
 
               {showDropdown && search.trim() && (
@@ -191,11 +252,12 @@ export function LabOrderModal({
                       <Loader2 className="h-4 w-4 animate-spin mx-auto mb-2" />
                       Loading tests...
                     </div>
-                  ) : templates.length === 0 ? (
+                  ) : templatesForDropdown.length === 0 ? (
                     <div className="p-4 text-center text-sm text-muted-foreground">No tests found. Try a different search term.</div>
                   ) : (
-                    templates.map((t) => {
+                    templatesForDropdown.map((t) => {
                       const isSelected = selected.has(t.id);
+                      const isOtherRow = (t.code || "").toUpperCase() === LAB_OTHER_TEMPLATE_CODE;
                       return (
                         <div
                           key={t.id}
@@ -206,12 +268,19 @@ export function LabOrderModal({
                         >
                           <Checkbox checked={isSelected} onCheckedChange={() => toggle(t)} />
                           <div className="flex-1 min-w-0">
-                            <div className="font-medium text-sm">{t.name}</div>
+                            <div className="font-medium text-sm flex items-center gap-2 flex-wrap">
+                              {t.name}
+                              {isOtherRow && (
+                                <Badge variant="outline" className="text-[10px] border-amber-500/60 text-amber-800 dark:text-amber-200">
+                                  Describe test in clinical notes
+                                </Badge>
+                              )}
+                            </div>
                             <div className="text-xs text-muted-foreground mt-1">
                               {t.code ? `${t.code} • ` : ""}
                               {t.sample_type || "N/A"}
                             </div>
-                            {t.description && <div className="text-xs text-muted-foreground mt-1 line-clamp-1">{t.description}</div>}
+                            {t.description && <div className="text-xs text-muted-foreground mt-1 line-clamp-2">{t.description}</div>}
                           </div>
                         </div>
                       );
@@ -226,7 +295,7 @@ export function LabOrderModal({
                 <p className="text-sm font-medium">Selected Tests ({selected.size})</p>
                 <div className="flex flex-wrap gap-2">
                   {Array.from(selected).map((id) => {
-                    const t = selectedDetails.get(id) || templates.find((x) => x.id === id);
+                    const t = selectedDetails.get(id) || templatesForDropdown.find((x) => x.id === id);
                     if (!t) return null;
                     return (
                       <Badge key={id} variant="secondary" className="flex items-center gap-1">
@@ -266,13 +335,25 @@ export function LabOrderModal({
           </div>
 
           <div className="space-y-2">
-            <Label>Clinical notes</Label>
+            <Label>
+              Clinical notes
+              {selectionIncludesOther && <span className="text-destructive"> *</span>}
+            </Label>
             <Textarea
               value={clinicalNotes}
               onChange={(e) => setClinicalNotes(e.target.value)}
-              placeholder="Optional"
+              placeholder={
+                selectionIncludesOther
+                  ? "Required for “Other”: exact test / panel name, specimen, send-out lab, or special instructions for the laboratory…"
+                  : "Optional — add clinical context for the lab (especially if you selected Other)"
+              }
               rows={3}
             />
+            {selectionIncludesOther && (
+              <p className="text-xs text-muted-foreground">
+                Laboratory staff read these notes to know what to run when you choose <strong>Other</strong>.
+              </p>
+            )}
           </div>
         </div>
 
@@ -289,7 +370,7 @@ export function LabOrderModal({
             ) : (
               <>
                 <Plus className="h-4 w-4 mr-2" />
-                {confirmLabel || `Add ${selected.size ? `(${selected.size}) ` : ""}to Order`}
+                {confirmLabel || `Submit (${selected.size})`}
               </>
             )}
           </Button>
@@ -298,4 +379,3 @@ export function LabOrderModal({
     </Dialog>
   );
 }
-

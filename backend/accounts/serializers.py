@@ -22,9 +22,9 @@ class UserSerializer(serializers.ModelSerializer):
             'clinic', 'clinic_name', 'department', 'department_name',
             'directorate', 'division',  # Legacy fields
             'phone', 'bio', 'is_management', 'is_active', 'is_staff', 'is_superuser',
-            'avatar', 'last_activity', 'date_joined',
+            'avatar', 'last_activity', 'last_login', 'date_joined',
         ]
-        read_only_fields = ['id', 'date_joined', 'last_activity', 'clinic_name', 'department_name']
+        read_only_fields = ['id', 'date_joined', 'last_activity', 'last_login', 'clinic_name', 'department_name']
         extra_kwargs = {
             'password': {'write_only': True, 'required': False},
         }

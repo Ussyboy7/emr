@@ -12,13 +12,14 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import {
-  Building2, Users, UserCheck, Clock, Search, Filter, Eye,
+  Building2, Users, UserCheck, Clock, Search, Eye,
   Edit, Stethoscope, UserPlus, FileText, AlertTriangle, CheckCircle,
   Plus, MessageSquare, Calendar, Bed, Activity, RefreshCw
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { wardService, type Ward, type PatientAdmission, type WardAssignment } from '@/lib/services/ward-service';
 import { useCurrentUser } from '@/hooks/use-current-user';
+import { ResetFiltersButton } from '@/components/ResetFiltersButton';
 
 export default function WardOverviewPage() {
   const { currentUser } = useCurrentUser();
@@ -355,11 +356,19 @@ export default function WardOverviewPage() {
         {/* Filters */}
         <Card>
           <CardContent className="p-4">
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <div className="space-y-2">
-                <Label>Ward</Label>
+            <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-3">
+              <div className="relative flex-1 min-w-[min(100%,16rem)]">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search by patient name or ID..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
                 <Select value={selectedWard} onValueChange={setSelectedWard}>
-                  <SelectTrigger>
+                  <SelectTrigger className="w-[180px]">
                     <SelectValue placeholder="All wards" />
                   </SelectTrigger>
                   <SelectContent>
@@ -373,11 +382,8 @@ export default function WardOverviewPage() {
                     )}
                   </SelectContent>
                 </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Status</Label>
                 <Select value={statusFilter} onValueChange={setStatusFilter}>
-                  <SelectTrigger>
+                  <SelectTrigger className="w-[160px]">
                     <SelectValue placeholder="All statuses" />
                   </SelectTrigger>
                   <SelectContent>
@@ -387,24 +393,14 @@ export default function WardOverviewPage() {
                     <SelectItem value="transferred">Transferred</SelectItem>
                   </SelectContent>
                 </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Search</Label>
-                <Input
-                  placeholder="Search by patient name or ID..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
+                <ResetFiltersButton
+                  label="Reset filters"
+                  onClick={() => {
+                    setSelectedWard('all');
+                    setStatusFilter('admitted');
+                    setSearchQuery('');
+                  }}
                 />
-              </div>
-              <div className="flex items-end">
-                <Button variant="outline" onClick={() => {
-                  setSelectedWard('all');
-                  setStatusFilter('admitted');
-                  setSearchQuery('');
-                }}>
-                  <Filter className="h-4 w-4 mr-2" />
-                  Clear Filters
-                </Button>
               </div>
             </div>
           </CardContent>

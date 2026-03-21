@@ -5,6 +5,7 @@ from rest_framework import viewsets
 from rest_framework.permissions import IsAuthenticated
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
+from django.db.models import Count, Q
 
 from .models import Clinic, Department, Room
 from .serializers import ClinicSerializer, DepartmentSerializer, RoomSerializer
@@ -23,7 +24,14 @@ class ClinicViewSet(viewsets.ModelViewSet):
     ordering = ['name']
     
     def get_queryset(self):
-        return Clinic.objects.all()
+        return Clinic.objects.annotate(
+            patient_count=Count("patients", distinct=True),
+            doctor_count=Count(
+                "staff",
+                filter=Q(staff__is_active=True, staff__system_role="Medical Doctor"),
+                distinct=True,
+            ),
+        )
     
     def perform_create(self, serializer):
         """Create clinic and log audit."""

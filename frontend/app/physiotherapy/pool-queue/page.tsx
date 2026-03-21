@@ -21,11 +21,12 @@ import { isAuthenticationError } from '@/lib/auth-errors';
 import { PatientAvatar } from "@/components/PatientAvatar";
 import { apiFetch } from '@/lib/api-client';
 import { AdvancedDateRangeDialog } from '@/components/AdvancedDateRangeDialog';
+import { CustomDateRangeButton } from '@/components/CustomDateRangeButton';
 
 import {
   Users, Search, Stethoscope, Calendar, Clock, CheckCircle, CheckCircle2,
   Eye, Play, AlertTriangle, Loader2, Activity, RefreshCw, XCircle,
-  FileText, Target, ClipboardList, Plus, User, Lightbulb, Heart, Pencil, Filter
+  FileText, Target, ClipboardList, Plus, User, Lightbulb, Heart, Pencil
 } from 'lucide-react';
 
 // Helper function to format relative time
@@ -978,8 +979,8 @@ export default function PhysioPoolQueuePage() {
                     <TabsTrigger value="all">All</TabsTrigger>
                   </TabsList>
                 </Tabs>
-                <div className="flex flex-col gap-4">
-                  <div className="relative flex-1">
+                <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-3">
+                  <div className="relative flex-1 min-w-[min(100%,16rem)]">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <Input
                       placeholder="Search orders..."
@@ -988,11 +989,8 @@ export default function PhysioPoolQueuePage() {
                       className="pl-10"
                     />
                   </div>
-                  <Button variant="outline" onClick={() => setIsDateFilterDialogOpen(true)}>
-                    <Filter className="h-4 w-4 mr-2" />
-                    Filters
-                  </Button>
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <CustomDateRangeButton onClick={() => setIsDateFilterDialogOpen(true)} />
                     <Select value={dateFilter} onValueChange={setDateFilter}>
                       <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
                       <SelectContent>

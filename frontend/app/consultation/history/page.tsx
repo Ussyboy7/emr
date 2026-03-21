@@ -697,7 +697,14 @@ export default function ConsultationHistoryPage() {
       clinical_notes: payload.clinicalNotes || undefined,
       tests_data: payload.templates.map((t) => ({
         name: t.name,
-        code: t.code || t.name.substring(0, 10).toUpperCase().replace(/\s/g, "_"),
+        code:
+          t.code ||
+          t.name
+            .substring(0, 24)
+            .toUpperCase()
+            .replace(/[^A-Z0-9]+/g, "_")
+            .replace(/^_|_$/g, "") ||
+          "LAB",
         sample_type: t.sample_type || "Blood",
         template: t.id,
         status: "pending",
@@ -728,6 +735,7 @@ export default function ConsultationHistoryPage() {
         procedure: t.name,
         body_part: t.body_part || "",
         modality: t.modality || "X-Ray",
+        template: t.id,
         status: "pending",
       })),
     } as any);
@@ -936,8 +944,8 @@ export default function ConsultationHistoryPage() {
         {/* Filters */}
         <Card>
           <CardContent className="p-4">
-            <div className="flex flex-col gap-4">
-              <div className="relative flex-1">
+            <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-3">
+              <div className="relative flex-1 min-w-[min(100%,16rem)]">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input 
                   placeholder="Search by patient name, visit ID, or patient ID..." 
@@ -946,7 +954,7 @@ export default function ConsultationHistoryPage() {
                   className="pl-10" 
                 />
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <Select value={dateFilter} onValueChange={setDateFilter}>
                   <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
                   <SelectContent>

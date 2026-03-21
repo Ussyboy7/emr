@@ -18,6 +18,7 @@ import { patientService } from '@/lib/services';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { AdvancedDateRangeDialog } from '@/components/AdvancedDateRangeDialog';
+import { CustomDateRangeButton } from '@/components/CustomDateRangeButton';
 
 // ==================== TYPES ====================
 interface CompletedProcedure {
@@ -367,15 +368,12 @@ export default function ProceduresHistoryPage() {
         {/* Filters */}
         <Card>
           <CardContent className="p-4">
-            <div className="flex flex-col gap-4">
-              <div className="relative flex-1">
+            <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-3">
+              <div className="relative flex-1 min-w-[min(100%,16rem)]">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input placeholder="Search patient, ID, or nurse..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-10" />
               </div>
-              <div className="flex flex-wrap gap-2">
-                <Button variant="outline" onClick={() => setIsDateFilterDialogOpen(true)}>
-                  Filters
-                </Button>
+              <div className="flex flex-wrap items-center gap-2">
                 <Select value={dateFilter} onValueChange={setDateFilter}>
                   <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
                   <SelectContent>
@@ -402,6 +400,7 @@ export default function ProceduresHistoryPage() {
                     <SelectItem value="female">Female</SelectItem>
                   </SelectContent>
                 </Select>
+                <CustomDateRangeButton onClick={() => setIsDateFilterDialogOpen(true)} />
               </div>
             </div>
           </CardContent>

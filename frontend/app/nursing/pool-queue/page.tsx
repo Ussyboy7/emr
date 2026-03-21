@@ -20,12 +20,13 @@ import { getPriorityFromVisitType } from '@/lib/utils/priority';
 import {
   Users, Search, Stethoscope, UserCheck, ArrowRight, Clock, AlertTriangle,
   Eye, Edit, CheckCircle2, Calendar, Activity, Thermometer,
-  Heart, Wind, Droplets, Scale, Loader2, Save, X, Filter
+  Heart, Wind, Droplets, Scale, Loader2, Save, X
 } from 'lucide-react';
 import { getAllClinicsWithAll } from '@/lib/constants/clinics';
 import { clinicMatches } from '@/lib/utils/clinic-utils';
 import { PatientAvatar } from "@/components/PatientAvatar";
 import { AdvancedDateRangeDialog } from '@/components/AdvancedDateRangeDialog';
+import { CustomDateRangeButton } from '@/components/CustomDateRangeButton';
 
 // Format visit type for display
 const getVisitTypeLabel = (type: string) => {
@@ -1064,8 +1065,8 @@ export default function NursingPoolQueuePage() {
         {!loading && (
         <Card>
           <CardContent className="p-4">
-            <div className="flex flex-col gap-4">
-              <div className="relative flex-1">
+            <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-3">
+              <div className="relative flex-1 min-w-[min(100%,16rem)]">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
                   placeholder="Search by patient name, visit ID, or patient ID..."
@@ -1074,11 +1075,7 @@ export default function NursingPoolQueuePage() {
                   className="pl-10"
                 />
               </div>
-              <Button variant="outline" onClick={() => setIsDateFilterDialogOpen(true)}>
-                <Filter className="h-4 w-4 mr-2" />
-                Filters
-              </Button>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <Select value={dateFilter} onValueChange={setDateFilter}>
                   <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
                   <SelectContent>
@@ -1114,6 +1111,7 @@ export default function NursingPoolQueuePage() {
                     {clinics.map(c => <SelectItem key={c} value={c === 'All Clinics' ? 'all' : c}>{c}</SelectItem>)}
                   </SelectContent>
                 </Select>
+                <CustomDateRangeButton onClick={() => setIsDateFilterDialogOpen(true)} />
               </div>
             </div>
           </CardContent>

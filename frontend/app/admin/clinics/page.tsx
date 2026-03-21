@@ -448,9 +448,26 @@ export default function ClinicDepartmentPage() {
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList><TabsTrigger value="clinics">Clinics</TabsTrigger><TabsTrigger value="departments">Departments</TabsTrigger></TabsList>
 
-          <Card className="mt-4"><CardContent className="p-4"><div className="flex flex-col md:flex-row gap-3"><div className="relative flex-1"><Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" /><Input placeholder="Search..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-10" /></div>
-            <Select value={statusFilter} onValueChange={setStatusFilter}><SelectTrigger className="w-[130px]"><SelectValue placeholder="Status" /></SelectTrigger><SelectContent><SelectItem value="all">All Status</SelectItem><SelectItem value="Active">Active</SelectItem><SelectItem value="Inactive">Inactive</SelectItem></SelectContent></Select>
-          </div></CardContent></Card>
+          <Card className="mt-4">
+            <CardContent className="p-4">
+              <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-3">
+                <div className="relative flex-1 min-w-[min(100%,16rem)]">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input placeholder="Search..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-10" />
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Select value={statusFilter} onValueChange={setStatusFilter}>
+                    <SelectTrigger className="w-[130px]"><SelectValue placeholder="Status" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Status</SelectItem>
+                      <SelectItem value="Active">Active</SelectItem>
+                      <SelectItem value="Inactive">Inactive</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
 
           <TabsContent value="clinics">
             {loading ? (

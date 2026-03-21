@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, use } from "react";
+import { useEffect, useMemo, useRef, useState, use } from "react";
 import { useRouter } from "next/navigation";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -63,6 +63,8 @@ import {
 import { getOrganizationHeader, getOrganizationLabHeader, getOrganizationServicesHeader } from '@/lib/constants/organization';
 import { LARGE_PAGE_SIZE } from '@/lib/constants/ui';
 import { safeAsync, logError } from '@/lib/utils/error-handling';
+import { LAB_OTHER_TEMPLATE_CODE } from '@/components/consultation/orders/LabOrderModal';
+import { RAD_OTHER_TEMPLATE_CODE } from '@/components/consultation/orders/RadiologyOrderModal';
 
 // ==========================================
 // UTILITY FUNCTIONS
@@ -525,6 +527,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   const [labTemplateSearch, setLabTemplateSearch] = useState("");
   const [showLabTemplateDropdown, setShowLabTemplateDropdown] = useState(false);
   const [selectedLabTemplates, setSelectedLabTemplates] = useState<Set<number>>(new Set());
+  const [otherLabPinnedTemplate, setOtherLabPinnedTemplate] = useState<ServiceLabTemplate | null>(null);
 
   // Radiology templates
   const [selectedRadiologyTemplates, setSelectedRadiologyTemplates] = useState<Set<number>>(new Set());
@@ -706,6 +709,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   const [radiologyOrders, setRadiologyOrders] = useState<{
     id: string;
     procedure: string;
+    templateId?: number;
     category: string;
     bodyPart: string;
     clinicalIndication: string;
@@ -729,6 +733,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   const [radiologyTemplatesError, setRadiologyTemplatesError] = useState<string | null>(null);
   const [radiologyTemplateSearch, setRadiologyTemplateSearch] = useState("");
   const [showRadiologyTemplateDropdown, setShowRadiologyTemplateDropdown] = useState(false);
+  const [otherRadiologyPinnedTemplate, setOtherRadiologyPinnedTemplate] = useState<any | null>(null);
 
   // Physiotherapy state
   const [physioOrders, setPhysioOrders] = useState<{
@@ -1795,6 +1800,40 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     
     loadLabTemplates();
   }, [showAddLabOrder, showLabTemplateDropdown, labTemplates.length]);
+
+  useEffect(() => {
+    if (!showAddLabOrder) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await labService.getTemplates({ code: LAB_OTHER_TEMPLATE_CODE, page_size: 1 });
+        const row = res.results?.[0];
+        if (!cancelled) setOtherLabPinnedTemplate(row ?? null);
+      } catch {
+        if (!cancelled) setOtherLabPinnedTemplate(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [showAddLabOrder]);
+
+  useEffect(() => {
+    if (!showAddRadiology) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await radiologyService.getTemplates({ code: RAD_OTHER_TEMPLATE_CODE, page_size: 1 });
+        const row = res.results?.[0];
+        if (!cancelled) setOtherRadiologyPinnedTemplate(row ?? null);
+      } catch {
+        if (!cancelled) setOtherRadiologyPinnedTemplate(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [showAddRadiology]);
 
   useEffect(() => {
     if (!showAddRadiology && !showRadiologyTemplateDropdown) return;
@@ -3369,6 +3408,14 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     });
   };
 
+  const slugLabCodeFromName = (name: string) =>
+    name
+      .trim()
+      .substring(0, 24)
+      .toUpperCase()
+      .replace(/[^A-Z0-9]+/g, "_")
+      .replace(/^_|_$/g, "") || "LAB";
+
   // Add selected lab templates to draft order (like prescriptions)
   const addLabOrder = () => {
     if (selectedLabTemplates.size === 0) {
@@ -3376,8 +3423,20 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       return;
     }
     
-    // Get selected templates
-    const selectedTemplates = labTemplates.filter(t => selectedLabTemplates.has(t.id));
+    // Resolve selected rows from full list or pinned "Other" template
+    const selectedTemplates = Array.from(selectedLabTemplates)
+      .map((id) =>
+        labTemplates.find((t) => t.id === id) ||
+        (otherLabPinnedTemplate?.id === id ? otherLabPinnedTemplate : null)
+      )
+      .filter((t): t is ServiceLabTemplate => !!t);
+    const hasOther = selectedTemplates.some(
+      (t) => (t.code || "").toUpperCase() === LAB_OTHER_TEMPLATE_CODE
+    );
+    if (hasOther && !newLabOrder.notes?.trim()) {
+      toast.error('Clinical indication is required when you select "Other". Describe the exact test for the laboratory.');
+      return;
+    }
     
     // Add to draft lab orders (not sent yet)
     const newOrders = selectedTemplates.map(template => ({
@@ -3443,9 +3502,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       
       const testsData = draftOrders.map(order => ({
         name: order.test,
-        code: order.code || order.test.substring(0, 10).toUpperCase().replace(/\s/g, '_'),
+        code: order.code || slugLabCodeFromName(order.test),
         sample_type: order.sampleType || 'Blood',
-        template: order.testId, // Link to template
+        template: order.testId != null ? order.testId : null,
         status: 'pending',
         notes: order.notes || '',
       }));
@@ -3477,6 +3536,11 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     const orderToEdit = labOrders[index];
     if (!orderToEdit) return;
 
+    if (orderToEdit.testId == null) {
+      toast.info("This line has no template link. Remove it and add again from the catalog (use Other + clinical notes if needed).");
+      return;
+    }
+
     // Reset modal state first
     setSelectedLabTemplates(new Set());
     setLabTemplateSearch("");
@@ -3504,18 +3568,47 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     toast.info(`Editing lab order for ${orderToEdit.test}`);
   };
 
-  // Filter lab templates based on search
-  const filteredLabTemplates = labTemplates.filter(template => {
-    if (!labTemplateSearch.trim()) return true;
-    const search = labTemplateSearch.toLowerCase();
-    return (
-      template.name?.toLowerCase().includes(search) ||
-      template.code?.toLowerCase().includes(search) ||
-      template.sample_type?.toLowerCase().includes(search) ||
-      (template.description && template.description.toLowerCase().includes(search))
-    );
-  }).slice(0, 20); // Limit to 20 results for performance
-  
+  // Filter lab templates; pin "Other" (OTHER) at top when not already in matches
+  const filteredLabTemplates = useMemo(() => {
+    const q = labTemplateSearch.trim().toLowerCase();
+    let list = labTemplates.filter((template) => {
+      if (!q) return true;
+      return (
+        template.name?.toLowerCase().includes(q) ||
+        template.code?.toLowerCase().includes(q) ||
+        template.sample_type?.toLowerCase().includes(q) ||
+        (template.description && template.description.toLowerCase().includes(q))
+      );
+    });
+    if (
+      otherLabPinnedTemplate &&
+      !list.some((t) => t.id === otherLabPinnedTemplate.id)
+    ) {
+      list = [otherLabPinnedTemplate, ...list];
+    }
+    return list.slice(0, 20);
+  }, [labTemplates, labTemplateSearch, otherLabPinnedTemplate]);
+
+  const roomRadiologyDropdownList = useMemo(() => {
+    const q = radiologyTemplateSearch.trim().toLowerCase();
+    let list = radiologyTemplates.filter((template: any) => {
+      if (!q) return true;
+      return (
+        (template.name && template.name.toLowerCase().includes(q)) ||
+        (template.code && template.code.toLowerCase().includes(q)) ||
+        (template.body_part && template.body_part.toLowerCase().includes(q)) ||
+        (template.modality && template.modality.toLowerCase().includes(q))
+      );
+    });
+    if (
+      otherRadiologyPinnedTemplate &&
+      !list.some((t: any) => t.id === otherRadiologyPinnedTemplate.id)
+    ) {
+      list = [otherRadiologyPinnedTemplate, ...list];
+    }
+    return list.slice(0, 20);
+  }, [radiologyTemplates, radiologyTemplateSearch, otherRadiologyPinnedTemplate]);
+
   // Add nursing order to draft (like prescriptions, lab orders, and radiology orders)
   const addNursingOrder = () => {
     if (!newNursingOrder.type || !newNursingOrder.instructions) {
@@ -3846,16 +3939,31 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       toast.error('Please select at least one imaging study and provide clinical indication');
       return;
     }
+
+    const selectedTemplates = Array.from(selectedRadiologyTemplates)
+      .map((templateId) =>
+        radiologyTemplates.find((t) => t.id === templateId) ||
+        (otherRadiologyPinnedTemplate?.id === templateId ? otherRadiologyPinnedTemplate : null)
+      )
+      .filter((t): t is NonNullable<typeof t> => !!t);
+
+    const hasOther = selectedTemplates.some(
+      (t) => (t.code || '').toUpperCase() === RAD_OTHER_TEMPLATE_CODE
+    );
+    if (hasOther && newRadiology.clinicalIndication.trim().length < 8) {
+      toast.error(
+        'You selected "Other". Add more detail in clinical indication (exact study, region, modality, clinical question).'
+      );
+      return;
+    }
     
     // Add each selected template as a separate order
-    const newOrders = Array.from(selectedRadiologyTemplates).map(templateId => {
-      const template = radiologyTemplates.find(t => t.id === templateId);
-      if (!template) return null;
-
-      const orderId = `RAD-${templateId}-${Date.now()}`;
+    const newOrders = selectedTemplates.map((template) => {
+      const orderId = `RAD-${template.id}-${Date.now()}`;
       return {
       id: orderId,
         procedure: template.name,
+        templateId: template.id,
         category: template.modality || template.category,
         bodyPart: template.body_part || '',
       clinicalIndication: newRadiology.clinicalIndication,
@@ -3864,7 +3972,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       lmp: newRadiology.lmp || undefined,
         status: 'Draft' as const
       };
-    }).filter((order): order is NonNullable<typeof order> => order !== null);
+    });
     
     setRadiologyOrders([...radiologyOrders, ...newOrders]);
 
@@ -3921,20 +4029,20 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       
       // Create all studies for the order
       const studiesData = draftOrders.map(order => {
-        // Find the template that matches this order
-        const template = radiologyTemplates.find(t => t.name === order.procedure);
-        const studyData = {
+        const template =
+          order.templateId != null
+            ? radiologyTemplates.find((t) => t.id === order.templateId)
+            : radiologyTemplates.find((t) => t.name === order.procedure);
+        const studyData: Record<string, unknown> = {
           procedure: order.procedure,
           body_part: template?.body_part || order.bodyPart || '',
           modality: template?.modality || order.category || 'X-Ray',
           status: 'pending',
         };
-
-        // TODO: Include template if it exists - commented out to debug 500 error
-        // if (template?.id) {
-        //   studyData.template = template.id;
-        // }
-
+        const tid = order.templateId ?? template?.id;
+        if (tid != null) {
+          studyData.template = tid;
+        }
         return studyData;
       });
       
@@ -4103,16 +4211,10 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     const orderToEdit = radiologyOrders.find(o => o.id === orderId);
     if (!orderToEdit) return;
 
-    // Reset modal state first
-    setNewRadiology({
-      procedure: "",
-      category: "",
-      bodyPart: "",
-      clinicalIndication: "",
-      priority: "Routine",
-      provisionalDiagnosis: "",
-      lmp: ""
-    });
+    const tid =
+      orderToEdit.templateId ??
+      radiologyTemplates.find((t) => t.name === orderToEdit.procedure)?.id;
+    setSelectedRadiologyTemplates(new Set(tid != null ? [tid] : []));
 
     // Pre-populate the modal with existing order data
     setNewRadiology({
@@ -4861,6 +4963,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-center gap-2 flex-wrap mb-0.5">
                                     <span className="font-semibold text-sm">{order.test}</span>
+                                    {order.testId == null && (
+                                      <Badge variant="outline" className="text-[10px] px-1.5 border-amber-500/50 text-amber-800 dark:text-amber-200">Custom</Badge>
+                                    )}
                                     <Badge variant={order.priority === "STAT" ? "destructive" : order.priority === "Urgent" ? "default" : "secondary"} className={`text-xs px-1.5 py-0.5 ${order.priority === 'STAT' ? 'bg-rose-500' : order.priority === 'Urgent' ? 'bg-amber-500' : ''}`}>
                                       {order.priority === 'STAT' && <AlertTriangle className="h-3 w-3 mr-1" />}
                                       {order.priority}
@@ -7213,14 +7318,16 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           <DialogContent className="w-[95vw] sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2"><TestTube className="h-5 w-5 text-amber-500" />Order Lab Test(s)</DialogTitle>
-              <DialogDescription>Select one or more laboratory tests to order - will be sent to Lab Tech queue</DialogDescription>
+              <DialogDescription>
+                Search and select tests from the catalog. Choose <strong>Other</strong> when the test is not listed, and describe the exact test in <strong>Clinical indication</strong> for the laboratory.
+              </DialogDescription>
             </DialogHeader>
             <div className="space-y-4 py-2">
               <div className="space-y-2">
                 <Label>Search and Select Tests *</Label>
                 <div className="relative" ref={labTemplateDropdownContainerRef} data-lab-template-dropdown>
                   <Input
-                    placeholder="Search tests by name, code, or sample type..."
+                    placeholder="Search by name, code, or sample type (try “Other”)…"
                     value={labTemplateSearch}
                     onChange={(e) => {
                       const searchValue = e.target.value;
@@ -7253,6 +7360,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                       ) : (
                         filteredLabTemplates.map((template) => {
                           const isSelected = selectedLabTemplates.has(template.id);
+                          const isOtherRow = (template.code || '').toUpperCase() === LAB_OTHER_TEMPLATE_CODE;
                           return (
                             <div
                               key={template.id}
@@ -7263,7 +7371,14 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                             >
                               <Checkbox checked={isSelected} onCheckedChange={() => toggleLabTemplateSelection(template)} />
                               <div className="flex-1 min-w-0">
-                                <div className="font-medium text-sm">{template.name}</div>
+                                <div className="font-medium text-sm flex items-center gap-2 flex-wrap">
+                                  {template.name}
+                                  {isOtherRow && (
+                                    <Badge variant="outline" className="text-[10px] border-amber-500/60 text-amber-800 dark:text-amber-200">
+                                      Describe in clinical indication
+                                    </Badge>
+                                  )}
+                                </div>
                                 <div className="text-xs text-muted-foreground mt-1">
                                   {template.code} • {template.sample_type}
                                 </div>
@@ -7284,9 +7399,12 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                   <div className="mt-2 space-y-2">
                     <div className="text-sm font-medium">Selected Tests ({selectedLabTemplates.size}):</div>
                     <div className="flex flex-wrap gap-2">
-                      {labTemplates
-                        .filter(t => selectedLabTemplates.has(t.id))
-                        .map(template => (
+                      {Array.from(selectedLabTemplates).map((id) => {
+                        const template =
+                          labTemplates.find((t) => t.id === id) ||
+                          (otherLabPinnedTemplate?.id === id ? otherLabPinnedTemplate : undefined);
+                        if (!template) return null;
+                        return (
                           <Badge key={template.id} variant="secondary" className="flex items-center gap-1">
                             {template.name}
                             <X
@@ -7294,7 +7412,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                               onClick={() => toggleLabTemplateSelection(template)}
                             />
                           </Badge>
-                        ))}
+                        );
+                      })}
                     </div>
                     <Button
                       variant="ghost"
@@ -7307,6 +7426,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                   </div>
                 )}
               </div>
+
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Priority</Label>
@@ -7327,8 +7447,13 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                 </div>
               </div>
               <div className="space-y-2">
-                <Label>Clinical Indication *</Label>
-                <Textarea value={newLabOrder.notes} onChange={(e) => setNewLabOrder({ ...newLabOrder, notes: e.target.value })} placeholder="Reason for test, clinical context, specific instructions for lab..." rows={3} />
+                <Label>Clinical indication *</Label>
+                <Textarea
+                  value={newLabOrder.notes}
+                  onChange={(e) => setNewLabOrder({ ...newLabOrder, notes: e.target.value })}
+                  placeholder="Reason for test and instructions for the lab. If you selected Other, write the exact test / panel / send-out details here."
+                  rows={3}
+                />
               </div>
               {newLabOrder.priority === 'STAT' && (
                 <div className="p-3 rounded-lg bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800">
@@ -7339,7 +7464,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                 </div>
               )}
             </div>
-            <DialogFooter>
+            <DialogFooter className="flex-col sm:flex-row gap-2">
               <Button variant="outline" onClick={() => {
                 setShowAddLabOrder(false);
                 setSelectedLabTemplates(new Set());
@@ -7354,7 +7479,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                 className="bg-amber-500 hover:bg-amber-600"
               >
                 <TestTube className="h-4 w-4 mr-2" />
-                Add to Order
+                Add to order
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -7711,7 +7836,17 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         </Dialog>
 
         {/* Add Radiology Order Dialog */}
-        <Dialog open={showAddRadiology} onOpenChange={setShowAddRadiology}>
+        <Dialog
+          open={showAddRadiology}
+          onOpenChange={(open) => {
+            setShowAddRadiology(open);
+            if (!open) {
+              setSelectedRadiologyTemplates(new Set());
+              setRadiologyTemplateSearch('');
+              setShowRadiologyTemplateDropdown(false);
+            }
+          }}
+        >
           <DialogContent className="w-[95vw] sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
@@ -7719,7 +7854,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                 Order Imaging Study
               </DialogTitle>
               <DialogDescription>
-                Search and select from radiology templates - orders will be sent to Radiology queue
+                Search and select templates (including <strong>Other</strong> when the study is not listed). Put the exact examination details in <strong>clinical indication</strong> for radiology.
               </DialogDescription>
             </DialogHeader>
             
@@ -7729,13 +7864,17 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                 <Label>Search and Select Imaging Studies *</Label>
                 <div className="relative" ref={radiologyTemplateDropdownContainerRef} data-radiology-template-dropdown>
                   <Input
-                    placeholder="Search imaging studies by name, code, or modality..."
+                    placeholder="Search imaging studies by name, code, or modality (try “Other”)…"
                     value={radiologyTemplateSearch}
                     onChange={(e) => {
-                      setRadiologyTemplateSearch(e.target.value);
-                      setShowRadiologyTemplateDropdown(true);
+                      const v = e.target.value;
+                      setRadiologyTemplateSearch(v);
+                      if (v.trim()) setShowRadiologyTemplateDropdown(true);
+                      else setShowRadiologyTemplateDropdown(false);
                     }}
-                    onFocus={() => setShowRadiologyTemplateDropdown(true)}
+                    onFocus={() => {
+                      if (radiologyTemplateSearch.trim()) setShowRadiologyTemplateDropdown(true);
+                    }}
                   />
                   {showRadiologyTemplateDropdown && radiologyTemplateSearch.trim() && (
                     <div className="absolute top-full left-0 right-0 z-50 bg-background border rounded-md shadow-lg max-h-60 overflow-y-auto">
@@ -7744,66 +7883,34 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                           <Loader2 className="h-4 w-4 mx-auto mb-2 animate-spin" />
                           <p className="text-xs">Loading templates...</p>
                         </div>
-                      ) : radiologyTemplates.length === 0 ? (
+                      ) : roomRadiologyDropdownList.length === 0 ? (
                         <div className="p-4 text-center text-muted-foreground">
-                          <p className="text-xs">{radiologyTemplatesError || 'No templates found'}</p>
+                          <p className="text-xs">{radiologyTemplatesError || 'No templates match. Try another search.'}</p>
                         </div>
                       ) : (
                         <div className="p-2">
-                          {/* Selected templates */}
-                          {selectedRadiologyTemplates.size > 0 && (
-                            <div className="mb-3 pb-2 border-b">
-                              <p className="text-xs font-medium text-muted-foreground mb-2">Selected ({selectedRadiologyTemplates.size})</p>
-                              <div className="flex flex-wrap gap-1">
-                                {Array.from(selectedRadiologyTemplates).map(templateId => {
-                                  const template = radiologyTemplates.find(t => t.id === templateId);
-                                  return template ? (
-                                    <Badge
-                                      key={templateId}
-                                      variant="default"
-                                      className="text-xs cursor-pointer hover:bg-destructive hover:text-destructive-foreground"
-                                      onClick={() => {
-                                        setSelectedRadiologyTemplates(prev => {
-                                          const newSet = new Set(prev);
-                                          newSet.delete(templateId);
-                                          return newSet;
-                    });
-                  }}
-                >
-                                      {template.code} - {template.name}
-                                      <X className="h-3 w-3 ml-1" />
-                                    </Badge>
-                                  ) : null;
-                                })}
-                              </div>
-                            </div>
-                          )}
-
-                          {/* Available templates */}
                           <div className="space-y-1">
-                            {radiologyTemplates
-                              .filter(template =>
-                                !selectedRadiologyTemplates.has(template.id) &&
-                                (radiologyTemplateSearch === '' ||
-                                 template.name.toLowerCase().includes(radiologyTemplateSearch.toLowerCase()) ||
-                                 template.code.toLowerCase().includes(radiologyTemplateSearch.toLowerCase()) ||
-                                 (template.body_part && template.body_part.toLowerCase().includes(radiologyTemplateSearch.toLowerCase())) ||
-                                 (template.modality && template.modality.toLowerCase().includes(radiologyTemplateSearch.toLowerCase())))
-                              )
-                              .slice(0, 20) // Limit for performance
-                              .map(template => (
+                            {roomRadiologyDropdownList
+                              .filter((template: any) => !selectedRadiologyTemplates.has(template.id))
+                              .map((template: any) => {
+                                const isOtherRow = (template.code || '').toUpperCase() === RAD_OTHER_TEMPLATE_CODE;
+                                return (
                                 <div
                                   key={template.id}
                                   className="flex items-center justify-between p-2 rounded hover:bg-muted cursor-pointer"
                                   onClick={() => {
                                     setSelectedRadiologyTemplates(prev => new Set([...prev, template.id]));
-                                    // Keep dropdown and search so user can multi-select
                                   }}
                                 >
                                   <div className="flex-1 min-w-0">
-                                    <div className="flex items-center gap-2">
+                                    <div className="flex items-center gap-2 flex-wrap">
                                       <span className="font-medium text-sm truncate">{template.name}</span>
                                       <Badge variant="outline" className="text-[10px] px-1.5 py-0">{template.code}</Badge>
+                                      {isOtherRow && (
+                                        <Badge variant="outline" className="text-[10px] border-indigo-500/60 text-indigo-800 dark:text-indigo-200">
+                                          Describe in clinical indication
+                                        </Badge>
+                                      )}
                                     </div>
                                     <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
                                       <span>{template.category}</span>
@@ -7818,7 +7925,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                     </div>
                                   </div>
                                 </div>
-                              ))}
+                              );
+                              })}
                           </div>
                         </div>
                       )}
@@ -7832,7 +7940,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                     <p className="text-sm font-medium">Selected Studies ({selectedRadiologyTemplates.size})</p>
                     <div className="space-y-1 max-h-32 overflow-y-auto">
                       {Array.from(selectedRadiologyTemplates).map(templateId => {
-                        const template = radiologyTemplates.find(t => t.id === templateId);
+                        const template =
+                          radiologyTemplates.find((t) => t.id === templateId) ||
+                          (otherRadiologyPinnedTemplate?.id === templateId ? otherRadiologyPinnedTemplate : undefined);
                         return template ? (
                           <div key={templateId} className="flex items-center justify-between p-2 bg-muted rounded text-sm">
                             <div className="flex-1 min-w-0">
@@ -7891,11 +8001,11 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
               {/* Clinical Indication */}
               <div className="space-y-2">
-                <Label>Clinical Indication *</Label>
+                <Label>Clinical indication *</Label>
                 <Textarea 
                   value={newRadiology.clinicalIndication}
                   onChange={(e) => setNewRadiology({ ...newRadiology, clinicalIndication: e.target.value })}
-                  placeholder="Reason for imaging, clinical findings, suspected diagnosis..."
+                  placeholder="Reason for imaging and instructions for radiology. If you selected Other, include exact study, region, modality, and clinical question."
                   rows={3}
                 />
               </div>

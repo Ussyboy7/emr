@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ResetFiltersButton } from "@/components/ResetFiltersButton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
@@ -14,7 +15,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
-  CalendarDays, Clock, User, Stethoscope, Building2, Plus, Search, Filter,
+  CalendarDays, Clock, User, Stethoscope, Building2, Plus, Search,
   Edit, Trash2, CheckCircle, XCircle, AlertCircle, Calendar as CalendarIcon,
   ChevronLeft, ChevronRight, MoreHorizontal, Eye, RefreshCw
 } from "lucide-react";
@@ -272,21 +273,20 @@ export default function AppointmentsPage() {
         {/* Filters and Search */}
         <Card>
           <CardContent className="p-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="search">Search</Label>
+            <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-3">
+              <div className="relative flex-1 min-w-[min(100%,16rem)]">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
                   id="search"
                   placeholder="Search by patient name, ID..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-10"
                 />
               </div>
-
-              <div className="space-y-2">
-                <Label>Status</Label>
+              <div className="flex flex-wrap items-center gap-2">
                 <Select value={statusFilter} onValueChange={setStatusFilter}>
-                  <SelectTrigger>
+                  <SelectTrigger className="w-[150px]">
                     <SelectValue placeholder="All Status" />
                   </SelectTrigger>
                   <SelectContent>
@@ -299,12 +299,8 @@ export default function AppointmentsPage() {
                     <SelectItem value="no_show">No Show</SelectItem>
                   </SelectContent>
                 </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label>Type</Label>
                 <Select value={typeFilter} onValueChange={setTypeFilter}>
-                  <SelectTrigger>
+                  <SelectTrigger className="w-[150px]">
                     <SelectValue placeholder="All Types" />
                   </SelectTrigger>
                   <SelectContent>
@@ -316,21 +312,17 @@ export default function AppointmentsPage() {
                     <SelectItem value="routine">Routine</SelectItem>
                   </SelectContent>
                 </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label>Date</Label>
                 <Popover>
                   <PopoverTrigger asChild>
                     <Button
                       variant="outline"
                       className={cn(
-                        "w-full justify-start text-left font-normal",
+                        "h-9 w-[min(100%,220px)] justify-start text-left font-normal shrink-0",
                         !dateFilter && "text-muted-foreground"
                       )}
                     >
-                      <CalendarIcon className="mr-2 h-4 w-4" />
-                      {dateFilter ? format(dateFilter, "PPP") : "Pick a date"}
+                      <CalendarIcon className="mr-2 h-4 w-4 shrink-0" />
+                      <span className="truncate">{dateFilter ? format(dateFilter, "PPP") : "Pick a date"}</span>
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-auto p-0" align="start">
@@ -352,24 +344,17 @@ export default function AppointmentsPage() {
                     </div>
                   </PopoverContent>
                 </Popover>
-              </div>
-
-              <div className="space-y-2 flex items-end">
-                  <Button
-                    onClick={() => {
-                      setSearchQuery("");
-                      setStatusFilter("all");
-                      setTypeFilter("all");
-                      setDateFilter(undefined);
-                      setCurrentPage(1);
-                      fetchAppointments(); // Force refresh
-                    }}
-                    variant="outline"
-                    className="w-full"
-                  >
-                    <Filter className="h-4 w-4 mr-2" />
-                    Clear Filters & Refresh
-                  </Button>
+                <ResetFiltersButton
+                  label="Clear filters and refresh"
+                  onClick={() => {
+                    setSearchQuery("");
+                    setStatusFilter("all");
+                    setTypeFilter("all");
+                    setDateFilter(undefined);
+                    setCurrentPage(1);
+                    fetchAppointments();
+                  }}
+                />
               </div>
             </div>
           </CardContent>

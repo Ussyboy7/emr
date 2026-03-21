@@ -433,7 +433,19 @@ class AdminService {
     const totalUsers = users.length;
     const activeUsers = users.filter(u => u.is_active).length;
     const inactiveUsers = totalUsers - activeUsers;
-    const onlineNow = 0; // Would need session tracking
+
+    /** Users with API activity or login within this window (see JWTAuthenticationWithActivity + last_login on login). */
+    const ONLINE_WINDOW_MS = 15 * 60 * 1000;
+    const nowMs = Date.now();
+    const onlineNow = users.filter((u: any) => {
+      if (!u.is_active) return false;
+      const candidates: string[] = [];
+      if (u.last_activity) candidates.push(u.last_activity);
+      if (u.last_login) candidates.push(u.last_login);
+      if (candidates.length === 0) return false;
+      const newest = Math.max(...candidates.map((t) => new Date(t).getTime()));
+      return Number.isFinite(newest) && nowMs - newest <= ONLINE_WINDOW_MS;
+    }).length;
 
     const totalRoles = roles.length;
     const totalClinics = clinics.length;
@@ -510,12 +522,12 @@ class AdminService {
       }))
       .slice(0, 5);
 
-    // Clinic status
-    const clinicStatus = clinics.map(c => ({
+    // Clinic status (patient_count / doctor_count from organization API annotations)
+    const clinicStatus = clinics.map((c: any) => ({
       name: c.name,
       status: c.is_active ? 'open' : 'closed',
-      patients: 0, // Would need visit data
-      doctors: 0, // Would need staff assignment data
+      patients: typeof c.patient_count === 'number' ? c.patient_count : 0,
+      doctors: typeof c.doctor_count === 'number' ? c.doctor_count : 0,
     }));
 
     // Pending approvals (simplified)
