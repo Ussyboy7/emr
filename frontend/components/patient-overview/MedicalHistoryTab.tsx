@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, lazy, Suspense } from 'react';
+import React, { useState } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -13,7 +13,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import { patientService } from '@/lib/services';
 import { VitalsDetailModal } from '@/components/VitalsDetailModal';
-const ConsultationDetailModal = lazy(() => import('@/components/consultation/ConsultationDetailModal').then(module => ({ default: module.ConsultationDetailModal })));
+import { ConsultationReportModal } from '@/components/consultation/ConsultationReportModal';
+import { loadConsultationReportSession, type ConsultationReportSession } from '@/lib/consultation-report';
 import { 
   FileText, Stethoscope, TestTube, ScanLine, Pill, Heart,
   AlertTriangle, Users, User, Eye, ChevronLeft, ChevronRight, Plus, X, Calendar
@@ -113,10 +114,27 @@ export function MedicalHistoryTab({
   const [selectedVitals, setSelectedVitals] = useState<any>(null);
   const [isVitalsDetailModalOpen, setIsVitalsDetailModalOpen] = useState(false);
   
-  // Consultation detail modal state
+  // Consultation report modal state (same as Patient Medical Records)
   const [typeFilter, setTypeFilter] = useState<'all' | 'visits' | 'consultations'>('all');
-  const [selectedItem, setSelectedItem] = useState<any>(null);
-  const [showDetailModal, setShowDetailModal] = useState(false);
+  const [selectedConsultationSession, setSelectedConsultationSession] = useState<ConsultationReportSession | null>(null);
+  const [showConsultationReport, setShowConsultationReport] = useState(false);
+  const [loadingConsultationReport, setLoadingConsultationReport] = useState(false);
+
+  const viewConsultationReport = async (session: any) => {
+    try {
+      setLoadingConsultationReport(true);
+      setSelectedConsultationSession(null);
+      setShowConsultationReport(true);
+      const fullSession = await loadConsultationReportSession(Number(session.id));
+      setSelectedConsultationSession(fullSession);
+    } catch (err) {
+      console.error('Error loading consultation report:', err);
+      toast.error('Failed to load consultation report');
+      setShowConsultationReport(false);
+    } finally {
+      setLoadingConsultationReport(false);
+    }
+  };
 
   // Handle adding allergies
   const handleAddAllergy = async () => {
@@ -410,12 +428,9 @@ export function MedicalHistoryTab({
                           <Button 
                             variant="ghost" 
                             size="sm" 
-                            onClick={() => {
-                              setSelectedItem(item);
-                              setShowDetailModal(true);
-                            }}
+                            onClick={() => viewConsultationReport(item)}
                           >
-                            <Eye className="h-4 w-4 mr-1" /> View
+                            <Eye className="h-4 w-4 mr-1" /> View Report
                           </Button>
                         </td>
                       </tr>
@@ -978,16 +993,12 @@ export function MedicalHistoryTab({
         </DialogContent>
       </Dialog>
       
-      {/* Consultation Detail Modal */}
-      <Suspense fallback={<div className="flex items-center justify-center p-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div></div>}>
-        <ConsultationDetailModal
-          open={showDetailModal}
-          onOpenChange={setShowDetailModal}
-          consultation={selectedItem?.type === 'visit' ? undefined : selectedItem}
-          visitId={selectedItem?.type === 'visit' ? selectedItem?.id || selectedItem?.numericId : undefined}
-          consultationSessionId={selectedItem?.type !== 'visit' ? selectedItem?.id : undefined}
-        />
-      </Suspense>
+      <ConsultationReportModal
+        open={showConsultationReport}
+        onOpenChange={setShowConsultationReport}
+        session={selectedConsultationSession}
+        loading={loadingConsultationReport}
+      />
     </div>
   );
 }

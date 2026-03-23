@@ -24,7 +24,7 @@ import {
 import { getOrganizationHeader } from "@/lib/constants/organization";
 import { toast } from "sonner";
 
-const { formatDate, formatTime, formatPriority, vitalLabel, formatVitalDisplay } = reportFormatters;
+const { formatDate, formatTime, formatPriority, vitalLabel, formatVitalDisplay, formatLabResult, formatRadiologyResult, formatResultWithPending } = reportFormatters;
 
 export interface ConsultationReportModalProps {
   open: boolean;
@@ -296,6 +296,7 @@ export function ConsultationReportModal({
                           <th className="px-3 py-2 text-left font-medium">Test</th>
                           <th className="px-3 py-2 text-left font-medium">Priority</th>
                           <th className="px-3 py-2 text-left font-medium">Status</th>
+                          <th className="px-3 py-2 text-left font-medium">Result</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y">
@@ -304,6 +305,13 @@ export function ConsultationReportModal({
                             <td className="px-3 py-2 font-medium">{lab.test ?? ""}</td>
                             <td className="px-3 py-2">{formatPriority(lab.priority)}</td>
                             <td className="px-3 py-2">{lab.status ?? ""}</td>
+                            <td className="px-3 py-2 whitespace-pre-line break-words max-w-[28rem]">
+                              {formatResultWithPending(
+                                lab.result ? formatLabResult(lab.result) : "",
+                                lab.status,
+                                ["verified", "completed"]
+                              )}
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -326,6 +334,7 @@ export function ConsultationReportModal({
                           <th className="px-3 py-2 text-left font-medium">Procedure</th>
                           <th className="px-3 py-2 text-left font-medium">Priority</th>
                           <th className="px-3 py-2 text-left font-medium">Status</th>
+                          <th className="px-3 py-2 text-left font-medium">Result</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y">
@@ -334,6 +343,13 @@ export function ConsultationReportModal({
                             <td className="px-3 py-2 font-medium">{rad.procedure ?? ""}</td>
                             <td className="px-3 py-2">{formatPriority(rad.priority)}</td>
                             <td className="px-3 py-2">{rad.status ?? ""}</td>
+                            <td className="px-3 py-2 whitespace-pre-line break-words max-w-[28rem]">
+                              {formatResultWithPending(
+                                rad.result ? formatRadiologyResult(rad.result) : "",
+                                rad.status,
+                                ["verified", "completed", "reported"]
+                              )}
+                            </td>
                           </tr>
                         ))}
                       </tbody>

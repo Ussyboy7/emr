@@ -28,8 +28,8 @@ export interface ConsultationReportSession {
   visit?: number;
   vitals?: Record<string, unknown>;
   prescriptions?: Array<{ id?: string; medication?: string; medication_name?: string; dosage?: string; frequency?: string; duration?: string; quantity?: string }>;
-  labOrders?: Array<{ test?: string; priority?: string; status?: string }>;
-  radiologyOrders?: Array<{ procedure?: string; priority?: string; status?: string }>;
+  labOrders?: Array<{ test?: string; priority?: string; status?: string; result?: string }>;
+  radiologyOrders?: Array<{ procedure?: string; priority?: string; status?: string; result?: string }>;
   physioOrders?: Array<{ diagnosis?: string; priority?: string; status?: string }>;
   diagnoses?: Array<{ id?: string; code?: string; name?: string; type?: string; notes?: string }>;
 }
@@ -73,6 +73,56 @@ const formatVitalDisplay = (key: string, value: unknown): string => {
   if (key === 'recordedAt' || key === 'recorded_at' || (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(value)))
     return formatDate(String(value)) + ' ' + formatTime(String(value));
   return String(value);
+};
+
+const formatLabResult = (value: unknown, normalRange?: Record<string, any>): string => {
+  if (value == null || value === '') return '';
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+  if (typeof value !== 'object') return String(value);
+
+  const entries = Object.entries(value as Record<string, unknown>).filter(([, v]) => v != null && v !== '');
+  if (entries.length === 0) return '';
+
+  return entries
+    .map(([key, v]) => {
+      const fieldMeta = normalRange?.[key] ?? {};
+      const unit = fieldMeta.unit ? ` ${fieldMeta.unit}` : '';
+      let range = '';
+      if (fieldMeta.range) {
+        range = ` (${fieldMeta.range})`;
+      } else if (fieldMeta.min != null || fieldMeta.max != null) {
+        range = ` (${fieldMeta.min ?? ''}-${fieldMeta.max ?? ''})`;
+      }
+      return `${key}: ${String(v)}${unit}${range}`.trim();
+    })
+    .join('\n');
+};
+
+const formatRadiologyResult = (value: unknown): string => {
+  if (value == null || value === '') return '';
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+  if (typeof value !== 'object') return String(value);
+
+  const entries = Object.entries(value as Record<string, unknown>).filter(([, v]) => v != null && v !== '');
+  if (!entries.length) return '';
+  return entries.map(([k, v]) => `${k}: ${String(v)}`).join('\n');
+};
+
+const formatResultWithPending = (
+  result: unknown,
+  status: unknown,
+  doneStatuses: string[],
+): string => {
+  const text = result == null ? '' : String(result).trim();
+  if (text) return text;
+
+  const currentStatus = String(status ?? '').toLowerCase();
+  const isDone = doneStatuses.some((s) => s.toLowerCase() === currentStatus);
+  return isDone ? '' : 'Pending';
 };
 
 // ----- HTML generator (single source for Download/Print) -----
@@ -179,9 +229,9 @@ export function buildConsultationReportHTML(session: ConsultationReportSession):
   <div class="section">
     <h3>LABORATORY ORDERS</h3>
     <table>
-      <thead><tr><th>Test</th><th>Priority</th><th>Status</th></tr></thead>
+      <thead><tr><th>Test</th><th>Priority</th><th>Status</th><th>Result</th></tr></thead>
       <tbody>
-        ${labOrders.map((lab: any) => `<tr><td>${lab.test ?? ''}</td><td>${formatPriority(lab.priority)}</td><td>${lab.status ?? ''}</td></tr>`).join('')}
+        ${labOrders.map((lab: any) => `<tr><td>${lab.test ?? ''}</td><td>${formatPriority(lab.priority)}</td><td>${lab.status ?? ''}</td><td>${formatResultWithPending(lab.result, lab.status, ['verified', 'completed']).toString().replace(/\n/g, '<br>')}</td></tr>`).join('')}
       </tbody>
     </table>
   </div>
@@ -191,9 +241,9 @@ export function buildConsultationReportHTML(session: ConsultationReportSession):
   <div class="section">
     <h3>RADIOLOGY ORDERS</h3>
     <table>
-      <thead><tr><th>Procedure</th><th>Priority</th><th>Status</th></tr></thead>
+      <thead><tr><th>Procedure</th><th>Priority</th><th>Status</th><th>Result</th></tr></thead>
       <tbody>
-        ${radiologyOrders.map((rad: any) => `<tr><td>${rad.procedure ?? ''}</td><td>${formatPriority(rad.priority)}</td><td>${rad.status ?? ''}</td></tr>`).join('')}
+        ${radiologyOrders.map((rad: any) => `<tr><td>${rad.procedure ?? ''}</td><td>${formatPriority(rad.priority)}</td><td>${rad.status ?? ''}</td><td>${formatResultWithPending(rad.result, rad.status, ['verified', 'completed', 'reported']).toString().replace(/\n/g, '<br>')}</td></tr>`).join('')}
       </tbody>
     </table>
   </div>
@@ -264,13 +314,31 @@ export async function loadConsultationReportSession(sessionId: number): Promise<
 
     try {
       const labOrders = await apiFetch<{ results: any[] }>(`/laboratory/orders/?visit=${visitId}&page_size=100`);
-      session.labOrders = (labOrders.results || []).flatMap((order: any) => {
-        const tests = order.tests || [];
-        if (!tests.length) return [];
+      const orderRows = labOrders.results || [];
+      const testResponses = await Promise.all(
+        orderRows.map((order: any) =>
+          apiFetch<{ results: any[] }>(`/laboratory/tests/?order=${order.id}&page_size=200`).catch(() => ({ results: [] }))
+        )
+      );
+
+      session.labOrders = orderRows.flatMap((order: any, idx: number) => {
+        const tests = testResponses[idx]?.results || [];
+        if (!tests.length) {
+          // Fallback to nested tests from order if tests endpoint returns nothing.
+          const nestedTests = order.tests || [];
+          return nestedTests.map((t: any) => ({
+            test: (t.name || t.test_name || t.template_name || '').trim(),
+            priority: order.priority ?? '',
+            status: t.status ?? order.status ?? '',
+            result: formatLabResult(t.results ?? t.result ?? '', t.template_normal_range || t.normal_range),
+          }));
+        }
+
         return tests.map((t: any) => ({
           test: (t.name || t.test_name || t.template_name || '').trim(),
           priority: order.priority ?? '',
           status: t.status ?? order.status ?? '',
+          result: formatLabResult(t.results ?? t.result ?? '', t.template_normal_range || t.normal_range),
         }));
       });
     } catch (err) {
@@ -287,11 +355,19 @@ export async function loadConsultationReportSession(sessionId: number): Promise<
             procedure: (s.procedure ?? order.procedure_name ?? order.procedure ?? '').toString().trim(),
             priority: order.priority ?? '',
             status: s.status ?? order.status ?? '',
+            result: formatRadiologyResult(
+              s.report ?? s.findings ?? s.impression ?? s.results ?? ''
+            ),
           }));
         }
         const proc = (order.procedure_name ?? order.procedure ?? '').toString().trim();
         if (!proc) return [];
-        return [{ procedure: proc, priority: order.priority ?? '', status: order.status ?? '' }];
+        return [{
+          procedure: proc,
+          priority: order.priority ?? '',
+          status: order.status ?? '',
+          result: formatRadiologyResult(order.report ?? order.findings ?? order.impression ?? ''),
+        }];
       });
     } catch (err) {
       console.warn('Could not load radiology orders:', err);
@@ -364,4 +440,7 @@ export const reportFormatters = {
   formatPriority,
   vitalLabel,
   formatVitalDisplay,
+  formatLabResult,
+  formatRadiologyResult,
+  formatResultWithPending,
 };
