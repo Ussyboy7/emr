@@ -104,6 +104,7 @@ const menuSections: MenuSection[] = [
       { label: "Manage Visits", href: "/medical-records/visits", icon: Calendar },
       { label: "Appointments", href: "/medical-records/appointments", icon: CalendarDays },
       { label: "Manage Dependents", href: "/medical-records/dependents", icon: UsersRound },
+      { label: "Referrals", href: "/medical-records/referrals", icon: ArrowRight },
       { label: "Reports", href: "/medical-records/reports", icon: FolderOpen },
     ],
   },
@@ -134,7 +135,6 @@ const menuSections: MenuSection[] = [
       { label: "Start Consultation", href: "/consultation/start", icon: Play },
       { label: "Consultation History", href: "/consultation/history", icon: History },
       { label: "Ward Overview", href: "/consultation/wards", icon: Building2 },
-      { label: "Referrals", href: "/consultation/referrals", icon: ArrowRight },
     ],
   },
   {

@@ -3888,7 +3888,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         urgency: newReferral.priority === 'STAT' ? 'emergency' : newReferral.priority.toLowerCase() as 'urgent' | 'routine' | 'emergency',
         contact_person: newReferral.contactPerson || undefined,
         contact_phone: newReferral.contactPhone || undefined,
-        status: 'sent',
+        status: 'submitted_to_records',
       });
       
       const referralId = `REF-${Date.now()}`;

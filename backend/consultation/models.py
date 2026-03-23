@@ -161,10 +161,11 @@ class Referral(models.Model):
     
     STATUS_CHOICES = [
         ('draft', 'Draft'),
-        ('sent', 'Sent'),
-        ('accepted', 'Accepted'),
-        ('scheduled', 'Scheduled'),
-        ('completed', 'Completed'),
+        ('submitted_to_records', 'Submitted to Records'),
+        ('records_review', 'Records Review'),
+        ('returned_for_correction', 'Returned for Correction'),
+        ('approved_for_forms', 'Approved for Forms'),
+        ('closed', 'Closed'),
         ('cancelled', 'Cancelled'),
     ]
     
@@ -192,13 +193,14 @@ class Referral(models.Model):
     contact_phone = models.CharField(max_length=50, blank=True)
     contact_email = models.EmailField(blank=True)
     
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft')
+    status = models.CharField(max_length=40, choices=STATUS_CHOICES, default='draft')
     notes = models.TextField(blank=True)
     
     referred_at = models.DateTimeField(auto_now_add=True)
-    accepted_at = models.DateTimeField(null=True, blank=True)
-    scheduled_at = models.DateTimeField(null=True, blank=True)
-    completed_at = models.DateTimeField(null=True, blank=True)
+    submitted_at = models.DateTimeField(null=True, blank=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    approved_at = models.DateTimeField(null=True, blank=True)
+    closed_at = models.DateTimeField(null=True, blank=True)
     created_by = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, related_name='created_referrals')
     
     class Meta:
@@ -231,6 +233,40 @@ class Referral(models.Model):
     
     def __str__(self):
         return f"{self.referral_id} - {self.patient.get_full_name()} to {self.specialty}"
+
+
+class ResponsibilityFormIssuance(models.Model):
+    """Monthly responsibility form issuances linked to a referral."""
+
+    STATUS_CHOICES = [
+        ('active', 'Active'),
+        ('expired', 'Expired'),
+        ('revoked', 'Revoked'),
+        ('used', 'Used'),
+    ]
+
+    referral = models.ForeignKey(Referral, on_delete=models.CASCADE, related_name='responsibility_forms')
+    sequence_number = models.PositiveIntegerField(default=1)
+    issue_date = models.DateTimeField(auto_now_add=True)
+    valid_from = models.DateField()
+    valid_to = models.DateField()
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active')
+    hospital_name_snapshot = models.CharField(max_length=200, blank=True)
+    document_file = models.FileField(upload_to='referral_forms/', blank=True, null=True)
+    notes = models.TextField(blank=True)
+    issued_by = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, related_name='issued_responsibility_forms')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'responsibility_form_issuances'
+        ordering = ['-issue_date']
+        constraints = [
+            models.UniqueConstraint(fields=['referral', 'sequence_number'], name='uniq_referral_form_sequence'),
+        ]
+
+    def __str__(self):
+        return f"{self.referral.referral_id} Form #{self.sequence_number}"
 
 
 class ICD10Code(models.Model):

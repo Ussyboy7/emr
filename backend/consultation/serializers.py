@@ -2,7 +2,7 @@
 Serializers for the Consultation app.
 """
 from rest_framework import serializers
-from .models import ConsultationRoom, ConsultationSession, ConsultationQueue, Referral, Diagnosis, ICD10Code
+from .models import ConsultationRoom, ConsultationSession, ConsultationQueue, Referral, ResponsibilityFormIssuance, Diagnosis, ICD10Code
 from patients.serializers import PatientListSerializer, VitalReadingSerializer
 
 
@@ -144,11 +144,43 @@ class ReferralSerializer(serializers.ModelSerializer):
 
     patient_name = serializers.CharField(source='patient.get_full_name', read_only=True)
     referred_by_name = serializers.CharField(source='referred_by.get_full_name', read_only=True, allow_null=True)
+    responsibility_forms_count = serializers.IntegerField(source='responsibility_forms.count', read_only=True)
+    latest_responsibility_form = serializers.SerializerMethodField()
 
     class Meta:
         model = Referral
         fields = '__all__'
         read_only_fields = ['referral_id', 'referred_at', 'created_at']
+
+    def get_latest_responsibility_form(self, obj):
+        latest = obj.responsibility_forms.order_by('-issue_date').first()
+        if not latest:
+            return None
+        return {
+            'id': latest.id,
+            'sequence_number': latest.sequence_number,
+            'valid_from': latest.valid_from,
+            'valid_to': latest.valid_to,
+            'status': latest.status,
+            'issue_date': latest.issue_date,
+            'document_file': latest.document_file.url if latest.document_file else None,
+        }
+
+
+class ResponsibilityFormIssuanceSerializer(serializers.ModelSerializer):
+    """Serializer for responsibility form issuances."""
+
+    issued_by_name = serializers.CharField(source='issued_by.get_full_name', read_only=True, allow_null=True)
+    referral_id_display = serializers.CharField(source='referral.referral_id', read_only=True)
+    document_file_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ResponsibilityFormIssuance
+        fields = '__all__'
+        read_only_fields = ['sequence_number', 'issue_date', 'created_at', 'updated_at', 'issued_by']
+
+    def get_document_file_url(self, obj):
+        return obj.document_file.url if obj.document_file else None
 
 
 class ICD10CodeSerializer(serializers.ModelSerializer):
