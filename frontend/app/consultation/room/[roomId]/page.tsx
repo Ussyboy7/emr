@@ -2854,7 +2854,27 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         }
       }
 
-      // Step 3: End the session using the dedicated endpoint
+      // Step 3: Ensure at least one diagnosis is present before ending session
+      try {
+        if (!sessionId) throw new Error('Session ID is required');
+        const diagnosisResult = await consultationService.getDiagnoses({
+          session: sessionId,
+          page: 1,
+          page_size: 1,
+        });
+        const hasDiagnosis = (diagnosisResult?.count || 0) > 0;
+        if (!hasDiagnosis) {
+          throw new Error('Please add at least one ICD-10 diagnosis before ending the session.');
+        }
+      } catch (err: any) {
+        if (err?.message?.includes('Please add at least one ICD-10 diagnosis')) {
+          throw err;
+        }
+        console.error('Error validating diagnosis before ending session:', err);
+        throw new Error('Unable to verify diagnosis. Please try again.');
+      }
+
+      // Step 4: End the session using the dedicated endpoint
       try {
         if (!sessionId) throw new Error('Session ID is required');
         debugConsultationRoom('Ending session with ID:', sessionId);

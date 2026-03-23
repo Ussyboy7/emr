@@ -122,12 +122,14 @@ class ConsultationService {
     room?: number;
     patient?: number;
     doctor?: number;
+    visit?: number;
     status?: string;
     search?: string;
     clinic?: string;
     date?: string;
     start_date?: string;
     end_date?: string;
+    ordering?: string;
     page?: number;
     page_size?: number;
   }): Promise<{ results: ConsultationSession[]; count: number }> {

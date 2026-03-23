@@ -14,12 +14,12 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { toast } from "sonner";
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { visitService, type Visit } from '@/lib/services';
+import { consultationService, visitService, type Visit } from '@/lib/services';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import {
   Search, Plus, Calendar, Clock, CheckCircle2,
-  Edit, Send, AlertTriangle, Loader2, Eye, X
+  Edit, Send, AlertTriangle, Loader2, Eye, X, FileText
 } from 'lucide-react';
 import { StandardPagination } from '@/components/StandardPagination';
 import { CustomDateRangeButton } from '@/components/CustomDateRangeButton';
@@ -27,6 +27,8 @@ import { AdvancedDateRangeDialog } from '@/components/AdvancedDateRangeDialog';
 import { getAllClinicsWithAll, CLINICS } from '@/lib/constants/clinics';
 import { normalizeClinicName } from '@/lib/utils/clinic-utils';
 import { useLocationOptions } from '@/lib/hooks/use-location-options';
+import { ConsultationReportModal } from '@/components/consultation/ConsultationReportModal';
+import { loadConsultationReportSession, type ConsultationReportSession } from '@/lib/consultation-report';
 
 // NPA Clinics - standardized list
 const clinics = getAllClinicsWithAll();
@@ -55,6 +57,9 @@ export default function VisitsPage() {
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [isForwardModalOpen, setIsForwardModalOpen] = useState(false);
   const [isCancelModalOpen, setIsCancelModalOpen] = useState(false);
+  const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+  const [reportLoading, setReportLoading] = useState(false);
+  const [reportSession, setReportSession] = useState<ConsultationReportSession | null>(null);
   type TransformedVisit = ReturnType<typeof transformVisit>;
   const [selectedVisit, setSelectedVisit] = useState<TransformedVisit | null>(null);
   const [visitToCancel, setVisitToCancel] = useState<TransformedVisit | null>(null);
@@ -333,6 +338,42 @@ export default function VisitsPage() {
   const handleCancelVisit = (visit: TransformedVisit) => {
     setVisitToCancel(visit);
     setIsCancelModalOpen(true);
+  };
+
+  const handleOpenVisitReport = async (visit: TransformedVisit) => {
+    try {
+      setReportLoading(true);
+      setReportSession(null);
+      setIsReportModalOpen(true);
+
+      const sessions = await consultationService.getSessions({
+        visit: visit.numericId,
+        status: 'completed',
+        ordering: '-ended_at',
+        page: 1,
+        page_size: 1,
+      });
+
+      const session = sessions.results?.[0];
+      if (!session?.id) {
+        toast.error('No completed consultation report found for this visit.');
+        setIsReportModalOpen(false);
+        return;
+      }
+
+      const fullSession = await loadConsultationReportSession(Number(session.id));
+      setReportSession(fullSession);
+    } catch (err: any) {
+      console.error('Error loading visit report:', err);
+      if (isAuthenticationError(err)) {
+        setAuthError(err);
+      } else {
+        toast.error('Failed to load consultation report.');
+      }
+      setIsReportModalOpen(false);
+    } finally {
+      setReportLoading(false);
+    }
   };
 
   const confirmCancelVisit = async () => {
@@ -660,9 +701,20 @@ export default function VisitsPage() {
                     )}
                     
                     {visit.status === 'Completed' && (
-                      <div className="h-7 w-7 flex items-center justify-center rounded bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400">
-                        <CheckCircle2 className="h-4 w-4" />
-                      </div>
+                      <>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          onClick={() => handleOpenVisitReport(visit)}
+                          title="View Consultation Report"
+                        >
+                          <FileText className="h-3.5 w-3.5" />
+                        </Button>
+                        <div className="h-7 w-7 flex items-center justify-center rounded bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400">
+                          <CheckCircle2 className="h-4 w-4" />
+                        </div>
+                      </>
                     )}
                   </div>
                 </div>
@@ -893,6 +945,13 @@ export default function VisitsPage() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        <ConsultationReportModal
+          open={isReportModalOpen}
+          onOpenChange={setIsReportModalOpen}
+          session={reportSession}
+          loading={reportLoading}
+        />
       </div>
     </DashboardLayout>
   );
