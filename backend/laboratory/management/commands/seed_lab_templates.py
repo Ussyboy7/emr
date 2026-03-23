@@ -10,16 +10,8 @@ class Command(BaseCommand):
     help = 'Seed the database with core lab test templates'
 
     def handle(self, *args, **options):
-        from laboratory.models import LabTest, LabOrder
-        
-        # Clear all existing data first
-        self.stdout.write('Clearing all existing lab data...')
-        LabTest.objects.all().delete()
-        LabOrder.objects.all().delete()
-        deleted_count, _ = LabTemplate.objects.all().delete()
-        self.stdout.write(f'Deleted {deleted_count} existing templates')
-        
-        self.stdout.write('Creating lab templates...')
+        self.stdout.write('Seeding lab templates (non-destructive mode)...')
+        self.stdout.write('Keeping existing LabOrder and LabTest records.')
 
         templates_data = [
             {
@@ -615,23 +607,31 @@ class Command(BaseCommand):
         ]
 
         created_count = 0
+        updated_count = 0
 
         for template_data in templates_data:
-            template = LabTemplate.objects.create(
-                name=template_data['name'],
+            template, created = LabTemplate.objects.update_or_create(
                 code=template_data['code'],
-                category=template_data.get('category', 'chemistry'),
-                sample_type=template_data['sample_type'],
-                description=template_data.get('description', ''),
-                normal_range=template_data.get('normal_range', {}),
-                turnaround_time=template_data.get('turnaround_time', ''),
-                is_active=True,
+                defaults={
+                    'name': template_data['name'],
+                    'category': template_data.get('category', 'chemistry'),
+                    'sample_type': template_data['sample_type'],
+                    'description': template_data.get('description', ''),
+                    'normal_range': template_data.get('normal_range', {}),
+                    'turnaround_time': template_data.get('turnaround_time', ''),
+                    'is_active': True,
+                },
             )
-            created_count += 1
-            self.stdout.write(self.style.SUCCESS(f'Created: {template.name} ({template.code})'))
+            if created:
+                created_count += 1
+                self.stdout.write(self.style.SUCCESS(f'Created: {template.name} ({template.code})'))
+            else:
+                updated_count += 1
+                self.stdout.write(self.style.WARNING(f'Updated: {template.name} ({template.code})'))
 
         self.stdout.write(self.style.SUCCESS(
             f'\n✓ Seeding complete!\n'
             f'  Created: {created_count} templates\n'
-            f'  Total: {len(templates_data)} templates in database'
+            f'  Updated: {updated_count} templates\n'
+            f'  Seeded: {len(templates_data)} template definitions'
         ))
