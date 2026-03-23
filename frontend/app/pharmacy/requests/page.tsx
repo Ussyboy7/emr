@@ -48,6 +48,7 @@ export default function DispensaryRequestsPage() {
   const [creatingRequest, setCreatingRequest] = useState(false);
   const [medicationSearch, setMedicationSearch] = useState("");
   const debouncedMedSearch = useDebouncedValue(medicationSearch, 300);
+  const debouncedSearchQuery = useDebouncedValue(searchQuery, 300);
   const [selectedMedication, setSelectedMedication] = useState<Medication | null>(null);
   const [requestQuantity, setRequestQuantity] = useState("100");
   const [stats, setStats] = useState({ total: 0, pending: 0, approved: 0, confirmed: 0, awaitingConfirmation: 0 });
@@ -82,18 +83,18 @@ export default function DispensaryRequestsPage() {
 
   useEffect(() => {
     loadStats();
-  }, [searchQuery, statusFilter, dateFilter]);
+  }, [debouncedSearchQuery, statusFilter, dateFilter]);
 
   useEffect(() => {
     loadRequests();
-  }, [currentPage, itemsPerPage, statusFilter, searchQuery, dateFilter]);
+  }, [currentPage, itemsPerPage, statusFilter, debouncedSearchQuery, dateFilter]);
 
   const loadRequests = async () => {
     try {
       setLoading(true);
       const params: Record<string, string | number> = { page: currentPage, page_size: itemsPerPage };
       if (statusFilter !== "all") params.status = statusFilter;
-      if (searchQuery.trim()) params.search = searchQuery.trim();
+      if (debouncedSearchQuery.trim()) params.search = debouncedSearchQuery.trim();
       Object.assign(params, buildDateParams());
       const response = await pharmacyService.getStockRequests(params);
       setRequests(response.results || []);
@@ -109,7 +110,7 @@ export default function DispensaryRequestsPage() {
   const loadStats = async () => {
     try {
       const baseParams: Record<string, string | number> = { page: 1, page_size: 1 };
-      if (searchQuery.trim()) baseParams.search = searchQuery.trim();
+      if (debouncedSearchQuery.trim()) baseParams.search = debouncedSearchQuery.trim();
       Object.assign(baseParams, buildDateParams());
       const [all, pending, approved, received, fulfilled] = await Promise.all([
         pharmacyService.getStockRequests(baseParams),
@@ -268,35 +269,24 @@ export default function DispensaryRequestsPage() {
           </Button>
         </div>
 
-        {loading && (
-          <Card>
-            <CardContent className="p-12 text-center">
-              <Loader2 className="h-12 w-12 mx-auto mb-4 animate-spin text-muted-foreground" />
-              <p className="text-muted-foreground">Loading requests...</p>
-            </CardContent>
-          </Card>
-        )}
-
-        {!loading && (
-          <>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              {statsCards.map((stat, i) => (
-                <Card key={i}>
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-muted-foreground">{stat.label}</p>
-                        <p className={`text-2xl sm:text-3xl font-bold ${stat.color} mt-1`}>{stat.value}</p>
-                        {stat.sub && <p className="text-xs text-muted-foreground">{stat.sub}</p>}
-                      </div>
-                      <div className={`p-3 rounded-full ${stat.bg}`}>
-                        <stat.icon className={`h-5 w-5 ${stat.color}`} />
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {statsCards.map((stat, i) => (
+            <Card key={i}>
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-muted-foreground">{stat.label}</p>
+                    <p className={`text-2xl sm:text-3xl font-bold ${stat.color} mt-1`}>{stat.value}</p>
+                    {stat.sub && <p className="text-xs text-muted-foreground">{stat.sub}</p>}
+                  </div>
+                  <div className={`p-3 rounded-full ${stat.bg}`}>
+                    <stat.icon className={`h-5 w-5 ${stat.color}`} />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
 
             <Card>
               <CardContent className="p-4">
@@ -344,7 +334,14 @@ export default function DispensaryRequestsPage() {
             </div>
 
             <div className="space-y-2">
-              {requests.length === 0 ? (
+              {loading ? (
+                <Card>
+                  <CardContent className="p-12 text-center">
+                    <Loader2 className="h-12 w-12 mx-auto mb-4 animate-spin text-muted-foreground" />
+                    <p className="text-muted-foreground">Loading requests...</p>
+                  </CardContent>
+                </Card>
+              ) : requests.length === 0 ? (
                 <Card>
                   <CardContent className="py-12 text-center text-muted-foreground">
                     <Send className="h-12 w-12 mx-auto mb-4 opacity-50" />
@@ -375,7 +372,7 @@ export default function DispensaryRequestsPage() {
               )}
             </div>
 
-            {totalRequests > 0 && (
+            {!loading && totalRequests > 0 && (
               <Card className="p-4">
                 <StandardPagination
                   currentPage={currentPage}
@@ -388,8 +385,6 @@ export default function DispensaryRequestsPage() {
                 />
               </Card>
             )}
-          </>
-        )}
 
         {/* New Request Modal */}
         <Dialog open={showNewRequestModal} onOpenChange={setShowNewRequestModal}>

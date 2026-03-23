@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, lazy, Suspense } from "react";
+import React, { useState, useEffect, useMemo, useCallback, lazy, Suspense } from "react";
 import { StandardPagination } from "@/components/StandardPagination";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -119,6 +119,13 @@ const cleanClinicalText = (text: string): string => {
   return cleaned;
 };
 
+const formatLocalYyyyMmDd = (d: Date) => {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
 // Extended type for local use (includes patientGender for filtering)
 interface ConsultationRecordWithGender extends ConsultationRecord {
   patientGender?: string;
@@ -231,6 +238,12 @@ export default function ConsultationHistoryPage() {
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [statsData, setStatsData] = useState({
+    today: 0,
+    thisWeek: 0,
+    inProgress: 0,
+    completed: 0,
+  });
   
   // Modal states
   const [selectedConsultation, setSelectedConsultation] = useState<ConsultationRecordWithGender | null>(null);
@@ -279,32 +292,36 @@ export default function ConsultationHistoryPage() {
   const [authError, setAuthError] = useState<unknown | null>(null);
   useAuthRedirect(authError);
 
+  const buildDateParams = useCallback(() => {
+    let date: string | undefined;
+    let start_date: string | undefined;
+    let end_date: string | undefined;
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    if (dateFilter === "today") {
+      date = formatLocalYyyyMmDd(today);
+    } else if (dateFilter === "week") {
+      const weekStart = new Date(today);
+      weekStart.setDate(today.getDate() - today.getDay()); // Start of week (Sunday)
+      start_date = formatLocalYyyyMmDd(weekStart);
+      end_date = formatLocalYyyyMmDd(today);
+    } else if (dateFilter === "month") {
+      const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+      start_date = formatLocalYyyyMmDd(monthStart);
+      end_date = formatLocalYyyyMmDd(today);
+    }
+
+    return { date, start_date, end_date };
+  }, [dateFilter]);
+
   useEffect(() => {
     const loadConsultations = async () => {
       try {
         setLoading(true);
 
-        // Date filter (server-side) - match Manage Visits/Nursing Pool concepts
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const yyyyMmDd = (d: Date) => d.toISOString().split("T")[0];
-        let date: string | undefined;
-        let start_date: string | undefined;
-        let end_date: string | undefined;
-
-        if (dateFilter === "today") {
-          date = yyyyMmDd(today);
-        } else if (dateFilter === "week") {
-          const weekAgo = new Date(today);
-          weekAgo.setDate(weekAgo.getDate() - 7);
-          start_date = yyyyMmDd(weekAgo);
-          end_date = yyyyMmDd(today);
-        } else if (dateFilter === "month") {
-          const monthAgo = new Date(today);
-          monthAgo.setMonth(monthAgo.getMonth() - 1);
-          start_date = yyyyMmDd(monthAgo);
-          end_date = yyyyMmDd(today);
-        }
+        const { date, start_date, end_date } = buildDateParams();
         
         // Backend expects status: 'active' | 'completed' | 'cancelled' (not 'in-progress')
         // Load all for date range (like Nursing Pool Queue) - search is client-side
@@ -326,7 +343,7 @@ export default function ConsultationHistoryPage() {
             // IMPORTANT: keep this list page light.
             // Avoid N+1 requests (patients, visits, diagnoses, orders, vitals).
             const startedAt = session.started_at ? new Date(session.started_at) : new Date();
-            const visitDate = startedAt.toISOString().split('T')[0];
+            const visitDate = formatLocalYyyyMmDd(startedAt);
             const visitTime = startedAt.toTimeString().slice(0, 5);
             const visitDisplayId: string | undefined = undefined;
 
@@ -409,7 +426,58 @@ export default function ConsultationHistoryPage() {
     };
     
     loadConsultations();
-  }, [statusFilter, dateFilter, clinicFilter]);
+  }, [statusFilter, clinicFilter, buildDateParams]);
+
+  useEffect(() => {
+    const loadStats = async () => {
+      try {
+        const { date, start_date, end_date } = buildDateParams();
+        const baseParams = {
+          page: 1,
+          page_size: 1,
+          clinic: clinicFilter !== "all" ? clinicFilter : undefined,
+          date,
+          start_date,
+          end_date,
+        };
+
+        const todayDate = formatLocalYyyyMmDd(new Date());
+        const weekStart = new Date();
+        weekStart.setHours(0, 0, 0, 0);
+        weekStart.setDate(weekStart.getDate() - weekStart.getDay());
+        const thisWeekStart = formatLocalYyyyMmDd(weekStart);
+
+        const [todayRes, thisWeekRes, inProgressRes, completedRes] = await Promise.all([
+          consultationService.getSessions({
+            page: 1,
+            page_size: 1,
+            clinic: clinicFilter !== "all" ? clinicFilter : undefined,
+            date: todayDate,
+          }),
+          consultationService.getSessions({
+            page: 1,
+            page_size: 1,
+            clinic: clinicFilter !== "all" ? clinicFilter : undefined,
+            start_date: thisWeekStart,
+            end_date: todayDate,
+          }),
+          consultationService.getSessions({ ...baseParams, status: "active" }),
+          consultationService.getSessions({ ...baseParams, status: "completed" }),
+        ]);
+
+        setStatsData({
+          today: todayRes.count || 0,
+          thisWeek: thisWeekRes.count || 0,
+          inProgress: inProgressRes.count || 0,
+          completed: completedRes.count || 0,
+        });
+      } catch (err) {
+        console.error("Error loading consultation stats:", err);
+      }
+    };
+
+    loadStats();
+  }, [clinicFilter, buildDateParams]);
 
   // Client-side filter and pagination (same as Nursing Pool Queue)
   const filteredConsultations = useMemo(() => {
@@ -446,41 +514,7 @@ export default function ConsultationHistoryPage() {
     setCurrentPage(1);
   }, [searchQuery, statusFilter, dateFilter, clinicFilter, itemsPerPage]);
 
-  // Stats (from filtered result set, like pool queue)
-  const stats = useMemo(() => {
-    const filtered = filteredConsultations;
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const weekAgo = new Date(today);
-    weekAgo.setDate(weekAgo.getDate() - 7);
-
-    const todayCount = filtered.filter(c => {
-      try {
-        const d = new Date(c.date + 'T' + (c.time || '00:00:00'));
-        d.setHours(0, 0, 0, 0);
-        return d.getTime() === today.getTime();
-      } catch {
-        return c.date === today.toISOString().split('T')[0];
-      }
-    }).length;
-
-    const weekCount = filtered.filter(c => {
-      try {
-        const d = new Date(c.date + 'T' + (c.time || '00:00:00'));
-        d.setHours(0, 0, 0, 0);
-        return d.getTime() >= weekAgo.getTime() && d.getTime() <= today.getTime();
-      } catch {
-        return true;
-      }
-    }).length;
-
-    return {
-      today: todayCount,
-      thisWeek: weekCount,
-      inProgress: filtered.filter(c => c.status === "In Progress").length,
-      completed: filtered.filter(c => c.status === "Completed").length,
-    };
-  }, [filteredConsultations]);
+  const stats = statsData;
 
   const openViewModal = (consultation: ConsultationRecord) => {
     setSelectedConsultation(consultation);
@@ -1035,17 +1069,6 @@ export default function ConsultationHistoryPage() {
                 .join("")
                 .toUpperCase();
 
-              const diagnosisSummary = (() => {
-                if (c.diagnosisCodes && c.diagnosisCodes.length > 0) {
-                  const codes = c.diagnosisCodes.map((dx) => dx.code).filter(Boolean);
-                  const shown = codes.slice(0, 3).join(", ");
-                  const extra = codes.length > 3 ? ` (+${codes.length - 3})` : "";
-                  return `${shown}${extra}`.trim();
-                }
-                if (c.diagnosis && c.diagnosis.trim()) return c.diagnosis.trim();
-                return "";
-              })();
-
               return (
                 <Card
                   key={c.id}
@@ -1082,13 +1105,6 @@ export default function ConsultationHistoryPage() {
                           {c.date ? ` • ${c.date}${c.time ? ` ${c.time}` : ""}` : ""}
                         </p>
 
-                        {/* Row 3: Diagnosis summary (like Notes in Manage Visits) */}
-                        {(diagnosisSummary || true) && (
-                          <p className="text-xs text-muted-foreground mt-1 line-clamp-1">
-                            <span className="font-medium">Diagnosis:</span>{" "}
-                            {diagnosisSummary ? diagnosisSummary : <span className="text-amber-600">No diagnosis recorded</span>}
-                          </p>
-                        )}
                       </div>
 
                       {/* Actions (Manage Visits pattern) */}

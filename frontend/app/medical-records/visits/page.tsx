@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import { DashboardLayout } from '@/components/DashboardLayout';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -18,23 +18,18 @@ import { visitService, type Visit } from '@/lib/services';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import {
-  Search, Plus, Calendar, Clock, CheckCircle2, MapPin,
+  Search, Plus, Calendar, Clock, CheckCircle2,
   Edit, Send, AlertTriangle, Loader2, Eye, X
 } from 'lucide-react';
 import { StandardPagination } from '@/components/StandardPagination';
 import { CustomDateRangeButton } from '@/components/CustomDateRangeButton';
 import { AdvancedDateRangeDialog } from '@/components/AdvancedDateRangeDialog';
 import { getAllClinicsWithAll, CLINICS } from '@/lib/constants/clinics';
-import { clinicMatches, normalizeClinicName } from '@/lib/utils/clinic-utils';
+import { normalizeClinicName } from '@/lib/utils/clinic-utils';
 import { useLocationOptions } from '@/lib/hooks/use-location-options';
 
 // NPA Clinics - standardized list
 const clinics = getAllClinicsWithAll();
-
-// Simplified visit statuses for Medical Records
-// Scheduled = Created, waiting to be sent to nursing
-// Sent to Nursing = Confirmed and forwarded (completed from Medical Records perspective)
-type VisitStatus = 'Scheduled' | 'In Progress'| 'Completed' | 'Cancelled';
 
 // Visits data will be loaded from API
 
@@ -47,6 +42,7 @@ export default function VisitsPage() {
   const [authError, setAuthError] = useState<unknown | null>(null);
   useAuthRedirect(authError);
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState('all');
   const [clinicFilter, setClinicFilter] = useState('all');
@@ -78,6 +74,13 @@ export default function VisitsPage() {
     inProgress: 0,
     completed: 0,
   });
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
 
   // Helper function to transform visit from API to frontend format
   const transformVisit = (visit: Visit) => ({
@@ -143,7 +146,7 @@ export default function VisitsPage() {
       const baseParams = {
         page: 1,
         page_size: 1, // We only need the count, not the data
-        search: searchQuery || undefined,
+        search: debouncedSearchQuery || undefined,
         visit_type: typeFilter !== 'all' ? typeFilter : undefined,
         clinic: clinicFilter !== 'all' ? clinicFilter : undefined,
         date: dateParam,
@@ -169,7 +172,7 @@ export default function VisitsPage() {
       console.error('Error loading stats:', err);
       // Don't set error state for stats - visits will still load
     }
-  }, [searchQuery, typeFilter, clinicFilter, buildDateParams]);
+  }, [debouncedSearchQuery, typeFilter, clinicFilter, buildDateParams]);
 
   // Load visits from API - extracted as a reusable function
   const loadVisits = useCallback(async () => {
@@ -182,7 +185,7 @@ export default function VisitsPage() {
       const filterParams = {
         page: currentPage,
         page_size: itemsPerPage,
-        search: searchQuery || undefined,
+        search: debouncedSearchQuery || undefined,
         status: statusFilter !== 'all' ? statusFilter : undefined,
         visit_type: typeFilter !== 'all' ? typeFilter : undefined,
         clinic: clinicFilter !== 'all' ? clinicFilter : undefined,
@@ -213,7 +216,7 @@ export default function VisitsPage() {
     } finally {
       setLoading(false);
     }
-  }, [currentPage, itemsPerPage, searchQuery, statusFilter, typeFilter, clinicFilter, buildDateParams]);
+  }, [currentPage, itemsPerPage, debouncedSearchQuery, statusFilter, typeFilter, clinicFilter, buildDateParams]);
 
   // Load visits when filters change
   useEffect(() => {
@@ -231,7 +234,7 @@ export default function VisitsPage() {
   // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, statusFilter, typeFilter, clinicFilter, dateFilter, dateRange.from, dateRange.to]);
+  }, [debouncedSearchQuery, statusFilter, typeFilter, clinicFilter, dateFilter, dateRange.from, dateRange.to]);
 
   const clearDateRangeFilters = () => {
     setDateRange({ from: '', to: '' });
@@ -272,14 +275,6 @@ export default function VisitsPage() {
 
       // Use numeric ID for API calls (backend expects primary key, not visit_id string)
       const visitId = selectedVisit.numericId || Number(selectedVisit.id);
-      
-      // Map frontend status to backend status
-      const statusMap: Record<string, string> = {
-        'Scheduled': 'scheduled',
-        'In Progress': 'in_progress',
-        'Completed': 'completed',
-        'Cancelled': 'cancelled',
-      };
       
       const updateData: any = {
         visit_type: editForm.type || undefined,
@@ -452,39 +447,26 @@ export default function VisitsPage() {
           </Card>
         )}
 
-        {/* Loading State */}
-        {loading && (
-          <Card>
-            <CardContent className="p-12 text-center">
-              <Loader2 className="h-12 w-12 mx-auto mb-4 animate-spin text-muted-foreground" />
-              <p className="text-muted-foreground">Loading visits...</p>
-            </CardContent>
-          </Card>
-        )}
-
         {/* Stats - 4 cards */}
-        {!loading && (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {stats.map((stat, i) => (
-              <Card key={i}>
-                <CardContent className="p-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-muted-foreground">{stat.label}</p>
-                      <p className={`text-2xl sm:text-3xl font-bold ${stat.color} mt-1`}>{stat.value}</p>
-                    </div>
-                    <div className={`p-3 rounded-full ${stat.bg}`}>
-                      <stat.icon className={`h-5 w-5 ${stat.color}`} />
-                    </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {stats.map((stat, i) => (
+            <Card key={i}>
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-muted-foreground">{stat.label}</p>
+                    <p className={`text-2xl sm:text-3xl font-bold ${stat.color} mt-1`}>{stat.value}</p>
                   </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        )}
+                  <div className={`p-3 rounded-full ${stat.bg}`}>
+                    <stat.icon className={`h-5 w-5 ${stat.color}`} />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
 
         {/* Filters */}
-        {!loading && (
         <Card>
           <CardContent className="p-4">
             <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-3">
@@ -538,7 +520,6 @@ export default function VisitsPage() {
             </div>
           </CardContent>
         </Card>
-        )}
 
         <AdvancedDateRangeDialog
           open={isDateFilterDialogOpen}
@@ -551,18 +532,24 @@ export default function VisitsPage() {
         />
 
         {/* Results Count */}
-        {!loading && (
-          <>
-            <div className="flex items-center justify-between px-1">
-              <p className="text-sm text-muted-foreground">
-                Showing <span className="font-medium text-foreground">{paginatedVisits.length}</span> visits
-              </p>
-            </div>
+        <>
+          <div className="flex items-center justify-between px-1">
+            <p className="text-sm text-muted-foreground">
+              Showing <span className="font-medium text-foreground">{paginatedVisits.length}</span> visits
+            </p>
+          </div>
 
-            {/* Visit Cards */}
-            <div className="space-y-2">
-              {paginatedVisits.length > 0 ? (
-                paginatedVisits.map((visit) => {
+          {/* Visit Cards */}
+          <div className="space-y-2">
+            {loading ? (
+              <Card>
+                <CardContent className="p-12 text-center">
+                  <Loader2 className="h-12 w-12 mx-auto mb-4 animate-spin text-muted-foreground" />
+                  <p className="text-muted-foreground">Loading visits...</p>
+                </CardContent>
+              </Card>
+            ) : paginatedVisits.length > 0 ? (
+              paginatedVisits.map((visit) => {
                   const visitLifecycleBadge = getPatientVisitStatusBadge(visit);
                   return (
             <Card key={visit.id} className={`border-l-4 ${getTypeColor(visit.type)} hover:shadow-md transition-shadow`}>
@@ -683,34 +670,33 @@ export default function VisitsPage() {
             </Card>
                   );
                 })
-              ) : (
-                <Card>
-                  <CardContent className="py-12 text-center">
-                    <Search className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-                    <p className="text-lg font-medium mb-1">No visits found</p>
-                    <p className="text-sm text-muted-foreground">Try adjusting your search or filter criteria</p>
-                  </CardContent>
-                </Card>
-              )}
-            </div>
-
-            {/* Pagination */}
-            {paginatedVisits.length > 0 && (
-              <StandardPagination
-                currentPage={currentPage}
-                totalItems={totalCount}
-                itemsPerPage={itemsPerPage}
-                onPageChange={setCurrentPage}
-                onItemsPerPageChange={(newSize) => {
-                  setItemsPerPage(newSize);
-                  setCurrentPage(1);
-                }}
-                itemName="visits"
-                pageSizeOptions={[50, 75, 100]}
-              />
+            ) : (
+              <Card>
+                <CardContent className="py-12 text-center">
+                  <Search className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+                  <p className="text-lg font-medium mb-1">No visits found</p>
+                  <p className="text-sm text-muted-foreground">Try adjusting your search or filter criteria</p>
+                </CardContent>
+              </Card>
             )}
-          </>
-        )}
+          </div>
+
+          {/* Pagination */}
+          {!loading && paginatedVisits.length > 0 && (
+            <StandardPagination
+              currentPage={currentPage}
+              totalItems={totalCount}
+              itemsPerPage={itemsPerPage}
+              onPageChange={setCurrentPage}
+              onItemsPerPageChange={(newSize) => {
+                setItemsPerPage(newSize);
+                setCurrentPage(1);
+              }}
+              itemName="visits"
+              pageSizeOptions={[50, 75, 100]}
+            />
+          )}
+        </>
 
         {/* Edit Visit Modal */}
         <Dialog open={isEditModalOpen} onOpenChange={setIsEditModalOpen}>

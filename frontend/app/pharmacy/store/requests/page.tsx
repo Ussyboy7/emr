@@ -15,12 +15,22 @@ import { toast } from "sonner";
 import { pharmacyService, type StockRequest, type StockRequestItem } from "@/lib/services";
 import { Send, CheckCircle2, Clock, Loader2, Eye, Zap, Search, Plus, Minus, HelpCircle } from "lucide-react";
 
+function useDebouncedValue<T>(value: T, delay: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(t);
+  }, [value, delay]);
+  return debounced;
+}
+
 export default function StoreRequestsPage() {
   const [loading, setLoading] = useState(true);
   const [requests, setRequests] = useState<StockRequest[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [statusFilter, setStatusFilter] = useState("pending");
   const [searchQuery, setSearchQuery] = useState("");
+  const debouncedSearchQuery = useDebouncedValue(searchQuery, 300);
   const [dateFilter, setDateFilter] = useState("today");
   const [selectedRequest, setSelectedRequest] = useState<StockRequest | null>(null);
   const [editedQuantities, setEditedQuantities] = useState<Record<number, number>>({});
@@ -56,7 +66,7 @@ export default function StoreRequestsPage() {
   const loadStats = async () => {
     try {
       const baseParams: Record<string, string | number> = { page: 1, page_size: 1 };
-      if (searchQuery.trim()) baseParams.search = searchQuery.trim();
+      if (debouncedSearchQuery.trim()) baseParams.search = debouncedSearchQuery.trim();
       Object.assign(baseParams, buildDateParams());
       const [all, pending, approved, fulfilled, partResp] = await Promise.all([
         pharmacyService.getStockRequests(baseParams),
@@ -84,7 +94,7 @@ export default function StoreRequestsPage() {
         page_size: itemsPerPage,
       };
       if (statusFilter && statusFilter !== "all") params.status = statusFilter;
-      if (searchQuery.trim()) params.search = searchQuery.trim();
+      if (debouncedSearchQuery.trim()) params.search = debouncedSearchQuery.trim();
       Object.assign(params, buildDateParams());
       const response = await pharmacyService.getStockRequests(params);
       setRequests(response.results || []);
@@ -99,11 +109,11 @@ export default function StoreRequestsPage() {
 
   useEffect(() => {
     loadRequests();
-  }, [statusFilter, currentPage, itemsPerPage, searchQuery, dateFilter]);
+  }, [statusFilter, currentPage, itemsPerPage, debouncedSearchQuery, dateFilter]);
 
   useEffect(() => {
     loadStats();
-  }, [searchQuery, statusFilter, dateFilter]);
+  }, [debouncedSearchQuery, statusFilter, dateFilter]);
 
   const handleOpenDetails = (req: StockRequest) => {
     setSelectedRequest(req);
@@ -237,34 +247,23 @@ export default function StoreRequestsPage() {
           </div>
         </div>
 
-        {loading && (
-          <Card>
-            <CardContent className="p-12 text-center">
-              <Loader2 className="h-12 w-12 mx-auto mb-4 animate-spin text-muted-foreground" />
-              <p className="text-muted-foreground">Loading requests...</p>
-            </CardContent>
-          </Card>
-        )}
-
-        {!loading && (
-          <>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              {stats.map((stat, i) => (
-                <Card key={i}>
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-muted-foreground">{stat.label}</p>
-                        <p className={`text-2xl sm:text-3xl font-bold ${stat.color} mt-1`}>{stat.value}</p>
-                      </div>
-                      <div className={`p-3 rounded-full ${stat.bg}`}>
-                        <stat.icon className={`h-5 w-5 ${stat.color}`} />
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {stats.map((stat, i) => (
+            <Card key={i}>
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-muted-foreground">{stat.label}</p>
+                    <p className={`text-2xl sm:text-3xl font-bold ${stat.color} mt-1`}>{stat.value}</p>
+                  </div>
+                  <div className={`p-3 rounded-full ${stat.bg}`}>
+                    <stat.icon className={`h-5 w-5 ${stat.color}`} />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
 
             <Card>
               <CardContent className="p-4">
@@ -311,7 +310,14 @@ export default function StoreRequestsPage() {
             </div>
 
             <div className="space-y-2">
-              {paginatedRequests.length === 0 ? (
+              {loading ? (
+                <Card>
+                  <CardContent className="p-12 text-center">
+                    <Loader2 className="h-12 w-12 mx-auto mb-4 animate-spin text-muted-foreground" />
+                    <p className="text-muted-foreground">Loading requests...</p>
+                  </CardContent>
+                </Card>
+              ) : paginatedRequests.length === 0 ? (
                 <Card>
                   <CardContent className="py-12 text-center text-muted-foreground">
                     <Send className="h-12 w-12 mx-auto mb-4 opacity-50" />
@@ -355,7 +361,7 @@ export default function StoreRequestsPage() {
               )}
             </div>
 
-            {totalCount > 0 && (
+            {!loading && totalCount > 0 && (
               <Card className="p-4">
                 <StandardPagination
                   currentPage={currentPage}
@@ -368,8 +374,6 @@ export default function StoreRequestsPage() {
                 />
               </Card>
             )}
-          </>
-        )}
 
         <Dialog open={showDetailsModal} onOpenChange={setShowDetailsModal}>
           <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
