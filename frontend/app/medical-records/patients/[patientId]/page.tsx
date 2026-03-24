@@ -20,6 +20,13 @@ import { patientService, consultationService, labService, radiologyService,
          pharmacyService, physioService, wardService, type Patient } from '@/lib/services';
 import { apiFetch } from '@/lib/api-client';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
+import { useCurrentUser } from '@/hooks/use-current-user';
+import {
+  WardDoctorOrdersSection,
+  userCanAddWardDoctorOrders,
+  userCanEditCancelWardOrders,
+} from '@/components/ward/WardDoctorOrdersSection';
+import type { PatientAdmission } from '@/lib/services/ward-service';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { PatientAvatar } from '@/components/PatientAvatar';
 import { VitalsDetailModal } from '@/components/VitalsDetailModal';
@@ -116,6 +123,7 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
   const [error, setError] = useState<string | null>(null);
   const [authError, setAuthError] = useState<unknown | null>(null);
   useAuthRedirect(authError);
+  const { currentUser } = useCurrentUser();
 
   // Consultation Report state (shared modal used by View Report)
   const [selectedSession, setSelectedSession] = useState<ConsultationReportSession | null>(null);
@@ -365,9 +373,9 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
         <Card>
           <CardContent className="p-6">
             <div className="flex flex-col md:flex-row items-start gap-6">
-              <PatientAvatar name={(patient.full_name || `${patient.first_name || ''} ${patient.surname || ''}`.trim()) || ''} photoUrl={patient.photo} size="lg" />
+              <PatientAvatar name={patient.full_name ?? ''} photoUrl={patient.photo} size="lg" />
               <div className="flex-1">
-                <h2 className="text-2xl font-bold">{patient.full_name || `${patient.first_name} ${patient.surname}`}</h2>
+                <h2 className="text-2xl font-bold">{patient.full_name ?? ''}</h2>
                 <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-4">
                   <div>
                     <p className="text-xs text-muted-foreground">Patient ID</p>
@@ -445,7 +453,6 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
                 selectedPrescription.patient_name ||
                 selectedPrescription.patient_details?.name ||
                 patient?.full_name ||
-                (patient ? `${patient.first_name || ''} ${patient.surname || ''}`.trim() : '') ||
                 '';
               const patientIdValue = patient?.patient_id || selectedPrescription.patient_details?.patient_id || '';
               const age = selectedPrescription.patient_details?.age ?? (patient as any)?.age ?? null;
@@ -605,7 +612,7 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
 
         <VitalsDetailModal
           vitals={selectedVital}
-          patientName={patient?.full_name || (patient ? `${patient.first_name || ''} ${patient.surname || ''}`.trim() : '')}
+          patientName={patient?.full_name ?? ''}
           isOpen={isVitalsDetailModalOpen}
           onClose={() => { setIsVitalsDetailModalOpen(false); setSelectedVital(null); }}
         />
@@ -1167,7 +1174,7 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
               {selectedPhysio && (
                 <DialogDescription>
                   {selectedPhysioSession 
-                    ? `${selectedPhysioSession.patient_name || (patient?.full_name || (patient ? [patient.first_name, patient.surname].filter(Boolean).join(' ') : '')) || 'Patient'} · PHY-${String(selectedPhysioSession.id || '').padStart(6, '0')} · Session ${selectedPhysioSession.session_number ?? '—'}`
+                    ? `${selectedPhysioSession.patient_name || patient?.full_name || ''} · PHY-${String(selectedPhysioSession.id || '').padStart(6, '0')} · Session ${selectedPhysioSession.session_number ?? '—'}`
                     : `PHY-${String(selectedPhysio.id || '').padStart(6, '0')} · ${formatDate(selectedPhysio.ordered_at)}`
                   }
                 </DialogDescription>
@@ -1270,7 +1277,7 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
                       <div className="space-y-2">
                         <h3 className="font-medium text-sm text-muted-foreground uppercase tracking-wide">Patient Information</h3>
                         <div className="space-y-1">
-                          <p><span className="font-medium">Name:</span> {selectedPhysioSession.patient_name || (patient?.full_name || (patient ? [patient.first_name, patient.surname].filter(Boolean).join(' ') : '')) || 'Unknown'}</p>
+                          <p><span className="font-medium">Name:</span> {selectedPhysioSession.patient_name || patient?.full_name || ''}</p>
                           <p><span className="font-medium">ID:</span> {selectedPhysioSession.patient_id || patient?.patient_id || '—'}</p>
                           <p><span className="font-medium">Physiotherapist:</span> {selectedPhysioSession.physiotherapist_name || 'Not specified'}</p>
                         </div>
@@ -1516,7 +1523,7 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
 
         {/* Ward Admission View Dialog */}
         <Dialog open={!!selectedWard} onOpenChange={(open) => { if (!open) setSelectedWard(null); }}>
-          <DialogContent className="w-[95vw] sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className="w-[95vw] sm:max-w-[720px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2"><FileText className="h-5 w-5 text-emerald-500" />Ward Admission</DialogTitle>
               <DialogDescription>
@@ -1527,12 +1534,16 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
               const patientName =
                 selectedWard.patient_name ||
                 patient?.full_name ||
-                (patient ? `${patient.first_name || ''} ${patient.surname || ''}`.trim() : '') ||
                 '';
               const patientIdValue = patient?.patient_id || '';
               const age = (patient as any)?.age ?? null;
               const gender = (patient as any)?.gender ?? '';
               const statusLabel = humanizeStatus(selectedWard.status);
+
+              const admissionForOrders = {
+                ...selectedWard,
+                patient_name: patientName,
+              } as PatientAdmission;
 
               const handlePrint = () => {
                 try {
@@ -1569,7 +1580,12 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
               };
 
               return (
-                <div className="space-y-6 py-4">
+                <Tabs defaultValue="summary" className="w-full py-2">
+                  <TabsList className="grid w-full grid-cols-2 h-9 mb-4">
+                    <TabsTrigger value="summary" className="text-xs">Admission summary</TabsTrigger>
+                    <TabsTrigger value="orders" className="text-xs">Doctor&apos;s orders</TabsTrigger>
+                  </TabsList>
+                  <TabsContent value="summary" className="space-y-6 mt-0">
                   <div id="ward-admission-print-root">
                     <div className="text-center p-4 border-b">
                       <h2 className="text-xl font-bold">WARD ADMISSION SUMMARY</h2>
@@ -1640,7 +1656,11 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
                       </div>
                       <div className="p-3 rounded-lg border">
                         <p className="text-xs text-muted-foreground">Length of Stay</p>
-                        <p className="font-medium">{selectedWard.length_of_stay ?? 0} days</p>
+                        <p className="font-medium">
+                        {selectedWard.length_of_stay === 0 || selectedWard.length_of_stay == null
+                          ? 'Same day'
+                          : `${selectedWard.length_of_stay} day${selectedWard.length_of_stay === 1 ? '' : 's'}`}
+                      </p>
                       </div>
                       <div className="p-3 rounded-lg border">
                         <p className="text-xs text-muted-foreground">Discharged</p>
@@ -1704,7 +1724,24 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
                       <Download className="h-4 w-4 mr-2" />Download PDF
                     </Button>
                   </div>
-                </div>
+                  </TabsContent>
+                  <TabsContent value="orders" className="mt-0">
+                    <WardDoctorOrdersSection
+                      admission={admissionForOrders}
+                      allowAddOrders={
+                        !!currentUser?.isSuperuser ||
+                        userCanAddWardDoctorOrders(currentUser?.systemRole)
+                      }
+                      allowEditCancelOrders={
+                        !!currentUser?.isSuperuser ||
+                        userCanEditCancelWardOrders(currentUser?.systemRole)
+                      }
+                      currentUserId={
+                        currentUser?.id != null ? Number(currentUser.id) : undefined
+                      }
+                    />
+                  </TabsContent>
+                </Tabs>
               );
             })()}
           </DialogContent>

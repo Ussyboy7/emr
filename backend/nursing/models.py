@@ -29,6 +29,13 @@ class NursingOrder(models.Model):
     ordered_by = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, related_name='ordered_nursing_orders')
     visit = models.ForeignKey('patients.Visit', on_delete=models.SET_NULL, null=True, blank=True, related_name='nursing_orders')
     consultation_session = models.ForeignKey('consultation.ConsultationSession', on_delete=models.SET_NULL, null=True, blank=True, related_name='nursing_orders')
+    admission = models.ForeignKey(
+        'wards.PatientAdmission',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='ward_nursing_orders',
+    )
     
     order_type = models.CharField(max_length=100, help_text="Medication, Procedure, Observation, etc.")
     description = models.TextField()

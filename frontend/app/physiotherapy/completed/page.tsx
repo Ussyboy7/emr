@@ -478,7 +478,7 @@ export default function PhysioCompletedPage() {
                       <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${
                         hasRecommendations ? 'bg-blue-100 dark:bg-blue-900/30' : 'bg-emerald-100 dark:bg-emerald-900/30'
                       }`}>
-                        <PatientAvatar name={session.patient_name || 'Unknown'} size="sm" />
+                        <PatientAvatar name={session.patient_name ?? ''} size="sm" />
                       </div>
                       
                       {/* Info */}
@@ -486,7 +486,7 @@ export default function PhysioCompletedPage() {
                         {/* Row 1: Name + Badges + Actions */}
                         <div className="flex items-center justify-between gap-2">
                           <div className="flex items-center gap-2 flex-wrap min-w-0">
-                            <span className="font-semibold text-foreground truncate">{session.patient_name || 'Unknown Patient'}</span>
+                            <span className="font-semibold text-foreground truncate">{session.patient_name ?? ''}</span>
                             <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-emerald-500/10 text-emerald-600 border-emerald-500/30">
                               <CheckCircle2 className="h-2 w-2 mr-0.5" />Completed
                             </Badge>

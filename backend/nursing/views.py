@@ -17,16 +17,22 @@ class NursingOrderViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     serializer_class = NursingOrderSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['patient', 'ordered_by', 'status', 'priority', 'order_type', 'consultation_session', 'visit']
+    filterset_fields = ['patient', 'ordered_by', 'status', 'priority', 'order_type', 'consultation_session', 'visit', 'admission']
     search_fields = ['order_id', 'description']
     ordering_fields = ['ordered_at']
     ordering = ['-ordered_at']
     
     def get_queryset(self):
-        return NursingOrder.objects.all().select_related('patient', 'ordered_by', 'visit', 'consultation_session', 'created_by')
+        return NursingOrder.objects.all().select_related(
+            'patient', 'ordered_by', 'visit', 'consultation_session', 'created_by', 'admission'
+        )
     
     def perform_create(self, serializer):
         order = serializer.save(created_by=self.request.user)
+        normalized_order_type = (order.order_type or '').strip().lower()
+        handoff_suffix = ''
+        if normalized_order_type == 'observation admission' and order.consultation_session_id:
+            handoff_suffix = ' (consultation handoff to nursing observation queue)'
         
         # Log audit
         AuditService.log_activity(
@@ -36,7 +42,7 @@ class NursingOrderViewSet(viewsets.ModelViewSet):
             object_id=str(order.id),
             module='nursing',
             object_repr=f'Nursing Order {order.order_id}',
-            description=f'Created nursing order {order.order_id} for patient {order.patient.get_full_name()}',
+            description=f'Created nursing order {order.order_id} for patient {order.patient.get_full_name()}{handoff_suffix}',
             new_values={'order_id': order.order_id, 'order_type': order.order_type, 'priority': order.priority, 'patient_id': str(order.patient.id)},
             request=self.request,
         )

@@ -721,7 +721,7 @@ export default function ReferralsManagementPage() {
                             onClick={() => openReferralDetails(referral)}
                             className="font-semibold text-foreground hover:text-primary transition-colors truncate text-left"
                           >
-                            {referral.patient_name || 'Unknown Patient'}
+                            {referral.patient_name ?? ''}
                           </button>
                           <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${getFacilityTypeBadge(referral.facility_type)}`}>
                             {toLabel(referral.facility_type)}
@@ -876,7 +876,7 @@ export default function ReferralsManagementPage() {
                   </div>
                   <div>
                     <Label className="text-sm font-medium">Patient</Label>
-                    <p className="text-sm">{selectedReferral.patient_name || 'Unknown'}</p>
+                    <p className="text-sm">{selectedReferral.patient_name ?? ''}</p>
                   </div>
                   <div>
                     <Label className="text-sm font-medium">Specialty</Label>

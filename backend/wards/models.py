@@ -209,6 +209,8 @@ class PatientAdmission(models.Model):
     """
 
     ADMISSION_TYPE_CHOICES = [
+        ('observation', 'Observation (Day Care)'),
+        ('daycare_observation', 'Day Care Observation'),
         ('emergency', 'Emergency'),
         ('elective', 'Elective'),
         ('transfer', 'Transfer from Another Ward'),

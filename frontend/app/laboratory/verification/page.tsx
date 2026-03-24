@@ -581,7 +581,7 @@ const transformResult = (
     orderId: (apiResult as any).order_id || order?.order_id || '',
     patient: {
       id: (patient as any)?.id?.toString() || '',
-      name: (apiResult as any).patient_name || (patient as any)?.name || 'Unknown',
+      name: (apiResult as any).patient_name ?? (patient as any)?.name ?? '',
       age: (patient as any)?.age || 0,
       gender: (patient as any)?.gender || 'Unknown',
     },

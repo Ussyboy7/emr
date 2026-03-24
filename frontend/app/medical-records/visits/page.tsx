@@ -93,7 +93,7 @@ export default function VisitsPage() {
     numericId: visit.id, // Keep numeric ID for backend API calls
     visitId: visit.visit_id || String(visit.id), // Display ID (visit_id string)
     patientId: visit.patient_id || '',
-    patient: visit.patient_name || `Patient ${visit.patient}`,
+    patient: visit.patient_name ?? '',
     type: visit.visit_type || 'consultation', // Use backend value (lowercase)
     clinic: visit.clinic || '',
     clinics: visit.clinics || [], // All clinics for this visit

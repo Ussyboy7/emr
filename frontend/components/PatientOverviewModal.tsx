@@ -53,6 +53,8 @@ interface Patient {
 interface PatientDetail {
   id: string;
   patientId: string;
+  /** Same string as API full_name / Patient.get_full_name() */
+  fullName: string;
   title: string;
   firstName: string;
   lastName: string;
@@ -172,6 +174,8 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
     residentialAddress: '',
   });
   const [loading, setLoading] = useState(false);
+  /** Header / avatar: list prop until GET patient returns, then API full_name only */
+  const [overviewPatientName, setOverviewPatientName] = useState('');
   const [activeTab, setActiveTab] = useState('overview');
   const [historySubTab, setHistorySubTab] = useState('background');
   
@@ -203,6 +207,12 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
     setSelectedVisit(visit);
     setIsVisitDetailModalOpen(true);
   };
+
+  useEffect(() => {
+    if (isOpen && patient) {
+      setOverviewPatientName(patient.name);
+    }
+  }, [isOpen, patient?.id, patient?.name]);
 
   const canManageDependents = patientDetail?.category === 'employee' || patientDetail?.category === 'retiree';
 
@@ -261,7 +271,8 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
         
         // Always fetch full patient details using the detailed serializer
         apiPatient = await patientService.getPatient(numericId);
-      
+      setOverviewPatientName(apiPatient.full_name ?? '');
+
       // Load all patient data in parallel
       const [visitsData, vitalsData, labData, historyData, prescriptionsData, consultationsData, imagingData] = await Promise.allSettled([
         patientService.getPatientVisits(numericId),
@@ -512,6 +523,7 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
       const detail: PatientDetail = {
         id: apiPatient.id.toString(),
         patientId: apiPatient.patient_id || apiPatient.id.toString(),
+        fullName: apiPatient.full_name ?? '',
         title: apiPatient.title || '',
         firstName: apiPatient.first_name || '',
         lastName: apiPatient.surname || '',
@@ -660,10 +672,10 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
               {loading ? (
                 <Loader2 className="h-12 w-12 animate-spin text-muted-foreground" />
               ) : (
-                <PatientAvatar name={patient.name} photoUrl={patient.photoUrl} size="lg" className="border-2 border-primary/20" />
+                <PatientAvatar name={overviewPatientName} photoUrl={patient.photoUrl} size="lg" className="border-2 border-primary/20" />
               )}
               <div>
-                <DialogTitle className="text-2xl font-bold">{patient.name || 'Patient Details'}</DialogTitle>
+                <DialogTitle className="text-2xl font-bold">{overviewPatientName || 'Patient Details'}</DialogTitle>
                 <div className="flex items-center gap-2 mt-1 text-sm text-muted-foreground">
                   <Badge variant="outline" className={getCategoryBadge(patient.category)}>
                     {patient.category}
@@ -1071,7 +1083,7 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
                       <CardContent className="p-5 space-y-3">
                         <div className="flex items-start justify-between gap-3">
                           <div>
-                            <p className="font-semibold">{dependent.full_name || dependent.patient_id}</p>
+                            <p className="font-semibold">{dependent.full_name ?? ''}</p>
                             <p className="text-sm text-muted-foreground">{dependent.patient_id}</p>
                           </div>
                           <Badge variant="outline">
@@ -1153,7 +1165,7 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
           <div className="space-y-6">
             <Card className="border-dashed">
               <CardContent className="p-4 text-sm space-y-1">
-                <p className="font-medium">{patientDetail?.firstName} {patientDetail?.middleName} {patientDetail?.lastName}</p>
+                <p className="font-medium">{patientDetail?.fullName ?? ''}</p>
                 <p className="text-muted-foreground">
                   Principal: {patientDetail?.patientId} {patientDetail?.personalNumber ? `• ${patientDetail.personalNumber}` : ''}
                 </p>

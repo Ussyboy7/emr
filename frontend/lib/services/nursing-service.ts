@@ -91,7 +91,7 @@ class NursingService {
         if (visit.visit_type === 'emergency') {
           alerts.push({
             id: `visit-${visit.id}`,
-            patient: visit.patient_name || `Patient ${visit.patient}`,
+            patient: visit.patient_name ?? '',
             room: visit.clinic || 'Triage',
             alert: `${visit.visit_type} requires immediate attention`,
             time: '5 min ago',
@@ -104,7 +104,7 @@ class NursingService {
       admissions.slice(0, 2).forEach((admission, index) => {
         alerts.push({
           id: `admission-${admission.id}`,
-          patient: admission.patient_name || `Patient ${admission.patient}`,
+          patient: admission.patient_name ?? '',
           room: admission.ward_name || `Bed ${admission.bed_number || 'Unknown'}`,
           alert: 'Post-admission monitoring required',
           time: '15 min ago',
@@ -133,7 +133,7 @@ class NursingService {
         .map((visit, index) => ({
           id: `activity-${visit.id}`,
           type: this.mapVisitTypeToActivityType(visit.visit_type || 'consultation'),
-          patient: visit.patient_name || `Patient ${visit.patient}`,
+          patient: visit.patient_name ?? '',
           action: this.getActivityDescription(visit),
           time: this.getRelativeTime(`${visit.date}T${visit.time || '00:00:00'}`),
           status: this.mapVisitStatusToActivityStatus(visit.status)

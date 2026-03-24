@@ -73,7 +73,7 @@ const transformReport = (apiReport: any): RadiologyReport => {
   
   // Extract patient details
   const patientId = (apiReport as any).patient_details?.patient_id || '';
-  const patientName = apiReport.patient_name || 'Unknown';
+  const patientName = apiReport.patient_name ?? '';
   const patientAge = (apiReport as any).patient_details?.age || (apiReport as any).patient_age || 0;
   const patientGender = (apiReport as any).patient_details?.gender || (apiReport as any).patient_gender || 'Unknown';
   

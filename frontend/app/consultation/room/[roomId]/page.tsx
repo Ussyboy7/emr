@@ -533,7 +533,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   const [selectedRadiologyTemplates, setSelectedRadiologyTemplates] = useState<Set<number>>(new Set());
   const [nursingOrders, setNursingOrders] = useState<{
     id: string;
-    type: 'Injection' | 'Dressing' | 'Ward Admission';
+    type: 'Injection' | 'Dressing' | 'Observation Admission';
     medication?: string;
     dosage?: string;
     route?: string;
@@ -543,7 +543,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     instructions: string;
     priority: 'Routine' | 'Urgent' | 'STAT';
     status: 'Draft' | 'Sent to Nursing' | 'In Progress' | 'Completed';
-    // Ward admission fields
+    // Observation admission fields
     ward?: string;
     admissionType?: string;
     admissionDiagnosis?: string;
@@ -576,6 +576,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     admissionDiagnosis: "",
     presentingComplaint: ""
   });
+  const draftObservationCount = nursingOrders.filter(
+    (order) => order.status === 'Draft' && order.type === 'Observation Admission'
+  ).length;
   const [injectionMedications, setInjectionMedications] = useState<Array<{ id: number; name: string; category?: string; strength?: string; generic_name?: string }>>([]);
   const [loadingInjectionMedications, setLoadingInjectionMedications] = useState(false);
 
@@ -1323,7 +1326,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         full_name: patient.full_name,
         first_name: patient.first_name,
         surname: patient.surname,
-        name: patient.full_name || `${patient.first_name || ''} ${patient.surname || ''}`.trim(),
+        name: patient.full_name ?? '',
         age: patient.age || 0,
         gender: patient.gender || '',
         mrn: patient.patient_id || '',
@@ -2550,7 +2553,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
         <div class="section">
           <h3>Patient Information</h3>
-          <p><strong>Name:</strong> ${session.patient_name || 'Unknown'}</p>
+          <p><strong>Name:</strong> ${session.patient_name ?? ''}</p>
           <p><strong>Patient ID:</strong> ${session.patient_id || 'N/A'}</p>
           <p><strong>Age:</strong> ${session.patient_age || 'N/A'} years</p>
           <p><strong>Gender:</strong> ${session.patient_gender || 'N/A'}</p>
@@ -2874,7 +2877,12 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         throw new Error('Unable to verify diagnosis. Please try again.');
       }
 
-      // Step 4: End the session using the dedicated endpoint
+      // Step 4: If there's a draft observation admission order, send it before ending session
+      if (draftObservationCount > 0) {
+        await sendNursingOrdersToNursing({ silentIfNoDraft: true });
+      }
+
+      // Step 5: End the session using the dedicated endpoint
       try {
         if (!sessionId) throw new Error('Session ID is required');
         debugConsultationRoom('Ending session with ID:', sessionId);
@@ -2914,7 +2922,11 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         });
       }
       
-      toast.success("Consultation session completed successfully");
+      if (draftObservationCount > 0) {
+        toast.success("Session ended and patient handed off to Nursing Observation Queue");
+      } else {
+        toast.success("Consultation session completed successfully");
+      }
       setPatients((prev) => prev.filter((p) => p.id !== currentPatient?.id));
       if (room) {
         setRoom({ ...room, totalConsultationsToday: room.totalConsultationsToday + 1, averageConsultationTime: Math.round((room.averageConsultationTime * room.totalConsultationsToday + sessionDuration) / (room.totalConsultationsToday + 1)) });
@@ -2944,6 +2956,42 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   };
 
 
+  const resolveCurrentVisitId = async (): Promise<number | undefined> => {
+    if (!currentPatient) return undefined;
+
+    const directVisitId = Number(currentPatient.visitId);
+    if (Number.isFinite(directVisitId) && directVisitId > 0) {
+      return directVisitId;
+    }
+
+    if (sessionId) {
+      try {
+        const session = await consultationService.getSession(sessionId);
+        if (typeof session.visit === 'number' && Number.isFinite(session.visit) && session.visit > 0) {
+          return session.visit;
+        }
+      } catch (err) {
+        console.warn('Could not resolve visit from session:', err);
+      }
+    }
+
+    const numericPatientId = parseInt(currentPatient.id, 10);
+    if (!Number.isFinite(numericPatientId)) return undefined;
+    try {
+      const latestVisits = await apiFetch<{ results: any[] }>(
+        `/visits/?patient=${numericPatientId}&ordering=-date,-time&page_size=1`
+      );
+      const latestVisitId = latestVisits.results?.[0]?.id;
+      if (typeof latestVisitId === 'number' && Number.isFinite(latestVisitId) && latestVisitId > 0) {
+        return latestVisitId;
+      }
+    } catch (err) {
+      console.warn('Could not resolve latest visit for patient:', err);
+    }
+    return undefined;
+  };
+
+
   const sendPrescriptionsToPharmacy = async () => {
     if (prescriptions.length === 0) {
       toast.error("No prescriptions to send");
@@ -2963,7 +3011,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     try {
       // currentPatient.id is the actual patient database ID
       const numericPatientId = parseInt(currentPatient.id);
-      const numericVisitId = currentPatient.visitId ? parseInt(currentPatient.visitId) : null;
+      const numericVisitId = await resolveCurrentVisitId();
       
       if (isNaN(numericPatientId)) {
         toast.error('Invalid patient ID');
@@ -3645,26 +3693,30 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       toast.error('Please specify wound location for dressing');
       return;
     }
-    if (newNursingOrder.type === 'Ward Admission') {
+    if (newNursingOrder.type === 'Observation Admission') {
       if (!newNursingOrder.ward) {
-        toast.error('Please select a ward for admission');
+        toast.error('Please select an observation ward');
         return;
       }
       if (!newNursingOrder.admissionType) {
-        toast.error('Please select admission type');
+        toast.error('Please select observation type');
         return;
       }
       if (!newNursingOrder.admissionDiagnosis) {
-        toast.error('Please enter admission diagnosis');
-      return;
+        toast.error('Please enter observation diagnosis');
+        return;
+      }
+      if (!newNursingOrder.presentingComplaint) {
+        toast.error('Please enter presenting complaint');
+        return;
       }
 
-      // Check if there's already a draft ward admission order
-      const existingWardAdmission = nursingOrders.find(order =>
-        order.type === 'Ward Admission' && order.status === 'Draft'
+      // Check if there's already a draft observation admission order
+      const existingObservationAdmission = nursingOrders.find(order =>
+        order.type === 'Observation Admission' && order.status === 'Draft'
       );
-      if (existingWardAdmission) {
-        toast.error('A ward admission order is already in draft. Please send it to nursing first or remove it.');
+      if (existingObservationAdmission) {
+        toast.error('An observation admission order is already in draft. Please send it to nursing first or remove it.');
         return;
       }
     }
@@ -3674,7 +3726,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     // Add to draft nursing orders (not sent yet)
     setNursingOrders([...nursingOrders, {
       id: orderId,
-      type: newNursingOrder.type as 'Injection' | 'Dressing' | 'Ward Admission',
+      type: newNursingOrder.type as 'Injection' | 'Dressing' | 'Observation Admission',
       medication: newNursingOrder.medication || undefined,
       dosage: newNursingOrder.dosage || undefined,
       route: newNursingOrder.route || undefined,
@@ -3684,7 +3736,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       instructions: newNursingOrder.instructions,
       priority: newNursingOrder.priority as 'Routine' | 'Urgent' | 'STAT',
       status: 'Draft',
-      // Ward admission fields
+      // Observation admission fields
       ward: newNursingOrder.ward || undefined,
       admissionType: newNursingOrder.admissionType || undefined,
       admissionDiagnosis: newNursingOrder.admissionDiagnosis || undefined,
@@ -3697,17 +3749,17 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   };
 
   // Send all draft nursing orders to nursing (like sendPrescriptionsToPharmacy, sendLabOrdersToLab, sendRadiologyOrders)
-  const sendNursingOrdersToNursing = async () => {
+  const sendNursingOrdersToNursing = async (options?: { silentIfNoDraft?: boolean }): Promise<number> => {
     const draftOrders = nursingOrders.filter(order => order.status === 'Draft');
     
     if (draftOrders.length === 0) {
-      toast.info("No draft nursing orders to send");
-      return;
+      if (!options?.silentIfNoDraft) toast.info("No draft nursing orders to send");
+      return 0;
     }
     
     if (!currentPatient || !sessionId) {
       toast.error('No active session. Please start a consultation session first.');
-      return;
+      throw new Error('No active session. Please start a consultation session first.');
     }
     
     try {
@@ -3717,7 +3769,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       
       if (isNaN(numericPatientId)) {
         toast.error('Invalid patient ID');
-        return;
+        throw new Error('Invalid patient ID');
       }
       
       const priorityMap: Record<string, 'low' | 'medium' | 'high' | 'urgent'> = {
@@ -3728,8 +3780,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       
       // Send each draft order to backend
       const sendPromises = draftOrders.map(async (order) => {
-        // Handle ward admission orders differently
-        if (order.type === 'Ward Admission') {
+        // Handle observation admission orders differently
+        if (order.type === 'Observation Admission') {
           // Check if patient is already admitted
           try {
             const existingAdmissions = await wardService.getAdmissions({
@@ -3748,16 +3800,16 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
             console.warn('Could not check existing admissions:', error);
           }
 
-          // Create nursing order only - nurse will do the actual admission
+          // Create nursing order only - nurse will do the actual observation admission
           return apiFetch('/nursing/orders/', {
             method: 'POST',
             body: JSON.stringify({
               patient: numericPatientId,
-              visit: numericVisitId || undefined,
+              visit: numericVisitId,
               consultation_session: sessionId,
               ordered_by: currentUser?.id ? Number(currentUser.id) : undefined,
-              order_type: 'ward admission',
-              description: `Ward admission to ${order.ward}. Diagnosis: ${order.admissionDiagnosis}. ${order.instructions}`,
+              order_type: 'observation admission',
+              description: `Observation admission (Day Care) to ${order.ward}. Type: ${order.admissionType}. Diagnosis: ${order.admissionDiagnosis}. Presenting complaint: ${order.presentingComplaint || 'N/A'}. ${order.instructions}`,
               frequency: '',
               duration: '',
               status: 'pending',
@@ -3778,7 +3830,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           method: 'POST',
           body: JSON.stringify({
             patient: numericPatientId,
-            visit: numericVisitId || undefined,
+            visit: numericVisitId,
               consultation_session: sessionId,
               ordered_by: currentUser?.id ? Number(currentUser.id) : undefined,
             order_type: order.type,
@@ -3802,9 +3854,11 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       ));
       
       toast.success(`${draftOrders.length} nursing order(s) sent to Nursing Procedures queue`);
+      return draftOrders.length;
     } catch (err: any) {
       console.error('Error creating nursing orders:', err);
       toast.error(err.message || 'Failed to send nursing orders');
+      throw err;
     }
   };
 
@@ -4674,7 +4728,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                 {/* ICD-10 Diagnosis Section */}
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
-                    <Label className="text-base font-semibold">Diagnosis (ICD-10)</Label>
+                    <Label className="text-sm font-semibold">Diagnosis (ICD-10)</Label>
                     <Button variant="outline" size="sm" onClick={() => setShowAddDiagnosis(true)}>
                       <Plus className="h-4 w-4 mr-1" />Add Diagnosis
                     </Button>
@@ -4701,23 +4755,23 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                             ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-700'
                             : 'bg-blue-500/15 text-blue-700 dark:text-blue-300 border-blue-300 dark:border-blue-700';
                         return (
-                          <div key={dx.id} className={`p-3 rounded-lg border flex items-start justify-between gap-3 ${typeStyles}`}>
+                          <div key={dx.id} className={`p-2 rounded-md border flex items-start justify-between gap-2 ${typeStyles}`}>
                             <div className="flex-1 min-w-0">
-                              <div className="flex flex-wrap items-center gap-2 mb-1.5">
-                                <Badge variant="outline" className={`text-xs font-medium shrink-0 ${typeBadgeStyles}`}>
+                              <div className="flex flex-wrap items-center gap-1.5 mb-1">
+                                <Badge variant="outline" className={`text-[10px] leading-none font-medium h-5 px-1.5 py-0 shrink-0 ${typeBadgeStyles}`}>
                                   {diagnosisType}
                                 </Badge>
-                                <span className="font-mono text-sm font-semibold text-foreground">{dx.icd10_code_details?.code || 'Unknown'}</span>
+                                <span className="font-mono text-xs font-semibold text-foreground">{dx.icd10_code_details?.code || 'Unknown'}</span>
                               </div>
-                              <p className="text-sm text-foreground/90 leading-snug">{dx.icd10_code_details?.description || dx.diagnosis_text || 'Unknown diagnosis'}</p>
+                              <p className="text-xs text-foreground/90 leading-snug">{dx.icd10_code_details?.description || dx.diagnosis_text || 'Unknown diagnosis'}</p>
                               {(dx.notes || (dx.diagnosis_text && dx.diagnosis_text !== (dx.icd10_code_details?.description ?? ''))) && (
-                                <p className="text-xs text-muted-foreground mt-1.5">{dx.notes || dx.diagnosis_text}</p>
+                                <p className="text-[11px] text-muted-foreground mt-1 leading-snug">{dx.notes || dx.diagnosis_text}</p>
                               )}
                             </div>
                             <Button
                               variant="ghost"
                               size="sm"
-                              className="h-8 w-8 p-0 shrink-0 rounded-full"
+                              className="h-7 w-7 p-0 shrink-0 rounded-full"
                               onClick={async () => {
                                 try {
                                   await consultationService.deleteDiagnosis(dx.id);
@@ -4730,7 +4784,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                               }}
                               title="Remove diagnosis"
                             >
-                              <X className="h-4 w-4" />
+                              <X className="h-3.5 w-3.5" />
                             </Button>
                           </div>
                         );
@@ -4741,8 +4795,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
                 <div className="space-y-2"><Label>Assessment</Label><Textarea value={medicalNotes.assessment} onChange={(e) => setMedicalNotes({ ...medicalNotes, assessment: e.target.value })} placeholder="Clinical assessment and reasoning..." rows={3} /></div>
                 <div className="space-y-2"><Label>Plan</Label><Textarea value={medicalNotes.plan} onChange={(e) => setMedicalNotes({ ...medicalNotes, plan: e.target.value })} placeholder="Treatment plan, follow-up instructions..." rows={4} /></div>
-                <Button 
-                  className="w-full" 
+                <Button
+                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white"
                   onClick={async () => {
                     if (!sessionId) {
                       toast.error('No active session. Please start a consultation session first.');
@@ -5739,7 +5793,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                       </TabsTrigger>
                       <TabsTrigger value="wards" className="text-xs">
                         <Building2 className="h-3 w-3 mr-1" />
-                        Ward Admissions ({wardAdmissions.length})
+                        Observation Admissions ({wardAdmissions.length})
                       </TabsTrigger>
                       <TabsTrigger value="background" className="text-xs">
                         <User className="h-3 w-3 mr-1" />
@@ -6403,7 +6457,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                       })()}
                     </TabsContent>
 
-                    {/* Ward Admissions Tab */}
+                    {/* Observation Admissions Tab */}
                     <TabsContent value="physio" className="mt-4">
                       {(() => {
                         const filteredPhysio = physioHistory.filter(order => {
@@ -6568,13 +6622,13 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                         return (
                           <>
                             <div className="flex items-center justify-between mb-3">
-                              <h3 className="text-sm font-medium">Ward Admission History</h3>
+                              <h3 className="text-sm font-medium">Observation Admission History</h3>
                             </div>
                             {totalAdmissions === 0 ? (
                               <div className="text-center py-12 bg-gradient-to-b from-muted/30 to-background rounded-lg border-2 border-dashed border-muted">
                                 <Building2 className="h-12 w-12 mx-auto mb-3 text-muted-foreground opacity-50" />
-                                <p className="font-medium text-muted-foreground mb-1">No ward admissions found</p>
-                                <p className="text-sm text-muted-foreground">Ward admission history will appear here</p>
+                                <p className="font-medium text-muted-foreground mb-1">No observation admissions found</p>
+                                <p className="text-sm text-muted-foreground">Observation admission history will appear here</p>
                               </div>
                             ) : (
                               <div className="border rounded-lg overflow-hidden">
@@ -6773,7 +6827,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                 Add Diagnosis
               </DialogTitle>
               <DialogDescription>
-                Search and add ICD-10 diagnosis codes for {currentPatient?.name}
+                Set the diagnosis type, search ICD-10, then select a row to save. This dialog closes after each add so the diagnosis list stays in view. Use Add Diagnosis again to enter another code.
               </DialogDescription>
             </DialogHeader>
             
@@ -6898,7 +6952,10 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                 const newDiagnosis = await consultationService.createDiagnosis(diagnosisData);
                                 setDiagnoses([...diagnoses, newDiagnosis]);
                                 toast.success(`Added diagnosis: ${dx.code} - ${dx.description}`);
-                                // Keep dropdown and search open so user can add more diagnoses
+                                setShowAddDiagnosis(false);
+                                setDiagnosisSearch("");
+                                setShowDiagnosisDropdown(false);
+                                setDiagnosisNotes("");
                               } catch (err: any) {
                                 console.error('Error creating diagnosis:', err);
                                 toast.error('Failed to add diagnosis. Please try again.');
@@ -7549,21 +7606,21 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                         Wound Dressing
                       </div>
                     </SelectItem>
-                    <SelectItem value="Ward Admission">
+                    <SelectItem value="Observation Admission">
                       <div className="flex items-center gap-2">
                         <DoorOpen className="h-4 w-4 text-blue-500" />
-                        Ward Admission
+                        Observation Admission (Day Care)
                       </div>
                     </SelectItem>
                   </SelectContent>
                 </Select>
               </div>
 
-              {/* Ward Admission-specific fields */}
-              {newNursingOrder.type === 'Ward Admission' && (
+              {/* Observation admission-specific fields */}
+              {newNursingOrder.type === 'Observation Admission' && (
                 <>
                   <div className="space-y-2">
-                    <Label>Ward *</Label>
+                    <Label>Observation Ward *</Label>
                     {/* Ward Search */}
                     <Input
                       placeholder="Search wards..."
@@ -7576,7 +7633,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                       onValueChange={(v) => setNewNursingOrder({ ...newNursingOrder, ward: v })}
                     >
                       <SelectTrigger>
-                        <SelectValue placeholder="Select ward for admission" />
+                        <SelectValue placeholder="Select ward for observation" />
                       </SelectTrigger>
                       <SelectContent>
                         {/* Ward options - dynamically loaded from API */}
@@ -7620,32 +7677,32 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                     </Select>
                   </div>
                   <div className="space-y-2">
-                    <Label>Admission Type *</Label>
+                    <Label>Observation Type *</Label>
                     <Select
                       value={newNursingOrder.admissionType || ''}
                       onValueChange={(v) => setNewNursingOrder({ ...newNursingOrder, admissionType: v })}
                     >
                       <SelectTrigger>
-                        <SelectValue placeholder="Select admission type" />
+                        <SelectValue placeholder="Select observation type" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="elective">Elective</SelectItem>
-                        <SelectItem value="emergency">Emergency</SelectItem>
-                        <SelectItem value="transfer">Transfer</SelectItem>
+                        <SelectItem value="daycare_observation">Day Care Observation</SelectItem>
+                        <SelectItem value="urgent_observation">Urgent Observation</SelectItem>
+                        <SelectItem value="transfer_observation">Transfer for Observation</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
                   <div className="space-y-2">
-                    <Label>Admission Diagnosis *</Label>
+                    <Label>Observation Diagnosis *</Label>
                     <Textarea
                       value={newNursingOrder.admissionDiagnosis || ''}
                       onChange={(e) => setNewNursingOrder({ ...newNursingOrder, admissionDiagnosis: e.target.value })}
-                      placeholder="Primary diagnosis for admission"
+                      placeholder="Primary diagnosis for observation"
                       rows={3}
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label>Presenting Complaint</Label>
+                    <Label>Presenting Complaint *</Label>
                     <Textarea
                       value={newNursingOrder.presentingComplaint || ''}
                       onChange={(e) => setNewNursingOrder({ ...newNursingOrder, presentingComplaint: e.target.value })}
@@ -7844,7 +7901,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                   !newNursingOrder.instructions ||
                   (newNursingOrder.type === 'Injection' && !newNursingOrder.medication) ||
                   (newNursingOrder.type === 'Dressing' && !newNursingOrder.woundLocation) ||
-                  (newNursingOrder.type === 'Ward Admission' && (!newNursingOrder.ward || !newNursingOrder.admissionType || !newNursingOrder.admissionDiagnosis))
+                  (newNursingOrder.type === 'Observation Admission' && (!newNursingOrder.ward || !newNursingOrder.admissionType || !newNursingOrder.admissionDiagnosis || !newNursingOrder.presentingComplaint))
                 }
                 className="bg-cyan-600 hover:bg-cyan-700"
               >
@@ -8306,7 +8363,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
               </AlertDialogTitle>
               <AlertDialogDescription>
                 Are you sure you want to end the consultation session with <strong>{currentPatient?.name}</strong>?
-                The session data will be saved and you will return to the room queue.
+                {draftObservationCount > 0
+                  ? " The session will be saved, draft observation handoff will be sent to Nursing Observation Queue, and you will return to the room queue."
+                  : " The session data will be saved and you will return to the room queue."}
               </AlertDialogDescription>
             </AlertDialogHeader>
 
@@ -8452,7 +8511,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                 ) : (
                   <>
                     <CheckCircle className="mr-2 h-4 w-4" />
-                    End Session & Return to Queue
+                    {draftObservationCount > 0
+                      ? "End Session & Send to Observation Queue"
+                      : "End Session & Return to Queue"}
                   </>
                 )}
               </AlertDialogAction>
@@ -8677,16 +8738,16 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           </DialogContent>
         </Dialog>
 
-        {/* Ward Admission Detail Dialog */}
+        {/* Observation Admission Detail Dialog */}
         <Dialog open={showWardAdmissionDetail} onOpenChange={setShowWardAdmissionDetail}>
           <DialogContent className="w-[95vw] sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Building2 className="h-5 w-5 text-blue-500" />
-                Ward Admission Details
+                Observation Admission Details
               </DialogTitle>
               <DialogDescription>
-                Detailed information about the patient's ward admission
+                Detailed information about the patient's observation admission
               </DialogDescription>
             </DialogHeader>
 
@@ -8835,7 +8896,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                       <div className="space-y-1">
                         <div className="flex items-center gap-2">
                           <User className="h-4 w-4 text-muted-foreground" />
-                          <span className="font-medium">{selectedSession.patient_name || 'Unknown Patient'}</span>
+                          <span className="font-medium">{selectedSession.patient_name ?? ''}</span>
                         </div>
                         <div className="text-sm text-muted-foreground">
                           Patient ID: {selectedSession.patient_id || 'N/A'} • Age: {selectedSession.patient_age || 'N/A'} • Gender: {selectedSession.patient_gender || 'N/A'}

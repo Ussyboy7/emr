@@ -554,7 +554,7 @@ export default function AppointmentsPage() {
                     <SelectContent>
                       {patients.map((patient) => (
                         <SelectItem key={patient.id} value={patient.id.toString()}>
-                          {patient.full_name || 'Unknown'} ({patient.patient_id})
+                          {patient.full_name ?? ''} ({patient.patient_id})
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -659,7 +659,7 @@ export default function AppointmentsPage() {
                     <SelectContent>
                       {patients.map((patient) => (
                         <SelectItem key={patient.id} value={patient.id.toString()}>
-                          {patient.full_name || 'Unknown'} ({patient.patient_id})
+                          {patient.full_name ?? ''} ({patient.patient_id})
                         </SelectItem>
                       ))}
                     </SelectContent>

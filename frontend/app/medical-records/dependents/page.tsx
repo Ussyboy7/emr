@@ -152,7 +152,7 @@ export default function DependentsPage() {
                   const primary = await patientService.getPatient(dep.principal_staff);
                   primaryPatient = {
                     id: primary.patient_id || '',
-                    name: primary.full_name || `${primary.first_name} ${primary.surname}`,
+                    name: primary.full_name ?? '',
                     category: primary.category,
                   };
                 } catch (err) {
@@ -164,7 +164,7 @@ export default function DependentsPage() {
                 id: dep.patient_id || '',
                 firstName: dep.first_name || '',
                 lastName: dep.surname || '',
-                name: dep.full_name || `${dep.first_name} ${dep.surname}`,
+                name: dep.full_name ?? '',
                 dob: dep.date_of_birth || '',
                 age: dep.age || 0,
                 gender: dep.gender === 'male' ? 'Male' : 'Female',
@@ -268,7 +268,7 @@ export default function DependentsPage() {
       const principal = await searchPrincipalByStaffId(trimmedId);
       if (principal) {
         setPrincipalSearchResult({ patient: principal, staffId: trimmedId });
-        toast.success(`Found: ${principal.full_name || `${principal.first_name} ${principal.surname}`} (${principal.category})`);
+        toast.success(`Found: ${principal.full_name ?? ''} (${principal.category})`);
       } else {
         toast.error(`Staff ID "${trimmedId}" not found. Enter a valid NPA staff or retiree ID.`);
       }
@@ -292,7 +292,7 @@ export default function DependentsPage() {
       const patient = principalSearchResult.patient;
       return {
         valid: true,
-        message: `Valid: ${patient.full_name || `${patient.first_name} ${patient.surname}`} (${patient.category})`,
+        message: `Valid: ${patient.full_name ?? ''} (${patient.category})`,
         patient,
       };
     }
@@ -310,7 +310,7 @@ export default function DependentsPage() {
 
     return {
       valid: true,
-      message: `Valid: ${patient.full_name || `${patient.first_name} ${patient.surname}`} (${patient.category})`,
+      message: `Valid: ${patient.full_name ?? ''} (${patient.category})`,
       patient,
     };
   };
@@ -463,7 +463,7 @@ export default function DependentsPage() {
               const primary = await patientService.getPatient(dep.principal_staff);
               primaryPatient = {
                 id: primary.patient_id || String(primary.id),
-                name: primary.full_name || `${primary.first_name} ${primary.surname}`,
+                name: primary.full_name ?? '',
                 category: primary.category,
               };
             } catch (err) {
@@ -475,7 +475,7 @@ export default function DependentsPage() {
             id: dep.patient_id || String(dep.id),
             firstName: dep.first_name || '',
             lastName: dep.surname || '',
-            name: dep.full_name || `${dep.first_name} ${dep.surname}`,
+            name: dep.full_name ?? '',
             dob: dep.date_of_birth || '',
             age: dep.age || 0,
             gender: dep.gender === 'male' ? 'Male' : 'Female',
@@ -605,7 +605,7 @@ export default function DependentsPage() {
               const primary = await patientService.getPatient(dep.principal_staff);
               primaryPatient = {
                 id: primary.patient_id || String(primary.id),
-                name: primary.full_name || `${primary.first_name} ${primary.surname}`,
+                name: primary.full_name ?? '',
                 category: primary.category,
               };
             } catch (err) {
@@ -617,7 +617,7 @@ export default function DependentsPage() {
             id: dep.patient_id || String(dep.id),
             firstName: dep.first_name || '',
             lastName: dep.surname || '',
-            name: dep.full_name || `${dep.first_name} ${dep.surname}`,
+            name: dep.full_name ?? '',
             dob: dep.date_of_birth || '',
             age: dep.age || 0,
             gender: dep.gender === 'male' ? 'Male' : 'Female',
@@ -682,7 +682,7 @@ export default function DependentsPage() {
               const primary = await patientService.getPatient(dep.principal_staff);
               primaryPatient = {
                 id: primary.patient_id || String(primary.id),
-                name: primary.full_name || `${primary.first_name} ${primary.surname}`,
+                name: primary.full_name ?? '',
                 category: primary.category,
               };
             } catch (err) {
@@ -694,7 +694,7 @@ export default function DependentsPage() {
             id: dep.patient_id || String(dep.id),
             firstName: dep.first_name || '',
             lastName: dep.surname || '',
-            name: dep.full_name || `${dep.first_name} ${dep.surname}`,
+            name: dep.full_name ?? '',
             dob: dep.date_of_birth || '',
             age: dep.age || 0,
             gender: dep.gender === 'male' ? 'Male' : 'Female',

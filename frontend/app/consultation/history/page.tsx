@@ -371,7 +371,7 @@ export default function ConsultationHistoryPage() {
 
             return {
               id: String(session.id),
-              patient: session.patient_name || 'Unknown',
+              patient: session.patient_name ?? '',
               patientId: session.patient_id || '',
               patientIdNumeric: session.patient,
               visitId: session.visit,

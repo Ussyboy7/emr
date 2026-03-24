@@ -154,11 +154,11 @@ export default function CompletedReportsPage() {
           orderId: apiReport.order_id || '',
           patient: {
             id: apiReport.patient_details?.id || '',
-            name: apiReport.patient_name || 'Unknown',
+            name: apiReport.patient_name ?? '',
             age: apiReport.patient_details?.age || null,
             gender: apiReport.patient_details?.gender || 'Unknown'
           },
-          patientName: apiReport.patient_name || 'Unknown',
+          patientName: apiReport.patient_name ?? '',
           patientId: apiReport.patient_details?.patient_id || '',
           age: apiReport.patient_details?.age || 0,
           gender: apiReport.patient_details?.gender || 'Unknown',

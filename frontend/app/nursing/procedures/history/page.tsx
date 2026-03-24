@@ -23,10 +23,11 @@ import { CustomDateRangeButton } from '@/components/CustomDateRangeButton';
 // ==================== TYPES ====================
 interface CompletedProcedure {
   id: string;
-  type: 'injection' | 'dressing' | 'medication';
+  type: 'injection' | 'dressing' | 'medication' | 'ward_admission';
   patientName: string;
   patientId: string;
   age: number;
+  dob?: string;
   gender: string;
   ward: string;
   orderedBy: string;
@@ -55,6 +56,7 @@ const getTypeConfig = (type: string) => {
     'injection': { icon: Syringe, color: 'text-emerald-500', bgColor: 'bg-emerald-500/10', label: 'Injection' },
     'dressing': { icon: Bandage, color: 'text-violet-500', bgColor: 'bg-violet-500/10', label: 'Dressing' },
     'medication': { icon: Pill, color: 'text-blue-500', bgColor: 'bg-blue-500/10', label: 'Medication' },
+    'ward_admission': { icon: Activity, color: 'text-amber-500', bgColor: 'bg-amber-500/10', label: 'Observation Admission' },
   };
   return configs[type] || configs['medication'];
 };
@@ -66,6 +68,9 @@ const getCompletedIconStyle = (type: string) => {
     case 'dressing':
       return 'border-violet-500/50 text-violet-600 dark:text-violet-400 bg-violet-500/10';
     case 'medication':
+      return 'border-blue-500/50 text-blue-600 dark:text-blue-400 bg-blue-500/10';
+    case 'ward_admission':
+      return 'border-amber-500/50 text-amber-600 dark:text-amber-400 bg-amber-500/10';
     default:
       return 'border-blue-500/50 text-blue-600 dark:text-blue-400 bg-blue-500/10';
   }
@@ -73,10 +78,65 @@ const getCompletedIconStyle = (type: string) => {
 
 const formatDateTime = (dateString: string) => {
   const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) {
+    return { date: 'Date unavailable', time: '' };
+  }
   return {
     date: date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
     time: date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
   };
+};
+
+const resolvePatientAge = (patient: any): number | null => {
+  if (typeof patient?.age === 'number' && Number.isFinite(patient.age) && patient.age > 0) {
+    return patient.age;
+  }
+
+  const dobValue = patient?.date_of_birth || patient?.dateOfBirth;
+  if (!dobValue) return null;
+
+  const dob = new Date(dobValue);
+  if (Number.isNaN(dob.getTime())) return null;
+
+  const today = new Date();
+  let age = today.getFullYear() - dob.getFullYear();
+  const monthDiff = today.getMonth() - dob.getMonth();
+  const birthdayNotReached = monthDiff < 0 || (monthDiff === 0 && today.getDate() < dob.getDate());
+  if (birthdayNotReached) age -= 1;
+
+  return age >= 0 ? age : null;
+};
+
+const formatDisplayAge = (age: number, dob?: string): string => {
+  if (typeof dob === 'string' && dob.trim()) {
+    const birthDate = new Date(dob);
+    if (!Number.isNaN(birthDate.getTime())) {
+      const today = new Date();
+      let years = today.getFullYear() - birthDate.getFullYear();
+      let months = today.getMonth() - birthDate.getMonth();
+      const days = today.getDate() - birthDate.getDate();
+
+      if (days < 0) months -= 1;
+      if (months < 0) {
+        years -= 1;
+        months += 12;
+      }
+
+      if (years > 0) return `Age: ${years} year${years === 1 ? '' : 's'}`;
+      if (months > 0) return `Age: ${months} month${months === 1 ? '' : 's'}`;
+      return 'Age: 0 months';
+    }
+  }
+
+  return age > 0 ? `Age: ${age} year${age === 1 ? '' : 's'}` : 'Age: Unknown';
+};
+
+const formatGender = (gender?: string): string => {
+  const value = String(gender || '').trim().toLowerCase();
+  if (!value) return 'Gender unknown';
+  if (value === 'male') return 'Male';
+  if (value === 'female') return 'Female';
+  return value.charAt(0).toUpperCase() + value.slice(1);
 };
 
 export default function ProceduresHistoryPage() {
@@ -125,9 +185,30 @@ export default function ProceduresHistoryPage() {
               'wound_care': 'dressing',
               'medication': 'medication',
               'other': 'medication',
+              'ward admission': 'ward_admission',
+              'observation admission': 'ward_admission',
+              'ward_admission': 'ward_admission',
+              'observation_admission': 'ward_admission',
             };
             
-            const procedureType = typeMap[proc.procedure_type?.toLowerCase()] || 'medication';
+            const procedureType = typeMap[String(proc.procedure_type || '').toLowerCase()] || 'medication';
+            const description = String(proc.description || '');
+            const wardFromDescription = description.match(/to\s+([^.;,\n]+)$/i)?.[1]?.trim() || '';
+            const wardLabel =
+              proc.ward_name ||
+              proc.ward?.name ||
+              wardFromDescription ||
+              (procedureType === 'ward_admission' ? 'Observation Ward' : '');
+            const orderedByLabel =
+              proc.ordered_by_name ||
+              proc.ordered_by_user_name ||
+              proc.ordered_by?.full_name ||
+              proc.ordered_by?.username ||
+              proc.requested_by_name ||
+              proc.requested_by?.full_name ||
+              proc.recorded_by_name ||
+              proc.performed_by_name ||
+              '';
             
             // Parse description for details
             const details: CompletedProcedure['details'] = {};
@@ -137,9 +218,9 @@ export default function ProceduresHistoryPage() {
             };
             
             // Try to extract details from description
-            if (proc.description) {
+            if (description) {
               if (procedureType === 'injection') {
-                const match = proc.description.match(/([^:]+):\s*(.+)/);
+                const match = description.match(/([^:]+):\s*(.+)/);
                 if (match) {
                   details.medication = match[1].trim();
                   const rest = match[2].trim();
@@ -148,15 +229,17 @@ export default function ProceduresHistoryPage() {
                   details.route = parts[1] || '';
                 }
               } else if (procedureType === 'dressing') {
-                const match = proc.description.match(/([^:]+):\s*(.+)/);
+                const match = description.match(/([^:]+):\s*(.+)/);
                 if (match) {
                   details.woundType = match[1].trim();
                   details.woundLocation = match[2].trim();
                 }
               } else {
-                const match = proc.description.match(/([^:]+):\s*(.+)/);
+                const match = description.match(/([^:]+):\s*(.+)/);
                 if (match) {
                   details.medication = match[1].trim();
+                } else if (procedureType === 'ward_admission') {
+                  details.medication = 'Observation Admission';
                 }
               }
             }
@@ -164,12 +247,13 @@ export default function ProceduresHistoryPage() {
             return {
               id: String(proc.id),
               type: procedureType,
-              patientName: patient.full_name || `${patient.surname} ${patient.first_name}`,
+              patientName: patient.full_name ?? '',
               patientId: patient.patient_id || '',
-              age: patient.age || 0,
-              gender: patient.gender || '',
-              ward: '',
-              orderedBy: proc.ordered_by_name || 'Unknown',
+              age: resolvePatientAge(patient) ?? 0,
+              dob: patient.date_of_birth || '',
+              gender: formatGender(patient.gender),
+              ward: wardLabel,
+              orderedBy: orderedByLabel,
               completedAt: proc.created_at || proc.recorded_at || new Date().toISOString(),
               completedBy: proc.recorded_by_name || proc.performed_by_name || 'Unknown',
               details,
@@ -390,6 +474,7 @@ export default function ProceduresHistoryPage() {
                     <SelectItem value="injection">💉 Injections</SelectItem>
                     <SelectItem value="dressing">🩹 Dressings</SelectItem>
                     <SelectItem value="medication">💊 Medications</SelectItem>
+                    <SelectItem value="ward_admission">🛏️ Observation Admissions</SelectItem>
                   </SelectContent>
                 </Select>
                 <Select value={genderFilter} onValueChange={setGenderFilter}>
@@ -426,82 +511,86 @@ export default function ProceduresHistoryPage() {
             </CardContent>
           </Card>
         ) : (
-          <Card className="overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b bg-muted/50">
-                    <th className="text-left p-4 text-sm font-medium text-muted-foreground">Type</th>
-                    <th className="text-left p-4 text-sm font-medium text-muted-foreground">Patient</th>
-                    <th className="text-left p-4 text-sm font-medium text-muted-foreground">Procedure</th>
-                    <th className="text-left p-4 text-sm font-medium text-muted-foreground">Completed By</th>
-                    <th className="text-left p-4 text-sm font-medium text-muted-foreground">Date & Time</th>
-                    <th className="text-left p-4 text-sm font-medium text-muted-foreground">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {paginatedHistory.map((procedure) => {
-                    const typeConfig = getTypeConfig(procedure.type);
-                    const TypeIcon = typeConfig.icon;
-                    const { date, time } = formatDateTime(procedure.completedAt);
-                    
-                    return (
-                      <tr key={procedure.id} className="border-b hover:bg-muted/30 transition-colors">
-                        <td className="p-4">
-                          <div className={`inline-flex items-center gap-2 px-2 py-1 rounded-full ${typeConfig.bgColor}`}>
-                            <TypeIcon className={`h-4 w-4 ${typeConfig.color}`} />
-                            <span className={`text-sm font-medium ${typeConfig.color}`}>{typeConfig.label}</span>
+          <div className="space-y-3">
+            {paginatedHistory.map((procedure) => {
+              const typeConfig = getTypeConfig(procedure.type);
+              const TypeIcon = typeConfig.icon;
+              const { date, time } = formatDateTime(procedure.completedAt);
+              const leftBorderClass =
+                procedure.type === 'injection'
+                  ? 'border-l-emerald-500'
+                  : procedure.type === 'dressing'
+                    ? 'border-l-violet-500'
+                    : 'border-l-blue-500';
+
+              return (
+                <Card key={procedure.id} className={`border-l-4 ${leftBorderClass} hover:shadow-md transition-shadow`}>
+                  <CardContent className="py-3 px-4">
+                    <div className="flex items-center gap-3">
+                      <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${typeConfig.bgColor}`}>
+                        <TypeIcon className={`h-4 w-4 ${typeConfig.color}`} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2 flex-wrap min-w-0">
+                            <span className="font-semibold text-foreground truncate">{procedure.patientName}</span>
+                            <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${typeConfig.bgColor} ${typeConfig.color}`}>
+                              {typeConfig.label}
+                            </Badge>
+                            <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-emerald-500/50 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10">
+                              Completed
+                            </Badge>
                           </div>
-                        </td>
-                        <td className="p-4">
-                          <p className="font-medium text-foreground">{procedure.patientName}</p>
-                          <p className="text-xs text-muted-foreground">{procedure.patientId} • {procedure.ward}</p>
-                        </td>
-                        <td className="p-4">
-                          {procedure.type === 'injection' && (
-                            <p className="text-foreground">{procedure.details.medication} - {procedure.details.dosage}</p>
-                          )}
-                          {procedure.type === 'dressing' && (
-                            <p className="text-foreground">{procedure.details.woundType} - {procedure.details.woundLocation}</p>
-                          )}
-                          {procedure.type === 'medication' && (
-                            <p className="text-foreground">{procedure.details.medication}</p>
-                          )}
-                          <p className="text-xs text-muted-foreground">Ordered by: {procedure.orderedBy}</p>
-                        </td>
-                        <td className="p-4">
-                          <p className="font-medium text-foreground">{procedure.completedBy}</p>
-                        </td>
-                        <td className="p-4">
-                          <p className="font-medium text-foreground">{date}</p>
-                          <p className="text-xs text-muted-foreground">{time}</p>
-                        </td>
-                        <td className="p-4">
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-1 flex-shrink-0">
                             <div className={`h-7 w-7 flex items-center justify-center rounded border ${getCompletedIconStyle(procedure.type)}`}>
                               <CheckCircle2 className="h-4 w-4" />
                             </div>
-                            <Button variant="ghost" size="sm" onClick={() => openViewDialog(procedure)}>
-                              <Eye className="h-4 w-4 mr-1" />View
+                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openViewDialog(procedure)} title="View Procedure">
+                              <Eye className="h-4 w-4 text-muted-foreground hover:text-primary" />
                             </Button>
                           </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-            <div className="p-4">
-              <StandardPagination
-                currentPage={currentPage}
-                totalItems={filteredHistory.length}
-                itemsPerPage={itemsPerPage}
-                onPageChange={setCurrentPage}
-                onItemsPerPageChange={setItemsPerPage}
-                itemName="records"
-              />
-            </div>
+                        </div>
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-wrap">
+                          <span>{procedure.patientId}</span>
+                          <span>•</span>
+                          <span>{formatDisplayAge(procedure.age, procedure.dob)}</span>
+                          <span>•</span>
+                          <span>{procedure.ward || 'Ward not specified'}</span>
+                          <span>•</span>
+                          <span className="flex items-center gap-1"><User className="h-3 w-3" />{procedure.completedBy}</span>
+                          {procedure.orderedBy && procedure.orderedBy !== procedure.completedBy && (
+                            <>
+                              <span>•</span>
+                              <span className="flex items-center gap-1"><Stethoscope className="h-3 w-3" />{procedure.orderedBy}</span>
+                            </>
+                          )}
+                          <span>•</span>
+                          <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{time ? `${date} ${time}` : date}</span>
+                        </div>
+                        <p className="text-[10px] text-muted-foreground mt-1 truncate max-w-[260px] hidden md:block">
+                          {procedure.type === 'injection' && `${procedure.details.medication || 'Medication'} ${procedure.details.dosage || ''}`.trim()}
+                          {procedure.type === 'dressing' && `${procedure.details.woundType || 'Wound care'} - ${procedure.details.woundLocation || 'Location not specified'}`}
+                          {procedure.type === 'medication' && (procedure.details.medication || 'Medication administered')}
+                        </p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+        )}
+
+        {filteredHistory.length > 0 && (
+          <Card className="p-4">
+            <StandardPagination
+              currentPage={currentPage}
+              totalItems={filteredHistory.length}
+              itemsPerPage={itemsPerPage}
+              onPageChange={setCurrentPage}
+              onItemsPerPageChange={setItemsPerPage}
+              itemName="records"
+            />
           </Card>
         )}
 
@@ -585,7 +674,7 @@ export default function ProceduresHistoryPage() {
 
                 {/* Meta */}
                 <div className="flex items-center justify-between text-xs text-muted-foreground pt-2 border-t">
-                  <span className="flex items-center gap-1"><Stethoscope className="h-3 w-3" />Ordered by: {selectedProcedure.orderedBy}</span>
+                  <span className="flex items-center gap-1"><Stethoscope className="h-3 w-3" />Ordered by: {selectedProcedure.orderedBy || '—'}</span>
                   <span className="flex items-center gap-1"><User className="h-3 w-3" />Completed by: {selectedProcedure.completedBy}</span>
                 </div>
                 <p className="text-xs text-center text-muted-foreground">

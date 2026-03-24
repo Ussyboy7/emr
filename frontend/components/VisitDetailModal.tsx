@@ -126,7 +126,7 @@ export function VisitDetailModal({ visit: visitProp, visitId: visitIdProp, isOpe
         const patientData = await patientService.getPatient(rawVisitData.patient);
         setPatient({
           id: patientData.patient_id || '',
-          name: patientData.full_name || `${patientData.first_name} ${patientData.surname}`,
+          name: patientData.full_name ?? '',
         });
       } catch (err) {
         console.error('Failed to load patient:', err);

@@ -162,10 +162,11 @@ class Patient(models.Model):
         return f"{self.patient_id} - {self.get_full_name()}"
     
     def get_full_name(self):
-        """Return the patient's full name formatted properly."""
-        parts = []
-        
-        # Add title if present
+        """
+        Canonical display name from stored fields only (no client-side reordering needed):
+        optional title, then surname, first name, and middle name separated by spaces (empty parts omitted).
+        """
+        title_display = None
         if self.title:
             title_lower = str(self.title).lower().strip()
             title_map = {
@@ -182,17 +183,21 @@ class Patient(models.Model):
                 'mallam': 'Mallam',
                 'lady': 'Lady',
             }
-            parts.append(title_map.get(title_lower, self.title.title()))
-        
-        # Add first name, middle name, surname
-        if self.first_name:
-            parts.append(self.first_name)
-        if self.middle_name:
-            parts.append(self.middle_name)
-        if self.surname:
-            parts.append(self.surname)
-        
-        return ' '.join(filter(None, parts))
+            title_display = title_map.get(title_lower, str(self.title).title())
+
+        segments = []
+        for value in (self.surname, self.first_name, self.middle_name):
+            if value:
+                s = str(value).strip()
+                if s:
+                    segments.append(s)
+        core = ' '.join(segments)
+
+        if title_display and core:
+            return f'{title_display} {core}'
+        if title_display:
+            return title_display
+        return core
 
     def get_age_components(self):
         """Return medically useful age components as years and months."""

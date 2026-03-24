@@ -296,7 +296,7 @@ export default function NursingPoolQueuePage() {
             visit_id: qi.visit_display_id || `VIS-${visitId}`,
             patient_id: (qi as any).patient_details?.patient_id,
             patient: patientId,
-            patient_name: qi.patient_name || `Patient ${patientId}`,
+            patient_name: qi.patient_name ?? '',
             visit_type: qi.visit_type || 'consultation',
             status: qi.visit_status || 'completed',
             date: qi.visit_date || fallbackDate,
@@ -437,7 +437,7 @@ export default function NursingPoolQueuePage() {
           
           return {
             id: String(visit.id),
-            name: visit.patient_name || `Patient ${visit.patient}`,
+            name: visit.patient_name ?? '',
             patientId: (visit as any).patient_id || '', // direct from backend
             visitId: visit.visit_id || String(visit.id), // Visit ID string (VIS-...)
             personalNumber: '', // Not used for search, keep empty

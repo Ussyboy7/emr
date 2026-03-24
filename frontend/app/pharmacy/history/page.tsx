@@ -76,7 +76,7 @@ export default function DispenseHistoryPage() {
         // Extract patient details from prescription
         const prescription = dispense.prescription_details || {};
         const patientDetails = prescription.patient_details || {};
-        const patientName = dispense.patient_name || patientDetails.name || 'Unknown';
+        const patientName = dispense.patient_name ?? patientDetails.name ?? '';
         const patientId = patientDetails.patient_id || '';
         const patientMRN = patientDetails.patient_id || patientDetails.mrn || '';
         const patientAge = patientDetails.age || 0;

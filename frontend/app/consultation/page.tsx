@@ -338,7 +338,7 @@ export default function ConsultationPage() {
                     {stats.recentSessions.map((session: any) => (
                       <div key={session.id} className="flex items-center justify-between p-3 rounded-lg border border-muted bg-muted/30 hover:bg-muted/50 transition-colors">
                         <div className="flex-1 min-w-0">
-                          <p className="font-medium text-sm">{session.patient_name || `Patient ${session.patient}`}</p>
+                          <p className="font-medium text-sm">{session.patient_name ?? ''}</p>
                           <p className="text-xs text-muted-foreground">
                             Session {session.session_id || session.id} • {session.room_name || 'Unknown Room'}
                           </p>

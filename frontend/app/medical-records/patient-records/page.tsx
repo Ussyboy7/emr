@@ -258,14 +258,14 @@ export default function PatientRecordsPage() {
                   <CardContent className="p-4">
                     <div className="flex items-center gap-4">
                       <PatientAvatar
-                        name={p.full_name || `${p.first_name || ""} ${p.surname || ""}`.trim() || "Unknown"}
+                        name={p.full_name ?? ""}
                         photoUrl={p.photo ?? undefined}
                         size="md"
                       />
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <h3 className="font-semibold text-foreground truncate">
-                            {p.full_name || `${p.first_name || ""} ${p.surname || ""}`.trim() || "Unknown"}
+                            {p.full_name ?? ""}
                           </h3>
                           <Badge className={`text-[10px] px-1.5 py-0 ${getCategoryColor(p.category)}`}>
                             {categoryMap[p.category] || p.category}
@@ -329,13 +329,13 @@ export default function PatientRecordsPage() {
                         className="w-full flex items-center gap-3 p-3 rounded-lg border bg-card hover:bg-muted/50 hover:border-primary/30 transition-colors text-left"
                       >
                         <PatientAvatar
-                          name={p.full_name || `${p.first_name || ""} ${p.surname || ""}`.trim() || "Unknown"}
+                          name={p.full_name ?? ""}
                           photoUrl={p.photo ?? undefined}
                           size="sm"
                         />
                         <div className="flex-1 min-w-0">
                           <div className="font-medium text-sm truncate">
-                            {p.full_name || `${p.first_name || ""} ${p.surname || ""}`.trim() || "Unknown"}
+                            {p.full_name ?? ""}
                           </div>
                           <div className="text-xs text-muted-foreground">
                             {p.patient_id}

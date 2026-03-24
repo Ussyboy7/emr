@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { toast } from "sonner";
 import Link from 'next/link';
 import { apiFetch } from '@/lib/api-client';
+import { excludeWardInstructionOrdersForProceduresQueue } from '@/lib/nursing-procedure-queue';
 import { patientService, wardService } from '@/lib/services';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { useCurrentUser } from '@/hooks/use-current-user';
@@ -25,9 +26,16 @@ import {
   Eye, Calendar, Loader2, Save, Activity, History, ArrowRight, User, Stethoscope, Building2, DoorOpen
 } from 'lucide-react';
 
+const isInvalidAdmissionTypeError = (error: any) => {
+  const msg = String(error?.message || error?.apiMessage || '').toLowerCase();
+  return msg.includes('admission_type') && msg.includes('not a valid choice');
+};
+
 // ==================== TYPES ====================
 interface Procedure {
   id: string;
+  visitId?: number;
+  consultationSessionId?: number;
   type: 'injection' | 'dressing' | 'medication' | 'ward_admission';
   status: 'pending' | 'completed';
   patientName: string;
@@ -55,6 +63,9 @@ interface Procedure {
     instructions?: string;
     // Medication
     scheduledTime?: string;
+    // Observation Admission (from order description)
+    admissionDiagnosis?: string;
+    presentingComplaint?: string;
   };
 }
 
@@ -76,7 +87,7 @@ const getTypeConfig = (type: string) => {
     'injection': { icon: Syringe, color: 'text-emerald-500', bgColor: 'bg-emerald-500/10 border-emerald-500/30', label: 'Injection' },
     'dressing': { icon: Bandage, color: 'text-violet-500', bgColor: 'bg-violet-500/10 border-violet-500/30', label: 'Dressing' },
     'medication': { icon: Pill, color: 'text-blue-500', bgColor: 'bg-blue-500/10 border-blue-500/30', label: 'Medication' },
-    'ward_admission': { icon: DoorOpen, color: 'text-amber-500', bgColor: 'bg-amber-500/10 border-amber-500/30', label: 'Ward Admission' },
+    'ward_admission': { icon: DoorOpen, color: 'text-amber-500', bgColor: 'bg-amber-500/10 border-amber-500/30', label: 'Observation Admission' },
   };
   return configs[type] || configs['medication'];
 };
@@ -102,7 +113,6 @@ export default function ProceduresQueuePage() {
   useAuthRedirect(authError);
   const { currentUser } = useCurrentUser();
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'completed'>('pending');
   const [typeFilter, setTypeFilter] = useState('all');
   const [priorityFilter, setPriorityFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('today');
@@ -148,7 +158,7 @@ export default function ProceduresQueuePage() {
           ]);
         }
         
-        // Load orders for selected status (pending/completed/all)
+        // Queue page focuses on pending procedures only.
         await loadOrders();
       } catch (err) {
         console.error('Error loading nursing orders:', err);
@@ -163,16 +173,13 @@ export default function ProceduresQueuePage() {
     };
     
     loadData();
-  }, [statusFilter]);
+  }, []);
 
   // ==================== STATS ====================
   const stats = useMemo(() => ({
     pending: procedures.filter(p => p.status === 'pending').length,
-    completed: procedures.filter(p => p.status === 'completed').length,
     emergency: procedures.filter(p => p.priority === 'Emergency').length,
     injections: procedures.filter(p => p.type === 'injection').length,
-    dressings: procedures.filter(p => p.type === 'dressing').length,
-    medications: procedures.filter(p => p.type === 'medication').length,
     wardAdmissions: procedures.filter(p => p.type === 'ward_admission').length,
   }), [procedures]);
 
@@ -197,7 +204,6 @@ export default function ProceduresQueuePage() {
       .filter(p => {
         const matchesSearch = p.patientName.toLowerCase().includes(searchQuery.toLowerCase()) ||
                              p.patientId.toLowerCase().includes(searchQuery.toLowerCase());
-        const matchesStatus = statusFilter === 'all' || p.status === statusFilter;
         const matchesType = typeFilter === 'all' || p.type === typeFilter;
         const matchesPriority = priorityFilter === 'all' || p.priority === priorityFilter;
         const matchesGender = genderFilter === 'all' || p.gender.toLowerCase() === genderFilter.toLowerCase();
@@ -234,7 +240,7 @@ export default function ProceduresQueuePage() {
           }
         }
         
-        return matchesSearch && matchesStatus && matchesType && matchesPriority && matchesGender;
+        return matchesSearch && matchesType && matchesPriority && matchesGender;
       })
       .sort((a, b) => {
         // Sort by priority first
@@ -247,7 +253,7 @@ export default function ProceduresQueuePage() {
         const bTime = new Date((b.status === 'completed' && b.completedAt) ? b.completedAt : b.orderedAt).getTime();
         return aTime - bTime;
       });
-  }, [procedures, searchQuery, statusFilter, typeFilter, priorityFilter, dateFilter, genderFilter, dateRange.from, dateRange.to]);
+  }, [procedures, searchQuery, typeFilter, priorityFilter, dateFilter, genderFilter, dateRange.from, dateRange.to]);
 
   // Paginated procedures
   const paginatedProcedures = useMemo(() => {
@@ -269,11 +275,11 @@ export default function ProceduresQueuePage() {
   const loadOrders = async () => {
     try {
       const qs = new URLSearchParams();
-      if (statusFilter !== 'all') qs.set('status', statusFilter);
+      qs.set('status', 'pending');
       qs.set('page_size', '1000');
       const ordersResult = await apiFetch<{ results: any[] }>(`/nursing/orders/?${qs.toString()}`);
-      const orders = ordersResult.results || [];
-      
+      const orders = excludeWardInstructionOrdersForProceduresQueue(ordersResult.results || []);
+
           const transformedProcedures = await Promise.all(orders.map(async (order: any) => {
         try {
           const patient = await patientService.getPatient(order.patient);
@@ -299,6 +305,10 @@ export default function ProceduresQueuePage() {
             'dressing': 'dressing',
             'wound_care': 'dressing',
             'medication': 'medication',
+            'ward admission': 'ward_admission',
+            'observation admission': 'ward_admission',
+            'ward_admission': 'ward_admission',
+            'observation_admission': 'ward_admission',
           };
           
           const procedureType = typeMap[order.order_type?.toLowerCase()] || 'medication';
@@ -314,6 +324,7 @@ export default function ProceduresQueuePage() {
           const details: Procedure['details'] = {};
           const description = order.description || '';
           const instructions = order.instructions || '';
+          let parsedWard = '';
           
           // Try to extract medication, dosage, route, frequency from description
           if (procedureType === 'injection' || procedureType === 'medication') {
@@ -339,18 +350,36 @@ export default function ProceduresQueuePage() {
               details.woundLocation = woundMatch[2]?.trim() || '';
             }
             details.instructions = instructions || description;
+          } else if (procedureType === 'ward_admission') {
+            // Support both legacy and new wording:
+            // "Ward admission to <WARD>" or "Observation admission ... to <WARD>"
+            const wardMatch = description.match(/to\s+([^.,;]+)/i);
+            if (wardMatch?.[1]) {
+              parsedWard = wardMatch[1].trim();
+            }
+            // Parse Diagnosis and Presenting complaint from order format:
+            // "Diagnosis: X. Presenting complaint: Y. instructions"
+            const diagPcMatch = description.match(/Diagnosis:\s*(.+?)\.\s*Presenting complaint:\s*(.+?)(?:\s*\.|$)/i);
+            if (diagPcMatch) {
+              const diag = diagPcMatch[1].trim();
+              const pc = diagPcMatch[2].trim();
+              details.admissionDiagnosis = diag && diag.toLowerCase() !== 'n/a' ? diag : undefined;
+              details.presentingComplaint = pc && pc.toLowerCase() !== 'n/a' ? pc : undefined;
+            }
           }
           
           return {
             id: String(order.id),
+            visitId: typeof order.visit === 'number' ? order.visit : undefined,
+            consultationSessionId: typeof order.consultation_session === 'number' ? order.consultation_session : undefined,
             type: procedureType,
             status: (order.status === 'completed' ? 'completed' : 'pending'),
-            patientName: patient.full_name || `${patient.surname} ${patient.first_name}`,
+            patientName: patient.full_name ?? '',
             patientId: patient.patient_id || '',
             personalNumber: patient.personal_number || '',
             age: patient.age || 0,
             gender: patient.gender || '',
-            ward: '',
+            ward: parsedWard,
             orderedAt: order.ordered_at,
             completedAt: order.completed_at || order.updated_at || undefined,
             orderedBy: order.ordered_by_name || 'Unknown',
@@ -455,21 +484,55 @@ export default function ProceduresQueuePage() {
       } else if (selectedProcedure.type === 'ward_admission') {
         // For ward admissions, create both procedure record and admission record
         const wardName = selectedProcedure.ward || 'Female Medical Ward';
-        description = `Ward Admission: Admitted to ${wardName}`;
+        description = `Observation Admission: Admitted to ${wardName}`;
         notes = wardAdmissionForm.notes || 'Patient admitted to ward';
 
-        // Get ward ID by ward code
-        const ward = wards.find(w => w.ward_code === wardName);
-        const wardId = ward ? ward.id : 8; // Default to Female Medical Ward ID
-
-        // Get patient's current visit (required for admission)
-
-        const visitsResponse = await apiFetch<{ results: any[] }>(`/visits/?patient=${patientDbId}&status=in_progress`);
-        const activeVisits = visitsResponse.results || [];
-        if (activeVisits.length === 0) {
-          throw new Error('Patient has no active visit. Cannot create admission.');
+        // Resolve ward ID from available wards (no hardcoded PK fallback).
+        const byCode = wards.find(
+          (w) => String(w.ward_code || '').toLowerCase() === String(wardName || '').toLowerCase()
+        );
+        const byName = wards.find(
+          (w) => String(w.name || '').toLowerCase() === String(wardName || '').toLowerCase()
+        );
+        const fallbackWard = wards[0];
+        const wardId = byCode?.id ?? byName?.id ?? fallbackWard?.id;
+        if (!wardId) {
+          throw new Error('No active ward found for admission. Please configure wards first.');
         }
-        const visitId = activeVisits[0].id;
+
+        // Resolve visit for admission:
+        // 1) use visit attached to nursing order
+        // 2) use consultation session's visit if available
+        // 3) fallback to in-progress visit
+        // 4) fallback to latest visit (session may already be ended/completed)
+        let visitId: number | undefined = selectedProcedure.visitId;
+        if (!visitId && selectedProcedure.consultationSessionId) {
+          try {
+            const session = await apiFetch<any>(`/consultation/sessions/${selectedProcedure.consultationSessionId}/`);
+            if (typeof session?.visit === 'number' && Number.isFinite(session.visit)) {
+              visitId = session.visit;
+            }
+          } catch (sessionErr) {
+            console.warn('Could not resolve visit from consultation session:', sessionErr);
+          }
+        }
+        if (!visitId) {
+          const visitsResponse = await apiFetch<{ results: any[] }>(`/visits/?patient=${patientDbId}&status=in_progress&page_size=1`);
+          const activeVisits = visitsResponse.results || [];
+          if (activeVisits.length > 0 && typeof activeVisits[0].id === 'number') {
+            visitId = activeVisits[0].id;
+          }
+        }
+        if (!visitId) {
+          const latestVisitsResponse = await apiFetch<{ results: any[] }>(`/visits/?patient=${patientDbId}&ordering=-date,-time&page_size=1`);
+          const latestVisits = latestVisitsResponse.results || [];
+          if (latestVisits.length > 0 && typeof latestVisits[0].id === 'number') {
+            visitId = latestVisits[0].id;
+          }
+        }
+        if (!visitId) {
+          throw new Error('Patient has no visit record. Cannot create observation admission.');
+        }
 
         // Check if patient is already admitted before creating admission
         try {
@@ -485,34 +548,57 @@ export default function ProceduresQueuePage() {
           console.warn('Could not check existing admissions:', error);
         }
 
-        // Create admission record
+        const admissionDiagnosis =
+          selectedProcedure.details.admissionDiagnosis ||
+          wardAdmissionForm.notes ||
+          `Observation admission ordered by ${selectedProcedure.orderedBy}`;
+        const presentingComplaint =
+          selectedProcedure.details.presentingComplaint ||
+          selectedProcedure.details.admissionDiagnosis ||
+          wardAdmissionForm.notes ||
+          `Observation admission ordered by ${selectedProcedure.orderedBy}`;
+
         const admissionData = {
           patient: patientDbId,
           visit: visitId,
           ward: wardId,
-          admission_type: 'elective', // Could be made configurable
-          admitting_doctor: null, // Will be set by doctor later when they see patient
-          admission_diagnosis: wardAdmissionForm.notes || `Ward admission ordered by ${selectedProcedure.orderedBy}`,
-          presenting_complaint: `Ward admission ordered by ${selectedProcedure.orderedBy}`,
+          admission_type: 'observation',
+          admitting_doctor: null,
+          admission_diagnosis: admissionDiagnosis,
+          presenting_complaint: presentingComplaint,
           admission_notes: `Admitted to ${wardName}. ${wardAdmissionForm.notes || ''}`.trim(),
-          created_by: currentUser?.id, // Nurse who performed the admission
+          created_by: currentUser?.id,
         };
         console.log('Creating admission record with data:', admissionData);
+        const createAdmissionWithFallback = async () => {
+          try {
+            return await apiFetch('/admissions/', {
+              method: 'POST',
+              body: JSON.stringify(admissionData),
+            });
+          } catch (admissionError: any) {
+            if (!isInvalidAdmissionTypeError(admissionError)) {
+              throw admissionError;
+            }
+
+            const fallbackAdmissionData = {
+              ...admissionData,
+              admission_type: 'elective',
+              admission_notes: `${admissionData.admission_notes}\n[Observation Mode] Created via compatibility fallback using elective admission type.`,
+            };
+            return await apiFetch('/admissions/', {
+              method: 'POST',
+              body: JSON.stringify(fallbackAdmissionData),
+            });
+          }
+        };
+
         try {
-          const admissionResponse = await apiFetch('/admissions/', {
-            method: 'POST',
-            body: JSON.stringify(admissionData),
-          });
+          const admissionResponse = await createAdmissionWithFallback();
           console.log('Admission created:', admissionResponse);
         } catch (admissionError: any) {
           console.error('Admission creation failed:', admissionError);
-          // Try to get more details about the error
-          try {
-            const errorDetails = await admissionError.response?.text();
-            console.error('Admission error details:', errorDetails);
-          } catch (e) {
-            console.error('Could not get error details');
-          }
+          console.error('Admission error details:', admissionError?.body || admissionError?.apiMessage || admissionError?.message);
           throw admissionError;
         }
       } else {
@@ -609,24 +695,29 @@ export default function ProceduresQueuePage() {
               </div>
               Procedures Queue
             </h1>
-            <p className="text-muted-foreground mt-1">View and manage nursing procedures (pending and completed)</p>
+            <p className="text-muted-foreground mt-1">View and manage pending nursing procedures</p>
+          </div>
+          <div>
+            <Button asChild variant="outline" size="sm">
+              <Link href="/nursing/procedures/history">Procedures History</Link>
+            </Button>
           </div>
         </div>
 
         {/* Stats Row */}
-        <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
-          <Card className={`${stats.pending > 0 ? 'bg-gradient-to-br from-rose-500/10 to-pink-500/10 border-rose-500/20' : ''}`}>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <Card>
             <CardContent className="p-4 text-center">
               <p className="text-xs text-muted-foreground uppercase tracking-wider">Pending</p>
-              <p className={`text-2xl sm:text-3xl font-bold ${stats.pending > 0 ? 'text-rose-500' : 'text-muted-foreground'}`}>{stats.pending}</p>
+              <p className="text-2xl sm:text-3xl font-bold text-rose-500">{stats.pending}</p>
             </CardContent>
           </Card>
-          <Card className={stats.emergency > 0 ? 'border-rose-500/50 bg-rose-500/5' : ''}>
+          <Card>
             <CardContent className="p-4 flex items-center gap-3">
               <div className="p-2 rounded-lg bg-rose-500/10"><AlertTriangle className="h-4 w-4 text-rose-500" /></div>
               <div>
                 <p className="text-xs text-muted-foreground">Emergency</p>
-                <p className={`text-xl font-bold ${stats.emergency > 0 ? 'text-rose-500' : 'text-muted-foreground'}`}>{stats.emergency}</p>
+                <p className="text-xl font-bold text-rose-500">{stats.emergency}</p>
               </div>
             </CardContent>
           </Card>
@@ -641,27 +732,9 @@ export default function ProceduresQueuePage() {
           </Card>
           <Card>
             <CardContent className="p-4 flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-violet-500/10"><Bandage className="h-4 w-4 text-violet-500" /></div>
-              <div>
-                <p className="text-xs text-muted-foreground">Dressings</p>
-                <p className="text-xl font-bold text-violet-500">{stats.dressings}</p>
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4 flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-blue-500/10"><Pill className="h-4 w-4 text-blue-500" /></div>
-              <div>
-                <p className="text-xs text-muted-foreground">Medications</p>
-                <p className="text-xl font-bold text-blue-500">{stats.medications}</p>
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4 flex items-center gap-3">
               <div className="p-2 rounded-lg bg-cyan-500/10"><Building2 className="h-4 w-4 text-cyan-500" /></div>
               <div>
-                <p className="text-xs text-muted-foreground">Ward Admits</p>
+                <p className="text-xs text-muted-foreground">Observation Admits</p>
                 <p className="text-xl font-bold text-cyan-500">{stats.wardAdmissions}</p>
               </div>
             </CardContent>
@@ -684,14 +757,6 @@ export default function ProceduresQueuePage() {
                     <SelectItem value="today">Today</SelectItem>
                     <SelectItem value="week">This Week</SelectItem>
                     <SelectItem value="month">This Month</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as 'all' | 'pending' | 'completed')}>
-                  <SelectTrigger className="w-[140px]"><SelectValue placeholder="Status" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Status</SelectItem>
-                    <SelectItem value="pending">Pending</SelectItem>
-                    <SelectItem value="completed">Completed</SelectItem>
                   </SelectContent>
                 </Select>
                 <Select value={typeFilter} onValueChange={setTypeFilter}>
@@ -733,12 +798,12 @@ export default function ProceduresQueuePage() {
             <CardContent className="flex flex-col items-center justify-center py-16">
               <CheckCircle2 className="h-16 w-16 text-emerald-500 mb-4" />
               <h3 className="text-xl font-semibold text-foreground mb-2">
-                {statusFilter === 'pending' ? 'All caught up!' : 'No records found'}
+                All caught up!
               </h3>
               <p className="text-muted-foreground text-center">
                 {procedures.length === 0
-                  ? (statusFilter === 'completed' ? 'No completed procedures found' : 'No procedures found')
-                  : 'No procedures match your current filters'}
+                  ? 'No pending procedures found'
+                  : 'No pending procedures match your current filters'}
               </p>
             </CardContent>
           </Card>
@@ -790,10 +855,10 @@ export default function ProceduresQueuePage() {
                                 <CheckCircle2 className="h-4 w-4" />
                               </div>
                             ) : (
-                              <Button 
+                              <Button
                                 size="sm"
                                 onClick={() => openPerformDialog(procedure)} 
-                                className={`h-7 px-2 text-xs text-white ${
+                                className={`h-7 px-2 text-xs ${
                                   procedure.type === 'injection' ? 'bg-emerald-500 hover:bg-emerald-600' :
                                   procedure.type === 'dressing' ? 'bg-violet-500 hover:bg-violet-600' :
                                   procedure.type === 'ward_admission' ? 'bg-amber-500 hover:bg-amber-600' :
@@ -803,7 +868,7 @@ export default function ProceduresQueuePage() {
                                 <TypeIcon className="h-3 w-3 mr-1" />
                                 {procedure.type === 'injection' ? 'Give' :
                                  procedure.type === 'dressing' ? 'Do' :
-                                 procedure.type === 'ward_admission' ? 'Admit' : 'Give'}
+                                 procedure.type === 'ward_admission' ? 'Admit to Observation' : 'Give'}
                               </Button>
                             )}
                           </div>
@@ -902,7 +967,7 @@ export default function ProceduresQueuePage() {
                   )}
                   {selectedProcedure.type === 'ward_admission' && (
                     <>
-                      <p className="font-medium text-foreground">Ward Admission</p>
+                      <p className="font-medium text-foreground">Observation Admission</p>
                       <p className="text-sm text-muted-foreground">{selectedProcedure.description}</p>
                     </>
                   )}

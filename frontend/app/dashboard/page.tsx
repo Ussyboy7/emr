@@ -127,7 +127,7 @@ export default function DashboardPage() {
         .map((visit: any) => ({
           visitId: visit.id,
           id: visit.patient?.patient_id || visit.patient_id || '',
-          name: visit.patient?.full_name || visit.patient_name || 'Unknown',
+          name: visit.patient?.full_name ?? visit.patient_name ?? '',
           clinic: visit.clinic || 'GOPD',
           time: new Date(visit.created_at || visit.visit_date).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
           status: visit.status === 'completed' ? 'Completed' : visit.status === 'in_progress' ? 'In Consultation' : 'Pending',

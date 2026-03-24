@@ -263,7 +263,7 @@ export default function PatientVitalsPage() {
             
             return {
               id: String(patient.id),
-              name: patient.full_name || `${patient.surname} ${patient.first_name}`,
+              name: patient.full_name ?? '',
               patientId: patient.patient_id || '',
               personalNumber: patient.personal_number || '',
               age: patient.age || 0,

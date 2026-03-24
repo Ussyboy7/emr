@@ -962,7 +962,7 @@ const loadConsultationFromVisit = async (visitId: string | number): Promise<Cons
     
     return {
       id: String(visit.id),
-      patient: patient.full_name || `${patient.first_name} ${patient.surname}`,
+      patient: patient.full_name ?? '',
       patientId: patient.patient_id || '',
       patientAge: patient.age || undefined,
       patientGender: patient.gender || undefined,
@@ -1334,7 +1334,7 @@ const loadConsultationFromSession = async (sessionId: string | number): Promise<
     
     return {
       id: String(session.id),
-      patient: patient.full_name || `${patient.first_name} ${patient.surname}`,
+      patient: patient.full_name ?? '',
       patientId: patient.patient_id || '',
       patientAge: patient.age || undefined,
       patientGender: patient.gender || undefined,

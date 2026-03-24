@@ -283,7 +283,7 @@ export async function loadConsultationReportSession(sessionId: number): Promise<
   if (patientId) {
     try {
       const patient = await patientService.getPatient(patientId);
-      session.patient_name = patient.full_name || `${patient.first_name || ''} ${patient.surname || ''}`.trim();
+      session.patient_name = patient.full_name ?? '';
       session.patient_id = patient.patient_id ?? String(patient.id);
       session.patient_age = patient.age ?? '';
       session.patient_gender = patient.gender ?? '';

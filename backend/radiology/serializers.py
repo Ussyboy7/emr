@@ -97,10 +97,18 @@ class RadiologyOrderSerializer(serializers.ModelSerializer):
         order = RadiologyOrder.objects.create(**validated_data)
 
         # Create studies if provided
-        for study_data in studies_data:
+        for raw in studies_data:
+            study_data = dict(raw)
+            # Frontend sends template as numeric PK; ORM expects instance or template_id.
+            tid = study_data.pop('template', None)
+            if tid is not None:
+                study_data['template_id'] = tid
+            # Never pass conflicting keys from ad-hoc dicts
+            study_data.pop('order', None)
+            study_data.pop('id', None)
             RadiologyStudy.objects.create(
                 order=order,
-                images_count=0,  # Default value for required field
+                images_count=study_data.pop('images_count', 0),
                 **study_data
             )
 

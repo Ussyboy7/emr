@@ -80,7 +80,7 @@ function NewVisitPageContent() {
   const mapPatient = useCallback((p: any) => ({
     id: p.patient_id || '',
     numericId: p.id,
-    name: p.full_name || `${p.first_name || ''} ${p.surname || ''}`.trim() || 'Unknown',
+    name: p.full_name ?? '',
     age: p.age || 0,
     gender: p.gender === 'male' ? 'Male' : 'Female',
     bloodGroup: p.blood_group || '',

@@ -220,8 +220,8 @@ export default function RoomQueuePage() {
             return {
               id: String(item.id),
               name: patient 
-                ? (patient.full_name || `${patient.first_name} ${patient.surname}`)
-                : (item.patient_name || `Patient ${item.patient}`),
+                ? (patient.full_name ?? '')
+                : (item.patient_name ?? ''),
               patientId: patient?.patient_id || '',
               personalNumber: patient?.personal_number || '',
               priority: getPriority(typeof item.priority === 'number' ? item.priority : parseInt(item.priority) || 2),

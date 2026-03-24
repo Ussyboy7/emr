@@ -263,7 +263,7 @@ export default function PrescriptionsPage() {
         const patientDetails = rx.patient_details || {};
         const visitDetails = rx.visit_details || {};
         const patientId = rx.patient?.toString() || patientDetails.id || '';
-        let patientName = rx.patient_name || patientDetails.name || 'Unknown Patient';
+        let patientName = rx.patient_name ?? patientDetails.name ?? '';
         const patientIdentifier = patientDetails.patient_id || '';
 
 
@@ -357,7 +357,7 @@ export default function PrescriptionsPage() {
             rx_patient_name: rx.patient_name,
             patientDetails
           });
-          patientObj.name = 'Unknown Patient';
+          patientObj.name = '';
         }
 
         return {
@@ -1787,7 +1787,7 @@ export default function PrescriptionsPage() {
                 <div className="bg-muted/50 rounded-lg p-3 text-sm">
                   <div className="flex items-center justify-between">
                     <div>
-                      <span className="font-medium">{selectedPrescription.patient_details?.name || 'Unknown Patient'}</span>
+                      <span className="font-medium">{selectedPrescription.patient_details?.name ?? ''}</span>
                       <span className="text-muted-foreground"> • ID: {selectedPrescription.patient_details?.patient_id || 'N/A'} • {selectedPrescription.patient_details?.age || 'N/A'}y {selectedPrescription.patient_details?.gender || 'N/A'}</span>
                     </div>
                     <Badge variant="outline" className={getPriorityColor(selectedPrescription.priority)}>

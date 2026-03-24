@@ -777,7 +777,7 @@ export default function NewPatientPage() {
       setPrincipalValidation({
         isValidating: false,
         isValid: true,
-        message: `Valid: ${patient.full_name || `${patient.first_name} ${patient.surname}`} (${patient.category})`,
+        message: `Valid: ${patient.full_name ?? ''} (${patient.category})`,
         patient
       });
 
@@ -2215,9 +2215,17 @@ export default function NewPatientPage() {
                   <div className="flex items-start justify-between">
                     <span className="text-muted-foreground">Name</span>
                     <span className="font-medium text-right max-w-[150px] truncate">
-                      {formData.firstName || formData.surname 
-                        ? `${formData.title ? formData.title + ' ' : ''}${formData.firstName} ${formData.surname}`.trim() 
-                        : '—'}
+                      {(() => {
+                        const titlePrefix = formData.title?.trim()
+                          ? `${formData.title.trim()} `
+                          : '';
+                        const parts = [formData.surname, formData.firstName, formData.middleName]
+                          .map((s) => (s || '').trim())
+                          .filter(Boolean);
+                        const core = parts.join(' ');
+                        if (!core && !titlePrefix) return '—';
+                        return `${titlePrefix}${core}`.trim();
+                      })()}
                     </span>
                   </div>
                   <div className="flex items-start justify-between">

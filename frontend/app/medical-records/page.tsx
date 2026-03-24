@@ -98,7 +98,7 @@ export default function MedicalRecordsPage() {
           const patients = patientsResult.results || [];
           const recentPatientsData: PatientData[] = patients.slice(0, 5).map(p => ({
             id: p.id,
-            full_name: p.full_name || `${p.surname || ''} ${p.first_name || ''}`.trim() || 'Unknown Patient',
+            full_name: p.full_name ?? '',
             patient_id: p.patient_id,
             status: 'Active',
             age: p.age,
@@ -329,7 +329,7 @@ export default function MedicalRecordsPage() {
                     {activeVisits.map((visit) => (
                       <div key={visit.id} className="flex items-center justify-between p-3 rounded-lg border border-muted bg-muted/30 hover:bg-muted/50 transition-colors">
                         <div className="flex-1 min-w-0">
-                          <p className="font-medium text-sm">{visit.patient_name || `Patient ${visit.patient}`}</p>
+                          <p className="font-medium text-sm">{visit.patient_name ?? ''}</p>
                           <p className="text-xs text-muted-foreground">
                             {visit.visit_type && visit.visit_type.charAt(0).toUpperCase() + visit.visit_type.slice(1).toLowerCase()} • {visit.clinic || 'GOPD'}
                           </p>
@@ -371,7 +371,7 @@ export default function MedicalRecordsPage() {
                   {recentPatients.map((patient) => (
                     <Link key={patient.id} href={`/medical-records/patients`} className="block">
                       <div className="p-3 rounded-lg border border-muted bg-muted/30 hover:bg-muted/50 transition-colors cursor-pointer">
-                        <p className="font-medium text-sm">{patient.full_name || patient.patient_id}</p>
+                        <p className="font-medium text-sm">{patient.full_name ?? ''}</p>
                         <p className="text-xs text-muted-foreground">
                           ID: {patient.patient_id}
                         </p>

@@ -771,14 +771,14 @@ export default function PhysioPoolQueuePage() {
         <CardContent className="py-3 px-4">
           <div className="flex items-center gap-3">
             {/* Avatar */}
-            <PatientAvatar name={order.patient_name || 'Unknown'} size="sm" />
+            <PatientAvatar name={order.patient_name ?? ''} size="sm" />
 
             {/* Info */}
             <div className="flex-1 min-w-0">
               {/* Row 1: Name + Badges */}
               <div className="flex items-center justify-between gap-2">
                             <div className="flex items-center gap-2 flex-wrap min-w-0">
-                            <span className="font-semibold text-foreground truncate">{order.patient_name || 'Unknown Patient'}</span>
+                            <span className="font-semibold text-foreground truncate">{order.patient_name ?? ''}</span>
                             <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${getStatusColor(order.status)}`}>
                               {order.status === 'in_progress' && <Activity className="h-2 w-2 mr-0.5" />}
                               {order.status.replace('_', ' ')}
@@ -1087,7 +1087,7 @@ export default function PhysioPoolQueuePage() {
                   <div className="grid grid-cols-2 gap-4 p-4 rounded-lg bg-muted/50">
                     <div>
                       <p className="text-xs text-muted-foreground mb-1">Patient</p>
-                      <p className="font-medium text-base">{selectedOrder.patient_name || 'Unknown Patient'}</p>
+                      <p className="font-medium text-base">{selectedOrder.patient_name ?? ''}</p>
                       <p className="text-sm text-muted-foreground font-mono">{selectedOrder.patient_id}</p>
                     </div>
                     <div>
@@ -1418,7 +1418,7 @@ export default function PhysioPoolQueuePage() {
                 <div className="space-y-4 py-4">
                   {/* Patient Summary */}
                   <div className="p-3 rounded-lg bg-muted/50 flex items-center gap-3">
-                    <PatientAvatar name={selectedOrder.patient_name || 'Unknown'} size="sm" />
+                    <PatientAvatar name={selectedOrder.patient_name ?? ''} size="sm" />
                     <div>
                       <p className="font-medium">{selectedOrder.patient_name}</p>
                       <p className="text-xs text-muted-foreground">{selectedOrder.patient_id}</p>
@@ -1473,7 +1473,7 @@ export default function PhysioPoolQueuePage() {
                 <div className="space-y-4 py-4">
                   {/* Patient Summary */}
                   <div className="p-3 rounded-lg bg-muted/50 flex items-center gap-3">
-                    <PatientAvatar name={selectedOrder.patient_name || 'Unknown'} size="sm" />
+                    <PatientAvatar name={selectedOrder.patient_name ?? ''} size="sm" />
                     <div>
                       <p className="font-medium">{selectedOrder.patient_name}</p>
                       <p className="text-xs text-muted-foreground">
@@ -1543,7 +1543,7 @@ export default function PhysioPoolQueuePage() {
                   {/* Current Status */}
                   <div className="p-3 rounded-lg bg-muted/50 space-y-2">
                     <div className="flex items-center gap-3">
-                      <PatientAvatar name={selectedOrder.patient_name || 'Unknown'} size="sm" />
+                      <PatientAvatar name={selectedOrder.patient_name ?? ''} size="sm" />
                       <div>
                         <p className="font-medium">{selectedOrder.patient_name}</p>
                         <p className="text-sm text-muted-foreground">
@@ -1621,7 +1621,7 @@ export default function PhysioPoolQueuePage() {
                   {/* Patient Info */}
                   <div className="p-3 rounded-lg bg-muted/50 space-y-2">
                     <div className="flex items-center gap-3">
-                      <PatientAvatar name={selectedOrder.patient_name || 'Unknown'} size="sm" />
+                      <PatientAvatar name={selectedOrder.patient_name ?? ''} size="sm" />
                       <div>
                         <p className="font-medium">{selectedOrder.patient_name}</p>
                         <p className="text-sm text-muted-foreground font-mono">{selectedOrder.patient_id}</p>
@@ -1724,7 +1724,7 @@ export default function PhysioPoolQueuePage() {
                     <div>
                       <p className="text-xs text-muted-foreground mb-1">Patient</p>
                       <div className="flex items-center gap-2">
-                        <PatientAvatar name={selectedOrder.patient_name || 'Unknown'} size="sm" />
+                        <PatientAvatar name={selectedOrder.patient_name ?? ''} size="sm" />
                         <div>
                           <p className="font-medium">{selectedOrder.patient_name}</p>
                           <p className="text-sm text-muted-foreground font-mono">{selectedOrder.patient_id}</p>
@@ -1921,7 +1921,7 @@ export default function PhysioPoolQueuePage() {
                     <div>
                       <p className="text-xs text-muted-foreground mb-1">Patient</p>
                       <div className="flex items-center gap-2">
-                        <PatientAvatar name={selectedOrder.patient_name || 'Unknown'} size="sm" />
+                        <PatientAvatar name={selectedOrder.patient_name ?? ''} size="sm" />
                         <div>
                           <p className="font-medium">{selectedOrder.patient_name}</p>
                           <p className="text-sm text-muted-foreground font-mono">{selectedOrder.patient_id}</p>
@@ -2266,7 +2266,7 @@ export default function PhysioPoolQueuePage() {
                     <div>
                       <p className="text-xs text-muted-foreground mb-1">Patient</p>
                       <div className="flex items-center gap-2">
-                        <PatientAvatar name={selectedOrder.patient_name || 'Unknown'} size="sm" />
+                        <PatientAvatar name={selectedOrder.patient_name ?? ''} size="sm" />
                         <div>
                           <p className="font-medium">{selectedOrder.patient_name}</p>
                           <p className="text-sm text-muted-foreground font-mono">{selectedOrder.patient_id}</p>

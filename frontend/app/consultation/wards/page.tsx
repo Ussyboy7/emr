@@ -10,7 +10,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger, DialogFooter } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  WardDoctorOrdersSection,
+  userCanAddWardDoctorOrders,
+  userCanEditCancelWardOrders,
+} from '@/components/ward/WardDoctorOrdersSection';
 import {
   Building2, Users, UserCheck, Clock, Search, Eye,
   Edit, Stethoscope, UserPlus, FileText, AlertTriangle, CheckCircle,
@@ -217,6 +222,13 @@ export default function WardOverviewPage() {
     }
   };
 
+  const formatAdmissionType = (type?: string) => {
+    const raw = String(type || '').trim().toLowerCase();
+    if (raw === 'observation' || raw === 'daycare_observation') return 'Observation (Day Care)';
+    if (!raw) return 'N/A';
+    return raw.replace(/[_-]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+  };
+
   return (
     <DashboardLayout>
       <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
@@ -227,11 +239,11 @@ export default function WardOverviewPage() {
               <Building2 className="h-8 w-8 text-blue-500" />
               Ward Overview
             </h1>
-            <p className="text-muted-foreground mt-1">Monitor admitted patients and manage ward operations</p>
+            <p className="text-muted-foreground mt-1">Monitor admitted and observation patients and manage ward operations</p>
           </div>
-          <Button onClick={fetchData} disabled={isLoading}>
-            <Search className="h-4 w-4 mr-2" />
-            Refresh Data
+          <Button variant="outline" onClick={fetchData} disabled={isLoading}>
+            <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
+            Refresh
           </Button>
         </div>
 
@@ -411,9 +423,9 @@ export default function WardOverviewPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Users className="h-5 w-5" />
-              Admitted Patients ({filteredAdmissions.length})
+              Ward/Observation Patients ({filteredAdmissions.length})
             </CardTitle>
-            <CardDescription>Monitor patient status and manage ward operations</CardDescription>
+            <CardDescription>Monitor observation and ward patient status and manage operations</CardDescription>
           </CardHeader>
           <CardContent>
             {isLoading ? (
@@ -426,127 +438,87 @@ export default function WardOverviewPage() {
                 <p>No patients found matching the criteria</p>
               </div>
             ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Patient</TableHead>
-                    <TableHead>Ward/Bed</TableHead>
-                    <TableHead>Admission</TableHead>
-                    <TableHead>Condition</TableHead>
-                    <TableHead>Nurse Assignment</TableHead>
-                    <TableHead>Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredAdmissions.map((admission) => {
-                    const patientAssignments = getPatientAssignments(admission.id);
-                    return (
-                      <TableRow key={admission.id}>
-                        <TableCell>
-                          <div>
-                            <p className="font-medium">{admission.patient_name}</p>
-                            <p className="text-sm text-muted-foreground">{admission.admission_id}</p>
+              <div className="space-y-2">
+                {filteredAdmissions.map((admission) => {
+                  const patientAssignments = getPatientAssignments(admission.id);
+                  return (
+                    <Card
+                      key={admission.id}
+                      className={`border-l-4 ${
+                        admission.status === 'admitted'
+                          ? 'border-l-blue-500'
+                          : admission.status === 'discharged'
+                            ? 'border-l-green-500'
+                            : 'border-l-purple-500'
+                      }`}
+                    >
+                      <CardContent className="py-3 px-4">
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 flex items-center justify-center font-semibold text-xs">
+                            {admission.patient_name.split(' ').map((n) => n[0]).join('').slice(0, 2)}
                           </div>
-                        </TableCell>
-                        <TableCell>
-                          <div>
-                            <p className="font-medium">{admission.ward_name}</p>
-                            {admission.bed_number && (
-                              <p className="text-sm text-muted-foreground">Bed {admission.bed_number}</p>
-                            )}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div>
-                            <p className="text-sm">{new Date(admission.admission_date).toLocaleDateString()}</p>
-                            <p className="text-xs text-muted-foreground">{admission.length_of_stay} days</p>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          {admission.current_condition ? (
-                            <Badge className={getConditionBadgeClass(admission.current_condition)}>
-                              {admission.current_condition}
-                            </Badge>
-                          ) : (
-                            <Badge variant="outline">Not specified</Badge>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          {patientAssignments.length > 0 ? (
-                            <div className="space-y-1">
-                              {patientAssignments.slice(0, 2).map((assignment, idx) => (
-                                <div key={idx} className="text-sm">
-                                  <span className="font-medium">{assignment.nurse_name}</span>
-                                  <span className="text-muted-foreground"> ({assignment.assignment_type})</span>
-                                </div>
-                              ))}
-                              {patientAssignments.length > 2 && (
-                                <p className="text-xs text-muted-foreground">
-                                  +{patientAssignments.length - 2} more
-                                </p>
-                              )}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <p className="font-medium text-sm truncate">{admission.patient_name}</p>
+                                <Badge className={getStatusBadgeClass(admission.status)}>{admission.status}</Badge>
+                                <Badge className={getConditionBadgeClass(admission.current_condition || '')}>
+                                  {admission.current_condition || 'Not specified'}
+                                </Badge>
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleViewAdmission(admission)} title="View Details">
+                                  <Eye className="h-3.5 w-3.5" />
+                                </Button>
+                                {admission.status === 'admitted' && (
+                                  <>
+                                    <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => { setSelectedAdmission(admission); setShowAssignNurse(true); }} title="Assign Nurse">
+                                      <UserPlus className="h-3.5 w-3.5" />
+                                    </Button>
+                                    <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => { setSelectedAdmission(admission); setShowUpdateCondition(true); }} title="Update Condition">
+                                      <Edit className="h-3.5 w-3.5" />
+                                    </Button>
+                                    <Button size="icon" variant="ghost" className="h-7 w-7 text-red-600 hover:text-red-700 hover:bg-red-50" onClick={() => { setSelectedAdmission(admission); setShowDischargeDialog(true); }} title="Discharge Patient">
+                                      <CheckCircle className="h-3.5 w-3.5" />
+                                    </Button>
+                                  </>
+                                )}
+                              </div>
                             </div>
-                          ) : (
-                            <Badge variant="outline" className="text-red-600">
-                              <AlertTriangle className="h-3 w-3 mr-1" />
-                              Unassigned
-                            </Badge>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex gap-2">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => handleViewAdmission(admission)}
-                              title="View Details"
-                            >
-                              <Eye className="h-4 w-4" />
-                            </Button>
-                            {admission.status === 'admitted' && (
-                              <>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => {
-                                    setSelectedAdmission(admission);
-                                    setShowAssignNurse(true);
-                                  }}
-                                  title="Assign Nurse"
-                                >
-                                  <UserPlus className="h-4 w-4" />
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => {
-                                    setSelectedAdmission(admission);
-                                    setShowUpdateCondition(true);
-                                  }}
-                                  title="Update Condition"
-                                >
-                                  <Edit className="h-4 w-4" />
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="destructive"
-                                  onClick={() => {
-                                    setSelectedAdmission(admission);
-                                    setShowDischargeDialog(true);
-                                  }}
-                                  title="Discharge Patient"
-                                >
-                                  <CheckCircle className="h-4 w-4" />
-                                </Button>
-                              </>
-                            )}
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5 flex-wrap">
+                              <span>{admission.admission_id}</span>
+                              <span>•</span>
+                              <span>{admission.ward_name}{admission.bed_number ? ` • Bed ${admission.bed_number}` : ''}</span>
+                              <span>•</span>
+                              <span>
+                                {new Date(admission.admission_date).toLocaleDateString('en-GB', {
+                                  day: 'numeric',
+                                  month: 'short',
+                                  year: 'numeric',
+                                })}
+                              </span>
+                              <span>•</span>
+                              <span>
+                                {admission.length_of_stay === 0
+                                  ? 'Same day'
+                                  : `${admission.length_of_stay} day${admission.length_of_stay === 1 ? '' : 's'}`}
+                              </span>
+                              <span>•</span>
+                              <span>{formatAdmissionType(admission.admission_type)}</span>
+                              <span>•</span>
+                              <span>
+                                {patientAssignments.length > 0
+                                  ? `${patientAssignments.slice(0, 2).map((a) => a.nurse_name).join(', ')}${patientAssignments.length > 2 ? ` +${patientAssignments.length - 2}` : ''}`
+                                  : 'Unassigned'}
+                              </span>
+                            </div>
                           </div>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
             )}
           </CardContent>
         </Card>
@@ -554,72 +526,108 @@ export default function WardOverviewPage() {
         {/* Admission Details Dialog */}
         {selectedAdmission && (
           <Dialog open={showAdmissionDetails} onOpenChange={setShowAdmissionDetails}>
-            <DialogContent className="sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
+            <DialogContent className="sm:max-w-[720px] max-h-[90vh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle>Patient Details: {selectedAdmission.patient_name}</DialogTitle>
                 <DialogDescription>
                   Admission ID: {selectedAdmission.admission_id} • Ward: {selectedAdmission.ward_name}
                 </DialogDescription>
               </DialogHeader>
-              <div className="grid gap-6 py-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <Label>Admission Date</Label>
-                    <p>{new Date(selectedAdmission.admission_date).toLocaleDateString()}</p>
+              <Tabs defaultValue="overview" className="w-full">
+                <TabsList className="grid w-full grid-cols-2 h-9">
+                  <TabsTrigger value="overview" className="text-xs">
+                    Overview
+                  </TabsTrigger>
+                  <TabsTrigger value="orders" className="text-xs">
+                    Doctor&apos;s orders
+                  </TabsTrigger>
+                </TabsList>
+                <TabsContent value="overview" className="grid gap-6 py-4 mt-2">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <Label>Admission Date</Label>
+                      <p>
+                        {new Date(selectedAdmission.admission_date).toLocaleDateString('en-GB', {
+                          day: 'numeric',
+                          month: 'short',
+                          year: 'numeric',
+                        })}
+                      </p>
+                    </div>
+                    <div>
+                      <Label>Length of Stay</Label>
+                      <p>
+                        {selectedAdmission.length_of_stay === 0
+                          ? 'Same day'
+                          : `${selectedAdmission.length_of_stay} day${selectedAdmission.length_of_stay === 1 ? '' : 's'}`}
+                      </p>
+                    </div>
+                    <div>
+                      <Label>Admitting Doctor</Label>
+                      <p>{selectedAdmission.admitting_doctor_name || 'Not specified'}</p>
+                    </div>
+                    <div>
+                      <Label>Current Status</Label>
+                      <Badge className={getStatusBadgeClass(selectedAdmission.status)}>
+                        {selectedAdmission.status}
+                      </Badge>
+                    </div>
                   </div>
-                  <div>
-                    <Label>Length of Stay</Label>
-                    <p>{selectedAdmission.length_of_stay} days</p>
-                  </div>
-                  <div>
-                    <Label>Admitting Doctor</Label>
-                    <p>{selectedAdmission.admitting_doctor_name || 'Not specified'}</p>
-                  </div>
-                  <div>
-                    <Label>Current Status</Label>
-                    <Badge className={getStatusBadgeClass(selectedAdmission.status)}>
-                      {selectedAdmission.status}
-                    </Badge>
-                  </div>
-                </div>
 
-                <div>
-                  <Label>Admission Diagnosis</Label>
-                  <p className="text-sm bg-muted p-3 rounded">{selectedAdmission.admission_diagnosis}</p>
-                </div>
-
-                {selectedAdmission.presenting_complaint && (
                   <div>
-                    <Label>Presenting Complaint</Label>
-                    <p className="text-sm bg-muted p-3 rounded">{selectedAdmission.presenting_complaint}</p>
+                    <Label>Admission Diagnosis</Label>
+                    <p className="text-sm bg-muted p-3 rounded">{selectedAdmission.admission_diagnosis}</p>
                   </div>
-                )}
 
-                {selectedAdmission.current_condition && (
+                  {selectedAdmission.presenting_complaint && (
+                    <div>
+                      <Label>Presenting Complaint</Label>
+                      <p className="text-sm bg-muted p-3 rounded">{selectedAdmission.presenting_complaint}</p>
+                    </div>
+                  )}
+
+                  {selectedAdmission.current_condition && (
+                    <div>
+                      <Label>Current Condition</Label>
+                      <p className="text-sm bg-muted p-3 rounded">{selectedAdmission.current_condition}</p>
+                    </div>
+                  )}
+
                   <div>
-                    <Label>Current Condition</Label>
-                    <p className="text-sm bg-muted p-3 rounded">{selectedAdmission.current_condition}</p>
-                  </div>
-                )}
-
-                <div>
-                  <Label>Nurse Assignments</Label>
-                  <div className="space-y-2">
-                    {getPatientAssignments(selectedAdmission.id).map((assignment, idx) => (
-                      <div key={idx} className="flex items-center justify-between p-3 bg-muted rounded">
-                        <div>
-                          <p className="font-medium">{assignment.nurse_name}</p>
-                          <p className="text-sm text-muted-foreground">{assignment.assignment_type}</p>
+                    <Label>Nurse Assignments</Label>
+                    <div className="space-y-2">
+                      {getPatientAssignments(selectedAdmission.id).map((assignment, idx) => (
+                        <div key={idx} className="flex items-center justify-between p-3 bg-muted rounded">
+                          <div>
+                            <p className="font-medium">{assignment.nurse_name}</p>
+                            <p className="text-sm text-muted-foreground">{assignment.assignment_type}</p>
+                          </div>
+                          <Badge variant="outline">{assignment.status}</Badge>
                         </div>
-                        <Badge variant="outline">{assignment.status}</Badge>
-                      </div>
-                    ))}
-                    {getPatientAssignments(selectedAdmission.id).length === 0 && (
-                      <p className="text-sm text-muted-foreground">No nurse assignments</p>
-                    )}
+                      ))}
+                      {getPatientAssignments(selectedAdmission.id).length === 0 && (
+                        <p className="text-sm text-muted-foreground">No nurse assignments</p>
+                      )}
+                    </div>
                   </div>
-                </div>
-              </div>
+                </TabsContent>
+                <TabsContent value="orders" className="py-4 mt-2">
+                  <WardDoctorOrdersSection
+                    admission={selectedAdmission}
+                    allowAddOrders={
+                      !!currentUser?.isSuperuser ||
+                      userCanAddWardDoctorOrders(currentUser?.systemRole)
+                    }
+                    allowEditCancelOrders={
+                      !!currentUser?.isSuperuser ||
+                      userCanEditCancelWardOrders(currentUser?.systemRole)
+                    }
+                    currentUserId={
+                      currentUser?.id != null ? Number(currentUser.id) : undefined
+                    }
+                  />
+                </TabsContent>
+              </Tabs>
             </DialogContent>
           </Dialog>
         )}
@@ -768,11 +776,21 @@ export default function WardOverviewPage() {
                 <div className="mt-4 grid grid-cols-2 gap-4 text-sm">
                   <div>
                     <Label className="text-muted-foreground">Admission Date</Label>
-                    <p className="font-medium">{new Date(selectedAdmission.admission_date).toLocaleDateString()}</p>
+                    <p className="font-medium">
+                      {new Date(selectedAdmission.admission_date).toLocaleDateString('en-GB', {
+                        day: 'numeric',
+                        month: 'short',
+                        year: 'numeric',
+                      })}
+                    </p>
                   </div>
                   <div>
                     <Label className="text-muted-foreground">Length of Stay</Label>
-                    <p className="font-medium">{selectedAdmission.length_of_stay} days</p>
+                    <p className="font-medium">
+                      {selectedAdmission.length_of_stay === 0
+                        ? 'Same day'
+                        : `${selectedAdmission.length_of_stay} day${selectedAdmission.length_of_stay === 1 ? '' : 's'}`}
+                    </p>
                   </div>
                 </div>
               </div>

@@ -84,14 +84,14 @@ export default function RadiologyOrdersPage() {
         <CardContent className="py-3 px-4">
           <div className="flex items-center gap-3">
             {/* Avatar */}
-            <PatientAvatar name={order.patient_name || 'Unknown'} size="sm" />
+            <PatientAvatar name={order.patient_name ?? ''} size="sm" />
 
             {/* Info */}
             <div className="flex-1 min-w-0">
               {/* Row 1: Name + Badges */}
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 flex-wrap min-w-0">
-                  <span className="font-semibold text-foreground truncate">{order.patient_name || 'Unknown Patient'}</span>
+                  <span className="font-semibold text-foreground truncate">{order.patient_name ?? ''}</span>
                   <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${getPriorityColor(order.priority)}`}>
                     {getPriorityLabel(order.priority)}
                   </Badge>

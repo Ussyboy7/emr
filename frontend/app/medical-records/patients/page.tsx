@@ -144,6 +144,31 @@ const getLocation = (patient: any): string => {
   return patient.location || patient.work_location || patient.office_location || '';
 };
 
+const getDisplayAge = (age?: number, dob?: string): string => {
+  if (typeof dob === 'string' && dob.trim()) {
+    const birthDate = new Date(dob);
+    if (!Number.isNaN(birthDate.getTime())) {
+      const today = new Date();
+      let years = today.getFullYear() - birthDate.getFullYear();
+      let months = today.getMonth() - birthDate.getMonth();
+      const days = today.getDate() - birthDate.getDate();
+
+      if (days < 0) months -= 1;
+      if (months < 0) {
+        years -= 1;
+        months += 12;
+      }
+
+      if (years > 0) return `${years}y`;
+      if (months > 0) return `${months}mo`;
+      return '0mo';
+    }
+  }
+
+  if (typeof age === 'number' && Number.isFinite(age) && age >= 0) return `${age}y`;
+  return 'Age unknown';
+};
+
 // Transform backend patient to frontend format
 const transformPatient = (apiPatient: ApiPatient): Patient => {
   const categoryMap: Record<string, string> = {
@@ -160,7 +185,7 @@ const transformPatient = (apiPatient: ApiPatient): Patient => {
   return {
     id: patientId,
     numericId: apiPatient.id,
-    name: apiPatient.full_name || `${apiPatient.first_name} ${apiPatient.surname}`,
+    name: apiPatient.full_name ?? '',
     category: categoryMap[apiPatient.category] || apiPatient.category,
     personalNumber: apiPatient.personal_number || '',
     employeeType: apiPatient.employee_type || '',
@@ -355,7 +380,7 @@ export default function PatientsListPage() {
           if (apiPatient.category === 'dependent' && apiPatient.principal_staff) {
             try {
               const principal = await patientService.getPatient(apiPatient.principal_staff);
-              patient.primaryPatient = principal.full_name || `${principal.first_name} ${principal.surname}`;
+              patient.primaryPatient = principal.full_name ?? '';
             } catch (err) {
               // Silently fail - principal staff data is optional
               console.debug('Could not fetch principal staff for dependent', apiPatient.id);
@@ -641,53 +666,61 @@ export default function PatientsListPage() {
         numericId = matchedPatient.id;
       }
       
-      // Map frontend form fields to backend API fields (snake_case)
-      const updateData: Partial<ApiPatient> = {
-        title: editForm.title && editForm.title.trim() !== '' ? editForm.title.toLowerCase() : undefined,
-        first_name: editForm.firstName.trim() || undefined,
-        surname: editForm.lastName.trim() || undefined,
-        middle_name: editForm.middleName.trim() || undefined,
-        date_of_birth: editForm.dateOfBirth || undefined,
-        marital_status: editForm.maritalStatus && editForm.maritalStatus.trim() !== '' 
-          ? editForm.maritalStatus.toLowerCase() 
-          : undefined,
-        religion: editForm.religion.trim() || undefined,
-        tribe: editForm.tribe.trim() || undefined,
-        phone: editForm.phone.trim() || undefined,
-        email: editForm.email.trim() || undefined,
-        residential_address: editForm.residentialAddress.trim() || undefined,
-        permanent_address: editForm.permanentAddress.trim() || undefined,
-        state_of_residence: editForm.stateOfResidence.trim() || undefined,
-        state_of_origin: editForm.stateOfOrigin.trim() || undefined,
-        lga: editForm.lga.trim() || undefined,
-        blood_group: editForm.bloodGroup && editForm.bloodGroup.trim() !== '' ? editForm.bloodGroup : undefined,
-        genotype: editForm.genotype && editForm.genotype.trim() !== '' ? editForm.genotype : undefined,
-        location: editForm.location.trim() || undefined,
-        division: editForm.division.trim() || undefined,
-        employee_type: editForm.employeeType && editForm.employeeType.trim() !== '' 
-          ? editForm.employeeType.charAt(0).toUpperCase() + editForm.employeeType.slice(1).toLowerCase()
-          : undefined,
-        nok_surname: editForm.nokSurname.trim() || undefined,
-        nok_first_name: editForm.nokFirstName.trim() || undefined,
-        nok_middle_name: editForm.nokMiddleName.trim() || undefined,
-        nok_relationship: editForm.nokRelationship && editForm.nokRelationship.trim() !== '' 
-          ? editForm.nokRelationship.charAt(0).toUpperCase() + editForm.nokRelationship.slice(1).toLowerCase()
-          : undefined,
-        nok_address: editForm.nokAddress.trim() || undefined,
-        nok_phone: editForm.nokPhone.trim() || undefined,
-      };
-
-      // Add occupation for Dependent and Retiree only
-      if ((selectedPatient.category === 'Dependent' || selectedPatient.category === 'Retiree') && editForm.occupation) {
-        (updateData as any).occupation = editForm.occupation.trim();
+      const first = editForm.firstName.trim();
+      const last = editForm.lastName.trim();
+      const dob = editForm.dateOfBirth?.trim() ?? '';
+      if (!first || !last) {
+        toast.error('First name and surname are required.');
+        setIsSubmitting(false);
+        return;
+      }
+      if (!dob) {
+        toast.error('Date of birth is required.');
+        setIsSubmitting(false);
+        return;
       }
 
-      // Remove undefined values to avoid sending them
-      Object.keys(updateData).forEach(key => {
-        if (updateData[key as keyof typeof updateData] === undefined) {
-          delete updateData[key as keyof typeof updateData];
-        }
-      });
+      // Map frontend form fields to backend API fields (snake_case).
+      // Optional fields use '' when cleared so PATCH actually clears the server values
+      // (omitting a key leaves the previous value unchanged).
+      const updateData: Partial<ApiPatient> = {
+        title: editForm.title.trim() ? editForm.title.toLowerCase().trim() : '',
+        first_name: first,
+        surname: last,
+        middle_name: editForm.middleName.trim(),
+        date_of_birth: dob,
+        marital_status: editForm.maritalStatus.trim()
+          ? editForm.maritalStatus.toLowerCase()
+          : '',
+        religion: editForm.religion.trim(),
+        tribe: editForm.tribe.trim(),
+        phone: editForm.phone.trim(),
+        email: editForm.email.trim(),
+        residential_address: editForm.residentialAddress.trim(),
+        permanent_address: editForm.permanentAddress.trim(),
+        state_of_residence: editForm.stateOfResidence.trim(),
+        state_of_origin: editForm.stateOfOrigin.trim(),
+        lga: editForm.lga.trim(),
+        blood_group: editForm.bloodGroup.trim() ? editForm.bloodGroup : '',
+        genotype: editForm.genotype.trim() ? editForm.genotype : '',
+        location: editForm.location.trim(),
+        division: editForm.division.trim(),
+        employee_type: editForm.employeeType.trim()
+          ? editForm.employeeType.charAt(0).toUpperCase() + editForm.employeeType.slice(1).toLowerCase()
+          : '',
+        nok_surname: editForm.nokSurname.trim(),
+        nok_first_name: editForm.nokFirstName.trim(),
+        nok_middle_name: editForm.nokMiddleName.trim(),
+        nok_relationship: editForm.nokRelationship.trim()
+          ? editForm.nokRelationship.charAt(0).toUpperCase() + editForm.nokRelationship.slice(1).toLowerCase()
+          : '',
+        nok_address: editForm.nokAddress.trim(),
+        nok_phone: editForm.nokPhone.trim(),
+      };
+
+      if (selectedPatient.category === 'Dependent' || selectedPatient.category === 'Retiree') {
+        (updateData as any).occupation = editForm.occupation.trim();
+      }
 
       // Handle photo upload if a new photo was selected
       if (photoFile) {
@@ -970,7 +1003,7 @@ export default function PatientsListPage() {
                           <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-wrap">
                             <span>{patient.id}</span>
                             <span>•</span>
-                            <span>{patient.age}y {patient.gender}</span>
+                            <span>{getDisplayAge(patient.age, patient.dob)} {patient.gender}</span>
                             <span>•</span>
                             <span className="flex items-center gap-1"><Phone className="h-3 w-3" />{patient.phone || 'No phone'}</span>
                             {patient.location ? (

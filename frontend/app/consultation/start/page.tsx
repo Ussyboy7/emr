@@ -371,7 +371,7 @@ const StartConsultation = () => {
           id: String(patient.id),
           visitId: visitId ? String(visitId) : '',
           patientId: patient.patient_id || '',
-          name: patient.full_name || `${patient.first_name} ${patient.surname}`,
+          name: patient.full_name ?? '',
           age: patient.age || 0,
           gender: patient.gender || '',
           mrn: patient.patient_id || '',
