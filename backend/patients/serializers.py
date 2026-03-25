@@ -2,7 +2,7 @@
 Serializers for the Patients app.
 """
 from rest_framework import serializers
-from .models import Patient, Visit, VitalReading, MedicalHistory
+from .models import Patient, Visit, VitalReading, MedicalHistory, MedicalCertificate
 
 
 class PatientSerializer(serializers.ModelSerializer):
@@ -216,7 +216,8 @@ class VisitSerializer(serializers.ModelSerializer):
             clinic = self._resolve_location_clinic(location_str)
             validated_data['location_clinic'] = clinic
         return super().update(instance, validated_data)
-    
+
+
     def validate(self, attrs):
         """
         Prevent duplicate *open* visits for same patient on same date with SAME clinics.
@@ -330,3 +331,45 @@ class MedicalHistorySerializer(serializers.ModelSerializer):
             'updated_at', 'updated_by',
         ]
         read_only_fields = ['id', 'updated_at']
+
+
+class MedicalCertificateSerializer(serializers.ModelSerializer):
+    """
+    Serializer for persisted medical certificate records.
+    """
+
+    patient_name = serializers.CharField(source="patient.get_full_name", read_only=True)
+    issued_by_name = serializers.CharField(source="issued_by.get_full_name", read_only=True, allow_null=True)
+
+    class Meta:
+        model = MedicalCertificate
+        fields = [
+            "id",
+            "certificate_number",
+            "patient",
+            "patient_name",
+            "purpose",
+            "valid_from",
+            "valid_to",
+            "findings",
+            "recommendations",
+            "issued_by",
+            "issued_by_name",
+            "issued_at",
+            "patient_name_snapshot",
+            "patient_id_snapshot",
+            "patient_category_snapshot",
+            "doctor_name_snapshot",
+        ]
+        read_only_fields = [
+            "id",
+            "certificate_number",
+            "issued_at",
+            "issued_by",
+            "issued_by_name",
+            "patient_name_snapshot",
+            "patient_id_snapshot",
+            "patient_category_snapshot",
+            "doctor_name_snapshot",
+            "patient_name",
+        ]

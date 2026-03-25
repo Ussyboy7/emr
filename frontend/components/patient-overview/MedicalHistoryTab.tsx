@@ -16,8 +16,24 @@ import { VitalsDetailModal } from '@/components/VitalsDetailModal';
 import { ConsultationReportModal } from '@/components/consultation/ConsultationReportModal';
 import { loadConsultationReportSession, type ConsultationReportSession } from '@/lib/consultation-report';
 import { 
-  FileText, Stethoscope, TestTube, ScanLine, Pill, Heart,
-  AlertTriangle, Users, User, Eye, ChevronLeft, ChevronRight, Plus, X, Calendar
+  FileText,
+  Stethoscope,
+  TestTube,
+  ScanLine,
+  Pill,
+  Heart,
+  Activity,
+  Building2,
+  Printer,
+  AlertTriangle,
+  Users,
+  User,
+  Eye,
+  ChevronLeft,
+  ChevronRight,
+  Plus,
+  X,
+  Calendar,
 } from 'lucide-react';
 
 // Helper function to safely parse date
@@ -30,6 +46,15 @@ const safeParseDate = (dateString: string | undefined): Date | null => {
   } catch {
     return null;
   }
+};
+
+const escapeHtml = (value: string) => {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
 };
 
 interface PatientDetail {
@@ -62,6 +87,9 @@ interface MedicalHistoryTabProps {
   imagingResults: any[];
   prescriptions: any[];
   vitalSigns: any[];
+  physioOrders?: any[];
+  wardAdmissions?: any[];
+  medicalCertificates?: any[];
   historySubTab: string;
   onHistorySubTabChange: (tab: string) => void;
   onViewVisit?: (visit: Visit) => void;
@@ -77,6 +105,9 @@ export function MedicalHistoryTab({
   imagingResults,
   prescriptions,
   vitalSigns,
+  physioOrders = [],
+  wardAdmissions = [],
+  medicalCertificates = [],
   historySubTab,
   onHistorySubTabChange,
   onViewVisit,
@@ -113,6 +144,111 @@ export function MedicalHistoryTab({
   // Vitals detail modal state
   const [selectedVitals, setSelectedVitals] = useState<any>(null);
   const [isVitalsDetailModalOpen, setIsVitalsDetailModalOpen] = useState(false);
+
+  // Medical certificate view/print state
+  const [selectedCertificate, setSelectedCertificate] = useState<any>(null);
+  const [isCertificateDialogOpen, setIsCertificateDialogOpen] = useState(false);
+
+  const openPrintWindow = (title: string, html: string) => {
+    const popup = window.open("", "_blank", "width=900,height=1000");
+    if (!popup) {
+      toast.error("Allow popups to print documents.");
+      return;
+    }
+    popup.document.open();
+    popup.document.write(html);
+    popup.document.close();
+    popup.document.title = title;
+    popup.focus();
+    popup.print();
+  };
+
+  const buildMedicalCertificateHtmlFromRecord = (cert: any) => {
+    const purposeLabelMap: Record<string, string> = {
+      fitness: 'FITNESS FOR DUTY',
+      illness: 'UNFIT FOR WORK',
+      travel: 'FIT TO TRAVEL',
+      employment: 'FIT FOR EMPLOYMENT',
+    };
+
+    const issuedAt = safeParseDate(cert?.issued_at);
+    const validFrom = safeParseDate(cert?.valid_from);
+    const validTo = safeParseDate(cert?.valid_to);
+
+    const issueDate = issuedAt ? issuedAt.toLocaleDateString() : cert?.issued_at ?? '';
+    const fromLabel = validFrom ? validFrom.toLocaleDateString() : cert?.valid_from ?? '';
+    const toLabel = validTo ? validTo.toLocaleDateString() : cert?.valid_to ?? '';
+
+    const patientName = cert?.patient_name_snapshot ?? cert?.patient_name ?? '';
+    const patientId = cert?.patient_id_snapshot ?? '';
+    const patientCategory = cert?.patient_category_snapshot ?? '';
+    const purposeLabel = purposeLabelMap[cert?.purpose] ?? String(cert?.purpose ?? '');
+    const doctorName = cert?.doctor_name_snapshot ?? cert?.issued_by_name ?? '';
+
+    const findings = (cert?.findings ?? '').trim();
+    const recommendations = (cert?.recommendations ?? '').trim();
+
+    return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>${escapeHtml(purposeLabel)} - ${escapeHtml(cert?.certificate_number ?? '')}</title>
+  <style>
+    @page { size: A4; margin: 18mm; }
+    body { font-family: Arial, Helvetica, sans-serif; color: #111; line-height: 1.4; }
+    .title { text-align: center; font-weight: 700; font-size: 20px; margin-bottom: 8px; }
+    .subtle { color: #333; font-size: 12px; }
+    .block { margin-top: 10px; }
+    .row { display: flex; justify-content: space-between; gap: 16px; }
+    .kv { width: 50%; }
+    .label { font-weight: 700; }
+    .content { margin-top: 14px; font-size: 14px; white-space: pre-wrap; }
+    .signature { margin-top: 28px; display: flex; justify-content: flex-end; }
+    .sig-line { border-top: 1px solid #111; width: 240px; padding-top: 6px; text-align: left; }
+  </style>
+</head>
+<body>
+  <div class="title">MEDICAL CERTIFICATE</div>
+  <div class="subtle" style="text-align:center;">Certificate No: ${escapeHtml(cert?.certificate_number ?? '')} &nbsp; | &nbsp; Issued: ${escapeHtml(issueDate)}</div>
+
+  <div class="block">
+    <div class="row">
+      <div class="kv">
+        <div><span class="label">Patient Name:</span> ${escapeHtml(patientName)}</div>
+        <div><span class="label">Patient ID:</span> ${escapeHtml(patientId)}</div>
+      </div>
+      <div class="kv">
+        <div><span class="label">Category:</span> ${escapeHtml(patientCategory)}</div>
+        <div><span class="label">Type:</span> ${escapeHtml(purposeLabel)}</div>
+      </div>
+    </div>
+
+    <div class="content">
+      This is to certify that <strong>${escapeHtml(patientName)}</strong> is ${escapeHtml(purposeLabel.toLowerCase())}.
+      ${
+        fromLabel && toLabel
+          ? `The certificate is valid from ${escapeHtml(fromLabel)} to ${escapeHtml(toLabel)}.`
+          : ""
+      }
+      ${findings ? `\n\nClinical findings:\n${escapeHtml(findings)}` : ''}
+      ${recommendations ? `\n\nRecommendations:\n${escapeHtml(recommendations)}` : ''}
+    </div>
+  </div>
+
+  <div class="signature">
+    <div class="sig-line">
+      <div><strong>${escapeHtml(doctorName)}</strong></div>
+      <div class="subtle">Doctor</div>
+    </div>
+  </div>
+</body>
+</html>`;
+  };
+
+  const handlePrintCertificate = (cert: any) => {
+    const html = buildMedicalCertificateHtmlFromRecord(cert);
+    openPrintWindow(`Medical Certificate - ${cert?.certificate_number ?? ''}`, html);
+  };
   
   // Consultation report modal state (same as Patient Medical Records)
   const [typeFilter, setTypeFilter] = useState<'all' | 'visits' | 'consultations'>('all');
@@ -242,7 +378,7 @@ export function MedicalHistoryTab({
         </CardHeader>
         <CardContent>
           <Tabs value={historySubTab} onValueChange={onHistorySubTabChange} className="w-full">
-            <TabsList className="grid w-full grid-cols-6">
+            <TabsList className="grid w-full grid-cols-9">
               <TabsTrigger value="background" className="text-xs">
                 <FileText className="h-3 w-3 mr-1" />
                 Background
@@ -266,6 +402,18 @@ export function MedicalHistoryTab({
               <TabsTrigger value="vitals" className="text-xs">
                 <Heart className="h-3 w-3 mr-1" />
                 Vitals ({vitalSigns.length})
+              </TabsTrigger>
+              <TabsTrigger value="physio" className="text-xs">
+                <Activity className="h-3 w-3 mr-1" />
+                Physio ({physioOrders.length})
+              </TabsTrigger>
+              <TabsTrigger value="wards" className="text-xs">
+                <Building2 className="h-3 w-3 mr-1" />
+                Wards ({wardAdmissions.length})
+              </TabsTrigger>
+              <TabsTrigger value="certificates" className="text-xs">
+                <FileText className="h-3 w-3 mr-1" />
+                Certificates ({medicalCertificates.length})
               </TabsTrigger>
             </TabsList>
 
@@ -933,6 +1081,139 @@ export function MedicalHistoryTab({
                 </div>
               )}
             </TabsContent>
+
+            {/* Physio Sub-Tab */}
+            <TabsContent value="physio" className="mt-4">
+              {physioOrders.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-8">No physiotherapy orders found</p>
+              ) : (
+                <div className="border rounded-lg overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/50">
+                      <tr>
+                        <th className="px-4 py-2 text-left font-medium">Ordered</th>
+                        <th className="px-4 py-2 text-left font-medium">Status</th>
+                        <th className="px-4 py-2 text-left font-medium">Priority</th>
+                        <th className="px-4 py-2 text-left font-medium">Sessions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {physioOrders.map((order: any) => {
+                        const d = safeParseDate(order.ordered_at);
+                        return (
+                          <tr key={order.id} className="hover:bg-muted/30">
+                            <td className="px-4 py-3 text-muted-foreground">
+                              {d ? d.toLocaleDateString() : order.ordered_at ?? ''}
+                            </td>
+                            <td className="px-4 py-3">
+                              <Badge variant="outline">{order.status ?? ''}</Badge>
+                            </td>
+                            <td className="px-4 py-3 text-muted-foreground">{order.priority ?? ''}</td>
+                            <td className="px-4 py-3 text-muted-foreground">{order.sessions_completed ?? 0}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </TabsContent>
+
+            {/* Wards Sub-Tab */}
+            <TabsContent value="wards" className="mt-4">
+              {wardAdmissions.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-8">No ward admissions found</p>
+              ) : (
+                <div className="border rounded-lg overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/50">
+                      <tr>
+                        <th className="px-4 py-2 text-left font-medium">Admission</th>
+                        <th className="px-4 py-2 text-left font-medium">Ward</th>
+                        <th className="px-4 py-2 text-left font-medium">Diagnosis</th>
+                        <th className="px-4 py-2 text-left font-medium">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {wardAdmissions.map((admission: any) => {
+                        const d = safeParseDate(admission.admission_date);
+                        return (
+                          <tr key={admission.id} className="hover:bg-muted/30">
+                            <td className="px-4 py-3 text-muted-foreground">{d ? d.toLocaleDateString() : admission.admission_date ?? ''}</td>
+                            <td className="px-4 py-3">
+                              <Badge variant="outline">{admission.ward_name ?? ''}</Badge>
+                            </td>
+                            <td className="px-4 py-3 text-muted-foreground">{admission.admission_diagnosis ?? ''}</td>
+                            <td className="px-4 py-3 text-muted-foreground">{admission.status ?? ''}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </TabsContent>
+
+            {/* Certificates Sub-Tab */}
+            <TabsContent value="certificates" className="mt-4">
+              {medicalCertificates.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-8">No medical certificates found</p>
+              ) : (
+                <div className="border rounded-lg overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/50">
+                      <tr>
+                        <th className="px-4 py-2 text-left font-medium">Issued</th>
+                        <th className="px-4 py-2 text-left font-medium">Certificate No</th>
+                        <th className="px-4 py-2 text-left font-medium">Purpose</th>
+                        <th className="px-4 py-2 text-left font-medium">Validity</th>
+                        <th className="px-4 py-2 text-center font-medium">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {medicalCertificates.map((cert: any) => {
+                        const issued = safeParseDate(cert.issued_at);
+                        const from = safeParseDate(cert.valid_from);
+                        const to = safeParseDate(cert.valid_to);
+                        return (
+                          <tr key={cert.id} className="hover:bg-muted/30">
+                            <td className="px-4 py-3 text-muted-foreground">{issued ? issued.toLocaleDateString() : cert.issued_at ?? ''}</td>
+                            <td className="px-4 py-3 font-medium">{cert.certificate_number ?? ''}</td>
+                            <td className="px-4 py-3 text-muted-foreground">{cert.purpose ?? ''}</td>
+                            <td className="px-4 py-3 text-muted-foreground">
+                              {(from ? from.toLocaleDateString() : cert.valid_from ?? '')} - {(to ? to.toLocaleDateString() : cert.valid_to ?? '')}
+                            </td>
+                            <td className="px-4 py-3 text-center">
+                              <div className="flex items-center justify-center gap-2">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => {
+                                    setSelectedCertificate(cert);
+                                    setIsCertificateDialogOpen(true);
+                                  }}
+                                >
+                                  <Eye className="h-4 w-4 mr-1" />
+                                  View
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handlePrintCertificate(cert)}
+                                >
+                                  <Printer className="h-4 w-4 mr-1" />
+                                  Print
+                                </Button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </TabsContent>
           </Tabs>
         </CardContent>
       </Card>
@@ -999,6 +1280,82 @@ export function MedicalHistoryTab({
         session={selectedConsultationSession}
         loading={loadingConsultationReport}
       />
+
+      {/* Medical certificate view dialog */}
+      <Dialog open={isCertificateDialogOpen} onOpenChange={setIsCertificateDialogOpen}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileText className="h-5 w-5" />
+              Medical Certificate
+            </DialogTitle>
+            <DialogDescription>
+              {selectedCertificate?.certificate_number ? `Certificate No: ${selectedCertificate.certificate_number}` : 'Certificate details'}
+            </DialogDescription>
+          </DialogHeader>
+
+          {selectedCertificate ? (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <p className="text-xs text-muted-foreground">Patient</p>
+                  <p className="font-medium">{selectedCertificate.patient_name_snapshot ?? selectedCertificate.patient_name ?? ''}</p>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-xs text-muted-foreground">Purpose</p>
+                  <p className="font-medium">{selectedCertificate.purpose ?? ''}</p>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-xs text-muted-foreground">Validity</p>
+                  <p className="font-medium">
+                    {(safeParseDate(selectedCertificate.valid_from)?.toLocaleDateString() ?? selectedCertificate.valid_from ?? '')}
+                    {" - "}
+                    {(safeParseDate(selectedCertificate.valid_to)?.toLocaleDateString() ?? selectedCertificate.valid_to ?? '')}
+                  </p>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-xs text-muted-foreground">Doctor</p>
+                  <p className="font-medium">{selectedCertificate.doctor_name_snapshot ?? selectedCertificate.issued_by_name ?? ''}</p>
+                </div>
+              </div>
+
+              <div>
+                <p className="text-xs text-muted-foreground mb-2">Clinical findings</p>
+                {selectedCertificate.findings ? (
+                  <div className="border rounded-md p-3 bg-muted/30 whitespace-pre-wrap text-sm">
+                    {selectedCertificate.findings}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">—</p>
+                )}
+              </div>
+
+              <div>
+                <p className="text-xs text-muted-foreground mb-2">Recommendations</p>
+                {selectedCertificate.recommendations ? (
+                  <div className="border rounded-md p-3 bg-muted/30 whitespace-pre-wrap text-sm">
+                    {selectedCertificate.recommendations}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">—</p>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="text-sm text-muted-foreground py-6">No certificate selected</div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsCertificateDialogOpen(false)}>
+              Close
+            </Button>
+            <Button onClick={() => handlePrintCertificate(selectedCertificate)} disabled={!selectedCertificate}>
+              <Printer className="h-4 w-4 mr-2" />
+              Print
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

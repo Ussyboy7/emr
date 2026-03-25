@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { CalendarRange } from "lucide-react";
 
-/** Compact icon button to open AdvancedDateRangeDialog — matches inline filter selects (h-9). */
+/** Compact icon button to open AdvancedDateRangeDialog — matches inline filter row (h-10). */
 export function CustomDateRangeButton({ onClick }: { onClick: () => void }) {
   return (
     <TooltipProvider>
@@ -14,7 +14,7 @@ export function CustomDateRangeButton({ onClick }: { onClick: () => void }) {
             type="button"
             variant="outline"
             size="icon"
-            className="h-9 w-9 shrink-0"
+            className="shrink-0"
             onClick={onClick}
             aria-label="Custom date range"
           >

@@ -1580,7 +1580,7 @@ export const ConsultationDetailModal = React.memo(function ConsultationDetailMod
     <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="w-[95vw] sm:max-w-[1000px] lg:max-w-[1200px] max-h-[90vh] overflow-y-auto mx-2 sm:mx-4"
+        className="w-[95vw] sm:max-w-[min(95vw,1100px)] lg:max-w-[min(96vw,1320px)] max-h-[90vh] overflow-y-auto mx-2 sm:mx-4"
         aria-labelledby="consultation-modal-title"
         aria-describedby="consultation-modal-description"
       >

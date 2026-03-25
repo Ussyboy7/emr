@@ -12,7 +12,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from "sonner";
-import { patientService, labService, pharmacyService, consultationService, radiologyService, type Patient as ApiPatient } from '@/lib/services';
+import { patientService, labService, pharmacyService, consultationService, radiologyService, physioService, wardService, medicalCertificateService, type Patient as ApiPatient } from '@/lib/services';
 import { VisitDetailModal } from '@/components/VisitDetailModal';
 import { PatientAvatar } from "@/components/PatientAvatar";
 import { MedicalHistoryTab } from '@/components/patient-overview/MedicalHistoryTab';
@@ -158,6 +158,9 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
   const [prescriptions, setPrescriptions] = useState<any[]>([]);
   const [consultationSessions, setConsultationSessions] = useState<any[]>([]);
   const [imagingResults, setImagingResults] = useState<any[]>([]);
+  const [physioOrders, setPhysioOrders] = useState<any[]>([]);
+  const [wardAdmissions, setWardAdmissions] = useState<any[]>([]);
+  const [medicalCertificates, setMedicalCertificates] = useState<any[]>([]);
   const [dependents, setDependents] = useState<DependentPatient[]>([]);
   const [dependentsLoading, setDependentsLoading] = useState(false);
   const [isAddDependentOpen, setIsAddDependentOpen] = useState(false);
@@ -274,7 +277,18 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
       setOverviewPatientName(apiPatient.full_name ?? '');
 
       // Load all patient data in parallel
-      const [visitsData, vitalsData, labData, historyData, prescriptionsData, consultationsData, imagingData] = await Promise.allSettled([
+      const [
+        visitsData,
+        vitalsData,
+        labData,
+        historyData,
+        prescriptionsData,
+        consultationsData,
+        imagingData,
+        physioData,
+        wardAdmissionsData,
+        certificatesData,
+      ] = await Promise.allSettled([
         patientService.getPatientVisits(numericId),
         patientService.getPatientVitals(numericId),
         labService.getOrders({ patient: numericId.toString() }),
@@ -282,6 +296,9 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
         pharmacyService.getPrescriptions({ patient: numericId.toString() }),
         consultationService.getSessions({ patient: numericId }).catch(() => ({ results: [] })),
         radiologyService.getOrders({ patient: numericId.toString() }).catch(() => ({ results: [] })),
+        physioService.getOrders({ patient: numericId.toString() }).catch(() => ({ results: [] })),
+        wardService.getAdmissions({ patient: numericId }).catch(() => ({ results: [] })),
+        medicalCertificateService.getCertificates({ patient: numericId.toString(), page_size: 1000 }).catch(() => ({ results: [] })),
       ]);
 
       if (apiPatient.category === 'employee' || apiPatient.category === 'retiree') {
@@ -415,6 +432,27 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
           diagnoses: session.diagnoses || [],
         }));
         setConsultationSessions(transformedSessions);
+      }
+
+      // Process physio orders
+      if (physioData.status === 'fulfilled') {
+        setPhysioOrders(physioData.value?.results || []);
+      } else {
+        setPhysioOrders([]);
+      }
+
+      // Process ward admissions
+      if (wardAdmissionsData.status === 'fulfilled') {
+        setWardAdmissions(wardAdmissionsData.value?.results || []);
+      } else {
+        setWardAdmissions([]);
+      }
+
+      // Process persisted medical certificates
+      if (certificatesData.status === 'fulfilled') {
+        setMedicalCertificates(certificatesData.value?.results || []);
+      } else {
+        setMedicalCertificates([]);
       }
 
       // Process imaging results - extract studies from orders
@@ -665,7 +703,7 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="w-[95vw] sm:max-w-[1000px] max-h-[90vh] overflow-y-auto p-0 flex flex-col">
+      <DialogContent className="w-[95vw] sm:max-w-[min(95vw,1100px)] lg:max-w-[min(96vw,1320px)] max-h-[90vh] overflow-y-auto p-0 flex flex-col">
         <DialogHeader className="px-6 pt-6 pb-4 border-b flex-shrink-0">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
@@ -1112,6 +1150,9 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
                 imagingResults={imagingResults}
                 prescriptions={prescriptions}
                 vitalSigns={vitalSigns}
+                physioOrders={physioOrders}
+                wardAdmissions={wardAdmissions}
+                medicalCertificates={medicalCertificates}
                 historySubTab={historySubTab}
                 onHistorySubTabChange={setHistorySubTab}
                 onViewVisit={(visit) => {

@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { RotateCcw } from "lucide-react";
 
-/** Compact reset / clear filters (h-9, matches Select height). */
+/** Compact reset / clear filters (h-10, matches Input / SelectTrigger). */
 export function ResetFiltersButton({ onClick, label = "Reset filters" }: { onClick: () => void; label?: string }) {
   return (
     <TooltipProvider>
@@ -14,7 +14,7 @@ export function ResetFiltersButton({ onClick, label = "Reset filters" }: { onCli
             type="button"
             variant="outline"
             size="icon"
-            className="h-9 w-9 shrink-0"
+            className="shrink-0"
             onClick={onClick}
             aria-label={label}
           >

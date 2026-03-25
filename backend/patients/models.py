@@ -705,3 +705,80 @@ class MedicalHistory(models.Model):
     
     def __str__(self):
         return f"Medical History for {self.patient.get_full_name()}"
+
+
+class MedicalCertificate(models.Model):
+    """
+    Persisted medical certificate records (fitness/illness/travel/employment).
+    PDF generation/storage is handled separately; we store issuance details + validity.
+    """
+
+    PURPOSE_CHOICES = [
+        ("fitness", "Fitness Certificate"),
+        ("illness", "Illness / Sick Leave"),
+        ("travel", "Travel Medical"),
+        ("employment", "Employment Medical"),
+    ]
+
+    patient = models.ForeignKey(Patient, on_delete=models.CASCADE, related_name="medical_certificates")
+    purpose = models.CharField(max_length=20, choices=PURPOSE_CHOICES)
+
+    valid_from = models.DateField()
+    valid_to = models.DateField()
+
+    findings = models.TextField(blank=True)
+    recommendations = models.TextField(blank=True)
+
+    certificate_number = models.CharField(max_length=50, unique=True, db_index=True)
+    issued_by = models.ForeignKey("accounts.User", on_delete=models.SET_NULL, null=True, related_name="issued_medical_certificates")
+    issued_at = models.DateTimeField(auto_now_add=True)
+
+    # Snapshot fields to keep printed certificates stable even if patient name changes.
+    patient_name_snapshot = models.CharField(max_length=200, blank=True)
+    patient_id_snapshot = models.CharField(max_length=50, blank=True)
+    patient_category_snapshot = models.CharField(max_length=20, blank=True)
+
+    doctor_name_snapshot = models.CharField(max_length=200, blank=True)
+
+    class Meta:
+        db_table = "medical_certificates"
+        ordering = ["-issued_at"]
+
+    def __str__(self) -> str:
+        return f"{self.certificate_number} - {self.patient_id_snapshot}"
+
+    def _generate_certificate_number(self) -> str:
+        year = timezone.now().year
+        prefix = f"MC-{year}-"
+        last = MedicalCertificate.objects.filter(certificate_number__startswith=prefix).order_by("-certificate_number").first()
+        if last and last.certificate_number:
+            try:
+                last_num = int(last.certificate_number.split("-")[-1])
+                new_num = last_num + 1
+            except (ValueError, IndexError):
+                new_num = 1
+        else:
+            new_num = 1
+        return f"{prefix}{new_num:06d}"
+
+    def save(self, *args, **kwargs):
+        if not self.certificate_number:
+            self.certificate_number = self._generate_certificate_number()
+
+        # Populate snapshot fields best-effort.
+        if self.patient_id_snapshot == "" or self.patient_name_snapshot == "":
+            try:
+                self.patient_id_snapshot = self.patient.patient_id
+                self.patient_name_snapshot = self.patient.get_full_name()
+                self.patient_category_snapshot = self.patient.category
+            except Exception:
+                # Keep whatever was provided; do not hard-fail certificate issuance.
+                pass
+
+        if self.doctor_name_snapshot == "" and self.issued_by:
+            try:
+                self.doctor_name_snapshot = self.issued_by.get_full_name()
+            except Exception:
+                self.doctor_name_snapshot = str(self.issued_by)
+
+        super().save(*args, **kwargs)

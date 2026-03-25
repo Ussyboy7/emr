@@ -12,7 +12,6 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { apiFetch } from "@/lib/api-client";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 
 interface ReferralSummary {
@@ -26,7 +25,6 @@ interface ReferralSummary {
 }
 
 export default function ReferralTrackingReport() {
-  const router = useRouter();
   const [year, setYear] = useState(new Date().getFullYear().toString());
   const [summary, setSummary] = useState<ReferralSummary>({
     new_referrals: 0,
@@ -89,12 +87,13 @@ export default function ReferralTrackingReport() {
   return (
     <DashboardLayout>
       <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
-        <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
-          <Link href="/medical-records" className="hover:text-primary">Medical Records</Link>
-          <span>/</span>
-          <Link href="/medical-records/reports" className="hover:text-primary">Reports</Link>
-          <span>/</span>
-          <span>Referral Tracking</span>
+        <div className="mb-2">
+          <Button variant="ghost" size="sm" className="-ml-2 gap-2 px-2" asChild>
+            <Link href="/medical-records/reports">
+              <ArrowLeft className="h-4 w-4" />
+              Back to reports
+            </Link>
+          </Button>
         </div>
 
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">

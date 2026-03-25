@@ -12,19 +12,26 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 from django.shortcuts import get_object_or_404
 from django.db.models import OuterRef, Subquery
 
-from .models import Patient, Visit, VitalReading, MedicalHistory
+from .models import Patient, Visit, VitalReading, MedicalHistory, MedicalCertificate
 from .serializers import (
     PatientSerializer,
     PatientListSerializer,
     VisitSerializer,
     VitalReadingSerializer,
     MedicalHistorySerializer,
+    MedicalCertificateSerializer,
 )
 from audit.services import AuditService
 
 
 class PatientPagination(PageNumberPagination):
     page_size = 100
+    page_size_query_param = 'page_size'
+    max_page_size = 500
+
+
+class MedicalCertificatePagination(PageNumberPagination):
+    page_size = 20
     page_size_query_param = 'page_size'
     max_page_size = 500
 
@@ -345,3 +352,28 @@ class VitalReadingViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         """Set recorded_by when creating a vital reading."""
         serializer.save(recorded_by=self.request.user)
+
+
+class MedicalCertificateViewSet(viewsets.ModelViewSet):
+    """
+    Persisted medical certificates.
+    Created by frontend "Medical Certificate" generator and printed later via browser print.
+    """
+
+    permission_classes = [IsAuthenticated]
+    serializer_class = MedicalCertificateSerializer
+    pagination_class = MedicalCertificatePagination
+    filter_backends = [DjangoFilterBackend, OrderingFilter]
+    ordering_fields = ["issued_at", "valid_from", "valid_to", "certificate_number"]
+    ordering = ["-issued_at"]
+
+    def get_queryset(self):
+        queryset = MedicalCertificate.objects.all().select_related("patient", "issued_by")
+        patient_id = self.request.query_params.get("patient")
+        if patient_id:
+            queryset = queryset.filter(patient__id=patient_id)
+        return queryset.order_by(*self.ordering)
+
+    def perform_create(self, serializer):
+        # Stamp who issued the certificate (doctor) - DB snapshot fields are handled in the model.
+        serializer.save(issued_by=self.request.user)

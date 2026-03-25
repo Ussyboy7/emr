@@ -1,49 +1,66 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ResetFiltersButton } from "@/components/ResetFiltersButton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Calendar } from "@/components/ui/calendar";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { CustomDateRangeButton } from "@/components/CustomDateRangeButton";
+import { AdvancedDateRangeDialog } from "@/components/AdvancedDateRangeDialog";
 import {
-  CalendarDays, Clock, User, Stethoscope, Building2, Plus, Search,
-  Edit, Trash2, CheckCircle, XCircle, AlertCircle, Calendar as CalendarIcon,
-  ChevronLeft, ChevronRight, MoreHorizontal, Eye, RefreshCw
+  CalendarDays,
+  Calendar as CalendarIcon,
+  Clock,
+  Plus,
+  Search,
+  Edit,
+  Trash2,
+  CheckCircle,
+  XCircle,
+  AlertCircle,
+  ChevronLeft,
+  ChevronRight,
+  MoreHorizontal,
+  Eye,
+  RefreshCw,
+  CheckCircle2,
+  Loader2,
+  Calendar,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { appointmentService, type Appointment } from "@/lib/services/appointment-service";
-import { patientService } from "@/lib/services/patient-service";
-import { cn } from "@/lib/utils";
+import { patientService, adminService, type Patient as ApiPatient } from "@/lib/services";
 import { format } from "date-fns";
-
-interface Patient {
-  id: number;
-  patient_id: string;
-  full_name?: string;
-  age?: number;
-  gender?: string;
-}
 
 export default function AppointmentsPage() {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
-  const [patients, setPatients] = useState<Patient[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
-  const [dateFilter, setDateFilter] = useState<Date | undefined>(new Date());
+  /** Preset row — same options as Manage Visits */
+  const [datePreset, setDatePreset] = useState<string>("today");
+  const [dateRange, setDateRange] = useState({ from: "", to: "" });
+  const [isDateFilterDialogOpen, setIsDateFilterDialogOpen] = useState(false);
+  const [clinicFilter, setClinicFilter] = useState("all");
+  const [clinicOptions, setClinicOptions] = useState<{ id: number; name: string }[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
   const [pageSize] = useState(10);
+  const [statsData, setStatsData] = useState({
+    total: 0,
+    scheduled: 0,
+    inProgress: 0,
+    completed: 0,
+  });
 
   // Dialog states
   const [showCreateDialog, setShowCreateDialog] = useState(false);
@@ -53,8 +70,7 @@ export default function AppointmentsPage() {
 
   // Form states
   const [formData, setFormData] = useState({
-    patient: "",
-    appointment_type: "consultation" as Appointment['appointment_type'],
+    appointment_type: "consultation" as Appointment["appointment_type"],
     appointment_date: "",
     appointment_time: "09:00",
     duration_minutes: 30,
@@ -62,50 +78,190 @@ export default function AppointmentsPage() {
     notes: "",
   });
 
+  const [createPatientSearch, setCreatePatientSearch] = useState("");
+  const [createPatientResults, setCreatePatientResults] = useState<ApiPatient[]>([]);
+  const [createPatientSearching, setCreatePatientSearching] = useState(false);
+  const [selectedCreatePatient, setSelectedCreatePatient] = useState<ApiPatient | null>(null);
+  const createPatientSearchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearchQuery(searchQuery), 300);
+    return () => clearTimeout(t);
+  }, [searchQuery]);
+
+  useEffect(() => {
+    if (!showCreateDialog) {
+      return;
+    }
+    const q = createPatientSearch.trim();
+    if (createPatientSearchTimeoutRef.current) {
+      clearTimeout(createPatientSearchTimeoutRef.current);
+      createPatientSearchTimeoutRef.current = null;
+    }
+    if (!q) {
+      setCreatePatientResults([]);
+      setCreatePatientSearching(false);
+      return;
+    }
+    setCreatePatientSearching(true);
+    createPatientSearchTimeoutRef.current = setTimeout(async () => {
+      createPatientSearchTimeoutRef.current = null;
+      try {
+        const res = await patientService.getPatients({ search: q, page_size: 50 });
+        setCreatePatientResults(res.results || []);
+      } catch (e: any) {
+        toast.error(e?.message || "Patient search failed");
+        setCreatePatientResults([]);
+      } finally {
+        setCreatePatientSearching(false);
+      }
+    }, 300);
+    return () => {
+      if (createPatientSearchTimeoutRef.current) {
+        clearTimeout(createPatientSearchTimeoutRef.current);
+      }
+    };
+  }, [createPatientSearch, showCreateDialog]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [debouncedSearchQuery, statusFilter, typeFilter, datePreset, dateRange.from, dateRange.to, clinicFilter]);
+
+  const buildAppointmentDateParams = useCallback(() => {
+    let appointment_date: string | undefined;
+    let start_date: string | undefined;
+    let end_date: string | undefined;
+
+    if (dateRange.from || dateRange.to) {
+      start_date = dateRange.from || undefined;
+      end_date = dateRange.to || undefined;
+    } else if (datePreset === "today") {
+      appointment_date = new Date().toISOString().split("T")[0];
+    } else if (datePreset === "week") {
+      const today = new Date();
+      const weekStart = new Date(today);
+      weekStart.setDate(today.getDate() - today.getDay());
+      start_date = weekStart.toISOString().split("T")[0];
+      end_date = today.toISOString().split("T")[0];
+    } else if (datePreset === "month") {
+      const today = new Date();
+      const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+      start_date = monthStart.toISOString().split("T")[0];
+      end_date = today.toISOString().split("T")[0];
+    }
+
+    return { appointment_date, start_date, end_date };
+  }, [datePreset, dateRange.from, dateRange.to]);
+
+  const clearDateRangeFilters = useCallback(() => {
+    setDateRange({ from: "", to: "" });
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await adminService.getClinics({ page_size: 500, is_active: true });
+        if (cancelled) return;
+        setClinicOptions((res.results || []).map((c) => ({ id: c.id, name: c.name })));
+      } catch {
+        if (!cancelled) setClinicOptions([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const fetchAppointments = useCallback(async () => {
     setIsLoading(true);
     try {
-      const params: any = {
+      const params: Record<string, string | number | undefined> = {
         page: currentPage,
         page_size: pageSize,
       };
 
-      if (searchQuery) params.search = searchQuery;
+      if (debouncedSearchQuery) params.search = debouncedSearchQuery;
       if (statusFilter !== "all") params.status = statusFilter;
       if (typeFilter !== "all") params.appointment_type = typeFilter;
-      if (dateFilter) params.appointment_date = format(dateFilter, "yyyy-MM-dd");
+      if (clinicFilter !== "all") params.clinic = Number(clinicFilter);
+
+      const { appointment_date, start_date, end_date } = buildAppointmentDateParams();
+      if (appointment_date) params.appointment_date = appointment_date;
+      if (start_date) params.start_date = start_date;
+      if (end_date) params.end_date = end_date;
 
       const response = await appointmentService.getAppointments(params);
       setAppointments(response.results || []);
-      setTotalPages(Math.ceil((response.count || 0) / pageSize));
+      const count = response.count ?? 0;
+      setTotalCount(count);
+      setTotalPages(Math.max(1, Math.ceil(count / pageSize)));
     } catch (error: any) {
       console.error("Error fetching appointments:", error);
       toast.error(error.message || "Failed to load appointments");
     } finally {
       setIsLoading(false);
     }
-  }, [currentPage, pageSize, searchQuery, statusFilter, typeFilter, dateFilter]);
+  }, [
+    currentPage,
+    pageSize,
+    debouncedSearchQuery,
+    statusFilter,
+    typeFilter,
+    clinicFilter,
+    buildAppointmentDateParams,
+  ]);
 
-  const fetchPatients = useCallback(async () => {
+  const loadStats = useCallback(async () => {
     try {
-      const response = await patientService.getPatients({ page_size: 100 });
-      setPatients(response.results || []);
-    } catch (error) {
-      console.error("Error fetching patients:", error);
+      const base: Record<string, string | number | undefined> = {
+        page: 1,
+        page_size: 1,
+      };
+      if (debouncedSearchQuery) base.search = debouncedSearchQuery;
+      if (typeFilter !== "all") base.appointment_type = typeFilter;
+      if (clinicFilter !== "all") base.clinic = Number(clinicFilter);
+
+      const { appointment_date, start_date, end_date } = buildAppointmentDateParams();
+      if (appointment_date) base.appointment_date = appointment_date;
+      if (start_date) base.start_date = start_date;
+      if (end_date) base.end_date = end_date;
+
+      const [totalResult, scheduledResult, inProgressResult, completedResult] = await Promise.all([
+        appointmentService.getAppointments({ ...base }),
+        appointmentService.getAppointments({ ...base, status: "scheduled" }),
+        appointmentService.getAppointments({ ...base, status: "in_progress" }),
+        appointmentService.getAppointments({ ...base, status: "completed" }),
+      ]);
+
+      setStatsData({
+        total: totalResult.count || 0,
+        scheduled: scheduledResult.count || 0,
+        inProgress: inProgressResult.count || 0,
+        completed: completedResult.count || 0,
+      });
+    } catch {
+      /* list fetch will surface errors */
     }
-  }, []);
+  }, [debouncedSearchQuery, typeFilter, clinicFilter, buildAppointmentDateParams]);
+
+  useEffect(() => {
+    void loadStats();
+  }, [loadStats]);
 
   useEffect(() => {
     fetchAppointments();
   }, [fetchAppointments]);
 
-  useEffect(() => {
-    fetchPatients();
-  }, [fetchPatients]);
+  const resetCreatePatientPicker = () => {
+    setCreatePatientSearch("");
+    setCreatePatientResults([]);
+    setSelectedCreatePatient(null);
+  };
 
   const resetForm = () => {
+    resetCreatePatientPicker();
     setFormData({
-      patient: "",
       appointment_type: "consultation",
       appointment_date: "",
       appointment_time: "09:00",
@@ -116,9 +272,13 @@ export default function AppointmentsPage() {
   };
 
   const handleCreateAppointment = async () => {
+    if (!selectedCreatePatient) {
+      toast.error("Please search and select a patient.");
+      return;
+    }
     try {
       const appointmentData = {
-        patient: parseInt(formData.patient),
+        patient: selectedCreatePatient.id,
         appointment_type: formData.appointment_type,
         appointment_date: formData.appointment_date,
         appointment_time: formData.appointment_time,
@@ -130,7 +290,6 @@ export default function AppointmentsPage() {
       await appointmentService.createAppointment(appointmentData);
       toast.success("Appointment created successfully");
       setShowCreateDialog(false);
-      resetForm();
       fetchAppointments();
     } catch (error: any) {
       console.error("Error creating appointment:", error);
@@ -200,7 +359,6 @@ export default function AppointmentsPage() {
   const openEditDialog = (appointment: Appointment) => {
     setSelectedAppointment(appointment);
     setFormData({
-      patient: appointment.patient.toString(),
       appointment_type: appointment.appointment_type,
       appointment_date: appointment.appointment_date,
       appointment_time: appointment.appointment_time,
@@ -239,55 +397,163 @@ export default function AppointmentsPage() {
     }
   };
 
+  const getAppointmentListTypeBorder = (type: Appointment["appointment_type"]) => {
+    switch (type) {
+      case "emergency":
+        return "border-l-rose-500";
+      case "follow_up":
+        return "border-l-blue-500";
+      case "routine":
+        return "border-l-violet-500";
+      case "procedure":
+        return "border-l-orange-500";
+      default:
+        return "border-l-teal-500";
+    }
+  };
+
+  const getAppointmentListTypeOutline = (type: Appointment["appointment_type"]) => {
+    const map: Record<string, string> = {
+      consultation: "border-teal-500/50 text-teal-600 dark:text-teal-400",
+      follow_up: "border-blue-500/50 text-blue-600 dark:text-blue-400",
+      emergency: "border-rose-500/50 text-rose-600 dark:text-rose-400",
+      procedure: "border-orange-500/50 text-orange-600 dark:text-orange-400",
+      routine: "border-violet-500/50 text-violet-600 dark:text-violet-400",
+    };
+    return map[type] || "border-muted-foreground/50 text-muted-foreground";
+  };
+
+  const getAppointmentListStatusOutline = (status: Appointment["status"]) => {
+    const map: Record<string, string> = {
+      scheduled: "border-amber-500/50 text-amber-600 dark:text-amber-400 bg-amber-500/10",
+      confirmed: "border-blue-500/50 text-blue-600 dark:text-blue-400 bg-blue-500/10",
+      in_progress: "border-yellow-500/50 text-yellow-700 dark:text-yellow-400 bg-yellow-500/10",
+      completed: "border-emerald-500/50 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10",
+      cancelled: "border-red-500/50 text-red-600 dark:text-red-400 bg-red-500/10",
+      no_show: "border-slate-500/50 text-slate-600 dark:text-slate-400 bg-slate-500/10",
+    };
+    return map[status] || "border-muted-foreground/50 text-muted-foreground";
+  };
+
+  const stats = useMemo(() => {
+    const totalLabel =
+      datePreset === "today"
+        ? "Today's appointments"
+        : datePreset === "week"
+          ? "This week"
+          : datePreset === "month"
+            ? "This month"
+            : "All appointments";
+    return [
+      {
+        label: totalLabel,
+        value: statsData.total,
+        icon: Calendar,
+        color: "text-blue-500",
+        bg: "bg-blue-500/10",
+      },
+      {
+        label: "Scheduled",
+        value: statsData.scheduled,
+        icon: Clock,
+        color: "text-amber-500",
+        bg: "bg-amber-500/10",
+      },
+      {
+        label: "In progress",
+        value: statsData.inProgress,
+        icon: CheckCircle2,
+        color: "text-emerald-500",
+        bg: "bg-emerald-500/10",
+      },
+      {
+        label: "Completed",
+        value: statsData.completed,
+        icon: CheckCircle2,
+        color: "text-violet-500",
+        bg: "bg-violet-500/10",
+      },
+    ];
+  }, [statsData, datePreset]);
+
+  const formatAppointmentTypeLabel = (type: Appointment["appointment_type"]) =>
+    type.replace(/_/g, " ");
+
   return (
     <DashboardLayout>
       <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
-        {/* Breadcrumbs */}
-        <div className="flex items-center gap-2 text-sm text-muted-foreground mb-4">
-          <a href="/medical-records" className="hover:text-primary">Medical Records</a>
-          <span>/</span>
-          <span>Appointments</span>
-        </div>
-
-        {/* Header */}
+        {/* Header — matches Manage Visits / Dependents */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl sm:text-3xl font-bold text-foreground flex items-center gap-3">
-              <CalendarDays className="h-8 w-8 text-blue-500" />
-              Appointments Management
-            </h1>
+            <h1 className="text-2xl sm:text-3xl font-bold text-foreground">Appointments</h1>
             <p className="text-muted-foreground mt-1">Schedule and manage patient appointments</p>
           </div>
-          <div className="flex gap-2">
-            <Button onClick={fetchAppointments} disabled={isLoading} variant="outline">
-              <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
+          <div className="flex flex-wrap gap-2">
+            <Button onClick={fetchAppointments} disabled={isLoading} variant="outline" className="shrink-0">
+              <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? "animate-spin" : ""}`} />
               Refresh
             </Button>
-            <Button onClick={() => { resetForm(); setShowCreateDialog(true); }}>
+            <Button
+              className="bg-gradient-to-r from-teal-500 to-cyan-500 hover:from-teal-600 hover:to-cyan-600 text-white shrink-0"
+              onClick={() => {
+                resetForm();
+                setShowCreateDialog(true);
+              }}
+            >
               <Plus className="h-4 w-4 mr-2" />
-              New Appointment
+              New appointment
             </Button>
           </div>
         </div>
 
-        {/* Filters and Search */}
+        {/* Stats */}
+        <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+          {stats.map((stat, i) => (
+            <Card key={i}>
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-muted-foreground">{stat.label}</p>
+                    <p className={`mt-1 text-2xl font-bold sm:text-3xl ${stat.color}`}>{stat.value}</p>
+                  </div>
+                  <div className={`rounded-full p-3 ${stat.bg}`}>
+                    <stat.icon className={`h-5 w-5 ${stat.color}`} />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+
+        {/* Filters — same structure & widths as Manage Visits */}
         <Card>
           <CardContent className="p-4">
             <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-3">
               <div className="relative flex-1 min-w-[min(100%,16rem)]">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
-                  id="search"
-                  placeholder="Search by patient name, ID..."
+                  placeholder="Search by patient name, appointment ID, or patient ID..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="pl-10"
                 />
               </div>
               <div className="flex flex-wrap items-center gap-2">
+                <CustomDateRangeButton onClick={() => setIsDateFilterDialogOpen(true)} />
+                <Select value={datePreset} onValueChange={setDatePreset}>
+                  <SelectTrigger className="w-[120px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Time</SelectItem>
+                    <SelectItem value="today">Today</SelectItem>
+                    <SelectItem value="week">This Week</SelectItem>
+                    <SelectItem value="month">This Month</SelectItem>
+                  </SelectContent>
+                </Select>
                 <Select value={statusFilter} onValueChange={setStatusFilter}>
-                  <SelectTrigger className="w-[150px]">
-                    <SelectValue placeholder="All Status" />
+                  <SelectTrigger className="w-[160px]">
+                    <SelectValue placeholder="Status" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Status</SelectItem>
@@ -300,8 +566,8 @@ export default function AppointmentsPage() {
                   </SelectContent>
                 </Select>
                 <Select value={typeFilter} onValueChange={setTypeFilter}>
-                  <SelectTrigger className="w-[150px]">
-                    <SelectValue placeholder="All Types" />
+                  <SelectTrigger className="w-[140px]">
+                    <SelectValue placeholder="Type" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Types</SelectItem>
@@ -309,233 +575,267 @@ export default function AppointmentsPage() {
                     <SelectItem value="follow_up">Follow-up</SelectItem>
                     <SelectItem value="emergency">Emergency</SelectItem>
                     <SelectItem value="procedure">Procedure</SelectItem>
-                    <SelectItem value="routine">Routine</SelectItem>
+                    <SelectItem value="routine">Routine Checkup</SelectItem>
                   </SelectContent>
                 </Select>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button
-                      variant="outline"
-                      className={cn(
-                        "h-9 w-[min(100%,220px)] justify-start text-left font-normal shrink-0",
-                        !dateFilter && "text-muted-foreground"
-                      )}
-                    >
-                      <CalendarIcon className="mr-2 h-4 w-4 shrink-0" />
-                      <span className="truncate">{dateFilter ? format(dateFilter, "PPP") : "Pick a date"}</span>
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0" align="start">
-                    <Calendar
-                      mode="single"
-                      selected={dateFilter}
-                      onSelect={setDateFilter}
-                      initialFocus
-                    />
-                    <div className="p-3 border-t">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setDateFilter(undefined)}
-                        className="w-full"
-                      >
-                        Clear Date
-                      </Button>
-                    </div>
-                  </PopoverContent>
-                </Popover>
-                <ResetFiltersButton
-                  label="Clear filters and refresh"
-                  onClick={() => {
-                    setSearchQuery("");
-                    setStatusFilter("all");
-                    setTypeFilter("all");
-                    setDateFilter(undefined);
-                    setCurrentPage(1);
-                    fetchAppointments();
-                  }}
-                />
+                <Select value={clinicFilter} onValueChange={setClinicFilter}>
+                  <SelectTrigger className="w-[140px]">
+                    <SelectValue placeholder="Clinic" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Clinics</SelectItem>
+                    {clinicOptions.map((c) => (
+                      <SelectItem key={c.id} value={String(c.id)}>
+                        {c.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
           </CardContent>
         </Card>
 
-        {/* Appointments Table */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Appointments ({appointments.length})</CardTitle>
-            <CardDescription>
-              Manage patient appointments and schedules
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {isLoading ? (
-              <div className="flex items-center justify-center py-12">
-                <RefreshCw className="h-8 w-8 animate-spin text-blue-500" />
-                <p className="ml-3 text-muted-foreground">Loading appointments...</p>
-              </div>
-            ) : appointments.length === 0 ? (
-              <div className="text-center py-12 bg-muted/50 rounded-lg border-2 border-dashed border-border">
-                <CalendarDays className="h-12 w-12 mx-auto mb-3 text-blue-500 opacity-60" />
-                <p className="font-medium text-foreground mb-1">No appointments found</p>
-                <p className="text-sm text-muted-foreground mb-4">
-                  {searchQuery || statusFilter !== "all" || typeFilter !== "all" || dateFilter
-                    ? "Try adjusting your filters"
-                    : "Create your first appointment to get started"}
-                </p>
-                {!searchQuery && statusFilter === "all" && typeFilter === "all" && !dateFilter && (
-                  <Button onClick={() => { resetForm(); setShowCreateDialog(true); }}>
-                    <Plus className="h-4 w-4 mr-2" />
-                    Create First Appointment
-                  </Button>
-                )}
-              </div>
-            ) : (
-              <>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Patient</TableHead>
-                      <TableHead>Type</TableHead>
-                      <TableHead>Date & Time</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Doctor</TableHead>
-                      <TableHead>Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {appointments.map((appointment) => (
-                      <TableRow key={appointment.id}>
-                        <TableCell>
-                          <div>
-                            <div className="font-medium">{appointment.patient_name}</div>
-                            <div className="text-sm text-muted-foreground">ID: {appointment.appointment_id}</div>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant="outline" className={getTypeBadgeClass(appointment.appointment_type)}>
-                            {appointment.appointment_type.replace('_', ' ')}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            <CalendarIcon className="h-4 w-4 text-muted-foreground" />
-                            <span>{format(new Date(appointment.appointment_date), "MMM dd, yyyy")}</span>
-                          </div>
-                          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                            <Clock className="h-3 w-3" />
-                            <span>{appointment.appointment_time} ({appointment.duration_minutes}min)</span>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <Badge className={getStatusBadgeClass(appointment.status)}>
-                            {appointment.status.replace('_', ' ')}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          {appointment.doctor_name || "Not assigned"}
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-1">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => openViewDialog(appointment)}
-                            >
-                              <Eye className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => openEditDialog(appointment)}
-                            >
-                              <Edit className="h-4 w-4" />
-                            </Button>
-                            <Select
-                              value=""
-                              onValueChange={(value) => handleStatusChange(appointment, value as Appointment['status'])}
-                            >
-                              <SelectTrigger className="w-8 h-8 p-0 border-0">
-                                <MoreHorizontal className="h-4 w-4" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {appointment.status !== 'confirmed' && (
-                                  <SelectItem value="confirmed">
-                                    <CheckCircle className="h-4 w-4 mr-2" />
-                                    Confirm
-                                  </SelectItem>
-                                )}
-                                {appointment.status !== 'completed' && (
-                                  <SelectItem value="completed">
-                                    <CheckCircle className="h-4 w-4 mr-2" />
-                                    Complete
-                                  </SelectItem>
-                                )}
-                                {appointment.status !== 'cancelled' && (
-                                  <SelectItem value="cancelled">
-                                    <XCircle className="h-4 w-4 mr-2" />
-                                    Cancel
-                                  </SelectItem>
-                                )}
-                                {appointment.status !== 'no_show' && (
-                                  <SelectItem value="no_show">
-                                    <AlertCircle className="h-4 w-4 mr-2" />
-                                    No Show
-                                  </SelectItem>
-                                )}
-                              </SelectContent>
-                            </Select>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleDeleteAppointment(appointment)}
-                              className="text-red-600 hover:text-red-700"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+        <AdvancedDateRangeDialog
+          open={isDateFilterDialogOpen}
+          onOpenChange={setIsDateFilterDialogOpen}
+          description="Apply a custom appointment date range to narrow down the list."
+          label="Appointment date range"
+          value={dateRange}
+          onChange={setDateRange}
+          onClear={clearDateRangeFilters}
+        />
 
-                {/* Pagination */}
-                <div className="flex items-center justify-between mt-4">
-                  <div className="text-sm text-muted-foreground">
-                    Showing {appointments.length} of {appointments.length} appointments
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                      disabled={currentPage === 1}
-                    >
-                      <ChevronLeft className="h-4 w-4" />
-                      Previous
-                    </Button>
-                    <span className="text-sm">
-                      Page {currentPage} of {totalPages}
-                    </span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                      disabled={currentPage === totalPages}
-                    >
-                      Next
-                      <ChevronRight className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
+        <div className="flex items-center justify-between px-1">
+          <p className="text-sm text-muted-foreground">
+            Showing{" "}
+            <span className="font-medium text-foreground">{appointments.length}</span>
+            {totalCount > 0 && (
+              <>
+                {" "}
+                of <span className="font-medium text-foreground">{totalCount}</span>
               </>
-            )}
-          </CardContent>
-        </Card>
+            )}{" "}
+            appointments
+          </p>
+        </div>
+
+        {isLoading ? (
+          <Card>
+            <CardContent className="p-12 text-center">
+              <Loader2 className="mx-auto mb-4 h-12 w-12 animate-spin text-muted-foreground" />
+              <p className="text-muted-foreground">Loading appointments…</p>
+            </CardContent>
+          </Card>
+        ) : appointments.length === 0 ? (
+          <Card>
+            <CardContent className="py-12 text-center">
+              <CalendarDays className="mx-auto mb-3 h-12 w-12 text-blue-500 opacity-60" />
+              <p className="mb-1 font-medium text-foreground">No appointments found</p>
+              <p className="mb-4 text-sm text-muted-foreground">
+                {searchQuery ||
+                statusFilter !== "all" ||
+                typeFilter !== "all" ||
+                datePreset !== "all" ||
+                dateRange.from ||
+                dateRange.to ||
+                clinicFilter !== "all"
+                  ? "Try adjusting your filters"
+                  : "Create your first appointment to get started"}
+                </p>
+              {!searchQuery &&
+                statusFilter === "all" &&
+                typeFilter === "all" &&
+                datePreset === "all" &&
+                !dateRange.from &&
+                !dateRange.to &&
+                clinicFilter === "all" && (
+                <Button
+                  className="bg-gradient-to-r from-teal-500 to-cyan-500 hover:from-teal-600 hover:to-cyan-600 text-white"
+                  onClick={() => {
+                    resetForm();
+                    setShowCreateDialog(true);
+                  }}
+                >
+                  <Plus className="mr-2 h-4 w-4" />
+                  Create first appointment
+                </Button>
+              )}
+            </CardContent>
+          </Card>
+        ) : (
+          <>
+            <div className="space-y-2">
+              {appointments.map((appointment) => {
+                const name = appointment.patient_name ?? "Patient";
+                const initials = name
+                  .split(/\s+/)
+                  .filter(Boolean)
+                  .slice(0, 2)
+                  .map((n) => n[0]?.toUpperCase())
+                  .join("");
+                const t = appointment.appointment_type;
+                const avatarBg =
+                  t === "emergency"
+                    ? "bg-rose-100 dark:bg-rose-900/30"
+                    : t === "follow_up"
+                      ? "bg-blue-100 dark:bg-blue-900/30"
+                      : t === "routine"
+                        ? "bg-violet-100 dark:bg-violet-900/30"
+                        : t === "procedure"
+                          ? "bg-orange-100 dark:bg-orange-900/30"
+                          : "bg-teal-100 dark:bg-teal-900/30";
+                const avatarFg =
+                  t === "emergency"
+                    ? "text-rose-600 dark:text-rose-400"
+                    : t === "follow_up"
+                      ? "text-blue-600 dark:text-blue-400"
+                      : t === "routine"
+                        ? "text-violet-600 dark:text-violet-400"
+                        : t === "procedure"
+                          ? "text-orange-600 dark:text-orange-400"
+                          : "text-teal-600 dark:text-teal-400";
+                return (
+                  <Card
+                    key={appointment.id}
+                    className={`border-l-4 ${getAppointmentListTypeBorder(t)} transition-shadow hover:shadow-md`}
+                  >
+                    <CardContent className="px-4 py-3">
+                      <div className="flex items-start gap-3">
+                        <div
+                          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${avatarBg}`}
+                        >
+                          <span className={`text-xs font-semibold ${avatarFg}`}>{initials}</span>
+                        </div>
+                        <div className="min-w-0 flex-1 overflow-hidden">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h3 className="truncate text-sm font-medium text-foreground">{name}</h3>
+                            <Badge
+                              variant="outline"
+                              className={`h-5 px-1.5 py-0 text-[10px] ${getAppointmentListTypeOutline(t)}`}
+                            >
+                              {formatAppointmentTypeLabel(t)}
+                            </Badge>
+                            <Badge
+                              variant="outline"
+                              className={`h-5 px-1.5 py-0 text-[10px] ${getAppointmentListStatusOutline(appointment.status)}`}
+                            >
+                              {appointment.status.replace(/_/g, " ")}
+                            </Badge>
+                          </div>
+                          <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
+                            <span>{appointment.appointment_id}</span>
+                            <span>•</span>
+                            <span className="inline-flex items-center gap-1">
+                              <CalendarIcon className="h-3 w-3" />
+                              {format(new Date(appointment.appointment_date), "MMM d, yyyy")}
+                            </span>
+                            <span>•</span>
+                            <span className="inline-flex items-center gap-1">
+                              <Clock className="h-3 w-3" />
+                              {appointment.appointment_time} ({appointment.duration_minutes} min)
+                            </span>
+                            <span>•</span>
+                            <span>{appointment.doctor_name || "No doctor assigned"}</span>
+                          </div>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-0.5">
+                          <Button variant="ghost" size="sm" onClick={() => openViewDialog(appointment)}>
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                          <Button variant="ghost" size="sm" onClick={() => openEditDialog(appointment)}>
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                          <Select
+                            value=""
+                            onValueChange={(value) =>
+                              handleStatusChange(appointment, value as Appointment["status"])
+                            }
+                          >
+                            <SelectTrigger className="h-8 w-8 border-0 p-0">
+                              <MoreHorizontal className="h-4 w-4" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {appointment.status !== "confirmed" && (
+                                <SelectItem value="confirmed">
+                                  <CheckCircle className="mr-2 h-4 w-4" />
+                                  Confirm
+                                </SelectItem>
+                              )}
+                              {appointment.status !== "completed" && (
+                                <SelectItem value="completed">
+                                  <CheckCircle className="mr-2 h-4 w-4" />
+                                  Complete
+                                </SelectItem>
+                              )}
+                              {appointment.status !== "cancelled" && (
+                                <SelectItem value="cancelled">
+                                  <XCircle className="mr-2 h-4 w-4" />
+                                  Cancel
+                                </SelectItem>
+                              )}
+                              {appointment.status !== "no_show" && (
+                                <SelectItem value="no_show">
+                                  <AlertCircle className="mr-2 h-4 w-4" />
+                                  No show
+                                </SelectItem>
+                              )}
+                            </SelectContent>
+                          </Select>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleDeleteAppointment(appointment)}
+                            className="text-red-600 hover:text-red-700"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+
+            <div className="flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm text-muted-foreground">
+                Page {currentPage} of {totalPages}
+              </p>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  disabled={currentPage <= 1}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                  Previous
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={currentPage >= totalPages}
+                >
+                  Next
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          </>
+        )}
 
         {/* Create Appointment Dialog */}
-        <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+        <Dialog
+          open={showCreateDialog}
+          onOpenChange={(open) => {
+            setShowCreateDialog(open);
+            if (!open) {
+              resetForm();
+            }
+          }}
+        >
           <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
@@ -544,37 +844,110 @@ export default function AppointmentsPage() {
               </DialogTitle>
             </DialogHeader>
             <div className="grid gap-4 py-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="patient">Patient *</Label>
-                  <Select value={formData.patient} onValueChange={(value) => setFormData({ ...formData, patient: value })}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select patient" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {patients.map((patient) => (
-                        <SelectItem key={patient.id} value={patient.id.toString()}>
-                          {patient.full_name ?? ''} ({patient.patient_id})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="type">Appointment Type *</Label>
-                  <Select value={formData.appointment_type} onValueChange={(value) => setFormData({ ...formData, appointment_type: value as Appointment['appointment_type'] })}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="consultation">Consultation</SelectItem>
-                      <SelectItem value="follow_up">Follow-up</SelectItem>
-                      <SelectItem value="emergency">Emergency</SelectItem>
-                      <SelectItem value="procedure">Procedure</SelectItem>
-                      <SelectItem value="routine">Routine</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+              <div className="space-y-2">
+                <Label>Patient *</Label>
+                {selectedCreatePatient ? (
+                  <div className="flex items-center justify-between gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2.5">
+                    <div className="min-w-0">
+                      <p className="truncate font-medium text-foreground">
+                        {selectedCreatePatient.full_name ??
+                          `${selectedCreatePatient.first_name} ${selectedCreatePatient.surname}`.trim()}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {selectedCreatePatient.patient_id}
+                        {selectedCreatePatient.age_display != null &&
+                          selectedCreatePatient.age_display !== "" &&
+                          ` • ${selectedCreatePatient.age_display}`}
+                        {selectedCreatePatient.gender && ` • ${selectedCreatePatient.gender}`}
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="shrink-0"
+                      onClick={() => setSelectedCreatePatient(null)}
+                      aria-label="Clear patient"
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        className="pl-10"
+                        placeholder="Search by name or patient ID…"
+                        value={createPatientSearch}
+                        onChange={(e) => setCreatePatientSearch(e.target.value)}
+                        autoComplete="off"
+                      />
+                    </div>
+                    <div className="max-h-[200px] space-y-1 overflow-y-auto rounded-md border border-border p-1">
+                      {createPatientSearching && (
+                        <div className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          Searching…
+                        </div>
+                      )}
+                      {!createPatientSearching &&
+                        createPatientResults.length === 0 &&
+                        createPatientSearch.trim() !== "" && (
+                          <p className="py-6 text-center text-sm text-muted-foreground">No patients found.</p>
+                        )}
+                      {!createPatientSearching && createPatientSearch.trim() === "" && (
+                        <p className="py-6 text-center text-sm text-muted-foreground">
+                          Type a name or patient ID to search the register.
+                        </p>
+                      )}
+                      {!createPatientSearching &&
+                        createPatientResults.map((p) => {
+                          const label = p.full_name ?? `${p.first_name} ${p.surname}`.trim();
+                          return (
+                            <button
+                              key={p.id}
+                              type="button"
+                              onClick={() => {
+                                setSelectedCreatePatient(p);
+                                setCreatePatientSearch("");
+                                setCreatePatientResults([]);
+                              }}
+                              className="flex w-full items-center gap-3 rounded-md px-2 py-2 text-left text-sm transition-colors hover:bg-muted/80"
+                            >
+                              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-medium text-muted-foreground">
+                                {label
+                                  .split(/\s+/)
+                                  .filter(Boolean)
+                                  .slice(0, 2)
+                                  .map((n) => n[0]?.toUpperCase())
+                                  .join("")}
+                              </div>
+                              <div className="min-w-0">
+                                <p className="truncate font-medium text-foreground">{label}</p>
+                                <p className="truncate text-xs text-muted-foreground">{p.patient_id}</p>
+                              </div>
+                            </button>
+                          );
+                        })}
+                    </div>
+                  </>
+                )}
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="type">Appointment Type *</Label>
+                <Select value={formData.appointment_type} onValueChange={(value) => setFormData({ ...formData, appointment_type: value as Appointment["appointment_type"] })}>
+                  <SelectTrigger id="type">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="consultation">Consultation</SelectItem>
+                    <SelectItem value="follow_up">Follow-up</SelectItem>
+                    <SelectItem value="emergency">Emergency</SelectItem>
+                    <SelectItem value="procedure">Procedure</SelectItem>
+                    <SelectItem value="routine">Routine</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
               <div className="grid grid-cols-3 gap-4">
                 <div className="space-y-2">
@@ -629,10 +1002,13 @@ export default function AppointmentsPage() {
               </div>
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => { setShowCreateDialog(false); resetForm(); }}>
+              <Button variant="outline" onClick={() => setShowCreateDialog(false)}>
                 Cancel
               </Button>
-              <Button onClick={handleCreateAppointment} disabled={!formData.patient || !formData.appointment_date}>
+              <Button
+                onClick={handleCreateAppointment}
+                disabled={!selectedCreatePatient || !formData.appointment_date}
+              >
                 Create Appointment
               </Button>
             </DialogFooter>
@@ -651,19 +1027,13 @@ export default function AppointmentsPage() {
             <div className="grid gap-4 py-4">
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="edit-patient">Patient</Label>
-                  <Select value={formData.patient} onValueChange={(value) => setFormData({ ...formData, patient: value })}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {patients.map((patient) => (
-                        <SelectItem key={patient.id} value={patient.id.toString()}>
-                          {patient.full_name ?? ''} ({patient.patient_id})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <Label>Patient</Label>
+                  <p className="rounded-md border border-border bg-muted/30 px-3 py-2 text-sm font-medium text-foreground">
+                    {selectedAppointment?.patient_name ?? "—"}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    To change the patient, cancel and create a new appointment.
+                  </p>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="edit-type">Appointment Type</Label>

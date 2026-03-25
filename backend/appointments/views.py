@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 
 from .models import Appointment, AppointmentSlot
 from .serializers import AppointmentSerializer, AppointmentSlotSerializer
+from .filters import AppointmentFilter
 from notifications.services import NotificationService
 
 
@@ -21,8 +22,15 @@ class AppointmentViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     serializer_class = AppointmentSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['patient', 'doctor', 'clinic', 'status', 'appointment_type']
-    search_fields = ['appointment_id', 'reason', 'notes']
+    filterset_class = AppointmentFilter
+    search_fields = [
+        'appointment_id',
+        'reason',
+        'notes',
+        'patient__first_name',
+        'patient__surname',
+        'patient__patient_id',
+    ]
     ordering_fields = ['appointment_date', 'appointment_time', 'created_at']
     ordering = ['appointment_date', 'appointment_time']
     

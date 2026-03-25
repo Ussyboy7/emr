@@ -686,7 +686,6 @@ export default function PrescriptionsPage() {
     ready: filteredPrescriptions.filter(r => r.status === 'Ready').length,
     onHold: filteredPrescriptions.filter(r => r.status === 'On Hold').length,
     emergency: filteredPrescriptions.filter(r => r.priority === 'Emergency').length,
-    avgWaitTime: Math.round(filteredPrescriptions.reduce((sum, r) => sum + r.waitTime, 0) / filteredPrescriptions.length) || 0
   }), [filteredPrescriptions]);
 
   const getPriorityColor = (priority: string) => {
@@ -1539,15 +1538,11 @@ export default function PrescriptionsPage() {
                       
                       {/* Row 2: Details */}
                       <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-wrap">
-                        <span>{rx.id}</span>
-                        <span>•</span>
                         <span>{rx.patient.mrn}</span>
                         <span>•</span>
                         <span>{rx.patient.age > 0 ? `${rx.patient.age}y` : 'Age unknown'} {rx.patient.gender}</span>
                         <span>•</span>
                         <span className="flex items-center gap-1"><Stethoscope className="h-3 w-3" />{rx.doctor}</span>
-                        <span>•</span>
-                        <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{rx.waitTime >= 60 ? `${Math.floor(rx.waitTime/60)}h ${rx.waitTime%60}m` : `${rx.waitTime}m`} wait</span>
                         {((rx as any).patient_details?.allergies?.length > 0) && (
                           <span className="text-red-600 dark:text-red-400 flex items-center gap-1">
                             <AlertTriangle className="h-3 w-3" />Allergies
@@ -1633,14 +1628,6 @@ export default function PrescriptionsPage() {
                       {selectedPrescription.prescribed_at
                         ? `${new Date(selectedPrescription.prescribed_at).toLocaleDateString()} ${new Date(selectedPrescription.prescribed_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`
                         : `${selectedPrescription.date || ''} ${selectedPrescription.time || ''}`}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-muted-foreground">Wait Time:</span>{' '}
-                    <span className="font-medium text-orange-600">
-                      {selectedPrescription.prescribed_at
-                        ? Math.max(0, Math.floor((Date.now() - new Date(selectedPrescription.prescribed_at).getTime()) / 60000))
-                        : selectedPrescription.waitTime} min
                     </span>
                   </div>
                 </div>

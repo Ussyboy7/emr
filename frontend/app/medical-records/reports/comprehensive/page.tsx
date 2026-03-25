@@ -13,7 +13,6 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { apiFetch } from "@/lib/api-client";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 
 interface ComprehensiveData {
@@ -38,7 +37,6 @@ interface ComprehensiveData {
 }
 
 export default function ComprehensiveReport() {
-  const router = useRouter();
   const [year, setYear] = useState(new Date().getFullYear().toString());
   const [reportData, setReportData] = useState<ComprehensiveData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -109,12 +107,13 @@ export default function ComprehensiveReport() {
     <DashboardLayout>
       <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
         {/* Header */}
-        <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
-          <Link href="/medical-records" className="hover:text-primary">Medical Records</Link>
-          <span>/</span>
-          <Link href="/medical-records/reports" className="hover:text-primary">Reports</Link>
-          <span>/</span>
-          <span>Comprehensive Report</span>
+        <div className="mb-2">
+          <Button variant="ghost" size="sm" className="-ml-2 gap-2 px-2" asChild>
+            <Link href="/medical-records/reports">
+              <ArrowLeft className="h-4 w-4" />
+              Back to reports
+            </Link>
+          </Button>
         </div>
 
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">

@@ -42,6 +42,9 @@ class AppointmentService {
     status?: string;
     appointment_type?: string;
     appointment_date?: string;
+    start_date?: string;
+    end_date?: string;
+    search?: string;
     page?: number;
     page_size?: number;
   }): Promise<{ results: Appointment[]; count: number; next?: string; previous?: string }> {

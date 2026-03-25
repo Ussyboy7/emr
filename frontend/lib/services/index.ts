@@ -46,6 +46,7 @@ export type {
 } from './physio-service';
 export type { User, Role, Clinic, Department, AuditLog } from './admin-service';
 export type { Room } from './room-service';
+export type { MedicalCertificate, MedicalCertificatePurpose } from './medical-certificate-service';
 
 // Export service instances
 export { default as labService } from './lab-service';
@@ -63,6 +64,8 @@ export { appointmentService } from './appointment-service';
 export { wardService } from './ward-service';
 export { physioService } from './physio-service';
 export { nursingService } from './nursing-service';
+
+export { medicalCertificateService } from './medical-certificate-service';
 
 // Export utility functions
 export { sanitizePatientForRendering } from './patient-service';

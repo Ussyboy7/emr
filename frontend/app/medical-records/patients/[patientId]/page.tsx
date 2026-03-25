@@ -17,7 +17,7 @@ import {
   ChevronLeft, ChevronRight, Loader2, AlertTriangle, FileText, Pencil
 } from "lucide-react";
 import { patientService, consultationService, labService, radiologyService, 
-         pharmacyService, physioService, wardService, type Patient } from '@/lib/services';
+         pharmacyService, physioService, wardService, medicalCertificateService, type Patient } from '@/lib/services';
 import { apiFetch } from '@/lib/api-client';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { useCurrentUser } from '@/hooks/use-current-user';
@@ -56,6 +56,120 @@ const formatTime = (dateString: string | undefined): string => {
   } catch {
     return '';
   }
+};
+
+const escapeHtml = (value: string) => {
+  return String(value ?? '')
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+};
+
+const purposeLabelMap: Record<string, string> = {
+  fitness: "FITNESS FOR DUTY",
+  illness: "UNFIT FOR WORK",
+  travel: "FIT TO TRAVEL",
+  employment: "FIT FOR EMPLOYMENT",
+};
+
+const patientCategoryLabelMap: Record<string, string> = {
+  employee: "Employee",
+  retiree: "Retiree",
+  dependent: "Dependent",
+  nonnpa: "Non-NPA",
+};
+
+const buildMedicalCertificateHtmlFromRecord = (cert: any) => {
+  const purposeLabel = purposeLabelMap[cert?.purpose] ?? String(cert?.purpose ?? "");
+  const patientCategoryLabel = patientCategoryLabelMap[cert?.patient_category_snapshot] ?? (cert?.patient_category_snapshot ?? "");
+
+  const validFrom = formatDate(cert?.valid_from);
+  const validTo = formatDate(cert?.valid_to);
+  const issueDate = formatDate(cert?.issued_at);
+
+  const findings = (cert?.findings ?? "").trim();
+  const recommendations = (cert?.recommendations ?? "").trim();
+
+  return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>${escapeHtml(purposeLabel)} - ${escapeHtml(cert?.certificate_number ?? "")}</title>
+  <style>
+    @page { size: A4; margin: 18mm; }
+    body { font-family: Arial, Helvetica, sans-serif; color: #111; line-height: 1.4; }
+    .title { text-align: center; font-weight: 700; font-size: 20px; margin-bottom: 8px; }
+    .subtle { color: #333; font-size: 12px; }
+    .block { margin-top: 10px; }
+    .row { display: flex; justify-content: space-between; gap: 16px; }
+    .kv { width: 50%; }
+    .label { font-weight: 700; }
+    .content { margin-top: 14px; font-size: 14px; white-space: pre-wrap; }
+    .signature { margin-top: 28px; display: flex; justify-content: flex-end; }
+    .sig-line { border-top: 1px solid #111; width: 240px; padding-top: 6px; text-align: left; }
+  </style>
+</head>
+<body>
+  <div class="title">MEDICAL CERTIFICATE</div>
+  <div class="subtle" style="text-align:center;">Certificate No: ${escapeHtml(cert?.certificate_number ?? "")} &nbsp; | &nbsp; Issued: ${escapeHtml(issueDate)}</div>
+
+  <div class="block">
+    <div class="row">
+      <div class="kv">
+        <div><span class="label">Patient Name:</span> ${escapeHtml(cert?.patient_name_snapshot ?? cert?.patient_name ?? "")}</div>
+        <div><span class="label">Patient ID:</span> ${escapeHtml(cert?.patient_id_snapshot ?? "")}</div>
+      </div>
+      <div class="kv">
+        <div><span class="label">Category:</span> ${escapeHtml(patientCategoryLabel)}</div>
+        <div><span class="label">Type:</span> ${escapeHtml(purposeLabel)}</div>
+      </div>
+    </div>
+
+    <div class="content">
+      This is to certify that <strong>${escapeHtml(cert?.patient_name_snapshot ?? cert?.patient_name ?? "")}</strong> is ${escapeHtml(
+        purposeLabel.toLowerCase(),
+      )}.
+      ${
+        validFrom && validTo
+          ? `The certificate is valid from ${escapeHtml(validFrom)} to ${escapeHtml(validTo)}.`
+          : ""
+      }
+      ${
+        findings
+          ? `\n\nClinical findings:\n${escapeHtml(findings)}`
+          : ""
+      }
+      ${
+        recommendations
+          ? `\n\nRecommendations:\n${escapeHtml(recommendations)}`
+          : ""
+      }
+    </div>
+  </div>
+
+  <div class="signature">
+    <div class="sig-line">
+      <div><strong>${escapeHtml(cert?.doctor_name_snapshot ?? cert?.issued_by_name ?? "")}</strong></div>
+      <div class="subtle">Doctor</div>
+    </div>
+  </div>
+</body>
+</html>`;
+};
+
+const openPrintWindow = (title: string, html: string) => {
+  const popup = window.open("", "_blank", "width=900,height=1000");
+  if (!popup) {
+    throw new Error("Allow popups to print documents.");
+  }
+  popup.document.open();
+  popup.document.write(html);
+  popup.document.close();
+  popup.document.title = title;
+  popup.focus();
+  popup.print();
 };
 
 const formatPriority = (p: string | undefined): string => {
@@ -155,6 +269,7 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
   const [vitalsHistory, setVitalsHistory] = useState<any[]>([]);
   const [physioHistory, setPhysioHistory] = useState<any[]>([]);
   const [wardAdmissions, setWardAdmissions] = useState<any[]>([]);
+  const [certificateHistory, setCertificateHistory] = useState<any[]>([]);
   const [medicalHistory, setMedicalHistory] = useState<any>(null);
   const [loadingHistory, setLoadingHistory] = useState(false);
 
@@ -281,6 +396,18 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
       const admissions = await wardService.getAdmissions({ patient: patientId });
       setWardAdmissions(admissions?.results || []);
 
+      // Load medical certificates (persisted records)
+      try {
+        const certificates = await medicalCertificateService.getCertificates({
+          patient: patientId.toString(),
+          page_size: 1000,
+        });
+        setCertificateHistory(certificates?.results || []);
+      } catch (err) {
+        console.warn('Could not load medical certificates:', err);
+        setCertificateHistory([]);
+      }
+
       // Load medical history
       try {
         const history = await patientService.getPatientHistory(patientId);
@@ -292,6 +419,14 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
       console.error('Error loading patient history:', err);
     } finally {
       setLoadingHistory(false);
+    }
+  };
+
+  const handlePrintMedicalCertificate = (cert: any) => {
+    try {
+      openPrintWindow(`Medical Certificate - ${cert?.certificate_number ?? ''}`, buildMedicalCertificateHtmlFromRecord(cert));
+    } catch (e: any) {
+      toast.error(e?.message || "Allow popups to print documents.");
     }
   };
 
@@ -1751,7 +1886,7 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
         <Card>
           <CardHeader className="pb-0">
             <Tabs defaultValue="consultations" className="w-full">
-              <TabsList className="grid w-full grid-cols-8">
+              <TabsList className="grid w-full grid-cols-9">
                 <TabsTrigger value="consultations" className="text-xs">
                   <ClipboardList className="h-3 w-3 mr-1" />
                   Consultations ({consultationHistory.length})
@@ -1779,6 +1914,10 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
                 <TabsTrigger value="wards" className="text-xs">
                   <Building2 className="h-3 w-3 mr-1" />
                   Ward Admissions ({wardAdmissions.length})
+                </TabsTrigger>
+                <TabsTrigger value="certificates" className="text-xs">
+                  <FileText className="h-3 w-3 mr-1" />
+                  Certificates ({certificateHistory.length})
                 </TabsTrigger>
                 <TabsTrigger value="background" className="text-xs">
                   <User className="h-3 w-3 mr-1" />
@@ -2255,6 +2394,59 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
                             <td className="px-4 py-3 text-center">
                               <Button variant="ghost" size="sm" onClick={() => { setSelectedWard(admission); }}>
                                 <Eye className="h-4 w-4 mr-1" /> View
+                              </Button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </TabsContent>
+
+              {/* Certificates Tab */}
+              <TabsContent value="certificates" className="mt-4">
+                {loadingHistory ? (
+                  <div className="text-center py-12">
+                    <Loader2 className="h-8 w-8 mx-auto mb-3 animate-spin text-muted-foreground" />
+                    <p className="text-sm text-muted-foreground">Loading certificates...</p>
+                  </div>
+                ) : certificateHistory.length === 0 ? (
+                  <div className="text-center py-12 bg-gradient-to-b from-muted/30 to-background rounded-lg border-2 border-dashed border-muted">
+                    <FileText className="h-12 w-12 mx-auto mb-3 text-muted-foreground opacity-50" />
+                    <p className="font-medium text-muted-foreground mb-1">No certificates found</p>
+                    <p className="text-sm text-muted-foreground">Create a Medical Certificate to see it listed here</p>
+                  </div>
+                ) : (
+                  <div className="border rounded-lg overflow-hidden">
+                    <table className="w-full text-sm">
+                      <thead className="bg-muted/50">
+                        <tr>
+                          <th className="px-4 py-2 text-left font-medium">Issued</th>
+                          <th className="px-4 py-2 text-left font-medium">Certificate No</th>
+                          <th className="px-4 py-2 text-left font-medium">Purpose</th>
+                          <th className="px-4 py-2 text-left font-medium">Validity</th>
+                          <th className="px-4 py-2 text-center font-medium">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y">
+                        {certificateHistory.map((cert: any) => (
+                          <tr key={cert.id} className="hover:bg-muted/30">
+                            <td className="px-4 py-3 text-muted-foreground">
+                              {formatDate(cert.issued_at)}
+                            </td>
+                            <td className="px-4 py-3 font-medium">{cert.certificate_number}</td>
+                            <td className="px-4 py-3">
+                              <Badge variant="outline" className="border-teal-500/50 text-teal-600 dark:text-teal-400">
+                                {purposeLabelMap[cert.purpose] ?? cert.purpose}
+                              </Badge>
+                            </td>
+                            <td className="px-4 py-3 text-muted-foreground">
+                              {formatDate(cert.valid_from)} - {formatDate(cert.valid_to)}
+                            </td>
+                            <td className="px-4 py-3 text-center">
+                              <Button variant="ghost" size="sm" onClick={() => handlePrintMedicalCertificate(cert)}>
+                                <Printer className="h-4 w-4 mr-1" /> Print
                               </Button>
                             </td>
                           </tr>
