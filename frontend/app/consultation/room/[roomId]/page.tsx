@@ -5256,7 +5256,12 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                       <Plus className="mr-2 h-4 w-4" />Add Procedure
                     </Button>
                     {nursingOrders.length > 0 && nursingOrders.some(order => order.status === 'Draft') && (
-                      <Button onClick={sendNursingOrdersToNursing} className="bg-cyan-600 hover:bg-cyan-700">
+                      <Button
+                        onClick={() => {
+                          void sendNursingOrdersToNursing();
+                        }}
+                        className="bg-cyan-600 hover:bg-cyan-700"
+                      >
                         <Syringe className="mr-2 h-4 w-4" />
                         Send to Nursing ({nursingOrders.filter(order => order.status === 'Draft').length})
                       </Button>
