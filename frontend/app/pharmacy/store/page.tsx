@@ -13,7 +13,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { pharmacyService, type MedicationInventory, type Medication } from "@/lib/services";
+import { pharmacyService, type MedicationInventory, type Medication, type BatchAdjustmentHistory } from "@/lib/services";
 import { PHARMACY_LOCATIONS } from "@/lib/constants/pharmacy-locations";
 import { MEDICATION_CATEGORIES } from "@/lib/constants/pharmacy";
 import { Package, Search, TrendingUp, AlertTriangle, Loader2, Eye, Send, Layers, Plus, ArrowUpDown, Upload, Hash, Pill, Clock, XCircle, CheckCircle2 } from "lucide-react";
@@ -54,7 +54,12 @@ export default function WarehouseStorePage() {
   const [showBatchesModal, setShowBatchesModal] = useState(false);
   const [showAdjustBatchModal, setShowAdjustBatchModal] = useState(false);
   const [selectedBatch, setSelectedBatch] = useState<MedicationInventory | null>(null);
+  const [showBatchHistoryModal, setShowBatchHistoryModal] = useState(false);
+  const [selectedHistoryBatch, setSelectedHistoryBatch] = useState<MedicationInventory | null>(null);
   const [adjusting, setAdjusting] = useState(false);
+  const [adjustmentHistoryLoading, setAdjustmentHistoryLoading] = useState(false);
+  const [adjustmentHistory, setAdjustmentHistory] = useState<BatchAdjustmentHistory[]>([]);
+  const [adjustmentHistoryError, setAdjustmentHistoryError] = useState<string | null>(null);
   const [adjustmentForm, setAdjustmentForm] = useState({
     type: "decrease" as "increase" | "decrease",
     quantity: 0,
@@ -253,10 +258,27 @@ export default function WarehouseStorePage() {
     openReceive();
   };
 
-  const openAdjustForBatch = (batch: MedicationInventory) => {
+  const openAdjustForBatch = async (batch: MedicationInventory) => {
     setSelectedBatch(batch);
     setShowAdjustBatchModal(true);
     setAdjustmentForm({ type: "decrease", quantity: 0, reason: "", notes: "" });
+  };
+
+  const openBatchHistoryForBatch = async (batch: MedicationInventory) => {
+    setSelectedHistoryBatch(batch);
+    setShowBatchHistoryModal(true);
+    setAdjustmentHistory([]);
+    setAdjustmentHistoryError(null);
+    setAdjustmentHistoryLoading(true);
+    try {
+      const history = await pharmacyService.getBatchAdjustmentHistory(Number(batch.id));
+      setAdjustmentHistory(history || []);
+    } catch (e: any) {
+      setAdjustmentHistoryError("Adjustment history not available.");
+      setAdjustmentHistory([]);
+    } finally {
+      setAdjustmentHistoryLoading(false);
+    }
   };
 
   const handleAdjustBatch = async () => {
@@ -284,7 +306,11 @@ export default function WarehouseStorePage() {
 
     try {
       setAdjusting(true);
-      await pharmacyService.updateInventoryItem(Number(selectedBatch.id), { quantity: newQty });
+      await pharmacyService.recordBatchAdjustment(Number(selectedBatch.id), {
+        quantity_after: newQty,
+        adjustment_reason: adjustmentForm.reason,
+        adjustment_notes: adjustmentForm.notes || undefined,
+      });
       toast.success(
         `Batch stock ${adjustmentForm.type === "increase" ? "increased" : "decreased"} by ${adjustPacks} packs (${adjustUnits} units)`
       );
@@ -740,7 +766,7 @@ export default function WarehouseStorePage() {
 
         {/* Inventory Details Modal */}
         <Dialog open={showDetailsModal} onOpenChange={setShowDetailsModal}>
-          <DialogContent className="w-[95vw] sm:max-w-[600px]">
+          <DialogContent className="w-[95vw] sm:max-w-[720px]">
             <DialogHeader>
               <DialogTitle className="flex items-center justify-between gap-2">
                 <span className="truncate">{selectedMedication?.name}</span>
@@ -780,34 +806,32 @@ export default function WarehouseStorePage() {
                   </div>
                 </div>
 
-                <div className="bg-muted/50 rounded-lg p-4">
-                  <h4 className="font-medium mb-3">Stock Levels</h4>
-                  <div className="grid grid-cols-2 gap-4 text-center mb-3">
-                    <div>
-                      <p className="text-2xl font-bold text-foreground">
-                        {formatPackDisplay(selectedMedication.storeQuantity, selectedMedication.packSize)}
-                      </p>
-                      <p className="text-xs text-muted-foreground">Current</p>
-                    </div>
-                    <div>
-                      <p className="text-2xl font-bold text-amber-600">
-                        {formatPackDisplay(selectedMedication.minimumStock, selectedMedication.packSize)}
-                      </p>
-                      <p className="text-xs text-muted-foreground">Minimum</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="bg-muted/50 rounded-lg p-4">
+                    <h4 className="font-medium mb-3">Stock Levels</h4>
+                    <div className="grid grid-cols-2 gap-4 text-center mb-3">
+                      <div>
+                        <p className="text-2xl font-bold text-foreground">
+                          {formatPackDisplay(selectedMedication.storeQuantity, selectedMedication.packSize)}
+                        </p>
+                        <p className="text-xs text-muted-foreground">Current</p>
+                      </div>
+                      <div>
+                        <p className="text-2xl font-bold text-amber-600">
+                          {formatPackDisplay(selectedMedication.minimumStock, selectedMedication.packSize)}
+                        </p>
+                        <p className="text-xs text-muted-foreground">Minimum</p>
+                      </div>
                     </div>
                   </div>
-                </div>
 
-                <div className="bg-muted/50 rounded-lg p-4">
-                  <h4 className="font-medium mb-2">Expiry Information</h4>
-                  <p className="text-sm">
-                    <span className="text-muted-foreground">Expiry Date:</span>{" "}
-                    <span className="font-medium">{getNearestExpiryDate(selectedMedication.batches) || "—"}</span>
-                  </p>
-                </div>
-
-                <div>
-                  <h4 className="font-medium mb-2">Batches ({selectedMedication.batches.length})</h4>
+                  <div className="bg-muted/50 rounded-lg p-4">
+                    <h4 className="font-medium mb-2">Expiry Information</h4>
+                    <p className="text-sm">
+                      <span className="text-muted-foreground">Expiry Date:</span>{" "}
+                      <span className="font-medium">{getNearestExpiryDate(selectedMedication.batches) || "—"}</span>
+                    </p>
+                  </div>
                 </div>
               </div>
             )}
@@ -861,6 +885,10 @@ export default function WarehouseStorePage() {
                               <ArrowUpDown className="h-4 w-4 mr-2" />
                               Adjust
                             </Button>
+                            <Button variant="outline" size="sm" onClick={() => openBatchHistoryForBatch(batch)}>
+                              <Clock className="h-4 w-4 mr-2" />
+                              History
+                            </Button>
                           </div>
                         </div>
                       </CardContent>
@@ -880,8 +908,117 @@ export default function WarehouseStorePage() {
           </DialogContent>
         </Dialog>
 
+        <Dialog
+          open={showBatchHistoryModal}
+          onOpenChange={(open) => {
+            setShowBatchHistoryModal(open);
+            if (!open) setSelectedHistoryBatch(null);
+          }}
+        >
+          <DialogContent className="w-[95vw] sm:max-w-[720px] max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <Hash className="h-5 w-5 text-muted-foreground" />
+                  <span className="font-semibold truncate">
+                    {selectedHistoryBatch?.batch_number || "—"}
+                  </span>
+                </div>
+                {selectedHistoryBatch ? (
+                  <Badge variant="outline">Exp: {selectedHistoryBatch.expiry_date}</Badge>
+                ) : null}
+              </DialogTitle>
+              <DialogDescription>Batch adjustment history (additions / reductions)</DialogDescription>
+            </DialogHeader>
+
+            {selectedHistoryBatch && (
+              <div className="space-y-4">
+                <div className="bg-muted/50 rounded-lg p-4 text-sm text-center">
+                  <p className="text-muted-foreground">Qty</p>
+                  <p className="text-2xl sm:text-3xl font-bold">
+                    {formatPackDisplay(Number(selectedHistoryBatch.quantity || 0), selectedMedication?.packSize)}
+                  </p>
+                </div>
+
+                <div className="bg-muted/50 rounded-lg p-4">
+                  <h4 className="font-medium mb-2">Adjustments</h4>
+                  {adjustmentHistoryLoading ? (
+                    <div className="flex items-center gap-2 text-muted-foreground text-sm">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Loading history...
+                    </div>
+                  ) : adjustmentHistoryError ? (
+                    <p className="text-sm text-muted-foreground">{adjustmentHistoryError}</p>
+                  ) : adjustmentHistory.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No historic adjustments yet for this batch.</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {adjustmentHistory.map((h) => {
+                        const packSize = selectedMedication?.packSize || 1;
+                        const deltaUnits = Number(h.quantity_after || 0) - Number(h.quantity_before || 0);
+                        const direction = deltaUnits >= 0 ? "Increase" : "Decrease";
+                        const absUnits = Math.abs(deltaUnits);
+                        const dateLabel = h.created_at ? new Date(h.created_at).toLocaleString() : "—";
+
+                        return (
+                          <div key={h.id} className="pt-1 border-t border-border first:border-t-0">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <p className="font-medium">
+                                  {direction} by {formatPackDisplay(absUnits, packSize)}
+                                </p>
+                                <p className="text-xs text-muted-foreground mt-1">
+                                  Reason: {h.adjustment_reason?.trim() ? h.adjustment_reason : "Not recorded"}
+                                </p>
+                                <p className="text-xs text-muted-foreground mt-1">
+                                  By: {h.created_by_name || "—"}
+                                </p>
+                                {h.adjustment_notes ? (
+                                  <p className="text-xs text-muted-foreground mt-1 break-words">
+                                    Notes: {h.adjustment_notes}
+                                  </p>
+                                ) : null}
+                                <p className="text-xs text-muted-foreground mt-1">
+                                  {formatPackDisplay(Number(h.quantity_before || 0), packSize)} -&gt;{" "}
+                                  {formatPackDisplay(Number(h.quantity_after || 0), packSize)}
+                                </p>
+                              </div>
+                              <p className="text-xs text-muted-foreground whitespace-nowrap">{dateLabel}</p>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => setShowBatchHistoryModal(false)}
+              >
+                Close
+              </Button>
+              <Button
+                onClick={() => {
+                  const b = selectedHistoryBatch;
+                  setShowBatchHistoryModal(false);
+                  if (b) openAdjustForBatch(b);
+                }}
+                className="bg-emerald-600 hover:bg-emerald-700"
+                disabled={!selectedHistoryBatch}
+              >
+                <ArrowUpDown className="h-4 w-4 mr-2" />
+                Adjust
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
         <Dialog open={showAdjustBatchModal} onOpenChange={setShowAdjustBatchModal}>
-          <DialogContent className="w-[95vw] sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className="w-[95vw] sm:max-w-[620px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <ArrowUpDown className="h-5 w-5 text-amber-500" />

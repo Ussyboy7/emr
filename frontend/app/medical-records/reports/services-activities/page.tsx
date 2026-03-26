@@ -2,13 +2,14 @@
 
 import React, { useState, useEffect } from "react";
 import { DashboardLayout } from "@/components/DashboardLayout";
+import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { 
   Download, FileSpreadsheet, RefreshCw, ArrowLeft, 
-  Activity, Syringe, FileText, Printer
+  Activity, Syringe, FileText, Printer, Calendar, TrendingUp, Users
 } from "lucide-react";
 import { toast } from "sonner";
 import { apiFetch } from "@/lib/api-client";
@@ -20,33 +21,72 @@ interface ServiceData {
   count: number;
   male: number;
   female: number;
+  percentage: number;
+}
+
+interface ServicesSummary {
+  total: number;
+  total_male: number;
+  total_female: number;
 }
 
 export default function ServicesActivitiesReport() {
   const [year, setYear] = useState(new Date().getFullYear().toString());
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [viewMode, setViewMode] = useState<"year" | "range">("year");
   const [data, setData] = useState<ServiceData[]>([]);
-  const [total, setTotal] = useState(0);
+  const [summary, setSummary] = useState<ServicesSummary>({
+    total: 0,
+    total_male: 0,
+    total_female: 0,
+  });
   const [isLoading, setIsLoading] = useState(true);
+
+  const setThisMonth = () => {
+    const now = new Date();
+    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    setStartDate(firstDay.toISOString().split("T")[0]);
+    setEndDate(lastDay.toISOString().split("T")[0]);
+    setViewMode("range");
+  };
+
+  const setThisYear = () => {
+    setYear(new Date().getFullYear().toString());
+    setViewMode("year");
+  };
 
   const fetchReport = async () => {
     setIsLoading(true);
     try {
-      const response = await apiFetch<{ data: ServiceData[]; total: number }>(`/reports/services-activities/?year=${year}`);
+      let url = "/reports/services-activities/?";
+      if (viewMode === "year") {
+        url += `year=${year}`;
+      } else if (startDate && endDate) {
+        url += `start_date=${startDate}&end_date=${endDate}`;
+      } else {
+        toast.error("Please select both start and end dates");
+        setIsLoading(false);
+        return;
+      }
+      const response = await apiFetch<{ data: ServiceData[]; summary: ServicesSummary }>(url);
       setData(response.data || []);
-      setTotal(response.total || 0);
+      setSummary(response.summary || { total: 0, total_male: 0, total_female: 0 });
     } catch (error: any) {
       console.error("Error fetching services report:", error);
       toast.error(error.message || "Failed to load services report");
       setData([]);
-      setTotal(0);
+      setSummary({ total: 0, total_male: 0, total_female: 0 });
     } finally {
       setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchReport();
-  }, [year]);
+    if (viewMode === "year" && year) fetchReport();
+    if (viewMode === "range" && startDate && endDate) fetchReport();
+  }, [year, startDate, endDate, viewMode]);
 
   const exportToCSV = () => {
     if (data.length === 0) {
@@ -54,23 +94,21 @@ export default function ServicesActivitiesReport() {
       return;
     }
 
-    const headers = ["S/N", "Category", "Total", "Male", "Female"];
-    const rows = data.map(row => [row.sn, row.category, row.count, row.male, row.female]);
-    
-    const totalMale = data.reduce((sum, row) => sum + row.male, 0);
-    const totalFemale = data.reduce((sum, row) => sum + row.female, 0);
+    const headers = ["S/N", "Category", "Total", "Male", "Female", "%"];
+    const rows = data.map(row => [row.sn, row.category, row.count, row.male, row.female, `${row.percentage}%`]);
     
     const csv = [
       headers.join(','),
       ...rows.map(row => row.join(',')),
-      `TOTAL,,${total},${totalMale},${totalFemale}`
+      `TOTAL,,${summary.total},${summary.total_male},${summary.total_female},100.0%`
     ].join('\n');
     
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `services_activities_${year}.csv`;
+    const period = viewMode === "year" ? year : `${startDate}_to_${endDate}`;
+    a.download = `services_activities_${period}.csv`;
     a.click();
     window.URL.revokeObjectURL(url);
     
@@ -85,8 +123,6 @@ export default function ServicesActivitiesReport() {
     if (category.includes('Sick Leave')) return FileText;
     return Activity;
   };
-
-  const maxValue = Math.max(...data.map(d => d.count), 1);
 
   return (
     <DashboardLayout>
@@ -125,21 +161,75 @@ export default function ServicesActivitiesReport() {
           </div>
         </div>
 
-        {/* Filters */}
+        <div className="flex gap-2">
+          <Button
+            variant={viewMode === "range" && startDate.includes(new Date().toISOString().slice(0, 7)) ? "default" : "outline"}
+            onClick={setThisMonth}
+            className="flex items-center gap-2"
+          >
+            <Calendar className="h-4 w-4" />
+            This Month
+          </Button>
+          <Button
+            variant={viewMode === "year" && year === new Date().getFullYear().toString() ? "default" : "outline"}
+            onClick={setThisYear}
+            className="flex items-center gap-2"
+          >
+            <Calendar className="h-4 w-4" />
+            This Year
+          </Button>
+        </div>
+
         <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Calendar className="h-5 w-5" />
+              Filters
+            </CardTitle>
+            <CardDescription>Adjust date range for detailed reporting</CardDescription>
+          </CardHeader>
           <CardContent className="p-4">
-            <div className="w-48">
-              <Label>Year</Label>
-              <Select value={year} onValueChange={setYear}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {years.map(y => (
-                    <SelectItem key={y} value={y}>{y}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div>
+                <Label>View Mode</Label>
+                <Select value={viewMode} onValueChange={(value: "year" | "range") => setViewMode(value)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="year">By Year</SelectItem>
+                    <SelectItem value="range">Date Range</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {viewMode === "year" ? (
+                <div>
+                  <Label>Year</Label>
+                  <Select value={year} onValueChange={setYear}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {years.map(y => (
+                        <SelectItem key={y} value={y}>{y}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : (
+                <>
+                  <div>
+                    <Label>Start Date</Label>
+                    <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+                  </div>
+                  <div>
+                    <Label>End Date</Label>
+                    <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+                  </div>
+                </>
+              )}
+              <div className="flex items-end">
+                <Button onClick={fetchReport} className="w-full" disabled={isLoading}>
+                  <TrendingUp className="h-4 w-4 mr-2" />
+                  {isLoading ? "Loading..." : "Generate Report"}
+                </Button>
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -147,30 +237,42 @@ export default function ServicesActivitiesReport() {
         {/* Summary Cards */}
         <div className="grid gap-4 md:grid-cols-3">
           <Card className="border-l-4 border-l-orange-500">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Total Services</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold text-orange-600 dark:text-orange-400">{total.toLocaleString()}</div>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Total Services</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-orange-600 dark:text-orange-400">{summary.total.toLocaleString()}</p>
+                  <p className="text-xs text-muted-foreground mt-1">Includes all recorded service activities</p>
+                </div>
+                <Activity className="h-10 w-10 text-orange-500 opacity-50" />
+              </div>
             </CardContent>
           </Card>
           <Card className="border-l-4 border-l-cyan-500">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Male Patients</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold text-cyan-600 dark:text-cyan-400">
-                {data.reduce((sum, row) => sum + row.male, 0).toLocaleString()}
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Male Patients</p>
+                  <p className="text-2xl sm:text-3xl font-bold">{summary.total_male.toLocaleString()}</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {summary.total > 0 ? `${((summary.total_male / summary.total) * 100).toFixed(1)}%` : "0%"} of total
+                  </p>
+                </div>
+                <Users className="h-10 w-10 text-cyan-500 opacity-50" />
               </div>
             </CardContent>
           </Card>
           <Card className="border-l-4 border-l-pink-500">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Female Patients</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold text-pink-600 dark:text-pink-400">
-                {data.reduce((sum, row) => sum + row.female, 0).toLocaleString()}
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Female Patients</p>
+                  <p className="text-2xl sm:text-3xl font-bold">{summary.total_female.toLocaleString()}</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {summary.total > 0 ? `${((summary.total_female / summary.total) * 100).toFixed(1)}%` : "0%"} of total
+                  </p>
+                </div>
+                <Users className="h-10 w-10 text-pink-500 opacity-50" />
               </div>
             </CardContent>
           </Card>
@@ -181,7 +283,7 @@ export default function ServicesActivitiesReport() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Activity className="h-5 w-5" />
-              Services & Activities - {year}
+              Services & Activities - {viewMode === "year" ? year : `${startDate} to ${endDate}`}
             </CardTitle>
             <CardDescription>Breakdown of services and activities performed</CardDescription>
           </CardHeader>
@@ -201,7 +303,7 @@ export default function ServicesActivitiesReport() {
                       <th className="text-right p-3 text-sm font-medium text-muted-foreground">Total</th>
                       <th className="text-right p-3 text-sm font-medium text-muted-foreground">Male</th>
                       <th className="text-right p-3 text-sm font-medium text-muted-foreground">Female</th>
-                      <th className="text-left p-3 text-sm font-medium text-muted-foreground">Distribution</th>
+                      <th className="text-right p-3 text-sm font-medium text-muted-foreground">%</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -215,29 +317,18 @@ export default function ServicesActivitiesReport() {
                             {row.category}
                           </td>
                           <td className="p-3 text-right font-semibold text-foreground">{row.count.toLocaleString()}</td>
-                          <td className="p-3 text-right text-cyan-600 dark:text-cyan-400 font-medium">{row.male.toLocaleString()}</td>
-                          <td className="p-3 text-right text-pink-600 dark:text-pink-400 font-medium">{row.female.toLocaleString()}</td>
-                          <td className="p-3">
-                            <div className="w-full bg-muted rounded-full h-4">
-                              <div 
-                                className="bg-orange-600 h-4 rounded-full transition-all duration-300"
-                                style={{ width: `${(row.count / maxValue) * 100}%` }}
-                              />
-                            </div>
-                          </td>
+                          <td className="p-3 text-right text-foreground">{row.male.toLocaleString()}</td>
+                          <td className="p-3 text-right text-foreground">{row.female.toLocaleString()}</td>
+                          <td className="p-3 text-right text-foreground">{row.percentage.toFixed(1)}%</td>
                         </tr>
                       );
                     })}
-                    <tr className="border-t-2 border-border bg-orange-50 dark:bg-orange-900/20 font-bold">
+                    <tr className="border-t-2 border-border bg-muted/50 font-bold">
                       <td colSpan={2} className="p-3 text-foreground">TOTAL</td>
-                      <td className="p-3 text-right text-orange-600 dark:text-orange-400">{total.toLocaleString()}</td>
-                      <td className="p-3 text-right text-cyan-600 dark:text-cyan-400">
-                        {data.reduce((sum, row) => sum + row.male, 0).toLocaleString()}
-                      </td>
-                      <td className="p-3 text-right text-pink-600 dark:text-pink-400">
-                        {data.reduce((sum, row) => sum + row.female, 0).toLocaleString()}
-                      </td>
-                      <td className="p-3"></td>
+                      <td className="p-3 text-right text-foreground">{summary.total.toLocaleString()}</td>
+                      <td className="p-3 text-right text-foreground">{summary.total_male.toLocaleString()}</td>
+                      <td className="p-3 text-right text-foreground">{summary.total_female.toLocaleString()}</td>
+                      <td className="p-3 text-right text-foreground">100.0%</td>
                     </tr>
                   </tbody>
                 </table>

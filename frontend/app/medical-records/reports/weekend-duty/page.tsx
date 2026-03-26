@@ -4,11 +4,12 @@ import React, { useState, useEffect } from "react";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { 
   Download, FileSpreadsheet, RefreshCw, ArrowLeft, 
-  Calendar, Printer
+  Calendar, Printer, Users, TrendingUp
 } from "lucide-react";
 import { toast } from "sonner";
 import { apiFetch } from "@/lib/api-client";
@@ -31,6 +32,9 @@ interface MonthlyData {
 
 export default function WeekendDutyReport() {
   const [year, setYear] = useState(new Date().getFullYear().toString());
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [viewMode, setViewMode] = useState<"year" | "range">("year");
   const [summary, setSummary] = useState<WeekendSummary>({
     officers: 0,
     staff: 0,
@@ -45,7 +49,18 @@ export default function WeekendDutyReport() {
   const fetchReport = async () => {
     setIsLoading(true);
     try {
-      const response = await apiFetch<{ summary: WeekendSummary; monthly_data: MonthlyData[] }>(`/reports/weekend-duty/?year=${year}`);
+      let url = "/reports/weekend-duty/?";
+      if (viewMode === "year") {
+        url += `year=${year}`;
+      } else if (startDate && endDate) {
+        url += `start_date=${startDate}&end_date=${endDate}`;
+      } else {
+        toast.error("Please select both start and end dates");
+        setIsLoading(false);
+        return;
+      }
+
+      const response = await apiFetch<{ summary: WeekendSummary; monthly_data: MonthlyData[] }>(url);
       setSummary(response.summary || summary);
       setMonthlyData(response.monthly_data || []);
     } catch (error: any) {
@@ -59,8 +74,9 @@ export default function WeekendDutyReport() {
   };
 
   useEffect(() => {
-    fetchReport();
-  }, [year]);
+    if (viewMode === "year" && year) fetchReport();
+    if (viewMode === "range" && startDate && endDate) fetchReport();
+  }, [year, startDate, endDate, viewMode]);
 
   const exportToCSV = () => {
     if (monthlyData.length === 0) {
@@ -68,9 +84,10 @@ export default function WeekendDutyReport() {
       return;
     }
 
+    const period = viewMode === "year" ? year : `${startDate}_to_${endDate}`;
     const lines = [
       "WEEKEND CALL DUTY REPORT",
-      `Year: ${year}`,
+      `Period: ${period}`,
       "",
       "Summary",
       "Category,Count",
@@ -91,7 +108,7 @@ export default function WeekendDutyReport() {
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `weekend_duty_${year}.csv`;
+    a.download = `weekend_duty_${period}.csv`;
     a.click();
     window.URL.revokeObjectURL(url);
     
@@ -99,6 +116,21 @@ export default function WeekendDutyReport() {
   };
 
   const years = Array.from({ length: 10 }, (_, i) => (new Date().getFullYear() - i).toString());
+  const setThisMonth = () => {
+    const now = new Date();
+    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    setStartDate(firstDay.toISOString().split("T")[0]);
+    setEndDate(lastDay.toISOString().split("T")[0]);
+    setViewMode("range");
+  };
+
+  const setThisYear = () => {
+    setYear(new Date().getFullYear().toString());
+    setViewMode("year");
+  };
+
+  const periodLabel = viewMode === "year" ? year : `${startDate} to ${endDate}`;
 
   return (
     <DashboardLayout>
@@ -122,7 +154,7 @@ export default function WeekendDutyReport() {
           </div>
           <div className="flex items-center gap-2">
             <Button variant="outline" onClick={fetchReport} disabled={isLoading}>
-              <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
+              <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? "animate-spin" : ""}`} />
               Refresh
             </Button>
             <Button variant="outline" onClick={exportToCSV} disabled={monthlyData.length === 0}>
@@ -136,63 +168,154 @@ export default function WeekendDutyReport() {
           </div>
         </div>
 
+        {/* Quick Filter Buttons */}
+        <div className="flex gap-2">
+          <Button
+            variant={viewMode === "range" && startDate.includes(new Date().toISOString().slice(0, 7)) ? "default" : "outline"}
+            onClick={setThisMonth}
+            className="flex items-center gap-2"
+          >
+            <Calendar className="h-4 w-4" />
+            This Month
+          </Button>
+          <Button
+            variant={viewMode === "year" && year === new Date().getFullYear().toString() ? "default" : "outline"}
+            onClick={setThisYear}
+            className="flex items-center gap-2"
+          >
+            <Calendar className="h-4 w-4" />
+            This Year
+          </Button>
+        </div>
+
+        {/* Filters */}
         <Card>
-          <CardContent className="p-4">
-            <div className="w-48">
-              <Label>Year</Label>
-              <Select value={year} onValueChange={setYear}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {years.map(y => (
-                    <SelectItem key={y} value={y}>{y}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Calendar className="h-5 w-5" />
+              Filters
+            </CardTitle>
+            <CardDescription>Adjust date range for detailed reporting</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div>
+                <Label>View Mode</Label>
+                <Select value={viewMode} onValueChange={(value: "year" | "range") => setViewMode(value)}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="year">By Year</SelectItem>
+                    <SelectItem value="range">Date Range</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {viewMode === "year" ? (
+                <div>
+                  <Label>Year</Label>
+                  <Select value={year} onValueChange={setYear}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {years.map((y) => (
+                        <SelectItem key={y} value={y}>
+                          {y}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : (
+                <>
+                  <div>
+                    <Label>Start Date</Label>
+                    <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+                  </div>
+                  <div>
+                    <Label>End Date</Label>
+                    <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+                  </div>
+                </>
+              )}
+              <div className="flex items-end">
+                <Button onClick={fetchReport} className="w-full" disabled={isLoading}>
+                  <TrendingUp className="h-4 w-4 mr-2" />
+                  {isLoading ? "Loading..." : "Generate Report"}
+                </Button>
+              </div>
             </div>
           </CardContent>
         </Card>
 
         <div className="grid gap-4 md:grid-cols-5">
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-xs font-medium text-muted-foreground">Officers</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-foreground">{summary.officers.toLocaleString()}</div>
+          <Card className="border-l-4 border-l-blue-500">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Officers</p>
+                  <p className="text-2xl sm:text-3xl font-bold">{summary.officers.toLocaleString()}</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {summary.total > 0 ? `${((summary.officers / summary.total) * 100).toFixed(1)}%` : "0%"} of total
+                  </p>
+                </div>
+                <Users className="h-10 w-10 text-blue-500 opacity-50" />
+              </div>
             </CardContent>
           </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-xs font-medium text-muted-foreground">Staff</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-foreground">{summary.staff.toLocaleString()}</div>
+          <Card className="border-l-4 border-l-green-500">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Staff</p>
+                  <p className="text-2xl sm:text-3xl font-bold">{summary.staff.toLocaleString()}</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {summary.total > 0 ? `${((summary.staff / summary.total) * 100).toFixed(1)}%` : "0%"} of total
+                  </p>
+                </div>
+                <Users className="h-10 w-10 text-green-500 opacity-50" />
+              </div>
             </CardContent>
           </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-xs font-medium text-muted-foreground">Dependents</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-foreground">{summary.dependents.toLocaleString()}</div>
+          <Card className="border-l-4 border-l-amber-500">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Dependents</p>
+                  <p className="text-2xl sm:text-3xl font-bold">{summary.dependents.toLocaleString()}</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {summary.total > 0 ? `${((summary.dependents / summary.total) * 100).toFixed(1)}%` : "0%"} of total
+                  </p>
+                </div>
+                <Users className="h-10 w-10 text-amber-500 opacity-50" />
+              </div>
             </CardContent>
           </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-xs font-medium text-muted-foreground">Retirees</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-foreground">{summary.retirees.toLocaleString()}</div>
+          <Card className="border-l-4 border-l-rose-500">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Retirees</p>
+                  <p className="text-2xl sm:text-3xl font-bold">{summary.retirees.toLocaleString()}</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {summary.total > 0 ? `${((summary.retirees / summary.total) * 100).toFixed(1)}%` : "0%"} of total
+                  </p>
+                </div>
+                <Users className="h-10 w-10 text-rose-500 opacity-50" />
+              </div>
             </CardContent>
           </Card>
           <Card className="border-l-4 border-l-purple-500">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-xs font-medium text-muted-foreground">Total</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-purple-600 dark:text-purple-400">{summary.total.toLocaleString()}</div>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Total Weekend Visits</p>
+                  <p className="text-2xl sm:text-3xl font-bold">{summary.total.toLocaleString()}</p>
+                  <p className="text-xs text-muted-foreground mt-1">Total weekend visits in selected period</p>
+                </div>
+                <Users className="h-10 w-10 text-purple-500 opacity-50" />
+              </div>
             </CardContent>
           </Card>
         </div>
@@ -201,7 +324,7 @@ export default function WeekendDutyReport() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Calendar className="h-5 w-5" />
-              Monthly Weekend Attendance - {year}
+              Monthly Weekend Attendance - {periodLabel}
             </CardTitle>
             <CardDescription>Weekend visits breakdown by month</CardDescription>
           </CardHeader>
@@ -229,9 +352,9 @@ export default function WeekendDutyReport() {
                         <td className="p-3 text-right font-semibold text-foreground">{row.count.toLocaleString()}</td>
                       </tr>
                     ))}
-                    <tr className="border-t-2 border-border bg-purple-50 dark:bg-purple-900/20 font-bold">
+                    <tr className="border-t-2 border-border bg-muted/50 font-bold">
                       <td colSpan={2} className="p-3 text-foreground">TOTAL WEEKEND VISITS</td>
-                      <td className="p-3 text-right text-purple-600 dark:text-purple-400">{summary.total.toLocaleString()}</td>
+                      <td className="p-3 text-right text-foreground">{summary.total.toLocaleString()}</td>
                     </tr>
                   </tbody>
                 </table>

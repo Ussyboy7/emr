@@ -2,31 +2,34 @@
 
 import React, { useState, useEffect } from "react";
 import { DashboardLayout } from "@/components/DashboardLayout";
+import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { 
   Download, FileSpreadsheet, RefreshCw, ArrowLeft, 
-  FileText, Printer
+  FileText, Printer, Calendar, Users, TrendingUp
 } from "lucide-react";
 import { toast } from "sonner";
 import { apiFetch } from "@/lib/api-client";
 import Link from "next/link";
 
-interface GOPMonthlyData {
+interface GOPCategoryData {
   sn: number;
-  month: string;
-  officers: number;
-  staff: number;
-  dependents: number;
-  retirees: number;
-  police: number;
-  non_npa: number;
+  category: string;
+  male: number;
+  female: number;
   total: number;
+  percentage: number;
 }
 
-interface GOPLifecycleSummary {
+interface GOPSummary {
+  total_employee: number;
+  total_non_employee: number;
+  total_male: number;
+  total_female: number;
+  grand_total: number;
   new_registrations: number;
   first_time_patients: number;
   returning_patients: number;
@@ -36,33 +39,59 @@ interface GOPLifecycleSummary {
 
 export default function GOPAttendanceReport() {
   const [year, setYear] = useState(new Date().getFullYear().toString());
-  const [data, setData] = useState<GOPMonthlyData[]>([]);
-  const [totals, setTotals] = useState({ officers: 0, staff: 0, dependents: 0, retirees: 0, police: 0, non_npa: 0 });
-  const [grandTotal, setGrandTotal] = useState(0);
-  const emptySummary: GOPLifecycleSummary = {
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [viewMode, setViewMode] = useState<"year" | "range">("year");
+  const [data, setData] = useState<GOPCategoryData[]>([]);
+  const emptySummary: GOPSummary = {
+    total_employee: 0,
+    total_non_employee: 0,
+    total_male: 0,
+    total_female: 0,
+    grand_total: 0,
     new_registrations: 0,
     first_time_patients: 0,
     returning_patients: 0,
     total_unique_patients_seen: 0,
     total_visits: 0,
   };
-  const [summary, setSummary] = useState<GOPLifecycleSummary>(emptySummary);
+  const [summary, setSummary] = useState<GOPSummary>(emptySummary);
   const [isLoading, setIsLoading] = useState(true);
+
+  const setThisMonth = () => {
+    const now = new Date();
+    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    setStartDate(firstDay.toISOString().split("T")[0]);
+    setEndDate(lastDay.toISOString().split("T")[0]);
+    setViewMode("range");
+  };
+
+  const setThisYear = () => {
+    setYear(new Date().getFullYear().toString());
+    setViewMode("year");
+  };
 
   const fetchReport = async () => {
     setIsLoading(true);
     try {
-      const response = await apiFetch<{ data: GOPMonthlyData[]; totals: typeof totals; grand_total: number; summary: GOPLifecycleSummary }>(`/reports/gop-attendance/?year=${year}`);
+      let url = "/reports/gop-attendance/?";
+      if (viewMode === "year") {
+        url += `year=${year}`;
+      } else if (startDate && endDate) {
+        url += `start_date=${startDate}&end_date=${endDate}`;
+      } else {
+        toast.error("Please select both start and end dates");
+        setIsLoading(false);
+        return;
+      }
+      const response = await apiFetch<{ data: GOPCategoryData[]; summary: GOPSummary }>(url);
       setData(response.data || []);
-      setTotals(response.totals || { officers: 0, staff: 0, dependents: 0, retirees: 0, police: 0, non_npa: 0 });
-      setGrandTotal(response.grand_total || 0);
       setSummary(response.summary || emptySummary);
     } catch (error: any) {
       console.error("Error fetching G.O.P report:", error);
       toast.error(error.message || "Failed to load G.O.P attendance report");
       setData([]);
-      setTotals({ officers: 0, staff: 0, dependents: 0, retirees: 0, police: 0, non_npa: 0 });
-      setGrandTotal(0);
       setSummary(emptySummary);
     } finally {
       setIsLoading(false);
@@ -70,8 +99,12 @@ export default function GOPAttendanceReport() {
   };
 
   useEffect(() => {
-    fetchReport();
-  }, [year]);
+    if (viewMode === "year" && year) {
+      fetchReport();
+    } else if (viewMode === "range" && startDate && endDate) {
+      fetchReport();
+    }
+  }, [year, startDate, endDate, viewMode]);
 
   const exportToCSV = () => {
     if (data.length === 0) {
@@ -79,22 +112,23 @@ export default function GOPAttendanceReport() {
       return;
     }
 
-    const headers = ["S/N", "Month", "Officers", "Staff", "Employee Dependents", "Retiree Dependents", "Police", "Non-NPA", "Total"];
+    const headers = ["S/N", "Category", "Male", "Female", "Total", "%"];
     const rows = data.map(row => [
-      row.sn, row.month, row.officers, row.staff, row.dependents, row.retirees, row.police, row.non_npa, row.total
+      row.sn, row.category, row.male, row.female, row.total, `${row.percentage}%`
     ]);
     
     const csv = [
       headers.join(','),
       ...rows.map(row => row.join(',')),
-      `Total Attendance,,${totals.officers},${totals.staff},${totals.dependents},${totals.retirees},${totals.police},${totals.non_npa},${grandTotal}`
+      `TOTAL,,${summary.total_male},${summary.total_female},${summary.grand_total},100.0%`
     ].join('\n');
     
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `gop_attendance_${year}.csv`;
+    const period = viewMode === "year" ? year : `${startDate}_to_${endDate}`;
+    a.download = `gop_attendance_${period}.csv`;
     a.click();
     window.URL.revokeObjectURL(url);
     
@@ -139,71 +173,134 @@ export default function GOPAttendanceReport() {
           </div>
         </div>
 
+        <div className="flex gap-2">
+          <Button
+            variant={viewMode === "range" && startDate.includes(new Date().toISOString().slice(0, 7)) ? "default" : "outline"}
+            onClick={setThisMonth}
+            className="flex items-center gap-2"
+          >
+            <Calendar className="h-4 w-4" />
+            This Month
+          </Button>
+          <Button
+            variant={viewMode === "year" && year === new Date().getFullYear().toString() ? "default" : "outline"}
+            onClick={setThisYear}
+            className="flex items-center gap-2"
+          >
+            <Calendar className="h-4 w-4" />
+            This Year
+          </Button>
+        </div>
+
         <Card>
-          <CardContent className="p-4">
-            <div className="w-48">
-              <Label>Year</Label>
-              <Select value={year} onValueChange={setYear}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {years.map(y => (
-                    <SelectItem key={y} value={y}>{y}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Calendar className="h-5 w-5" />
+              Filters
+            </CardTitle>
+            <CardDescription>Adjust date range for detailed reporting</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div>
+                <Label>View Mode</Label>
+                <Select value={viewMode} onValueChange={(value: "year" | "range") => setViewMode(value)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="year">By Year</SelectItem>
+                    <SelectItem value="range">Date Range</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {viewMode === "year" ? (
+                <div>
+                  <Label>Year</Label>
+                  <Select value={year} onValueChange={setYear}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {years.map(y => (
+                        <SelectItem key={y} value={y}>{y}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : (
+                <>
+                  <div>
+                    <Label>Start Date</Label>
+                    <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+                  </div>
+                  <div>
+                    <Label>End Date</Label>
+                    <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+                  </div>
+                </>
+              )}
+              <div className="flex items-end">
+                <Button onClick={fetchReport} className="w-full" disabled={isLoading}>
+                  <TrendingUp className="h-4 w-4 mr-2" />
+                  {isLoading ? "Loading..." : "Generate Report"}
+                </Button>
+              </div>
             </div>
           </CardContent>
         </Card>
 
-        <div className="grid gap-4 md:grid-cols-6">
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-xs font-medium text-muted-foreground">Officers</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-foreground">{totals.officers.toLocaleString()}</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-xs font-medium text-muted-foreground">Staff</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-foreground">{totals.staff.toLocaleString()}</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-xs font-medium text-muted-foreground">Dependents</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-foreground">{totals.dependents.toLocaleString()}</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-xs font-medium text-muted-foreground">Retirees</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-foreground">{totals.retirees.toLocaleString()}</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-xs font-medium text-muted-foreground">Police</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-foreground">{totals.police.toLocaleString()}</div>
-            </CardContent>
-          </Card>
+        <div className="grid gap-4 md:grid-cols-4">
           <Card className="border-l-4 border-l-blue-500">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-xs font-medium text-muted-foreground">Total</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">{grandTotal.toLocaleString()}</div>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Total Employee</p>
+                  <p className="text-2xl sm:text-3xl font-bold">{summary.total_employee.toLocaleString()}</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {summary.grand_total > 0 ? `${((summary.total_employee / summary.grand_total) * 100).toFixed(1)}%` : "0%"} of total
+                  </p>
+                </div>
+                <Users className="h-10 w-10 text-blue-500 opacity-50" />
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="border-l-4 border-l-green-500">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Total Non-Employee</p>
+                  <p className="text-2xl sm:text-3xl font-bold">{summary.total_non_employee.toLocaleString()}</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {summary.grand_total > 0 ? `${((summary.total_non_employee / summary.grand_total) * 100).toFixed(1)}%` : "0%"} of total
+                  </p>
+                </div>
+                <Users className="h-10 w-10 text-green-500 opacity-50" />
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="border-l-4 border-l-cyan-500">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Total Male</p>
+                  <p className="text-2xl sm:text-3xl font-bold">{summary.total_male.toLocaleString()}</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {summary.grand_total > 0 ? `${((summary.total_male / summary.grand_total) * 100).toFixed(1)}%` : "0%"} of total
+                  </p>
+                </div>
+                <Users className="h-10 w-10 text-cyan-500 opacity-50" />
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="border-l-4 border-l-pink-500">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Total Female</p>
+                  <p className="text-2xl sm:text-3xl font-bold">{summary.total_female.toLocaleString()}</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {summary.grand_total > 0 ? `${((summary.total_female / summary.grand_total) * 100).toFixed(1)}%` : "0%"} of total
+                  </p>
+                </div>
+                <Users className="h-10 w-10 text-pink-500 opacity-50" />
+              </div>
             </CardContent>
           </Card>
         </div>
@@ -243,7 +340,7 @@ export default function GOPAttendanceReport() {
           </Card>
           <Card className="border-l-4 border-l-emerald-500">
             <CardHeader className="pb-2">
-              <CardTitle className="text-xs font-medium text-muted-foreground">Total Visits</CardTitle>
+              <CardTitle className="text-xs font-medium text-muted-foreground">Total Visit Records</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{summary.total_visits.toLocaleString()}</div>
@@ -255,7 +352,7 @@ export default function GOPAttendanceReport() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <FileText className="h-5 w-5" />
-              Monthly G.O.P Attendance - {year}
+              G.O.P Attendance by Category - {viewMode === "year" ? year : `${startDate} to ${endDate}`}
             </CardTitle>
             <CardDescription>General outpatient attendance by category</CardDescription>
           </CardHeader>
@@ -271,39 +368,30 @@ export default function GOPAttendanceReport() {
                   <thead>
                     <tr className="border-b border-border">
                       <th className="text-left p-3 text-sm font-medium text-muted-foreground">S/N</th>
-                      <th className="text-left p-3 text-sm font-medium text-muted-foreground">Month</th>
-                      <th className="text-right p-3 text-sm font-medium text-muted-foreground">Officers</th>
-                      <th className="text-right p-3 text-sm font-medium text-muted-foreground">Staff</th>
-                      <th className="text-right p-3 text-sm font-medium text-muted-foreground">Employee Dependents</th>
-                      <th className="text-right p-3 text-sm font-medium text-muted-foreground">Retiree Dependents</th>
-                      <th className="text-right p-3 text-sm font-medium text-muted-foreground">Police</th>
-                      <th className="text-right p-3 text-sm font-medium text-muted-foreground">Non-NPA</th>
+                      <th className="text-left p-3 text-sm font-medium text-muted-foreground">Category</th>
+                      <th className="text-right p-3 text-sm font-medium text-muted-foreground">Male</th>
+                      <th className="text-right p-3 text-sm font-medium text-muted-foreground">Female</th>
                       <th className="text-right p-3 text-sm font-medium text-muted-foreground">Total</th>
+                      <th className="text-right p-3 text-sm font-medium text-muted-foreground">%</th>
                     </tr>
                   </thead>
                   <tbody>
                     {data.map((row) => (
                       <tr key={row.sn} className="border-b border-border hover:bg-muted/30 transition-colors">
                         <td className="p-3 text-foreground">{row.sn}</td>
-                        <td className="p-3 font-medium text-foreground">{row.month}</td>
-                        <td className="p-3 text-right text-foreground">{row.officers.toLocaleString()}</td>
-                        <td className="p-3 text-right text-foreground">{row.staff.toLocaleString()}</td>
-                        <td className="p-3 text-right text-foreground">{row.dependents.toLocaleString()}</td>
-                        <td className="p-3 text-right text-foreground">{row.retirees.toLocaleString()}</td>
-                        <td className="p-3 text-right text-foreground">{row.police.toLocaleString()}</td>
-                        <td className="p-3 text-right text-foreground">{row.non_npa.toLocaleString()}</td>
+                        <td className="p-3 font-medium text-foreground">{row.category}</td>
+                        <td className="p-3 text-right text-foreground">{row.male.toLocaleString()}</td>
+                        <td className="p-3 text-right text-foreground">{row.female.toLocaleString()}</td>
                         <td className="p-3 text-right font-semibold text-foreground">{row.total.toLocaleString()}</td>
+                        <td className="p-3 text-right text-foreground">{row.percentage.toFixed(1)}%</td>
                       </tr>
                     ))}
-                    <tr className="border-t-2 border-border bg-blue-50 dark:bg-blue-900/20 font-bold">
+                    <tr className="border-t-2 border-border bg-muted/50 font-bold">
                       <td colSpan={2} className="p-3 text-foreground">TOTAL ATTENDANCE</td>
-                      <td className="p-3 text-right text-foreground">{totals.officers.toLocaleString()}</td>
-                      <td className="p-3 text-right text-foreground">{totals.staff.toLocaleString()}</td>
-                      <td className="p-3 text-right text-foreground">{totals.dependents.toLocaleString()}</td>
-                      <td className="p-3 text-right text-foreground">{totals.retirees.toLocaleString()}</td>
-                      <td className="p-3 text-right text-foreground">{totals.police.toLocaleString()}</td>
-                      <td className="p-3 text-right text-foreground">{totals.non_npa.toLocaleString()}</td>
-                      <td className="p-3 text-right text-blue-600 dark:text-blue-400">{grandTotal.toLocaleString()}</td>
+                      <td className="p-3 text-right text-foreground">{summary.total_male.toLocaleString()}</td>
+                      <td className="p-3 text-right text-foreground">{summary.total_female.toLocaleString()}</td>
+                      <td className="p-3 text-right text-foreground">{summary.grand_total.toLocaleString()}</td>
+                      <td className="p-3 text-right text-foreground">100.0%</td>
                     </tr>
                   </tbody>
                 </table>

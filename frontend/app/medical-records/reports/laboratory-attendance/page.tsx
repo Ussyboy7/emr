@@ -8,52 +8,113 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { 
   Download, FileSpreadsheet, RefreshCw, ArrowLeft, 
-  TestTube, Printer
+  TestTube, Printer, Users
 } from "lucide-react";
 import { toast } from "sonner";
 import { apiFetch } from "@/lib/api-client";
 import Link from "next/link";
 
-interface LabMonthlyData {
+interface LabCategoryData {
   sn: number;
-  month: string;
-  officers: number;
-  officers_male: number;
-  officers_female: number;
-  staff: number;
-  staff_male: number;
-  staff_female: number;
-  dependents: number;
-  dependents_male: number;
-  dependents_female: number;
-  retirees: number;
-  retirees_male: number;
-  retirees_female: number;
-  non_npa: number;
-  non_npa_male: number;
-  non_npa_female: number;
+  category: string;
+  male: number;
+  female: number;
   total: number;
+  percentage: number;
+}
+
+interface LabSummary {
+  total_employee: number;
+  total_non_employee: number;
   total_male: number;
   total_female: number;
+  grand_total: number;
+  new_registrations: number;
+  first_time_patients: number;
+  returning_patients: number;
+  total_unique_patients_seen: number;
+  total_visits: number;
 }
 
 export default function LaboratoryAttendanceReport() {
   const [year, setYear] = useState(new Date().getFullYear().toString());
-  const [data, setData] = useState<LabMonthlyData[]>([]);
-  const [total, setTotal] = useState(0);
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [viewMode, setViewMode] = useState<"year" | "range">("year");
+  const [data, setData] = useState<LabCategoryData[]>([]);
+  const [summary, setSummary] = useState<LabSummary>({
+    total_employee: 0,
+    total_non_employee: 0,
+    total_male: 0,
+    total_female: 0,
+    grand_total: 0,
+    new_registrations: 0,
+    first_time_patients: 0,
+    returning_patients: 0,
+    total_unique_patients_seen: 0,
+    total_visits: 0,
+  });
   const [isLoading, setIsLoading] = useState(true);
+
+  const setThisMonth = () => {
+    const now = new Date();
+    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    setStartDate(firstDay.toISOString().split('T')[0]);
+    setEndDate(lastDay.toISOString().split('T')[0]);
+    setViewMode("range");
+  };
+
+  const setThisYear = () => {
+    setYear(new Date().getFullYear().toString());
+    setViewMode("year");
+  };
 
   const fetchReport = async () => {
     setIsLoading(true);
     try {
-      const response = await apiFetch<{ data: LabMonthlyData[]; total: number }>(`/reports/laboratory-attendance/?year=${year}`);
+      let url = `/reports/laboratory-attendance/?`;
+      if (viewMode === "year") {
+        url += `year=${year}`;
+      } else {
+        if (startDate && endDate) {
+          url += `start_date=${startDate}&end_date=${endDate}`;
+        } else {
+          toast.error("Please select both start and end dates");
+          setIsLoading(false);
+          return;
+        }
+      }
+      const response = await apiFetch<{ data: LabCategoryData[]; summary: LabSummary }>(url);
       setData(response.data || []);
-      setTotal(response.total || 0);
+      setSummary(response.summary || {
+        total_employee: 0,
+        total_non_employee: 0,
+        total_male: 0,
+        total_female: 0,
+        grand_total: 0,
+        new_registrations: 0,
+        first_time_patients: 0,
+        returning_patients: 0,
+        total_unique_patients_seen: 0,
+        total_visits: 0,
+      });
     } catch (error: any) {
       console.error("Error fetching lab report:", error);
       toast.error(error.message || "Failed to load laboratory report");
       setData([]);
-      setTotal(0);
+      setSummary({
+        total_employee: 0,
+        total_non_employee: 0,
+        total_male: 0,
+        total_female: 0,
+        grand_total: 0,
+        new_registrations: 0,
+        first_time_patients: 0,
+        returning_patients: 0,
+        total_unique_patients_seen: 0,
+        total_visits: 0,
+      });
     } finally {
       setIsLoading(false);
     }
@@ -61,7 +122,15 @@ export default function LaboratoryAttendanceReport() {
 
   useEffect(() => {
     fetchReport();
-  }, [year]);
+  }, []);
+
+  useEffect(() => {
+    if (viewMode === "year" && year) {
+      fetchReport();
+    } else if (viewMode === "range" && startDate && endDate) {
+      fetchReport();
+    }
+  }, [year, startDate, endDate, viewMode]);
 
   const exportToCSV = () => {
     if (data.length === 0) {
@@ -69,55 +138,23 @@ export default function LaboratoryAttendanceReport() {
       return;
     }
 
-    const headers = ["S/N", "Month", "Officers", "Officers(M)", "Officers(F)", "Staff", "Staff(M)", "Staff(F)", "Dependents", "Dependents(M)", "Dependents(F)", "Retirees", "Retirees(M)", "Retirees(F)", "Non-NPA", "Non-NPA(M)", "Non-NPA(F)", "Total", "Male", "Female"];
+    const headers = ["S/N", "Category", "Male", "Female", "Total", "%"];
     const rows = data.map(row => [
-      row.sn, row.month, 
-      row.officers, row.officers_male, row.officers_female,
-      row.staff, row.staff_male, row.staff_female,
-      row.dependents, row.dependents_male, row.dependents_female,
-      row.retirees, row.retirees_male, row.retirees_female,
-      row.non_npa, row.non_npa_male, row.non_npa_female,
-      row.total, row.total_male, row.total_female
+      row.sn, row.category, row.male, row.female, row.total, `${row.percentage}%`
     ]);
-    
-    const categoryTotals = data.reduce((acc, row) => ({
-      officers: acc.officers + row.officers,
-      officers_male: acc.officers_male + row.officers_male,
-      officers_female: acc.officers_female + row.officers_female,
-      staff: acc.staff + row.staff,
-      staff_male: acc.staff_male + row.staff_male,
-      staff_female: acc.staff_female + row.staff_female,
-      dependents: acc.dependents + row.dependents,
-      dependents_male: acc.dependents_male + row.dependents_male,
-      dependents_female: acc.dependents_female + row.dependents_female,
-      retirees: acc.retirees + row.retirees,
-      retirees_male: acc.retirees_male + row.retirees_male,
-      retirees_female: acc.retirees_female + row.retirees_female,
-      non_npa: acc.non_npa + row.non_npa,
-      non_npa_male: acc.non_npa_male + row.non_npa_male,
-      non_npa_female: acc.non_npa_female + row.non_npa_female,
-      total_male: acc.total_male + row.total_male,
-      total_female: acc.total_female + row.total_female
-    }), { 
-      officers: 0, officers_male: 0, officers_female: 0,
-      staff: 0, staff_male: 0, staff_female: 0,
-      dependents: 0, dependents_male: 0, dependents_female: 0,
-      retirees: 0, retirees_male: 0, retirees_female: 0,
-      non_npa: 0, non_npa_male: 0, non_npa_female: 0,
-      total_male: 0, total_female: 0
-    });
     
     const csv = [
       headers.join(','),
       ...rows.map(row => row.join(',')),
-      `TOTAL ATTENDANCE,,${categoryTotals.officers},${categoryTotals.officers_male},${categoryTotals.officers_female},${categoryTotals.staff},${categoryTotals.staff_male},${categoryTotals.staff_female},${categoryTotals.dependents},${categoryTotals.dependents_male},${categoryTotals.dependents_female},${categoryTotals.retirees},${categoryTotals.retirees_male},${categoryTotals.retirees_female},${categoryTotals.non_npa},${categoryTotals.non_npa_male},${categoryTotals.non_npa_female},${total},${categoryTotals.total_male},${categoryTotals.total_female}`
+      `TOTAL,,${summary.total_male},${summary.total_female},${summary.grand_total},100.0%`
     ].join('\n');
     
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `laboratory_attendance_${year}.csv`;
+    const period = viewMode === "year" ? year : `${startDate}_to_${endDate}`;
+    a.download = `laboratory_attendance_${period}.csv`;
     a.click();
     window.URL.revokeObjectURL(url);
     
@@ -125,33 +162,6 @@ export default function LaboratoryAttendanceReport() {
   };
 
   const years = Array.from({ length: 10 }, (_, i) => (new Date().getFullYear() - i).toString());
-
-  const categoryTotals = data.reduce((acc, row) => ({
-    officers: acc.officers + row.officers,
-    officers_male: acc.officers_male + row.officers_male,
-    officers_female: acc.officers_female + row.officers_female,
-    staff: acc.staff + row.staff,
-    staff_male: acc.staff_male + row.staff_male,
-    staff_female: acc.staff_female + row.staff_female,
-    dependents: acc.dependents + row.dependents,
-    dependents_male: acc.dependents_male + row.dependents_male,
-    dependents_female: acc.dependents_female + row.dependents_female,
-    retirees: acc.retirees + row.retirees,
-    retirees_male: acc.retirees_male + row.retirees_male,
-    retirees_female: acc.retirees_female + row.retirees_female,
-    non_npa: acc.non_npa + row.non_npa,
-    non_npa_male: acc.non_npa_male + row.non_npa_male,
-    non_npa_female: acc.non_npa_female + row.non_npa_female,
-    total_male: acc.total_male + row.total_male,
-    total_female: acc.total_female + row.total_female
-  }), { 
-    officers: 0, officers_male: 0, officers_female: 0,
-    staff: 0, staff_male: 0, staff_female: 0,
-    dependents: 0, dependents_male: 0, dependents_female: 0,
-    retirees: 0, retirees_male: 0, retirees_female: 0,
-    non_npa: 0, non_npa_male: 0, non_npa_female: 0,
-    total_male: 0, total_female: 0
-  });
 
   return (
     <DashboardLayout>
@@ -190,41 +200,166 @@ export default function LaboratoryAttendanceReport() {
           </div>
         </div>
 
+        <div className="flex gap-2">
+          <Button
+            variant={viewMode === "range" && startDate.includes(new Date().toISOString().slice(0, 7)) ? "default" : "outline"}
+            onClick={setThisMonth}
+            className="flex items-center gap-2"
+          >
+            <TestTube className="h-4 w-4" />
+            This Month
+          </Button>
+          <Button
+            variant={viewMode === "year" && year === new Date().getFullYear().toString() ? "default" : "outline"}
+            onClick={setThisYear}
+            className="flex items-center gap-2"
+          >
+            <TestTube className="h-4 w-4" />
+            This Year
+          </Button>
+        </div>
+
         {/* Filters */}
         <Card>
           <CardContent className="p-4">
-            <div className="w-48">
-              <Label>Year</Label>
-              <Select value={year} onValueChange={setYear}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {years.map(y => (
-                    <SelectItem key={y} value={y}>{y}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div>
+                <Label>View Mode</Label>
+                <Select value={viewMode} onValueChange={(value: "year" | "range") => setViewMode(value)}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="year">By Year</SelectItem>
+                    <SelectItem value="range">Date Range</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {viewMode === "year" ? (
+                <div>
+                  <Label>Year</Label>
+                  <Select value={year} onValueChange={setYear}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {years.map(y => (
+                        <SelectItem key={y} value={y}>{y}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : (
+                <>
+                  <div>
+                    <Label>Start Date</Label>
+                    <input
+                      type="date"
+                      value={startDate}
+                      onChange={(e) => setStartDate(e.target.value)}
+                      className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <Label>End Date</Label>
+                    <input
+                      type="date"
+                      value={endDate}
+                      onChange={(e) => setEndDate(e.target.value)}
+                      className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    />
+                  </div>
+                </>
+              )}
+              <div className="flex items-end">
+                <Button onClick={fetchReport} className="w-full" disabled={isLoading}>
+                  {isLoading ? "Loading..." : "Generate Report"}
+                </Button>
+              </div>
             </div>
           </CardContent>
         </Card>
 
         {/* Summary Cards */}
-        <div className="grid gap-4 md:grid-cols-5">
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-xs font-medium text-muted-foreground">Male Total</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-cyan-600 dark:text-cyan-400">{categoryTotals.total_male.toLocaleString()}</div>
+        <div className="grid gap-4 md:grid-cols-4">
+          <Card className="border-l-4 border-l-blue-500">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Total Employee</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-blue-600 dark:text-blue-400">{summary.total_employee.toLocaleString()}</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {summary.grand_total > 0 ? `${((summary.total_employee / summary.grand_total) * 100).toFixed(1)}%` : '0%'} of total
+                  </p>
+                </div>
+                <Users className="h-10 w-10 text-blue-500 opacity-50" />
+              </div>
             </CardContent>
           </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-xs font-medium text-muted-foreground">Female Total</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-pink-600 dark:text-pink-400">{categoryTotals.total_female.toLocaleString()}</div>
+          <Card className="border-l-4 border-l-green-500">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Total Non-Employee</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-green-600 dark:text-green-400">{summary.total_non_employee.toLocaleString()}</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {summary.grand_total > 0 ? `${((summary.total_non_employee / summary.grand_total) * 100).toFixed(1)}%` : '0%'} of total
+                  </p>
+                </div>
+                <Users className="h-10 w-10 text-green-500 opacity-50" />
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="border-l-4 border-l-cyan-500">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Total Male</p>
+                  <p className="text-2xl sm:text-3xl font-bold">{summary.total_male.toLocaleString()}</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {summary.grand_total > 0 ? `${((summary.total_male / summary.grand_total) * 100).toFixed(1)}%` : '0%'} of total
+                  </p>
+                </div>
+                <Users className="h-10 w-10 text-cyan-500 opacity-50" />
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="border-l-4 border-l-pink-500">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Total Female</p>
+                  <p className="text-2xl sm:text-3xl font-bold">{summary.total_female.toLocaleString()}</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {summary.grand_total > 0 ? `${((summary.total_female / summary.grand_total) * 100).toFixed(1)}%` : '0%'} of total
+                  </p>
+                </div>
+                <Users className="h-10 w-10 text-pink-500 opacity-50" />
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-3">
+          <Card className="border-l-4 border-l-cyan-500">
+            <CardContent className="p-4">
+              <p className="text-sm text-muted-foreground">New Registrations</p>
+              <p className="text-2xl sm:text-3xl font-bold text-cyan-600 dark:text-cyan-400">{summary.new_registrations.toLocaleString()}</p>
+              <p className="text-xs text-muted-foreground mt-1">New patient records created in selected period (not attendance count)</p>
+            </CardContent>
+          </Card>
+          <Card className="border-l-4 border-l-slate-500">
+            <CardContent className="p-4">
+              <p className="text-sm text-muted-foreground">Returning Patients</p>
+              <p className="text-2xl sm:text-3xl font-bold text-slate-700 dark:text-slate-300">{summary.returning_patients.toLocaleString()}</p>
+              <p className="text-xs text-muted-foreground mt-1">Seen this period with prior visit history</p>
+            </CardContent>
+          </Card>
+          <Card className="border-l-4 border-l-emerald-500">
+            <CardContent className="p-4">
+              <p className="text-sm text-muted-foreground">Total Visit Records</p>
+              <p className="text-2xl sm:text-3xl font-bold text-emerald-600 dark:text-emerald-400">{summary.total_visits.toLocaleString()}</p>
+              <p className="text-xs text-muted-foreground mt-1">Includes repeat visits by the same patient</p>
             </CardContent>
           </Card>
         </div>
@@ -234,7 +369,7 @@ export default function LaboratoryAttendanceReport() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <TestTube className="h-5 w-5" />
-              Monthly Laboratory Attendance - {year}
+              Laboratory Attendance by Category - {year}
             </CardTitle>
             <CardDescription>Lab services breakdown by patient category</CardDescription>
           </CardHeader>
@@ -250,82 +385,30 @@ export default function LaboratoryAttendanceReport() {
                   <thead>
                     <tr className="border-b border-border">
                       <th className="text-left p-3 text-sm font-medium text-muted-foreground">S/N</th>
-                      <th className="text-left p-3 text-sm font-medium text-muted-foreground">Month</th>
-                      <th className="text-center p-3 text-sm font-medium text-muted-foreground" colSpan={3}>Officers</th>
-                      <th className="text-center p-3 text-sm font-medium text-muted-foreground" colSpan={3}>Staff</th>
-                      <th className="text-center p-3 text-sm font-medium text-muted-foreground" colSpan={3}>Dependents</th>
-                      <th className="text-center p-3 text-sm font-medium text-muted-foreground" colSpan={3}>Retirees</th>
-                      <th className="text-center p-3 text-sm font-medium text-muted-foreground" colSpan={3}>Non-NPA</th>
-                      <th className="text-center p-3 text-sm font-medium text-muted-foreground" colSpan={3}>Total</th>
-                    </tr>
-                    <tr className="border-b border-border bg-muted/50">
-                      <th className="text-left p-2 text-xs font-medium text-muted-foreground"></th>
-                      <th className="text-left p-2 text-xs font-medium text-muted-foreground"></th>
-                      <th className="text-right p-2 text-xs font-medium text-muted-foreground">T</th>
-                      <th className="text-right p-2 text-xs font-medium text-muted-foreground">M</th>
-                      <th className="text-right p-2 text-xs font-medium text-muted-foreground">F</th>
-                      <th className="text-right p-2 text-xs font-medium text-muted-foreground">T</th>
-                      <th className="text-right p-2 text-xs font-medium text-muted-foreground">M</th>
-                      <th className="text-right p-2 text-xs font-medium text-muted-foreground">F</th>
-                      <th className="text-right p-2 text-xs font-medium text-muted-foreground">T</th>
-                      <th className="text-right p-2 text-xs font-medium text-muted-foreground">M</th>
-                      <th className="text-right p-2 text-xs font-medium text-muted-foreground">F</th>
-                      <th className="text-right p-2 text-xs font-medium text-muted-foreground">T</th>
-                      <th className="text-right p-2 text-xs font-medium text-muted-foreground">M</th>
-                      <th className="text-right p-2 text-xs font-medium text-muted-foreground">F</th>
-                      <th className="text-right p-2 text-xs font-medium text-muted-foreground">T</th>
-                      <th className="text-right p-2 text-xs font-medium text-muted-foreground">M</th>
-                      <th className="text-right p-2 text-xs font-medium text-muted-foreground">F</th>
-                      <th className="text-right p-2 text-xs font-medium text-muted-foreground">T</th>
-                      <th className="text-right p-2 text-xs font-medium text-muted-foreground">M</th>
-                      <th className="text-right p-2 text-xs font-medium text-muted-foreground">F</th>
+                      <th className="text-left p-3 text-sm font-medium text-muted-foreground">Category</th>
+                      <th className="text-right p-3 text-sm font-medium text-muted-foreground">Male</th>
+                      <th className="text-right p-3 text-sm font-medium text-muted-foreground">Female</th>
+                      <th className="text-right p-3 text-sm font-medium text-muted-foreground">Total</th>
+                      <th className="text-right p-3 text-sm font-medium text-muted-foreground">%</th>
                     </tr>
                   </thead>
                   <tbody>
                     {data.map((row) => (
                       <tr key={row.sn} className="border-b border-border hover:bg-muted/30 transition-colors">
                         <td className="p-3 text-foreground">{row.sn}</td>
-                        <td className="p-3 font-medium text-foreground">{row.month}</td>
-                        <td className="p-3 text-right text-foreground">{row.officers.toLocaleString()}</td>
-                        <td className="p-3 text-right text-cyan-600 dark:text-cyan-400">{row.officers_male.toLocaleString()}</td>
-                        <td className="p-3 text-right text-pink-600 dark:text-pink-400">{row.officers_female.toLocaleString()}</td>
-                        <td className="p-3 text-right text-foreground">{row.staff.toLocaleString()}</td>
-                        <td className="p-3 text-right text-cyan-600 dark:text-cyan-400">{row.staff_male.toLocaleString()}</td>
-                        <td className="p-3 text-right text-pink-600 dark:text-pink-400">{row.staff_female.toLocaleString()}</td>
-                        <td className="p-3 text-right text-foreground">{row.dependents.toLocaleString()}</td>
-                        <td className="p-3 text-right text-cyan-600 dark:text-cyan-400">{row.dependents_male.toLocaleString()}</td>
-                        <td className="p-3 text-right text-pink-600 dark:text-pink-400">{row.dependents_female.toLocaleString()}</td>
-                        <td className="p-3 text-right text-foreground">{row.retirees.toLocaleString()}</td>
-                        <td className="p-3 text-right text-cyan-600 dark:text-cyan-400">{row.retirees_male.toLocaleString()}</td>
-                        <td className="p-3 text-right text-pink-600 dark:text-pink-400">{row.retirees_female.toLocaleString()}</td>
-                        <td className="p-3 text-right text-foreground">{row.non_npa.toLocaleString()}</td>
-                        <td className="p-3 text-right text-cyan-600 dark:text-cyan-400">{row.non_npa_male.toLocaleString()}</td>
-                        <td className="p-3 text-right text-pink-600 dark:text-pink-400">{row.non_npa_female.toLocaleString()}</td>
+                        <td className="p-3 font-medium text-foreground">{row.category}</td>
+                        <td className="p-3 text-right text-foreground">{row.male.toLocaleString()}</td>
+                        <td className="p-3 text-right text-foreground">{row.female.toLocaleString()}</td>
                         <td className="p-3 text-right font-semibold text-foreground">{row.total.toLocaleString()}</td>
-                        <td className="p-3 text-right font-semibold text-cyan-600 dark:text-cyan-400">{row.total_male.toLocaleString()}</td>
-                        <td className="p-3 text-right font-semibold text-pink-600 dark:text-pink-400">{row.total_female.toLocaleString()}</td>
+                        <td className="p-3 text-right text-foreground">{row.percentage.toFixed(1)}%</td>
                       </tr>
                     ))}
-                    <tr className="border-t-2 border-border bg-pink-50 dark:bg-pink-900/20 font-bold">
+                    <tr className="border-t-2 border-border bg-muted/50 font-bold">
                       <td colSpan={2} className="p-3 text-foreground">TOTAL ATTENDANCE</td>
-                      <td className="p-3 text-right text-foreground">{categoryTotals.officers.toLocaleString()}</td>
-                      <td className="p-3 text-right text-cyan-600 dark:text-cyan-400">{categoryTotals.officers_male.toLocaleString()}</td>
-                      <td className="p-3 text-right text-pink-600 dark:text-pink-400">{categoryTotals.officers_female.toLocaleString()}</td>
-                      <td className="p-3 text-right text-foreground">{categoryTotals.staff.toLocaleString()}</td>
-                      <td className="p-3 text-right text-cyan-600 dark:text-cyan-400">{categoryTotals.staff_male.toLocaleString()}</td>
-                      <td className="p-3 text-right text-pink-600 dark:text-pink-400">{categoryTotals.staff_female.toLocaleString()}</td>
-                      <td className="p-3 text-right text-foreground">{categoryTotals.dependents.toLocaleString()}</td>
-                      <td className="p-3 text-right text-cyan-600 dark:text-cyan-400">{categoryTotals.dependents_male.toLocaleString()}</td>
-                      <td className="p-3 text-right text-pink-600 dark:text-pink-400">{categoryTotals.dependents_female.toLocaleString()}</td>
-                      <td className="p-3 text-right text-foreground">{categoryTotals.retirees.toLocaleString()}</td>
-                      <td className="p-3 text-right text-cyan-600 dark:text-cyan-400">{categoryTotals.retirees_male.toLocaleString()}</td>
-                      <td className="p-3 text-right text-pink-600 dark:text-pink-400">{categoryTotals.retirees_female.toLocaleString()}</td>
-                      <td className="p-3 text-right text-foreground">{categoryTotals.non_npa.toLocaleString()}</td>
-                      <td className="p-3 text-right text-cyan-600 dark:text-cyan-400">{categoryTotals.non_npa_male.toLocaleString()}</td>
-                      <td className="p-3 text-right text-pink-600 dark:text-pink-400">{categoryTotals.non_npa_female.toLocaleString()}</td>
-                      <td className="p-3 text-right text-pink-600 dark:text-pink-400">{total.toLocaleString()}</td>
-                      <td className="p-3 text-right text-cyan-600 dark:text-cyan-400">{categoryTotals.total_male.toLocaleString()}</td>
-                      <td className="p-3 text-right text-pink-600 dark:text-pink-400">{categoryTotals.total_female.toLocaleString()}</td>
+                      <td className="p-3 text-right text-foreground">{summary.total_male.toLocaleString()}</td>
+                      <td className="p-3 text-right text-foreground">{summary.total_female.toLocaleString()}</td>
+                      <td className="p-3 text-right text-foreground">{summary.grand_total.toLocaleString()}</td>
+                      <td className="p-3 text-right text-foreground">100.0%</td>
                     </tr>
                   </tbody>
                 </table>

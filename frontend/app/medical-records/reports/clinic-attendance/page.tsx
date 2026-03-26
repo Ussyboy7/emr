@@ -9,24 +9,27 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { 
   Download, FileSpreadsheet, RefreshCw, ArrowLeft, 
-  Building, TrendingUp, Printer, Calendar 
+  Building, Printer, Calendar 
 } from "lucide-react";
 import { toast } from "sonner";
 import { apiFetch } from "@/lib/api-client";
 import Link from "next/link";
 import { CLINICS, CLINIC_LABELS } from '@/lib/constants/clinics';
 
-interface MonthlyData {
+interface CategoryData {
   sn: number;
-  month: string;
-  employee: number;
-  non_employee: number;
+  category: string;
+  male: number;
+  female: number;
   total: number;
+  percentage: number;
 }
 
 interface ClinicAttendanceSummary {
   total_employee: number;
   total_non_employee: number;
+  total_male: number;
+  total_female: number;
   grand_total: number;
   new_registrations: number;
   first_time_patients: number;
@@ -41,10 +44,12 @@ export default function ClinicAttendanceReport() {
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [viewMode, setViewMode] = useState<"year" | "range">("year");
-  const [data, setData] = useState<MonthlyData[]>([]);
+  const [data, setData] = useState<CategoryData[]>([]);
   const emptySummary: ClinicAttendanceSummary = {
     total_employee: 0,
     total_non_employee: 0,
+    total_male: 0,
+    total_female: 0,
     grand_total: 0,
     new_registrations: 0,
     first_time_patients: 0,
@@ -54,6 +59,50 @@ export default function ClinicAttendanceReport() {
   };
   const [summary, setSummary] = useState<ClinicAttendanceSummary>(emptySummary);
   const [isLoading, setIsLoading] = useState(true);
+
+  const toNumber = (value: unknown, fallback = 0): number => {
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "string") {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : fallback;
+    }
+    return fallback;
+  };
+
+  const normalizeCategoryRows = (rows: any[]): CategoryData[] => {
+    if (!Array.isArray(rows)) return [];
+    return rows.map((row: any, index: number) => {
+      const male = toNumber(row?.male, 0);
+      const female = toNumber(row?.female, 0);
+      const total = toNumber(row?.total, male + female);
+      const percentage = toNumber(row?.percentage, 0);
+      return {
+        sn: toNumber(row?.sn, index + 1),
+        // Backward-compatible: old payload used "month"; new payload uses "category".
+        category: String(row?.category || row?.month || `Row ${index + 1}`),
+        male,
+        female,
+        total,
+        percentage,
+      };
+    });
+  };
+
+  const normalizeSummary = (raw: Partial<ClinicAttendanceSummary> | undefined): ClinicAttendanceSummary => {
+    if (!raw) return emptySummary;
+    return {
+      total_employee: toNumber(raw.total_employee, 0),
+      total_non_employee: toNumber(raw.total_non_employee, 0),
+      total_male: toNumber(raw.total_male, 0),
+      total_female: toNumber(raw.total_female, 0),
+      grand_total: toNumber(raw.grand_total, 0),
+      new_registrations: toNumber(raw.new_registrations, 0),
+      first_time_patients: toNumber(raw.first_time_patients, 0),
+      returning_patients: toNumber(raw.returning_patients, 0),
+      total_unique_patients_seen: toNumber(raw.total_unique_patients_seen, 0),
+      total_visits: toNumber(raw.total_visits, 0),
+    };
+  };
 
   const clinics = CLINICS.map(clinic => ({
     value: clinic,
@@ -85,9 +134,9 @@ export default function ClinicAttendanceReport() {
         url += `&start_date=${startDate}&end_date=${endDate}`;
       }
 
-      const response = await apiFetch<{ data: MonthlyData[]; summary: ClinicAttendanceSummary }>(url);
-      setData(response.data || []);
-      setSummary(response.summary || emptySummary);
+      const response = await apiFetch<{ data: any[]; summary: Partial<ClinicAttendanceSummary> }>(url);
+      setData(normalizeCategoryRows(response.data || []));
+      setSummary(normalizeSummary(response.summary));
     } catch (error: any) {
       console.error("Error fetching clinic report:", error);
       toast.error(error.message || "Failed to load clinic report");
@@ -114,13 +163,13 @@ export default function ClinicAttendanceReport() {
       return;
     }
 
-    const headers = ["S/N", "Month", "Employee", "Non-Employee", "Total"];
-    const rows = data.map(row => [row.sn, row.month, row.employee, row.non_employee, row.total]);
+    const headers = ["S/N", "Category", "Male", "Female", "Total", "%"];
+    const rows = data.map(row => [row.sn, row.category, row.male, row.female, row.total, `${row.percentage}%`]);
     
     const csv = [
       headers.join(','),
       ...rows.map(row => row.join(',')),
-      `Total,${summary.total_employee},${summary.total_non_employee},${summary.grand_total}`
+      `TOTAL,,${summary.total_male},${summary.total_female},${summary.grand_total},100.0%`
     ].join('\n');
     
     const blob = new Blob([csv], { type: 'text/csv' });
@@ -268,7 +317,7 @@ export default function ClinicAttendanceReport() {
           </CardContent>
         </Card>
 
-        <div className="grid gap-4 md:grid-cols-3">
+        <div className="grid gap-4 md:grid-cols-2">
           <Card className="border-l-4 border-l-blue-500">
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
@@ -294,18 +343,6 @@ export default function ClinicAttendanceReport() {
                   </p>
                 </div>
                 <Building className="h-10 w-10 text-green-500" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="border-l-4 border-l-purple-500">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Grand Total</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-purple-600 dark:text-purple-400">{summary.grand_total.toLocaleString()}</p>
-                  <p className="text-xs text-muted-foreground mt-1">Total attendance</p>
-                </div>
-                <TrendingUp className="h-10 w-10 text-purple-500" />
               </div>
             </CardContent>
           </Card>
@@ -335,9 +372,9 @@ export default function ClinicAttendanceReport() {
           </Card>
           <Card className="border-l-4 border-l-emerald-500">
             <CardContent className="p-4">
-              <p className="text-sm text-muted-foreground">Total Visits</p>
+              <p className="text-sm text-muted-foreground">Total Visit Records</p>
               <p className="text-2xl sm:text-3xl font-bold text-emerald-600 dark:text-emerald-400">{summary.total_visits.toLocaleString()}</p>
-              <p className="text-xs text-muted-foreground mt-1">Visit records in selected clinic and period</p>
+              <p className="text-xs text-muted-foreground mt-1">Includes repeat visits by the same patient</p>
             </CardContent>
           </Card>
         </div>
@@ -346,9 +383,9 @@ export default function ClinicAttendanceReport() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Building className="h-5 w-5" />
-              Monthly Breakdown - {selectedClinic} Clinic
+              Attendance by Category - {selectedClinic} Clinic
             </CardTitle>
-            <CardDescription>Attendance distribution by month</CardDescription>
+            <CardDescription>Breakdown by patient category</CardDescription>
           </CardHeader>
           <CardContent>
             {isLoading ? (
@@ -362,27 +399,30 @@ export default function ClinicAttendanceReport() {
                   <thead>
                     <tr className="border-b border-border">
                       <th className="text-left p-3 text-sm font-medium text-muted-foreground">S/N</th>
-                      <th className="text-left p-3 text-sm font-medium text-muted-foreground">Month</th>
-                      <th className="text-right p-3 text-sm font-medium text-muted-foreground">Employee</th>
-                      <th className="text-right p-3 text-sm font-medium text-muted-foreground">Non-Employee</th>
+                      <th className="text-left p-3 text-sm font-medium text-muted-foreground">Category</th>
+                      <th className="text-right p-3 text-sm font-medium text-muted-foreground">Male</th>
+                      <th className="text-right p-3 text-sm font-medium text-muted-foreground">Female</th>
                       <th className="text-right p-3 text-sm font-medium text-muted-foreground">Total</th>
+                      <th className="text-right p-3 text-sm font-medium text-muted-foreground">%</th>
                     </tr>
                   </thead>
                   <tbody>
                     {data.map((row) => (
                       <tr key={row.sn} className="border-b border-border hover:bg-muted/30 transition-colors">
                         <td className="p-3 text-foreground">{row.sn}</td>
-                        <td className="p-3 font-medium text-foreground">{row.month}</td>
-                        <td className="p-3 text-right text-foreground">{row.employee.toLocaleString()}</td>
-                        <td className="p-3 text-right text-foreground">{row.non_employee.toLocaleString()}</td>
+                        <td className="p-3 font-medium text-foreground">{row.category}</td>
+                        <td className="p-3 text-right text-foreground">{row.male.toLocaleString()}</td>
+                        <td className="p-3 text-right text-foreground">{row.female.toLocaleString()}</td>
                         <td className="p-3 text-right font-semibold text-foreground">{row.total.toLocaleString()}</td>
+                        <td className="p-3 text-right text-foreground">{row.percentage.toFixed(1)}%</td>
                       </tr>
                     ))}
                     <tr className="border-t-2 border-border bg-green-50 dark:bg-green-900/20 font-bold">
                       <td colSpan={2} className="p-3 text-foreground">Total</td>
-                      <td className="p-3 text-right text-foreground">{summary.total_employee.toLocaleString()}</td>
-                      <td className="p-3 text-right text-foreground">{summary.total_non_employee.toLocaleString()}</td>
+                      <td className="p-3 text-right text-foreground">{summary.total_male.toLocaleString()}</td>
+                      <td className="p-3 text-right text-foreground">{summary.total_female.toLocaleString()}</td>
                       <td className="p-3 text-right text-green-600 dark:text-green-400">{summary.grand_total.toLocaleString()}</td>
+                      <td className="p-3 text-right text-foreground">100.0%</td>
                     </tr>
                   </tbody>
                 </table>

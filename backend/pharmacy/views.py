@@ -30,6 +30,7 @@ from .serializers import (
 )
 from .pagination import FlexiblePageNumberPagination
 from audit.services import AuditService
+from audit.models import ActivityLog
 
 
 class GenericMedicationViewSet(viewsets.ModelViewSet):
@@ -323,6 +324,171 @@ class MedicationInventoryViewSet(viewsets.ModelViewSet):
             old_values=old_values,
             new_values=new_values,
             request=self.request,
+        )
+
+    @action(detail=True, methods=['get'], url_path='adjustment_history')
+    def adjustment_history(self, request, pk=None):
+        """
+        Return adjustment history for a specific batch inventory item.
+
+        Note: History is derived from ActivityLog records tagged with
+        `metadata.batch_adjustment=true` so we don't need a new DB table.
+        """
+        inventory = self.get_object()
+
+        # Only return records created by our adjustment endpoint.
+        # We filter `metadata.batch_adjustment` in Python for DB compatibility.
+        logs = (
+            ActivityLog.objects.filter(
+                module='pharmacy',
+                object_type='medication_inventory',
+                object_id=str(inventory.id),
+            )
+            .order_by('-created_at')[:50]
+        )
+
+        # Frontend expects `BatchAdjustmentHistory` shape.
+        data = []
+        for log in logs:
+            qty_before = (log.old_values or {}).get('quantity')
+            qty_after = (log.new_values or {}).get('quantity')
+            meta = log.metadata or {}
+
+            # Only include logs that actually represent a quantity change.
+            # (Avoid noise from other updates like expiry changes.)
+            if qty_before is None or qty_after is None:
+                continue
+
+            # Pull reason from a few potential metadata keys (backwards/forwards compatibility).
+            # If none exist (older adjustment style), the UI will show `—`.
+            reason_val = (
+                meta.get("adjustment_reason")
+                or meta.get("reason_display")
+                or meta.get("adjustment_reason_display")
+                or meta.get("reason")
+                or meta.get("adjustmentReason")
+                or ""
+            )
+
+            data.append(
+                {
+                    "id": log.id,
+                    "batch_inventory": inventory.id,
+                    "medication_name": inventory.medication.name if hasattr(inventory, "medication") else None,
+                    "batch_number": inventory.batch_number,
+                    "quantity_before": float(qty_before or 0),
+                    "quantity_after": float(qty_after or 0),
+                    "quantity_unit": meta.get("quantity_unit") or (inventory.unit or "units"),
+                    "adjustment_reason": reason_val or "",
+                    "adjustment_notes": meta.get("adjustment_notes") or "",
+                    "created_by": getattr(log.user, "id", None) if getattr(log, "user", None) else None,
+                    "created_by_name": (
+                        (log.user.get_full_name() if getattr(log.user, "get_full_name", None) else None)
+                        or getattr(log.user, "username", None)
+                        or (str(log.user) if getattr(log, "user", None) else None)
+                    ),
+                    "created_at": log.created_at.isoformat(),
+                }
+            )
+
+        return Response(data)
+
+    @action(detail=True, methods=['post'], url_path='record_adjustment')
+    def record_adjustment(self, request, pk=None):
+        """
+        Record a quantity adjustment for a batch inventory item.
+
+        This updates `quantity` and logs an audit record tagged as a batch adjustment.
+        """
+        inventory = self.get_object()
+
+        try:
+            quantity_after_raw = request.data.get('quantity_after')
+            if quantity_after_raw is None:
+                return Response({"error": "quantity_after is required"}, status=status.HTTP_400_BAD_REQUEST)
+            quantity_after = Decimal(str(quantity_after_raw))
+        except (InvalidOperation, TypeError, ValueError):
+            return Response({"error": "Invalid quantity_after"}, status=status.HTTP_400_BAD_REQUEST)
+
+        if quantity_after < 0:
+            return Response({"error": "Stock cannot be negative"}, status=status.HTTP_400_BAD_REQUEST)
+
+        adjustment_reason = (request.data.get('adjustment_reason') or '').strip()
+        if not adjustment_reason:
+            return Response({"error": "adjustment_reason is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        adjustment_notes = request.data.get('adjustment_notes') or ""
+
+        qty_before = inventory.quantity
+        inventory.quantity = quantity_after
+        inventory.save(update_fields=['quantity'])
+
+        # Log a tagged audit record so we can reconstruct history.
+        AuditService.log_activity(
+            user=request.user,
+            action='update',
+            object_type='medication_inventory',
+            object_id=str(inventory.id),
+            module='pharmacy',
+            object_repr=f'Inventory {inventory.batch_number} - {inventory.medication.name}',
+            description=f'Batch adjustment recorded for {inventory.batch_number}.',
+            old_values={'quantity': float(qty_before or 0)},
+            new_values={'quantity': float(inventory.quantity or 0)},
+            metadata={
+                'batch_adjustment': True,
+                'adjustment_reason': adjustment_reason,
+                'adjustment_notes': adjustment_notes,
+                'quantity_unit': inventory.unit or 'units',
+            },
+            request=request,
+        )
+
+        # Return the created history record using the same response shape.
+        latest_log = (
+            ActivityLog.objects.filter(
+                module='pharmacy',
+                object_type='medication_inventory',
+                object_id=str(inventory.id),
+            )
+            .order_by('-created_at')
+            .first()
+        )
+        if latest_log and not (latest_log.metadata or {}).get('batch_adjustment'):
+            # In case the newest matching log isn't a batch adjustment,
+            # pick the next one that is.
+            latest_log = next(
+                (
+                    l
+                    for l in ActivityLog.objects.filter(
+                        module='pharmacy',
+                        object_type='medication_inventory',
+                        object_id=str(inventory.id),
+                    ).order_by('-created_at')[:20]
+                    if (l.metadata or {}).get('batch_adjustment')
+                ),
+                None,
+            )
+
+        meta = (latest_log.metadata or {}) if latest_log else {}
+        return Response(
+            {
+                "id": latest_log.id if latest_log else None,
+                "batch_inventory": inventory.id,
+                "medication_name": inventory.medication.name if hasattr(inventory, "medication") else None,
+                "batch_number": inventory.batch_number,
+                "quantity_before": float(qty_before or 0),
+                "quantity_after": float(inventory.quantity or 0),
+                "quantity_unit": meta.get("quantity_unit") or (inventory.unit or "units"),
+                "adjustment_reason": meta.get("adjustment_reason") or adjustment_reason,
+                "adjustment_notes": meta.get("adjustment_notes") or adjustment_notes,
+                "created_by": getattr(latest_log.user, "id", None) if latest_log and getattr(latest_log, "user", None) else None,
+                "created_by_name": (
+                    (latest_log.user.get_full_name() if latest_log and getattr(latest_log.user, "get_full_name", None) else None)
+                    or (getattr(latest_log.user, "username", None) if latest_log and getattr(latest_log, "user", None) else None)
+                    or (str(latest_log.user) if latest_log and getattr(latest_log, "user", None) else None)
+                ),
+                "created_at": (latest_log.created_at.isoformat() if latest_log else None),
+            }
         )
 
 

@@ -115,6 +115,13 @@ class MedicationInventorySerializer(serializers.ModelSerializer):
     is_low_stock = serializers.ReadOnlyField()
     is_expired = serializers.ReadOnlyField()
     medication = MedicationSerializer(read_only=True)
+    # Accept medication id for writes (required for creating inventory rows).
+    medication_id = serializers.PrimaryKeyRelatedField(
+        queryset=Medication.objects.all(),
+        source='medication',
+        write_only=True,
+        required=True,
+    )
     source_from_central_store = serializers.SerializerMethodField()
 
     def get_source_from_central_store(self, obj):
@@ -133,7 +140,7 @@ class MedicationInventorySerializer(serializers.ModelSerializer):
     class Meta:
         model = MedicationInventory
         fields = [
-            'id', 'medication', 'medication_name', 'batch_number', 'expiry_date', 'quantity',
+            'id', 'medication', 'medication_id', 'medication_name', 'batch_number', 'expiry_date', 'quantity',
             'unit', 'min_stock_level', 'max_stock_level', 'location', 'supplier', 'purchase_price',
             'created_at', 'updated_at', 'is_low_stock', 'is_expired', 'source_from_central_store',
         ]

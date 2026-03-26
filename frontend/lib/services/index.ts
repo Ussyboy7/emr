@@ -19,6 +19,7 @@ export type {
   Medication,
   GenericMedication,
   MedicationInventory,
+  BatchAdjustmentHistory,
   Dispense,
   DrugInteraction,
   StockRequest,

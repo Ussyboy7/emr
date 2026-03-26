@@ -472,9 +472,12 @@ class PharmacyService {
     supplier?: string;
     purchase_price?: number;
   }): Promise<MedicationInventory> {
+    // Backend expects `medication_id` for writes (serializer keeps `medication` read-only).
+    const payload = { ...data, medication_id: data.medication } as any;
+    delete (payload as any).medication;
     return apiFetch<MedicationInventory>('/v1/pharmacy/inventory/', {
       method: 'POST',
-      body: JSON.stringify(data),
+      body: JSON.stringify(payload),
     });
   }
 

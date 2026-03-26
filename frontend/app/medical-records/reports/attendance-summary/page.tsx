@@ -108,12 +108,7 @@ export default function AttendanceSummaryReport() {
   };
 
   useEffect(() => {
-    // Auto-load current year's data on mount
-    fetchReport();
-  }, []); // Only run on mount
-  
-  useEffect(() => {
-    // Fetch when dates/year change (but not on initial mount to avoid double fetch)
+    // Fetch when active filter values change
     if (viewMode === 'year' && year) {
       fetchReport();
     } else if (viewMode === 'range' && startDate && endDate) {
@@ -127,12 +122,10 @@ export default function AttendanceSummaryReport() {
       return;
     }
 
-    const headers = ["S/N", "Category", "Employee", "Non-Employee", "Male", "Female", "Total", "%"];
+    const headers = ["S/N", "Category", "Male", "Female", "Total", "%"];
     const rows = data.map(row => [
       row.sn,
       row.category,
-      row.employee,
-      row.non_employee,
       row.male,
       row.female,
       row.total,
@@ -141,7 +134,7 @@ export default function AttendanceSummaryReport() {
     const csv = [
       headers.join(','),
       ...rows.map(row => row.join(',')),
-      `TOTAL,,${summary.total_employee},${summary.total_non_employee},${summary.grand_total},100%`
+      `TOTAL,,${summary.total_male},${summary.total_female},${summary.grand_total},100%`
     ].join('\n');
     
     const blob = new Blob([csv], { type: 'text/csv' });
@@ -289,7 +282,7 @@ export default function AttendanceSummaryReport() {
         </Card>
 
         {/* Summary Cards */}
-        <div className="grid gap-4 md:grid-cols-5">
+        <div className="grid gap-4 md:grid-cols-4">
           <Card className="border-l-4 border-l-blue-500">
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
@@ -346,35 +339,14 @@ export default function AttendanceSummaryReport() {
               </div>
             </CardContent>
           </Card>
-          <Card className="border-l-4 border-l-purple-500">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Grand Total</p>
-                  <p className="text-2xl sm:text-3xl font-bold">{summary.grand_total.toLocaleString()}</p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Total unique patients
-                  </p>
-                </div>
-                <TrendingUp className="h-10 w-10 text-purple-500 opacity-50" />
-              </div>
-            </CardContent>
-          </Card>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-5">
-          <Card className="border-l-4 border-l-indigo-500">
-            <CardContent className="p-4">
-              <p className="text-sm text-muted-foreground">First-Time Visitors</p>
-              <p className="text-2xl sm:text-3xl font-bold text-indigo-600 dark:text-indigo-400">{summary.first_time_patients.toLocaleString()}</p>
-              <p className="text-xs text-muted-foreground mt-1">Earliest hospital visit in selected period</p>
-            </CardContent>
-          </Card>
+        <div className="grid gap-4 md:grid-cols-3">
           <Card className="border-l-4 border-l-cyan-500">
             <CardContent className="p-4">
               <p className="text-sm text-muted-foreground">New Registrations</p>
               <p className="text-2xl sm:text-3xl font-bold text-cyan-600 dark:text-cyan-400">{summary.new_registrations.toLocaleString()}</p>
-              <p className="text-xs text-muted-foreground mt-1">Patients registered in selected period</p>
+              <p className="text-xs text-muted-foreground mt-1">New patient records created in selected period (not attendance count)</p>
             </CardContent>
           </Card>
           <Card className="border-l-4 border-l-slate-500">
@@ -384,18 +356,11 @@ export default function AttendanceSummaryReport() {
               <p className="text-xs text-muted-foreground mt-1">Seen this period with prior visit history</p>
             </CardContent>
           </Card>
-          <Card className="border-l-4 border-l-amber-500">
-            <CardContent className="p-4">
-              <p className="text-sm text-muted-foreground">Unique Patients Seen</p>
-              <p className="text-2xl sm:text-3xl font-bold text-amber-600 dark:text-amber-400">{summary.total_unique_patients_seen.toLocaleString()}</p>
-              <p className="text-xs text-muted-foreground mt-1">Distinct patients with visits in period</p>
-            </CardContent>
-          </Card>
           <Card className="border-l-4 border-l-emerald-500">
             <CardContent className="p-4">
-              <p className="text-sm text-muted-foreground">Total Visits</p>
+              <p className="text-sm text-muted-foreground">Total Visit Records</p>
               <p className="text-2xl sm:text-3xl font-bold text-emerald-600 dark:text-emerald-400">{summary.total_visits.toLocaleString()}</p>
-              <p className="text-xs text-muted-foreground mt-1">All visit records in selected period</p>
+              <p className="text-xs text-muted-foreground mt-1">Includes repeat visits by the same patient</p>
             </CardContent>
           </Card>
         </div>
@@ -424,8 +389,6 @@ export default function AttendanceSummaryReport() {
                     <tr className="border-b border-border">
                       <th className="text-left p-3 text-sm font-medium text-muted-foreground">S/N</th>
                       <th className="text-left p-3 text-sm font-medium text-muted-foreground">Category</th>
-                      <th className="text-right p-3 text-sm font-medium text-muted-foreground">Employee</th>
-                      <th className="text-right p-3 text-sm font-medium text-muted-foreground">Non-Employee</th>
                       <th className="text-right p-3 text-sm font-medium text-muted-foreground">Male</th>
                       <th className="text-right p-3 text-sm font-medium text-muted-foreground">Female</th>
                       <th className="text-right p-3 text-sm font-medium text-muted-foreground">Total</th>
@@ -437,8 +400,6 @@ export default function AttendanceSummaryReport() {
                       <tr key={row.sn} className="border-b border-border hover:bg-muted/30 transition-colors">
                         <td className="p-3 text-foreground">{row.sn}</td>
                         <td className="p-3 font-medium text-foreground">{row.category}</td>
-                        <td className="p-3 text-right text-foreground">{row.employee.toLocaleString()}</td>
-                        <td className="p-3 text-right text-foreground">{row.non_employee.toLocaleString()}</td>
                         <td className="p-3 text-right text-foreground">{row.male.toLocaleString()}</td>
                         <td className="p-3 text-right text-foreground">{row.female.toLocaleString()}</td>
                         <td className="p-3 text-right font-semibold text-foreground">{row.total.toLocaleString()}</td>
@@ -447,8 +408,6 @@ export default function AttendanceSummaryReport() {
                     ))}
                     <tr className="border-t-2 border-border bg-muted/50 font-semibold">
                       <td className="p-3 text-foreground" colSpan={2}>TOTAL</td>
-                      <td className="p-3 text-right text-foreground">{summary.total_employee.toLocaleString()}</td>
-                      <td className="p-3 text-right text-foreground">{summary.total_non_employee.toLocaleString()}</td>
                       <td className="p-3 text-right text-foreground">{summary.total_male.toLocaleString()}</td>
                       <td className="p-3 text-right text-foreground">{summary.total_female.toLocaleString()}</td>
                       <td className="p-3 text-right text-foreground">{summary.grand_total.toLocaleString()}</td>

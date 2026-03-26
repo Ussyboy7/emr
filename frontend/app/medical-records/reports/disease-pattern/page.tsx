@@ -4,11 +4,12 @@ import React, { useState, useEffect } from "react";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { 
   Download, FileSpreadsheet, RefreshCw, ArrowLeft, 
-  TrendingUp, Printer, Activity
+  TrendingUp, Printer, Activity, Users, Calendar
 } from "lucide-react";
 import { toast } from "sonner";
 import { apiFetch } from "@/lib/api-client";
@@ -17,6 +18,8 @@ import Link from "next/link";
 interface DiseaseData {
   sn: number;
   diagnosis: string;
+  code?: string;
+  description?: string;
   employee: number;
   non_employee: number;
   total: number;
@@ -24,14 +27,42 @@ interface DiseaseData {
 
 export default function DiseasePatternReport() {
   const [year, setYear] = useState(new Date().getFullYear().toString());
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [viewMode, setViewMode] = useState<"year" | "range">("year");
   const [data, setData] = useState<DiseaseData[]>([]);
   const [summary, setSummary] = useState({ total_employee: 0, total_non_employee: 0, grand_total: 0 });
   const [isLoading, setIsLoading] = useState(true);
 
+  const setThisMonth = () => {
+    const now = new Date();
+    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    setStartDate(firstDay.toISOString().split("T")[0]);
+    setEndDate(lastDay.toISOString().split("T")[0]);
+    setViewMode("range");
+  };
+
+  const setThisYear = () => {
+    setYear(new Date().getFullYear().toString());
+    setViewMode("year");
+  };
+
   const fetchReport = async () => {
     setIsLoading(true);
     try {
-      const response = await apiFetch<{ data: DiseaseData[]; summary: typeof summary }>(`/reports/disease-pattern/?year=${year}`);
+      let url = "/reports/disease-pattern/?";
+      if (viewMode === "year") {
+        url += `year=${year}`;
+      } else if (startDate && endDate) {
+        url += `start_date=${startDate}&end_date=${endDate}`;
+      } else {
+        toast.error("Please select both start and end dates");
+        setIsLoading(false);
+        return;
+      }
+
+      const response = await apiFetch<{ data: DiseaseData[]; summary: typeof summary }>(url);
       setData(response.data || []);
       setSummary(response.summary || { total_employee: 0, total_non_employee: 0, grand_total: 0 });
     } catch (error: any) {
@@ -45,8 +76,12 @@ export default function DiseasePatternReport() {
   };
 
   useEffect(() => {
-    fetchReport();
-  }, [year]);
+    if (viewMode === "year" && year) {
+      fetchReport();
+    } else if (viewMode === "range" && startDate && endDate) {
+      fetchReport();
+    }
+  }, [year, startDate, endDate, viewMode]);
 
   const exportToCSV = () => {
     if (data.length === 0) {
@@ -54,7 +89,7 @@ export default function DiseasePatternReport() {
       return;
     }
 
-    const headers = ["S/N", "Diagnosis", "Employee", "Non-Employee", "Total"];
+    const headers = ["S/N", "ICD-10 Diagnosis", "Employee", "Non-Employee", "Total"];
     const rows = data.map(row => [row.sn, row.diagnosis, row.employee, row.non_employee, row.total]);
     
     const csv = [
@@ -67,7 +102,8 @@ export default function DiseasePatternReport() {
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `disease_pattern_${year}.csv`;
+    const period = viewMode === "year" ? year : `${startDate}_to_${endDate}`;
+    a.download = `disease_pattern_${period}.csv`;
     a.click();
     window.URL.revokeObjectURL(url);
     
@@ -75,7 +111,6 @@ export default function DiseasePatternReport() {
   };
 
   const years = Array.from({ length: 10 }, (_, i) => (new Date().getFullYear() - i).toString());
-  const maxValue = Math.max(...data.map(d => d.total), 1);
 
   return (
     <DashboardLayout>
@@ -95,7 +130,7 @@ export default function DiseasePatternReport() {
               <Activity className="h-8 w-8 text-red-500" />
               Disease Pattern Report
             </h1>
-            <p className="text-muted-foreground mt-1">Top diagnoses and disease trends</p>
+            <p className="text-muted-foreground mt-1">Top ICD-10 diagnoses and disease trends</p>
           </div>
           <div className="flex items-center gap-2">
             <Button variant="outline" onClick={fetchReport} disabled={isLoading}>
@@ -113,47 +148,130 @@ export default function DiseasePatternReport() {
           </div>
         </div>
 
+        <div className="flex gap-2">
+          <Button
+            variant={viewMode === "range" && startDate.includes(new Date().toISOString().slice(0, 7)) ? "default" : "outline"}
+            onClick={setThisMonth}
+            className="flex items-center gap-2"
+          >
+            <Calendar className="h-4 w-4" />
+            This Month
+          </Button>
+          <Button
+            variant={viewMode === "year" && year === new Date().getFullYear().toString() ? "default" : "outline"}
+            onClick={setThisYear}
+            className="flex items-center gap-2"
+          >
+            <Calendar className="h-4 w-4" />
+            This Year
+          </Button>
+        </div>
+
         <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Calendar className="h-5 w-5" />
+              Filters
+            </CardTitle>
+            <CardDescription>Adjust date range for detailed reporting</CardDescription>
+          </CardHeader>
           <CardContent className="p-4">
-            <div className="w-48">
-              <Label>Year</Label>
-              <Select value={year} onValueChange={setYear}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {years.map(y => (
-                    <SelectItem key={y} value={y}>{y}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div>
+                <Label>View Mode</Label>
+                <Select value={viewMode} onValueChange={(value: "year" | "range") => setViewMode(value)}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="year">By Year</SelectItem>
+                    <SelectItem value="range">Date Range</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {viewMode === "year" ? (
+                <div>
+                  <Label>Year</Label>
+                  <Select value={year} onValueChange={setYear}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {years.map(y => (
+                        <SelectItem key={y} value={y}>{y}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : (
+                <>
+                  <div>
+                    <Label>Start Date</Label>
+                    <Input
+                      type="date"
+                      value={startDate}
+                      onChange={(e) => setStartDate(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <Label>End Date</Label>
+                    <Input
+                      type="date"
+                      value={endDate}
+                      onChange={(e) => setEndDate(e.target.value)}
+                    />
+                  </div>
+                </>
+              )}
+              <div className="flex items-end">
+                <Button onClick={fetchReport} className="w-full" disabled={isLoading}>
+                  <TrendingUp className="h-4 w-4 mr-2" />
+                  {isLoading ? "Loading..." : "Generate Report"}
+                </Button>
+              </div>
             </div>
           </CardContent>
         </Card>
 
         <div className="grid gap-4 md:grid-cols-3">
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Employee Cases</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl sm:text-3xl font-bold text-blue-600 dark:text-blue-400">{summary.total_employee.toLocaleString()}</div>
+          <Card className="border-l-4 border-l-blue-500">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Employee Cases</p>
+                  <p className="text-2xl sm:text-3xl font-bold">{summary.total_employee.toLocaleString()}</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {summary.grand_total > 0 ? `${((summary.total_employee / summary.grand_total) * 100).toFixed(1)}%` : "0%"} of total
+                  </p>
+                </div>
+                <Users className="h-10 w-10 text-blue-500 opacity-50" />
+              </div>
             </CardContent>
           </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Non-Employee Cases</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl sm:text-3xl font-bold text-green-600 dark:text-green-400">{summary.total_non_employee.toLocaleString()}</div>
+          <Card className="border-l-4 border-l-green-500">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Non-Employee Cases</p>
+                  <p className="text-2xl sm:text-3xl font-bold">{summary.total_non_employee.toLocaleString()}</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {summary.grand_total > 0 ? `${((summary.total_non_employee / summary.grand_total) * 100).toFixed(1)}%` : "0%"} of total
+                  </p>
+                </div>
+                <Users className="h-10 w-10 text-green-500 opacity-50" />
+              </div>
             </CardContent>
           </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Total Cases</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl sm:text-3xl font-bold text-foreground">{summary.grand_total.toLocaleString()}</div>
+          <Card className="border-l-4 border-l-rose-500">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Total Cases</p>
+                  <p className="text-2xl sm:text-3xl font-bold">{summary.grand_total.toLocaleString()}</p>
+                  <p className="text-xs text-muted-foreground mt-1">Total diagnosis records in selected year</p>
+                </div>
+                <Activity className="h-10 w-10 text-rose-500 opacity-50" />
+              </div>
             </CardContent>
           </Card>
         </div>
@@ -162,9 +280,9 @@ export default function DiseasePatternReport() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <TrendingUp className="h-5 w-5" />
-              Top Diagnoses - {year}
+              All ICD-10 Diagnoses - {year}
             </CardTitle>
-            <CardDescription>Top 15 diagnoses by frequency</CardDescription>
+            <CardDescription>All ICD-10 diagnoses by frequency</CardDescription>
           </CardHeader>
           <CardContent>
             {isLoading ? (
@@ -178,11 +296,11 @@ export default function DiseasePatternReport() {
                   <thead>
                     <tr className="border-b border-border">
                       <th className="text-left p-3 text-sm font-medium text-muted-foreground">S/N</th>
-                      <th className="text-left p-3 text-sm font-medium text-muted-foreground">Diagnosis</th>
+                      <th className="text-left p-3 text-sm font-medium text-muted-foreground">ICD-10 Diagnosis</th>
                       <th className="text-right p-3 text-sm font-medium text-muted-foreground">Employee</th>
                       <th className="text-right p-3 text-sm font-medium text-muted-foreground">Non-Employee</th>
                       <th className="text-right p-3 text-sm font-medium text-muted-foreground">Total</th>
-                      <th className="text-left p-3 text-sm font-medium text-muted-foreground">Distribution</th>
+                      <th className="text-right p-3 text-sm font-medium text-muted-foreground">%</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -193,22 +311,17 @@ export default function DiseasePatternReport() {
                         <td className="p-3 text-right text-foreground">{row.employee.toLocaleString()}</td>
                         <td className="p-3 text-right text-foreground">{row.non_employee.toLocaleString()}</td>
                         <td className="p-3 text-right font-semibold text-foreground">{row.total.toLocaleString()}</td>
-                        <td className="p-3">
-                          <div className="w-full bg-muted rounded-full h-3">
-                            <div 
-                              className="bg-red-600 h-3 rounded-full transition-all"
-                              style={{ width: `${(row.total / maxValue) * 100}%` }}
-                            />
-                          </div>
+                        <td className="p-3 text-right text-foreground">
+                          {summary.grand_total > 0 ? `${((row.total / summary.grand_total) * 100).toFixed(1)}%` : "0.0%"}
                         </td>
                       </tr>
                     ))}
-                    <tr className="border-t-2 border-border bg-blue-50 dark:bg-blue-900/20 font-bold">
+                    <tr className="border-t-2 border-border bg-muted/50 font-bold">
                       <td colSpan={2} className="p-3 text-foreground">TOTAL</td>
                       <td className="p-3 text-right text-foreground">{summary.total_employee.toLocaleString()}</td>
                       <td className="p-3 text-right text-foreground">{summary.total_non_employee.toLocaleString()}</td>
                       <td className="p-3 text-right text-foreground">{summary.grand_total.toLocaleString()}</td>
-                      <td className="p-3"></td>
+                      <td className="p-3 text-right text-foreground">100.0%</td>
                     </tr>
                   </tbody>
                 </table>
