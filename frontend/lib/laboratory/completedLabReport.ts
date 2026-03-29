@@ -1,0 +1,265 @@
+import { transformPriority } from '@/lib/services/transformers';
+
+export interface CompletedTestResultRow {
+  parameter: string;
+  value: string;
+  unit: string;
+  normalRange: string;
+  status: 'Normal' | 'Abnormal' | 'Critical';
+}
+
+/** Shape used by Laboratory Completed Tests and shared Lab Report dialog */
+export interface CompletedTest {
+  id: string;
+  orderId: string;
+  patient: { id: string; name: string; age: number | null; gender: string };
+  doctor: { id: string; name: string; specialty: string };
+  testName: string;
+  testCode: string;
+  results: CompletedTestResultRow[];
+  result_file?: string | null;
+  overallStatus: 'Normal' | 'Abnormal' | 'Critical';
+  priority: 'Routine' | 'Urgent' | 'STAT';
+  orderedAt: string;
+  completedAt: string;
+  verifiedBy: string;
+  verifiedAt: string;
+  submittedBy: string;
+  clinic: string;
+  turnaroundTime: string;
+}
+
+/**
+ * Map a row from GET /laboratory/verification/ or GET /laboratory/tests/ into CompletedTest.
+ * Matches Laboratory → Completed Tests list transform.
+ */
+export function transformApiRowToCompletedTest(
+  row: any,
+  listMode: 'verification' | 'tests'
+): CompletedTest {
+  const test: any = listMode === 'verification' ? (row.test_details || row.test || {}) : row;
+
+  const orderDetails = test.order_details || {};
+
+  const patientDetails = orderDetails.patient_details;
+  const patientName = patientDetails?.name ?? orderDetails.patient_name ?? '';
+  const patientId =
+    patientDetails?.patient_id?.toString() || patientDetails?.id?.toString() || '';
+
+  const age = patientDetails?.age ?? null;
+  const gender = patientDetails?.gender || '';
+
+  const orderId = orderDetails.order_id || '';
+
+  const doctorDetails = orderDetails.doctor_details;
+  const doctorName = doctorDetails?.name || orderDetails.doctor_name || '';
+  const doctorSpecialty = doctorDetails?.specialty || '';
+
+  // order_details.clinic is the primary source; nested `order` is only present if the API expands it.
+  const orderObj = typeof row.order === 'object' && row.order != null ? row.order : null;
+  const clinic =
+    (orderDetails.clinic && String(orderDetails.clinic).trim()) ||
+    (orderObj?.clinic && String(orderObj.clinic).trim()) ||
+    '';
+
+  const orderedAt = test.collected_at || test.lab_order?.order_date || new Date().toISOString();
+  const completedAt = test.processed_at || test.verified_at || new Date().toISOString();
+  const turnaroundMs = new Date(completedAt).getTime() - new Date(orderedAt).getTime();
+  const turnaroundHours = Math.floor(turnaroundMs / 3600000);
+  const turnaroundMins = Math.floor((turnaroundMs % 3600000) / 60000);
+  const turnaroundTime =
+    turnaroundHours > 0
+      ? `${turnaroundHours}h ${turnaroundMins}m`
+      : turnaroundMins > 0
+        ? `${turnaroundMins}m`
+        : '< 1 min';
+
+  const rf = test.result_file;
+  const resultFileUrl =
+    rf && typeof rf === 'string'
+      ? rf.startsWith('http')
+        ? rf
+        : typeof window !== 'undefined'
+          ? `${window.location.origin}${rf}`
+          : rf
+      : null;
+
+  const resolveTemplateMeta = (parameterName: string) => {
+    const normalRangeObj: Record<string, any> | undefined =
+      test?.template_normal_range || test?.template?.normal_range;
+    if (!normalRangeObj || typeof normalRangeObj !== 'object') return null;
+    const wanted = String(parameterName || '').trim().toLowerCase();
+    if (!wanted) return null;
+    for (const [k, v] of Object.entries(normalRangeObj)) {
+      if (String(k).trim().toLowerCase() === wanted) return { key: k, meta: v as any };
+    }
+    return null;
+  };
+
+  const formatTemplateRange = (meta: any) => {
+    if (!meta) return '';
+    if (typeof meta.range === 'string' && meta.range.trim()) return meta.range.trim();
+    const min = meta.min ?? meta.normalRangeMin;
+    const max = meta.max ?? meta.normalRangeMax;
+    if (min !== undefined && max !== undefined && String(min).trim() && String(max).trim()) {
+      return `${min}-${max}`;
+    }
+    return '';
+  };
+
+  const processedResults = Object.entries(test.results || {}).map(([key, value]) => {
+    const valueStr = String(value);
+    const valueNum = parseFloat(valueStr);
+
+    let unit = '';
+    let normalRange = '';
+    let status: 'Normal' | 'Abnormal' | 'Critical' = 'Normal';
+
+    const templateMatch = resolveTemplateMeta(key);
+    if (templateMatch) {
+      unit = String((templateMatch.meta?.unit ?? '') || '');
+      normalRange = formatTemplateRange(templateMatch.meta);
+
+      const minRaw = templateMatch.meta?.min ?? templateMatch.meta?.normalRangeMin;
+      const maxRaw = templateMatch.meta?.max ?? templateMatch.meta?.normalRangeMax;
+      const min = minRaw !== undefined && String(minRaw).trim() !== '' ? Number(minRaw) : undefined;
+      const max = maxRaw !== undefined && String(maxRaw).trim() !== '' ? Number(maxRaw) : undefined;
+      if (!isNaN(valueNum) && valueStr.trim() !== '' && (min !== undefined || max !== undefined)) {
+        if (min !== undefined && !isNaN(min) && valueNum < min) status = 'Abnormal';
+        if (max !== undefined && !isNaN(max) && valueNum > max) status = 'Abnormal';
+      }
+    }
+
+    // Hardcoded validation logic disabled (template metadata is source of truth).
+    if (false && !templateMatch && !isNaN(valueNum) && valueStr.trim() !== '') {
+      if (test.code === 'LFT') {
+        if (key.toLowerCase().includes('alt') || key.toLowerCase().includes('sgpt')) {
+          unit = 'U/L';
+          normalRange = '7-56';
+          if (valueNum > 1000) status = 'Critical';
+          else if (valueNum < 7 || valueNum > 56) status = 'Abnormal';
+          else status = 'Normal';
+        } else if (key.toLowerCase().includes('ast') || key.toLowerCase().includes('sgot')) {
+          unit = 'U/L';
+          normalRange = '10-40';
+          if (valueNum > 1000) status = 'Critical';
+          else if (valueNum < 10 || valueNum > 40) status = 'Abnormal';
+          else status = 'Normal';
+        } else if (key.toLowerCase().includes('alp') || key.toLowerCase().includes('alkaline phosphatase')) {
+          unit = 'U/L';
+          normalRange = '44-147';
+          if (valueNum > 1000) status = 'Critical';
+          else if (valueNum < 44 || valueNum > 147) status = 'Abnormal';
+          else status = 'Normal';
+        } else if (key.toLowerCase().includes('albumin')) {
+          unit = 'g/dL';
+          normalRange = '3.5-5.0';
+          if (valueNum < 2.0 || valueNum > 6.0) status = 'Critical';
+          else if (valueNum < 3.5 || valueNum > 5.0) status = 'Abnormal';
+          else status = 'Normal';
+        } else if (key.toLowerCase().includes('bilirubin') && key.toLowerCase().includes('total')) {
+          unit = 'mg/dL';
+          normalRange = '0.1-1.2';
+          if (valueNum > 5.0) status = 'Critical';
+          else if (valueNum > 1.2) status = 'Abnormal';
+          else status = 'Normal';
+        }
+      } else if (test.code === 'FBS') {
+        if (key.toLowerCase().includes('glucose')) {
+          unit = 'mg/dL';
+          normalRange = '70-140';
+          if (valueNum < 40 || valueNum > 600) status = 'Critical';
+          else if (valueNum < 70 || valueNum > 140) status = 'Abnormal';
+          else status = 'Normal';
+        }
+      } else if (test.code === '24HR_PROTEIN') {
+        if (key.toLowerCase() === 'result') {
+          unit = 'mg/day';
+          normalRange = '<150';
+          if (!isNaN(valueNum)) {
+            if (valueNum > 1000) status = 'Critical';
+            else if (valueNum > 300) status = 'Abnormal';
+            else status = 'Normal';
+          }
+        }
+      }
+    }
+
+    return {
+      parameter: key,
+      value: valueStr,
+      unit,
+      normalRange,
+      status,
+    };
+  });
+
+  let overallStatus: 'Normal' | 'Abnormal' | 'Critical' = 'Normal';
+  if (test.overall_status) {
+    const statusMap: Record<string, 'Normal' | 'Abnormal' | 'Critical'> = {
+      normal: 'Normal',
+      abnormal: 'Abnormal',
+      critical: 'Critical',
+    };
+    overallStatus = statusMap[String(test.overall_status).toLowerCase()] || 'Normal';
+  } else {
+    if (processedResults.some((r) => r.status === 'Abnormal')) overallStatus = 'Abnormal';
+    else overallStatus = 'Normal';
+  }
+
+  const priority = transformPriority(test.lab_order?.priority || test.priority || 'routine') as
+    | 'Routine'
+    | 'Urgent'
+    | 'STAT';
+
+  const doctorIdRaw = test.lab_order?.doctor?.id ?? doctorDetails?.id;
+
+  return {
+    id: test.id != null ? String(test.id) : '',
+    orderId,
+    patient: {
+      id: patientId,
+      name: patientName,
+      age: age ?? null,
+      gender,
+    },
+    doctor: {
+      id: doctorIdRaw != null ? String(doctorIdRaw) : '',
+      name: doctorName,
+      specialty: doctorSpecialty,
+    },
+    testName: test.name,
+    testCode: test.code,
+    results: processedResults,
+    overallStatus,
+    priority,
+    orderedAt,
+    completedAt,
+    verifiedBy: test.verified_by_name || test.verified_by || '',
+    verifiedAt: test.verified_at || new Date().toISOString(),
+    submittedBy: test.processed_by_name || test.processed_by || '',
+    clinic,
+    turnaroundTime,
+    result_file: resultFileUrl,
+  };
+}
+
+/** Collapse accidental `.pdf.pdf` from storage/upload naming. */
+export function sanitizeLabResultFileName(name: string): string {
+  let n = name.trim();
+  while (n.length > 4 && n.toLowerCase().endsWith('.pdf.pdf')) {
+    n = n.slice(0, -4);
+  }
+  return n || 'report.pdf';
+}
+
+/** Human-readable filename from an absolute or relative result file URL. */
+export function displayNameFromLabResultFileUrl(url: string): string {
+  try {
+    const path = url.split('?')[0];
+    const seg = path.split('/').filter(Boolean).pop() || 'report.pdf';
+    return sanitizeLabResultFileName(decodeURIComponent(seg));
+  } catch {
+    return 'report.pdf';
+  }
+}

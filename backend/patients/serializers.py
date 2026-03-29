@@ -83,17 +83,17 @@ class PatientSerializer(serializers.ModelSerializer):
         if category == 'dependent':
             if not principal_staff:
                 raise serializers.ValidationError({
-                    'principal_staff': 'Principal staff is required for dependent patients.'
+                    'principal_staff': 'Principal (employee or retiree) is required for dependent patients.'
                 })
 
             if principal_staff.category not in ['employee', 'retiree']:
                 raise serializers.ValidationError({
-                    'principal_staff': 'Principal staff must be an employee or retiree.'
+                    'principal_staff': 'Principal must be an employee or retiree.'
                 })
 
             if not (principal_staff.personal_number or '').strip():
                 raise serializers.ValidationError({
-                    'principal_staff': 'Principal staff must have a valid personal number.'
+                    'principal_staff': 'Principal must have a valid personal number.'
                 })
         
         return attrs
@@ -106,6 +106,7 @@ class PatientListSerializer(serializers.ModelSerializer):
     full_name = serializers.SerializerMethodField()
     age = serializers.ReadOnlyField()
     age_display = serializers.ReadOnlyField()
+    gender = serializers.SerializerMethodField()
     photo = serializers.SerializerMethodField()
     
     class Meta:
@@ -118,6 +119,9 @@ class PatientListSerializer(serializers.ModelSerializer):
     
     def get_full_name(self, obj):
         return obj.get_full_name()
+
+    def get_gender(self, obj):
+        return obj.get_gender_display() if obj.gender else ''
     
     def get_photo(self, obj):
         """Return the photo URL if photo exists."""
@@ -133,12 +137,20 @@ class VisitSerializer(serializers.ModelSerializer):
 
     patient_name = serializers.CharField(source='patient.get_full_name', read_only=True)
     patient_id = serializers.CharField(source='patient.patient_id', read_only=True)
+    age = serializers.IntegerField(source='patient.age', read_only=True)
+    gender = serializers.SerializerMethodField()
     doctor_name = serializers.CharField(source='doctor.get_full_name', read_only=True, allow_null=True)
     is_new_registration = serializers.SerializerMethodField()
     is_first_visit = serializers.SerializerMethodField()
     is_returning_visit = serializers.SerializerMethodField()
     patient_visit_status = serializers.SerializerMethodField()
     vitals = serializers.SerializerMethodField()
+
+    def get_gender(self, obj):
+        patient = getattr(obj, 'patient', None)
+        if not patient or not patient.gender:
+            return ''
+        return patient.get_gender_display()
     
     def get_vitals(self, obj):
         """Get the most recent vital reading for this visit."""
@@ -265,13 +277,13 @@ class VisitSerializer(serializers.ModelSerializer):
     class Meta:
         model = Visit
         fields = [
-            'id', 'visit_id', 'patient', 'patient_id', 'patient_name', 'visit_type', 'status',
+            'id', 'visit_id', 'patient', 'patient_id', 'patient_name', 'age', 'gender', 'visit_type', 'status',
             'date', 'time', 'clinic', 'clinics', 'completed_clinics', 'location', 'location_clinic', 'doctor', 'doctor_name',
             'clinical_notes', 'vitals',
             'is_new_registration', 'is_first_visit', 'is_returning_visit', 'patient_visit_status',
             'created_at', 'updated_at',
         ]
-        read_only_fields = ['id', 'visit_id', 'created_at', 'updated_at', 'vitals']
+        read_only_fields = ['id', 'visit_id', 'created_at', 'updated_at', 'vitals', 'age', 'gender']
         extra_kwargs = {
             'clinics': {'required': False},
             'completed_clinics': {'required': False},
@@ -291,7 +303,7 @@ class VitalReadingSerializer(serializers.ModelSerializer):
             'id', 'visit', 'patient', 'patient_id', 'patient_name',
             'temperature', 'blood_pressure_systolic', 'blood_pressure_diastolic',
             'heart_rate', 'respiratory_rate', 'oxygen_saturation',
-            'weight', 'height', 'bmi', 'pain_scale', 'blood_sugar',
+            'weight', 'height', 'bmi', 'pain_scale', 'blood_sugar', 'random_blood_sugar',
             'notes', 'recorded_at', 'recorded_by', 'recorded_by_name',
         ]
         read_only_fields = ['id', 'bmi', 'recorded_at']

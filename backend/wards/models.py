@@ -219,6 +219,7 @@ class PatientAdmission(models.Model):
 
     STATUS_CHOICES = [
         ('admitted', 'Admitted'),
+        ('pending_discharge', 'Pending Discharge'),
         ('discharged', 'Discharged'),
         ('transferred', 'Transferred'),
         ('absconded', 'Absconded'),
@@ -355,22 +356,26 @@ class PatientAdmission(models.Model):
 
     @property
     def is_active(self):
-        """Check if admission is currently active."""
-        return self.status == 'admitted'
+        """Check if admission is currently active (admitted or awaiting discharge)."""
+        return self.status in ('admitted', 'pending_discharge')
 
     def discharge_patient(self, discharge_type='regular', discharge_doctor=None, **kwargs):
         """Discharge the patient from the ward."""
-        if not self.is_active:
+        if self.status not in ('admitted', 'pending_discharge'):
             raise ValueError("Patient is not currently admitted")
 
         self.status = 'discharged'
         self.discharge_date = timezone.now()
-        self.discharge_type = discharge_type
-        self.discharge_doctor = discharge_doctor
+        # Only overwrite discharge_type if not already set (preserve doctor's choice)
+        if discharge_type or not self.discharge_type:
+            self.discharge_type = discharge_type or 'regular'
+        if discharge_doctor:
+            self.discharge_doctor = discharge_doctor
 
-        # Update discharge fields
+        # Only update fields with non-None, non-empty values to avoid wiping
+        # details the doctor already filled in during initiate_discharge.
         for key, value in kwargs.items():
-            if hasattr(self, key):
+            if hasattr(self, key) and value is not None:
                 setattr(self, key, value)
 
         # Free up the bed

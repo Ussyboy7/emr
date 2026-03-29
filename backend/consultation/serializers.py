@@ -67,10 +67,16 @@ class ConsultationSessionSerializer(serializers.ModelSerializer):
     patient_id = serializers.CharField(source='patient.patient_id', read_only=True)
     patient_age = serializers.IntegerField(source='patient.age', read_only=True)
     patient_age_display = serializers.CharField(source='patient.age_display', read_only=True)
-    patient_gender = serializers.CharField(source='patient.gender', read_only=True)
+    patient_gender = serializers.SerializerMethodField()
     doctor_name = serializers.CharField(source='doctor.get_full_name', read_only=True, allow_null=True)
     room_name = serializers.CharField(source='room.name', read_only=True)
     clinic_name = serializers.CharField(source='visit.clinic', read_only=True, allow_null=True)
+
+    def get_patient_gender(self, obj):
+        p = getattr(obj, 'patient', None)
+        if not p or not p.gender:
+            return ''
+        return p.get_gender_display()
     
     class Meta:
         model = ConsultationSession
@@ -85,7 +91,7 @@ class ConsultationQueueSerializer(serializers.ModelSerializer):
     patient_id = serializers.CharField(source='patient.patient_id', read_only=True)
     patient_age = serializers.IntegerField(source='patient.age', read_only=True)
     patient_age_display = serializers.CharField(source='patient.age_display', read_only=True)
-    patient_gender = serializers.CharField(source='patient.gender', read_only=True)
+    patient_gender = serializers.SerializerMethodField()
     patient_details = PatientListSerializer(source='patient', read_only=True)
     room_name = serializers.CharField(source='room.name', read_only=True)
     visit_display_id = serializers.CharField(source='visit.visit_id', read_only=True, allow_null=True)
@@ -97,6 +103,12 @@ class ConsultationQueueSerializer(serializers.ModelSerializer):
     visit_clinics = serializers.SerializerMethodField()  # All clinics for this visit
     visit_completed_clinics = serializers.SerializerMethodField()  # Completed clinics
     latest_vitals = serializers.SerializerMethodField()
+
+    def get_patient_gender(self, obj):
+        p = getattr(obj, 'patient', None)
+        if not p or not p.gender:
+            return ''
+        return p.get_gender_display()
 
     def get_visit_clinics(self, obj):
         """Get all clinics for this visit."""
@@ -144,6 +156,7 @@ class ReferralSerializer(serializers.ModelSerializer):
 
     patient_name = serializers.CharField(source='patient.get_full_name', read_only=True)
     referred_by_name = serializers.CharField(source='referred_by.get_full_name', read_only=True, allow_null=True)
+    referral_letter_acknowledged_by_name = serializers.SerializerMethodField()
     responsibility_forms_count = serializers.IntegerField(source='responsibility_forms.count', read_only=True)
     latest_responsibility_form = serializers.SerializerMethodField()
 
@@ -151,6 +164,47 @@ class ReferralSerializer(serializers.ModelSerializer):
         model = Referral
         fields = '__all__'
         read_only_fields = ['referral_id', 'referred_at', 'created_at']
+
+    def get_referral_letter_acknowledged_by_name(self, obj):
+        u = getattr(obj, 'referral_letter_acknowledged_by', None)
+        if u is not None and hasattr(u, 'get_full_name'):
+            return u.get_full_name()
+        return None
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        # Real patient fields only (no derived/fallback values) for referral / form print.
+        data['patient_print_pn'] = self.get_patient_print_pn(instance)
+        data['patient_print_dept'] = self.get_patient_print_dept(instance)
+        return data
+
+    def get_patient_print_pn(self, obj):
+        """Stored personal_number, or principal's when patient is a dependent and has no own number."""
+        p = getattr(obj, 'patient', None)
+        if not p:
+            return ''
+        own = (p.personal_number or '').strip()
+        if own:
+            return own
+        if p.category == 'dependent':
+            principal = getattr(p, 'principal_staff', None)
+            if principal:
+                return (principal.personal_number or '').strip()
+        return ''
+
+    def get_patient_print_dept(self, obj):
+        """Stored division, or principal's when dependent has no own division."""
+        p = getattr(obj, 'patient', None)
+        if not p:
+            return ''
+        own = (p.division or '').strip()
+        if own:
+            return own
+        if p.category == 'dependent':
+            principal = getattr(p, 'principal_staff', None)
+            if principal:
+                return (principal.division or '').strip()
+        return ''
 
     def get_latest_responsibility_form(self, obj):
         latest = obj.responsibility_forms.order_by('-issue_date').first()
@@ -171,13 +225,28 @@ class ResponsibilityFormIssuanceSerializer(serializers.ModelSerializer):
     """Serializer for responsibility form issuances."""
 
     issued_by_name = serializers.CharField(source='issued_by.get_full_name', read_only=True, allow_null=True)
+    records_acknowledged_by_name = serializers.SerializerMethodField()
     referral_id_display = serializers.CharField(source='referral.referral_id', read_only=True)
     document_file_url = serializers.SerializerMethodField()
 
     class Meta:
         model = ResponsibilityFormIssuance
         fields = '__all__'
-        read_only_fields = ['sequence_number', 'issue_date', 'created_at', 'updated_at', 'issued_by']
+        read_only_fields = [
+            'sequence_number',
+            'issue_date',
+            'created_at',
+            'updated_at',
+            'issued_by',
+            'records_acknowledged_at',
+            'records_acknowledged_by',
+        ]
+
+    def get_records_acknowledged_by_name(self, obj):
+        u = getattr(obj, 'records_acknowledged_by', None)
+        if u is not None and hasattr(u, 'get_full_name'):
+            return u.get_full_name()
+        return None
 
     def get_document_file_url(self, obj):
         return obj.document_file.url if obj.document_file else None

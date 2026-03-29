@@ -25,6 +25,7 @@ export interface LabOrder {
   ordered_at: string;
   clinic: string;
   clinical_notes?: string;
+  icd10_diagnoses?: Array<{ code: string; name: string; type: string; notes?: string }>;
 }
 
 export interface LabTest {
@@ -57,6 +58,20 @@ export interface LabTest {
   notes?: string;
 }
 
+/** External / outsourced lab partners (managed in Django admin or via API). */
+export interface LabPartner {
+  id: number;
+  name: string;
+  code?: string;
+  phone?: string;
+  email?: string;
+  notes?: string;
+  is_active: boolean;
+  sort_order: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
 export interface LabTemplate {
   id: number;
   name: string;
@@ -85,6 +100,26 @@ export interface LabResult {
   overall_status?: 'normal' | 'abnormal' | 'critical';
   priority?: 'low' | 'medium' | 'high';
   created_at: string;
+}
+
+export interface LabAnalyticsSummary {
+  period: { start: string; end: string };
+  summary: {
+    orders_count: number;
+    tests_total: number;
+    tests_verified: number;
+    tests_results_ready: number;
+    tests_rejected: number;
+    unique_patients: number;
+  };
+  patients_by_gender: Record<string, number>;
+  patients_by_category: Record<string, number>;
+  npa_staff_linked_vs_non_npa: { npa_staff_linked: number; non_npa: number };
+  tests_by_status: Record<string, number>;
+  tests_by_processing_method: Record<string, number>;
+  by_day: Array<{ date: string; tests: number; orders: number }>;
+  top_tests: Array<{ code: string; name: string; count: number }>;
+  tests_by_template_category: Record<string, number>;
 }
 
 class LabService {
@@ -210,6 +245,47 @@ class LabService {
         }),
       });
     }
+  }
+
+  /**
+   * List outsourced lab partners (for processing dropdown).
+   */
+  async getLabPartners(params?: {
+    is_active?: boolean;
+    search?: string;
+    page?: number;
+    page_size?: number;
+  }): Promise<{ results: LabPartner[]; count: number }> {
+    const query = buildQueryString({
+      is_active: true,
+      page_size: 200,
+      ...params,
+    });
+    const path = `/laboratory/lab-partners/${query}`;
+    const raw = await apiFetch<LabPartner[] | { results?: LabPartner[]; count?: number }>(path);
+    const results = Array.isArray(raw) ? raw : raw?.results ?? [];
+    const count = Array.isArray(raw) ? raw.length : raw?.count ?? results.length;
+    return { results, count };
+  }
+
+  async createLabPartner(data: Partial<LabPartner>): Promise<LabPartner> {
+    return apiFetch<LabPartner>('/laboratory/lab-partners/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateLabPartner(id: number, data: Partial<LabPartner>): Promise<LabPartner> {
+    return apiFetch<LabPartner>(`/laboratory/lab-partners/${id}/`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteLabPartner(id: number): Promise<void> {
+    return apiFetch<void>(`/laboratory/lab-partners/${id}/`, {
+      method: 'DELETE',
+    });
   }
 
   /**
@@ -399,6 +475,11 @@ class LabService {
         // rejected_by and rejected_at will be set by the backend
       }),
     });
+  }
+
+  async getAnalyticsSummary(start: string, end: string): Promise<LabAnalyticsSummary> {
+    const query = buildQueryString({ start, end });
+    return apiFetch<LabAnalyticsSummary>(`/laboratory/analytics/summary/${query}`);
   }
 
   /**

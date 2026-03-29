@@ -115,7 +115,15 @@ class RadiologyOrderViewSet(viewsets.ModelViewSet):
 
 
     def get_queryset(self):
-        return RadiologyOrder.objects.all().select_related('patient', 'doctor', 'visit', 'consultation_session', 'created_by').prefetch_related('studies')
+        return (
+            RadiologyOrder.objects.all()
+            .select_related('patient', 'doctor', 'visit', 'consultation_session', 'created_by')
+            .prefetch_related(
+                'studies',
+                'consultation_session__diagnoses__icd10_code',
+                'visit__diagnoses__icd10_code',
+            )
+        )
 
     def list(self, request, *args, **kwargs):
         logger.debug("RadiologyOrderViewSet.list() called")

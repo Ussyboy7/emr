@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { StandardPagination } from '@/components/StandardPagination';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import Link from 'next/link';
@@ -19,6 +19,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { toast } from 'sonner';
 import { patientService, radiologyService } from '@/lib/services';
 import { PatientAvatar } from '@/components/PatientAvatar';
+import { Icd10DiagnosesBlock } from '@/components/medical/Icd10DiagnosesBlock';
 import { AdvancedDateRangeDialog } from '@/components/AdvancedDateRangeDialog';
 import { CustomDateRangeButton } from '@/components/CustomDateRangeButton';
 import {
@@ -277,10 +278,59 @@ export default function RadiologyOrdersPage() {
   const orderHasStudyStatus = (order: any, status: string): boolean =>
     (order.studies || []).some((s: any) => s.status === status);
 
-  // Load orders from API
+  const loadOrders = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent;
+    try {
+      if (!silent) {
+        setLoading(true);
+        setError(null);
+      }
+
+      const response = await radiologyService.getOrders({
+        page: 1,
+        page_size: 1000,
+      });
+
+      setOrders(response.results || []);
+    } catch (err: any) {
+      if (!silent) {
+        setError(err.message || 'Failed to load radiology orders');
+      }
+      console.error('Error loading radiology orders:', err);
+    } finally {
+      if (!silent) {
+        setLoading(false);
+      }
+    }
+  }, []);
+
   useEffect(() => {
     loadOrders();
-  }, []);
+  }, [loadOrders]);
+
+  const pollingPaused = useMemo(
+    () =>
+      isDateFilterDialogOpen ||
+      isViewDialogOpen ||
+      isProcessDialogOpen ||
+      isResultsDialogOpen ||
+      isAddStudyDialogOpen,
+    [
+      isDateFilterDialogOpen,
+      isViewDialogOpen,
+      isProcessDialogOpen,
+      isResultsDialogOpen,
+      isAddStudyDialogOpen,
+    ]
+  );
+
+  useEffect(() => {
+    if (pollingPaused) return;
+    const id = setInterval(() => {
+      void loadOrders({ silent: true });
+    }, 15000);
+    return () => clearInterval(id);
+  }, [loadOrders, pollingPaused]);
 
   useEffect(() => {
     if (!isViewDialogOpen) {
@@ -305,26 +355,6 @@ export default function RadiologyOrdersPage() {
       cancelled = true;
     };
   }, [isViewDialogOpen, selectedOrder?.patient_details?.id, selectedOrder?.patient]);
-
-
-  const loadOrders = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-
-      const response = await radiologyService.getOrders({
-        page: 1,
-        page_size: 1000,
-      });
-
-      setOrders(response.results || []);
-    } catch (err: any) {
-      setError(err.message || 'Failed to load radiology orders');
-      console.error('Error loading radiology orders:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const loadTemplates = async () => {
     setLoadingTemplates(true);
@@ -646,12 +676,6 @@ export default function RadiologyOrdersPage() {
             </h1>
             <p className="text-muted-foreground mt-1">Process studies individually - acquire, process & report results per study</p>
           </div>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={loadOrders} className="gap-2">
-              <RotateCcw className="h-4 w-4" />
-              Refresh
-            </Button>
-          </div>
         </div>
 
         {/* Stats */}
@@ -822,7 +846,7 @@ export default function RadiologyOrdersPage() {
               <CardContent className="p-8 text-center text-muted-foreground">
                 <AlertTriangle className="h-12 w-12 mx-auto mb-4 opacity-50" />
                 <p className="text-red-600 dark:text-red-400">{error}</p>
-                <Button variant="outline" className="mt-4" onClick={loadOrders}>Retry</Button>
+                <Button variant="outline" className="mt-4" onClick={() => void loadOrders()}>Retry</Button>
               </CardContent>
             </Card>
           ) : filteredOrders.length > 0 ? (
@@ -1209,6 +1233,8 @@ export default function RadiologyOrdersPage() {
                     <p className="text-xs text-muted-foreground">{selectedOrder.doctor_details?.specialty}</p>
                   </div>
                 </div>
+
+                <Icd10DiagnosesBlock diagnoses={selectedOrder.icd10_diagnoses} compact />
 
                 {/* Clinical Notes */}
                 {selectedOrder.clinical_notes && (

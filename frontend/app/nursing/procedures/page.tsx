@@ -102,6 +102,176 @@ const getTimeSince = (dateString: string) => {
   return `${diffHrs}h ${diffMins % 60}m ago`;
 };
 
+/** Anatomical sites where left/right must be recorded */
+const INJECTION_SITES_NEEDING_LATERALITY = new Set([
+  'Deltoid',
+  'Vastus Lateralis',
+  'Dorsogluteal',
+  'Ventrogluteal',
+  'Forearm vein',
+  'Hand vein',
+]);
+
+function injectionSiteNeedsLaterality(site: string): boolean {
+  return INJECTION_SITES_NEEDING_LATERALITY.has(site);
+}
+
+function getInjectionSiteOptions(route?: string): { value: string; label: string }[] {
+  const r = (route || '').toLowerCase();
+  const hasSc = r.includes('subcutaneous') || /\bsc\b/.test(r);
+  const hasIm = r.includes('intramuscular') || /\bim\b/.test(r);
+  const hasIv = r.includes('intravenous') || /\biv\b/.test(r) || r.includes('infusion');
+
+  if (hasIv && !hasIm && !hasSc) {
+    return [
+      { value: 'Forearm vein', label: 'Forearm (peripheral IV)' },
+      { value: 'Hand vein', label: 'Hand (peripheral IV)' },
+      { value: 'Other IV site', label: 'Other (specify in notes)' },
+    ];
+  }
+  if (hasSc && !hasIm) {
+    return [
+      { value: 'Abdomen', label: 'Abdomen (SC)' },
+      { value: 'Deltoid', label: 'Outer upper arm / Deltoid (SC)' },
+      { value: 'Vastus Lateralis', label: 'Anterolateral thigh (SC)' },
+      { value: 'Other SC site', label: 'Other (specify in notes)' },
+    ];
+  }
+  return [
+    { value: 'Deltoid', label: 'Deltoid (Upper arm)' },
+    { value: 'Vastus Lateralis', label: 'Vastus Lateralis (Thigh)' },
+    { value: 'Dorsogluteal', label: 'Dorsogluteal (Buttock)' },
+    { value: 'Ventrogluteal', label: 'Ventrogluteal (Hip)' },
+    { value: 'Abdomen', label: 'Abdomen' },
+    { value: 'Other', label: 'Other (specify in notes)' },
+  ];
+}
+
+const emptyInjectionForm = () => ({
+  site: '',
+  administeredTime: '',
+  notes: '',
+  laterality: '' as '' | 'Left' | 'Right',
+  immediateReaction: 'none' as 'none' | 'yes',
+  reactionDetail: '',
+});
+
+function formatAdministrationNote(timeHm: string): string {
+  const t = (timeHm || '').trim();
+  if (!t) return '';
+  const d = new Date();
+  const dateStr = d.toLocaleDateString(undefined, {
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+  });
+  return `Time of administration: ${t} on ${dateStr}`;
+}
+
+/** Parse nursing order descriptions produced by the consultation room (and legacy text). */
+function parseProcedureDetails(
+  procedureType: Procedure['type'],
+  description: string,
+  orderFrequency: string
+): Procedure['details'] {
+  const details: Procedure['details'] = {};
+  const d = (description || '').trim();
+  if (!d) return details;
+
+  if (procedureType === 'dressing') {
+    // "Laceration dressing at Left forearm. …" (consultation room)
+    const at = d.match(/^(.+?)\s+dressing\s+at\s+([^.]+?)(?:\.|\s*$)/i);
+    if (at) {
+      details.woundType = at[1].trim();
+      details.woundLocation = at[2].trim();
+    } else {
+      const dash = d.match(/^(.+?)\s*[-–—]\s*(.+)$/);
+      if (dash && dash[1].length > 1) {
+        details.woundType = dash[1].trim();
+        details.woundLocation = dash[2].trim();
+      }
+    }
+    details.instructions = d;
+    return details;
+  }
+
+  if (procedureType === 'injection' || procedureType === 'medication') {
+    // "IV Infusion: Fluid — rate. …"
+    if (/^IV\s+Infusion:/i.test(d)) {
+      const body = d.replace(/^IV\s+Infusion:\s*/i, '').trim();
+      const parts = body.split(/\s+[—-]\s+/);
+      details.medication = parts[0]?.replace(/[.,]\s*$/, '').trim() || body;
+      if (parts[1]) details.dosage = parts[1].split(/\./)[0]?.trim() || parts[1].trim();
+      if (orderFrequency) details.frequency = orderFrequency;
+      return details;
+    }
+    // "Name - dose via Route. …" — split on first " - " and " via " (avoid +? on one char)
+    const hy = d.indexOf(' - ');
+    if (hy > 0 && /\bvia\b/i.test(d)) {
+      const med = d.slice(0, hy).trim();
+      const afterHy = d.slice(hy + 3);
+      const vi = afterHy.split(/\bvia\b/i);
+      const dosePart = (vi[0] || '').replace(/[.,]\s*$/, '').trim();
+      const routePart = vi[1] ? vi[1].replace(/^\s+/i, '').replace(/[.,]\s*$/, '').trim().split(/\./)[0] : '';
+      if (med.length >= 2) {
+        details.medication = med;
+        if (dosePart) details.dosage = dosePart;
+        if (routePart) details.route = routePart;
+        if (orderFrequency) details.frequency = orderFrequency;
+        return details;
+      }
+    }
+    const hyphen = d.match(/^(.{2,})\s*-\s+(.+)$/);
+    if (hyphen) {
+      details.medication = hyphen[1].trim();
+      const rest = hyphen[2].trim();
+      const viaIdx = rest.search(/\bvia\b/i);
+      if (viaIdx >= 0) {
+        details.dosage = rest.slice(0, viaIdx).replace(/[.,]\s*$/, '').trim();
+        details.route = rest
+          .slice(viaIdx)
+          .replace(/^\s*via\s+/i, '')
+          .replace(/[.,]\s*$/, '')
+          .split(/\./)[0]
+          ?.trim() || '';
+      } else {
+        details.dosage = rest.split(/[.•]/)[0]?.trim() || rest;
+      }
+      if (orderFrequency) details.frequency = orderFrequency;
+      return details;
+    }
+    const firstSentence = d.split(/[.\n]/)[0]?.trim() || d;
+    details.medication = firstSentence.length >= 2 ? firstSentence : d;
+    if (orderFrequency) details.frequency = orderFrequency;
+    return details;
+  }
+
+  return details;
+}
+
+function procedureSummaryLine(procedure: Procedure): string {
+  const desc = (procedure.description || '').trim();
+  if (procedure.type === 'injection' || procedure.type === 'medication') {
+    const parts = [procedure.details.medication, procedure.details.dosage, procedure.details.route]
+      .filter((x) => x && String(x).trim() !== '');
+    if (parts.length) return parts.join(' · ');
+    return desc.length > 90 ? `${desc.slice(0, 90)}…` : desc;
+  }
+  if (procedure.type === 'dressing') {
+    const wt = procedure.details.woundType;
+    const wl = procedure.details.woundLocation;
+    if (wt && wl) return `${wt} · ${wl}`;
+    if (wt || wl) return [wt, wl].filter(Boolean).join(' · ');
+    return desc.length > 90 ? `${desc.slice(0, 90)}…` : desc;
+  }
+  if (procedure.type === 'ward_admission') {
+    const bits = [procedure.details.admissionDiagnosis, procedure.details.presentingComplaint].filter(Boolean);
+    if (bits.length) return bits.join(' · ');
+    return desc.length > 90 ? `${desc.slice(0, 90)}…` : desc;
+  }
+  return desc.length > 90 ? `${desc.slice(0, 90)}…` : desc;
+}
+
 // ==================== MAIN COMPONENT ====================
 export default function ProceduresQueuePage() {
   const [procedures, setProcedures] = useState<Procedure[]>([]);
@@ -130,10 +300,33 @@ export default function ProceduresQueuePage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Form states
-  const [injectionForm, setInjectionForm] = useState({ site: '', batchNumber: '', expiryDate: '', manufacturer: '', notes: '' });
+  const [injectionForm, setInjectionForm] = useState(() => emptyInjectionForm());
   const [dressingForm, setDressingForm] = useState({ dressingType: '', woundCondition: '', woundSize: '', drainage: '', painLevel: '', skinCondition: '', observations: '' });
   const [medicationForm, setMedicationForm] = useState({ site: '', notes: '' });
   const [wardAdmissionForm, setWardAdmissionForm] = useState({ notes: '' });
+
+  const resetForms = () => {
+    setInjectionForm(emptyInjectionForm());
+    setDressingForm({ dressingType: '', woundCondition: '', woundSize: '', drainage: '', painLevel: '', skinCondition: '', observations: '' });
+    setMedicationForm({ site: '', notes: '' });
+    setWardAdmissionForm({ notes: '' });
+  };
+
+  const injectionSiteOptionsForDialog = useMemo(() => {
+    if (!selectedProcedure || selectedProcedure.type !== 'injection') return [];
+    return getInjectionSiteOptions(selectedProcedure.details.route);
+  }, [selectedProcedure]);
+
+  const injectionCanComplete = useMemo(() => {
+    if (!selectedProcedure || selectedProcedure.type !== 'injection') return true;
+    const opts = injectionSiteOptionsForDialog;
+    const validSite = !!injectionForm.site && opts.some((o) => o.value === injectionForm.site);
+    if (!validSite) return false;
+    if (!injectionForm.administeredTime.trim()) return false;
+    if (injectionSiteNeedsLaterality(injectionForm.site) && !injectionForm.laterality) return false;
+    if (injectionForm.immediateReaction === 'yes' && !injectionForm.reactionDetail.trim()) return false;
+    return true;
+  }, [selectedProcedure, injectionForm, injectionSiteOptionsForDialog]);
   
   // Load nursing orders and wards from API
   useEffect(() => {
@@ -142,24 +335,25 @@ export default function ProceduresQueuePage() {
         setLoading(true);
         setError(null);
 
-        // Load wards for admission procedures
-        try {
-          const wardsResponse = await wardService.getWards({ status: 'active' });
-          setWards(wardsResponse.results || []);
-        } catch (wardError) {
-          console.warn('Could not load wards, using fallback:', wardError);
-          // Fallback wards if API fails
-          setWards([
-            { id: 8, ward_code: 'FEMALE-MED', name: 'Female Medical Ward', total_beds: 5, available_beds: 3 },
-            { id: 9, ward_code: 'MALE-MED', name: 'Male Medical Ward', total_beds: 5, available_beds: 2 },
-            { id: 10, ward_code: 'SURGICAL', name: 'Surgical Ward', total_beds: 10, available_beds: 7 },
-            { id: 11, ward_code: 'PEDIATRIC', name: 'Pediatric Ward', total_beds: 8, available_beds: 5 },
-            { id: 12, ward_code: 'MATERNITY', name: 'Maternity Ward', total_beds: 6, available_beds: 3 },
-          ]);
-        }
-        
-        // Queue page focuses on pending procedures only.
-        await loadOrders();
+        const wardsPromise = wardService
+          .getWards({ status: 'active' })
+          .then((wardsResponse) => {
+            setWards(wardsResponse.results || []);
+          })
+          .catch((wardError) => {
+            console.warn('Could not load wards, using fallback:', wardError);
+            // Fallback wards if API fails
+            setWards([
+              { id: 8, ward_code: 'FEMALE-MED', name: 'Female Medical Ward', total_beds: 5, available_beds: 3 },
+              { id: 9, ward_code: 'MALE-MED', name: 'Male Medical Ward', total_beds: 5, available_beds: 2 },
+              { id: 10, ward_code: 'SURGICAL', name: 'Surgical Ward', total_beds: 10, available_beds: 7 },
+              { id: 11, ward_code: 'PEDIATRIC', name: 'Pediatric Ward', total_beds: 8, available_beds: 5 },
+              { id: 12, ward_code: 'MATERNITY', name: 'Maternity Ward', total_beds: 6, available_beds: 3 },
+            ]);
+          });
+
+        // Load wards and queue concurrently to reduce first-render latency.
+        await Promise.all([wardsPromise, loadOrders()]);
       } catch (err) {
         console.error('Error loading nursing orders:', err);
         if (isAuthenticationError(err)) {
@@ -282,22 +476,23 @@ export default function ProceduresQueuePage() {
 
           const transformedProcedures = await Promise.all(orders.map(async (order: any) => {
         try {
-          const patient = await patientService.getPatient(order.patient);
-          
+          const [patient, history] = await Promise.all([
+            patientService.getPatient(order.patient),
+            patientService.getPatientHistory(order.patient).catch((historyErr) => {
+              // If history fetch fails, continue without allergies
+              console.warn(`Could not load allergies for patient ${order.patient}:`, historyErr);
+              return null;
+            }),
+          ]);
+
           // Load patient allergies from medical history
           let allergies: string[] = [];
-          try {
-            const history = await patientService.getPatientHistory(order.patient);
-            if (history && history.allergies) {
-              allergies = Array.isArray(history.allergies) 
-                ? history.allergies 
-                : typeof history.allergies === 'string' 
-                  ? history.allergies.split(/[,\n]/).map((a: string) => a.trim()).filter((a: string) => a)
-                  : [];
-            }
-          } catch (historyErr) {
-            // If history fetch fails, continue without allergies
-            console.warn(`Could not load allergies for patient ${order.patient}:`, historyErr);
+          if (history && history.allergies) {
+            allergies = Array.isArray(history.allergies)
+              ? history.allergies
+              : typeof history.allergies === 'string'
+                ? history.allergies.split(/[,\n]/).map((a: string) => a.trim()).filter((a: string) => a)
+                : [];
           }
           
           const typeMap: Record<string, Procedure['type']> = {
@@ -305,6 +500,7 @@ export default function ProceduresQueuePage() {
             'dressing': 'dressing',
             'wound_care': 'dressing',
             'medication': 'medication',
+            'iv infusion': 'injection',
             'ward admission': 'ward_admission',
             'observation admission': 'ward_admission',
             'ward_admission': 'ward_admission',
@@ -320,45 +516,15 @@ export default function ProceduresQueuePage() {
             'low': 'Low',
           };
           
-          // Parse order description to extract details
-          const details: Procedure['details'] = {};
           const description = order.description || '';
-          const instructions = order.instructions || '';
           let parsedWard = '';
-          
-          // Try to extract medication, dosage, route, frequency from description
-          if (procedureType === 'injection' || procedureType === 'medication') {
-            // Look for patterns like "Medication Name - Dosage" or "Medication (Route)"
-            const medMatch = description.match(/([^-•]+?)(?:\s*[-•]\s*([^•]+))?/);
-            if (medMatch) {
-              details.medication = medMatch[1].trim();
-              if (medMatch[2]) {
-                const rest = medMatch[2].trim();
-                // Try to extract dosage, route, frequency
-                const parts = rest.split(/[•,]/).map((p: string) => p.trim());
-                details.dosage = parts[0] || '';
-                details.route = parts.find((p: string) => /oral|im|iv|sc|sublingual|topical/i.test(p)) || '';
-                details.frequency = order.frequency || parts.find((p: string) => /daily|bd|tds|qds|prn/i.test(p)) || '';
-              }
-            }
-            if (order.frequency) details.frequency = order.frequency;
-          } else if (procedureType === 'dressing') {
-            // Look for wound type and location in description
-            const woundMatch = description.match(/([^-•]+?)(?:\s*[-•]\s*([^•]+))?/);
-            if (woundMatch) {
-              details.woundType = woundMatch[1].trim();
-              details.woundLocation = woundMatch[2]?.trim() || '';
-            }
-            details.instructions = instructions || description;
-          } else if (procedureType === 'ward_admission') {
-            // Support both legacy and new wording:
-            // "Ward admission to <WARD>" or "Observation admission ... to <WARD>"
+          let details: Procedure['details'] = {};
+
+          if (procedureType === 'ward_admission') {
             const wardMatch = description.match(/to\s+([^.,;]+)/i);
             if (wardMatch?.[1]) {
               parsedWard = wardMatch[1].trim();
             }
-            // Parse Diagnosis and Presenting complaint from order format:
-            // "Diagnosis: X. Presenting complaint: Y. instructions"
             const diagPcMatch = description.match(/Diagnosis:\s*(.+?)\.\s*Presenting complaint:\s*(.+?)(?:\s*\.|$)/i);
             if (diagPcMatch) {
               const diag = diagPcMatch[1].trim();
@@ -366,6 +532,8 @@ export default function ProceduresQueuePage() {
               details.admissionDiagnosis = diag && diag.toLowerCase() !== 'n/a' ? diag : undefined;
               details.presentingComplaint = pc && pc.toLowerCase() !== 'n/a' ? pc : undefined;
             }
+          } else {
+            details = parseProcedureDetails(procedureType, description, order.frequency || '');
           }
           
           return {
@@ -386,6 +554,7 @@ export default function ProceduresQueuePage() {
             priority: priorityMap[order.priority] || 'Medium',
             allergies,
             details,
+            description,
           } as Procedure;
         } catch (err) {
           return null;
@@ -403,8 +572,15 @@ export default function ProceduresQueuePage() {
   
 
   const openPerformDialog = (procedure: Procedure) => {
+    resetForms();
     setSelectedProcedure(procedure);
     setIsPerformDialogOpen(true);
+    if (procedure.type === 'injection') {
+      const now = new Date();
+      const hh = String(now.getHours()).padStart(2, '0');
+      const mm = String(now.getMinutes()).padStart(2, '0');
+      setInjectionForm({ ...emptyInjectionForm(), administeredTime: `${hh}:${mm}` });
+    }
   };
 
   const handleComplete = async () => {
@@ -416,6 +592,26 @@ export default function ProceduresQueuePage() {
       if (isNaN(orderId)) {
         toast.error('Invalid order ID');
         return;
+      }
+
+      if (selectedProcedure.type === 'injection') {
+        const opts = getInjectionSiteOptions(selectedProcedure.details.route);
+        if (!injectionForm.site || !opts.some((o) => o.value === injectionForm.site)) {
+          toast.error('Select a valid injection site for the ordered route.');
+          return;
+        }
+        if (!injectionForm.administeredTime.trim()) {
+          toast.error('Enter the time of administration.');
+          return;
+        }
+        if (injectionSiteNeedsLaterality(injectionForm.site) && !injectionForm.laterality) {
+          toast.error('Select left or right for this injection site.');
+          return;
+        }
+        if (injectionForm.immediateReaction === 'yes' && !injectionForm.reactionDetail.trim()) {
+          toast.error('Describe the immediate reaction, or set immediate reaction to None.');
+          return;
+        }
       }
       
       // Map frontend type to backend procedure_type
@@ -451,10 +647,12 @@ export default function ProceduresQueuePage() {
         
         // Include all form fields in notes
         const injectionNotes = [
+          formatAdministrationNote(injectionForm.administeredTime),
+          injectionSiteNeedsLaterality(injectionForm.site) && injectionForm.laterality && `Laterality: ${injectionForm.laterality}`,
           injectionForm.site && `Site: ${injectionForm.site}`,
-          injectionForm.batchNumber && `Batch #: ${injectionForm.batchNumber}`,
-          injectionForm.expiryDate && `Expiry: ${injectionForm.expiryDate}`,
-          injectionForm.manufacturer && `Manufacturer: ${injectionForm.manufacturer}`,
+          injectionForm.immediateReaction === 'yes'
+            ? `Immediate reaction: ${injectionForm.reactionDetail.trim()}`
+            : 'Immediate reaction: none',
           injectionForm.notes && `Notes: ${injectionForm.notes}`,
         ].filter(Boolean).join(' | ');
         
@@ -619,12 +817,21 @@ export default function ProceduresQueuePage() {
         notes = medicationNotes || medicationForm.notes || '';
       }
       
+      const performedSite =
+        selectedProcedure.type === 'ward_admission'
+          ? ''
+          : selectedProcedure.type === 'injection'
+            ? injectionSiteNeedsLaterality(injectionForm.site) && injectionForm.laterality
+              ? `${injectionForm.laterality} — ${injectionForm.site}`
+              : injectionForm.site
+            : medicationForm.site || '';
+
       const procedureData: any = {
         patient: patientDbId,  // Use correct patient database ID
         nursing_order: orderId,  // Link to the original nursing order
         procedure_type: typeMap[selectedProcedure.type] || 'other',
         description,
-        site: selectedProcedure.type === 'ward_admission' ? '' : (injectionForm.site || medicationForm.site || ''),
+        site: performedSite,
         notes,
         performed_by: currentUser?.id ? Number(currentUser.id) : null,  // Add the nurse who performed it
       };
@@ -639,11 +846,8 @@ export default function ProceduresQueuePage() {
         console.log('Procedure created:', procedureResponse);
       } catch (procedureError: any) {
         console.error('Procedure creation failed:', procedureError);
-        try {
-          const errorDetails = await procedureError.response?.text();
-          console.error('Procedure error details:', errorDetails);
-        } catch (e) {
-          console.error('Could not get procedure error details');
+        if (procedureError?.body != null) {
+          console.error('Procedure error details:', procedureError.body);
         }
         throw procedureError;
       }
@@ -667,19 +871,26 @@ export default function ProceduresQueuePage() {
 
       setIsPerformDialogOpen(false);
       resetForms();
-    } catch (err) {
-      console.error('Error completing procedure:', err);
-      toast.error('Failed to complete procedure. Please try again.');
+    } catch (err: any) {
+      const userMsg = err?.apiMessage || err?.message;
+      if (userMsg) {
+        toast.error(userMsg);
+      } else {
+        toast.error('Failed to complete procedure. Please try again.');
+      }
+      // Only log unexpected errors (not user-facing validation messages)
+      const isExpectedError =
+        userMsg?.includes('already admitted') ||
+        userMsg?.includes('Patient not found') ||
+        userMsg?.includes('No active ward') ||
+        userMsg?.includes('no visit record') ||
+        userMsg?.includes('Invalid order ID');
+      if (!isExpectedError) {
+        console.error('Error completing procedure:', err);
+      }
     } finally {
       setIsSubmitting(false);
     }
-  };
-
-  const resetForms = () => {
-    setInjectionForm({ site: '', batchNumber: '', expiryDate: '', manufacturer: '', notes: '' });
-    setDressingForm({ dressingType: '', woundCondition: '', woundSize: '', drainage: '', painLevel: '', skinCondition: '', observations: '' });
-    setMedicationForm({ site: '', notes: '' });
-    setWardAdmissionForm({ notes: '' });
   };
 
   // ==================== RENDER ====================
@@ -766,6 +977,7 @@ export default function ProceduresQueuePage() {
                     <SelectItem value="injection">💉 Injections</SelectItem>
                     <SelectItem value="dressing">🩹 Dressings</SelectItem>
                     <SelectItem value="medication">💊 Medications</SelectItem>
+                    <SelectItem value="ward_admission">🏥 Observation admission</SelectItem>
                   </SelectContent>
                 </Select>
                 <Select value={priorityFilter} onValueChange={setPriorityFilter}>
@@ -843,10 +1055,8 @@ export default function ProceduresQueuePage() {
                               <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-rose-500 text-rose-500">⚠️</Badge>
                             )}
                             {/* Procedure summary */}
-                            <span className="text-[10px] text-muted-foreground hidden md:inline truncate max-w-[200px]">
-                              {procedure.type === 'injection' && `${procedure.details.medication} ${procedure.details.dosage}`}
-                              {procedure.type === 'dressing' && `${procedure.details.woundType} - ${procedure.details.woundLocation}`}
-                              {procedure.type === 'medication' && procedure.details.medication}
+                            <span className="text-[10px] text-muted-foreground hidden md:inline truncate max-w-[min(100%,280px)]" title={procedure.description}>
+                              {procedureSummaryLine(procedure)}
                             </span>
                           </div>
                           <div className="flex items-center gap-1 flex-shrink-0">
@@ -879,8 +1089,12 @@ export default function ProceduresQueuePage() {
                           <span>{procedure.patientId}</span>
                           <span>•</span>
                           <span>{procedure.age}y {procedure.gender}</span>
-                          <span>•</span>
-                          <span>{procedure.ward}</span>
+                          {procedure.ward ? (
+                            <>
+                              <span>•</span>
+                              <span>{procedure.ward}</span>
+                            </>
+                          ) : null}
                           <span>•</span>
                           <span className="flex items-center gap-1"><Stethoscope className="h-3 w-3" />{procedure.orderedBy}</span>
                           <span>•</span>
@@ -920,7 +1134,16 @@ export default function ProceduresQueuePage() {
           />
 
         {/* Perform Dialog */}
-        <Dialog open={isPerformDialogOpen} onOpenChange={setIsPerformDialogOpen}>
+        <Dialog
+          open={isPerformDialogOpen}
+          onOpenChange={(open) => {
+            setIsPerformDialogOpen(open);
+            if (!open) {
+              resetForms();
+              setSelectedProcedure(null);
+            }
+          }}
+        >
           <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
@@ -976,34 +1199,86 @@ export default function ProceduresQueuePage() {
                 {/* Type-specific forms */}
                 {selectedProcedure.type === 'injection' && (
                   <div className="grid grid-cols-2 gap-4">
+                    <p className="col-span-2 text-xs text-muted-foreground">
+                      Sites match the ordered route when possible (IM / SC / IV). Confirm the vial or syringe matches the order before administering.
+                    </p>
                     <div className="space-y-2">
                       <Label>Injection Site *</Label>
-                      <Select value={injectionForm.site} onValueChange={(v) => setInjectionForm(p => ({ ...p, site: v }))}>
+                      <Select
+                        value={injectionForm.site}
+                        onValueChange={(v) =>
+                          setInjectionForm((p) => ({
+                            ...p,
+                            site: v,
+                            laterality: injectionSiteNeedsLaterality(v) ? p.laterality : '',
+                          }))
+                        }
+                      >
                         <SelectTrigger><SelectValue placeholder="Select site" /></SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="Deltoid">Deltoid (Upper arm)</SelectItem>
-                          <SelectItem value="Vastus Lateralis">Vastus Lateralis (Thigh)</SelectItem>
-                          <SelectItem value="Dorsogluteal">Dorsogluteal (Buttock)</SelectItem>
-                          <SelectItem value="Ventrogluteal">Ventrogluteal (Hip)</SelectItem>
-                          <SelectItem value="Abdomen">Abdomen</SelectItem>
+                          {injectionSiteOptionsForDialog.map((opt) => (
+                            <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
                     </div>
-                    <div className="space-y-2">
-                      <Label>Batch Number *</Label>
-                      <Input value={injectionForm.batchNumber} onChange={(e) => setInjectionForm(p => ({ ...p, batchNumber: e.target.value }))} placeholder="e.g., BATCH123456" />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Expiry Date *</Label>
-                      <Input type="date" value={injectionForm.expiryDate} onChange={(e) => setInjectionForm(p => ({ ...p, expiryDate: e.target.value }))} />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Manufacturer</Label>
-                      <Input value={injectionForm.manufacturer} onChange={(e) => setInjectionForm(p => ({ ...p, manufacturer: e.target.value }))} placeholder="e.g., Pfizer" />
+                    {injectionSiteNeedsLaterality(injectionForm.site) && (
+                      <div className="space-y-2">
+                        <Label>Laterality *</Label>
+                        <Select
+                          value={injectionForm.laterality}
+                          onValueChange={(v) => setInjectionForm((p) => ({ ...p, laterality: v as 'Left' | 'Right' }))}
+                        >
+                          <SelectTrigger><SelectValue placeholder="Left or right" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Left">Left</SelectItem>
+                            <SelectItem value="Right">Right</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+                    <div className="col-span-2 space-y-2">
+                      <Label>Time of administration *</Label>
+                      <Input
+                        type="time"
+                        value={injectionForm.administeredTime ?? ''}
+                        onChange={(e) => setInjectionForm((p) => ({ ...p, administeredTime: e.target.value }))}
+                      />
+                      <p className="text-xs text-muted-foreground">Defaults to current time; adjust if the dose was given earlier.</p>
                     </div>
                     <div className="col-span-2 space-y-2">
+                      <Label>Immediate reaction after dose</Label>
+                      <Select
+                        value={injectionForm.immediateReaction}
+                        onValueChange={(v) =>
+                          setInjectionForm((p) => ({
+                            ...p,
+                            immediateReaction: v as 'none' | 'yes',
+                            reactionDetail: v === 'none' ? '' : p.reactionDetail,
+                          }))
+                        }
+                      >
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">None observed</SelectItem>
+                          <SelectItem value="yes">Yes — describe below</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {injectionForm.immediateReaction === 'yes' && (
+                      <div className="col-span-2 space-y-2">
+                        <Label>Reaction details *</Label>
+                        <Textarea
+                          value={injectionForm.reactionDetail ?? ''}
+                          onChange={(e) => setInjectionForm((p) => ({ ...p, reactionDetail: e.target.value }))}
+                          placeholder="e.g., urticaria at site, nausea, dizziness..."
+                          rows={2}
+                        />
+                      </div>
+                    )}
+                    <div className="col-span-2 space-y-2">
                       <Label>Notes</Label>
-                      <Textarea value={injectionForm.notes} onChange={(e) => setInjectionForm(p => ({ ...p, notes: e.target.value }))} placeholder="Observations..." rows={2} />
+                      <Textarea value={injectionForm.notes ?? ''} onChange={(e) => setInjectionForm(p => ({ ...p, notes: e.target.value }))} placeholder="Observations..." rows={2} />
                     </div>
                   </div>
                 )}
@@ -1121,7 +1396,10 @@ export default function ProceduresQueuePage() {
 
             <DialogFooter>
               <Button variant="outline" onClick={() => setIsPerformDialogOpen(false)}>Cancel</Button>
-              <Button onClick={handleComplete} disabled={isSubmitting} className={`text-white ${
+              <Button
+                onClick={handleComplete}
+                disabled={isSubmitting || (selectedProcedure?.type === 'injection' && !injectionCanComplete)}
+                className={`text-white ${
                 selectedProcedure?.type === 'injection' ? 'bg-emerald-500 hover:bg-emerald-600' :
                 selectedProcedure?.type === 'dressing' ? 'bg-violet-500 hover:bg-violet-600' :
                 'bg-blue-500 hover:bg-blue-600'

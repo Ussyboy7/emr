@@ -136,7 +136,15 @@ export function TimelineTab({
         date: normalizeDate(vital.date),
         time: vital.time,
         title: 'Vital Signs Recorded',
-        description: `BP: ${vital.bp} | Pulse: ${vital.pulse} bpm | Temp: ${vital.temp}°C`,
+        description: [
+          `BP: ${vital.bp}`,
+          `Pulse: ${vital.pulse} bpm`,
+          `Temp: ${vital.temp}°C`,
+          vital.bloodSugar && vital.bloodSugar !== '-' ? `BS: ${vital.bloodSugar}` : null,
+          vital.randomBloodSugar && vital.randomBloodSugar !== '-' ? `RBS: ${vital.randomBloodSugar}` : null,
+        ]
+          .filter(Boolean)
+          .join(' | '),
         icon: Heart,
         metadata: vital,
       });

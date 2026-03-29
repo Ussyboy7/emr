@@ -17,6 +17,7 @@ import { toast } from "sonner";
 import { pharmacyService, type Prescription as ApiPrescription, type PrescriptionItem } from '@/lib/services';
 import { PHARMACY_LOCATIONS } from '@/lib/constants/pharmacy-locations';
 import { PatientAvatar } from "@/components/PatientAvatar";
+import { Icd10DiagnosesBlock } from '@/components/medical/Icd10DiagnosesBlock';
 import { 
   ClipboardList, Search, Eye, Clock, CheckCircle2, CheckCircle, Pill, Calendar,
   AlertTriangle, Package, User, Activity, Stethoscope,
@@ -159,11 +160,55 @@ export default function PrescriptionsPage() {
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [totalCount, setTotalCount] = useState(0);
   const [isLoadingPrescriptions, setIsLoadingPrescriptions] = useState(false);
+  const silentPollLockRef = useRef(false);
+  const userLoadInFlightRef = useRef(false);
 
-  // Load prescriptions from API
-  useEffect(() => {
-    loadPrescriptions();
-  }, [currentPage, itemsPerPage, statusFilter, searchQuery]);
+  const [showViewModal, setShowViewModal] = useState(false);
+  const [showDispenseModal, setShowDispenseModal] = useState(false);
+  const [showSubstitutionModal, setShowSubstitutionModal] = useState(false);
+
+  // Modal states (declared before load effects — hooks order)
+  const [selectedPrescription, setSelectedPrescription] = useState<Prescription | null>(null);
+  const [selectedPrescriptionMedications, setSelectedPrescriptionMedications] = useState<any[]>([]);
+
+  const [selectedMedications, setSelectedMedications] = useState<string[]>([]);
+  const [dispenseQuantities, setDispenseQuantities] = useState<Record<string, number>>({});
+  const [dispenseCoverageQuantities, setDispenseCoverageQuantities] = useState<Record<string, number>>({});
+  const [dispenseNotes, setDispenseNotes] = useState('');
+  const [selectedBatches, setSelectedBatches] = useState<Record<string, string>>({});
+  const [medicationBatches, setMedicationBatches] = useState<Record<string, MedicationBatch[]>>({});
+  const [substitutionMed, setSubstitutionMed] = useState<MedicationItem | null>(null);
+  const [detectedInteractions, setDetectedInteractions] = useState<DrugInteraction[]>([]);
+  const [interactionAcknowledged, setInteractionAcknowledged] = useState(false);
+
+  // Substitution form state
+  const [substitutionForm, setSubstitutionForm] = useState({
+    reason: '',
+    selectedSubstitute: '',
+    selectedSubstituteBrand: '', // When substituting with generic, pharmacist picks brand
+    notes: '',
+  });
+  const [availableSubstitutes, setAvailableSubstitutes] = useState<SubstituteOption[]>([]);
+  const [allAvailableMedications, setAllAvailableMedications] = useState<SubstituteOption[]>([]);
+  const [substituteSearchQuery, setSubstituteSearchQuery] = useState('');
+  const [substituteSearchResults, setSubstituteSearchResults] = useState<SubstituteOption[]>([]);
+  const [substituteBrandOptions, setSubstituteBrandOptions] = useState<SubstituteOption[]>([]);
+  const [isSearchingSubstitutes, setIsSearchingSubstitutes] = useState(false);
+  const [isLoadingSubstituteBrands, setIsLoadingSubstituteBrands] = useState(false);
+  const [brandSelectionTargetName, setBrandSelectionTargetName] = useState('');
+  const [brandSelectionMode, setBrandSelectionMode] = useState<'select' | 'switch'>('select');
+
+  // Performance optimizations - Caching and loading states
+  const [isLoadingBrands, setIsLoadingBrands] = useState(false);
+  const [isLoadingSubstitutes, setIsLoadingSubstitutes] = useState(false);
+  const medicationsCache = useRef<SubstituteOption[] | null>(null);
+  const genericsCache = useRef<SubstituteOption[] | null>(null);
+  const brandSelectionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const substituteTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const brandSelectionGenericIdRef = useRef<number | null>(null);
+
+  // Print functionality
+  const [printing, setPrinting] = useState(false);
 
   // Transform medication data with status determination
   const transformMedications = (medications: any[], prescriptionStatus: string) => {
@@ -239,16 +284,27 @@ export default function PrescriptionsPage() {
     });
   };
 
-  const loadPrescriptions = async () => {
-    // Prevent concurrent calls
-    if (isLoadingPrescriptions) {
-      return;
-    }
-
-    try {
+  const loadPrescriptions = async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent;
+    if (!silent) {
+      if (userLoadInFlightRef.current) {
+        return;
+      }
+      userLoadInFlightRef.current = true;
       setIsLoadingPrescriptions(true);
       setLoading(true);
       setError(null);
+    } else {
+      if (userLoadInFlightRef.current) {
+        return;
+      }
+      if (silentPollLockRef.current) {
+        return;
+      }
+      silentPollLockRef.current = true;
+    }
+
+    try {
       const response = await pharmacyService.getPrescriptions({
         status: statusFilter !== 'all' ? statusFilter : undefined,
         page: currentPage,
@@ -383,61 +439,47 @@ export default function PrescriptionsPage() {
       }));
       setPrescriptions(transformed as Prescription[]);
     } catch (err: any) {
-      setError(err.message || 'Failed to load prescriptions');
+      if (!silent) {
+        setError(err.message || 'Failed to load prescriptions');
+      }
       console.error('Error loading prescriptions:', err);
     } finally {
-      setLoading(false);
-      setIsLoadingPrescriptions(false);
+      if (!silent) {
+        userLoadInFlightRef.current = false;
+        setLoading(false);
+        setIsLoadingPrescriptions(false);
+      } else {
+        silentPollLockRef.current = false;
+      }
     }
   };
-  
-  // Modal states
-  const [selectedPrescription, setSelectedPrescription] = useState<Prescription | null>(null);
-  const [selectedPrescriptionMedications, setSelectedPrescriptionMedications] = useState<any[]>([]);
 
-  const [showViewModal, setShowViewModal] = useState(false);
-  const [showDispenseModal, setShowDispenseModal] = useState(false);
-  const [selectedMedications, setSelectedMedications] = useState<string[]>([]);
-  const [dispenseQuantities, setDispenseQuantities] = useState<Record<string, number>>({});
-  const [dispenseCoverageQuantities, setDispenseCoverageQuantities] = useState<Record<string, number>>({});
-  const [dispenseNotes, setDispenseNotes] = useState('');
-  const [selectedBatches, setSelectedBatches] = useState<Record<string, string>>({});
-  const [medicationBatches, setMedicationBatches] = useState<Record<string, MedicationBatch[]>>({});
-  const [showSubstitutionModal, setShowSubstitutionModal] = useState(false);
-  const [substitutionMed, setSubstitutionMed] = useState<MedicationItem | null>(null);
-  const [detectedInteractions, setDetectedInteractions] = useState<DrugInteraction[]>([]);
-  const [interactionAcknowledged, setInteractionAcknowledged] = useState(false);
-  
-  // Substitution form state
-  const [substitutionForm, setSubstitutionForm] = useState({
-    reason: '',
-    selectedSubstitute: '',
-    selectedSubstituteBrand: '', // When substituting with generic, pharmacist picks brand
-    notes: '',
-  });
-  const [availableSubstitutes, setAvailableSubstitutes] = useState<SubstituteOption[]>([]);
-  const [allAvailableMedications, setAllAvailableMedications] = useState<SubstituteOption[]>([]);
-  const [substituteSearchQuery, setSubstituteSearchQuery] = useState('');
-  const [substituteSearchResults, setSubstituteSearchResults] = useState<SubstituteOption[]>([]);
-  const [substituteBrandOptions, setSubstituteBrandOptions] = useState<SubstituteOption[]>([]);
-  const [isSearchingSubstitutes, setIsSearchingSubstitutes] = useState(false);
-  const [isLoadingSubstituteBrands, setIsLoadingSubstituteBrands] = useState(false);
-  const [brandSelectionTargetName, setBrandSelectionTargetName] = useState('');
-  const [brandSelectionMode, setBrandSelectionMode] = useState<'select' | 'switch'>('select');
+  const loadPrescriptionsRef = useRef(loadPrescriptions);
+  loadPrescriptionsRef.current = loadPrescriptions;
 
-  // Performance optimizations - Caching and loading states
-  const [isLoadingBrands, setIsLoadingBrands] = useState(false);
-  const [isLoadingSubstitutes, setIsLoadingSubstitutes] = useState(false);
-  const medicationsCache = useRef<SubstituteOption[] | null>(null);
-  const genericsCache = useRef<SubstituteOption[] | null>(null);
-  const brandSelectionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const substituteTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const brandSelectionGenericIdRef = useRef<number | null>(null);
+  useEffect(() => {
+    void loadPrescriptions();
+  }, [currentPage, itemsPerPage, statusFilter, searchQuery]);
+
+  useEffect(() => {
+    if (showViewModal || showDispenseModal || showSubstitutionModal) {
+      return;
+    }
+    const id = setInterval(() => {
+      void loadPrescriptionsRef.current({ silent: true });
+    }, 15000);
+    return () => clearInterval(id);
+  }, [
+    currentPage,
+    itemsPerPage,
+    statusFilter,
+    searchQuery,
+    showViewModal,
+    showDispenseModal,
+    showSubstitutionModal,
+  ]);
 
   // Status update functionality
-
-  // Print functionality
-  const [printing, setPrinting] = useState(false);
 
   // Helper functions for filtering
   const normalizeGender = (value: unknown): string => {
@@ -765,9 +807,23 @@ export default function PrescriptionsPage() {
   };
 
   const handleStartDispense = async (prescription: Prescription) => {
-    setSelectedPrescription(prescription);
-    // Transform medications to include calculated properties
-    const transformedMedications = transformMedications(prescription.medications, prescription.status);
+    let freshRx: any = null;
+    try {
+      freshRx = await pharmacyService.getPrescription(Number(prescription.id));
+    } catch (e) {
+      console.error('Error fetching prescription for dispense:', e);
+    }
+    const uiStatus =
+      freshRx?.status === 'pending' ? 'Pending' :
+      freshRx?.status === 'dispensing' ? 'Processing' :
+      freshRx?.status === 'dispensed' ? 'Dispensed' :
+      freshRx?.status === 'partially_dispensed' ? 'Partially Dispensed' :
+      prescription.status;
+    const hydrated = freshRx
+      ? { ...prescription, ...freshRx, status: uiStatus }
+      : { ...prescription, status: uiStatus };
+    setSelectedPrescription(hydrated as any);
+    const transformedMedications = transformMedications(hydrated.medications || [], hydrated.status);
     setSelectedPrescriptionMedications(transformedMedications);
 
     const initialQuantities: Record<string, number> = {};
@@ -798,9 +854,13 @@ export default function PrescriptionsPage() {
               medicationIdToUse = medSearch.results[0].id;
             }
           } else {
-            // Regular medication - get from prescription details
-            const prescriptionId = parseInt(prescription.id) || prescription.id;
-            const rxDetail = await pharmacyService.getPrescription(typeof prescriptionId === 'number' ? prescriptionId : parseInt(prescriptionId));
+            // Regular medication - get from prescription details (reuse fresh fetch when available)
+            const prescriptionId = parseInt(String(hydrated.id), 10) || hydrated.id;
+            const rxDetail =
+              freshRx ||
+              (await pharmacyService.getPrescription(
+                typeof prescriptionId === 'number' ? prescriptionId : parseInt(String(prescriptionId), 10)
+              ));
             const rxMed = rxDetail.medications.find((m: any) => m.id.toString() === med.id);
             
             if (rxMed && rxMed.medication) {
@@ -1449,7 +1509,7 @@ export default function PrescriptionsPage() {
               <CardContent className="p-8 text-center text-muted-foreground">
                 <AlertTriangle className="h-12 w-12 mx-auto mb-4 opacity-50" />
                 <p className="text-red-600 dark:text-red-400">{error}</p>
-                <Button variant="outline" className="mt-4" onClick={loadPrescriptions}>Retry</Button>
+                <Button variant="outline" className="mt-4" onClick={() => void loadPrescriptions()}>Retry</Button>
               </CardContent>
             </Card>
           ) : filteredPrescriptions.length > 0 ? (
@@ -1649,6 +1709,8 @@ export default function PrescriptionsPage() {
                   </div>
                 )}
 
+                <Icd10DiagnosesBlock diagnoses={(selectedPrescription as any).icd10_diagnoses} compact />
+
                 {/* Clinical Notes */}
                 {selectedPrescription.clinicalNotes && (
                   <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
@@ -1792,6 +1854,8 @@ export default function PrescriptionsPage() {
                     ) : null;
                   })()}
                 </div>
+
+                <Icd10DiagnosesBlock diagnoses={(selectedPrescription as any).icd10_diagnoses} compact />
 
                 {/* Prescription Details */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 bg-muted/30 rounded-lg p-4 text-sm">

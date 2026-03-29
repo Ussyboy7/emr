@@ -200,7 +200,7 @@ class WardService {
   }
 
   /**
-   * Discharge patient
+   * Discharge patient (direct — used when there is no pending_discharge step)
    */
   async dischargePatient(admissionId: number, data: {
     discharge_type: string;
@@ -213,6 +213,64 @@ class WardService {
     return apiFetch<PatientAdmission>(`/admissions/${admissionId}/discharge/`, {
       method: 'POST',
       body: JSON.stringify(data),
+    });
+  }
+
+  /**
+   * Step 1 of 2-step discharge: doctor fills in discharge details and sets
+   * status to pending_discharge. Nurse will confirm in Step 2.
+   */
+  async initiateDischarge(admissionId: number, data: {
+    discharge_type: string;
+    discharge_diagnosis: string;
+    discharge_notes?: string;
+    discharge_summary?: string;
+    follow_up_instructions?: string;
+  }): Promise<PatientAdmission> {
+    return apiFetch<PatientAdmission>(`/admissions/${admissionId}/initiate_discharge/`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  /**
+   * Step 2 of 2-step discharge: nurse confirms the patient has left and the
+   * bed is vacated. Calls the full discharge endpoint with pre-filled data.
+   */
+  async completeDischarge(admissionId: number, confirmedByNurseId?: number): Promise<PatientAdmission> {
+    return apiFetch<PatientAdmission>(`/admissions/${admissionId}/discharge/`, {
+      method: 'POST',
+      body: JSON.stringify({
+        confirmed_by_nurse: confirmedByNurseId ?? undefined,
+      }),
+    });
+  }
+
+  /**
+   * Update admission details (PATCH)
+   */
+  async updateAdmission(admissionId: number, data: {
+    current_condition?: string;
+    admission_notes?: string;
+    discharge_diagnosis?: string;
+    discharge_notes?: string;
+    discharge_summary?: string;
+    follow_up_instructions?: string;
+  }): Promise<PatientAdmission> {
+    return apiFetch<PatientAdmission>(`/admissions/${admissionId}/`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  /**
+   * Assign or change a patient's bed. Pass bedId=null to remove from bed.
+   * Returns the updated admission (with bed_number populated).
+   */
+  async assignBedToAdmission(admissionId: number, bedId: number | null): Promise<PatientAdmission> {
+    return apiFetch<PatientAdmission>(`/admissions/${admissionId}/assign_bed/`, {
+      method: 'POST',
+      body: JSON.stringify({ bed_id: bedId }),
     });
   }
 
@@ -282,15 +340,6 @@ class WardService {
     return apiFetch<{ results: Bed[]; count: number }>(`/beds/${query}`);
   }
 
-  /**
-   * Assign bed to patient
-   */
-  async assignBed(bedId: number, admissionId: number): Promise<Bed> {
-    return apiFetch<Bed>(`/beds/${bedId}/assign_patient/`, {
-      method: 'POST',
-      body: JSON.stringify({ admission: admissionId }),
-    });
-  }
 }
 
 export const wardService = new WardService();

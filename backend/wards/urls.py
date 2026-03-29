@@ -16,8 +16,10 @@ urlpatterns = [
     # Admission endpoints
     path('admissions/', PatientAdmissionViewSet.as_view({'get': 'list', 'post': 'create'}), name='admission-list'),
     path('admissions/<int:pk>/', PatientAdmissionViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'update', 'delete': 'destroy'}), name='admission-detail'),
+    path('admissions/<int:pk>/initiate_discharge/', PatientAdmissionViewSet.as_view({'post': 'initiate_discharge'}), name='admission-initiate-discharge'),
     path('admissions/<int:pk>/discharge/', PatientAdmissionViewSet.as_view({'post': 'discharge'}), name='admission-discharge'),
     path('admissions/<int:pk>/transfer/', PatientAdmissionViewSet.as_view({'post': 'transfer'}), name='admission-transfer'),
+    path('admissions/<int:pk>/assign_bed/', PatientAdmissionViewSet.as_view({'post': 'assign_bed'}), name='admission-assign-bed'),
 
     # Bed endpoints
     path('beds/', BedViewSet.as_view({'get': 'list', 'post': 'create'}), name='bed-list'),

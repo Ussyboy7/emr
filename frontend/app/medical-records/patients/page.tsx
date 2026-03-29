@@ -236,6 +236,8 @@ export default function PatientsListPage() {
   // Edit form state
   const [editForm, setEditForm] = useState({
     title: '',
+    personalNumber: '',
+    gender: 'male' as 'male' | 'female',
     firstName: '',
     lastName: '',
     middleName: '',
@@ -264,6 +266,11 @@ export default function PatientsListPage() {
     nokAddress: '',
   });
   const [editFormLoading, setEditFormLoading] = useState(false);
+  /** Principal (employee/retiree) P.N. when editing a dependent — read-only; link is via API, not edited here */
+  const [editPrincipalInfo, setEditPrincipalInfo] = useState<{
+    personalNumber: string;
+    fullName: string;
+  } | null>(null);
 
   // Retiree conversion state
   const [isRetireeConversionOpen, setIsRetireeConversionOpen] = useState(false);
@@ -464,6 +471,8 @@ export default function PatientsListPage() {
     // Reset form immediately to clear any stale data from previous edits
     setEditForm({
       title: '',
+      personalNumber: '',
+      gender: 'male',
       firstName: '',
       lastName: '',
       middleName: '',
@@ -493,7 +502,8 @@ export default function PatientsListPage() {
     });
     setPhotoPreview(null);
     setPhotoFile(null);
-    
+    setEditPrincipalInfo(null);
+
     try {
       // Look up patient by patient_id to get numeric ID and full data
       const patientIdStr = patient.id.trim();
@@ -518,7 +528,28 @@ export default function PatientsListPage() {
       
       // Always fetch full patient details using numeric ID (this returns PatientSerializer with all fields)
       apiPatient = await patientService.getPatient(numericId);
-      
+
+      let historyPayload: Awaited<ReturnType<typeof patientService.getPatientHistory>> | null = null;
+      try {
+        historyPayload = await patientService.getPatientHistory(numericId);
+      } catch (historyErr: any) {
+        console.warn('Failed to load patient history:', historyErr);
+      }
+
+      if (apiPatient.category === 'dependent' && apiPatient.principal_staff) {
+        try {
+          const principal = await patientService.getPatient(apiPatient.principal_staff);
+          setEditPrincipalInfo({
+            personalNumber: (principal.personal_number || '').trim(),
+            fullName: principal.full_name || '',
+          });
+        } catch {
+          setEditPrincipalInfo(null);
+        }
+      } else {
+        setEditPrincipalInfo(null);
+      }
+
       // Parse date of birth
       let dobFormatted = '';
       if (apiPatient.date_of_birth) {
@@ -538,10 +569,16 @@ export default function PatientsListPage() {
       const normalizedEmployeeType = apiPatient.employee_type ? apiPatient.employee_type.charAt(0).toUpperCase() + apiPatient.employee_type.slice(1).toLowerCase() : '';
       const normalizedNokRelationship = apiPatient.nok_relationship ? apiPatient.nok_relationship.charAt(0).toUpperCase() + apiPatient.nok_relationship.slice(1).toLowerCase() : '';
       
+      const mergedOccupation =
+        (apiPatient.occupation || '').trim() ||
+        (historyPayload?.social_history?.occupation || '').trim();
+
       // Use a single setEditForm call to ensure all fields update together
       // Note: API returns snake_case (first_name, surname, etc.)
       const formData = {
         title: normalizedTitle,
+        personalNumber: (apiPatient.personal_number || '').trim(),
+        gender: (apiPatient.gender === 'female' ? 'female' : 'male') as 'male' | 'female',
         firstName: apiPatient.first_name || '',
         lastName: apiPatient.surname || '',
         middleName: apiPatient.middle_name || '',
@@ -549,7 +586,7 @@ export default function PatientsListPage() {
         maritalStatus: normalizedMaritalStatus,
         religion: apiPatient.religion || '',
         tribe: apiPatient.tribe || '',
-        occupation: apiPatient.occupation || '',
+        occupation: mergedOccupation,
         phone: apiPatient.phone || '',
         email: apiPatient.email || '',
         residentialAddress: apiPatient.residential_address || '',
@@ -581,24 +618,21 @@ export default function PatientsListPage() {
       }
       setPhotoFile(null);
       
-      // Load medical history
-      try {
-        const history = await patientService.getPatientHistory(numericId);
+      // Medical history (occupation is edited once under Personal Information; synced on save)
+      if (historyPayload) {
         setMedicalHistory({
-          allergies: Array.isArray(history.allergies) ? history.allergies : [],
-          diagnoses: Array.isArray(history.diagnoses) ? history.diagnoses : [],
-          surgicalHistory: Array.isArray(history.surgical_history) ? history.surgical_history : [],
-          familyHistory: Array.isArray(history.family_history) ? history.family_history : [],
+          allergies: Array.isArray(historyPayload.allergies) ? historyPayload.allergies : [],
+          diagnoses: Array.isArray(historyPayload.diagnoses) ? historyPayload.diagnoses : [],
+          surgicalHistory: Array.isArray(historyPayload.surgical_history) ? historyPayload.surgical_history : [],
+          familyHistory: Array.isArray(historyPayload.family_history) ? historyPayload.family_history : [],
           socialHistory: {
-            smoking: history.social_history?.smoking || '',
-            alcohol: history.social_history?.alcohol || '',
-            exercise: history.social_history?.exercise || '',
-            occupation: history.social_history?.occupation || '',
+            smoking: historyPayload.social_history?.smoking || '',
+            alcohol: historyPayload.social_history?.alcohol || '',
+            exercise: historyPayload.social_history?.exercise || '',
+            occupation: '',
           },
         });
-      } catch (historyErr: any) {
-        console.warn('Failed to load medical history:', historyErr);
-        // Initialize with empty values if history doesn't exist
+      } else {
         setMedicalHistory({
           allergies: [],
           diagnoses: [],
@@ -679,12 +713,25 @@ export default function PatientsListPage() {
         setIsSubmitting(false);
         return;
       }
+      if (editForm.gender !== 'male' && editForm.gender !== 'female') {
+        toast.error('Gender is required.');
+        setIsSubmitting(false);
+        return;
+      }
+      const cat = selectedPatient.category;
+      if ((cat === 'Employee' || cat === 'Retiree') && !editForm.personalNumber.trim()) {
+        toast.error('Personal number is required for employees and retirees.');
+        setIsSubmitting(false);
+        return;
+      }
 
       // Map frontend form fields to backend API fields (snake_case).
       // Optional fields use '' when cleared so PATCH actually clears the server values
       // (omitting a key leaves the previous value unchanged).
       const updateData: Partial<ApiPatient> = {
         title: editForm.title.trim() ? editForm.title.toLowerCase().trim() : '',
+        gender: editForm.gender,
+        personal_number: editForm.personalNumber.trim(),
         first_name: first,
         surname: last,
         middle_name: editForm.middleName.trim(),
@@ -716,11 +763,8 @@ export default function PatientsListPage() {
           : '',
         nok_address: editForm.nokAddress.trim(),
         nok_phone: editForm.nokPhone.trim(),
+        occupation: editForm.occupation.trim(),
       };
-
-      if (selectedPatient.category === 'Dependent' || selectedPatient.category === 'Retiree') {
-        (updateData as any).occupation = editForm.occupation.trim();
-      }
 
       // Handle photo upload if a new photo was selected
       if (photoFile) {
@@ -799,7 +843,10 @@ export default function PatientsListPage() {
           diagnoses: medicalHistory.diagnoses,
           surgical_history: medicalHistory.surgicalHistory,
           family_history: medicalHistory.familyHistory,
-          social_history: medicalHistory.socialHistory,
+          social_history: {
+            ...medicalHistory.socialHistory,
+            occupation: editForm.occupation.trim(),
+          },
         });
       } catch (historyErr: any) {
         console.warn('Failed to update medical history:', historyErr);
@@ -1227,9 +1274,53 @@ export default function PatientsListPage() {
 
                     <Separator />
 
-                    {/* Personal Information */}
+                    {/* Personal Information — same core fields as Register Patient */}
                     <div className="space-y-4">
                       <h3 className="text-sm font-semibold text-foreground">Personal Information</h3>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label>Gender *</Label>
+                          <Select
+                            value={editForm.gender}
+                            onValueChange={(v) => setEditForm((prev) => ({ ...prev, gender: v as "male" | "female" }))}
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select gender" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="male">Male</SelectItem>
+                              <SelectItem value="female">Female</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        {selectedPatient.category !== "NonNPA" &&
+                          selectedPatient.category !== "Dependent" && (
+                            <div className="space-y-2">
+                              <Label>Personal number *</Label>
+                              <Input
+                                value={editForm.personalNumber}
+                                onChange={(e) => setEditForm((prev) => ({ ...prev, personalNumber: e.target.value }))}
+                                placeholder="e.g. A2962 (NPA personal number)"
+                              />
+                            </div>
+                          )}
+                        {selectedPatient.category === "Dependent" && (
+                          <div className="space-y-2">
+                            <Label>Principal personal number</Label>
+                            <Input
+                              value={editPrincipalInfo?.personalNumber || ""}
+                              readOnly
+                              className="bg-muted"
+                              placeholder="—"
+                            />
+                            <p className="text-xs text-muted-foreground">
+                              {editPrincipalInfo?.fullName
+                                ? `Linked to ${editPrincipalInfo.fullName}. To change the principal, use Manage Dependents.`
+                                : "Principal record not loaded or not linked."}
+                            </p>
+                          </div>
+                        )}
+                      </div>
                       <div className="grid grid-cols-4 gap-4">
                         <div className="space-y-2">
                           <Label>Title</Label>
@@ -1270,6 +1361,19 @@ export default function PatientsListPage() {
                           </Select>
                         </div>
                       </div>
+                      {selectedPatient.category === "Dependent" && (
+                        <div className="space-y-2">
+                          <Label>Personal number (dependent)</Label>
+                          <Input
+                            value={editForm.personalNumber}
+                            onChange={(e) => setEditForm((prev) => ({ ...prev, personalNumber: e.target.value }))}
+                            placeholder="This dependent's P.N. from registration (not the principal's)"
+                          />
+                          <p className="text-xs text-muted-foreground">
+                            The principal's employee/retiree P.N. is shown above. This field is this patient's own personal number.
+                          </p>
+                        </div>
+                      )}
                       <div className="grid grid-cols-3 gap-4">
                         <div className="space-y-2">
                           <Label>Religion</Label>
@@ -1291,16 +1395,14 @@ export default function PatientsListPage() {
                             </SelectContent>
                           </Select>
                         </div>
-                        {(selectedPatient.category === 'Dependent' || selectedPatient.category === 'Retiree') && (
-                          <div className="space-y-2">
-                            <Label>Occupation</Label>
-                            <Input 
-                              value={editForm.occupation} 
-                              onChange={(e) => setEditForm(prev => ({ ...prev, occupation: e.target.value }))} 
-                              placeholder="Enter occupation" 
-                            />
-                          </div>
-                        )}
+                        <div className="space-y-2">
+                          <Label>Occupation</Label>
+                          <Input
+                            value={editForm.occupation}
+                            onChange={(e) => setEditForm((prev) => ({ ...prev, occupation: e.target.value }))}
+                            placeholder="e.g. Senior Engineer - NPA"
+                          />
+                        </div>
                       </div>
                     </div>
 
@@ -1776,7 +1878,7 @@ export default function PatientsListPage() {
                               </SelectContent>
                             </Select>
                           </div>
-                          <div className="space-y-1">
+                          <div className="space-y-1 sm:col-span-2">
                             <Label className="text-xs">Exercise</Label>
                             <Input
                               value={medicalHistory.socialHistory.exercise}
@@ -1790,30 +1892,19 @@ export default function PatientsListPage() {
                               className="h-8 text-xs"
                             />
                           </div>
-                          <div className="space-y-1">
-                            <Label className="text-xs">Occupation</Label>
-                            <Input
-                              value={medicalHistory.socialHistory.occupation}
-                              onChange={(e) => {
-                                setMedicalHistory(prev => ({
-                                  ...prev,
-                                  socialHistory: { ...prev.socialHistory, occupation: e.target.value },
-                                }));
-                              }}
-                              placeholder="e.g., Senior Engineer - NPA"
-                              className="h-8 text-xs"
-                            />
-                          </div>
                         </div>
+                        <p className="text-xs text-muted-foreground">
+                          Occupation is set under Personal Information above (same as registration).
+                        </p>
                       </div>
                     </div>
 
-                    {/* Work Information (if Employee) */}
-                    {selectedPatient.category === 'Employee' && (
+                    {/* Work Info — same as registration (employee + retiree) */}
+                    {(selectedPatient.category === 'Employee' || selectedPatient.category === 'Retiree') && (
                       <>
                         <Separator />
                         <div className="space-y-4">
-                          <h3 className="text-sm font-semibold text-foreground">Employment Details</h3>
+                          <h3 className="text-sm font-semibold text-foreground">Work Information</h3>
                           <div className="grid grid-cols-3 gap-4">
                             <div className="space-y-2">
                               <Label>Employee Type</Label>
@@ -1853,14 +1944,12 @@ export default function PatientsListPage() {
                       </>
                     )}
 
-                    {/* Location field for non-Employee categories (except Dependent) */}
-                    {(selectedPatient.category === 'Retiree' || selectedPatient.category === 'NonNPA') && (
+                    {/* Non-NPA: location / type (retiree work info handled above) */}
+                    {selectedPatient.category === 'NonNPA' && (
                       <>
                         <Separator />
                         <div className="space-y-4">
-                          <h3 className="text-sm font-semibold text-foreground">
-                            {selectedPatient.category === 'Retiree' ? 'Retiree Details' : 'Non-NPA Details'}
-                          </h3>
+                          <h3 className="text-sm font-semibold text-foreground">Non-NPA Details</h3>
                           <div className="grid grid-cols-1 gap-4">
                             <div className="space-y-2">
                               <Label>Location</Label>

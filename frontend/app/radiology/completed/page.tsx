@@ -8,45 +8,25 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { radiologyService, adminService } from '@/lib/services';
 import { PatientAvatar } from "@/components/PatientAvatar";
 import { AdvancedDateRangeDialog } from '@/components/AdvancedDateRangeDialog';
 import { CustomDateRangeButton } from '@/components/CustomDateRangeButton';
+import { RadiologyCompletedReportDialog } from '@/components/radiology/RadiologyCompletedReportDialog';
+import {
+  transformApiRadiologyReportToCompleted,
+  type CompletedRadiologyReport,
+} from '@/lib/radiology/completedRadiologyReport';
+import { downloadRadiologyReportFile, printRadiologyReport } from '@/lib/radiology/radiologyReportActions';
 
 import {
   CheckCircle2, Search, Eye, Clock, AlertTriangle,
-  User, FileText, Stethoscope, RefreshCw, Download, Loader2, Printer, ScanLine
+  Stethoscope, RefreshCw, Download, Loader2, Printer
 } from 'lucide-react';
 
-interface CompletedReport {
-  id: string;
-  orderId: string;
-  patient: { id: string; name: string; age: number | null; gender: string; };
-  patientName: string;
-  patientId: string;
-  age: number;
-  gender: string;
-  doctor: { id: string; name: string; specialty: string; };
-  studyName: string;
-  studyType: string;
-  category: string;
-  overallStatus: string;
-  priority: string;
-  orderingDoctor: string;
-  orderedAt: string;
-  completedAt: string;
-  verifiedBy: string;
-  verifiedAt: string;
-  clinic: string;
-  turnaroundTime: string;
-  report?: string;
-  reportFile?: { name: string; url: string; };
-}
-
 export default function CompletedReportsPage() {
-  const [reports, setReports] = useState<CompletedReport[]>([]);
+  const [reports, setReports] = useState<CompletedRadiologyReport[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -64,7 +44,7 @@ export default function CompletedReportsPage() {
   const [clinics, setClinics] = useState<any[]>([]);
 
   // Dialog states
-  const [selectedReport, setSelectedReport] = useState<CompletedReport | null>(null);
+  const [selectedReport, setSelectedReport] = useState<CompletedRadiologyReport | null>(null);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
 
   const formatDateTime = (isoString: string) => {
@@ -73,32 +53,6 @@ export default function CompletedReportsPage() {
       date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
       time: date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
     };
-  };
-
-  const calculateTurnaroundTime = (createdAt?: string, verifiedAt?: string): string => {
-    if (!createdAt || !verifiedAt) return 'N/A';
-
-    try {
-      const start = new Date(createdAt);
-      const end = new Date(verifiedAt);
-      const diffMs = end.getTime() - start.getTime();
-
-      if (diffMs < 0) return 'N/A';
-
-      const diffMins = Math.floor(diffMs / (1000 * 60));
-      const diffHours = Math.floor(diffMins / 60);
-      const diffDays = Math.floor(diffHours / 24);
-
-      if (diffDays > 0) {
-        return `${diffDays}d ${diffHours % 24}h`;
-      } else if (diffHours > 0) {
-        return `${diffHours}h ${diffMins % 60}m`;
-      } else {
-        return `${diffMins}m`;
-      }
-    } catch (error) {
-      return 'N/A';
-    }
   };
 
   // Load clinics function
@@ -129,64 +83,9 @@ export default function CompletedReportsPage() {
       const response = await radiologyService.getPendingVerifications(params);
       setTotalCount(response.count || response.results.length);
 
-      // Transform the reports to match our interface
-      const transformedReports = response.results.map((apiReport: any) => {
-        const legacyFindings = String(apiReport.study_details?.findings || '').trim();
-        const legacyImpression = String(apiReport.study_details?.impression || '').trim();
-        const reportText = String(apiReport.study_details?.report || '').trim() || legacyFindings;
-        const mergedReportText = legacyImpression
-          ? `${reportText}\n\nImpression:\n${legacyImpression}`.trim()
-          : reportText;
-
-        const verified = {
-          date: apiReport.study_details?.verified_at ? new Date(apiReport.study_details.verified_at).toLocaleDateString('en-US', {
-            month: 'short',
-            day: 'numeric'
-          }) : 'Unknown',
-          time: apiReport.study_details?.verified_at ? new Date(apiReport.study_details.verified_at).toLocaleTimeString('en-US', {
-            hour: '2-digit',
-            minute: '2-digit'
-          }) : 'Unknown'
-        };
-
-        return {
-          id: apiReport.id.toString(),
-          orderId: apiReport.order_id || '',
-          patient: {
-            id: apiReport.patient_details?.id || '',
-            name: apiReport.patient_name ?? '',
-            age: apiReport.patient_details?.age || null,
-            gender: apiReport.patient_details?.gender || 'Unknown'
-          },
-          patientName: apiReport.patient_name ?? '',
-          patientId: apiReport.patient_details?.patient_id || '',
-          age: apiReport.patient_details?.age || 0,
-          gender: apiReport.patient_details?.gender || 'Unknown',
-          doctor: {
-            id: apiReport.order_details?.doctor || '',
-            name: apiReport.order_details?.doctor_name || 'Unknown',
-            specialty: apiReport.order_details?.doctor_specialty || ''
-          },
-          studyName: apiReport.study_details?.procedure || 'Unknown Study',
-          studyType: apiReport.study_details?.modality || 'Unknown',
-          category: apiReport.study_details?.modality || 'X-Ray',
-          overallStatus: apiReport.overall_status === 'critical' ? 'Critical' :
-                       apiReport.overall_status === 'abnormal' ? 'Abnormal' : 'Normal',
-          priority: apiReport.priority || 'Routine',
-          orderingDoctor: apiReport.order_details?.doctor_name || 'Unknown',
-          orderedAt: apiReport.study_details?.created_at || '',
-          completedAt: apiReport.study_details?.verified_at || '',
-          verifiedBy: apiReport.study_details?.verified_by_name || 'Unknown',
-          verifiedAt: apiReport.study_details?.verified_at || '',
-          clinic: apiReport.order_details?.clinic || '',
-          turnaroundTime: calculateTurnaroundTime(apiReport.study_details?.created_at, apiReport.study_details?.verified_at),
-          report: mergedReportText || undefined,
-          reportFile: apiReport.study_details?.report_file_url ? {
-            name: (typeof apiReport.study_details.report_file === 'string' ? apiReport.study_details.report_file.split('/').pop() : null) || 'Report File',
-            url: apiReport.study_details.report_file_url
-          } : undefined
-        };
-      });
+      const transformedReports = response.results.map((apiReport: any) =>
+        transformApiRadiologyReportToCompleted(apiReport)
+      );
 
       setReports(transformedReports);
     } catch (err: any) {
@@ -278,112 +177,9 @@ export default function CompletedReportsPage() {
     critical: reports.filter(r => r.overallStatus === 'Critical').length,
   };
 
-  const openViewDialog = (report: CompletedReport) => {
+  const openViewDialog = (report: CompletedRadiologyReport) => {
     setSelectedReport(report);
     setIsViewDialogOpen(true);
-  };
-
-  const handlePrint = (report: CompletedReport) => {
-    // Create a print-friendly version of the report
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) return;
-
-    const printContent = `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>Radiology Report - ${report.patientName}</title>
-          <style>
-            body { font-family: Arial, sans-serif; margin: 20px; }
-            .header { text-align: center; border-bottom: 2px solid #333; padding-bottom: 20px; margin-bottom: 30px; }
-            .logo { font-size: 24px; font-weight: bold; color: #2563eb; }
-            .report-title { font-size: 18px; margin: 10px 0; }
-            .patient-info { margin: 20px 0; }
-            .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-            .info-item { margin: 5px 0; }
-            .label { font-weight: bold; }
-            .timeline { margin: 20px 0; background: #f8f9fa; padding: 15px; border-radius: 5px; }
-            .timeline-item { margin: 5px 0; }
-            .signatures { margin: 30px 0; }
-            .signature-item { margin: 15px 0; border-top: 1px solid #ddd; padding-top: 10px; }
-            @media print { body { margin: 0; } }
-          </style>
-        </head>
-        <body>
-          <div class="header">
-            <div class="logo">Nigerian Ports Authority</div>
-            <div class="logo">Medical Services</div>
-            <div class="report-title">RADIOLOGY REPORT</div>
-          </div>
-
-          <div class="patient-info">
-            <h3>Patient Information</h3>
-            <div class="info-grid">
-              <div class="info-item"><span class="label">Patient Name:</span> ${report.patientName}</div>
-              <div class="info-item"><span class="label">Patient ID:</span> ${report.patientId}</div>
-              <div class="info-item"><span class="label">Age/Gender:</span> ${report.age}y ${report.gender}</div>
-              <div class="info-item"><span class="label">Study:</span> ${report.studyType}</div>
-            </div>
-          </div>
-
-          <div class="timeline">
-            <h3>Study Timeline</h3>
-            <div class="timeline-item"><span class="label">Ordered:</span> ${report.orderedAt}</div>
-            <div class="timeline-item"><span class="label">Completed:</span> ${report.completedAt}</div>
-            <div class="timeline-item"><span class="label">Verified:</span> ${report.verifiedAt}</div>
-            <div class="timeline-item"><span class="label">Turnaround Time:</span> ${report.turnaroundTime}</div>
-          </div>
-
-          ${report.report ? `
-          <div class="patient-info" style="margin-top: 20px;">
-            <h3>Report Content</h3>
-            <div style="margin: 10px 0;"><div class="label">Report:</div><div style="white-space: pre-wrap;">${report.report}</div></div>
-          </div>
-          ` : ''}
-
-          <div class="signatures">
-            <h3>Signatures</h3>
-            <div class="signature-item">
-              <div><span class="label">Ordering Doctor:</span> ${report.orderingDoctor}</div>
-              <div><span class="label">Verified By:</span> ${report.verifiedBy}</div>
-            </div>
-          </div>
-        </body>
-      </html>
-    `;
-
-    printWindow.document.write(printContent);
-    printWindow.document.close();
-    printWindow.print();
-  };
-
-  const handleDownload = (report: CompletedReport) => {
-    if (!report.reportFile) {
-      toast.error('No report file available for download');
-      return;
-    }
-
-    try {
-      // Create download link
-      const link = document.createElement('a');
-      link.href = report.reportFile.url;
-      link.download = `radiology_report_${report.patientName.replace(/\s+/g, '_')}_${report.id}.pdf`;
-      link.target = '_blank';
-
-      // Add to DOM temporarily
-      document.body.appendChild(link);
-
-      // Trigger download
-      link.click();
-
-      // Remove from DOM
-      document.body.removeChild(link);
-
-      toast.success('Report download started');
-    } catch (error) {
-      console.error('Download failed:', error);
-      toast.error('Failed to download report. Please try again.');
-    }
   };
 
   return (
@@ -573,10 +369,10 @@ export default function CompletedReportsPage() {
                               <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openViewDialog(report)}>
                                 <Eye className="h-4 w-4 text-muted-foreground hover:text-primary" />
                               </Button>
-                              <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => handlePrint(report)}>
+                              <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => printRadiologyReport(report)}>
                                 <Printer className="h-4 w-4 text-muted-foreground hover:text-blue-500" />
                               </Button>
-                              <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => handleDownload(report)}>
+                              <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => downloadRadiologyReportFile(report)}>
                                 <Download className="h-4 w-4 text-muted-foreground hover:text-emerald-500" />
                               </Button>
                             </div>
@@ -620,210 +416,14 @@ export default function CompletedReportsPage() {
           )}
         </div>
 
-        {/* View Dialog */}
-        <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
-          <DialogContent className="w-[95vw] sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2"><FileText className="h-5 w-5 text-emerald-500" />Radiology Report</DialogTitle>
-              <DialogDescription>{selectedReport?.studyName} - {selectedReport?.patient.name}</DialogDescription>
-            </DialogHeader>
-            {selectedReport && (
-              <div className="space-y-6 py-4">
-                {/* Header */}
-                <div className="text-center p-4 border-b">
-                  <h2 className="text-xl font-bold">RADIOLOGY REPORT</h2>
-                  <p className="text-sm text-muted-foreground">Nigerian Ports Authority Medical Services</p>
-                </div>
-
-                {/* Patient & Study Info */}
-                <div className="grid grid-cols-2 gap-4 p-4 rounded-lg bg-muted/50">
-                  <div>
-                    <p className="text-xs text-muted-foreground">Patient Name</p>
-                    <p className="font-medium">{selectedReport.patient.name}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground">Age / Gender</p>
-                    <p className="font-medium">{selectedReport.patient.age !== null && selectedReport.patient.age !== undefined ? `${selectedReport.patient.age} years` : ''} / {selectedReport.patient.gender}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground">Ordering Doctor</p>
-                    <p className="font-medium">{selectedReport.doctor.name}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground">Order ID</p>
-                    <p className="font-medium">{selectedReport.orderId}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground">Study Name</p>
-                    <p className="font-medium">{selectedReport.studyName}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground">Category</p>
-                    <p className="font-medium">{selectedReport.category}</p>
-                  </div>
-                </div>
-
-                {/* Study Details */}
-                <div>
-                  <h3 className="font-semibold mb-3 flex items-center gap-2">
-                    <ScanLine className="h-4 w-4 text-cyan-500" />
-                    Study Details
-                    <Badge variant="outline" className={selectedReport.overallStatus === 'Critical' ? 'border-rose-500 text-rose-700' : 'border-emerald-500 text-emerald-700'}>
-                      {selectedReport.overallStatus}
-                    </Badge>
-                  </h3>
-
-                  {/* Report File Info */}
-                  {selectedReport.reportFile && (
-                    <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <FileText className="h-4 w-4 text-blue-600" />
-                          <span className="text-sm font-medium text-blue-800 dark:text-blue-200">Radiology Report File Available</span>
-                        </div>
-                        <div className="flex gap-2">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => {
-                              if (selectedReport.reportFile) {
-                                // Open in new tab for viewing
-                                const link = document.createElement('a');
-                                link.href = selectedReport.reportFile.url;
-                                link.target = '_blank';
-                                link.rel = 'noopener noreferrer';
-                                document.body.appendChild(link);
-                                link.click();
-                                document.body.removeChild(link);
-                              }
-                            }}
-                            className="text-blue-600 hover:text-blue-800"
-                          >
-                            <Eye className="h-3 w-3 mr-1" />
-                            View
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleDownload(selectedReport)}
-                            className="text-blue-600 hover:text-blue-800"
-                          >
-                            <Download className="h-3 w-3 mr-1" />
-                            Download
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="p-3 rounded-lg bg-cyan-50 dark:bg-cyan-900/20 border border-cyan-200 dark:border-cyan-800">
-                    <p className="text-sm font-medium text-cyan-800 dark:text-cyan-200">{selectedReport.studyName}</p>
-                    <p className="text-xs text-muted-foreground mt-1">Category: {selectedReport.category} | Status: {selectedReport.overallStatus}</p>
-                  </div>
-                </div>
-
-                {selectedReport.report && (
-                  <div>
-                    <h3 className="font-semibold mb-3 flex items-center gap-2">
-                      <FileText className="h-4 w-4 text-amber-500" />
-                      Report Content
-                    </h3>
-                    <div className="space-y-3 p-4 rounded-lg bg-muted/50 border">
-                      <div>
-                        <p className="text-xs text-muted-foreground font-medium mb-1">Report</p>
-                        <p className="text-sm whitespace-pre-wrap">{selectedReport.report}</p>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Report File (uploaded document) */}
-                {selectedReport.reportFile && (
-                  <div>
-                    <h3 className="font-semibold mb-2 flex items-center gap-2">
-                      <FileText className="h-4 w-4 text-blue-500" />
-                      Attached Report
-                    </h3>
-                    <div className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm font-medium text-blue-800 dark:text-blue-200">{selectedReport.reportFile.name}</span>
-                        <div className="flex gap-2">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => {
-                              if (selectedReport.reportFile?.url) {
-                                const link = document.createElement('a');
-                                link.href = selectedReport.reportFile.url;
-                                link.target = '_blank';
-                                link.rel = 'noopener noreferrer';
-                                document.body.appendChild(link);
-                                link.click();
-                                document.body.removeChild(link);
-                              }
-                            }}
-                            className="text-blue-600 hover:text-blue-800"
-                          >
-                            <Eye className="h-3 w-3 mr-1" />View
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleDownload(selectedReport)}
-                            className="text-blue-600 hover:text-blue-800"
-                          >
-                            <Download className="h-3 w-3 mr-1" />Download
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Timeline */}
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div className="p-3 rounded-lg border">
-                    <p className="text-xs text-muted-foreground">Ordered</p>
-                    <p className="font-medium">{selectedReport.orderedAt ? `${formatDateTime(selectedReport.orderedAt).date} ${formatDateTime(selectedReport.orderedAt).time}` : 'Unknown'}</p>
-                  </div>
-                  <div className="p-3 rounded-lg border">
-                    <p className="text-xs text-muted-foreground">Completed</p>
-                    <p className="font-medium">{selectedReport.completedAt ? `${formatDateTime(selectedReport.completedAt).date} ${formatDateTime(selectedReport.completedAt).time}` : 'Unknown'}</p>
-                  </div>
-                  <div className="p-3 rounded-lg border">
-                    <p className="text-xs text-muted-foreground">Verified</p>
-                    <p className="font-medium">{selectedReport.verifiedAt ? `${formatDateTime(selectedReport.verifiedAt).date} ${formatDateTime(selectedReport.verifiedAt).time}` : 'Unknown'}</p>
-                  </div>
-                  <div className="p-3 rounded-lg border">
-                    <p className="text-xs text-muted-foreground">Turnaround Time</p>
-                    <p className="font-medium">{selectedReport.turnaroundTime}</p>
-                  </div>
-                </div>
-
-                {/* Signatures */}
-                <div className="grid grid-cols-2 gap-4 pt-4 border-t">
-                  <div>
-                    <p className="text-xs text-muted-foreground">Reported By</p>
-                    <p className="font-medium">{selectedReport.verifiedBy}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground">Verified By</p>
-                    <p className="font-medium">{selectedReport.verifiedBy}</p>
-                  </div>
-                </div>
-              </div>
-            )}
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setIsViewDialogOpen(false)}>Close</Button>
-              <Button variant="outline" onClick={() => selectedReport && handlePrint(selectedReport)}>
-                <Printer className="h-4 w-4 mr-2" />Print
-              </Button>
-              <Button onClick={() => selectedReport && handleDownload(selectedReport)}>
-                <Download className="h-4 w-4 mr-2" />Download PDF
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+        <RadiologyCompletedReportDialog
+          open={isViewDialogOpen}
+          onOpenChange={(o) => {
+            setIsViewDialogOpen(o);
+            if (!o) setSelectedReport(null);
+          }}
+          report={selectedReport}
+        />
       </div>
     </DashboardLayout>
   );

@@ -1,6 +1,8 @@
 """
 Views for the Appointments app.
 """
+import logging
+
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -14,6 +16,8 @@ from .models import Appointment, AppointmentSlot
 from .serializers import AppointmentSerializer, AppointmentSlotSerializer
 from .filters import AppointmentFilter
 from notifications.services import NotificationService
+
+logger = logging.getLogger(__name__)
 
 
 class AppointmentViewSet(viewsets.ModelViewSet):
@@ -39,18 +43,21 @@ class AppointmentViewSet(viewsets.ModelViewSet):
     
     def perform_create(self, serializer):
         appointment = serializer.save(created_by=self.request.user)
-        
-        # Create notification for patient/doctor
-        if appointment.patient:
-            NotificationService.create_notification(
-                user=appointment.patient.user if hasattr(appointment.patient, 'user') else None,
-                title='Appointment Scheduled',
-                message=f"Your appointment is scheduled for {appointment.appointment_date} at {appointment.appointment_time}",
-                notification_type='appointment',
-                priority='normal',
-                object_type='appointment',
-                object_id=str(appointment.id),
-            )
+
+        patient_user = getattr(appointment.patient, "user", None)
+        if patient_user is not None:
+            try:
+                NotificationService.create_notification(
+                    user=patient_user,
+                    title="Appointment Scheduled",
+                    message=f"Your appointment is scheduled for {appointment.appointment_date} at {appointment.appointment_time}",
+                    notification_type="appointment",
+                    priority="normal",
+                    object_type="appointment",
+                    object_id=str(appointment.id),
+                )
+            except Exception:
+                logger.exception("Failed to create appointment notification (appointment already saved)")
     
     @action(detail=True, methods=['post'])
     def confirm(self, request, pk=None):

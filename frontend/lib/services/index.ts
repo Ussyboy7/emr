@@ -7,6 +7,8 @@ export type {
   LabTest,
   LabTemplate,
   LabResult,
+  LabPartner,
+  LabAnalyticsSummary,
 } from './lab-service';
 export type {
   Patient,
@@ -26,12 +28,14 @@ export type {
   StockRequestItem,
   StockIssue,
   StockIssueLine,
+  PharmacyAnalyticsSummary,
 } from './pharmacy-service';
 export type {
   RadiologyOrder,
   RadiologyStudy,
   RadiologyReport,
   RadiologyTemplate,
+  RadiologyAnalyticsSummary,
 } from './radiology-service';
 export type {
   ConsultationStats,

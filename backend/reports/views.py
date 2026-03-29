@@ -499,7 +499,7 @@ class AttendanceSummaryReportView(views.APIView):
         nonnpa_count = nonnpa_visits.values('patient').distinct().count()
         nonnpa_male = nonnpa_visits.filter(patient__gender='male').values('patient').distinct().count()
         nonnpa_female = nonnpa_visits.filter(patient__gender='female').values('patient').distinct().count()
-
+        
         retiree_count = retiree_visits.values('patient').distinct().count()
         retiree_male = retiree_visits.filter(patient__gender='male').values('patient').distinct().count()
         retiree_female = retiree_visits.filter(patient__gender='female').values('patient').distinct().count()
@@ -530,7 +530,7 @@ class AttendanceSummaryReportView(views.APIView):
             start_date=period_start,
             end_date=period_end,
         )
-
+        
         # Build response data
         categories = [
             {
@@ -643,7 +643,7 @@ class DispensedPrescriptionsReportView(views.APIView):
             )
         else:
             prescriptions = prescriptions.filter(dispensed_at__year=year_int)
-
+        
         # Monthly breakdown
         # If user selected a date range within the same year, return every month in that span (even if 0)
         # so the UI doesn't look like data is "missing".
@@ -675,7 +675,7 @@ class DispensedPrescriptionsReportView(views.APIView):
                         'total': count,
                     })
                     total += count
-
+        
         male_patients = prescriptions.filter(patient__gender='male').values('patient_id').distinct().count()
         female_patients = prescriptions.filter(patient__gender='female').values('patient_id').distinct().count()
         grand_total_patients = male_patients + female_patients
@@ -905,7 +905,7 @@ class LaboratoryAttendanceReportView(views.APIView):
                 'percentage': round((retirees_total / grand_total * 100) if grand_total > 0 else 0, 1),
             },
         ]
-
+        
         return Response({
             'data': data,
             'summary': {
@@ -1380,7 +1380,7 @@ class ClinicAttendanceReportView(views.APIView):
                 'percentage': round((retiree_count / grand_total * 100) if grand_total > 0 else 0, 1)
             },
         ]
-
+        
         return Response({
             'data': categories,
             'summary': {
@@ -1589,7 +1589,7 @@ class RadiologicalServicesReportView(views.APIView):
             first_time_patients = 0
             new_registrations = 0
             returning_patients = total_seen
-
+        
         return Response({
             'data': categories,
             'summary': {
@@ -1690,7 +1690,7 @@ class DiseasePatternReportView(views.APIView):
             year_int = int(year) if year else timezone.now().year
         except (ValueError, TypeError):
             year_int = timezone.now().year
-
+        
         # Use structured ICD-10 diagnoses captured in consultation sessions.
         from consultation.models import Diagnosis
 
@@ -1725,7 +1725,7 @@ class DiseasePatternReportView(views.APIView):
             .annotate(total=F('employee') + F('non_employee'))
             .order_by('-total', 'code')
         )
-
+        
         result = []
         for idx, row in enumerate(diagnosis_rows, 1):
             code = row.get('code') or 'UNSPECIFIED'
@@ -1797,22 +1797,22 @@ class GOPAttendanceReportView(views.APIView):
         )
         
         officers_visits = visits.filter(
-            patient__category='employee',
+                patient__category='employee',
             patient__employee_type__icontains='officer'
         )
         staff_visits = visits.filter(patient__category='employee').exclude(
             patient__employee_type__icontains='officer'
         )
         emp_dep_visits = visits.filter(
-            patient__category='dependent',
+                patient__category='dependent',
             patient__dependent_type__icontains='employee'
         )
         ret_dep_visits = visits.filter(
-            patient__category='dependent',
+                patient__category='dependent',
             patient__dependent_type__icontains='retiree'
         )
         police_visits = visits.filter(
-            patient__category='nonnpa',
+                patient__category='nonnpa',
             patient__nonnpa_type__icontains='police'
         )
         non_npa_visits = visits.filter(patient__category='nonnpa').exclude(
@@ -1860,7 +1860,7 @@ class GOPAttendanceReportView(views.APIView):
         ]
         for row in categories:
             row['percentage'] = round((row['total'] / grand_total * 100) if grand_total > 0 else 0, 1)
-
+        
         return Response({
             'data': categories,
             'summary': {
@@ -1868,7 +1868,7 @@ class GOPAttendanceReportView(views.APIView):
                 'total_non_employee': total_non_employee,
                 'total_male': total_male,
                 'total_female': total_female,
-                'grand_total': grand_total,
+            'grand_total': grand_total,
                 **lifecycle_summary,
             },
         })

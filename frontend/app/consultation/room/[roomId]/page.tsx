@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, use } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, use } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -15,7 +16,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Separator } from "@/components/ui/separator";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Activity, AlertTriangle, ArrowLeft, CheckCircle, Clock, FileText, History, Loader2, MapPin, Pill, Plus, Save, Stethoscope, Syringe, TestTube, User, Users, X, Send, ScanLine, TrendingUp, TrendingDown, Minus, Building2, UserPlus, Calendar, Phone, Mail, Heart, Download, Eye, Printer, ChevronLeft, ChevronRight, ClipboardList, RefreshCw, Thermometer, Edit, DoorOpen, UserX, Wind, Zap, Scale, Search, Lightbulb, Target } from "lucide-react";
+import { Activity, AlertTriangle, ArrowLeft, CheckCircle, Clock, Droplets, FileText, History, Loader2, MapPin, Pill, Plus, Save, Stethoscope, Syringe, TestTube, User, Users, X, Send, ScanLine, TrendingUp, TrendingDown, Minus, Building2, UserPlus, Calendar, Phone, Mail, Heart, Download, Eye, Printer, ChevronLeft, ChevronRight, ClipboardList, RefreshCw, Thermometer, Edit, DoorOpen, UserX, Wind, Zap, Scale, Search, Lightbulb, Target } from "lucide-react";
 import { toast } from "sonner";
 import { roomService, patientService, pharmacyService, labService, radiologyService, physioService, referralService, consultationService, appointmentService, wardService, type ConsultationSession, type ICD10Code, type Diagnosis, type RadiologyReport as ServiceRadiologyReport, type VitalReading, type Prescription, type LabTemplate as ServiceLabTemplate, type Medication, type PhysioSession } from '@/lib/services';
 import { sanitizePatientForRendering } from '@/lib/services/patient-service';
@@ -53,18 +54,35 @@ import {
   ADMINISTRATION_ROUTES,
   INJECTION_ROUTES,
   WOUND_TYPES,
-  DRESSING_SUPPLIES,
+  WOUND_LOCATIONS,
   IV_FLUIDS,
   RADIOLOGY_PROCEDURES,
   REFERRAL_SPECIALTIES,
   REFERRAL_FACILITIES,
   REFERRAL_REASONS
 } from '@/lib/constants/medical-data';
-import { getOrganizationHeader, getOrganizationLabHeader, getOrganizationServicesHeader } from '@/lib/constants/organization';
+import { getOrganizationHeader, getOrganizationServicesHeader } from '@/lib/constants/organization';
 import { LARGE_PAGE_SIZE } from '@/lib/constants/ui';
 import { safeAsync, logError } from '@/lib/utils/error-handling';
 import { LAB_OTHER_TEMPLATE_CODE } from '@/components/consultation/orders/LabOrderModal';
 import { RAD_OTHER_TEMPLATE_CODE } from '@/components/consultation/orders/RadiologyOrderModal';
+import { LabCompletedReportDialog } from '@/components/laboratory/LabCompletedReportDialog';
+import {
+  transformApiRowToCompletedTest,
+  type CompletedTest as CompletedLabReportTest,
+} from '@/lib/laboratory/completedLabReport';
+import { RadiologyCompletedReportDialog } from '@/components/radiology/RadiologyCompletedReportDialog';
+import {
+  transformApiRadiologyReportToCompleted,
+  type CompletedRadiologyReport,
+} from '@/lib/radiology/completedRadiologyReport';
+import { PrescriptionReportDialog } from '@/components/pharmacy/PrescriptionReportDialog';
+import {
+  summarizeLabTestForConsultationReport,
+  reportFormatters,
+} from '@/lib/consultation-report';
+
+const { formatLabResult, formatResultWithPending } = reportFormatters;
 
 // ==========================================
 // UTILITY FUNCTIONS
@@ -90,6 +108,13 @@ const getSessionProperty = (session: ExtendedConsultationSession | null, propert
 };
 
 // Safe date formatting utility
+const escapeHtml = (s: string) =>
+  String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+
 const formatDate = (dateString: string | undefined): string => {
   if (!dateString) return 'N/A';
   try {
@@ -206,6 +231,7 @@ interface VitalsData {
   bmi?: number;
   painScale?: number;
   bloodSugar?: number;
+  randomBloodSugar?: number;
   recordedBy?: string;
   recordedAt?: string;
   bloodPressure?: string;
@@ -280,7 +306,21 @@ interface Patient {
   religion?: string;
   tribe?: string;
   photo?: string | null;
-  vitals?: { temperature: string; bloodPressure: string; heartRate: string; respiratoryRate: string; oxygenSaturation: string; weight: string; height: string; recordedAt: string };
+  vitals?: {
+    temperature: string;
+    bloodPressure: string;
+    heartRate: string;
+    respiratoryRate: string;
+    oxygenSaturation: string;
+    weight: string;
+    height: string;
+    bmi?: string;
+    painScale?: string;
+    bloodSugar?: string;
+    randomBloodSugar?: string;
+    notes?: string;
+    recordedAt: string;
+  };
   // Multi-clinic support
   clinics?: string[];
   completedClinics?: string[];
@@ -355,7 +395,7 @@ const inferDoseUnitFromForm = (formValue?: string, fallbackUnit?: string): strin
 // Medical constants are now imported from @/lib/constants/medical-data
 const injectionRoutes = INJECTION_ROUTES;
 const woundTypes = WOUND_TYPES;
-const dressingSupplies = DRESSING_SUPPLIES;
+const woundLocations = WOUND_LOCATIONS;
 const ivFluids = IV_FLUIDS;
 
 // Referral data
@@ -389,6 +429,10 @@ const processVitals = (vitalsData: any) => {
     oxygen_saturation: vitalsData.oxygen_saturation,
     weight: vitalsData.weight,
     height: vitalsData.height,
+    bmi: vitalsData.bmi,
+    pain_scale: vitalsData.pain_scale,
+    blood_sugar: vitalsData.blood_sugar,
+    random_blood_sugar: vitalsData.random_blood_sugar,
   });
 
   // Simplified blood pressure processing to match other vitals
@@ -406,6 +450,20 @@ const processVitals = (vitalsData: any) => {
     oxygenSaturation: vitalsData.oxygen_saturation?.toString() || '',
     weight: vitalsData.weight?.toString() || '',
     height: vitalsData.height?.toString() || '',
+    bmi: vitalsData.bmi != null && vitalsData.bmi !== '' ? String(vitalsData.bmi) : '',
+    painScale:
+      vitalsData.pain_scale != null && vitalsData.pain_scale !== ''
+        ? String(vitalsData.pain_scale)
+        : '',
+    bloodSugar:
+      vitalsData.blood_sugar != null && vitalsData.blood_sugar !== ''
+        ? String(vitalsData.blood_sugar)
+        : '',
+    randomBloodSugar:
+      vitalsData.random_blood_sugar != null && vitalsData.random_blood_sugar !== ''
+        ? String(vitalsData.random_blood_sugar)
+        : '',
+    notes: vitalsData.notes ? String(vitalsData.notes) : '',
     recordedAt: vitalsData.recorded_at || new Date().toISOString(),
   };
 
@@ -533,25 +591,22 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   const [selectedRadiologyTemplates, setSelectedRadiologyTemplates] = useState<Set<number>>(new Set());
   const [nursingOrders, setNursingOrders] = useState<{
     id: string;
-    type: 'Injection' | 'Dressing' | 'Observation Admission';
+    type: 'Injection' | 'Dressing' | 'IV Infusion' | 'Observation Admission';
     medication?: string;
     dosage?: string;
     route?: string;
     woundLocation?: string;
     woundType?: string;
-    supplies?: string;
     instructions: string;
     priority: 'Routine' | 'Urgent' | 'STAT';
     status: 'Draft' | 'Sent to Nursing' | 'In Progress' | 'Completed';
     // Observation admission fields
     ward?: string;
-    admissionType?: string;
     admissionDiagnosis?: string;
     presentingComplaint?: string;
   }[]>([]);
   const [wardAdmissions, setWardAdmissions] = useState<WardAdmission[]>([]);
   const [wards, setWards] = useState<any[]>([]);
-  const [wardSearch, setWardSearch] = useState('');
   const [showAddNursingOrder, setShowAddNursingOrder] = useState(false);
   const [showDischargeDialog, setShowDischargeDialog] = useState(false);
   const [dischargeData, setDischargeData] = useState({
@@ -568,11 +623,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     route: "Intramuscular (IM)",
     woundLocation: "",
     woundType: "",
-    supplies: "",
     instructions: "",
     priority: "Routine",
     ward: "",
-    admissionType: "",
     admissionDiagnosis: "",
     presentingComplaint: ""
   });
@@ -686,6 +739,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   // Referral state
   const [referrals, setReferrals] = useState<{
     id: string;
+    /** Server PK when this row was created via API (required to submit or delete on server). */
+    backendId?: number;
     specialty: string;
     facility: string;
     facilityType: string;
@@ -766,9 +821,12 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   const [showSessionViewer, setShowSessionViewer] = useState(false);
   const [expandedSessions, setExpandedSessions] = useState<string[]>([]);
 
-  // Lab result viewer state
-  const [selectedLabResult, setSelectedLabResult] = useState<LabTestResult | null>(null);
+  // Lab result viewer (same standard report as Laboratory → Completed Tests)
+  const [selectedCompletedLabTest, setSelectedCompletedLabTest] = useState<CompletedLabReportTest | null>(null);
   const [showLabResultViewer, setShowLabResultViewer] = useState(false);
+  const [selectedCompletedRadiologyReport, setSelectedCompletedRadiologyReport] =
+    useState<CompletedRadiologyReport | null>(null);
+  const [showRadiologyReportViewer, setShowRadiologyReportViewer] = useState(false);
   const [expandedLabResults, setExpandedLabResults] = useState<string[]>([]);
 
   const [selectedPrescription, setSelectedPrescription] = useState<any | null>(null);
@@ -793,8 +851,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   const [rawConsultations, setRawConsultations] = useState<any[]>([]);
   const [rawPrescriptions, setRawPrescriptions] = useState<Prescription[]>([]);
   const [rawVitals, setRawVitals] = useState<VitalReading[]>([]);
-  const [rawLabResults, setRawLabResults] = useState<LabTestResult[]>([]);
-  const [rawImagingResults, setRawImagingResults] = useState<ServiceRadiologyReport[]>([]);
+  const [rawLabResults, setRawLabResults] = useState<any[]>([]);
+  const [rawImagingResults, setRawImagingResults] = useState<any[]>([]);
   const [rawPhysioResults, setRawPhysioResults] = useState<any[]>([]);
   
   // View vitals details
@@ -838,19 +896,39 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         }
       }
 
+      const icdDx = Array.isArray(rx.icd10_diagnoses) ? rx.icd10_diagnoses : [];
       return {
         id: rx.id?.toString() || '',
         date: formattedDate,
-        prescriptionId: rx.id?.toString() || '',
         doctor: rx.doctor_name || currentUser?.name || '',
-        diagnosis: rx.diagnosis || rx.notes || '',
         medications: (rx.medications || []).map((med: any) => ({
-          medication_name: med.medication_name || med.medication || 'Unknown',
+          medication_name:
+            med.medication_name ||
+            (med.medication && typeof med.medication === 'object' ? med.medication.name : null) ||
+            (typeof med.medication === 'string' ? med.medication : '') ||
+            'Unknown',
           dosage: med.dose || med.dosage || '',
+          dose: med.dose || med.dosage || '',
           frequency: med.frequency || '',
-          route: med.route || ''
+          duration: med.duration || '',
+          quantity: med.quantity != null && med.quantity !== '' ? med.quantity : '',
+          route: med.route || '',
         })),
-        status: rx.status || 'pending'
+        status: rx.status || 'pending',
+        diagnoses: icdDx.map((d: any) => ({
+          code: String(d.code ?? ''),
+          name: String(d.name ?? ''),
+          type: String(d.type ?? 'Primary'),
+          notes: String(d.notes ?? ''),
+        })),
+        // Free-text notes only when no ICD rows (avoid duplicating assessment as "NOTES").
+        notes:
+          icdDx.length > 0
+            ? ''
+            : (rx.notes && String(rx.notes).trim()) ||
+              (rx.clinical_notes && String(rx.clinical_notes).trim()) ||
+              (rx.instructions && String(rx.instructions).trim()) ||
+              '',
       };
     });
   };
@@ -869,9 +947,19 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       oxygenSaturation: parseFloat(v.oxygen_saturation) || 0,
       weight: v.weight ? parseFloat(v.weight) : undefined,
       height: v.height ? parseFloat(v.height) : undefined,
-      bmi: v.bmi ? parseFloat(v.bmi) : undefined,
-      painScale: 0, // Not in backend model
-      bloodSugar: 0, // Not in backend model
+      bmi: v.bmi != null && v.bmi !== '' ? parseFloat(String(v.bmi)) : undefined,
+      painScale:
+        v.pain_scale != null && v.pain_scale !== ''
+          ? parseInt(String(v.pain_scale), 10)
+          : undefined,
+      bloodSugar:
+        v.blood_sugar != null && v.blood_sugar !== ''
+          ? parseFloat(String(v.blood_sugar))
+          : undefined,
+      randomBloodSugar:
+        v.random_blood_sugar != null && v.random_blood_sugar !== ''
+          ? parseFloat(String(v.random_blood_sugar))
+          : undefined,
       recordedBy: v.recorded_by_name || currentUser?.name || '',
       recordedAt: v.recorded_at || '',
       bloodPressure: v.blood_pressure_systolic && v.blood_pressure_diastolic
@@ -881,12 +969,52 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     }));
   };
 
+  // DRF returns FileField as a URL string; some clients may send { name, url }.
+  const normalizeLabResultFileFromApi = (rf: unknown): { name: string; url: string; type: string } | null => {
+    if (rf == null || rf === '') return null;
+    if (typeof rf === 'string') {
+      const trimmed = rf.trim();
+      if (!trimmed) return null;
+      const name = trimmed.split('/').filter(Boolean).pop() || 'lab-result.pdf';
+      const url =
+        trimmed.startsWith('http://') || trimmed.startsWith('https://')
+          ? trimmed
+          : typeof window !== 'undefined'
+            ? `${window.location.origin}${trimmed.startsWith('/') ? trimmed : `/${trimmed}`}`
+            : trimmed;
+      const lower = name.toLowerCase();
+      const type = lower.endsWith('.pdf') ? 'application/pdf' : 'application/octet-stream';
+      return { name, url, type };
+    }
+    if (typeof rf === 'object' && rf !== null) {
+      const o = rf as { name?: string; url?: string; type?: string };
+      const rawUrl = o.url || (o.name ? `/media/${String(o.name).replace(/^\/+/, '')}` : '');
+      if (!rawUrl && !o.name) return null;
+      const name = o.name || String(rawUrl).split('/').filter(Boolean).pop() || 'lab-result.pdf';
+      const url =
+        typeof rawUrl === 'string' &&
+        (rawUrl.startsWith('http://') || rawUrl.startsWith('https://'))
+          ? rawUrl
+          : typeof window !== 'undefined' && typeof rawUrl === 'string'
+            ? `${window.location.origin}${rawUrl.startsWith('/') ? rawUrl : `/${rawUrl}`}`
+            : String(rawUrl);
+      const lower = String(name).toLowerCase();
+      return {
+        name: String(name),
+        url,
+        type: o.type || (lower.endsWith('.pdf') ? 'application/pdf' : 'application/octet-stream'),
+      };
+    }
+    return null;
+  };
+
   // Transform lab results with actual users who processed/verified them
   const transformLabResults = (labResults: any[]) => {
     return labResults.map((test: any) => {
       // Check if this test has manual results or uploaded file
       const hasManualResults = test.results && Object.keys(test.results).length > 0;
-      const hasUploadedFile = test.result_file && test.result_file.name;
+      const resultFile = normalizeLabResultFileFromApi(test.result_file);
+      const hasUploadedFile = resultFile != null;
 
       return {
         id: test.id || 0,
@@ -903,16 +1031,12 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         category: test.template_category || 'Unknown',
         test: test.name || 'Unknown Test',
         specimenType: test.sample_type || test.template_sample_type || 'Unknown',
-        orderedBy: test.order?.doctor_name || 'Unknown',
+        orderedBy: test.order_details?.doctor_name || test.order?.doctor_name || 'Unknown',
         collectedAt: test.collected_at ? formatDate(test.collected_at) : 'N/A',
         reportedAt: test.processed_at ? formatDate(test.processed_at) : 'N/A',
         performedBy: test.processed_by_name || 'Unknown',
         verifiedBy: test.verified_by_name || 'Unknown',
-        resultFile: test.result_file ? {
-          name: test.result_file.name,
-          url: test.result_file.url || `/media/${test.result_file.name}`,
-          type: test.result_file.type || 'application/pdf'
-        } : null,
+        resultFile,
         hasManualResults,
         hasUploadedFile,
         parameters: test.results ? Object.entries(test.results).map(([key, value]: [string, any]) => ({
@@ -1062,7 +1186,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   const [physioOrderSessions, setPhysioOrderSessions] = useState<PhysioSession[]>([]);
   const [loadingPhysioSessions, setLoadingPhysioSessions] = useState(false);
 
-  const [isRefreshing, setIsRefreshing] = useState(false);
   const [isRefreshingQueue, setIsRefreshingQueue] = useState(false);
   
   // Function to load wards for nursing order form
@@ -1083,9 +1206,10 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     }
   };
   
-  // Function to refresh only the queue data (for modal refresh)
-  const refreshQueueData = async () => {
-    setIsRefreshingQueue(true);
+  // Refresh queue only (no full-page loading). `silent` = background poll (no toasts / queue button state).
+  const refreshQueueData = useCallback(async (options?: { silent?: boolean }) => {
+    const silent = options?.silent === true;
+    if (!silent) setIsRefreshingQueue(true);
     try {
       const numericRoomId = parseInt(roomId);
       if (isNaN(numericRoomId)) {
@@ -1158,11 +1282,11 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       setPatients(validPatients);
     } catch (err: any) {
       console.error('Error refreshing queue:', err);
-      toast.error('Failed to refresh queue');
+      if (!silent) toast.error('Failed to refresh queue');
     } finally {
-      setIsRefreshingQueue(false);
+      if (!silent) setIsRefreshingQueue(false);
     }
-  };
+  }, [roomId]);
   
   const loadRoomData = async () => {
     try {
@@ -1410,6 +1534,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
               test: (test.name ?? test.test_name ?? test.template_name ?? '').toString().trim(),
               status: test.status ?? order.status ?? '',
               priority: order.priority ?? '',
+              result: summarizeLabTestForConsultationReport(test),
               orderedBy: order.doctor_name ?? '',
               createdAt: test.created_at ?? order.ordered_at ?? '',
             }));
@@ -1430,7 +1555,14 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                 procedure: (s.procedure ?? order.procedure_name ?? order.procedure ?? '').toString().trim(),
                 priority: order.priority ?? '',
                 status: s.status ?? order.status ?? '',
-                finding: s.finding ?? order.finding ?? '',
+                finding: (
+                  s.report ??
+                  s.findings ??
+                  s.impression ??
+                  s.finding ??
+                  order.finding ??
+                  ''
+                ).toString().trim(),
                 orderedBy: order.doctor_name ?? '',
                 createdAt: s.created_at ?? order.ordered_at ?? '',
               }));
@@ -1442,7 +1574,13 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
               procedure: proc,
               priority: order.priority ?? '',
               status: order.status ?? '',
-              finding: order.finding ?? '',
+              finding: (
+                order.report ??
+                order.findings ??
+                order.impression ??
+                order.finding ??
+                ''
+              ).toString().trim(),
               orderedBy: order.doctor_name ?? '',
               createdAt: order.ordered_at ?? '',
             }];
@@ -1679,9 +1817,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
               medication: order.description?.split(' - ')[1] || '',
               dosage: order.frequency || '',
               route: 'As ordered',
-              woundLocation: order.description?.includes('wound') ? order.description : '',
-              woundType: order.description?.includes('wound') ? 'Unknown' : '',
-              supplies: order.description?.includes('supplies') ? order.description : '',
+              woundLocation: '',
+              woundType: '',
               instructions: order.description || '',
               priority: order.priority === 'medium' ? 'Routine' : order.priority === 'high' ? 'Urgent' : 'STAT',
               status: 'Sent to Nursing' as const, // Already sent if loaded from API
@@ -1938,18 +2075,18 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     setShowRadiologyTemplateDropdown(false);
   }, [activeTab]);
   
-  const handleRefresh = async () => {
-    setIsRefreshing(true);
-    try {
-      await loadRoomData();
-      toast.success('Queue refreshed');
-    } catch (err) {
-      console.error('Error refreshing:', err);
-      toast.error('Failed to refresh queue');
-    } finally {
-      setIsRefreshing(false);
-    }
-  };
+  // Auto-refresh queue while waiting (no active consultation patient) — same data as the old Refresh button
+  useEffect(() => {
+    const numericRoomId = parseInt(roomId);
+    if (Number.isNaN(numericRoomId)) return;
+    if (sessionActive && currentPatient) return;
+
+    const intervalMs = 15000;
+    const id = window.setInterval(() => {
+      void refreshQueueData({ silent: true });
+    }, intervalMs);
+    return () => window.clearInterval(id);
+  }, [roomId, sessionActive, currentPatient, refreshQueueData]);
 
   useEffect(() => {
     if (!sessionActive || !sessionStartTime) return;
@@ -2246,6 +2383,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           test: (test.name ?? test.test_name ?? test.template_name ?? '').toString().trim(),
           status: test.status ?? order.status ?? '',
           priority: order.priority ?? '',
+          result: summarizeLabTestForConsultationReport(test),
           orderedBy: order.doctor_name ?? '',
           createdAt: test.created_at ?? order.ordered_at ?? '',
         }));
@@ -2269,7 +2407,14 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
             procedure: (s.procedure ?? order.procedure_name ?? order.procedure ?? '').toString().trim(),
             priority: order.priority ?? '',
             status: s.status ?? order.status ?? '',
-            finding: s.finding ?? order.finding ?? '',
+            finding: (
+              s.report ??
+              s.findings ??
+              s.impression ??
+              s.finding ??
+              order.finding ??
+              ''
+            ).toString().trim(),
             orderedBy: order.doctor_name ?? '',
             createdAt: s.created_at ?? order.ordered_at ?? '',
           }));
@@ -2281,7 +2426,13 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           procedure: proc,
           priority: order.priority ?? '',
           status: order.status ?? '',
-          finding: order.finding ?? '',
+          finding: (
+            order.report ??
+            order.findings ??
+            order.impression ??
+            order.finding ??
+            ''
+          ).toString().trim(),
           orderedBy: order.doctor_name ?? '',
           createdAt: order.ordered_at ?? '',
         }];
@@ -2565,7 +2716,11 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           <p><strong>Clinic:</strong> ${session.clinic_name || 'Unknown'}</p>
           <p><strong>Room:</strong> ${session.room_name || 'Unknown'}</p>
           <p><strong>Date & Time:</strong> ${formatDate(session.started_at)} ${formatTime(session.started_at)}</p>
-          <p><strong>Duration:</strong> ${session.ended_at ? Math.round((new Date(session.ended_at).getTime() - new Date(session.started_at).getTime()) / (1000 * 60)) + ' minutes' : 'Ongoing'}</p>
+          <p><strong>Duration:</strong> ${session.ended_at && session.started_at
+            ? Math.round((new Date(session.ended_at).getTime() - new Date(session.started_at).getTime()) / (1000 * 60)) + ' minutes'
+            : session.started_at
+              ? Math.round((Date.now() - new Date(session.started_at).getTime()) / (1000 * 60)) + ' minutes (ongoing)'
+              : '—'}</p>
         </div>
 
         ${Object.keys(vitalsObj).length > 0 ? `
@@ -2649,16 +2804,24 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                 <th>Test</th>
                 <th>Priority</th>
                 <th>Status</th>
+                <th>Result</th>
               </tr>
             </thead>
             <tbody>
-              ${labOrders.map((lab: any) => `
+              ${labOrders.map((lab: any) => {
+                const resultText = formatResultWithPending(
+                  lab.result ? formatLabResult(lab.result) : '',
+                  lab.status,
+                  ['verified', 'completed', 'results_ready']
+                );
+                return `
                 <tr>
-                  <td>${lab.test ?? ''}</td>
-                  <td>${formatPriority(lab.priority)}</td>
-                  <td>${lab.status ?? ''}</td>
-                </tr>
-              `).join('')}
+                  <td>${escapeHtml(lab.test ?? '')}</td>
+                  <td>${escapeHtml(formatPriority(lab.priority))}</td>
+                  <td>${escapeHtml(lab.status ?? '')}</td>
+                  <td>${escapeHtml(resultText).replace(/\n/g, '<br>')}</td>
+                </tr>`;
+              }).join('')}
             </tbody>
           </table>
         </div>
@@ -2673,16 +2836,24 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                 <th>Procedure</th>
                 <th>Priority</th>
                 <th>Status</th>
+                <th>Finding</th>
               </tr>
             </thead>
             <tbody>
-              ${radiologyOrders.map((rad: any) => `
+              ${radiologyOrders.map((rad: any) => {
+                const findingText = formatResultWithPending(
+                  rad.finding ? String(rad.finding) : '',
+                  rad.status,
+                  ['verified', 'completed', 'reported']
+                );
+                return `
                 <tr>
-                  <td>${rad.procedure ?? ''}</td>
-                  <td>${formatPriority(rad.priority)}</td>
-                  <td>${rad.status ?? ''}</td>
-                </tr>
-              `).join('')}
+                  <td>${escapeHtml(rad.procedure ?? '')}</td>
+                  <td>${escapeHtml(formatPriority(rad.priority))}</td>
+                  <td>${escapeHtml(rad.status ?? '')}</td>
+                  <td>${escapeHtml(findingText).replace(/\n/g, '<br>')}</td>
+                </tr>`;
+              }).join('')}
             </tbody>
           </table>
         </div>
@@ -2741,10 +2912,26 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     window.print();
   };
 
-  // View lab result details
-  const viewLabResultDetails = (labResult: any) => {
-    setSelectedLabResult(labResult);
+  // View lab result details (shared Lab Report dialog with Laboratory → Completed Tests)
+  const viewLabResultDetails = (labResult: LabTestResult) => {
+    const raw = rawLabResults.find((r: any) => Number(r?.id) === Number(labResult.id));
+    if (!raw) {
+      toast.error('Could not open lab report. Try refreshing patient history.');
+      return;
+    }
+    setSelectedCompletedLabTest(transformApiRowToCompletedTest(raw, 'tests'));
     setShowLabResultViewer(true);
+  };
+
+  // View imaging report (shared Radiology Report dialog with Radiology → Completed Studies)
+  const viewImagingReportDetails = (img: ServiceRadiologyReport) => {
+    const raw = rawImagingResults.find((r: any) => Number(r?.id) === Number(img.id));
+    if (!raw) {
+      toast.error('Could not open imaging report. Try refreshing patient history.');
+      return;
+    }
+    setSelectedCompletedRadiologyReport(transformApiRadiologyReportToCompleted(raw));
+    setShowRadiologyReportViewer(true);
   };
 
   // View prescription details
@@ -2762,30 +2949,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     );
   };
 
-  // Download lab result PDF
-  const downloadLabResultPDF = (labResult: any) => {
-    toast.success(`Downloading lab report: ${labResult.id}`, {
-      description: `${labResult.test} from ${labResult.date}`
-    });
-  };
-
-  // Print lab result
-  const printLabResult = (labResult: any) => {
-    toast.info(`Opening print dialog for ${labResult.id}`);
-    window.print();
-  };
-
-  // Get parameter status color
-  const getParameterStatusColor = (status: string) => {
-    switch (status) {
-      case 'Normal': return 'text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20';
-      case 'Abnormal': return 'text-red-600 bg-red-50 dark:bg-red-900/20';
-      case 'Borderline': return 'text-amber-600 bg-amber-50 dark:bg-amber-900/20';
-      case 'Critical': return 'text-red-700 bg-red-100 dark:bg-red-900/30 font-bold';
-      default: return 'text-gray-600 bg-gray-50 dark:bg-gray-900/20';
-    }
-  };
-
   const confirmEndSession = async () => {
     setIsEnding(true);
     
@@ -2794,28 +2957,11 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         throw new Error('No active session to end');
       }
 
-      // Step 1: Handle follow-up appointment if needed (separate from session)
-      if (followUpRequired && followUpDate && followUpReason && currentPatient && sessionId) {
-        try {
-          const patientId = typeof currentPatient.id === 'string' ? parseInt(currentPatient.id, 10) : currentPatient.id;
-          await appointmentService.createAppointment({
-            patient: patientId,
-            doctor: undefined,
-            clinic: undefined,
-            appointment_type: 'follow_up',
-            appointment_date: followUpDate,
-            appointment_time: '09:00',
-            duration_minutes: 30,
-            reason: followUpReason,
-            notes: `Follow-up from consultation session ${sessionId}. Reason: ${followUpReason}`,
-          });
-          debugConsultationRoom('Follow-up appointment created');
-        } catch (apptError: any) {
-          console.warn('Could not create follow-up appointment:', apptError?.message);
-        }
+      if (followUpRequired && !followUpDate) {
+        throw new Error('Please select a follow-up date before ending the session.');
       }
 
-      // Step 2: Deactivate queue item if patient was in queue
+      // Step 1: Deactivate queue item if patient was in queue
       // Now safe with the new conditional unique constraint
       if (currentPatient?.id) {
         try {
@@ -2857,7 +3003,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         }
       }
 
-      // Step 3: Ensure at least one diagnosis is present before ending session
+      // Step 2: Ensure at least one diagnosis is present before ending session
       try {
         if (!sessionId) throw new Error('Session ID is required');
         const diagnosisResult = await consultationService.getDiagnoses({
@@ -2875,6 +3021,35 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         }
         console.error('Error validating diagnosis before ending session:', err);
         throw new Error('Unable to verify diagnosis. Please try again.');
+      }
+
+      // Step 3: Create follow-up appointment (after diagnosis check; reason optional — empty reason skipped creation before)
+      if (followUpRequired && followUpDate && currentPatient && sessionId) {
+        const trimmedReason = (followUpReason || '').trim();
+        const reasonForAppt = trimmedReason || 'Follow-up visit';
+        try {
+          const patientId = typeof currentPatient.id === 'string' ? parseInt(currentPatient.id, 10) : currentPatient.id;
+          await appointmentService.createAppointment({
+            patient: patientId,
+            appointment_type: 'follow_up',
+            appointment_date: followUpDate,
+            appointment_time: '09:00:00',
+            duration_minutes: 30,
+            reason: reasonForAppt,
+            notes: `Follow-up from consultation session ${sessionId}. Reason: ${reasonForAppt}`,
+            clinics: ['GOPD'],
+          });
+          debugConsultationRoom('Follow-up appointment created');
+          toast.success('Follow-up appointment saved', {
+            description: `${reasonForAppt} — ${followUpDate}. View it under Medical Records → Appointments.`,
+          });
+        } catch (apptError: any) {
+          const msg = apptError?.message || 'Could not create follow-up appointment';
+          console.warn('Could not create follow-up appointment:', msg);
+          toast.error('Follow-up appointment was not saved (session will still end)', {
+            description: msg,
+          });
+        }
       }
 
       // Step 4: If there's a draft observation admission order, send it before ending session
@@ -3577,12 +3752,18 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         notes: order.notes || '',
       }));
       
+      const clinicFromVisit =
+        Array.isArray((currentPatient as any).clinics) && (currentPatient as any).clinics.length > 0
+          ? String((currentPatient as any).clinics[0]).trim()
+          : '';
+
       await labService.createOrder({
         patient: numericPatientId as any,
         visit: numericVisitId || undefined,
         consultation_session: sessionId,
         priority: priorityMap[orderPriority] || 'routine',
         clinical_notes: combinedNotes,
+        ...(clinicFromVisit ? { clinic: clinicFromVisit } : {}),
         tests_data: testsData as any,
       } as any);
       
@@ -3689,17 +3870,23 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       toast.error('Please select a medication for injection');
       return;
     }
-    if (newNursingOrder.type === 'Dressing' && !newNursingOrder.woundLocation) {
-      toast.error('Please specify wound location for dressing');
+    if (newNursingOrder.type === 'Dressing') {
+      if (!newNursingOrder.woundLocation) {
+        toast.error('Please specify wound location for dressing');
+        return;
+      }
+      if (!newNursingOrder.woundType) {
+        toast.error('Please select wound type for dressing');
+        return;
+      }
+    }
+    if (newNursingOrder.type === 'IV Infusion' && !newNursingOrder.medication) {
+      toast.error('Please select IV fluid for infusion');
       return;
     }
     if (newNursingOrder.type === 'Observation Admission') {
       if (!newNursingOrder.ward) {
         toast.error('Please select an observation ward');
-        return;
-      }
-      if (!newNursingOrder.admissionType) {
-        toast.error('Please select observation type');
         return;
       }
       if (!newNursingOrder.admissionDiagnosis) {
@@ -3726,24 +3913,22 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     // Add to draft nursing orders (not sent yet)
     setNursingOrders([...nursingOrders, {
       id: orderId,
-      type: newNursingOrder.type as 'Injection' | 'Dressing' | 'Observation Admission',
+      type: newNursingOrder.type as 'Injection' | 'Dressing' | 'IV Infusion' | 'Observation Admission',
       medication: newNursingOrder.medication || undefined,
       dosage: newNursingOrder.dosage || undefined,
       route: newNursingOrder.route || undefined,
       woundLocation: newNursingOrder.woundLocation || undefined,
       woundType: newNursingOrder.woundType || undefined,
-      supplies: newNursingOrder.supplies || undefined,
       instructions: newNursingOrder.instructions,
       priority: newNursingOrder.priority as 'Routine' | 'Urgent' | 'STAT',
       status: 'Draft',
       // Observation admission fields
       ward: newNursingOrder.ward || undefined,
-      admissionType: newNursingOrder.admissionType || undefined,
       admissionDiagnosis: newNursingOrder.admissionDiagnosis || undefined,
       presentingComplaint: newNursingOrder.presentingComplaint || undefined
     }]);
     
-    setNewNursingOrder({ type: "", medication: "", dosage: "", route: "Intramuscular (IM)", woundLocation: "", woundType: "", supplies: "", instructions: "", priority: "Routine", ward: "", admissionType: "", admissionDiagnosis: "", presentingComplaint: "" });
+    setNewNursingOrder({ type: "", medication: "", dosage: "", route: "Intramuscular (IM)", woundLocation: "", woundType: "", instructions: "", priority: "Routine", ward: "", admissionDiagnosis: "", presentingComplaint: "" });
     setShowAddNursingOrder(false);
     toast.success("Nursing order added to draft");
   };
@@ -3809,7 +3994,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
               consultation_session: sessionId,
               ordered_by: currentUser?.id ? Number(currentUser.id) : undefined,
               order_type: 'observation admission',
-              description: `Observation admission (Day Care) to ${order.ward}. Type: ${order.admissionType}. Diagnosis: ${order.admissionDiagnosis}. Presenting complaint: ${order.presentingComplaint || 'N/A'}. ${order.instructions}`,
+              description: `Observation admission (Day Care) to ${order.ward}. Diagnosis: ${order.admissionDiagnosis}. Presenting complaint: ${order.presentingComplaint || 'N/A'}. ${order.instructions}`,
               frequency: '',
               duration: '',
               status: 'pending',
@@ -3823,7 +4008,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         if (order.type === 'Injection' && order.medication) {
           description = `${order.medication} - ${order.dosage || ''} via ${order.route || ''}. ${order.instructions}`;
         } else if (order.type === 'Dressing') {
-          description = `${order.woundType || 'Wound'} dressing at ${order.woundLocation || 'site'}. Supplies: ${order.supplies || 'Standard'}. ${order.instructions}`;
+          description = `${order.woundType || 'Wound'} dressing at ${order.woundLocation || 'site'}. ${order.instructions}`;
+        } else if (order.type === 'IV Infusion' && order.medication) {
+          description = `IV Infusion: ${order.medication}${order.dosage ? ` — ${order.dosage}` : ''}. ${order.instructions}`;
         }
         
           return apiFetch('/nursing/orders/', {
@@ -3874,11 +4061,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       route: "Intramuscular (IM)",
       woundLocation: "",
       woundType: "",
-      supplies: "",
       instructions: "",
       priority: "Routine",
       ward: "",
-      admissionType: "",
       admissionDiagnosis: "",
       presentingComplaint: ""
     });
@@ -3891,11 +4076,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       route: orderToEdit.route || "Intramuscular (IM)",
       woundLocation: orderToEdit.woundLocation || "",
       woundType: orderToEdit.woundType || "",
-      supplies: orderToEdit.supplies || "",
       instructions: orderToEdit.instructions,
       priority: orderToEdit.priority,
       ward: orderToEdit.ward || "",
-      admissionType: orderToEdit.admissionType || "",
       admissionDiagnosis: orderToEdit.admissionDiagnosis || "",
       presentingComplaint: orderToEdit.presentingComplaint || ""
     });
@@ -3911,6 +4094,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     switch (type) {
       case 'Injection': return <Syringe className="h-3.5 w-3.5 text-rose-600" />;
       case 'Dressing': return <Activity className="h-3.5 w-3.5 text-amber-600" />;
+      case 'IV Infusion': return <Droplets className="h-3.5 w-3.5 text-sky-600" />;
       default: return <Syringe className="h-3.5 w-3.5 text-cyan-600" />;
     }
   };
@@ -3962,12 +4146,11 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         urgency: newReferral.priority === 'STAT' ? 'emergency' : newReferral.priority.toLowerCase() as 'urgent' | 'routine' | 'emergency',
         contact_person: newReferral.contactPerson || undefined,
         contact_phone: newReferral.contactPhone || undefined,
-        status: 'submitted_to_records',
       });
-      
-      const referralId = `REF-${Date.now()}`;
+
       setReferrals([...referrals, {
-        id: referralId,
+        id: createdReferral.referral_id || String(createdReferral.id),
+        backendId: createdReferral.id,
         specialty: newReferral.specialty,
         facility: newReferral.facility,
         facilityType: newReferral.facilityType,
@@ -3976,34 +4159,17 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         clinicalSummary: newReferral.clinicalSummary,
         contactPerson: newReferral.contactPerson || undefined,
         contactPhone: newReferral.contactPhone || undefined,
-        status: 'Sent'
+        status: 'Draft'
       }]);
       setNewReferral({ specialty: "", facility: "", facilityType: "", reason: "", priority: "Routine", clinicalSummary: "", contactPerson: "", contactPhone: "" });
       setShowAddReferral(false);
-      toast.success("Referral sent successfully");
+      toast.success(
+        "Referral created as draft. Open Referrals & forms to print, issue a responsibility form, then submit to Medical Records for acknowledgement."
+      );
     } catch (err: any) {
       console.error('Error creating referral:', err);
       toast.error(err.message || 'Failed to create referral');
     }
-  };
-
-  const sendReferrals = () => {
-    // Note: Referrals are now sent directly when added via addReferral
-    // This function is kept for backward compatibility but referrals are sent immediately
-    if (referrals.length === 0) {
-      toast.error("No referrals to send");
-      return;
-    }
-    const draftReferrals = referrals.filter(r => r.status === 'Draft');
-    if (draftReferrals.length === 0) {
-      toast.info("All referrals have already been sent");
-      return;
-    }
-    // Referrals are now sent immediately when created, so this is just a status update
-    setReferrals(prev => prev.map(r => r.status === 'Draft' ? { ...r, status: 'Sent' } : r));
-    toast.success(`${draftReferrals.length} referral(s) already sent successfully`, {
-      description: `Patient: ${currentPatient?.name}`
-    });
   };
 
   // Radiology functions
@@ -4390,10 +4556,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <Button variant="outline" onClick={handleRefresh} disabled={isRefreshing}>
-                <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
-                {isRefreshing ? 'Refreshing...' : 'Refresh'}
-              </Button>
               <Button variant="outline" onClick={() => router.push("/consultation/start")}>
                 <ArrowLeft className="mr-2 h-4 w-4" />
                 Exit Room
@@ -4676,6 +4838,44 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                   <div className="text-lg font-bold text-orange-600">{currentPatient.vitals.height} cm</div>
                 </div>
               </div>
+              {(currentPatient.vitals.bmi ||
+                currentPatient.vitals.painScale ||
+                currentPatient.vitals.bloodSugar ||
+                currentPatient.vitals.randomBloodSugar) && (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4 pt-4 border-t">
+                  {currentPatient.vitals.bmi ? (
+                    <div className="text-center p-3 bg-slate-50 dark:bg-slate-900/20 rounded-lg">
+                      <div className="text-xs text-muted-foreground">BMI</div>
+                      <div className="text-lg font-bold text-slate-700 dark:text-slate-200">{currentPatient.vitals.bmi}</div>
+                    </div>
+                  ) : null}
+                  {currentPatient.vitals.painScale !== undefined && currentPatient.vitals.painScale !== "" ? (
+                    <div className="text-center p-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg">
+                      <div className="text-xs text-muted-foreground">Pain</div>
+                      <div className="text-lg font-bold text-amber-700 dark:text-amber-300">
+                        {currentPatient.vitals.painScale}/10
+                      </div>
+                    </div>
+                  ) : null}
+                  {currentPatient.vitals.bloodSugar ? (
+                    <div className="text-center p-3 bg-violet-50 dark:bg-violet-900/20 rounded-lg">
+                      <div className="text-xs text-muted-foreground">Blood sugar</div>
+                      <div className="text-lg font-bold text-violet-700 dark:text-violet-300">
+                        {currentPatient.vitals.bloodSugar} <span className="text-xs font-normal">mg/dL</span>
+                      </div>
+                    </div>
+                  ) : null}
+                  {currentPatient.vitals.randomBloodSugar ? (
+                    <div className="text-center p-3 bg-fuchsia-50 dark:bg-fuchsia-900/20 rounded-lg">
+                      <div className="text-xs text-muted-foreground">RBS</div>
+                      <div className="text-lg font-bold text-fuchsia-700 dark:text-fuchsia-300">
+                        {currentPatient.vitals.randomBloodSugar}{" "}
+                        <span className="text-xs font-normal">mg/dL</span>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              )}
             </CardContent>
           </Card>
         )}
@@ -5303,6 +5503,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                         switch (type) {
                           case 'Injection': return 'bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-400';
                           case 'Dressing': return 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400';
+                          case 'IV Infusion': return 'bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-400';
                           default: return 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900/30 dark:text-cyan-400';
                         }
                       };
@@ -5312,7 +5513,15 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                           <CardContent className="p-3">
                             <div className="flex items-start justify-between gap-3">
                               <div className="flex items-start gap-2 flex-1">
-                                <div className={`p-1.5 rounded-full ${order.type === 'Injection' ? 'bg-rose-100 dark:bg-rose-900/30' : order.type === 'Dressing' ? 'bg-amber-100 dark:bg-amber-900/30' : 'bg-cyan-100 dark:bg-cyan-900/30'}`}>
+                                <div className={`p-1.5 rounded-full ${
+                                  order.type === 'Injection'
+                                    ? 'bg-rose-100 dark:bg-rose-900/30'
+                                    : order.type === 'Dressing'
+                                      ? 'bg-amber-100 dark:bg-amber-900/30'
+                                      : order.type === 'IV Infusion'
+                                        ? 'bg-sky-100 dark:bg-sky-900/30'
+                                        : 'bg-cyan-100 dark:bg-cyan-900/30'
+                                }`}>
                                   {getNursingOrderIcon(order.type)}
                                 </div>
                                 <div className="flex-1 min-w-0">
@@ -5333,8 +5542,13 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                   )}
                                   {order.type === 'Dressing' && order.woundLocation && (
                                     <div className="text-xs font-medium mb-0.5">
-                                      {order.woundType} - {order.woundLocation}
-                                      {order.supplies && <span className="text-muted-foreground"> • Supplies: {order.supplies}</span>}
+                                      {order.woundType ? `${order.woundType} — ` : ''}{order.woundLocation}
+                                    </div>
+                                  )}
+                                  {order.type === 'IV Infusion' && order.medication && (
+                                    <div className="text-xs font-medium mb-0.5">
+                                      {order.medication}
+                                      {order.dosage ? ` • ${order.dosage}` : ''}
                                     </div>
                                   )}
                                   
@@ -5571,14 +5785,24 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                     </CardTitle>
                     <CardDescription>Refer patient to specialists or other facilities</CardDescription>
                   </div>
-                  <div className="flex gap-2">
-                    <Button variant="outline" onClick={() => setShowAddReferral(true)}>
-                      <Plus className="mr-2 h-4 w-4" />Add Referral
+                  <div className="flex flex-wrap gap-2">
+                    <Button variant="secondary" asChild>
+                      <Link href="/consultation/referrals">
+                        <ClipboardList className="mr-2 h-4 w-4" />
+                        Referrals &amp; forms
+                      </Link>
                     </Button>
-                    {referrals.length > 0 && referrals.some(r => r.status === 'Draft') && (
-                      <Button onClick={sendReferrals} className="bg-teal-600 hover:bg-teal-700">
-                        <Send className="mr-2 h-4 w-4" />
-                        Send Referrals ({referrals.filter(r => r.status === 'Draft').length})
+                    <Button variant="outline" onClick={() => setShowAddReferral(true)}>
+                      <Plus className="mr-2 h-4 w-4" />
+                      Create referral
+                    </Button>
+                    {referrals.some((r) => r.status === "Draft") && (
+                      <Button variant="default" className="bg-teal-600 hover:bg-teal-700" asChild>
+                        <Link href="/consultation/referrals">
+                          <ClipboardList className="mr-2 h-4 w-4" />
+                          Continue in Referrals &amp; forms (
+                          {referrals.filter((r) => r.status === "Draft").length})
+                        </Link>
                       </Button>
                     )}
                   </div>
@@ -5641,7 +5865,26 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                 </div>
                               </div>
                               {referral.status === 'Draft' && (
-                                <Button variant="ghost" size="sm" onClick={() => setReferrals(referrals.filter((_, i) => i !== index))} className="text-red-500 hover:text-red-600">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => {
+                                    void (async () => {
+                                      const row = referrals[index];
+                                      if (row?.backendId != null) {
+                                        try {
+                                          await referralService.deleteReferral(row.backendId);
+                                        } catch (err: unknown) {
+                                          const msg = err instanceof Error ? err.message : "Failed to remove referral";
+                                          toast.error(msg);
+                                          return;
+                                        }
+                                      }
+                                      setReferrals((prev) => prev.filter((_, i) => i !== index));
+                                    })();
+                                  }}
+                                  className="text-red-500 hover:text-red-600"
+                                >
                                   <X className="h-4 w-4" />
                                 </Button>
                               )}
@@ -5662,28 +5905,25 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                     <p className="font-medium text-teal-900 dark:text-teal-100 mb-1">No referrals yet</p>
                     <p className="text-sm text-muted-foreground mb-4">Refer patient to specialists or other facilities</p>
                     <Button variant="outline" size="sm" onClick={() => setShowAddReferral(true)} className="border-teal-300 text-teal-700 hover:bg-teal-100">
-                      <Plus className="h-4 w-4 mr-1" />Add Referral
+                      <Plus className="h-4 w-4 mr-1" />
+                      Create referral
                     </Button>
                   </div>
                 )}
 
-                {/* Referral Workflow Info */}
-                <div className="p-4 rounded-lg bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-800">
-                  <h4 className="font-medium text-teal-900 dark:text-teal-100 mb-2 flex items-center gap-2">
-                    <Activity className="h-4 w-4" />Referral Workflow
+                {/* Referral workflow — full management lives on Consultation → Referrals & forms */}
+                <div className="p-4 rounded-lg bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-800 space-y-2">
+                  <h4 className="font-medium text-teal-900 dark:text-teal-100 flex items-center gap-2">
+                    <Activity className="h-4 w-4" />
+                    After you add a referral
                   </h4>
-                  <div className="flex items-center gap-2 text-xs text-teal-700 dark:text-teal-300 flex-wrap">
-                    <Badge variant="outline" className="bg-gray-100 dark:bg-gray-800">Draft</Badge>
-                    <span>→</span>
-                    <Badge variant="outline" className="bg-teal-100 dark:bg-teal-900/30">Sent</Badge>
-                    <span>→</span>
-                    <Badge variant="outline" className="bg-blue-100 dark:bg-blue-900/30">Accepted</Badge>
-                    <span>→</span>
-                    <Badge variant="outline" className="bg-purple-100 dark:bg-purple-900/30">Scheduled</Badge>
-                    <span>→</span>
-                    <Badge variant="outline" className="bg-emerald-100 dark:bg-emerald-900/30">Completed ✓</Badge>
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-2">Referral letter will be generated and sent to the facility</p>
+                  <p className="text-sm text-teal-800 dark:text-teal-200">
+                    After creating a referral here, use{" "}
+                    <Link href="/consultation/referrals" className="font-semibold underline-offset-4 hover:underline">
+                      Referrals &amp; forms
+                    </Link>{" "}
+                    to print the letter, issue at least one responsibility form, then submit to Medical Records for acknowledgement, and track status. Optional stamping, close, and extra records workflow stay in the Medical Records queue.
+                  </p>
                 </div>
               </CardContent>
             </Card>
@@ -5770,8 +6010,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
               {/* History Tables in Tabs */}
               <Card>
                 <CardHeader className="pb-0">
-                  <Tabs defaultValue="consultations" className="w-full">
-                    <TabsList className="grid w-full grid-cols-7">
+                    <Tabs defaultValue="consultations" className="w-full">
+                    <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4 lg:grid-cols-8">
                       <TabsTrigger value="consultations" className="text-xs">
                         <ClipboardList className="h-3 w-3 mr-1" />
                         Consultations ({consultationHistory.length})
@@ -6030,7 +6270,12 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                     {/* Imaging Tab */}
                     <TabsContent value="imaging" className="mt-4">
                       {(() => {
-                        const filteredImaging = imagingHistory.filter((img: ServiceRadiologyReport) => imagingStatusFilter === 'all' || img.overall_status === imagingStatusFilter);
+                        const filteredImaging = imagingHistory.filter((img: ServiceRadiologyReport) => {
+                          if (imagingStatusFilter === 'all') return true;
+                          return (
+                            String(img.overall_status || '').toLowerCase() === imagingStatusFilter.toLowerCase()
+                          );
+                        });
                         const totalImaging = filteredImaging.length;
                         const totalImagingPages = Math.ceil(totalImaging / imagingPerPage);
                         const paginatedImaging = filteredImaging.slice((imagingPage - 1) * imagingPerPage, imagingPage * imagingPerPage);
@@ -6054,8 +6299,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                   className="text-sm border rounded-md px-3 py-1.5 bg-background"
                                 >
                                   <option value="all">All Status</option>
-                                  <option value="Normal">Normal</option>
-                                  <option value="Abnormal">Abnormal</option>
+                                  <option value="normal">Normal</option>
+                                  <option value="abnormal">Abnormal</option>
+                                  <option value="critical">Critical</option>
                                 </select>
                               </div>
                             </div>
@@ -6072,24 +6318,39 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                   </tr>
                                 </thead>
                                 <tbody className="divide-y">
-                                  {paginatedImaging.map((img: ServiceRadiologyReport, index: number) => (
-                                    <tr key={index} className="hover:bg-muted/30">
+                                  {paginatedImaging.map((img: ServiceRadiologyReport) => {
+                                    const st = String(img.overall_status || 'pending').toLowerCase();
+                                    const statusBadgeClass =
+                                      st === 'normal'
+                                        ? 'bg-emerald-100 text-emerald-800'
+                                        : st === 'critical'
+                                          ? 'bg-rose-100 text-rose-800'
+                                          : 'bg-amber-100 text-amber-800';
+                                    const sd = img.study_details as Record<string, unknown> | undefined;
+                                    const reportedBy =
+                                      (sd?.reported_by_name as string) ||
+                                      (sd?.verified_by_name as string) ||
+                                      '—';
+                                    const verifiedBy = (sd?.verified_by_name as string) || '—';
+                                    return (
+                                    <tr key={img.id} className="hover:bg-muted/30">
                                       <td className="px-4 py-3 text-muted-foreground">{formatDate(img.created_at)}</td>
                                       <td className="px-4 py-3 font-medium">{img.study_details?.procedure || `Study ${img.study}`}</td>
-                                      <td className="px-4 py-3 text-muted-foreground">{'—'}</td>
-                                      <td className="px-4 py-3 text-muted-foreground">{'—'}</td>
+                                      <td className="px-4 py-3 text-muted-foreground">{reportedBy}</td>
+                                      <td className="px-4 py-3 text-muted-foreground">{verifiedBy}</td>
                                       <td className="px-4 py-3 text-center">
-                                        <Badge className={img.overall_status === 'normal' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}>
+                                        <Badge className={statusBadgeClass}>
                                           {img.overall_status || 'pending'}
                                         </Badge>
                                       </td>
                                       <td className="px-4 py-3 text-center">
-                                        <Button variant="ghost" size="sm" onClick={() => toast.info(`Viewing ${img.study_details?.procedure || `Study ${img.study}`}`)}>
+                                        <Button variant="ghost" size="sm" onClick={() => viewImagingReportDetails(img)}>
                                           <Eye className="h-4 w-4 mr-1" /> View
                                         </Button>
                                       </td>
                                     </tr>
-                                  ))}
+                                    );
+                                  })}
                                 </tbody>
                               </table>
                             </div>
@@ -6202,9 +6463,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                 <thead className="bg-muted/50">
                                   <tr>
                                     <th className="px-4 py-2 text-left font-medium">Date</th>
-                                    <th className="px-4 py-2 text-left font-medium">Prescription ID</th>
                                     <th className="px-4 py-2 text-left font-medium">Doctor</th>
-                                    <th className="px-4 py-2 text-left font-medium">Diagnosis</th>
                                     <th className="px-4 py-2 text-left font-medium">Medications</th>
                                     <th className="px-4 py-2 text-center font-medium">Status</th>
                                     <th className="px-4 py-2 text-center font-medium">Action</th>
@@ -6214,11 +6473,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                   {paginatedPrescriptions.map((prescription) => (
                                     <tr key={prescription.id} className="hover:bg-muted/30">
                                       <td className="px-4 py-3 text-muted-foreground">{prescription.date}</td>
-                                      <td className="px-4 py-3">
-                                        <Badge variant="outline">{prescription.prescriptionId}</Badge>
-                                      </td>
                                       <td className="px-4 py-3">{prescription.doctor}</td>
-                                      <td className="px-4 py-3">{prescription.diagnosis}</td>
                                       <td className="px-4 py-3">
                                         <div className="flex flex-wrap gap-1">
                                           {prescription.medications.map((med: any, idx: number) => (
@@ -6462,7 +6717,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                       })()}
                     </TabsContent>
 
-                    {/* Observation Admissions Tab */}
+                    {/* Physio Tab */}
                     <TabsContent value="physio" className="mt-4">
                       {(() => {
                         const filteredPhysio = physioHistory.filter(order => {
@@ -7160,7 +7415,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                     <div>
                       <Label className="text-sm font-semibold">Configure Prescriptions</Label>
                       <p className="text-xs text-muted-foreground mt-1">
-                        Set dose, frequency, duration, and route for each selected medication
+                        Set dose, frequency, duration, route, and instructions for each selected medication
                       </p>
                     </div>
                     <Badge variant="outline" className="text-xs">
@@ -7314,6 +7569,16 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                     <SelectItem value="Otic">Otic</SelectItem>
                                   </SelectContent>
                                 </Select>
+                              </div>
+                              <div className="space-y-1">
+                                <Label className="text-xs">Instructions</Label>
+                                <Textarea
+                                  placeholder="e.g., Take with food; rotate injection sites; monitor glucose"
+                                  className="min-h-[72px] text-xs resize-y"
+                                  value={config.instructions || ''}
+                                  onChange={(e) => updateMedicationConfig(medId, 'instructions', e.target.value)}
+                                  rows={3}
+                                />
                               </div>
                             </div>
                           </CardContent>
@@ -7595,7 +7860,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                 <Label>Procedure Type *</Label>
                 <Select 
                   value={newNursingOrder.type} 
-                  onValueChange={(v) => setNewNursingOrder({ ...newNursingOrder, type: v, medication: "", dosage: "", woundLocation: "", woundType: "", supplies: "", ward: "", admissionType: "", admissionDiagnosis: "", presentingComplaint: "" })}
+                  onValueChange={(v) => setNewNursingOrder({ ...newNursingOrder, type: v, medication: "", dosage: "", woundLocation: "", woundType: "", ward: "", admissionDiagnosis: "", presentingComplaint: "" })}
                 >
                   <SelectTrigger><SelectValue placeholder="Select procedure type" /></SelectTrigger>
                   <SelectContent>
@@ -7609,6 +7874,12 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                       <div className="flex items-center gap-2">
                         <Activity className="h-4 w-4 text-amber-500" />
                         Wound Dressing
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="IV Infusion">
+                      <div className="flex items-center gap-2">
+                        <Droplets className="h-4 w-4 text-sky-500" />
+                        IV Infusion
                       </div>
                     </SelectItem>
                     <SelectItem value="Observation Admission">
@@ -7626,13 +7897,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                 <>
                   <div className="space-y-2">
                     <Label>Observation Ward *</Label>
-                    {/* Ward Search */}
-                    <Input
-                      placeholder="Search wards..."
-                      value={wardSearch}
-                      onChange={(e) => setWardSearch(e.target.value)}
-                      className="mb-2"
-                    />
                     <Select
                       value={newNursingOrder.ward || ''}
                       onValueChange={(v) => setNewNursingOrder({ ...newNursingOrder, ward: v })}
@@ -7640,15 +7904,10 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                       <SelectTrigger>
                         <SelectValue placeholder="Select ward for observation" />
                       </SelectTrigger>
-                      <SelectContent>
-                        {/* Ward options - dynamically loaded from API */}
+                      <SelectContent className="max-h-[280px]">
                         {wards
-                          .filter(ward =>
-                            ward.available_beds > 0 && // Only show wards with available beds
-                            (ward.name.toLowerCase().includes(wardSearch.toLowerCase()) ||
-                             ward.ward_code.toLowerCase().includes(wardSearch.toLowerCase()))
-                          )
-                          .sort((a, b) => b.available_beds - a.available_beds) // Sort by availability
+                          .filter((ward) => ward.available_beds > 0)
+                          .sort((a, b) => b.available_beds - a.available_beds)
                           .map((ward) => (
                             <SelectItem key={ward.id} value={ward.ward_code}>
                               <div className="flex items-center justify-between w-full">
@@ -7663,37 +7922,12 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                               </div>
                             </SelectItem>
                           ))}
-                        {wards.filter(ward =>
-                          ward.available_beds > 0 &&
-                          (ward.name.toLowerCase().includes(wardSearch.toLowerCase()) ||
-                           ward.ward_code.toLowerCase().includes(wardSearch.toLowerCase()))
-                        ).length === 0 && wardSearch && (
-                          <div className="px-2 py-4 text-center text-sm text-muted-foreground">
-                            No wards found matching "{wardSearch}"
-                          </div>
-                        )}
-                        {wards.length === 0 && (
+                        {wards.filter((ward) => ward.available_beds > 0).length === 0 && (
                           <>
                             <SelectItem value="FEMALE-MED">Female Medical Ward (5 beds available)</SelectItem>
                             <SelectItem value="MALE-MED">Male Medical Ward (5 beds available)</SelectItem>
                           </>
                         )}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Observation Type *</Label>
-                    <Select
-                      value={newNursingOrder.admissionType || ''}
-                      onValueChange={(v) => setNewNursingOrder({ ...newNursingOrder, admissionType: v })}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select observation type" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="daycare_observation">Day Care Observation</SelectItem>
-                        <SelectItem value="urgent_observation">Urgent Observation</SelectItem>
-                        <SelectItem value="transfer_observation">Transfer for Observation</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -7784,7 +8018,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                 <>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
-                      <Label>Wound Type</Label>
+                      <Label>Wound Type *</Label>
                       <Select value={newNursingOrder.woundType} onValueChange={(v) => setNewNursingOrder({ ...newNursingOrder, woundType: v })}>
                         <SelectTrigger><SelectValue placeholder="Select wound type" /></SelectTrigger>
                         <SelectContent>
@@ -7795,24 +8029,23 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                       </Select>
                     </div>
                     <div className="space-y-2">
-                      <Label>Location</Label>
-                      <Input 
-                        value={newNursingOrder.woundLocation} 
-                        onChange={(e) => setNewNursingOrder({ ...newNursingOrder, woundLocation: e.target.value })}
-                        placeholder="e.g., Left forearm, Right knee"
-                      />
+                      <Label>Location *</Label>
+                      <Select
+                        value={newNursingOrder.woundLocation}
+                        onValueChange={(v) => setNewNursingOrder({ ...newNursingOrder, woundLocation: v })}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select location" />
+                        </SelectTrigger>
+                        <SelectContent className="max-h-[280px]">
+                          {woundLocations.map((loc) => (
+                            <SelectItem key={loc} value={loc}>
+                              {loc}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Supplies Needed</Label>
-                    <Input 
-                      value={newNursingOrder.supplies} 
-                      onChange={(e) => setNewNursingOrder({ ...newNursingOrder, supplies: e.target.value })}
-                      placeholder="e.g., Gauze, Normal Saline, Antibiotic ointment"
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      Common supplies: {dressingSupplies.slice(0, 5).join(', ')}...
-                    </p>
                   </div>
                 </>
               )}
@@ -7848,31 +8081,29 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
               )}
 
               {/* Priority */}
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Priority</Label>
-                  <Select value={newNursingOrder.priority} onValueChange={(v) => setNewNursingOrder({ ...newNursingOrder, priority: v })}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Routine">
-                        <div className="flex items-center gap-2">
-                          <Badge className="bg-blue-100 text-blue-800">Routine</Badge>
-                        </div>
-                      </SelectItem>
-                      <SelectItem value="Urgent">
-                        <div className="flex items-center gap-2">
-                          <Badge className="bg-amber-100 text-amber-800">Urgent</Badge>
-                        </div>
-                      </SelectItem>
-                      <SelectItem value="STAT">
-                        <div className="flex items-center gap-2">
-                          <Badge className="bg-red-100 text-red-800">STAT</Badge>
-                          <span className="text-xs text-muted-foreground">Immediate</span>
-                        </div>
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+              <div className="space-y-2">
+                <Label>Priority</Label>
+                <Select value={newNursingOrder.priority} onValueChange={(v) => setNewNursingOrder({ ...newNursingOrder, priority: v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Routine">
+                      <div className="flex items-center gap-2">
+                        <Badge className="bg-blue-100 text-blue-800">Routine</Badge>
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="Urgent">
+                      <div className="flex items-center gap-2">
+                        <Badge className="bg-amber-100 text-amber-800">Urgent</Badge>
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="STAT">
+                      <div className="flex items-center gap-2">
+                        <Badge className="bg-red-100 text-red-800">STAT</Badge>
+                        <span className="text-xs text-muted-foreground">Immediate</span>
+                      </div>
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
               
               {/* Instructions */}
@@ -7905,8 +8136,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                   !newNursingOrder.type ||
                   !newNursingOrder.instructions ||
                   (newNursingOrder.type === 'Injection' && !newNursingOrder.medication) ||
-                  (newNursingOrder.type === 'Dressing' && !newNursingOrder.woundLocation) ||
-                  (newNursingOrder.type === 'Observation Admission' && (!newNursingOrder.ward || !newNursingOrder.admissionType || !newNursingOrder.admissionDiagnosis || !newNursingOrder.presentingComplaint))
+                  (newNursingOrder.type === 'Dressing' && (!newNursingOrder.woundLocation || !newNursingOrder.woundType)) ||
+                  (newNursingOrder.type === 'IV Infusion' && !newNursingOrder.medication) ||
+                  (newNursingOrder.type === 'Observation Admission' && (!newNursingOrder.ward || !newNursingOrder.admissionDiagnosis || !newNursingOrder.presentingComplaint))
                 }
                 className="bg-cyan-600 hover:bg-cyan-700"
               >
@@ -8404,11 +8636,11 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                         />
             </div>
                       <div className="space-y-2">
-                        <label className="text-sm font-medium">Reason</label>
+                        <label className="text-sm font-medium">Reason (optional)</label>
                         <Input
                           value={followUpReason}
                           onChange={(e) => setFollowUpReason(e.target.value)}
-                          placeholder="e.g., Review lab results, follow-up consultation"
+                          placeholder="e.g., Review lab results (leave blank to use Follow-up visit)"
                           className="w-full"
                         />
                       </div>
@@ -8663,8 +8895,11 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                     </span>
                                   )}
                                 </div>
-                                  {(patient.vitals.oxygenSaturation || patient.vitals.weight) && (
-                                    <div className="flex items-center gap-2 col-span-2">
+                                  {(patient.vitals.oxygenSaturation ||
+                                    patient.vitals.weight ||
+                                    patient.vitals.bloodSugar ||
+                                    patient.vitals.randomBloodSugar) && (
+                                    <div className="flex flex-wrap items-center gap-2 col-span-2">
                                       {patient.vitals.oxygenSaturation && (
                                         <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
                                           <Zap className="h-3 w-3" />
@@ -8675,6 +8910,16 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                         <span className="flex items-center gap-1 text-purple-600 dark:text-purple-400">
                                           <Scale className="h-3 w-3" />
                                           {patient.vitals.weight} kg
+                                        </span>
+                                      )}
+                                      {patient.vitals.bloodSugar && (
+                                        <span className="text-violet-600 dark:text-violet-400">
+                                          BS: {patient.vitals.bloodSugar}
+                                        </span>
+                                      )}
+                                      {patient.vitals.randomBloodSugar && (
+                                        <span className="text-fuchsia-600 dark:text-fuchsia-400">
+                                          RBS: {patient.vitals.randomBloodSugar}
                                         </span>
                                       )}
                                     </div>
@@ -8913,7 +9158,20 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                       <div className="space-y-1 text-sm">
                         <div><strong>Doctor:</strong> {selectedSession.doctor_name || 'Unknown'}</div>
                         <div><strong>Clinic:</strong> {selectedSession.clinic_name || 'Unknown Clinic'}</div>
-                        <div><strong>Duration:</strong> {selectedSession.ended_at ? Math.round((new Date(selectedSession.ended_at).getTime() - new Date(selectedSession.started_at).getTime()) / (1000 * 60)) + ' min' : 'Ongoing'}</div>
+                        <div>
+                          <strong>Duration:</strong>{' '}
+                          {selectedSession.ended_at && selectedSession.started_at
+                            ? Math.round(
+                                (new Date(selectedSession.ended_at).getTime() -
+                                  new Date(selectedSession.started_at).getTime()) /
+                                  (1000 * 60)
+                              ) + ' min'
+                            : selectedSession.started_at
+                              ? Math.round(
+                                  (Date.now() - new Date(selectedSession.started_at).getTime()) / (1000 * 60)
+                                ) + ' min (ongoing)'
+                              : '—'}
+                        </div>
                         <div><strong>Room:</strong> {selectedSession.room_name || 'Unknown Room'}</div>
                       </div>
                     </div>
@@ -9070,7 +9328,13 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                 <td className="px-3 py-2">
                                   <Badge className="bg-emerald-100 text-emerald-800">{lab.status ?? ''}</Badge>
                                 </td>
-                                <td className="px-3 py-2 text-sm">{lab.result ?? ''}</td>
+                                <td className="px-3 py-2 text-sm whitespace-pre-line break-words max-w-[28rem]">
+                                  {formatResultWithPending(
+                                    lab.result ? formatLabResult(lab.result) : '',
+                                    lab.status,
+                                    ['verified', 'completed', 'results_ready']
+                                  )}
+                                </td>
                               </tr>
                             ))}
                           </tbody>
@@ -9104,7 +9368,13 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                 <td className="px-3 py-2">
                                   <Badge className="bg-emerald-100 text-emerald-800">{img.status ?? ''}</Badge>
                                 </td>
-                                <td className="px-3 py-2 text-sm">{img.finding ?? ''}</td>
+                                <td className="px-3 py-2 text-sm whitespace-pre-line break-words max-w-[28rem]">
+                                  {formatResultWithPending(
+                                    img.finding ? String(img.finding) : '',
+                                    img.status,
+                                    ['verified', 'completed', 'reported']
+                                  )}
+                                </td>
                               </tr>
                             ))}
                           </tbody>
@@ -9199,340 +9469,47 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           </DialogContent>
         </Dialog>
 
-        {/* Lab Result Viewer Dialog */}
-        <Dialog open={showLabResultViewer} onOpenChange={setShowLabResultViewer}>
-          <DialogContent className="w-[95vw] sm:max-w-[1000px] max-h-[90vh] overflow-y-auto">
-            {selectedLabResult && (
-              <>
-                <DialogHeader>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <DialogTitle className="flex items-center gap-3">
-                        <TestTube className="h-5 w-5 text-amber-500" />
-                        Laboratory Report
-                        <Badge variant="outline" className="bg-amber-50 text-amber-700">
-                          {selectedLabResult.id}
-                        </Badge>
-                        {selectedLabResult.criticalValue && (
-                          <Badge className="bg-red-600 text-white">
-                            <AlertTriangle className="h-3 w-3 mr-1" />
-                            Critical Value
-                          </Badge>
-                        )}
-                      </DialogTitle>
-                      <DialogDescription>
-                        {selectedLabResult.date} • {selectedLabResult.category} • {selectedLabResult.test}
-                      </DialogDescription>
-                    </div>
-                    <div className="flex gap-2">
-                      <Button variant="outline" size="sm" onClick={() => downloadLabResultPDF(selectedLabResult)}>
-                        <Download className="h-4 w-4 mr-1" />
-                        Download
-                      </Button>
-                      <Button variant="outline" size="sm" onClick={() => printLabResult(selectedLabResult)}>
-                        <Printer className="h-4 w-4 mr-1" />
-                        Print
-                      </Button>
-                    </div>
-                  </div>
-                </DialogHeader>
+        <LabCompletedReportDialog
+          open={showLabResultViewer}
+          onOpenChange={(o) => {
+            setShowLabResultViewer(o);
+            if (!o) setSelectedCompletedLabTest(null);
+          }}
+          test={selectedCompletedLabTest}
+          hideLabWorkflowActions
+        />
 
-                <div className="space-y-6 py-4">
-                  {/* Header - Test Info */}
-                  <div className="p-4 bg-amber-50 dark:bg-amber-900/20 rounded-lg border border-amber-200 dark:border-amber-800">
-                    <div className="grid md:grid-cols-2 gap-4">
-                      <div>
-                        <h4 className="text-sm font-semibold text-amber-700 dark:text-amber-400 mb-2">TEST INFORMATION</h4>
-                        <div className="space-y-1 text-sm">
-                          <div><strong>Test Name:</strong> {selectedLabResult.test}</div>
-                          <div><strong>Category:</strong> {selectedLabResult.category}</div>
-                          <div><strong>Specimen Type:</strong> {selectedLabResult.specimenType}</div>
-                          <div className="flex items-center gap-2">
-                            <strong>Overall Status:</strong>
-                            <Badge className={selectedLabResult.status === 'Normal' ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}>
-                              {selectedLabResult.status}
-                            </Badge>
-                          </div>
-                        </div>
-                      </div>
-                      <div>
-                        <h4 className="text-sm font-semibold text-amber-700 dark:text-amber-400 mb-2">PROCESSING DETAILS</h4>
-                        <div className="space-y-1 text-sm">
-                          <div><strong>Ordered By:</strong> {selectedLabResult.orderedBy}</div>
-                          <div><strong>Collected:</strong> {selectedLabResult.collectedAt}</div>
-                          <div><strong>Reported:</strong> {selectedLabResult.reportedAt}</div>
-                          <div><strong>Performed By:</strong> {selectedLabResult.performedBy}</div>
-                          <div><strong>Verified By:</strong> {selectedLabResult.verifiedBy}</div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
+        <RadiologyCompletedReportDialog
+          open={showRadiologyReportViewer}
+          onOpenChange={(o) => {
+            setShowRadiologyReportViewer(o);
+            if (!o) setSelectedCompletedRadiologyReport(null);
+          }}
+          report={selectedCompletedRadiologyReport}
+        />
 
-                  {/* Test Results */}
-                  {selectedLabResult.hasManualResults ? (
-                  <div>
-                    <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
-                      <Activity className="h-4 w-4" />
-                      TEST RESULTS
-                    </h4>
-                    <div className="border rounded-lg overflow-hidden">
-                      <table className="w-full text-sm">
-                        <thead className="bg-muted/50">
-                          <tr>
-                            <th className="px-4 py-3 text-left font-semibold">Parameter</th>
-                            <th className="px-4 py-3 text-center font-semibold">Result</th>
-                            <th className="px-4 py-3 text-center font-semibold">Unit</th>
-                            <th className="px-4 py-3 text-center font-semibold">Reference Range</th>
-                            <th className="px-4 py-3 text-center font-semibold">Status</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y">
-                            {(selectedLabResult.parameters || []).map((param: { name: string; value: string; unit: string; status: string; referenceRange?: string; normalRange?: string }, index: number) => (
-                            <tr key={index} className={param.status !== 'Normal' ? 'bg-red-50/50 dark:bg-red-900/10' : ''}>
-                              <td className="px-4 py-3 font-medium">{param.name}</td>
-                              <td className={`px-4 py-3 text-center font-bold ${param.status === 'Abnormal' ? 'text-red-600' : param.status === 'Borderline' ? 'text-amber-600' : ''}`}>
-                                {param.value}
-                              </td>
-                              <td className="px-4 py-3 text-center text-muted-foreground">{param.unit}</td>
-                              <td className="px-4 py-3 text-center text-muted-foreground">{param.normalRange || param.referenceRange || '-'}</td>
-                              <td className="px-4 py-3 text-center">
-                                <Badge className={getParameterStatusColor(param.status)}>
-                                  {param.status}
-                                </Badge>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                  ) : selectedLabResult.hasUploadedFile ? (
-                    <div>
-                      <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
-                        <FileText className="h-4 w-4" />
-                        UPLOADED RESULT FILE
-                      </h4>
-                      <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
-                        <div className="flex items-center gap-3">
-                          <FileText className="h-8 w-8 text-blue-500" />
-                          <div className="flex-1">
-                            <p className="font-medium text-blue-900 dark:text-blue-100">
-                              {selectedLabResult.resultFile?.name || 'Lab Result File'}
-                            </p>
-                            <p className="text-sm text-blue-700 dark:text-blue-300">
-                              {selectedLabResult.resultFile?.type === 'application/pdf' ? 'PDF Document' : 'Lab Result File'}
-                            </p>
-                          </div>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              if (selectedLabResult.resultFile?.url) {
-                                window.open(selectedLabResult.resultFile.url, '_blank');
-                              }
-                            }}
-                            className="bg-blue-100 hover:bg-blue-200 text-blue-800 border-blue-300"
-                          >
-                            <Download className="h-4 w-4 mr-1" />
-                            View File
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <div>
-                      <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
-                        <Activity className="h-4 w-4" />
-                        TEST RESULTS
-                      </h4>
-                      <div className="p-4 bg-gray-50 dark:bg-gray-900/20 rounded-lg border border-gray-200 dark:border-gray-800">
-                        <p className="text-center text-muted-foreground">
-                          No test results available
-                        </p>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Summary Result */}
-                  {selectedLabResult.hasManualResults && (
-                  <div>
-                    <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">SUMMARY</h4>
-                    <p className="p-3 bg-muted/30 rounded-lg border text-sm font-medium">
-                        {selectedLabResult.result || 'Results entered manually'}
-                    </p>
-                  </div>
-                  )}
-
-                  {selectedLabResult.hasUploadedFile && (
-                    <div>
-                      <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">NOTES</h4>
-                      <p className="p-3 bg-muted/30 rounded-lg border text-sm">
-                        Results uploaded as file. Please view the uploaded document for detailed findings.
-                      </p>
-                    </div>
-                  )}
-
-                  {/* Interpretation */}
-                  <div>
-                    <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">INTERPRETATION</h4>
-                    <p className={`p-4 rounded-lg border text-sm ${selectedLabResult.status === 'Abnormal' ? 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800' : 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800'}`}>
-                      {selectedLabResult.hasUploadedFile
-                        ? 'Please refer to the uploaded result file for interpretation and clinical correlation.'
-                        : selectedLabResult.interpretation || 'No interpretation available'
-                      }
-                    </p>
-                  </div>
-
-                  {/* Clinical Notes */}
-                  {selectedLabResult.clinicalNotes && (
-                    <div>
-                      <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">CLINICAL NOTES</h4>
-                      <p className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800 text-sm">
-                        {selectedLabResult.clinicalNotes}
-                      </p>
-                    </div>
-                  )}
-
-                  {/* Footer */}
-                  <div className="border-t pt-4">
-                    <div className="grid md:grid-cols-3 gap-4 text-xs text-muted-foreground">
-                      <div>
-                        <strong>Performed By:</strong><br />
-                        {selectedLabResult.performedBy}
-                      </div>
-                      <div>
-                        <strong>Verified By:</strong><br />
-                        {selectedLabResult.verifiedBy}
-                      </div>
-                      <div className="text-right">
-                        <strong>Report Generated:</strong><br />
-                        {new Date().toLocaleDateString()} at {new Date().toLocaleTimeString()}
-                      </div>
-                    </div>
-                    <div className="mt-4 text-center text-xs text-muted-foreground">
-{getOrganizationLabHeader()}<br />
-                      Document ID: {selectedLabResult.id}
-                    </div>
-                  </div>
-                </div>
-              </>
-            )}
-          </DialogContent>
-        </Dialog>
-
-        {/* Prescription Viewer Modal */}
-        <Dialog open={showPrescriptionViewer} onOpenChange={setShowPrescriptionViewer}>
-          <DialogContent className="w-[95vw] sm:max-w-[1000px] max-h-[90vh] overflow-y-auto">
-            {selectedPrescription && (
-              <>
-                <DialogHeader>
-                  <div className="flex items-center justify-between">
-                    <DialogTitle className="flex items-center gap-2">
-                      <Pill className="h-5 w-5 text-violet-500" />
-                      Prescription Details
-                      <Badge variant="outline" className="ml-2">
-                        {selectedPrescription.prescriptionId}
-                      </Badge>
-                    </DialogTitle>
-                    <div className="flex items-center gap-2">
-                      <Button variant="outline" size="sm" onClick={() => {}}>
-                        <Download className="h-4 w-4 mr-1" />
-                        Download
-                      </Button>
-                      <Button variant="outline" size="sm" onClick={() => {}}>
-                        <Printer className="h-4 w-4 mr-1" />
-                        Print
-                      </Button>
-                    </div>
-                  </div>
-                  <DialogDescription>
-                    {selectedPrescription.date} • {selectedPrescription.doctor} • {selectedPrescription.diagnosis}
-                  </DialogDescription>
-                </DialogHeader>
-
-                <div className="space-y-6 mt-4">
-                  {/* Prescription Information */}
-                  <div>
-                    <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">PRESCRIPTION INFORMATION</h4>
-                    <div className="grid md:grid-cols-2 gap-4 p-4 bg-muted/30 rounded-lg border">
-                      <div>
-                        <div><strong>Prescription ID:</strong> {selectedPrescription.prescriptionId}</div>
-                        <div><strong>Date:</strong> {selectedPrescription.date}</div>
-                        <div><strong>Doctor:</strong> {selectedPrescription.doctor}</div>
-                      </div>
-                      <div>
-                        <div><strong>Diagnosis:</strong> {selectedPrescription.diagnosis}</div>
-                        <div className="flex items-center gap-2 mt-2">
-                          <strong>Status:</strong>
-                          <Badge 
-                            variant="outline" 
-                            className={
-                              selectedPrescription.status === 'dispensed' 
-                                ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400'
-                                : selectedPrescription.status === 'partially_dispensed'
-                                ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400'
-                                : 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300'
-                            }
-                          >
-                            {selectedPrescription.status === 'dispensed' ? 'Dispensed' : 
-                             selectedPrescription.status === 'partially_dispensed' ? 'Partially Dispensed' : 
-                             'Pending'}
-                          </Badge>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Medications */}
-                  <div>
-                    <h4 className="text-sm font-semibold text-violet-600 mb-3 flex items-center gap-2">
-                      <Pill className="h-4 w-4" />
-                      PRESCRIBED MEDICATIONS
-                    </h4>
-                    <div className="border rounded-lg overflow-hidden">
-                      <table className="w-full text-sm">
-                        <thead className="bg-muted/50">
-                          <tr>
-                            <th className="px-4 py-2 text-left font-medium">Medication</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y">
-                          {selectedPrescription.medications.map((med: any, index: number) => (
-                            <tr key={index} className="hover:bg-muted/30">
-                              <td className="px-4 py-3">
-                                <Badge variant="outline" className="text-sm">
-                                  {med.medication_name || med.medication?.name || med.name || 'Unknown'}
-                                </Badge>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-
-                  {/* Notes */}
-                  {selectedPrescription.notes && (
-                    <div>
-                      <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">NOTES</h4>
-                      <p className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800 text-sm">
-                        {selectedPrescription.notes}
-                      </p>
-                    </div>
-                  )}
-
-                  {/* Footer */}
-                  <div className="border-t pt-4">
-                    <div className="text-center text-xs text-muted-foreground">
-{getOrganizationServicesHeader()}<br />
-                      Document ID: {selectedPrescription.id}
-                    </div>
-                  </div>
-                </div>
-              </>
-            )}
-          </DialogContent>
-        </Dialog>
+        <PrescriptionReportDialog
+          open={showPrescriptionViewer}
+          onOpenChange={(o) => {
+            setShowPrescriptionViewer(o);
+            if (!o) setSelectedPrescription(null);
+          }}
+          prescription={selectedPrescription}
+          patient={
+            currentPatient
+              ? {
+                  name: currentPatient.name || (currentPatient as any).full_name || '',
+                  patientId:
+                    (currentPatient as any).patient_id ||
+                    (currentPatient as any).patientId ||
+                    (currentPatient as any).mrn ||
+                    '',
+                  age: currentPatient.age,
+                  gender: currentPatient.gender,
+                }
+              : null
+          }
+        />
 
         {/* Edit Medical History Dialog */}
         <Dialog open={showEditMedicalHistory} onOpenChange={setShowEditMedicalHistory}>
@@ -10057,8 +10034,10 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
             bmi: selectedVital.bmi?.toString(),
             painScale: selectedVital.painScale?.toString(),
             bloodSugar: selectedVital.bloodSugar?.toString(),
+            randomBloodSugar: selectedVital.randomBloodSugar?.toString(),
           } : null}
           patientName={currentPatient?.name || 'Patient'}
+          patientId={currentPatient?.patientId}
         />
       </div>
 

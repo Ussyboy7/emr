@@ -49,6 +49,13 @@ class Appointment(models.Model):
     
     reason = models.TextField(blank=True, help_text="Reason for appointment")
     notes = models.TextField(blank=True)
+
+    # Same canonical names as visits (GOPD, Eye Clinic, Physiotherapy, …); primary clinic FK synced on save when possible
+    clinics = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="List of clinic names for this appointment (matches standard clinic list)",
+    )
     
     # Recurring appointment
     is_recurring = models.BooleanField(default=False)
@@ -77,6 +84,33 @@ class Appointment(models.Model):
             models.Index(fields=['doctor', 'appointment_date', 'appointment_time']),
             models.Index(fields=['status', 'appointment_date']),
         ]
+
+    def save(self, *args, **kwargs):
+        if not self.appointment_id:
+            from datetime import datetime
+
+            year = datetime.now().year
+            last = Appointment.objects.filter(appointment_id__startswith=f"APT-{year}-").order_by("-appointment_id").first()
+            if last:
+                try:
+                    last_num = int(last.appointment_id.split("-")[-1])
+                    new_num = last_num + 1
+                except (ValueError, IndexError):
+                    new_num = 1
+            else:
+                new_num = 1
+            self.appointment_id = f"APT-{year}-{new_num:06d}"
+
+        if self.clinics:
+            from organization.models import Clinic
+
+            first = self.clinics[0]
+            if isinstance(first, str) and first.strip():
+                match = Clinic.objects.filter(name__iexact=first.strip()).first()
+                if match:
+                    self.clinic = match
+
+        super().save(*args, **kwargs)
     
     def __str__(self):
         return f"{self.appointment_id} - {self.patient.get_full_name()} - {self.appointment_date}"

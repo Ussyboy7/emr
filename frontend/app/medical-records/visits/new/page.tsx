@@ -42,6 +42,9 @@ function NewVisitPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const patientIdParam = searchParams.get('patient');
+  const prefDate = searchParams.get('date');
+  const prefTime = searchParams.get('time');
+  const prefVisitType = searchParams.get('visit_type');
   const { locations: locationOptions } = useLocationOptions();
   
   const [loading, setLoading] = useState(!!patientIdParam);
@@ -72,10 +75,11 @@ function NewVisitPageContent() {
   useEffect(() => {
     setFormData(prev => ({
       ...prev,
-      visitDate: prev.visitDate || new Date().toISOString().split('T')[0],
-      visitTime: prev.visitTime || new Date().toTimeString().slice(0, 5),
+      visitDate: prev.visitDate || prefDate || new Date().toISOString().split('T')[0],
+      visitTime: prev.visitTime || (prefTime && prefTime.length >= 5 ? prefTime.slice(0, 5) : prefTime) || new Date().toTimeString().slice(0, 5),
+      visitType: prev.visitType || prefVisitType || '',
     }));
-  }, []);
+  }, [prefDate, prefTime, prefVisitType]);
 
   const mapPatient = useCallback((p: any) => ({
     id: p.patient_id || '',
@@ -87,7 +91,7 @@ function NewVisitPageContent() {
     allergies: p.allergies ? String(p.allergies).split(/[,\n]/).map((a: string) => a.trim()).filter(Boolean) : [],
   }), []);
 
-  // Preselect patient from ?patient= URL
+  // Preselect patient from ?patient= URL (patient_id string or numeric PK)
   useEffect(() => {
     if (!patientIdParam) {
       setLoading(false);
@@ -98,12 +102,23 @@ function NewVisitPageContent() {
       try {
         setLoading(true);
         setError(null);
-        const result = await patientService.getPatients({ search: patientIdParam, page_size: 10 });
+        let p: any = null;
+        if (/^\d+$/.test(patientIdParam.trim())) {
+          try {
+            p = await patientService.getPatient(parseInt(patientIdParam, 10));
+          } catch {
+            p = null;
+          }
+        }
+        if (!p) {
+          const result = await patientService.getPatients({ search: patientIdParam, page_size: 10 });
+          if (cancelled) return;
+          p = result.results.find((r: any) => r.patient_id === patientIdParam) ?? null;
+        }
         if (cancelled) return;
-        const p = result.results.find((r: any) => r.patient_id === patientIdParam);
         if (p) {
           setSelectedPatient(mapPatient(p));
-          setFormData(prev => ({ ...prev, patientId: patientIdParam }));
+          setFormData(prev => ({ ...prev, patientId: p.patient_id || patientIdParam }));
         }
       } catch (err) {
         if (cancelled) return;

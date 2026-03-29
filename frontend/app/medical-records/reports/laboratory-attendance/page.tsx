@@ -237,17 +237,17 @@ export default function LaboratoryAttendanceReport() {
               </div>
               {viewMode === "year" ? (
                 <div>
-                  <Label>Year</Label>
-                  <Select value={year} onValueChange={setYear}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {years.map(y => (
-                        <SelectItem key={y} value={y}>{y}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+              <Label>Year</Label>
+              <Select value={year} onValueChange={setYear}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {years.map(y => (
+                    <SelectItem key={y} value={y}>{y}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
                 </div>
               ) : (
                 <>

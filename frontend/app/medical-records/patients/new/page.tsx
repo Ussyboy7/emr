@@ -497,7 +497,7 @@ export default function NewPatientPage() {
   const [showCategorySwitchDialog, setShowCategorySwitchDialog] = useState(false);
   const [pendingCategory, setPendingCategory] = useState<'employee' | 'retiree' | 'nonnpa' | 'dependent' | null>(null);
 
-  // Principal Staff ID validation state
+  // Principal personal number validation (employee/retiree P.N.)
   const [principalValidation, setPrincipalValidation] = useState<{
     isValidating: boolean;
     isValid: boolean | null;
@@ -574,7 +574,7 @@ export default function NewPatientPage() {
         next.lga = '';
       }
 
-      // If principal staff ID is being changed, reset auto-population
+      // If principal personal number is being changed, reset auto-population
       if (field === 'principalStaffId') {
         if (!value || value !== prev.principalStaffId) {
           setNokAutoPopulated(false);
@@ -710,7 +710,7 @@ export default function NewPatientPage() {
   };
   
   
-  // Validate Principal Staff ID
+  // Validate principal personal number (links to employee/retiree patient)
   const validatePrincipalStaffId = async (staffId: string) => {
     if (!staffId || !staffId.trim()) {
       setPrincipalValidation({ isValidating: false, isValid: null, message: '' });
@@ -721,7 +721,7 @@ export default function NewPatientPage() {
     setPrincipalValidation({ isValidating: true, isValid: null, message: 'Validating...' });
 
     try {
-      // Principal Staff ID must be the principal's personal number (e.g. A2962).
+      // Value must match the principal’s personal_number (e.g. A2962), not patient_id.
       let foundPatient: any = null;
       let numericId: number | null = null;
 
@@ -896,7 +896,7 @@ export default function NewPatientPage() {
       }
 
       if (patientCategory === 'dependent' && !formData.principalStaffId) {
-        toast.error('Principal staff is required for Dependents');
+        toast.error('Principal personal number is required for dependents');
         setIsSubmitting(false);
         return;
       }
@@ -960,7 +960,7 @@ export default function NewPatientPage() {
       }
       
       if (patientCategory === 'dependent') {
-        // Principal Staff ID must resolve strictly from the principal's personal number.
+        // Resolve principal via personal_number on an employee or retiree record.
         const principalIdStr = formData.principalStaffId.trim();
         const searchResult = await patientService.getPatients({ search: principalIdStr }).catch(() => ({ results: [] }));
         const principalMatches = searchResult.results || [];
@@ -969,7 +969,7 @@ export default function NewPatientPage() {
         ) || null;
 
         if (!matchedPrincipal) {
-          toast.error(`Principal personal number "${principalIdStr}" not found. Please enter a valid staff or retiree personal number.`);
+          toast.error(`Principal personal number "${principalIdStr}" not found. Use the employee or retiree's personal number from their registration (not their patient ID).`);
           setIsSubmitting(false);
           return;
         }
@@ -1518,7 +1518,7 @@ export default function NewPatientPage() {
                           </Select>
                         </div>
                         <div className="space-y-2">
-                          <Label>Principal Staff ID *</Label>
+                          <Label>Principal personal number *</Label>
                           <div className="flex gap-2">
                             <Input
                               value={formData.principalStaffId}
@@ -1540,13 +1540,15 @@ export default function NewPatientPage() {
                               Search
                             </Button>
                           </div>
-                          <p className="text-xs text-muted-foreground">Use the principal&apos;s personal number only. Patient IDs like `E-A2962` are not accepted here.</p>
+                          <p className="text-xs text-muted-foreground">
+                            Enter the principal&apos;s <strong>personal number</strong> (employee or retiree)—the same value as P.N. on their registration and forms. Do not use patient IDs such as E-A2962 or R-… here.
+                          </p>
                           {formData.principalStaffId && (
                             <div className={`text-xs p-2 rounded-md border ${
                               principalValidation.isValidating ? 'bg-blue-50 border-blue-200 text-blue-700' :
                               principalValidation.isValid ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'
                             }`}>
-                              {principalValidation.message || 'Enter a valid staff ID to validate'}
+                              {principalValidation.message || "Enter the principal's personal number, then Search"}
                             </div>
                           )}
                         </div>
@@ -2126,7 +2128,7 @@ export default function NewPatientPage() {
                         <div className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg mb-4">
                           <p className="text-sm text-blue-800 dark:text-blue-200 flex items-center gap-2">
                             <Users className="h-4 w-4" />
-                            Next of kin fields have been auto-populated from the principal staff member.
+                            Next of kin fields have been auto-populated from the principal (employee/retiree) record.
                             All fields can still be edited if needed.
                           </p>
                         </div>

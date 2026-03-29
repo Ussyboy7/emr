@@ -8,10 +8,15 @@ export interface Referral {
   referral_id: string;
   patient: number;
   patient_name?: string;
+  /** Patient personal_number from DB (dependents: principal’s when own is empty). */
+  patient_print_pn?: string;
+  /** Patient division from DB (dependents: principal’s when own is empty). */
+  patient_print_dept?: string;
   visit?: number;
   session?: number;
   referred_by?: number;
   referred_by_name?: string;
+  created_by?: number;
   specialty: string;
   facility: string;
   facility_type: 'internal' | 'external' | 'specialist';
@@ -27,6 +32,8 @@ export interface Referral {
     | 'records_review'
     | 'returned_for_correction'
     | 'approved_for_forms'
+    /** Legacy value; treat like approved_for_forms where still present in DB */
+    | 'scheduled'
     | 'closed'
     | 'cancelled';
   notes?: string;
@@ -35,6 +42,10 @@ export interface Referral {
   reviewed_at?: string;
   approved_at?: string;
   closed_at?: string;
+  /** Medical Records: printed referral letter physically stamped / filed */
+  referral_letter_acknowledged_at?: string;
+  referral_letter_acknowledged_by?: number;
+  referral_letter_acknowledged_by_name?: string;
   responsibility_forms_count?: number;
   latest_responsibility_form?: ResponsibilityFormIssuance | null;
 }
@@ -54,6 +65,10 @@ export interface ResponsibilityFormIssuance {
   notes?: string;
   issued_by?: number;
   issued_by_name?: string;
+  /** Medical Records: this issuance physically stamped */
+  records_acknowledged_at?: string;
+  records_acknowledged_by?: number;
+  records_acknowledged_by_name?: string;
 }
 
 class ReferralService {
@@ -75,8 +90,16 @@ class ReferralService {
     end_date?: string;
     page?: number;
     page_size?: number;
+    /** When true, list excludes draft referrals (Medical Records queue). */
+    exclude_draft?: boolean;
+    /** When set, list excludes referrals whose status is in this comma-separated list. */
+    exclude_status?: string;
   }): Promise<{ results: Referral[]; count: number }> {
-    const query = buildQueryString(params || {});
+    const { exclude_draft, ...rest } = params || {};
+    const query = buildQueryString({
+      ...rest,
+      ...(exclude_draft ? { exclude_draft: "true" as const } : {}),
+    });
     return apiFetch<{ results: Referral[]; count: number }>(`/consultation/referrals/${query}`);
   }
 
@@ -122,16 +145,20 @@ class ReferralService {
     });
   }
 
-  async startReview(referralId: number): Promise<Referral> {
-    return apiFetch<Referral>(`/consultation/referrals/${referralId}/start_review/`, {
-      method: 'POST',
-    });
-  }
-
   async approveForForms(referralId: number): Promise<Referral> {
     return apiFetch<Referral>(`/consultation/referrals/${referralId}/approve_for_forms/`, {
       method: 'POST',
     });
+  }
+
+  async acknowledgeResponsibilityForm(referralId: number, formId: number): Promise<ResponsibilityFormIssuance> {
+    return apiFetch<ResponsibilityFormIssuance>(
+      `/consultation/referrals/${referralId}/acknowledge_responsibility_form/`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ form_id: formId }),
+      }
+    );
   }
 
   async returnForCorrection(referralId: number, notes?: string): Promise<Referral> {
@@ -153,7 +180,14 @@ class ReferralService {
 
   async issueForm(
     referralId: number,
-    payload: { valid_from: string; valid_to: string; notes?: string; document_file?: File }
+    payload: {
+      valid_from: string;
+      valid_to: string;
+      notes?: string;
+      document_file?: File;
+      override_active?: boolean;
+      override_reason?: string;
+    }
   ): Promise<ResponsibilityFormIssuance> {
     if (payload.document_file) {
       const formData = new FormData();
@@ -161,6 +195,8 @@ class ReferralService {
       formData.append('valid_to', payload.valid_to);
       if (payload.notes) formData.append('notes', payload.notes);
       formData.append('document_file', payload.document_file);
+      if (payload.override_active) formData.append('override_active', 'true');
+      if (payload.override_reason) formData.append('override_reason', payload.override_reason);
       return apiFetch<ResponsibilityFormIssuance>(`/consultation/referrals/${referralId}/forms/`, {
         method: 'POST',
         body: formData,
@@ -172,6 +208,8 @@ class ReferralService {
         valid_from: payload.valid_from,
         valid_to: payload.valid_to,
         notes: payload.notes || '',
+        ...(payload.override_active ? { override_active: true } : {}),
+        ...(payload.override_reason?.trim() ? { override_reason: payload.override_reason.trim() } : {}),
       }),
     });
   }

@@ -1,3 +1,5 @@
+"use client";
+
 /**
  * Patient API service
  */
@@ -102,6 +104,9 @@ export interface Visit {
   patient: number;
   patient_id?: string;
   patient_name?: string;
+  /** Completed years from patient DOB (from Visit API). */
+  age?: number;
+  gender?: string;
   visit_type: string;
   status: string;
   date: string;
@@ -133,9 +138,13 @@ export interface VitalReading {
   weight?: number;
   height?: number;
   bmi?: number;
+  pain_scale?: number | null;
+  blood_sugar?: number | string | null;
+  random_blood_sugar?: number | string | null;
   notes?: string;
   recorded_at: string;
   recorded_by?: number;
+  recorded_by_name?: string | null;
 }
 
 class PatientService {

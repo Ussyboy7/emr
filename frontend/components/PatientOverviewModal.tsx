@@ -50,6 +50,33 @@ interface Patient {
   nonNpaType?: string;
 }
 
+/** Stored registration codes → labels (matches patient registration form). */
+const TITLE_CODE_TO_LABEL: Record<string, string> = {
+  mr: "Mr",
+  mrs: "Mrs",
+  ms: "Ms",
+  miss: "Miss",
+  dr: "Dr",
+  chief: "Chief",
+  engr: "Engr",
+  prof: "Prof",
+  alhaji: "Alhaji",
+  hajia: "Hajia",
+  mallam: "Mallam",
+  lady: "Lady",
+};
+
+function displayStoredTitle(code: string): string {
+  if (!code?.trim()) return "";
+  const k = code.toLowerCase().trim();
+  return TITLE_CODE_TO_LABEL[k] || code;
+}
+
+function sentenceCaseEnum(s: string): string {
+  if (!s?.trim()) return "";
+  return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+}
+
 interface PatientDetail {
   id: string;
   patientId: string;
@@ -111,6 +138,13 @@ interface PatientDetail {
   stateOfOrigin: string;
   lga: string;
   numericId: number;
+  /** From persisted medical history (registration “Medical & NOK” social section). */
+  socialHistory: {
+    smoking: string;
+    alcohol: string;
+    exercise: string;
+    occupation: string;
+  };
 }
 
 interface DependentPatient {
@@ -381,8 +415,20 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
           temp: vital.temperature?.toString() || '-',
           spo2: vital.oxygen_saturation?.toString() || '-',
           weight: vital.weight?.toString() || '-',
+          height: vital.height?.toString() || '-',
           bmi: vital.bmi?.toString() || '-',
-          recordedBy: vital.recorded_by?.toString() || 'Unknown',
+          painScale: vital.pain_scale != null && vital.pain_scale !== '' ? String(vital.pain_scale) : '',
+          bloodSugar:
+            vital.blood_sugar != null && vital.blood_sugar !== '' ? String(vital.blood_sugar) : '',
+          randomBloodSugar:
+            vital.random_blood_sugar != null && vital.random_blood_sugar !== ''
+              ? String(vital.random_blood_sugar)
+              : '',
+          notes: vital.notes || '',
+          recordedBy:
+            vital.recorded_by_name ||
+            (vital.recorded_by != null ? String(vital.recorded_by) : '') ||
+            'Unknown',
         }));
         setVitalSigns(transformedVitals);
       }
@@ -506,11 +552,21 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
       let allergies: string[] = [];
       let conditions: string[] = [];
       let medications: any[] = [];
-      
-      if (historyData.status === 'fulfilled' && historyData.value) {
+      let socialHistory = { smoking: "", alcohol: "", exercise: "", occupation: "" };
+
+      if (historyData.status === "fulfilled" && historyData.value) {
         const history = historyData.value;
         allergies = history.allergies || [];
         conditions = history.chronic_conditions || history.conditions || [];
+        const sh = history.social_history;
+        if (sh && typeof sh === "object") {
+          socialHistory = {
+            smoking: String((sh as { smoking?: string }).smoking || ""),
+            alcohol: String((sh as { alcohol?: string }).alcohol || ""),
+            exercise: String((sh as { exercise?: string }).exercise || ""),
+            occupation: String((sh as { occupation?: string }).occupation || ""),
+          };
+        }
         medications = (history.medications || []).map((med: any, index: number) => ({
           id: med.id || index,
           name: med.name || med.medication_name || '',
@@ -562,7 +618,7 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
         id: apiPatient.id.toString(),
         patientId: apiPatient.patient_id || apiPatient.id.toString(),
         fullName: apiPatient.full_name ?? '',
-        title: apiPatient.title || '',
+        title: displayStoredTitle(apiPatient.title || "") || apiPatient.title || "",
         firstName: apiPatient.first_name || '',
         lastName: apiPatient.surname || '',
         middleName: apiPatient.middle_name || '',
@@ -570,7 +626,7 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
         age: apiPatient.age || 0,
         ageDisplay: (apiPatient as any).age_display || undefined,
         gender: apiPatient.gender === 'male' ? 'Male' : 'Female',
-        maritalStatus: apiPatient.marital_status || '',
+        maritalStatus: sentenceCaseEnum(apiPatient.marital_status || ""),
         religion: (apiPatient as any).religion || '',
         tribe: (apiPatient as any).tribe || '',
         occupation: (apiPatient as any).occupation || '',
@@ -611,13 +667,13 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
         currentMedications: medications,
         emergencyContact: {
           name: nokName,
-          relationship: apiPatient.nok_relationship || '',
+          relationship: sentenceCaseEnum(apiPatient.nok_relationship || ""),
           phone: apiPatient.nok_phone || '',
           address: apiPatient.nok_address || '',
         },
         nextOfKin: {
           name: nokName,
-          relationship: apiPatient.nok_relationship || '',
+          relationship: sentenceCaseEnum(apiPatient.nok_relationship || ""),
           phone: apiPatient.nok_phone || '',
           address: apiPatient.nok_address || '',
         },
@@ -627,6 +683,7 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
         stateOfOrigin: apiPatient.state_of_origin || '',
         lga: apiPatient.lga || '',
         numericId,
+        socialHistory,
       };
       
       setPatientDetail(detail);
@@ -802,7 +859,7 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
                           </div>
                           <div className="space-y-1">
                             <p className="text-muted-foreground">Title</p>
-                            <p>{patientDetail.title || 'Not provided'}</p>
+                            <p>{patientDetail.title?.trim() ? patientDetail.title : "Not provided"}</p>
                           </div>
                           {patientDetail.dependentType ? (
                             <div className="space-y-1">
@@ -840,7 +897,7 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
                           </div>
                           <div className="space-y-1">
                             <p className="text-muted-foreground">Marital Status</p>
-                            <p className="capitalize">{patientDetail.maritalStatus || 'Not provided'}</p>
+                            <p>{patientDetail.maritalStatus || "Not provided"}</p>
                           </div>
                           <div className="space-y-1">
                             <p className="text-muted-foreground">Religion</p>
@@ -862,8 +919,35 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
                             <p>{patientDetail.genotype || 'Not provided'}</p>
                           </div>
                           <div className="space-y-1 md:col-span-2">
-                            <p className="text-muted-foreground">Occupation</p>
-                            <p>{patientDetail.occupation || 'Not provided'}</p>
+                            <p className="text-muted-foreground">Occupation (demographics)</p>
+                            <p>{patientDetail.occupation || "Not provided"}</p>
+                          </div>
+                        </CardContent>
+                      </Card>
+
+                      <Card>
+                        <CardHeader>
+                          <CardTitle className="flex items-center gap-2">
+                            <Activity className="h-5 w-5 text-slate-500" />
+                            Social &amp; lifestyle
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent className="grid gap-3 md:grid-cols-2 text-sm">
+                          <div className="space-y-1">
+                            <p className="text-muted-foreground">Smoking</p>
+                            <p>{patientDetail.socialHistory.smoking || "Not provided"}</p>
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-muted-foreground">Alcohol</p>
+                            <p>{patientDetail.socialHistory.alcohol || "Not provided"}</p>
+                          </div>
+                          <div className="space-y-1 md:col-span-2">
+                            <p className="text-muted-foreground">Exercise</p>
+                            <p>{patientDetail.socialHistory.exercise || "Not provided"}</p>
+                          </div>
+                          <div className="space-y-1 md:col-span-2">
+                            <p className="text-muted-foreground">Occupation (medical history)</p>
+                            <p>{patientDetail.socialHistory.occupation || "Not provided"}</p>
                           </div>
                         </CardContent>
                       </Card>

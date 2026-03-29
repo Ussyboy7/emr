@@ -103,12 +103,23 @@ class AnalyticsService {
   }
 
   /**
-   * Get analytics summary stats
+   * Get analytics summary stats.
+   * When `dateRange` is set, visit counts use that inclusive calendar range; otherwise last `period` days ending today.
    */
-  async getSummaryStats(period: number = 30): Promise<AnalyticsStats> {
-    const endDate = new Date();
-    const startDate = new Date();
-    startDate.setDate(startDate.getDate() - period);
+  async getSummaryStats(
+    period: number = 30,
+    dateRange?: { start: string; end: string }
+  ): Promise<AnalyticsStats> {
+    let endDate: Date;
+    let startDate: Date;
+    if (dateRange?.start && dateRange?.end) {
+      startDate = new Date(`${dateRange.start}T00:00:00`);
+      endDate = new Date(`${dateRange.end}T23:59:59`);
+    } else {
+      endDate = new Date();
+      startDate = new Date();
+      startDate.setDate(startDate.getDate() - period);
+    }
     
     const previousStartDate = new Date();
     previousStartDate.setDate(previousStartDate.getDate() - (period * 2));
@@ -120,7 +131,7 @@ class AnalyticsService {
     const totalPatients = currentPatients.count || currentPatients.results.length;
     
     // Get visit counts
-    const currentVisits = await visitService.getVisits({ 
+    const currentVisits = await visitService.getVisits({
       page: 1,
       start_date: startDate.toISOString().split('T')[0],
       end_date: endDate.toISOString().split('T')[0],

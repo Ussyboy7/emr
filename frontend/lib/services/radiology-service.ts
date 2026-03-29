@@ -21,6 +21,8 @@ export interface RadiologyOrder {
   critical?: boolean;
   studies: RadiologyStudy[];
   ordered_at: string;
+  icd10_diagnoses?: Array<{ code: string; name: string; type: string; notes?: string }>;
+  patient_details?: { id?: number; name?: string; age?: number; gender?: string };
   // For creating orders with studies
   studies_data?: any[];
 }
@@ -81,6 +83,28 @@ export interface RadiologyTemplate {
   is_active: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export interface RadiologyAnalyticsSummary {
+  period: { start: string; end: string };
+  summary: {
+    orders_count: number;
+    studies_total: number;
+    studies_verified: number;
+    studies_reported: number;
+    studies_marked_critical: number;
+    unique_patients: number;
+  };
+  patients_by_gender: Record<string, number>;
+  patients_by_category: Record<string, number>;
+  npa_staff_linked_vs_non_npa: { npa_staff_linked: number; non_npa: number };
+  studies_by_status: Record<string, number>;
+  studies_by_modality: Record<string, number>;
+  studies_by_template_category: Record<string, number>;
+  studies_by_processing_method: Record<string, number>;
+  orders_by_priority: Record<string, number>;
+  by_day: Array<{ date: string; studies: number; orders: number }>;
+  top_procedures: Array<{ procedure: string; count: number }>;
 }
 
 class RadiologyService {
@@ -214,7 +238,8 @@ class RadiologyService {
     page?: number;
     page_size?: number;
   }): Promise<{ results: RadiologyReport[]; count: number }> {
-    const queryParams = { ...params, study_status: 'verified' };
+    // Backend RadiologyReportViewSet reads `status`, not `study_status` (see get_queryset).
+    const queryParams = { ...params, status: 'verified' };
     const query = buildQueryString(queryParams);
     return apiFetch<{ results: RadiologyReport[]; count: number }>(
       `/radiology/verification/${query}`
@@ -414,6 +439,11 @@ class RadiologyService {
       method: 'POST',
       body: formData,
     });
+  }
+
+  async getAnalyticsSummary(start: string, end: string): Promise<RadiologyAnalyticsSummary> {
+    const query = buildQueryString({ start, end });
+    return apiFetch<RadiologyAnalyticsSummary>(`/radiology/analytics/summary/${query}`);
   }
 }
 

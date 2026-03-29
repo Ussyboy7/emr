@@ -1,17 +1,33 @@
 "use client";
 
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Separator } from '@/components/ui/separator';
-import { 
-  Activity, Heart, Thermometer, Wind, Droplets, Scale, TrendingUp,
-  Calendar, Clock, User, AlertTriangle, CheckCircle2
-} from 'lucide-react';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import {
+  Activity,
+  Droplets,
+  Edit,
+  Eye,
+  Heart,
+  Scale,
+  Thermometer,
+  Wind,
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import {
+  displayBmiFromVitals,
+  formatVitalTileValue,
+  vitalFieldToString,
+} from "@/lib/vitals-display";
 
 interface VitalsDetail {
-  id: string | number;
+  id?: string | number;
   date?: string;
   time?: string;
   recordedAt?: string;
@@ -27,288 +43,173 @@ interface VitalsDetail {
   bmi?: string;
   painScale?: string;
   bloodSugar?: string;
+  randomBloodSugar?: string;
   notes?: string;
-  bp?: string; // Alternative format
-  temp?: string; // Alternative format
-  spo2?: string; // Alternative format
-  [key: string]: any;
+  bp?: string;
+  temp?: string;
+  spo2?: string;
+  heartRate?: string | number;
+  systolic?: string | number;
+  diastolic?: string | number;
+  recorded_at?: string;
+  recorded_by_name?: string;
 }
 
-interface VitalsDetailModalProps {
+export interface VitalsDetailModalProps {
   vitals: VitalsDetail | null;
   patientName?: string;
+  /** Shown in subtitle before "Recorded:" (e.g. R-9999). */
+  patientId?: string;
   isOpen: boolean;
   onClose: () => void;
+  /** When set, shows "Edit Vitals" like nursing pool queue. */
+  onEdit?: () => void;
 }
 
-export function VitalsDetailModal({ vitals, patientName, isOpen, onClose }: VitalsDetailModalProps) {
+export function VitalsDetailModal({
+  vitals,
+  patientName,
+  patientId,
+  isOpen,
+  onClose,
+  onEdit,
+}: VitalsDetailModalProps) {
   if (!vitals) return null;
 
-  // Normalize vitals data
-  const normalizedVitals = {
-    bloodPressureSystolic: vitals.bloodPressureSystolic || (vitals.bp ? vitals.bp.split('/')[0] : undefined),
-    bloodPressureDiastolic: vitals.bloodPressureDiastolic || (vitals.bp ? vitals.bp.split('/')[1] : undefined),
-    pulse: vitals.pulse,
-    temperature: vitals.temperature || vitals.temp,
-    respiratoryRate: vitals.respiratoryRate,
-    oxygenSaturation: vitals.oxygenSaturation || vitals.spo2,
-    weight: vitals.weight,
-    height: vitals.height,
-    bmi: vitals.bmi,
-    painScale: vitals.painScale,
-    bloodSugar: vitals.bloodSugar,
-    notes: vitals.notes,
+  const sysFromBp = vitals.bp ? String(vitals.bp).split("/")[0]?.trim() : "";
+  const diaFromBp = vitals.bp ? String(vitals.bp).split("/")[1]?.trim() : "";
+
+  const normalized = {
+    temperature: vitalFieldToString(vitals.temperature ?? vitals.temp),
+    pulse: vitalFieldToString(vitals.pulse ?? vitals.heartRate),
+    bloodPressureSystolic: vitalFieldToString(
+      vitals.bloodPressureSystolic ?? vitals.systolic ?? sysFromBp
+    ),
+    bloodPressureDiastolic: vitalFieldToString(
+      vitals.bloodPressureDiastolic ?? vitals.diastolic ?? diaFromBp
+    ),
+    respiratoryRate: vitalFieldToString(vitals.respiratoryRate),
+    oxygenSaturation: vitalFieldToString(vitals.oxygenSaturation ?? vitals.spo2),
+    weight: vitalFieldToString(vitals.weight),
+    height: vitalFieldToString(vitals.height),
+    bmi: vitalFieldToString(vitals.bmi),
+    painScale: vitalFieldToString(vitals.painScale),
+    bloodSugar: vitalFieldToString(vitals.bloodSugar),
+    randomBloodSugar: vitalFieldToString(vitals.randomBloodSugar),
+    notes: vitals.notes != null ? String(vitals.notes).trim() : "",
   };
 
-  // Format date and time
-  const getDateString = () => {
-    if (vitals.recordedAt) {
-      const date = new Date(vitals.recordedAt);
-      return {
-        date: date.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }),
-        time: date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
-      };
-    }
-    if (vitals.date || vitals.time) {
-      return {
-        date: vitals.date || 'Not specified',
-        time: vitals.time || 'Not specified',
-      };
-    }
-    return { date: 'Not specified', time: 'Not specified' };
-  };
+  const recordedRaw = vitals.recordedAt ?? vitals.recorded_at;
+  const recordedAtStr = recordedRaw
+    ? new Date(recordedRaw as string).toLocaleString()
+    : [vitals.date, vitals.time].filter(Boolean).join(", ") || "N/A";
 
-  const { date, time } = getDateString();
+  const sysS = normalized.bloodPressureSystolic;
+  const diaS = normalized.bloodPressureDiastolic;
+  const bpValue =
+    sysS && diaS
+      ? `${formatVitalTileValue(sysS)}/${formatVitalTileValue(diaS)}`
+      : "—";
+  const bmiStr = displayBmiFromVitals(normalized);
 
-  // Calculate BMI if weight and height are available
-  const calculateBMI = () => {
-    if (normalizedVitals.bmi) return normalizedVitals.bmi;
-    const weight = parseFloat(normalizedVitals.weight || '0');
-    const height = parseFloat(normalizedVitals.height || '0');
-    if (weight > 0 && height > 0) {
-      const bmiValue = (weight / Math.pow(height / 100, 2)).toFixed(1);
-      return bmiValue;
-    }
-    return null;
-  };
+  const rows: { label: string; value: string; unit: string; icon?: LucideIcon }[] = [
+    {
+      label: "Temperature",
+      value: formatVitalTileValue(normalized.temperature),
+      unit: "°C",
+      icon: Thermometer,
+    },
+    { label: "Pulse", value: formatVitalTileValue(normalized.pulse), unit: "bpm", icon: Heart },
+    {
+      label: "Blood Pressure",
+      value: bpValue,
+      unit: "mmHg",
+      icon: Activity,
+    },
+    {
+      label: "Respiratory Rate",
+      value: formatVitalTileValue(normalized.respiratoryRate),
+      unit: "/min",
+      icon: Wind,
+    },
+    {
+      label: "SpO2",
+      value: formatVitalTileValue(normalized.oxygenSaturation),
+      unit: "%",
+      icon: Droplets,
+    },
+    { label: "Weight", value: formatVitalTileValue(normalized.weight), unit: "kg", icon: Scale },
+    { label: "Height", value: formatVitalTileValue(normalized.height), unit: "cm" },
+    {
+      label: "BMI",
+      value: bmiStr ? formatVitalTileValue(bmiStr) : "—",
+      unit: bmiStr ? "kg/m²" : "",
+    },
+    { label: "Pain Scale", value: formatVitalTileValue(normalized.painScale), unit: "/10" },
+    {
+      label: "Blood sugar",
+      value: formatVitalTileValue(normalized.bloodSugar),
+      unit: "mg/dL",
+    },
+    { label: "RBS", value: formatVitalTileValue(normalized.randomBloodSugar), unit: "mg/dL" },
+  ];
 
-  const bmiValue = calculateBMI();
-  const bmiStatus = bmiValue ? (parseFloat(bmiValue) < 18.5 ? 'Underweight' : parseFloat(bmiValue) < 25 ? 'Normal' : parseFloat(bmiValue) < 30 ? 'Overweight' : 'Obese') : null;
-
-  // Get vital status colors
-  const getVitalStatusColor = (type: string, value: string | undefined) => {
-    if (!value) return '';
-    const num = parseFloat(value);
-    if (isNaN(num)) return '';
-    
-    switch (type) {
-      case 'temperature':
-        if (num >= 39) return 'text-rose-600 dark:text-rose-400 font-semibold';
-        if (num >= 38) return 'text-amber-600 dark:text-amber-400';
-        if (num < 36) return 'text-blue-600 dark:text-blue-400';
-        return '';
-      case 'pulse':
-        if (num >= 120) return 'text-rose-600 dark:text-rose-400 font-semibold';
-        if (num >= 100) return 'text-amber-600 dark:text-amber-400';
-        if (num < 60) return 'text-blue-600 dark:text-blue-400';
-        return '';
-      case 'systolic':
-        if (num >= 180) return 'text-rose-600 dark:text-rose-400 font-semibold';
-        if (num >= 140) return 'text-amber-600 dark:text-amber-400';
-        if (num < 90) return 'text-blue-600 dark:text-blue-400';
-        return '';
-      case 'oxygen':
-        if (num < 90) return 'text-rose-600 dark:text-rose-400 font-semibold';
-        if (num < 95) return 'text-amber-600 dark:text-amber-400';
-        return '';
-      default:
-        return '';
-    }
-  };
+  const name = patientName?.trim() || "Patient";
+  const pid = patientId?.trim();
 
   return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="w-[95vw] sm:max-w-[700px] max-h-[90vh] overflow-hidden flex flex-col">
+    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Activity className="h-5 w-5 text-rose-500" />
-            Vital Signs Details
+            <Eye className="h-5 w-5 text-rose-500" />
+            Vitals - {name}
           </DialogTitle>
           <DialogDescription>
-            {patientName && `${patientName} • `}
-            <Calendar className="h-3 w-3 inline mr-1" />
-            {date} <Clock className="h-3 w-3 inline mx-2" />
-            {time}
-            {vitals.recordedBy && ` • Recorded by: ${vitals.recordedBy}`}
+            {pid ? `${pid} | ` : ""}
+            Recorded: {recordedAtStr}
           </DialogDescription>
         </DialogHeader>
-
-        <div className="flex-1 overflow-y-auto py-4 space-y-4">
-          {/* Primary Vitals */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Primary Vital Signs</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                {/* Blood Pressure */}
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <Activity className="h-4 w-4 text-muted-foreground" />
-                    <p className="text-sm text-muted-foreground">Blood Pressure</p>
-                  </div>
-                  <p className={`text-xl font-semibold ${getVitalStatusColor('systolic', normalizedVitals.bloodPressureSystolic)}`}>
-                    {normalizedVitals.bloodPressureSystolic && normalizedVitals.bloodPressureDiastolic
-                      ? `${normalizedVitals.bloodPressureSystolic}/${normalizedVitals.bloodPressureDiastolic}`
-                      : '-'
-                    } <span className="text-sm font-normal text-muted-foreground">mmHg</span>
-                  </p>
-                </div>
-
-                {/* Pulse */}
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <Heart className="h-4 w-4 text-muted-foreground" />
-                    <p className="text-sm text-muted-foreground">Pulse</p>
-                  </div>
-                  <p className={`text-xl font-semibold ${getVitalStatusColor('pulse', normalizedVitals.pulse)}`}>
-                    {normalizedVitals.pulse || '-'} <span className="text-sm font-normal text-muted-foreground">bpm</span>
-                  </p>
-                </div>
-
-                {/* Temperature */}
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <Thermometer className="h-4 w-4 text-muted-foreground" />
-                    <p className="text-sm text-muted-foreground">Temperature</p>
-                  </div>
-                  <p className={`text-xl font-semibold ${getVitalStatusColor('temperature', normalizedVitals.temperature)}`}>
-                    {normalizedVitals.temperature || '-'} <span className="text-sm font-normal text-muted-foreground">°C</span>
-                  </p>
-                </div>
-
-                {/* Respiratory Rate */}
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <Wind className="h-4 w-4 text-muted-foreground" />
-                    <p className="text-sm text-muted-foreground">Respiratory Rate</p>
-                  </div>
-                  <p className="text-xl font-semibold">
-                    {normalizedVitals.respiratoryRate || '-'} <span className="text-sm font-normal text-muted-foreground">/min</span>
-                  </p>
-                </div>
-
-                {/* Oxygen Saturation */}
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <Droplets className="h-4 w-4 text-muted-foreground" />
-                    <p className="text-sm text-muted-foreground">Oxygen Saturation (SpO2)</p>
-                  </div>
-                  <p className={`text-xl font-semibold ${getVitalStatusColor('oxygen', normalizedVitals.oxygenSaturation)}`}>
-                    {normalizedVitals.oxygenSaturation || '-'} <span className="text-sm font-normal text-muted-foreground">%</span>
-                  </p>
-                </div>
+        <div className="py-4">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+            {rows.map((item, i) => (
+              <div key={i} className="p-3 rounded-lg bg-muted/50 text-center">
+                <p className="text-xs text-muted-foreground flex items-center justify-center gap-1">
+                  {item.icon && <item.icon className="h-3 w-3" />}
+                  {item.label}
+                </p>
+                <p className="text-lg font-semibold">
+                  {item.value}{" "}
+                  {item.unit ? (
+                    <span className="text-sm font-normal text-muted-foreground">{item.unit}</span>
+                  ) : null}
+                </p>
               </div>
-            </CardContent>
-          </Card>
-
-          {/* Secondary Vitals */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Additional Measurements</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                {/* Weight */}
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <Scale className="h-4 w-4 text-muted-foreground" />
-                    <p className="text-sm text-muted-foreground">Weight</p>
-                  </div>
-                  <p className="text-xl font-semibold">
-                    {normalizedVitals.weight || '-'} <span className="text-sm font-normal text-muted-foreground">kg</span>
-                  </p>
-                </div>
-
-                {/* Height */}
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <TrendingUp className="h-4 w-4 text-muted-foreground" />
-                    <p className="text-sm text-muted-foreground">Height</p>
-                  </div>
-                  <p className="text-xl font-semibold">
-                    {normalizedVitals.height || '-'} <span className="text-sm font-normal text-muted-foreground">cm</span>
-                  </p>
-                </div>
-
-                {/* BMI */}
-                <div className="space-y-1">
-                  <p className="text-sm text-muted-foreground">Body Mass Index (BMI)</p>
-                  {bmiValue ? (
-                    <div>
-                      <p className={`text-xl font-semibold ${
-                        bmiStatus === 'Normal' ? 'text-emerald-600 dark:text-emerald-400' :
-                        bmiStatus === 'Underweight' ? 'text-blue-600 dark:text-blue-400' :
-                        bmiStatus === 'Overweight' ? 'text-amber-600 dark:text-amber-400' :
-                        'text-rose-600 dark:text-rose-400'
-                      }`}>
-                        {bmiValue} <span className="text-sm font-normal text-muted-foreground">kg/m²</span>
-                      </p>
-                      <p className={`text-xs ${
-                        bmiStatus === 'Normal' ? 'text-emerald-500' :
-                        bmiStatus === 'Underweight' ? 'text-blue-500' :
-                        bmiStatus === 'Overweight' ? 'text-amber-500' :
-                        'text-rose-500'
-                      }`}>
-                        {bmiStatus}
-                      </p>
-                    </div>
-                  ) : (
-                    <p className="text-xl font-semibold text-muted-foreground">-</p>
-                  )}
-                </div>
-
-                {/* Pain Scale */}
-                {normalizedVitals.painScale && (
-                  <div className="space-y-1">
-                    <p className="text-sm text-muted-foreground">Pain Scale</p>
-                    <p className="text-xl font-semibold">
-                      {normalizedVitals.painScale} <span className="text-sm font-normal text-muted-foreground">/10</span>
-                    </p>
-                  </div>
-                )}
-
-                {/* Blood Sugar */}
-                {normalizedVitals.bloodSugar && (
-                  <div className="space-y-1">
-                    <p className="text-sm text-muted-foreground">Blood Sugar</p>
-                    <p className="text-xl font-semibold">
-                      {normalizedVitals.bloodSugar} <span className="text-sm font-normal text-muted-foreground">mg/dL</span>
-                    </p>
-                  </div>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Notes */}
-          {normalizedVitals.notes && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Notes</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-sm whitespace-pre-wrap">{normalizedVitals.notes}</p>
-              </CardContent>
-            </Card>
-          )}
+            ))}
+          </div>
+          {normalized.notes ? (
+            <div className="mt-4 p-3 rounded-lg bg-blue-500/10 border border-blue-500/20">
+              <p className="text-sm font-medium text-blue-700 dark:text-blue-300">Notes</p>
+              <p className="text-sm text-foreground mt-1 whitespace-pre-wrap">{normalized.notes}</p>
+            </div>
+          ) : null}
+          <p className="text-xs text-muted-foreground mt-4">
+            Recorded by:{" "}
+            {vitalFieldToString(vitals.recordedBy ?? vitals.recorded_by_name) || "Unknown"}
+          </p>
         </div>
-
-        <div className="flex justify-end pt-4 border-t">
-          <Button variant="outline" onClick={onClose}>Close</Button>
-        </div>
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={onClose}>
+            Close
+          </Button>
+          {onEdit ? (
+            <Button type="button" onClick={onEdit}>
+              <Edit className="h-4 w-4 mr-2" />
+              Edit Vitals
+            </Button>
+          ) : null}
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
 }
-

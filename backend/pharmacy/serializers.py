@@ -373,6 +373,7 @@ class PrescriptionSerializer(serializers.ModelSerializer):
     medications = PrescriptionItemSerializer(many=True, read_only=True)
     # Allow medications to be written during creation
     items = PrescriptionItemSerializer(many=True, write_only=True, required=False)
+    icd10_diagnoses = serializers.SerializerMethodField()
 
     def get_patient_name(self, obj):
         """Get patient full name."""
@@ -428,7 +429,16 @@ class PrescriptionSerializer(serializers.ModelSerializer):
     def get_doctor_name(self, obj):
         """Get doctor full name."""
         return obj.doctor.get_full_name() if obj.doctor else None
-    
+
+    def get_icd10_diagnoses(self, obj):
+        from common.diagnosis_serialization import serialize_icd10_diagnoses_for_order
+
+        return serialize_icd10_diagnoses_for_order(
+            consultation_session=obj.consultation_session if getattr(obj, "consultation_session_id", None) else None,
+            visit=obj.visit if getattr(obj, "visit_id", None) else None,
+            patient=obj.patient,
+        )
+
     def create(self, validated_data):
         """Create prescription with nested items."""
         items_data = validated_data.pop('items', [])

@@ -17,13 +17,14 @@ import { toast } from "sonner";
 import { Checkbox } from "@/components/ui/checkbox";
 import { AdvancedDateRangeDialog } from '@/components/AdvancedDateRangeDialog';
 import { CustomDateRangeButton } from '@/components/CustomDateRangeButton';
-import { labService, type LabOrder as ApiLabOrder, type LabTest as ApiLabTest } from '@/lib/services';
+import { labService, type LabOrder as ApiLabOrder, type LabTest as ApiLabTest, type LabPartner } from '@/lib/services';
+import { Icd10DiagnosesBlock } from '@/components/medical/Icd10DiagnosesBlock';
 import { transformLabTestStatus, transformPriority, transformToBackendPriority, transformProcessingMethod, transformToBackendProcessingMethod } from '@/lib/services/transformers';
 import { PatientAvatar } from "@/components/PatientAvatar";
 import {
   TestTube, Search, Eye, Clock, CheckCircle2, Activity, FlaskConical, Loader2,
   Beaker, AlertTriangle, User, Calendar, FileText, Play, Stethoscope,
-  ClipboardList, RefreshCw, Upload, Download, Building2, Truck, X, Droplets, Pipette, RotateCcw, XCircle
+  ClipboardList, Upload, Download, Building2, Truck, X, Droplets, Pipette, RotateCcw, XCircle
 } from 'lucide-react';
 
 // ==========================================
@@ -96,6 +97,7 @@ interface LabOrder {
   orderedAt: string;
   clinic: string;
   clinicalNotes?: string;
+  icd10_diagnoses?: Array<{ code: string; name: string; type: string; notes?: string }>;
 }
 
 // Helper function to transform backend order to frontend format
@@ -122,6 +124,9 @@ const transformOrder = (apiOrder: ApiLabOrder): LabOrder => {
     priority: transformPriority(apiOrder.priority) as 'Routine' | 'Urgent' | 'STAT',
     orderedAt: apiOrder.ordered_at,
     clinic: apiOrder.clinic || '',
+    icd10_diagnoses: Array.isArray((apiOrder as any).icd10_diagnoses)
+      ? (apiOrder as any).icd10_diagnoses
+      : [],
     clinicalNotes: (() => {
       // Get clinical notes, avoiding duplication
       const notes = apiOrder.clinical_notes || '';
@@ -661,14 +666,8 @@ const collectionMethods: Record<string, { name: string; icon: string; descriptio
   ],
 };
 
-// Outsourced lab partners
-const outsourcedLabs = [
-  'PathCare Labs',
-  'MedLab Nigeria',
-  'Synlab Nigeria',
-  'Lancet Labs',
-  'Alpha Medical Labs',
-];
+/** Select value for "type a different lab name" (not in catalog). */
+const OUTSOURCED_LAB_OTHER = '__other__';
 
 export default function LabOrdersPage() {
   const [orders, setOrders] = useState<LabOrder[]>([]);
@@ -702,6 +701,9 @@ export default function LabOrdersPage() {
   const [collectionNotes, setCollectionNotes] = useState('');
   const [processingMethod, setProcessingMethod] = useState<'In-house' | 'Outsourced'>('In-house');
   const [selectedOutsourcedLab, setSelectedOutsourcedLab] = useState('');
+  const [customOutsourcedLab, setCustomOutsourcedLab] = useState('');
+  const [labPartners, setLabPartners] = useState<LabPartner[]>([]);
+  const [loadingLabPartners, setLoadingLabPartners] = useState(false);
   const [resultEntryMode, setResultEntryMode] = useState<'values' | 'upload'>('values');
   const [resultValues, setResultValues] = useState<Record<string, string>>({});
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
@@ -916,10 +918,13 @@ export default function LabOrdersPage() {
   };
 
   // Load orders function - memoized to prevent infinite loops
-  const loadOrders = useCallback(async () => {
+  const loadOrders = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent;
     try {
-      setLoading(true);
-      setError(null);
+      if (!silent) {
+        setLoading(true);
+        setError(null);
+      }
 
       const params: any = {
         page: currentPage,
@@ -963,11 +968,15 @@ export default function LabOrdersPage() {
         }
       }
 
-      setError(errorMessage);
-      toast.error(toastMessage);
+      if (!silent) {
+        setError(errorMessage);
+        toast.error(toastMessage);
+      }
       console.error('Error loading orders:', err);
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   }, [currentPage, priorityFilter, searchQuery]);
 
@@ -975,6 +984,30 @@ export default function LabOrdersPage() {
   useEffect(() => {
     loadOrders();
   }, [loadOrders]);
+
+  const pollingPaused = useMemo(
+    () =>
+      isDateFilterDialogOpen ||
+      isViewDialogOpen ||
+      isCollectDialogOpen ||
+      isProcessDialogOpen ||
+      isResultsDialogOpen,
+    [
+      isDateFilterDialogOpen,
+      isViewDialogOpen,
+      isCollectDialogOpen,
+      isProcessDialogOpen,
+      isResultsDialogOpen,
+    ]
+  );
+
+  useEffect(() => {
+    if (pollingPaused) return;
+    const id = setInterval(() => {
+      void loadOrders({ silent: true });
+    }, 15000);
+    return () => clearInterval(id);
+  }, [loadOrders, pollingPaused]);
 
   // Load Test Templates from API for result entry (so FBC, etc. use template parameters)
   const loadTemplatesForResults = useCallback(async () => {
@@ -1128,10 +1161,17 @@ export default function LabOrdersPage() {
   };
 
   // Start processing for a single test
+  const resolvedOutsourcedLabName = (): string => {
+    if (processingMethod !== 'Outsourced') return '';
+    if (selectedOutsourcedLab === OUTSOURCED_LAB_OTHER) return customOutsourcedLab.trim();
+    return selectedOutsourcedLab.trim();
+  };
+
   const handleStartProcessing = async () => {
     if (!selectedOrder || !selectedTest) return;
-    if (processingMethod === 'Outsourced' && !selectedOutsourcedLab) {
-      toast.error('Please select an outsourced lab');
+    const outsourcedName = resolvedOutsourcedLabName();
+    if (processingMethod === 'Outsourced' && !outsourcedName) {
+      toast.error('Please select a lab partner or enter a lab name');
       return;
     }
     setIsSubmitting(true);
@@ -1141,7 +1181,7 @@ export default function LabOrdersPage() {
         parseInt(selectedOrder.id),
         parseInt(selectedTest.id),
         transformToBackendProcessingMethod(processingMethod) as 'in_house' | 'outsourced',
-        processingMethod === 'Outsourced' ? selectedOutsourcedLab : undefined
+        processingMethod === 'Outsourced' ? outsourcedName : undefined
       );
 
       toast.success(`${selectedTest.name} sent for ${processingMethod.toLowerCase()} processing`);
@@ -1158,6 +1198,7 @@ export default function LabOrdersPage() {
       setIsProcessDialogOpen(false);
       setProcessingMethod('In-house');
       setSelectedOutsourcedLab('');
+      setCustomOutsourcedLab('');
     } catch (err: any) {
       let errorMessage = 'Failed to start processing. Please try again.';
       if (err.message) {
@@ -1287,11 +1328,27 @@ export default function LabOrdersPage() {
     setIsCollectDialogOpen(true);
   };
   
-  const openProcessDialog = (test: LabTest) => { 
+  const openProcessDialog = async (test: LabTest) => {
     setSelectedTest(test);
     setProcessingMethod('In-house');
     setSelectedOutsourcedLab('');
-    setIsProcessDialogOpen(true); 
+    setCustomOutsourcedLab('');
+    setIsProcessDialogOpen(true);
+    setLoadingLabPartners(true);
+    try {
+      const res = await labService.getLabPartners({ page_size: 200 });
+      setLabPartners(res.results || []);
+    } catch (e: any) {
+      console.error('getLabPartners failed', e?.status, e?.body, e);
+      const hint =
+        e?.status === 404
+          ? 'Lab partners API not found. Restart the backend after deploy, then run migrations.'
+          : e?.apiMessage || e?.message || 'Request failed';
+      toast.error(`Could not load lab partners (${hint}). Use “Other” to type a name.`);
+      setLabPartners([]);
+    } finally {
+      setLoadingLabPartners(false);
+    }
   };
   
   const openResultsDialog = (test: LabTest, isRework = false) => {
@@ -1411,9 +1468,6 @@ export default function LabOrdersPage() {
             </h1>
             <p className="text-muted-foreground mt-1">Process tests individually - collect, process & enter results per test</p>
           </div>
-          <Button variant="outline" onClick={loadOrders} disabled={loading}>
-            <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />Refresh
-          </Button>
         </div>
 
         {/* Stats */}
@@ -1581,7 +1635,7 @@ export default function LabOrdersPage() {
             <Card><CardContent className="p-8 text-center text-muted-foreground">
               <AlertTriangle className="h-12 w-12 mx-auto mb-4 opacity-50" />
               <p className="text-red-600 dark:text-red-400">{error}</p>
-              <Button variant="outline" className="mt-4" onClick={loadOrders}>Retry</Button>
+              <Button variant="outline" className="mt-4" onClick={() => void loadOrders()}>Retry</Button>
             </CardContent></Card>
           ) : filteredOrders.length === 0 ? (
             <Card><CardContent className="p-8 text-center text-muted-foreground">
@@ -1649,6 +1703,8 @@ export default function LabOrdersPage() {
                   </div>
                   <div><p className="text-xs text-muted-foreground">Ordering Doctor</p><p className="font-medium">{selectedOrder.doctor.name}</p><p className="text-xs text-muted-foreground">{selectedOrder.doctor.specialty}</p></div>
                 </div>
+
+                <Icd10DiagnosesBlock diagnoses={selectedOrder.icd10_diagnoses} compact />
 
                 {selectedOrder.clinicalNotes && (
                   <div className="p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
@@ -1968,7 +2024,16 @@ export default function LabOrdersPage() {
         </Dialog>
 
         {/* Start Processing Dialog */}
-        <Dialog open={isProcessDialogOpen} onOpenChange={setIsProcessDialogOpen}>
+        <Dialog
+          open={isProcessDialogOpen}
+          onOpenChange={(open) => {
+            setIsProcessDialogOpen(open);
+            if (!open) {
+              setSelectedOutsourcedLab('');
+              setCustomOutsourcedLab('');
+            }
+          }}
+        >
           <DialogContent className="w-[95vw] sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2"><Play className="h-5 w-5 text-blue-500" />Process Test</DialogTitle>
@@ -2017,14 +2082,40 @@ export default function LabOrdersPage() {
                 {processingMethod === 'Outsourced' && (
                   <div className="space-y-2">
                     <Label>Select Lab Partner *</Label>
-                    <Select value={selectedOutsourcedLab} onValueChange={setSelectedOutsourcedLab}>
-                      <SelectTrigger><SelectValue placeholder="Choose a lab partner..." /></SelectTrigger>
+                    <Select
+                      value={selectedOutsourcedLab}
+                      onValueChange={(v) => {
+                        setSelectedOutsourcedLab(v);
+                        if (v !== OUTSOURCED_LAB_OTHER) setCustomOutsourcedLab('');
+                      }}
+                      disabled={loadingLabPartners}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder={loadingLabPartners ? 'Loading partners…' : 'Choose a lab partner…'} />
+                      </SelectTrigger>
                       <SelectContent>
-                        {outsourcedLabs.map(lab => (
-                          <SelectItem key={lab} value={lab}>{lab}</SelectItem>
+                        {labPartners.map((p) => (
+                          <SelectItem key={p.id} value={p.name}>
+                            {p.name}
+                          </SelectItem>
                         ))}
+                        <SelectItem value={OUTSOURCED_LAB_OTHER}>Other (type name below)</SelectItem>
                       </SelectContent>
                     </Select>
+                    {selectedOutsourcedLab === OUTSOURCED_LAB_OTHER && (
+                      <div className="space-y-1">
+                        <Label className="text-xs text-muted-foreground">External lab name</Label>
+                        <Input
+                          value={customOutsourcedLab}
+                          onChange={(e) => setCustomOutsourcedLab(e.target.value)}
+                          placeholder="e.g. City Diagnostics Ltd"
+                        />
+                      </div>
+                    )}
+                    <p className="text-xs text-muted-foreground">
+                      Add, edit, or deactivate partners in Django Admin → <span className="font-medium">Laboratory</span> →{' '}
+                      <span className="font-medium">Lab partners (outsourced)</span>.
+                    </p>
                   </div>
                 )}
               </div>
@@ -2033,7 +2124,7 @@ export default function LabOrdersPage() {
               <Button variant="outline" onClick={() => setIsProcessDialogOpen(false)}>Cancel</Button>
               <Button 
                 onClick={handleStartProcessing} 
-                disabled={isSubmitting || (processingMethod === 'Outsourced' && !selectedOutsourcedLab)} 
+                disabled={isSubmitting || (processingMethod === 'Outsourced' && !resolvedOutsourcedLabName())} 
                 className="bg-blue-500 hover:bg-blue-600"
               >
                 {isSubmitting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Play className="h-4 w-4 mr-2" />}

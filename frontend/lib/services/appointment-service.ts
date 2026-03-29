@@ -7,11 +7,15 @@ export interface Appointment {
   id: number;
   appointment_id: string;
   patient: number;
+  /** Human-readable patient ID (e.g. ED-A2962-1) for deep links */
+  patient_code?: string;
   patient_name?: string;
   doctor?: number;
   doctor_name?: string;
   clinic?: number;
   clinic_name?: string;
+  /** Canonical clinic names (same list as visits / CLINICS constant) */
+  clinics?: string[];
   room?: number;
   room_name?: string;
   appointment_type: 'consultation' | 'follow_up' | 'routine' | 'emergency' | 'procedure';
@@ -75,6 +79,7 @@ class AppointmentService {
     duration_minutes?: number;
     reason?: string;
     notes?: string;
+    clinics?: string[];
     is_recurring?: boolean;
     recurrence_pattern?: string;
     recurrence_end_date?: string;
@@ -88,7 +93,10 @@ class AppointmentService {
   /**
    * Update appointment
    */
-  async updateAppointment(id: number, data: Partial<Appointment>): Promise<Appointment> {
+  async updateAppointment(
+    id: number,
+    data: Partial<Appointment> & { clinic?: number | null; clinics?: string[] }
+  ): Promise<Appointment> {
     return apiFetch<Appointment>(`/appointments/${id}/`, {
       method: 'PATCH',
       body: JSON.stringify(data),

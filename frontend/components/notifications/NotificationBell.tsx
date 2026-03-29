@@ -14,11 +14,13 @@ import { NotificationList } from './NotificationList';
 import { useNotificationWebSocket } from '@/hooks/use-notification-websocket';
 import { usePolling } from '@/hooks/use-polling';
 import { NOTIFICATION_POLL_INTERVAL_MS } from '@/lib/constants';
+import { usePageVisible } from '@/hooks/use-page-visible';
 
 export const NotificationBell = () => {
   const [unreadCount, setUnreadCount] = useState(0);
   const [isOpen, setIsOpen] = useState(false);
   const [newNotifications, setNewNotifications] = useState<Notification[]>([]);
+  const isPageVisible = usePageVisible();
 
   // Use WebSocket for real-time updates
   const { unreadCount: wsUnreadCount, isConnected } = useNotificationWebSocket({
@@ -44,7 +46,7 @@ export const NotificationBell = () => {
   }, []);
 
   usePolling(fetchUnreadCount, NOTIFICATION_POLL_INTERVAL_MS, {
-    enabled: !isConnected,
+    enabled: !isConnected && isPageVisible,
     runImmediately: true,
   });
 

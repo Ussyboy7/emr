@@ -47,6 +47,7 @@ class RadiologyOrderSerializer(serializers.ModelSerializer):
     doctor_name = serializers.CharField(source='doctor.get_full_name', read_only=True, allow_null=True)
     doctor_details = serializers.SerializerMethodField()
     studies = RadiologyStudySerializer(many=True, read_only=True)
+    icd10_diagnoses = serializers.SerializerMethodField()
 
     # Allow writing studies during creation
     studies_data = serializers.ListField(
@@ -76,7 +77,16 @@ class RadiologyOrderSerializer(serializers.ModelSerializer):
                 'specialty': getattr(obj.doctor, 'specialty', None),
             }
         return None
-    
+
+    def get_icd10_diagnoses(self, obj):
+        from common.diagnosis_serialization import serialize_icd10_diagnoses_for_order
+
+        return serialize_icd10_diagnoses_for_order(
+            consultation_session=obj.consultation_session if getattr(obj, "consultation_session_id", None) else None,
+            visit=obj.visit if getattr(obj, "visit_id", None) else None,
+            patient=obj.patient,
+        )
+
     def validate_clinic(self, value):
         """Normalize clinic name before validation."""
         if value:

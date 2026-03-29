@@ -229,7 +229,7 @@ class Command(BaseCommand):
                     "/analytics", "/analytics/executive",
                     "/consultation", "/consultation/history", "/consultation/referrals", "/consultation/start", "/consultation/wards",
                     "/laboratory", "/laboratory/completed", "/laboratory/orders", "/laboratory/templates", "/laboratory/verification",
-                    "/medical-records", "/medical-records/appointments", "/medical-records/dependents", "/medical-records/patients", "/medical-records/patients/new", "/medical-records/reports", "/medical-records/visits", "/medical-records/visits/new",
+                    "/medical-records", "/medical-records/appointments", "/medical-records/dependents", "/medical-records/patients", "/medical-records/patients/new", "/medical-records/referrals", "/medical-records/reports", "/medical-records/visits", "/medical-records/visits/new",
                     "/nursing", "/nursing/patient-vitals", "/nursing/pool-queue", "/nursing/procedures", "/nursing/procedures/history", "/nursing/room-queue", "/nursing/wards",
                     "/pharmacy", "/pharmacy/history", "/pharmacy/inventory", "/pharmacy/prescriptions",
                     "/physiotherapy", "/physiotherapy/completed", "/physiotherapy/pool-queue",
@@ -251,7 +251,7 @@ class Command(BaseCommand):
                     '/medical-records', '/medical-records/patients/new', '/medical-records/patients',
                     '/medical-records/visits/new', '/medical-records/visits', '/medical-records/appointments',
                     '/medical-records/dependents', '/medical-records/reports',
-                    # Consultation - All pages
+                    # Consultation - All pages (referrals & forms live under /consultation/referrals)
                     '/consultation', '/consultation/start', '/consultation/history',
                     '/consultation/wards', '/consultation/referrals',
                     # Nursing - Limited access
@@ -409,7 +409,7 @@ class Command(BaseCommand):
                     # Medical Records - All pages
                     '/medical-records', '/medical-records/patients/new', '/medical-records/patients',
                     '/medical-records/visits/new', '/medical-records/visits', '/medical-records/appointments',
-                    '/medical-records/dependents', '/medical-records/reports',
+                    '/medical-records/dependents', '/medical-records/referrals', '/medical-records/reports',
                     # No other modules
                 ],
                 'is_active': True,

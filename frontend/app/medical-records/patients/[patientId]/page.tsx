@@ -748,6 +748,7 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
         <VitalsDetailModal
           vitals={selectedVital}
           patientName={patient?.full_name ?? ''}
+          patientId={patient?.patient_id}
           isOpen={isVitalsDetailModalOpen}
           onClose={() => { setIsVitalsDetailModalOpen(false); setSelectedVital(null); }}
         />

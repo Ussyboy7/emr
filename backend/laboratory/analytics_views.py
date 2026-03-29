@@ -1,0 +1,125 @@
+"""Laboratory module analytics API."""
+from django.db.models import Count, Q
+from django.db.models.functions import TruncDate
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+from common.module_analytics import (
+    npa_staff_vs_non_npa,
+    parse_analytics_dates,
+    patient_category_breakdown,
+    patient_gender_breakdown,
+)
+from laboratory.models import LabOrder, LabTest
+from patients.models import Patient
+
+
+class LaboratoryAnalyticsSummaryView(APIView):
+    """
+    GET ?start=YYYY-MM-DD&end=YYYY-MM-DD
+    Tests and orders are scoped by lab order ordered_at.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        parsed = parse_analytics_dates(request)
+        if isinstance(parsed, Response):
+            return parsed
+        start_dt, end_dt = parsed
+
+        order_filter = Q(ordered_at__gte=start_dt, ordered_at__lte=end_dt)
+        test_filter = Q(order__ordered_at__gte=start_dt, order__ordered_at__lte=end_dt)
+
+        orders_qs = LabOrder.objects.filter(order_filter)
+        tests_qs = LabTest.objects.filter(test_filter)
+
+        orders_count = orders_qs.count()
+        tests_total = tests_qs.count()
+        tests_verified = tests_qs.filter(status="verified").count()
+        tests_results_ready = tests_qs.filter(status="results_ready").count()
+        tests_rejected = tests_qs.filter(status="rejected").count()
+
+        patient_ids = orders_qs.values_list("patient_id", flat=True).distinct()
+        patients_qs = Patient.objects.filter(id__in=patient_ids)
+        unique_patients = patients_qs.count()
+
+        gender = patient_gender_breakdown(patients_qs)
+        category = patient_category_breakdown(patients_qs)
+        staff_split = npa_staff_vs_non_npa(category)
+
+        status_rows = (
+            tests_qs.values("status").annotate(count=Count("id")).order_by("-count")
+        )
+        status_breakdown = {r["status"]: r["count"] for r in status_rows}
+
+        method_rows = (
+            tests_qs.exclude(processing_method__isnull=True)
+            .exclude(processing_method="")
+            .values("processing_method")
+            .annotate(count=Count("id"))
+            .order_by("-count")
+        )
+        processing_method = {r["processing_method"]: r["count"] for r in method_rows}
+
+        daily = (
+            LabTest.objects.filter(test_filter)
+            .annotate(day=TruncDate("order__ordered_at"))
+            .values("day")
+            .annotate(tests=Count("id"), orders=Count("order_id", distinct=True))
+            .order_by("day")
+        )
+        by_day = [
+            {
+                "date": row["day"].isoformat() if row["day"] else None,
+                "tests": row["tests"],
+                "orders": row["orders"],
+            }
+            for row in daily
+            if row["day"]
+        ]
+
+        top_tests = list(
+            tests_qs.values("code", "name")
+            .annotate(count=Count("id"))
+            .order_by("-count")[:30]
+        )
+
+        template_cat = (
+            tests_qs.exclude(template__isnull=True)
+            .values("template__category")
+            .annotate(count=Count("id"))
+            .order_by("-count")
+        )
+        by_template_category = {
+            (r["template__category"] or "uncategorized"): r["count"] for r in template_cat
+        }
+
+        return Response(
+            {
+                "period": {
+                    "start": start_dt.date().isoformat(),
+                    "end": end_dt.date().isoformat(),
+                },
+                "summary": {
+                    "orders_count": orders_count,
+                    "tests_total": tests_total,
+                    "tests_verified": tests_verified,
+                    "tests_results_ready": tests_results_ready,
+                    "tests_rejected": tests_rejected,
+                    "unique_patients": unique_patients,
+                },
+                "patients_by_gender": gender,
+                "patients_by_category": category,
+                "npa_staff_linked_vs_non_npa": staff_split,
+                "tests_by_status": status_breakdown,
+                "tests_by_processing_method": processing_method,
+                "by_day": by_day,
+                "top_tests": [
+                    {"code": r["code"], "name": r["name"], "count": r["count"]}
+                    for r in top_tests
+                ],
+                "tests_by_template_category": by_template_category,
+            }
+        )

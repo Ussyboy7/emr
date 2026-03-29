@@ -137,6 +137,33 @@ class Procedure(models.Model):
     class Meta:
         db_table = 'procedures'
         ordering = ['-performed_at']
+
+    def generate_procedure_id(self):
+        """
+        Generate a unique procedure_id: PROC-YYYYMMDD-NNNN (aligned with nursing order IDs).
+        """
+        if self.procedure_id and self.procedure_id != '':
+            return
+        ref = self.performed_at or timezone.now()
+        date_str = ref.strftime('%Y%m%d')
+        date_obj = ref.date()
+        count_qs = Procedure.objects.filter(performed_at__date=date_obj).exclude(procedure_id='')
+        if self.pk:
+            count_qs = count_qs.exclude(pk=self.pk)
+        seq = count_qs.count() + 1
+        self.procedure_id = f'PROC-{date_str}-{str(seq).zfill(4)}'
+        guard = 0
+        while Procedure.objects.filter(procedure_id=self.procedure_id).exclude(pk=self.pk if self.pk else None).exists():
+            seq += 1
+            self.procedure_id = f'PROC-{date_str}-{str(seq).zfill(4)}'
+            guard += 1
+            if guard > 1000:
+                raise ValueError('Unable to generate unique procedure_id')
+
+    def save(self, *args, **kwargs):
+        if not self.procedure_id or self.procedure_id == '':
+            self.generate_procedure_id()
+        super().save(*args, **kwargs)
     
     def __str__(self):
         return f"{self.procedure_id} - {self.procedure_type} - {self.patient.get_full_name()}"

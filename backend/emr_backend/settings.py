@@ -7,6 +7,7 @@ from pathlib import Path
 import os
 
 from dotenv import load_dotenv
+from celery.schedules import crontab
 
 
 # ---------------------------------------------------------------------------
@@ -285,6 +286,20 @@ CELERY_TIMEZONE = os.getenv("TIME_ZONE", "UTC")
 CELERY_TASK_TRACK_STARTED = True
 CELERY_TASK_TIME_LIMIT = 30 * 60  # 30 minutes
 CELERY_TASK_SOFT_TIME_LIMIT = 25 * 60  # 25 minutes
+
+# Celery Beat (requires `celery -A emr_backend beat` — see docker-compose celery-beat service).
+# Disable with CELERY_BEAT_REFERRAL_MONTH_CLOSE=false if you use system cron only.
+CELERY_BEAT_REFERRAL_MONTH_CLOSE = os.getenv("CELERY_BEAT_REFERRAL_MONTH_CLOSE", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+CELERY_BEAT_SCHEDULE = {}
+if CELERY_BEAT_REFERRAL_MONTH_CLOSE:
+    CELERY_BEAT_SCHEDULE["close-cleared-referrals-monthly"] = {
+        "task": "consultation.tasks.close_cleared_referrals_monthly_task",
+        "schedule": crontab(hour=2, minute=0, day_of_month="1"),
+    }
 
 
 # ---------------------------------------------------------------------------

@@ -509,6 +509,8 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
         ).prefetch_related(
             'medications__medication',
             'medications__dispenses',
+            'consultation_session__diagnoses__icd10_code',
+            'visit__diagnoses__icd10_code',
         )
     
     def perform_update(self, serializer):

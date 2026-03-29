@@ -343,9 +343,14 @@ class VitalReadingViewSet(viewsets.ModelViewSet):
         serialized = VitalReadingSerializer(latest_by_visit.values(), many=True).data
         by_visit_id: dict[str, dict] = {}
         for item in serialized:
-            visit_id = item.get('visit')
-            if isinstance(visit_id, int):
-                by_visit_id[str(visit_id)] = item
+            visit_raw = item.get('visit')
+            if visit_raw is None:
+                continue
+            try:
+                visit_key = str(int(visit_raw))
+            except (TypeError, ValueError):
+                continue
+            by_visit_id[visit_key] = item
 
         return Response({'results': by_visit_id})
     

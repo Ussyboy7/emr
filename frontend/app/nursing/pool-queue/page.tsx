@@ -25,6 +25,8 @@ import {
 import { getAllClinicsWithAll } from '@/lib/constants/clinics';
 import { clinicMatches } from '@/lib/utils/clinic-utils';
 import { PatientAvatar } from "@/components/PatientAvatar";
+import { VitalsDetailModal } from "@/components/VitalsDetailModal";
+import { vitalFieldToString } from "@/lib/vitals-display";
 import { AdvancedDateRangeDialog } from '@/components/AdvancedDateRangeDialog';
 import { CustomDateRangeButton } from '@/components/CustomDateRangeButton';
 
@@ -74,6 +76,8 @@ interface VitalsData {
   height: string;
   painScale: string;
   bloodSugar: string;
+  randomBloodSugar: string;
+  bmi: string;
   notes: string;
   recordedAt?: string;
   recordedBy?: string;
@@ -93,9 +97,23 @@ interface ConsultationRoom {
 
 const emptyVitals: VitalsData = {
   temperature: '', pulse: '', bloodPressureSystolic: '', bloodPressureDiastolic: '',
-  respiratoryRate: '', oxygenSaturation: '', weight: '', height: '',
-  painScale: '', bloodSugar: '', notes: ''
+  respiratoryRate: '', oxygenSaturation: '', weight: '', height: '', bmi: '',
+  painScale: '', bloodSugar: '', randomBloodSugar: '', notes: ''
 };
+
+function parseOptionalInt(raw: string | undefined): number | null {
+  const t = (raw ?? '').trim();
+  if (t === '') return null;
+  const n = parseInt(t, 10);
+  return Number.isNaN(n) ? null : n;
+}
+
+function parseOptionalFloat(raw: string | undefined): number | null {
+  const t = (raw ?? '').trim();
+  if (t === '') return null;
+  const n = parseFloat(t);
+  return Number.isNaN(n) ? null : n;
+}
 
 export default function NursingPoolQueuePage() {
   // Debug logging (off by default). Enable in browser console:
@@ -131,10 +149,13 @@ export default function NursingPoolQueuePage() {
   const [dateRange, setDateRange] = useState({ from: '', to: '' });
 
   // Load visits and rooms from API - extracted as reusable function
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (opts?: { silent?: boolean }): Promise<NursingPatient[] | null> => {
+      const silent = opts?.silent;
       try {
-        setLoading(true);
-        setError(null);
+        if (!silent) {
+          setLoading(true);
+          setError(null);
+        }
 
         // Load rooms first
         const roomsResult = await roomService.getRooms({ page_size: 200 });
@@ -216,6 +237,9 @@ export default function NursingPoolQueuePage() {
           visit?: number | null;
           patient?: number | null;
           patient_name?: string;
+          patient_age?: number | null;
+          patient_gender?: string | null;
+          patient_details?: { age?: number; gender?: string; patient_id?: string };
           room_name?: string;
           queued_at?: string;
           is_active?: boolean;
@@ -291,12 +315,24 @@ export default function NursingPoolQueuePage() {
           const fallbackDate = queuedAt ? queuedAt.toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
           const fallbackTime = queuedAt ? queuedAt.toTimeString().slice(0, 8) : '00:00:00';
 
+          const qAge = qi.patient_age;
+          const dAge = qi.patient_details?.age;
+          const rowAge =
+            typeof qAge === 'number' && !Number.isNaN(qAge)
+              ? qAge
+              : typeof dAge === 'number' && !Number.isNaN(dAge)
+                ? dAge
+                : undefined;
+          const rowGender = qi.patient_gender ?? qi.patient_details?.gender;
+
           combinedVisits.push({
             id: visitId,
             visit_id: qi.visit_display_id || `VIS-${visitId}`,
-            patient_id: (qi as any).patient_details?.patient_id,
+            patient_id: qi.patient_details?.patient_id,
             patient: patientId,
             patient_name: qi.patient_name ?? '',
+            age: rowAge,
+            gender: rowGender,
             visit_type: qi.visit_type || 'consultation',
             status: qi.visit_status || 'completed',
             date: qi.visit_date || fallbackDate,
@@ -343,8 +379,8 @@ export default function NursingPoolQueuePage() {
         setPhysioCheckins(physioCheckedInByVisitId);
         setEyeCheckins(eyeCheckedInByVisitId);
 
-        // Fetch latest vitals in one batch call for active nursing visits.
-        const vitalsTargetVisitIds = Array.from(new Set(nursingVisits.map(v => v.id))).filter(Boolean);
+        // Latest vitals for every visit shown in the list (in-progress + queue-history rows).
+        const vitalsTargetVisitIds = Array.from(new Set(combinedVisits.map(v => v.id))).filter(Boolean);
         const vitalsMap = new Map<number, any>();
         if (vitalsTargetVisitIds.length > 0) {
           try {
@@ -418,19 +454,21 @@ export default function NursingPoolQueuePage() {
             nursingStatus = hasCompleteVitals ? 'Ready for Consultation' : 'Vitals Recorded';
           }
           
-          // Transform vitals data to frontend format
+          // Transform vitals data to frontend format (preserve 0; snake_case + camelCase from API)
           const vitals: VitalsData | undefined = vitalsData ? {
-            temperature: vitalsData.temperature?.toString() || '',
-            pulse: vitalsData.heart_rate?.toString() || '',
-            bloodPressureSystolic: vitalsData.blood_pressure_systolic?.toString() || '',
-            bloodPressureDiastolic: vitalsData.blood_pressure_diastolic?.toString() || '',
-            respiratoryRate: vitalsData.respiratory_rate?.toString() || '',
-            oxygenSaturation: vitalsData.oxygen_saturation?.toString() || '',
-            weight: vitalsData.weight?.toString() || '',
-            height: vitalsData.height?.toString() || '',
-            painScale: vitalsData.pain_scale?.toString() || '',
-            bloodSugar: vitalsData.blood_sugar?.toString() || '',
-            notes: vitalsData.notes || '',
+            temperature: vitalFieldToString(vitalsData.temperature),
+            pulse: vitalFieldToString(vitalsData.heart_rate ?? vitalsData.pulse),
+            bloodPressureSystolic: vitalFieldToString(vitalsData.blood_pressure_systolic ?? vitalsData.bloodPressureSystolic),
+            bloodPressureDiastolic: vitalFieldToString(vitalsData.blood_pressure_diastolic ?? vitalsData.bloodPressureDiastolic),
+            respiratoryRate: vitalFieldToString(vitalsData.respiratory_rate ?? vitalsData.respiratoryRate),
+            oxygenSaturation: vitalFieldToString(vitalsData.oxygen_saturation ?? vitalsData.oxygenSaturation),
+            weight: vitalFieldToString(vitalsData.weight),
+            height: vitalFieldToString(vitalsData.height),
+            bmi: vitalFieldToString(vitalsData.bmi),
+            painScale: vitalFieldToString(vitalsData.pain_scale ?? vitalsData.painScale),
+            bloodSugar: vitalFieldToString(vitalsData.blood_sugar ?? vitalsData.bloodSugar),
+            randomBloodSugar: vitalFieldToString(vitalsData.random_blood_sugar ?? vitalsData.randomBloodSugar),
+            notes: typeof vitalsData.notes === 'string' ? vitalsData.notes : '',
             recordedAt: vitalsData.recorded_at || new Date().toISOString(),
             recordedBy: vitalsData.recorded_by_name || 'Unknown',
           } : undefined;
@@ -454,8 +492,8 @@ export default function NursingPoolQueuePage() {
             patientNumericId: visit.patient, // Store the actual patient ID from backend
             visitNumericId: visit.id, // Store the actual visit ID from backend
             visitNotes: visit.clinical_notes, // Clinical notes from the visit
-            age: (visit as any).age || 0, // Patient age from backend
-            gender: ((visit as any).gender || 'Male') as any, // Patient gender from backend
+            age: typeof visit.age === 'number' && !Number.isNaN(visit.age) ? visit.age : undefined,
+            gender: visit.gender,
             sentAt: queueVisitToSentAt.get(visit.id),
             sentToPhysio,
             sentToEyeClinic,
@@ -463,15 +501,19 @@ export default function NursingPoolQueuePage() {
         });
 
         setPatients(transformedPatients);
+        return transformedPatients;
       } catch (err) {
         console.error('Error loading nursing pool data:', err);
         if (isAuthenticationError(err)) {
           setAuthError(err);
-        } else {
+        } else if (!silent) {
           setError('Failed to load nursing pool queue. Please try again.');
         }
+        return null;
       } finally {
-        setLoading(false);
+        if (!silent) {
+          setLoading(false);
+        }
       }
   }, [dateFilter, statusFilter, dateRange.from, dateRange.to]);
 
@@ -479,11 +521,33 @@ export default function NursingPoolQueuePage() {
   useEffect(() => {
     loadData();
   }, [loadData]);
-  
+
   // Dialog states
   const [isVitalsDialogOpen, setIsVitalsDialogOpen] = useState(false);
   const [isViewVitalsDialogOpen, setIsViewVitalsDialogOpen] = useState(false);
   const [isRoomPickerOpen, setIsRoomPickerOpen] = useState(false);
+
+  useEffect(() => {
+    if (
+      isDateFilterDialogOpen ||
+      isVitalsDialogOpen ||
+      isViewVitalsDialogOpen ||
+      isRoomPickerOpen
+    ) {
+      return;
+    }
+    const id = setInterval(() => {
+      void loadData({ silent: true });
+    }, 15000);
+    return () => clearInterval(id);
+  }, [
+    loadData,
+    isDateFilterDialogOpen,
+    isVitalsDialogOpen,
+    isViewVitalsDialogOpen,
+    isRoomPickerOpen,
+  ]);
+
   // Custom interface for nursing patient objects (different from Patient interface)
   interface NursingPatient {
     id: string;
@@ -658,7 +722,7 @@ export default function NursingPoolQueuePage() {
 
   const openRecordVitals = (patient: NursingPatient) => {
     setSelectedPatient(patient);
-    setVitalsForm(patient.vitals || emptyVitals);
+    setVitalsForm({ ...emptyVitals, ...(patient.vitals || {}) });
     setIsVitalsDialogOpen(true);
   };
 
@@ -750,22 +814,23 @@ export default function NursingPoolQueuePage() {
         throw new Error('Visit not found');
       }
       
-      // Prepare payload for API
+      // Prepare payload for API (trimmed strings; 0 is valid for pain / glucose)
       const payload = {
         visit: parseInt(visitId), // Link vitals to visit
         patient: visit.patient, // Patient ID
-        temperature: vitalsForm.temperature ? parseFloat(vitalsForm.temperature) : null,
-        blood_pressure_systolic: vitalsForm.bloodPressureSystolic ? parseInt(vitalsForm.bloodPressureSystolic) : null,
-        blood_pressure_diastolic: vitalsForm.bloodPressureDiastolic ? parseInt(vitalsForm.bloodPressureDiastolic) : null,
-        heart_rate: vitalsForm.pulse ? parseInt(vitalsForm.pulse) : null,
-        respiratory_rate: vitalsForm.respiratoryRate ? parseInt(vitalsForm.respiratoryRate) : null,
-        oxygen_saturation: vitalsForm.oxygenSaturation ? parseFloat(vitalsForm.oxygenSaturation) : null,
-        weight: vitalsForm.weight ? parseFloat(vitalsForm.weight) : null,
-        height: vitalsForm.height ? parseFloat(vitalsForm.height) : null,
-        pain_scale: vitalsForm.painScale ? parseInt(vitalsForm.painScale, 10) : null,
-        blood_sugar: vitalsForm.bloodSugar ? parseFloat(vitalsForm.bloodSugar) : null,
+        temperature: parseOptionalFloat(vitalsForm.temperature),
+        blood_pressure_systolic: parseOptionalInt(vitalsForm.bloodPressureSystolic),
+        blood_pressure_diastolic: parseOptionalInt(vitalsForm.bloodPressureDiastolic),
+        heart_rate: parseOptionalInt(vitalsForm.pulse),
+        respiratory_rate: parseOptionalInt(vitalsForm.respiratoryRate),
+        oxygen_saturation: parseOptionalFloat(vitalsForm.oxygenSaturation),
+        weight: parseOptionalFloat(vitalsForm.weight),
+        height: parseOptionalFloat(vitalsForm.height),
+        pain_scale: vitalsForm.painScale === '' ? null : parseOptionalInt(vitalsForm.painScale),
+        blood_sugar: parseOptionalFloat(vitalsForm.bloodSugar),
+        random_blood_sugar: parseOptionalFloat(vitalsForm.randomBloodSugar),
         notes: vitalsForm.notes || '',
-        // Note: BMI will be auto-calculated by the backend
+        // Note: BMI will be auto-calculated by the backend when weight & height are set
       };
       
       // Save vitals to API
@@ -785,9 +850,14 @@ export default function NursingPoolQueuePage() {
       setIsVitalsDialogOpen(false);
       setVitalsForm(emptyVitals);
       
-      // Reload all data to reflect the saved vitals (preserves all filters)
-      await loadData();
-      
+      const refreshed = await loadData();
+      if (refreshed?.length) {
+        setSelectedPatient((prev) => {
+          if (!prev) return prev;
+          return refreshed.find((p) => p.id === prev.id) ?? prev;
+        });
+      }
+
     } catch (err: any) {
       console.error('[Pool Queue] Error saving vitals:', err);
       
@@ -1322,7 +1392,15 @@ export default function NursingPoolQueuePage() {
                           <span>{patient.clinic || 'GOPD'}</span>
                         )}
                         <span>•</span>
-                        <span>{patient.age}y</span>
+                        <span>
+                          {patient.age != null && Number.isFinite(patient.age) ? `${patient.age}y` : '—'}
+                        </span>
+                        {patient.gender?.trim() ? (
+                          <>
+                            <span>•</span>
+                            <span>{patient.gender.trim()}</span>
+                          </>
+                        ) : null}
                         <span>•</span>
                         <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{patient.waitTime}m</span>
                       </div>
@@ -1458,9 +1536,9 @@ export default function NursingPoolQueuePage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div className="space-y-2">
-                  <Label>Pain Scale (0-10)</Label>
+                  <Label>Pain scale (0–10)</Label>
                   <Select value={vitalsForm.painScale} onValueChange={(v) => setVitalsForm(prev => ({ ...prev, painScale: v }))}>
                     <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
                     <SelectContent>
@@ -1471,8 +1549,12 @@ export default function NursingPoolQueuePage() {
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label>Blood Sugar (mg/dL)</Label>
+                  <Label>Blood sugar (mg/dL)</Label>
                   <Input type="number" placeholder="95" value={vitalsForm.bloodSugar} onChange={(e) => setVitalsForm(prev => ({ ...prev, bloodSugar: e.target.value }))} />
+                </div>
+                <div className="space-y-2">
+                  <Label>RBS (mg/dL)</Label>
+                  <Input type="number" placeholder="140" value={vitalsForm.randomBloodSugar} onChange={(e) => setVitalsForm(prev => ({ ...prev, randomBloodSugar: e.target.value }))} />
                 </div>
               </div>
 
@@ -1518,60 +1600,25 @@ export default function NursingPoolQueuePage() {
           </DialogContent>
         </Dialog>
 
-        {/* View Vitals Dialog */}
-        <Dialog open={isViewVitalsDialogOpen} onOpenChange={setIsViewVitalsDialogOpen}>
-          <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                <Eye className="h-5 w-5 text-rose-500" />
-                Vitals - {selectedPatient?.name}
-              </DialogTitle>
-              <DialogDescription>
-                {selectedPatient?.patientId} | Recorded: {selectedPatient?.vitals?.recordedAt ? new Date(selectedPatient.vitals.recordedAt).toLocaleString() : 'N/A'}
-              </DialogDescription>
-            </DialogHeader>
-            {selectedPatient?.vitals && (
-              <div className="py-4">
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                  {[
-                    { label: 'Temperature', value: selectedPatient.vitals.temperature, unit: '°C', icon: Thermometer },
-                    { label: 'Pulse', value: selectedPatient.vitals.pulse, unit: 'bpm', icon: Heart },
-                    { label: 'Blood Pressure', value: `${selectedPatient.vitals.bloodPressureSystolic}/${selectedPatient.vitals.bloodPressureDiastolic}`, unit: 'mmHg', icon: Activity },
-                    { label: 'Respiratory Rate', value: selectedPatient.vitals.respiratoryRate, unit: '/min', icon: Wind },
-                    { label: 'SpO2', value: selectedPatient.vitals.oxygenSaturation, unit: '%', icon: Droplets },
-                    { label: 'Weight', value: selectedPatient.vitals.weight, unit: 'kg', icon: Scale },
-                    { label: 'Height', value: selectedPatient.vitals.height, unit: 'cm' },
-                    { label: 'Pain Scale', value: selectedPatient.vitals.painScale, unit: '/10' },
-                    { label: 'Blood Sugar', value: selectedPatient.vitals.bloodSugar, unit: 'mg/dL' },
-                  ].map((item, i) => (
-                    <div key={i} className="p-3 rounded-lg bg-muted/50 text-center">
-                      <p className="text-xs text-muted-foreground flex items-center justify-center gap-1">
-                        {item.icon && <item.icon className="h-3 w-3" />}
-                        {item.label}
-                      </p>
-                      <p className="text-lg font-semibold">{item.value || '-'} <span className="text-sm font-normal text-muted-foreground">{item.unit}</span></p>
-                    </div>
-                  ))}
-                </div>
-                {selectedPatient.vitals.notes && (
-                  <div className="mt-4 p-3 rounded-lg bg-blue-500/10 border border-blue-500/20">
-                    <p className="text-sm font-medium text-blue-700 dark:text-blue-300">Notes</p>
-                    <p className="text-sm text-foreground mt-1">{selectedPatient.vitals.notes}</p>
-                  </div>
-                )}
-                <p className="text-xs text-muted-foreground mt-4">
-                  Recorded by: {selectedPatient.vitals.recordedBy || 'Unknown'}
-                </p>
-              </div>
-            )}
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setIsViewVitalsDialogOpen(false)}>Close</Button>
-              <Button onClick={() => { setIsViewVitalsDialogOpen(false); openRecordVitals(selectedPatient!); }}>
-                <Edit className="h-4 w-4 mr-2" />Edit Vitals
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+        <VitalsDetailModal
+          isOpen={isViewVitalsDialogOpen}
+          onClose={() => setIsViewVitalsDialogOpen(false)}
+          vitals={
+            selectedPatient?.vitals
+              ? { id: selectedPatient.id, ...selectedPatient.vitals }
+              : null
+          }
+          patientName={selectedPatient?.name}
+          patientId={selectedPatient?.patientId}
+          onEdit={
+            selectedPatient
+              ? () => {
+                  setIsViewVitalsDialogOpen(false);
+                  openRecordVitals(selectedPatient);
+                }
+              : undefined
+          }
+        />
 
         {/* Room Picker Dialog */}
         <Dialog open={isRoomPickerOpen} onOpenChange={setIsRoomPickerOpen}>

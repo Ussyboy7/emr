@@ -13,7 +13,16 @@ router.register(r'referrals', ReferralViewSet, basename='referral')
 router.register(r'icd10-codes', ICD10CodeViewSet, basename='icd10-code')
 router.register(r'diagnoses', DiagnosisViewSet, basename='diagnosis')
 
+# Explicit referral stamp route (registered before the router so it always resolves; avoids 404 if router
+# action registration is missing on older deployed images).
+referral_ack_form = ReferralViewSet.as_view({"post": "acknowledge_responsibility_form"})
+
 urlpatterns = [
-    path('consultation/', include(router.urls)),
+    path(
+        "consultation/referrals/<int:pk>/acknowledge_responsibility_form/",
+        referral_ack_form,
+        name="referral-acknowledge-responsibility-form",
+    ),
+    path("consultation/", include(router.urls)),
 ]
 

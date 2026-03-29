@@ -8,10 +8,17 @@ from django.views.static import serve as static_serve
 from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, SpectacularSwaggerView
 
 from common.views import health_check
+from laboratory.analytics_views import LaboratoryAnalyticsSummaryView
+from pharmacy.analytics_views import PharmacyAnalyticsSummaryView
+from radiology.analytics_views import RadiologyAnalyticsSummaryView
 
 
 api_v1_patterns = [
     path('health/', health_check, name='health_check'),
+    # Module analytics: registered here first so no other path('', include(...)) can shadow them.
+    path('laboratory/analytics/summary/', LaboratoryAnalyticsSummaryView.as_view(), name='laboratory-analytics-summary'),
+    path('radiology/analytics/summary/', RadiologyAnalyticsSummaryView.as_view(), name='radiology-analytics-summary'),
+    path('pharmacy/analytics/summary/', PharmacyAnalyticsSummaryView.as_view(), name='pharmacy-analytics-summary'),
     path('accounts/', include('accounts.urls')),
     path('organization/', include('organization.urls')),
     path('', include('patients.urls')),

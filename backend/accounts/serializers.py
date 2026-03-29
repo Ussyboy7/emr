@@ -54,6 +54,7 @@ class UserSerializer(serializers.ModelSerializer):
                     '/medical-records/visits': 'visit_view',
                     '/medical-records/appointments': 'visit_view',
                     '/medical-records/dependents': 'patient_view',
+                    '/medical-records/referrals': 'patient_view',
                     '/medical-records/reports': 'reports_view',
 
                     # Nursing

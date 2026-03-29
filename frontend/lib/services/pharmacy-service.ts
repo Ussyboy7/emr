@@ -923,6 +923,11 @@ class PharmacyService {
       return [];
     }
   }
+
+  async getAnalyticsSummary(start: string, end: string): Promise<PharmacyAnalyticsSummary> {
+    const query = buildQueryString({ start, end });
+    return apiFetch<PharmacyAnalyticsSummary>(`/pharmacy/analytics/summary/${query}`);
+  }
 }
 
 interface MedicationBatch {
@@ -952,6 +957,41 @@ export interface DrugInteraction {
   severity: 'Major' | 'Moderate' | 'Minor';
   description: string;
   recommendation: string;
+}
+
+export interface PharmacyAnalyticsSummary {
+  period: { start: string; end: string };
+  dispensing: {
+    dispense_events: number;
+    total_quantity_all_units: number;
+    note: string;
+    prescriptions_with_activity: number;
+    unique_patients: number;
+  };
+  prescribing: {
+    new_prescriptions: number;
+    by_status: Record<string, number>;
+  };
+  patients_by_gender: Record<string, number>;
+  patients_by_category: Record<string, number>;
+  npa_staff_linked_vs_non_npa: { npa_staff_linked: number; non_npa: number };
+  by_day: Array<{
+    date: string;
+    dispense_events: number;
+    total_quantity: number;
+    prescriptions: number;
+  }>;
+  top_medications_by_quantity: Array<{
+    medication_id: number;
+    name: string;
+    dispense_events: number;
+    total_quantity: number;
+  }>;
+  top_medications_by_events: Array<{
+    medication_id: number;
+    name: string;
+    dispense_events: number;
+  }>;
 }
 
 export const pharmacyService = new PharmacyService();

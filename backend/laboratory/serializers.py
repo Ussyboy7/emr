@@ -2,7 +2,27 @@
 Serializers for the Laboratory app.
 """
 from rest_framework import serializers
-from .models import LabTemplate, LabOrder, LabTest, LabResult
+from .models import LabTemplate, LabPartner, LabOrder, LabTest, LabResult
+
+
+class LabPartnerSerializer(serializers.ModelSerializer):
+    """External lab partners for outsourced test processing."""
+
+    class Meta:
+        model = LabPartner
+        fields = [
+            "id",
+            "name",
+            "code",
+            "phone",
+            "email",
+            "notes",
+            "is_active",
+            "sort_order",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["created_at", "updated_at"]
 
 
 class LabTemplateSerializer(serializers.ModelSerializer):
@@ -129,7 +149,7 @@ class LabTestSerializer(serializers.ModelSerializer):
             'doctor_name': doctor_name,
             'patient_details': patient_details,
             'doctor_details': doctor_details,
-            'clinic': order.clinic or '',
+            'clinic': order.get_clinic_for_display(),
             'priority': order.priority,
             'clinical_notes': order.clinical_notes or '',
         }
@@ -165,6 +185,7 @@ class LabOrderSerializer(serializers.ModelSerializer):
     tests = LabTestSerializer(many=True, read_only=True)
     # Allow tests to be written during creation (using nested serializer without order field)
     tests_data = LabTestCreateSerializer(many=True, write_only=True, required=False)
+    icd10_diagnoses = serializers.SerializerMethodField()
     
     def get_patient_name(self, obj):
         """Get patient full name."""
@@ -174,7 +195,16 @@ class LabOrderSerializer(serializers.ModelSerializer):
             return obj.patient.get_full_name()
         except (AttributeError, TypeError):
             return str(obj.patient) if obj.patient else None
-    
+
+    def get_icd10_diagnoses(self, obj):
+        from common.diagnosis_serialization import serialize_icd10_diagnoses_for_order
+
+        return serialize_icd10_diagnoses_for_order(
+            consultation_session=obj.consultation_session if getattr(obj, "consultation_session_id", None) else None,
+            visit=obj.visit if getattr(obj, "visit_id", None) else None,
+            patient=obj.patient,
+        )
+
     def get_doctor_name(self, obj):
         """Get doctor full name."""
         if not obj.doctor:

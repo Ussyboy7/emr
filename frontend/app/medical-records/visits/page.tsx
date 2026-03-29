@@ -180,10 +180,13 @@ export default function VisitsPage() {
   }, [debouncedSearchQuery, typeFilter, clinicFilter, buildDateParams]);
 
   // Load visits from API - extracted as a reusable function
-  const loadVisits = useCallback(async () => {
+  const loadVisits = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent;
     try {
-      setLoading(true);
-      setError(null);
+      if (!silent) {
+        setLoading(true);
+        setError(null);
+      }
 
       const { dateParam, startDate, endDate } = buildDateParams();
 
@@ -215,11 +218,13 @@ export default function VisitsPage() {
       console.error('Error loading visits:', err);
       if (isAuthenticationError(err)) {
         setAuthError(err);
-      } else {
+      } else if (!silent) {
         setError('Failed to load visits. Please try again.');
       }
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   }, [currentPage, itemsPerPage, debouncedSearchQuery, statusFilter, typeFilter, clinicFilter, buildDateParams]);
 
@@ -232,6 +237,33 @@ export default function VisitsPage() {
   useEffect(() => {
     loadStats();
   }, [loadStats]);
+
+  const pollingPaused = useMemo(
+    () =>
+      isDateFilterDialogOpen ||
+      isEditModalOpen ||
+      isViewModalOpen ||
+      isForwardModalOpen ||
+      isCancelModalOpen ||
+      isReportModalOpen,
+    [
+      isDateFilterDialogOpen,
+      isEditModalOpen,
+      isViewModalOpen,
+      isForwardModalOpen,
+      isCancelModalOpen,
+      isReportModalOpen,
+    ]
+  );
+
+  useEffect(() => {
+    if (pollingPaused) return;
+    const id = setInterval(() => {
+      void loadVisits({ silent: true });
+      void loadStats();
+    }, 15000);
+    return () => clearInterval(id);
+  }, [loadVisits, loadStats, pollingPaused]);
 
   // With server-side pagination, visits array contains only current page results
   const paginatedVisits = visits;

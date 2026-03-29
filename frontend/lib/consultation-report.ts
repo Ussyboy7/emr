@@ -122,8 +122,37 @@ const formatResultWithPending = (
 
   const currentStatus = String(status ?? '').toLowerCase();
   const isDone = doneStatuses.some((s) => s.toLowerCase() === currentStatus);
-  return isDone ? '' : 'Pending';
+  return isDone ? 'Completed' : 'Pending';
 };
+
+/** True if API attached a result file (string URL or { url } object). */
+function labTestHasResultFile(test: any): boolean {
+  const rf = test?.result_file;
+  if (rf == null || rf === false) return false;
+  if (typeof rf === 'string') return rf.trim().length > 0;
+  if (typeof rf === 'object' && rf && typeof (rf as { url?: string }).url === 'string') {
+    return (rf as { url: string }).url.trim().length > 0;
+  }
+  return true;
+}
+
+/**
+ * Text for consultation report lab tables (session viewer, PDF, shared modal).
+ * Uses structured results when present; otherwise PDF-on-file or a short status label.
+ */
+export function summarizeLabTestForConsultationReport(test: any): string {
+  const status = String(test?.status ?? '').toLowerCase();
+  const norm = test?.template_normal_range || test?.template?.normal_range;
+  const fromResults = formatLabResult(test?.results ?? test?.result ?? '', norm).trim();
+  if (fromResults) return fromResults;
+  if (labTestHasResultFile(test)) {
+    return 'PDF report on file';
+  }
+  if (status === 'verified' || status === 'results_ready') {
+    return 'Completed';
+  }
+  return '';
+}
 
 // ----- HTML generator (single source for Download/Print) -----
 export function buildConsultationReportHTML(session: ConsultationReportSession): string {
@@ -134,9 +163,14 @@ export function buildConsultationReportHTML(session: ConsultationReportSession):
   const physioOrders = session.physioOrders || [];
   const diagnoses = session.diagnoses || [];
 
-  const durationStr = session.ended_at && session.started_at
-    ? Math.round((new Date(session.ended_at).getTime() - new Date(session.started_at).getTime()) / (1000 * 60)) + ' minutes'
-    : '';
+  const durationStr =
+    session.ended_at && session.started_at
+      ? Math.round(
+          (new Date(session.ended_at).getTime() - new Date(session.started_at).getTime()) / (1000 * 60),
+        ) + ' minutes'
+      : session.started_at
+        ? Math.round((Date.now() - new Date(session.started_at).getTime()) / (1000 * 60)) + ' minutes (ongoing)'
+        : '';
 
   return `
 <!DOCTYPE html>
@@ -231,7 +265,7 @@ export function buildConsultationReportHTML(session: ConsultationReportSession):
     <table>
       <thead><tr><th>Test</th><th>Priority</th><th>Status</th><th>Result</th></tr></thead>
       <tbody>
-        ${labOrders.map((lab: any) => `<tr><td>${lab.test ?? ''}</td><td>${formatPriority(lab.priority)}</td><td>${lab.status ?? ''}</td><td>${formatResultWithPending(lab.result, lab.status, ['verified', 'completed']).toString().replace(/\n/g, '<br>')}</td></tr>`).join('')}
+        ${labOrders.map((lab: any) => `<tr><td>${lab.test ?? ''}</td><td>${formatPriority(lab.priority)}</td><td>${lab.status ?? ''}</td><td>${formatResultWithPending(lab.result ? formatLabResult(lab.result) : '', lab.status, ['verified', 'completed', 'results_ready']).toString().replace(/\n/g, '<br>')}</td></tr>`).join('')}
       </tbody>
     </table>
   </div>
@@ -330,7 +364,7 @@ export async function loadConsultationReportSession(sessionId: number): Promise<
             test: (t.name || t.test_name || t.template_name || '').trim(),
             priority: order.priority ?? '',
             status: t.status ?? order.status ?? '',
-            result: formatLabResult(t.results ?? t.result ?? '', t.template_normal_range || t.normal_range),
+            result: summarizeLabTestForConsultationReport(t),
           }));
         }
 
@@ -338,7 +372,7 @@ export async function loadConsultationReportSession(sessionId: number): Promise<
           test: (t.name || t.test_name || t.template_name || '').trim(),
           priority: order.priority ?? '',
           status: t.status ?? order.status ?? '',
-          result: formatLabResult(t.results ?? t.result ?? '', t.template_normal_range || t.normal_range),
+          result: summarizeLabTestForConsultationReport(t),
         }));
       });
     } catch (err) {

@@ -124,34 +124,30 @@ export const getNotifications = async (params?: {
 let unreadCountInFlight: Promise<number> | null = null;
 let unreadCountLastValue: number | null = null;
 let unreadCountLastFetchedAt = 0;
+// Cache for 20s — well within the 30s poll interval, eliminates strict-mode double-mount duplicates.
+const UNREAD_COUNT_CACHE_TTL_MS = 20_000;
 
 export const getUnreadNotificationCount = async (): Promise<number> => {
   if (!hasTokens()) return 0;
 
   try {
     const now = Date.now();
-    if (unreadCountLastValue !== null && now - unreadCountLastFetchedAt < 1500) {
+    if (unreadCountLastValue !== null && now - unreadCountLastFetchedAt < UNREAD_COUNT_CACHE_TTL_MS) {
       return unreadCountLastValue;
     }
     if (unreadCountInFlight) {
       return unreadCountInFlight;
     }
-    // The router registers 'notifications' under api/notifications/, and the viewset is also 'notifications'
-    // So the full path is /api/notifications/notifications/unread_count/
-    // apiFetch adds /api/v1/ prefix, so we need /notifications/notifications/unread_count/
     const url = '/notifications/notifications/unread_count/';
-    unreadCountInFlight = (async () => {
-      const response = await apiFetch<{ count: number }>(url);
+    unreadCountInFlight = apiFetch<{ count: number }>(url).then((response) => {
       const count = response.count || 0;
       unreadCountLastValue = count;
       unreadCountLastFetchedAt = Date.now();
       return count;
-    })();
-    return await unreadCountInFlight;
+    });
+    const count = await unreadCountInFlight;
+    return count;
   } catch (error: any) {
-    // Silently handle errors - notifications endpoint might not be available yet
-    // Network errors (Failed to fetch), 404s, 401s, etc. are all acceptable
-    // Only log in development mode for debugging
     if (process.env.NODE_ENV === 'development') {
       console.debug('[notifications-storage] Error fetching unread count (silently handled):', error?.message || error);
     }
@@ -159,6 +155,12 @@ export const getUnreadNotificationCount = async (): Promise<number> => {
   } finally {
     unreadCountInFlight = null;
   }
+};
+
+/** Invalidate the unread count cache (e.g. after marking a notification as read). */
+export const invalidateUnreadCountCache = () => {
+  unreadCountLastValue = null;
+  unreadCountLastFetchedAt = 0;
 };
 
 /**

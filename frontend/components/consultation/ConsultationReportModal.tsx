@@ -136,7 +136,11 @@ export function ConsultationReportModal({
                         ? Math.round(
                             (new Date(session.ended_at).getTime() - new Date(session.started_at).getTime()) / (1000 * 60)
                           ) + " min"
-                        : ""}
+                        : session.started_at
+                          ? Math.round(
+                              (Date.now() - new Date(session.started_at).getTime()) / (1000 * 60)
+                            ) + " min (ongoing)"
+                          : "—"}
                     </div>
                     <div><strong>Room:</strong> {session.room_name ?? ""}</div>
                   </div>
@@ -309,7 +313,7 @@ export function ConsultationReportModal({
                               {formatResultWithPending(
                                 lab.result ? formatLabResult(lab.result) : "",
                                 lab.status,
-                                ["verified", "completed"]
+                                ["verified", "completed", "results_ready"]
                               )}
                             </td>
                           </tr>

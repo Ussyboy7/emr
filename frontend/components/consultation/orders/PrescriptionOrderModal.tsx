@@ -342,7 +342,7 @@ export function PrescriptionOrderModal({
         frequency: cfg.frequency || "Once daily (OD)",
         duration: days ? `${days} days` : "As directed",
         quantity: qty,
-        instructions: (cfg.instructions || clinicalIndication).trim(),
+        instructions: (cfg.instructions?.trim() || clinicalIndication.trim()),
       });
     }
 
@@ -494,7 +494,9 @@ export function PrescriptionOrderModal({
               <div className="flex items-center justify-between">
                 <div>
                   <Label className="text-sm font-semibold">Configure Prescriptions</Label>
-                  <p className="text-xs text-muted-foreground mt-1">Set dose, frequency, duration, and route for each selected medication</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Set dose, frequency, duration, route, and instructions for each selected medication
+                  </p>
                 </div>
                 <Badge variant="outline" className="text-xs">
                   {selectedMedications.length} medication{selectedMedications.length > 1 ? "s" : ""} selected
@@ -623,6 +625,16 @@ export function PrescriptionOrderModal({
                               </SelectContent>
                             </Select>
                           </div>
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">Instructions</Label>
+                          <Textarea
+                            placeholder="e.g., Take with food; rotate injection sites; monitor glucose"
+                            className="min-h-[72px] text-xs resize-y"
+                            value={mergedCfg.instructions || ""}
+                            onChange={(e) => updateMedicationConfig(medId, "instructions", e.target.value)}
+                            rows={3}
+                          />
                         </div>
                       </div>
                     </div>

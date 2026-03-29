@@ -2,7 +2,15 @@
 Admin configuration for the Laboratory app.
 """
 from django.contrib import admin
-from .models import LabTemplate, LabOrder, LabTest, LabResult
+from .models import LabTemplate, LabPartner, LabOrder, LabTest, LabResult
+
+
+@admin.register(LabPartner)
+class LabPartnerAdmin(admin.ModelAdmin):
+    list_display = ["name", "code", "is_active", "sort_order", "phone", "updated_at"]
+    list_filter = ["is_active"]
+    search_fields = ["name", "code", "email"]
+    ordering = ["sort_order", "name"]
 
 
 @admin.register(LabTemplate)

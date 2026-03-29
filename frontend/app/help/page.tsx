@@ -35,7 +35,7 @@ const faqs = [
     questions: [
       { q: 'How do I search for a patient?', a: 'Use the search bar in Medical Records > Manage Patients. You can search by patient name, ID, phone number, or personal number. Use filters for more specific searches.' },
       { q: 'How do I update patient information?', a: 'Find the patient in Manage Patients, click on their record, then click "Edit". Make the necessary changes and save.' },
-      { q: 'How do I add a dependent to a patient?', a: 'Go to Medical Records > Manage Dependents. Click "Add Dependent", select the principal staff member, and fill in the dependent\'s details.' },
+      { q: 'How do I add a dependent to a patient?', a: 'Go to Medical Records > Manage Dependents. Click "Add Dependent", enter the principal\'s personal number (employee or retiree), search to link them, then fill in the dependent\'s details.' },
     ]
   },
   {

@@ -15,6 +15,11 @@ import {
 } from "@/lib/auth-cookie-names";
 import { getHomeRouteForUser } from "@/lib/home-route";
 
+const CURRENT_USER_CACHE_TTL_MS = 30_000;
+let cachedRemoteUser: User | null | undefined = undefined;
+let cachedRemoteUserAt = 0;
+let inFlightRemoteUserRequest: Promise<User | null> | null = null;
+
 const toOptionalString = (value: unknown): string | undefined => {
   if (value === null || value === undefined) return undefined;
   return String(value);
@@ -64,13 +69,40 @@ const clearCookie = (name: string) => {
   document.cookie = `${name}=; Path=/; SameSite=Lax; Max-Age=0`;
 };
 
+const cacheRemoteUser = (user: User | null) => {
+  cachedRemoteUser = user;
+  cachedRemoteUserAt = Date.now();
+};
+
+const shouldUseCachedRemoteUser = (): boolean => {
+  if (cachedRemoteUser === undefined) return false;
+  return Date.now() - cachedRemoteUserAt < CURRENT_USER_CACHE_TTL_MS;
+};
+
+const writeAuthMirrorCookies = (mapped: User) => {
+  try {
+    setCookie(AUTH_ALLOWED_PAGES_COOKIE, JSON.stringify(mapped.permissions || []), 60 * 60 * 24 * 7);
+    setCookie(AUTH_IS_SUPERUSER_COOKIE, mapped.isSuperuser ? "1" : "0", 60 * 60 * 24 * 7);
+    const home = getHomeRouteForUser(mapped);
+    if (home) setCookie(AUTH_HOME_ROUTE_COOKIE, home, 60 * 60 * 24 * 7);
+
+    // Cleanup legacy cookie names to avoid confusion / stale state.
+    clearCookie(LEGACY_AUTH_ALLOWED_PAGES_COOKIE);
+    clearCookie(LEGACY_AUTH_IS_SUPERUSER_COOKIE);
+    clearCookie(LEGACY_AUTH_HOME_ROUTE_COOKIE);
+  } catch {
+    // ignore cookie write errors
+  }
+};
+
 export const useCurrentUser = () => {
   const organization = useContext(OrganizationContext);
   const users = organization?.users ?? [];
   const [remoteUser, setRemoteUser] = useState<User | null>(null);
   const [hydrated, setHydrated] = useState(false);
 
-  const loadCurrentUser = useCallback(async () => {
+  const loadCurrentUser = useCallback(async (opts?: { force?: boolean }) => {
+    const force = opts?.force === true;
     // Check for demo mode first
     if (typeof window !== 'undefined') {
       const demoUserStr = localStorage.getItem('demo_user');
@@ -103,32 +135,36 @@ export const useCurrentUser = () => {
     }
 
     if (!hasTokens()) {
+      cacheRemoteUser(null);
       setRemoteUser(null);
       setHydrated(true);
       return;
     }
 
+    if (!force && shouldUseCachedRemoteUser()) {
+      setRemoteUser(cachedRemoteUser ?? null);
+      setHydrated(true);
+      return;
+    }
+
     try {
-      const response = await apiFetch("/accounts/auth/me/");
-      const mapped = mapApiUserToUser(response);
-      setRemoteUser(mapped);
-
-      // Mirror authorization context into cookies for middleware (best-effort).
-      try {
-        setCookie(AUTH_ALLOWED_PAGES_COOKIE, JSON.stringify(mapped.permissions || []), 60 * 60 * 24 * 7);
-        setCookie(AUTH_IS_SUPERUSER_COOKIE, mapped.isSuperuser ? "1" : "0", 60 * 60 * 24 * 7);
-        const home = getHomeRouteForUser(mapped);
-        if (home) setCookie(AUTH_HOME_ROUTE_COOKIE, home, 60 * 60 * 24 * 7);
-
-        // Cleanup legacy cookie names to avoid confusion / stale state.
-        clearCookie(LEGACY_AUTH_ALLOWED_PAGES_COOKIE);
-        clearCookie(LEGACY_AUTH_IS_SUPERUSER_COOKIE);
-        clearCookie(LEGACY_AUTH_HOME_ROUTE_COOKIE);
-      } catch {
-        // ignore cookie write errors
+      if (!inFlightRemoteUserRequest) {
+        inFlightRemoteUserRequest = (async () => {
+          const response = await apiFetch("/accounts/auth/me/");
+          const mapped = mapApiUserToUser(response);
+          writeAuthMirrorCookies(mapped);
+          cacheRemoteUser(mapped);
+          return mapped;
+        })().finally(() => {
+          inFlightRemoteUserRequest = null;
+        });
       }
+
+      const mapped = await inFlightRemoteUserRequest;
+      setRemoteUser(mapped);
     } catch (error) {
       logWarn("Failed to hydrate current user from API", error);
+      cacheRemoteUser(null);
       setRemoteUser(null);
     } finally {
       setHydrated(true);
@@ -163,8 +199,10 @@ export const useCurrentUser = () => {
   }, [remoteUser, users]);
 
   const refresh = useCallback(async () => {
+    cachedRemoteUser = undefined;
+    cachedRemoteUserAt = 0;
     setHydrated(false);
-    await loadCurrentUser();
+    await loadCurrentUser({ force: true });
   }, [loadCurrentUser]);
 
   return {

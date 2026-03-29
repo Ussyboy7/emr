@@ -464,8 +464,8 @@ export default function ReportsPage() {
   const StatisticalReportRowCard = ({ tile }: { tile: StatisticalReportTile }) => {
     const Icon = tile.icon;
     const go = () => router.push(tile.href);
-    return (
-      <Card
+  return (
+            <Card 
         role="button"
         tabIndex={0}
         onKeyDown={(e) => {
@@ -501,9 +501,9 @@ export default function ReportsPage() {
               </div>
             </div>
             <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0 opacity-70" />
-          </div>
-        </CardContent>
-      </Card>
+                </div>
+              </CardContent>
+            </Card>
     );
   };
 
@@ -531,7 +531,7 @@ export default function ReportsPage() {
         onClick={go}
       >
         <CardContent className="py-3 px-4">
-          <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3">
             <div
               className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${tile.iconWrap}`}
             >
@@ -558,9 +558,9 @@ export default function ReportsPage() {
               </div>
             </div>
             <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0 opacity-70" />
-          </div>
-        </CardContent>
-      </Card>
+              </div>
+            </CardContent>
+          </Card>
     );
   };
 
@@ -589,7 +589,7 @@ export default function ReportsPage() {
                       {patientDocumentReports.length} certificate & letter types
                     </span>
                   </div>
-                </div>
+              </div>
               </div>
               <Button
                 type="button"
@@ -612,17 +612,17 @@ export default function ReportsPage() {
                   <BarChart3 className="h-5 w-5 text-teal-600 dark:text-teal-400" />
                 </span>
                 Departmental & statistical
-              </CardTitle>
+            </CardTitle>
               <CardDescription>
                 Select a row to open that report&apos;s workspace. There you choose the time period, export CSV, and print (or save as PDF).
               </CardDescription>
-            </CardHeader>
+          </CardHeader>
             <CardContent className="pt-4 space-y-3 flex-1">
               {statisticalReports.map((tile) => (
                 <StatisticalReportRowCard key={tile.id} tile={tile} />
               ))}
-            </CardContent>
-          </Card>
+          </CardContent>
+        </Card>
 
           <Card className="order-1 xl:order-2 border-border shadow-sm overflow-hidden h-full flex flex-col">
             <CardHeader className="pb-3 space-y-2 border-b border-border/80 bg-muted/25">
@@ -662,7 +662,7 @@ export default function ReportsPage() {
               <DialogDescription>Generate fitness/illness medical certificates for a patient.</DialogDescription>
             </DialogHeader>
             <div className="grid gap-4 py-4">
-              <div className="space-y-2">
+                <div className="space-y-2">
                 <Label>Report type *</Label>
                 <Select value={newReport.type} onValueChange={(v) => setNewReport((prev) => ({ ...prev, type: v }))}>
                   <SelectTrigger>
@@ -675,10 +675,10 @@ export default function ReportsPage() {
                       </SelectItem>
                     ))}
                   </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Patient *</Label>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Patient *</Label>
                 {selectedCertificatePatient ? (
                   <div className="flex items-center justify-between gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2.5">
                     <div className="min-w-0">
@@ -764,11 +764,11 @@ export default function ReportsPage() {
                             </button>
                           );
                         })}
-                    </div>
+                </div>
                   </>
                 )}
               </div>
-
+              
               {newReport.type === "Medical Certificate" && (
                 <>
                   <div className="space-y-2">

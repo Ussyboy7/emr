@@ -25,6 +25,7 @@ const getBaseUrl = () => {
 };
 
 const isBrowser = () => typeof window !== "undefined";
+const inFlightGetRequests = new Map<string, Promise<Response>>();
 
 const getCookie = (name: string): string | null => {
   if (!isBrowser()) return null;
@@ -347,12 +348,33 @@ export const apiFetch = async <T = unknown>(path: string, options: FetchOptions 
       try {
         const method = (rest.method || "GET").toUpperCase();
         const cache = rest.cache ?? (method === "GET" ? "no-store" : undefined);
-        response = await fetch(fullUrl, {
-          ...rest,
-          cache,
-          headers: requestHeaders,
-          credentials: "include",
-        });
+
+        if (method === "GET") {
+          // De-duplicate concurrent identical GET requests (common with parallel mounts / strict mode).
+          const dedupeKey = `${fullUrl}::${requestHeaders.get("Authorization") ?? ""}::${requestHeaders.get("Accept") ?? ""}`;
+          let pending = inFlightGetRequests.get(dedupeKey);
+          if (!pending) {
+            pending = fetch(fullUrl, {
+              ...rest,
+              cache,
+              headers: requestHeaders,
+              credentials: "include",
+            });
+            inFlightGetRequests.set(dedupeKey, pending);
+            pending.finally(() => {
+              inFlightGetRequests.delete(dedupeKey);
+            });
+          }
+          const baseResponse = await pending;
+          response = baseResponse.clone();
+        } else {
+          response = await fetch(fullUrl, {
+            ...rest,
+            cache,
+            headers: requestHeaders,
+            credentials: "include",
+          });
+        }
       } catch (networkError: any) {
         // Handle network errors (Failed to fetch, CORS, etc.)
         // This typically means the backend is not running or unreachable
@@ -415,21 +437,66 @@ export const apiFetch = async <T = unknown>(path: string, options: FetchOptions 
         }
 
         // Extract a safe, user-friendly message from API responses (if present).
-        // This avoids leaking HTTP status codes while still surfacing why something failed.
         let apiMessage: string | undefined;
         try {
           const parsed = JSON.parse(responseBody);
           if (parsed && typeof parsed === "object") {
+            // DRF ErrorDetail and similar: coerce to string
+            const rawDetail = (parsed as any).detail;
+            let detailStr: string | undefined;
+            if (typeof rawDetail === "string") detailStr = rawDetail;
+            else if (rawDetail != null && typeof rawDetail === "object" && typeof (rawDetail as any).string === "string") {
+              detailStr = String((rawDetail as any).string);
+            }
+
             apiMessage =
               (typeof (parsed as any).error === "string" && (parsed as any).error) ||
-              (typeof (parsed as any).detail === "string" && (parsed as any).detail) ||
+              (typeof (parsed as any).message === "string" && (parsed as any).message) ||
+              detailStr ||
               undefined;
+
+            // DRF sometimes returns detail as a string[] (e.g. auth errors)
+            if (!apiMessage && Array.isArray((parsed as any).detail)) {
+              const parts = ((parsed as any).detail as unknown[]).filter((x): x is string => typeof x === "string");
+              if (parts.length) apiMessage = parts.join(" ");
+            }
+
+            if (!apiMessage && (parsed as any).detail != null && typeof (parsed as any).detail === "object" && !Array.isArray((parsed as any).detail)) {
+              const d = (parsed as any).detail as Record<string, unknown>;
+              const flattened = Object.entries(d)
+                .map(([k, v]) => {
+                  if (Array.isArray(v) && v.length && typeof v[0] === "string") return `${k}: ${(v as string[])[0]}`;
+                  if (typeof v === "string") return `${k}: ${v}`;
+                  return null;
+                })
+                .filter(Boolean);
+              if (flattened.length) apiMessage = flattened.join(" ");
+              else {
+                try {
+                  apiMessage = JSON.stringify(d);
+                } catch {
+                  /* ignore */
+                }
+              }
+            }
+
+            // DRF non_field_errors
+            if (!apiMessage && Array.isArray((parsed as any).non_field_errors)) {
+              const parts = ((parsed as any).non_field_errors as unknown[]).filter((x): x is string => typeof x === "string");
+              if (parts.length) apiMessage = parts.join(" ");
+            }
             
             // Handle Django REST Framework validation errors
             // Format: {"field_name": ["error message"]}
             if (!apiMessage) {
               const fieldErrors = Object.entries(parsed as Record<string, unknown>).filter(
-                ([key, value]) => key !== 'detail' && key !== 'error' && Array.isArray(value) && value.length > 0
+                ([key, value]) =>
+                  key !== 'detail' &&
+                  key !== 'error' &&
+                  key !== 'message' &&
+                  key !== 'non_field_errors' &&
+                  Array.isArray(value) &&
+                  value.length > 0
               );
               
               if (fieldErrors.length > 0) {
@@ -442,14 +509,29 @@ export const apiFetch = async <T = unknown>(path: string, options: FetchOptions 
             }
           }
         } catch {
-          // Not JSON (could be HTML); ignore.
+          // Not JSON (could be HTML); try a minimal hint in development.
+        }
+
+        const isDevBuild =
+          typeof process !== "undefined" && process.env.NODE_ENV === "development";
+
+        let fallbackMessage = "Request failed. Please try again";
+        if (!apiMessage) {
+          if (isDevBuild) {
+            const titleMatch = responseBody.match(/<title[^>]*>([^<]+)<\/title>/i);
+            const htmlTitle = titleMatch?.[1]?.trim();
+            fallbackMessage = htmlTitle
+              ? `${htmlTitle} (HTTP ${response.status})`
+              : `HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ""} — ${response.url}`;
+          } else if (response.statusText) {
+            fallbackMessage = `${response.statusText}. Please try again.`;
+          }
         }
 
         // NOTE:
         // - Some parts of the app intentionally probe optional endpoints and treat 404 as "not supported".
         // - Avoid spamming console.error for 404s; callers can still branch on (err as any).status.
         if (response.status !== 404) {
-          // Security: Never expose raw HTTP status codes to prevent information leakage
           console.error(`API request failed with status ${response.status}`, {
             url: response.url,
             status: response.status,
@@ -457,7 +539,7 @@ export const apiFetch = async <T = unknown>(path: string, options: FetchOptions 
             body: responseBody
           });
         }
-        const err = new Error(apiMessage || 'Request failed. Please try again');
+        const err = new Error(apiMessage || fallbackMessage);
         (err as any).status = response.status;
         (err as any).apiMessage = apiMessage;
         (err as any).body = responseBody;
@@ -671,3 +753,17 @@ export const getPhotoUrl = (relativePath: string | null | undefined): string | n
   }
   return null; // Unknown format
 };
+
+/** User-facing message from apiFetch errors (message usually set by apiFetch with status/URL in dev). */
+export function getReadableApiError(error: unknown): string {
+  const e = error as Error & { status?: number; apiMessage?: string };
+  if (e?.apiMessage) return e.apiMessage;
+  if (e?.message?.trim()) return e.message;
+  if (e?.status === 404) {
+    return "This API was not found. Redeploy the backend and set NEXT_PUBLIC_API_URL to your API root (e.g. …/api or …/api/v1).";
+  }
+  if (e?.status === 401 || e?.status === 403) {
+    return "Sign in again or check that your account can access this report.";
+  }
+  return "Something went wrong. Please try again.";
+}

@@ -4,6 +4,7 @@ import type { User } from '@/lib/npa-structure';
 import { updateOrganizationCache } from '@/lib/npa-structure';
 import { apiFetch, hasTokens } from '@/lib/api-client';
 import { useCurrentUser } from '@/hooks/use-current-user';
+import { usePathname } from 'next/navigation';
 
 export interface Directorate {
   id: string;
@@ -372,6 +373,17 @@ export const OrganizationProvider: React.FC<{ children: ReactNode }> = ({ childr
   const [isSyncing, setIsSyncing] = useState(false);
   const [hasSynced, setHasSynced] = useState(false);
   const { currentUser, hydrated } = useCurrentUser();
+  const pathname = usePathname();
+
+  // Keep organization bootstrap off clinical pages to reduce background API noise.
+  // It still loads automatically on admin/ECM routes where these datasets are used.
+  const shouldAutoSyncOrganizationData =
+    !!pathname &&
+    (
+      pathname.startsWith('/admin') ||
+      pathname.startsWith('/ecm') ||
+      pathname.startsWith('/permissions')
+    );
 
 
   const applyDepartmentUpdate = useCallback(
@@ -473,6 +485,9 @@ export const OrganizationProvider: React.FC<{ children: ReactNode }> = ({ childr
   }, [hydrated, currentUser]);
 
   useEffect(() => {
+    if (!shouldAutoSyncOrganizationData) {
+      return;
+    }
     if (!hydrated || !currentUser || !hasTokens()) {
       return;
     }
@@ -480,7 +495,7 @@ export const OrganizationProvider: React.FC<{ children: ReactNode }> = ({ childr
     if (!hasSynced) {
       void refreshOrganizationData();
     }
-  }, [hydrated, currentUser, hasSynced, refreshOrganizationData]);
+  }, [hydrated, currentUser, hasSynced, refreshOrganizationData, shouldAutoSyncOrganizationData]);
 
   useEffect(() => {
     if (hydrated && currentUser && hasTokens()) {

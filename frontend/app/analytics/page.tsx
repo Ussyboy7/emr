@@ -1,13 +1,16 @@
 "use client";
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { DashboardLayout } from '@/components/DashboardLayout';
+import {
+  AnalyticsReportLayout,
+  analyticsRangeFromFilters,
+  type AnalyticsViewMode,
+} from '@/components/analytics/AnalyticsReportLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { analyticsService } from '@/lib/services';
 import { apiFetch } from '@/lib/api-client';
 import { toast } from 'sonner';
@@ -18,12 +21,21 @@ import {
 } from 'recharts';
 import {
   TrendingUp, TrendingDown, Users, Stethoscope, TestTube, Pill, Calendar,
-  Clock, Activity, Heart, FileText, Download, RefreshCw, Building2,
-  AlertTriangle, CheckCircle2, UserPlus, Bed, Loader2
+  Clock, Activity, Heart, Building2,
+  UserPlus, Loader2
 } from 'lucide-react';
 
+function inclusiveDayCount(start: string, end: string): number {
+  const a = new Date(`${start}T12:00:00`).getTime();
+  const b = new Date(`${end}T12:00:00`).getTime();
+  return Math.max(1, Math.round((b - a) / 86400000) + 1);
+}
+
 export default function AnalyticsPage() {
-  const [selectedPeriod, setSelectedPeriod] = useState('30');
+  const [viewMode, setViewMode] = useState<AnalyticsViewMode>('year');
+  const [year, setYear] = useState(() => new Date().getFullYear().toString());
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -50,22 +62,25 @@ export default function AnalyticsPage() {
   const [labPerformance, setLabPerformance] = useState<any>(null);
   const [pharmacyPerformance, setPharmacyPerformance] = useState<any>(null);
 
-  useEffect(() => {
-    loadAnalyticsData();
-  }, [selectedPeriod]);
-
-  const loadAnalyticsData = async () => {
+  const loadAnalyticsData = useCallback(async () => {
+    const range = analyticsRangeFromFilters(viewMode, year, startDate, endDate);
+    if (!range) {
+      if (viewMode === 'range') {
+        toast.error('Please select start and end dates');
+      }
+      return;
+    }
     try {
       setLoading(true);
       setError(null);
-      const period = parseInt(selectedPeriod);
-      
+      const period = inclusiveDayCount(range.start, range.end);
+
       // Load all analytics data
       const [summaryStats, visitsTrend, clinicDist, daily, diagnoses, labDist, pharmMetrics, demographics, dashboardStats, labPerf, pharmPerf] = await Promise.all([
-        analyticsService.getSummaryStats(period),
-        analyticsService.getPatientVisitsTrend(period),
+        analyticsService.getSummaryStats(period, { start: range.start, end: range.end }),
+        analyticsService.getPatientVisitsTrend(Math.min(period, 365)),
         analyticsService.getClinicDistribution(),
-        analyticsService.getDailyTrend(7),
+        analyticsService.getDailyTrend(Math.min(period, 30)),
         analyticsService.getTopDiagnoses(10),
         analyticsService.getLabTestDistribution(),
         analyticsService.getPharmacyMetrics(12),
@@ -93,7 +108,15 @@ export default function AnalyticsPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [viewMode, year, startDate, endDate]);
+
+  useEffect(() => {
+    if (viewMode === 'year' && year) {
+      void loadAnalyticsData();
+    } else if (viewMode === 'range' && startDate && endDate) {
+      void loadAnalyticsData();
+    }
+  }, [viewMode, year, startDate, endDate, loadAnalyticsData]);
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
@@ -101,40 +124,74 @@ export default function AnalyticsPage() {
     setIsRefreshing(false);
   };
 
-  const handleExport = () => {
-    // Export functionality
-    toast.info('Export functionality will be implemented');
+  const setThisMonth = () => {
+    const n = new Date();
+    const first = new Date(n.getFullYear(), n.getMonth(), 1);
+    const last = new Date(n.getFullYear(), n.getMonth() + 1, 0);
+    setStartDate(first.toISOString().split('T')[0]);
+    setEndDate(last.toISOString().split('T')[0]);
+    setViewMode('range');
+  };
+
+  const setThisYear = () => {
+    setYear(new Date().getFullYear().toString());
+    setViewMode('year');
+  };
+
+  const highlightThisMonth =
+    viewMode === 'range' &&
+    Boolean(startDate) &&
+    startDate.includes(new Date().toISOString().slice(0, 7));
+  const highlightThisYear = viewMode === 'year' && year === new Date().getFullYear().toString();
+
+  const exportDashboardCsv = () => {
+    const esc = (s: string) => `"${String(s).replace(/"/g, '""')}"`;
+    const lines: string[] = [];
+    const period =
+      viewMode === 'year' ? year : startDate && endDate ? `${startDate}_to_${endDate}` : 'period';
+    lines.push(['Clinical analytics export', period].map(esc).join(','));
+    lines.push('');
+    lines.push(['Metric', 'Value'].map(esc).join(','));
+    lines.push(['total_patients', String(stats.totalPatients)].map(esc).join(','));
+    lines.push(['total_visits', String(stats.totalVisits)].map(esc).join(','));
+    lines.push(['avg_wait_time_min', String(stats.avgWaitTime)].map(esc).join(','));
+    lines.push(['satisfaction_pct', String(stats.satisfaction)].map(esc).join(','));
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `clinical_analytics_${period}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success('Exported CSV');
   };
 
   return (
     <DashboardLayout>
-      <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
-        {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <h1 className="text-2xl sm:text-3xl font-bold text-foreground flex items-center gap-3">
-              <Activity className="h-8 w-8 text-indigo-500" />
-              Analytics & Reports
-            </h1>
-            <p className="text-muted-foreground mt-1">Clinical performance metrics and insights</p>
-          </div>
-          <div className="flex gap-2">
-            <Select value={selectedPeriod} onValueChange={setSelectedPeriod}>
-              <SelectTrigger className="w-[150px]"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="7">Last 7 days</SelectItem>
-                <SelectItem value="30">Last 30 days</SelectItem>
-                <SelectItem value="90">Last 3 months</SelectItem>
-                <SelectItem value="365">Last year</SelectItem>
-              </SelectContent>
-            </Select>
-            <Button variant="outline" onClick={handleRefresh} disabled={isRefreshing}>
-              <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />Refresh
-            </Button>
-            <Button onClick={handleExport}><Download className="h-4 w-4 mr-2" />Export</Button>
-          </div>
-        </div>
-
+      <AnalyticsReportLayout
+        reportTitle="Clinical analytics dashboard"
+        reportDescription="Cross-cutting performance views: visits, clinics, labs, pharmacy, and consultations."
+        ReportIcon={Activity}
+        reportIconClassName="text-indigo-500"
+        loading={loading || isRefreshing}
+        onRefresh={handleRefresh}
+        onGenerate={loadAnalyticsData}
+        exportCsvDisabled={loading}
+        onExportCsv={exportDashboardCsv}
+        printDisabled={false}
+        viewMode={viewMode}
+        onViewModeChange={setViewMode}
+        year={year}
+        onYearChange={setYear}
+        startDate={startDate}
+        onStartDateChange={setStartDate}
+        endDate={endDate}
+        onEndDateChange={setEndDate}
+        onThisMonth={setThisMonth}
+        onThisYear={setThisYear}
+        highlightThisMonth={highlightThisMonth}
+        highlightThisYear={highlightThisYear}
+      >
         {/* Summary Stats */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {loading ? (
@@ -644,7 +701,7 @@ export default function AnalyticsPage() {
             </div>
           </TabsContent>
         </Tabs>
-      </div>
+      </AnalyticsReportLayout>
     </DashboardLayout>
   );
 }

@@ -61,6 +61,7 @@ const allPagePermissions: PagePermission[] = [
   { id: '/medical-records/appointments', name: 'Appointments', description: 'Manage patient appointments', module: 'Medical Records' },
   { id: '/medical-records/dependents', name: 'Manage Dependents', description: 'Manage patient dependents', module: 'Medical Records' },
   { id: '/medical-records/reports', name: 'Reports', description: 'View and generate reports', module: 'Medical Records' },
+  { id: '/medical-records/referrals', name: 'Referral queue (records)', description: 'Review referrals for stamping and records workflow (same data as consultation referrals)', module: 'Medical Records' },
 
   // Nursing
   { id: '/nursing', name: 'Dashboard', description: 'Nursing Dashboard', module: 'Nursing' },
@@ -76,7 +77,7 @@ const allPagePermissions: PagePermission[] = [
   { id: '/consultation/start', name: 'Start Consultation', description: 'Start consultation sessions', module: 'Consultation' },
   { id: '/consultation/history', name: 'Consultation History', description: 'View consultation history', module: 'Consultation' },
   { id: '/consultation/wards', name: 'Ward Overview', description: 'View ward overview', module: 'Consultation' },
-  { id: '/consultation/referrals', name: 'Referrals', description: 'Manage patient referrals', module: 'Consultation' },
+  { id: '/consultation/referrals', name: 'Referrals & forms', description: 'Referral letters, responsibility forms, and referral tracking (primary doctor workflow)', module: 'Consultation' },
 
   // Laboratory
   { id: '/laboratory', name: 'Dashboard', description: 'Laboratory Dashboard', module: 'Laboratory' },
@@ -84,6 +85,7 @@ const allPagePermissions: PagePermission[] = [
   { id: '/laboratory/verification', name: 'Results Verification', description: 'Verify lab results', module: 'Laboratory' },
   { id: '/laboratory/completed', name: 'Completed Tests', description: 'View completed tests', module: 'Laboratory' },
   { id: '/laboratory/templates', name: 'Test Templates', description: 'Manage test templates', module: 'Laboratory' },
+  { id: '/laboratory/analytics', name: 'Lab Analytics', description: 'Laboratory volume and patient-mix reports', module: 'Laboratory' },
 
   // Pharmacy
   { id: '/pharmacy', name: 'Dashboard', description: 'Pharmacy Dashboard', module: 'Pharmacy' },
@@ -92,6 +94,7 @@ const allPagePermissions: PagePermission[] = [
   { id: '/pharmacy/inventory', name: 'Inventory', description: 'Manage drug inventory', module: 'Pharmacy' },
   { id: '/pharmacy/requests', name: 'Requests', description: 'Request stock from Central Store', module: 'Pharmacy' },
   { id: '/pharmacy/store', name: 'Central Store', description: 'Manage central store receipts and fulfillments', module: 'Pharmacy' },
+  { id: '/pharmacy/analytics', name: 'Pharmacy Analytics', description: 'Dispensing and prescription analytics', module: 'Pharmacy' },
 
   // Radiology
   { id: '/radiology', name: 'Dashboard', description: 'Radiology Dashboard', module: 'Radiology' },
@@ -99,6 +102,7 @@ const allPagePermissions: PagePermission[] = [
   { id: '/radiology/verification', name: 'Results Verification', description: 'Verify radiology results', module: 'Radiology' },
   { id: '/radiology/completed', name: 'Completed Studies', description: 'View completed studies', module: 'Radiology' },
   { id: '/radiology/templates', name: 'Study Templates', description: 'Manage study templates', module: 'Radiology' },
+  { id: '/radiology/analytics', name: 'Radiology Analytics', description: 'Imaging volume and patient-mix reports', module: 'Radiology' },
 
   // Physiotherapy
   { id: '/physiotherapy', name: 'Dashboard', description: 'Physiotherapy Dashboard', module: 'Physiotherapy' },

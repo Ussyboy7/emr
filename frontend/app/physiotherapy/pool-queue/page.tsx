@@ -173,10 +173,13 @@ export default function PhysioPoolQueuePage() {
   // Patient vitals
   const [patientVitals, setPatientVitals] = useState<any>(null);
 
-  const loadOrders = useCallback(async () => {
+  const loadOrders = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent;
     try {
-      setLoading(true);
-      setError(null);
+      if (!silent) {
+        setLoading(true);
+        setError(null);
+      }
 
       const params: any = {
         page: currentPage,
@@ -193,18 +196,54 @@ export default function PhysioPoolQueuePage() {
       console.error('Error loading physiotherapy orders:', err);
       if (isAuthenticationError(err)) {
         setAuthError(err);
-      } else {
+      } else if (!silent) {
         setError(err.message || 'Failed to load orders');
         toast.error('Failed to load physiotherapy orders');
       }
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   }, [currentPage, itemsPerPage, searchQuery, dateFilter]);
 
   useEffect(() => {
     loadOrders();
   }, [loadOrders]);
+
+  const pollingPaused = useMemo(
+    () =>
+      isDateFilterDialogOpen ||
+      isViewDialogOpen ||
+      isScheduleDialogOpen ||
+      isStartSessionDialogOpen ||
+      isScheduleNextDialogOpen ||
+      isExtendTreatmentDialogOpen ||
+      isNewTreatmentDialogOpen ||
+      isCompleteSessionDialogOpen ||
+      isContinueSessionDialogOpen ||
+      isEditSessionDialogOpen,
+    [
+      isDateFilterDialogOpen,
+      isViewDialogOpen,
+      isScheduleDialogOpen,
+      isStartSessionDialogOpen,
+      isScheduleNextDialogOpen,
+      isExtendTreatmentDialogOpen,
+      isNewTreatmentDialogOpen,
+      isCompleteSessionDialogOpen,
+      isContinueSessionDialogOpen,
+      isEditSessionDialogOpen,
+    ]
+  );
+
+  useEffect(() => {
+    if (pollingPaused) return;
+    const id = setInterval(() => {
+      void loadOrders({ silent: true });
+    }, 15000);
+    return () => clearInterval(id);
+  }, [loadOrders, pollingPaused]);
 
   // Load sessions for the order when View dialog is open
   useEffect(() => {
@@ -862,9 +901,6 @@ export default function PhysioPoolQueuePage() {
               </h1>
               <p className="text-muted-foreground mt-1">Process orders, schedule sessions, and manage treatment courses. Physiotherapists can extend treatments or start new courses as clinically indicated.</p>
             </div>
-            <Button variant="outline" onClick={loadOrders} disabled={loading}>
-              <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />Refresh
-            </Button>
           </div>
 
           {/* Stats */}
@@ -1027,7 +1063,7 @@ export default function PhysioPoolQueuePage() {
               <Card><CardContent className="p-8 text-center text-muted-foreground">
                 <AlertTriangle className="h-12 w-12 mx-auto mb-4 opacity-50" />
                 <p className="text-red-600 dark:text-red-400">{error}</p>
-                <Button variant="outline" className="mt-4" onClick={loadOrders}>Retry</Button>
+                <Button variant="outline" className="mt-4" onClick={() => void loadOrders()}>Retry</Button>
               </CardContent></Card>
             ) : filteredOrders.length === 0 ? (
               <Card><CardContent className="p-8 text-center text-muted-foreground">

@@ -38,6 +38,7 @@ interface VitalsData {
   height: string;
   painScale: string;
   bloodSugar: string;
+  randomBloodSugar: string;
   bmi: string;
   notes: string;
   recordedAt: string;
@@ -236,6 +237,7 @@ export default function PatientVitalsPage() {
               height: latestVitals.height?.toString() || '',
               painScale: latestVitals.pain_scale?.toString() || '',
               bloodSugar: latestVitals.blood_sugar?.toString() || '',
+              randomBloodSugar: latestVitals.random_blood_sugar?.toString() || '',
               bmi: latestVitals.bmi?.toString() || '',
               notes: latestVitals.notes || '',
               recordedAt: latestVitals.recorded_at || new Date().toISOString(),
@@ -255,6 +257,7 @@ export default function PatientVitalsPage() {
               height: v.height?.toString() || '',
               painScale: v.pain_scale?.toString() || '',
               bloodSugar: v.blood_sugar?.toString() || '',
+              randomBloodSugar: v.random_blood_sugar?.toString() || '',
               bmi: v.bmi?.toString() || '',
               notes: v.notes || '',
               recordedAt: v.recorded_at || new Date().toISOString(),
@@ -697,11 +700,13 @@ export default function PatientVitalsPage() {
                           </span>
                           {index === 0 && <Badge className="bg-rose-500 text-white text-xs">Latest</Badge>}
                         </div>
-                        <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
                           <span>BP: {vitals.bloodPressureSystolic}/{vitals.bloodPressureDiastolic}</span>
                           <span>P: {vitals.pulse}</span>
                           <span>T: {vitals.temperature}°C</span>
                           <span>SpO2: {vitals.oxygenSaturation}%</span>
+                          {vitals.bloodSugar ? <span>BS: {vitals.bloodSugar}</span> : null}
+                          {vitals.randomBloodSugar ? <span>RBS: {vitals.randomBloodSugar}</span> : null}
                           {vitals.recordedBy && <span className="ml-auto">Recorded by: {vitals.recordedBy}</span>}
                         </div>
                       </div>

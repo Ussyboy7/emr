@@ -164,7 +164,7 @@ class Referral(models.Model):
         ('submitted_to_records', 'Submitted to Records'),
         ('records_review', 'Records Review'),
         ('returned_for_correction', 'Returned for Correction'),
-        ('approved_for_forms', 'Approved for Forms'),
+        ('approved_for_forms', 'Records acknowledged'),
         ('closed', 'Closed'),
         ('cancelled', 'Cancelled'),
     ]
@@ -202,6 +202,14 @@ class Referral(models.Model):
     approved_at = models.DateTimeField(null=True, blank=True)
     closed_at = models.DateTimeField(null=True, blank=True)
     created_by = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, related_name='created_referrals')
+    referral_letter_acknowledged_at = models.DateTimeField(null=True, blank=True)
+    referral_letter_acknowledged_by = models.ForeignKey(
+        'accounts.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='referral_letters_acknowledged',
+    )
     
     class Meta:
         db_table = 'referrals'
@@ -255,6 +263,14 @@ class ResponsibilityFormIssuance(models.Model):
     document_file = models.FileField(upload_to='referral_forms/', blank=True, null=True)
     notes = models.TextField(blank=True)
     issued_by = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, related_name='issued_responsibility_forms')
+    records_acknowledged_at = models.DateTimeField(null=True, blank=True)
+    records_acknowledged_by = models.ForeignKey(
+        'accounts.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='responsibility_forms_acknowledged',
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

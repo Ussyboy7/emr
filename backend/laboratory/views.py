@@ -10,15 +10,33 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 from django.utils import timezone
 from django.db.models import Count, Q
 
-from .models import LabTemplate, LabOrder, LabTest, LabResult
+from .models import LabTemplate, LabPartner, LabOrder, LabTest, LabResult
 from .serializers import (
     LabTemplateSerializer,
+    LabPartnerSerializer,
     LabOrderSerializer,
     LabTestSerializer,
     LabResultSerializer,
 )
 from .pagination import FlexiblePageNumberPagination
 from audit.services import AuditService
+
+
+class LabPartnerViewSet(viewsets.ModelViewSet):
+    """CRUD for outsourced lab partners (dropdown + Django admin)."""
+
+    permission_classes = [IsAuthenticated]
+    serializer_class = LabPartnerSerializer
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ["is_active"]
+    search_fields = ["name", "code", "email"]
+    ordering_fields = ["sort_order", "name", "created_at"]
+    ordering = ["sort_order", "name"]
+    # Small catalog: return a plain JSON array (avoids pagination quirks in clients).
+    pagination_class = None
+
+    def get_queryset(self):
+        return LabPartner.objects.all()
 
 
 class LabTemplateViewSet(viewsets.ModelViewSet):
@@ -50,7 +68,15 @@ class LabOrderViewSet(viewsets.ModelViewSet):
     ordering = ['-ordered_at']
     
     def get_queryset(self):
-        return LabOrder.objects.all().select_related('patient', 'doctor', 'visit', 'consultation_session', 'created_by').prefetch_related('tests')
+        return (
+            LabOrder.objects.all()
+            .select_related('patient', 'doctor', 'visit', 'consultation_session', 'created_by')
+            .prefetch_related(
+                'tests',
+                'consultation_session__diagnoses__icd10_code',
+                'visit__diagnoses__icd10_code',
+            )
+        )
     
     def perform_create(self, serializer):
         # Set the doctor field using multiple fallback strategies
@@ -431,7 +457,16 @@ class LabTestViewSet(viewsets.ModelViewSet):
     ordering = ['-created_at']
 
     def get_queryset(self):
-        queryset = LabTest.objects.all().select_related('order', 'template', 'collected_by', 'processed_by', 'verified_by', 'rejected_by')
+        queryset = LabTest.objects.all().select_related(
+            'order',
+            'order__visit',
+            'order__consultation_session__room__clinic',
+            'template',
+            'collected_by',
+            'processed_by',
+            'verified_by',
+            'rejected_by',
+        )
 
         # Filter by status if provided
         status_filter = self.request.query_params.get('status', None)
@@ -525,6 +560,9 @@ class LabResultViewSet(viewsets.ReadOnlyModelViewSet):
         queryset = LabResult.objects.select_related(
             'test',
             'test__template',
+            'test__order',
+            'test__order__visit',
+            'test__order__consultation_session__room__clinic',
             'order',
             'order__patient',
             'order__doctor',

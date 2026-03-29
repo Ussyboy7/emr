@@ -2,18 +2,14 @@
 
 import React, { useState, useEffect } from "react";
 import { DashboardLayout } from "@/components/DashboardLayout";
+import {
+  AnalyticsReportLayout,
+  type AnalyticsViewMode,
+} from "@/components/analytics/AnalyticsReportLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { 
-  Download, FileSpreadsheet, RefreshCw, ArrowLeft, 
-  Users, Printer, Calendar, TrendingUp
-} from "lucide-react";
+import { RefreshCw, Users } from "lucide-react";
 import { toast } from "sonner";
 import { apiFetch } from "@/lib/api-client";
-import Link from "next/link";
 
 interface AttendanceData {
   sn: number;
@@ -60,7 +56,7 @@ export default function AttendanceSummaryReport() {
   const [year, setYear] = useState(new Date().getFullYear().toString());
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
-  const [viewMode, setViewMode] = useState<"year" | "range">("year");
+  const [viewMode, setViewMode] = useState<AnalyticsViewMode>("year");
   
   // Quick filters
   const setThisMonth = () => {
@@ -149,138 +145,42 @@ export default function AttendanceSummaryReport() {
     toast.success("Report exported successfully");
   };
 
-  const exportToPDF = () => {
-    window.print();
-  };
-
   const years = Array.from({ length: 10 }, (_, i) => (new Date().getFullYear() - i).toString());
+
+  const highlightThisMonth =
+    viewMode === "range" &&
+    Boolean(startDate) &&
+    startDate.includes(new Date().toISOString().slice(0, 7));
+  const highlightThisYear = viewMode === "year" && year === new Date().getFullYear().toString();
 
   return (
     <DashboardLayout>
-      <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
-        {/* Header */}
-        <div className="mb-2">
-          <Button variant="ghost" size="sm" className="-ml-2 gap-2 px-2" asChild>
-            <Link href="/medical-records/reports">
-              <ArrowLeft className="h-4 w-4" />
-              Back to reports
-            </Link>
-          </Button>
-        </div>
-
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <h1 className="text-2xl sm:text-3xl font-bold text-foreground flex items-center gap-3">
-              <Users className="h-8 w-8 text-blue-500" />
-              Attendance Summary Report
-            </h1>
-            <p className="text-muted-foreground mt-1">Patient attendance by category</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" onClick={fetchReport} disabled={isLoading}>
-              <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
-              Refresh
-            </Button>
-            <Button variant="outline" onClick={exportToCSV} disabled={data.length === 0}>
-              <FileSpreadsheet className="h-4 w-4 mr-2" />
-              Export CSV
-            </Button>
-            <Button variant="outline" onClick={exportToPDF} disabled={data.length === 0}>
-              <Printer className="h-4 w-4 mr-2" />
-              Print
-            </Button>
-          </div>
-        </div>
-
-        {/* Quick Filter Buttons */}
-        <div className="flex gap-2">
-          <Button 
-            variant={viewMode === "range" && startDate.includes(new Date().toISOString().slice(0,7)) ? "default" : "outline"}
-            onClick={setThisMonth}
-            className="flex items-center gap-2"
-          >
-            <Calendar className="h-4 w-4" />
-            This Month
-          </Button>
-          <Button 
-            variant={viewMode === "year" && year === new Date().getFullYear().toString() ? "default" : "outline"}
-            onClick={setThisYear}
-            className="flex items-center gap-2"
-          >
-            <Calendar className="h-4 w-4" />
-            This Year
-          </Button>
-        </div>
-
-        {/* Filters */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Calendar className="h-5 w-5" />
-              Filters
-            </CardTitle>
-            <CardDescription>Adjust date range for detailed reporting</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <div>
-                <Label>View Mode</Label>
-                <Select value={viewMode} onValueChange={(value: "year" | "range") => setViewMode(value)}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="year">By Year</SelectItem>
-                    <SelectItem value="range">Date Range</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {viewMode === 'year' ? (
-                <div>
-                  <Label>Year</Label>
-                  <Select value={year} onValueChange={setYear}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {years.map(y => (
-                        <SelectItem key={y} value={y}>{y}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              ) : (
-                <>
-                  <div>
-                    <Label>Start Date</Label>
-                    <Input
-                      type="date"
-                      value={startDate}
-                      onChange={(e) => setStartDate(e.target.value)}
-                    />
-                  </div>
-                  <div>
-                    <Label>End Date</Label>
-                    <Input
-                      type="date"
-                      value={endDate}
-                      onChange={(e) => setEndDate(e.target.value)}
-                    />
-                  </div>
-                </>
-              )}
-
-              <div className="flex items-end">
-                <Button onClick={fetchReport} className="w-full" disabled={isLoading}>
-                  <TrendingUp className="h-4 w-4 mr-2" />
-                  {isLoading ? "Loading..." : "Generate Report"}
-                </Button>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
+      <AnalyticsReportLayout
+        backLink={{ href: "/medical-records/reports", label: "Back to reports" }}
+        reportTitle="Attendance Summary Report"
+        reportDescription="Patient attendance by category"
+        ReportIcon={Users}
+        reportIconClassName="text-blue-500"
+        loading={isLoading}
+        onRefresh={fetchReport}
+        onGenerate={fetchReport}
+        exportCsvDisabled={data.length === 0}
+        onExportCsv={exportToCSV}
+        printDisabled={data.length === 0}
+        viewMode={viewMode}
+        onViewModeChange={setViewMode}
+        year={year}
+        onYearChange={setYear}
+        startDate={startDate}
+        onStartDateChange={setStartDate}
+        endDate={endDate}
+        onEndDateChange={setEndDate}
+        onThisMonth={setThisMonth}
+        onThisYear={setThisYear}
+        highlightThisMonth={highlightThisMonth}
+        highlightThisYear={highlightThisYear}
+        yearOptions={years}
+      >
         {/* Summary Cards */}
         <div className="grid gap-4 md:grid-cols-4">
           <Card className="border-l-4 border-l-blue-500">
@@ -419,7 +319,7 @@ export default function AttendanceSummaryReport() {
             )}
           </CardContent>
         </Card>
-      </div>
+      </AnalyticsReportLayout>
     </DashboardLayout>
   );
 }

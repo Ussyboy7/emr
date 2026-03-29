@@ -44,6 +44,36 @@ class LabTemplate(models.Model):
         return f"{self.code} - {self.name}"
 
 
+class LabPartner(models.Model):
+    """
+    External / outsourced laboratory partners (for outsourced processing).
+    Managed via Django admin or API; shown in lab order processing UI.
+    """
+
+    name = models.CharField(max_length=200, unique=True)
+    code = models.CharField(
+        max_length=50,
+        blank=True,
+        help_text="Optional short code (e.g. for reports)",
+    )
+    phone = models.CharField(max_length=50, blank=True)
+    email = models.EmailField(blank=True)
+    notes = models.TextField(blank=True)
+    is_active = models.BooleanField(default=True, db_index=True)
+    sort_order = models.PositiveSmallIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "lab_outsourced_partners"
+        ordering = ["sort_order", "name"]
+        verbose_name = "Lab partner (outsourced)"
+        verbose_name_plural = "Lab partners (outsourced)"
+
+    def __str__(self):
+        return self.name
+
+
 class LabOrder(models.Model):
     """
     Laboratory test order from a doctor/consultation.
@@ -79,14 +109,46 @@ class LabOrder(models.Model):
             models.Index(fields=['patient', '-ordered_at']),
             models.Index(fields=['priority']),
         ]
-    
+
+    def _resolve_clinic_raw(self) -> str:
+        """
+        Prefer explicit LabOrder.clinic; otherwise infer from linked visit or consultation room.
+        Consultation flows often omit `clinic` on create — this keeps reports/filters accurate.
+        """
+        c = (self.clinic or "").strip()
+        if c:
+            return c
+        if self.visit_id:
+            try:
+                visit = self.visit
+                vc = getattr(visit, "clinic", None) if visit else None
+                if vc and str(vc).strip():
+                    return str(vc).strip()
+            except Exception:
+                pass
+        if self.consultation_session_id:
+            try:
+                sess = self.consultation_session
+                org_clinic = getattr(getattr(sess, "room", None), "clinic", None)
+                name = getattr(org_clinic, "name", None) if org_clinic else None
+                if name and str(name).strip():
+                    return str(name).strip()
+            except Exception:
+                pass
+        return ""
+
+    def get_clinic_for_display(self) -> str:
+        raw = self._resolve_clinic_raw()
+        if not raw:
+            return ""
+        from common.clinic_utils import normalize_clinic_name
+
+        return normalize_clinic_name(raw)
+
     def save(self, *args, **kwargs):
-        """Auto-generate order_id if not provided and normalize clinic names."""
-        # Normalize clinic name before saving
-        if self.clinic:
-            from common.clinic_utils import normalize_clinic_name
-            self.clinic = normalize_clinic_name(self.clinic)
-        
+        """Auto-generate order_id if not provided; resolve and normalize clinic."""
+        self.clinic = self.get_clinic_for_display()
+
         if not self.order_id:
             # Generate lab order ID: LAB-YYYYMMDD-HHMMSS-XXXX
             from datetime import datetime

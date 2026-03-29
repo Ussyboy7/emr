@@ -236,7 +236,7 @@ export default function DependentsPage() {
     return (patient.category === 'retiree' || (patient.category as string) === 'Retiree') ? 'Retiree Dependent' : 'Employee Dependent';
   };
 
-  // Search Principal Staff ID via API (employees/retirees)
+  // Search principal by personal number via API (employees/retirees)
   const searchPrincipalByStaffId = async (staffId: string): Promise<ApiPatient | null> => {
     const trimmedId = staffId.trim();
     if (!trimmedId) return null;
@@ -259,7 +259,7 @@ export default function DependentsPage() {
   const handleSearchPrincipal = async (staffId: string) => {
     const trimmedId = staffId.trim();
     if (!trimmedId) {
-      toast.error('Enter a Staff ID to search');
+      toast.error("Enter the principal's personal number to search");
       return;
     }
     setIsSearchingPrincipal(true);
@@ -270,7 +270,7 @@ export default function DependentsPage() {
         setPrincipalSearchResult({ patient: principal, staffId: trimmedId });
         toast.success(`Found: ${principal.full_name ?? ''} (${principal.category})`);
       } else {
-        toast.error(`Staff ID "${trimmedId}" not found. Enter a valid NPA staff or retiree ID.`);
+        toast.error(`Principal personal number "${trimmedId}" not found. Use the employee or retiree's personal number from their registration (not their patient ID).`);
       }
     } catch (err) {
       toast.error('Search failed. Please try again.');
@@ -279,10 +279,10 @@ export default function DependentsPage() {
     }
   };
 
-  // Validate Principal Staff ID (uses API search result when available)
+  // Validate principal personal number (uses API search result when available)
   const validatePrincipalStaffId = (staffId: string) => {
     if (!staffId || !staffId.trim()) {
-      return { valid: false, message: 'Principal Staff ID is required' };
+      return { valid: false, message: 'Principal personal number is required' };
     }
 
     const trimmedId = staffId.trim();
@@ -301,11 +301,11 @@ export default function DependentsPage() {
     let patient = patients.find((p) => p.patient_id === trimmedId || p.personal_number === trimmedId || p.employee_id === trimmedId || String(p.id) === trimmedId);
 
     if (!patient) {
-      return { valid: false, message: `Staff ID not found. Click "Search" to look up employees/retirees.` };
+      return { valid: false, message: `Principal not found. Enter their personal number and click Search.` };
     }
 
     if (patient.category !== 'employee' && patient.category !== 'retiree') {
-      return { valid: false, message: `ID "${trimmedId}" belongs to a ${patient.category}, not a staff member or retiree` };
+      return { valid: false, message: `Personal number "${trimmedId}" belongs to a ${patient.category}, not an employee or retiree` };
     }
 
     return {
@@ -402,7 +402,7 @@ export default function DependentsPage() {
         return;
       }
 
-      toast.error(`Principal Staff ID "${trimmedId}" not found. Click "Search" to look up employees/retirees.`);
+      toast.error(`Principal personal number "${trimmedId}" not found. Enter their personal number and click Search.`);
     } catch (err: any) {
       console.error('Error adding dependent:', err);
       if (isAuthenticationError(err)) {
@@ -540,7 +540,7 @@ export default function DependentsPage() {
       if (!primaryPatient) primaryPatient = await searchPrincipalByStaffId(trimmedId);
 
       if (!primaryPatient) {
-        toast.error(`Principal Staff ID "${trimmedId}" not found. Click "Search" to look up employees/retirees.`);
+        toast.error(`Principal personal number "${trimmedId}" not found. Enter their personal number and click Search.`);
         return;
       }
 
@@ -1035,7 +1035,7 @@ export default function DependentsPage() {
                 </div>
               </div>
               <div className="space-y-2">
-                <Label>Principal Staff ID *</Label>
+                <Label>Principal personal number *</Label>
                 <div className="flex gap-2">
                   <Input
                     value={newDependent.primaryPatientId}
@@ -1048,7 +1048,7 @@ export default function DependentsPage() {
                       }));
                       setPrincipalSearchResult(null);
                     }}
-                    placeholder="Enter NPA Staff ID (e.g., A2000)"
+                    placeholder="e.g. A2000 (employee or retiree P.N.)"
                     className={`flex-1 ${(() => {
                       if (!newDependent.primaryPatientId) return '';
                       const validation = validatePrincipalStaffId(newDependent.primaryPatientId);
@@ -1065,7 +1065,7 @@ export default function DependentsPage() {
                     Search
                   </Button>
                 </div>
-                <p className="text-xs text-muted-foreground">Enter Staff ID and click Search to find the employee or retiree</p>
+                <p className="text-xs text-muted-foreground">Enter the principal&apos;s personal number and click Search (not their patient ID)</p>
                 {newDependent.primaryPatientId && (
                   <div className={`text-xs p-2 rounded-md border ${
                     (() => {
@@ -1091,7 +1091,7 @@ export default function DependentsPage() {
                 <div className="space-y-2">
                   <Label>Dependent Type *</Label>
                   <Input value={newDependent.dependentType} readOnly className="bg-muted" placeholder="Auto-filled based on principal" />
-                  <p className="text-xs text-muted-foreground">Automatically determined by principal staff type</p>
+                  <p className="text-xs text-muted-foreground">Automatically determined from the principal (employee vs retiree)</p>
                 </div>
                 <div className="space-y-2"><Label>Relationship *</Label>
                   <Select value={newDependent.relationship} onValueChange={(v) => setNewDependent(prev => ({ ...prev, relationship: v }))}><SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger><SelectContent>{relationshipTypes.map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}</SelectContent></Select>
@@ -1128,7 +1128,7 @@ export default function DependentsPage() {
                   <div><p className="text-sm text-muted-foreground">Email</p><p>{selectedDependent.email}</p></div>
                 </div>
                 <div className="mt-4 p-4 rounded-lg bg-muted/50">
-                  <p className="text-sm text-muted-foreground mb-1">Principal (Staff/Retiree)</p>
+                  <p className="text-sm text-muted-foreground mb-1">Principal (employee or retiree)</p>
                   <Link href="/medical-records/patients" className="flex items-center gap-2 text-primary hover:underline font-medium"><Link2 className="h-4 w-4" />{selectedDependent.primaryPatient.name}</Link>
                 </div>
               </div>
@@ -1367,7 +1367,7 @@ export default function DependentsPage() {
                       </div>
                       <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-2">
-                          <Label>Principal Staff ID *</Label>
+                          <Label>Principal personal number *</Label>
                           <div className="flex gap-2">
                             <Input
                               value={editForm.primaryPatientId}
@@ -1380,7 +1380,7 @@ export default function DependentsPage() {
                                 }));
                                 setPrincipalSearchResult(null);
                               }}
-                              placeholder="Enter NPA Staff ID (e.g., A2000)"
+                              placeholder="e.g. A2000 (employee or retiree P.N.)"
                               className={`flex-1 ${(() => {
                                 if (!editForm.primaryPatientId) return '';
                                 const validation = validatePrincipalStaffId(editForm.primaryPatientId);
@@ -1397,7 +1397,7 @@ export default function DependentsPage() {
                               Search
                             </Button>
                           </div>
-                          <p className="text-xs text-muted-foreground">Enter Staff ID and click Search to find the employee or retiree</p>
+                          <p className="text-xs text-muted-foreground">Enter the principal&apos;s personal number and click Search (not their patient ID)</p>
                           {editForm.primaryPatientId && (
                             <div className={`text-xs p-2 rounded-md border mt-1 ${
                               (() => {

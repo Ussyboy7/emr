@@ -189,37 +189,176 @@ class PatientAdmissionViewSet(viewsets.ModelViewSet):
         )
 
     @action(detail=True, methods=['post'])
-    def discharge(self, request, pk=None):
-        """Discharge a patient."""
+    def initiate_discharge(self, request, pk=None):
+        """
+        Step 1 of 2-step discharge: doctor fills discharge details and sets
+        status to pending_discharge. Nurse will confirm in Step 2.
+        """
         admission = self.get_object()
-        discharge_data = request.data
 
-        try:
-            admission.discharge_patient(
-                discharge_type=discharge_data.get('discharge_type', 'regular'),
-                discharge_doctor=request.user,
-                discharge_diagnosis=discharge_data.get('discharge_diagnosis'),
-                discharge_notes=discharge_data.get('discharge_notes'),
-                discharge_summary=discharge_data.get('discharge_summary'),
-                follow_up_instructions=discharge_data.get('follow_up_instructions'),
+        if admission.status != 'admitted':
+            return Response(
+                {'error': 'Only admitted patients can have discharge initiated'},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
-            # Log audit
+        discharge_type = request.data.get('discharge_type', 'regular')
+        discharge_diagnosis = request.data.get('discharge_diagnosis', '')
+        discharge_notes = request.data.get('discharge_notes', '')
+        discharge_summary = request.data.get('discharge_summary', '')
+        follow_up_instructions = request.data.get('follow_up_instructions', '')
+
+        if not discharge_diagnosis:
+            return Response(
+                {'error': 'Discharge diagnosis is required'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        admission.status = 'pending_discharge'
+        admission.discharge_type = discharge_type
+        admission.discharge_diagnosis = discharge_diagnosis
+        admission.discharge_notes = discharge_notes
+        admission.discharge_summary = discharge_summary
+        admission.follow_up_instructions = follow_up_instructions
+        admission.discharge_doctor = request.user
+        admission.save(update_fields=[
+            'status', 'discharge_type', 'discharge_diagnosis',
+            'discharge_notes', 'discharge_summary', 'follow_up_instructions',
+            'discharge_doctor',
+        ])
+
+        AuditService.log_activity(
+            user=request.user,
+            action='update',
+            object_type='admission',
+            object_id=str(admission.id),
+            module='wards',
+            object_repr=f'Admission {admission.admission_id}',
+            description=f'Discharge initiated for {admission.patient.get_full_name()} — awaiting nurse confirmation',
+            old_values={'status': 'admitted'},
+            new_values={'status': 'pending_discharge'},
+            request=request,
+        )
+
+        serializer = self.get_serializer(admission)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'])
+    def discharge(self, request, pk=None):
+        """
+        Step 2 of 2-step discharge (nurse confirms) OR direct one-step discharge.
+        Only overrides fields explicitly provided in the request body — preserves
+        anything the doctor already set during initiate_discharge.
+        """
+        admission = self.get_object()
+        data = request.data
+
+        try:
+            # Build kwargs only from values actually sent in the request
+            kwargs = {}
+            if data.get('discharge_type'):
+                kwargs['discharge_type'] = data['discharge_type']
+            if data.get('discharge_diagnosis'):
+                kwargs['discharge_diagnosis'] = data['discharge_diagnosis']
+            if data.get('discharge_notes'):
+                kwargs['discharge_notes'] = data['discharge_notes']
+            if data.get('discharge_summary'):
+                kwargs['discharge_summary'] = data['discharge_summary']
+            if data.get('follow_up_instructions'):
+                kwargs['follow_up_instructions'] = data['follow_up_instructions']
+
+            admission.discharge_patient(
+                discharge_doctor=request.user,
+                **kwargs,
+            )
+
             AuditService.log_activity(
-                user=self.request.user,
+                user=request.user,
                 action='update',
                 object_type='admission',
                 object_id=str(admission.id),
                 module='wards',
                 object_repr=f'Admission {admission.admission_id}',
                 description=f'Discharged patient {admission.patient.get_full_name()} from ward {admission.ward.name}',
-                old_values={'status': 'admitted'},
-                new_values={'status': 'discharged', 'discharge_type': discharge_data.get('discharge_type')},
-                request=self.request,
+                old_values={'status': admission.status},
+                new_values={'status': 'discharged'},
+                request=request,
             )
 
             return Response({'message': 'Patient discharged successfully'})
         except ValueError as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=True, methods=['post'])
+    def assign_bed(self, request, pk=None):
+        """Assign or change a bed for an admitted patient."""
+        admission = self.get_object()
+        bed_id = request.data.get('bed_id')
+
+        try:
+            if bed_id is None:
+                # Remove from bed
+                old_bed = admission.bed
+                if old_bed:
+                    old_bed.current_patient = None
+                    old_bed.status = 'available'
+                    old_bed.admission_date = None
+                    old_bed.save(update_fields=['current_patient', 'status', 'admission_date'])
+                    old_bed.ward.recalculate_occupancy()
+
+                admission.bed = None
+                admission.save(update_fields=['bed'])
+                serializer = self.get_serializer(admission)
+                return Response(serializer.data)
+
+            new_bed = Bed.objects.select_related('ward').get(id=bed_id)
+
+            if new_bed.ward_id != admission.ward_id:
+                return Response(
+                    {'error': 'Bed does not belong to this patient\'s ward'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Free the old bed if switching
+            old_bed = admission.bed
+            if old_bed and old_bed.id != new_bed.id:
+                old_bed.current_patient = None
+                old_bed.status = 'available'
+                old_bed.admission_date = None
+                old_bed.save(update_fields=['current_patient', 'status', 'admission_date'])
+
+            # Occupy the new bed
+            new_bed.current_patient = admission.patient
+            new_bed.status = 'occupied'
+            new_bed.save(update_fields=['current_patient', 'status'])
+
+            # Link bed to admission
+            admission.bed = new_bed
+            admission.save(update_fields=['bed'])
+
+            # Recalculate ward occupancy from source of truth
+            admission.ward.recalculate_occupancy()
+
+            AuditService.log_activity(
+                user=request.user,
+                action='update',
+                object_type='admission',
+                object_id=str(admission.id),
+                module='wards',
+                object_repr=f'Admission {admission.admission_id}',
+                description=f'Assigned bed {new_bed.bed_number} to {admission.patient.get_full_name()}',
+                new_values={'bed': new_bed.bed_number},
+                request=request,
+            )
+
+            serializer = self.get_serializer(admission)
+            return Response(serializer.data)
+
+        except Bed.DoesNotExist:
+            return Response({'error': 'Bed not found'}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
     @action(detail=True, methods=['post'])

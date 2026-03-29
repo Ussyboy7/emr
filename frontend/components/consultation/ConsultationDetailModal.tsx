@@ -72,6 +72,7 @@ export interface VitalsRecord {
   bmi?: number;
   painScale?: number;
   bloodSugar?: number;
+  randomBloodSugar?: number;
   recordedBy?: string;
   notes?: string;
   bloodPressureSystolic?: number; // Keep for compatibility
@@ -610,7 +611,15 @@ const generateTimeline = (
       timeline.push({
         time: vitalsDate.toISOString(),
         event: 'Vitals Recorded',
-        description: `BP: ${v.systolic}/${v.diastolic}, Temp: ${v.temperature}°C, HR: ${v.heartRate} bpm`,
+        description: [
+          `BP: ${v.systolic}/${v.diastolic}`,
+          `Temp: ${v.temperature}°C`,
+          `HR: ${v.heartRate} bpm`,
+          v.bloodSugar != null && !Number.isNaN(Number(v.bloodSugar)) ? `BS: ${v.bloodSugar}` : null,
+          v.randomBloodSugar != null && !Number.isNaN(Number(v.randomBloodSugar)) ? `RBS: ${v.randomBloodSugar}` : null,
+        ]
+          .filter(Boolean)
+          .join(', '),
         type: 'vitals',
       });
     } catch (error) {
@@ -619,7 +628,15 @@ const generateTimeline = (
       timeline.push({
         time: isNaN(fallbackDate.getTime()) ? new Date().toISOString() : fallbackDate.toISOString(),
         event: 'Vitals Recorded',
-        description: `BP: ${v.systolic}/${v.diastolic}, Temp: ${v.temperature}°C, HR: ${v.heartRate} bpm`,
+        description: [
+          `BP: ${v.systolic}/${v.diastolic}`,
+          `Temp: ${v.temperature}°C`,
+          `HR: ${v.heartRate} bpm`,
+          v.bloodSugar != null && !Number.isNaN(Number(v.bloodSugar)) ? `BS: ${v.bloodSugar}` : null,
+          v.randomBloodSugar != null && !Number.isNaN(Number(v.randomBloodSugar)) ? `RBS: ${v.randomBloodSugar}` : null,
+        ]
+          .filter(Boolean)
+          .join(', '),
         type: 'vitals',
       });
     }
@@ -932,7 +949,11 @@ const loadConsultationFromVisit = async (visitId: string | number): Promise<Cons
         const weight = v.weight ? (typeof v.weight === 'string' ? parseFloat(v.weight) : Number(v.weight)) : null;
         const height = v.height ? (typeof v.height === 'string' ? parseFloat(v.height) : Number(v.height)) : null;
         const oxygenSat = v.oxygen_saturation ? (typeof v.oxygen_saturation === 'string' ? parseFloat(v.oxygen_saturation) : Number(v.oxygen_saturation)) : null;
-        
+        const bmiRaw = v.bmi != null && v.bmi !== '' ? Number(v.bmi) : NaN;
+        const painRaw = v.pain_scale != null && v.pain_scale !== '' ? Number(v.pain_scale) : NaN;
+        const bsRaw = v.blood_sugar != null && v.blood_sugar !== '' ? Number(v.blood_sugar) : NaN;
+        const rbsRaw = v.random_blood_sugar != null && v.random_blood_sugar !== '' ? Number(v.random_blood_sugar) : NaN;
+
         return {
           id: String(v.id),
           systolic: systolic || 0,
@@ -940,11 +961,13 @@ const loadConsultationFromVisit = async (visitId: string | number): Promise<Cons
           heartRate: v.heart_rate || v.heartRate || 0,
           temperature: temp || 0,
           respiratoryRate: v.respiratory_rate || v.respiratoryRate || 0,
-          weight: weight || 0,
-          height: height || 0,
-          oxygenSaturation: oxygenSat || 0,
-          bloodSugar: v.blood_sugar || v.bloodSugar || 0,
-          painScale: v.pain_scale || v.painScale || 0,
+          weight: weight != null && !Number.isNaN(weight) ? weight : undefined,
+          height: height != null && !Number.isNaN(height) ? height : undefined,
+          oxygenSaturation: oxygenSat != null && !Number.isNaN(oxygenSat) ? oxygenSat : 0,
+          bmi: !Number.isNaN(bmiRaw) ? bmiRaw : undefined,
+          painScale: !Number.isNaN(painRaw) ? painRaw : undefined,
+          bloodSugar: !Number.isNaN(bsRaw) ? bsRaw : undefined,
+          randomBloodSugar: !Number.isNaN(rbsRaw) ? rbsRaw : undefined,
           comment: v.notes || v.comment || '',
           recordedBy: v.recorded_by_name || (typeof v.recorded_by === 'object' ? v.recorded_by?.full_name || v.recorded_by?.username : v.recorded_by) || 'Unknown',
           date: v.recorded_at || v.created_at || new Date().toISOString(),
@@ -1309,7 +1332,11 @@ const loadConsultationFromSession = async (sessionId: string | number): Promise<
         const weight = v.weight ? (typeof v.weight === 'string' ? parseFloat(v.weight) : Number(v.weight)) : null;
         const height = v.height ? (typeof v.height === 'string' ? parseFloat(v.height) : Number(v.height)) : null;
         const oxygenSat = v.oxygen_saturation ? (typeof v.oxygen_saturation === 'string' ? parseFloat(v.oxygen_saturation) : Number(v.oxygen_saturation)) : null;
-        
+        const bmiRaw = v.bmi != null && v.bmi !== '' ? Number(v.bmi) : NaN;
+        const painRaw = v.pain_scale != null && v.pain_scale !== '' ? Number(v.pain_scale) : NaN;
+        const bsRaw = v.blood_sugar != null && v.blood_sugar !== '' ? Number(v.blood_sugar) : NaN;
+        const rbsRaw = v.random_blood_sugar != null && v.random_blood_sugar !== '' ? Number(v.random_blood_sugar) : NaN;
+
         return {
           id: String(v.id),
           systolic: systolic || 0,
@@ -1317,11 +1344,13 @@ const loadConsultationFromSession = async (sessionId: string | number): Promise<
           heartRate: v.heart_rate || v.heartRate || 0,
           temperature: temp || 0,
           respiratoryRate: v.respiratory_rate || v.respiratoryRate || 0,
-          weight: weight || 0,
-          height: height || 0,
-          oxygenSaturation: oxygenSat || 0,
-          bloodSugar: v.blood_sugar || v.bloodSugar || 0,
-          painScale: v.pain_scale || v.painScale || 0,
+          weight: weight != null && !Number.isNaN(weight) ? weight : undefined,
+          height: height != null && !Number.isNaN(height) ? height : undefined,
+          oxygenSaturation: oxygenSat != null && !Number.isNaN(oxygenSat) ? oxygenSat : 0,
+          bmi: !Number.isNaN(bmiRaw) ? bmiRaw : undefined,
+          painScale: !Number.isNaN(painRaw) ? painRaw : undefined,
+          bloodSugar: !Number.isNaN(bsRaw) ? bsRaw : undefined,
+          randomBloodSugar: !Number.isNaN(rbsRaw) ? rbsRaw : undefined,
           comment: v.notes || v.comment || '',
           recordedBy: v.recorded_by_name || (typeof v.recorded_by === 'object' ? v.recorded_by?.full_name || v.recorded_by?.username : v.recorded_by) || 'Unknown',
           date: v.recorded_at || v.created_at || new Date().toISOString(),
@@ -1727,8 +1756,40 @@ export const ConsultationDetailModal = React.memo(function ConsultationDetailMod
                       </div>
                       <div className="p-3 border border-blue-200 dark:border-blue-800 rounded-lg">
                         <p className="text-xs text-gray-500 dark:text-gray-500">Weight</p>
-                        <p className="text-lg font-semibold text-gray-800 dark:text-gray-200">{latestVitals.weight} kg</p>
+                        <p className="text-lg font-semibold text-gray-800 dark:text-gray-200">
+                          {latestVitals.weight != null ? `${latestVitals.weight} kg` : '—'}
+                        </p>
                       </div>
+                      {latestVitals.height != null && (
+                        <div className="p-3 border border-blue-200 dark:border-blue-800 rounded-lg">
+                          <p className="text-xs text-gray-500 dark:text-gray-500">Height</p>
+                          <p className="text-lg font-semibold text-gray-800 dark:text-gray-200">{latestVitals.height} cm</p>
+                        </div>
+                      )}
+                      {latestVitals.bmi != null && (
+                        <div className="p-3 border border-blue-200 dark:border-blue-800 rounded-lg">
+                          <p className="text-xs text-gray-500 dark:text-gray-500">BMI</p>
+                          <p className="text-lg font-semibold text-gray-800 dark:text-gray-200">{latestVitals.bmi}</p>
+                        </div>
+                      )}
+                      {latestVitals.painScale != null && (
+                        <div className="p-3 border border-blue-200 dark:border-blue-800 rounded-lg">
+                          <p className="text-xs text-gray-500 dark:text-gray-500">Pain scale</p>
+                          <p className="text-lg font-semibold text-gray-800 dark:text-gray-200">{latestVitals.painScale}/10</p>
+                        </div>
+                      )}
+                      {latestVitals.bloodSugar != null && (
+                        <div className="p-3 border border-violet-200 dark:border-violet-800 rounded-lg">
+                          <p className="text-xs text-gray-500 dark:text-gray-500">Blood sugar</p>
+                          <p className="text-lg font-semibold text-gray-800 dark:text-gray-200">{latestVitals.bloodSugar} mg/dL</p>
+                        </div>
+                      )}
+                      {latestVitals.randomBloodSugar != null && (
+                        <div className="p-3 border border-fuchsia-200 dark:border-fuchsia-800 rounded-lg">
+                          <p className="text-xs text-gray-500 dark:text-gray-500">RBS</p>
+                          <p className="text-lg font-semibold text-gray-800 dark:text-gray-200">{latestVitals.randomBloodSugar} mg/dL</p>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}

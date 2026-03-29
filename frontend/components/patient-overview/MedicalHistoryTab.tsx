@@ -1006,12 +1006,18 @@ export function MedicalHistoryTab({
                                 <span className="text-xs text-muted-foreground ml-auto">Recorded by: {vital.recordedBy}</span>
                               )}
                             </div>
-                            <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
                               <span>BP: {vital.bp}</span>
                               <span>P: {vital.pulse} bpm</span>
                               <span>T: {vital.temp}°C</span>
                               <span>SpO2: {vital.spo2}%</span>
                               {vital.weight && vital.weight !== '-' && <span>Weight: {vital.weight} kg</span>}
+                              {vital.bloodSugar && vital.bloodSugar !== '-' && (
+                                <span>BS: {vital.bloodSugar} mg/dL</span>
+                              )}
+                              {vital.randomBloodSugar && vital.randomBloodSugar !== '-' && (
+                                <span>RBS: {vital.randomBloodSugar} mg/dL</span>
+                              )}
                             </div>
                           </div>
                           <Button
@@ -1032,6 +1038,9 @@ export function MedicalHistoryTab({
                                 weight: vital.weight,
                                 height: vital.height,
                                 bmi: vital.bmi,
+                                painScale: vital.painScale,
+                                bloodSugar: vital.bloodSugar,
+                                randomBloodSugar: vital.randomBloodSugar,
                                 recordedBy: vital.recordedBy,
                                 notes: vital.notes,
                               });

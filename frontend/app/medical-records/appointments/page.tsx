@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import Link from "next/link";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -22,7 +23,6 @@ import {
   Trash2,
   CheckCircle,
   XCircle,
-  AlertCircle,
   ChevronLeft,
   ChevronRight,
   MoreHorizontal,
@@ -32,11 +32,44 @@ import {
   Loader2,
   Calendar,
   X,
+  Stethoscope,
+  Building2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { appointmentService, type Appointment } from "@/lib/services/appointment-service";
 import { patientService, adminService, type Patient as ApiPatient } from "@/lib/services";
+import { CLINICS } from "@/lib/constants/clinics";
 import { format } from "date-fns";
+
+/** Deep link to New Visit with patient + appointment date/time/type prefilled */
+function buildScheduleVisitHref(a: Appointment): string {
+  const pid = a.patient_code ?? String(a.patient);
+  const params = new URLSearchParams();
+  params.set("patient", pid);
+  if (a.appointment_date) params.set("date", a.appointment_date);
+  const t =
+    a.appointment_time && a.appointment_time.length >= 5
+      ? a.appointment_time.slice(0, 5)
+      : "09:00";
+  params.set("time", t);
+  if (a.appointment_type) params.set("visit_type", a.appointment_type);
+  return `/medical-records/visits/new?${params.toString()}`;
+}
+
+function canScheduleVisitFromAppointment(a: Appointment): boolean {
+  return ["scheduled", "confirmed", "in_progress"].includes(a.status);
+}
+
+function appointmentClinicsForForm(a: Appointment): string[] {
+  if (a.clinics && a.clinics.length > 0) return a.clinics;
+  if (a.clinic_name) return [a.clinic_name];
+  return [];
+}
+
+function formatAppointmentClinics(a: Appointment): string {
+  if (a.clinics && a.clinics.length > 0) return a.clinics.join(", ");
+  return a.clinic_name || "No clinic";
+}
 
 export default function AppointmentsPage() {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
@@ -46,7 +79,8 @@ export default function AppointmentsPage() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
   /** Preset row — same options as Manage Visits */
-  const [datePreset, setDatePreset] = useState<string>("today");
+  /** Default to all dates so future follow-ups from consultation are visible without changing filters */
+  const [datePreset, setDatePreset] = useState<string>("all");
   const [dateRange, setDateRange] = useState({ from: "", to: "" });
   const [isDateFilterDialogOpen, setIsDateFilterDialogOpen] = useState(false);
   const [clinicFilter, setClinicFilter] = useState("all");
@@ -58,8 +92,8 @@ export default function AppointmentsPage() {
   const [statsData, setStatsData] = useState({
     total: 0,
     scheduled: 0,
+    confirmed: 0,
     inProgress: 0,
-    completed: 0,
   });
 
   // Dialog states
@@ -71,6 +105,7 @@ export default function AppointmentsPage() {
   // Form states
   const [formData, setFormData] = useState({
     appointment_type: "consultation" as Appointment["appointment_type"],
+    clinics: [] as string[],
     appointment_date: "",
     appointment_time: "09:00",
     duration_minutes: 30,
@@ -227,18 +262,18 @@ export default function AppointmentsPage() {
       if (start_date) base.start_date = start_date;
       if (end_date) base.end_date = end_date;
 
-      const [totalResult, scheduledResult, inProgressResult, completedResult] = await Promise.all([
+      const [totalResult, scheduledResult, confirmedResult, inProgressResult] = await Promise.all([
         appointmentService.getAppointments({ ...base }),
         appointmentService.getAppointments({ ...base, status: "scheduled" }),
+        appointmentService.getAppointments({ ...base, status: "confirmed" }),
         appointmentService.getAppointments({ ...base, status: "in_progress" }),
-        appointmentService.getAppointments({ ...base, status: "completed" }),
       ]);
 
       setStatsData({
         total: totalResult.count || 0,
         scheduled: scheduledResult.count || 0,
+        confirmed: confirmedResult.count || 0,
         inProgress: inProgressResult.count || 0,
-        completed: completedResult.count || 0,
       });
     } catch {
       /* list fetch will surface errors */
@@ -263,6 +298,7 @@ export default function AppointmentsPage() {
     resetCreatePatientPicker();
     setFormData({
       appointment_type: "consultation",
+      clinics: [],
       appointment_date: "",
       appointment_time: "09:00",
       duration_minutes: 30,
@@ -271,9 +307,23 @@ export default function AppointmentsPage() {
     });
   };
 
+  const handleClinicToggle = (clinicName: string) => {
+    setFormData((prev) => {
+      const next = [...prev.clinics];
+      const i = next.indexOf(clinicName);
+      if (i >= 0) next.splice(i, 1);
+      else next.push(clinicName);
+      return { ...prev, clinics: next };
+    });
+  };
+
   const handleCreateAppointment = async () => {
     if (!selectedCreatePatient) {
       toast.error("Please search and select a patient.");
+      return;
+    }
+    if (formData.clinics.length === 0) {
+      toast.error("Select at least one clinic (e.g. GOPD, Eye Clinic).");
       return;
     }
     try {
@@ -285,11 +335,13 @@ export default function AppointmentsPage() {
         duration_minutes: formData.duration_minutes,
         reason: formData.reason || undefined,
         notes: formData.notes || undefined,
+        clinics: formData.clinics,
       };
 
       await appointmentService.createAppointment(appointmentData);
       toast.success("Appointment created successfully");
       setShowCreateDialog(false);
+      void loadStats();
       fetchAppointments();
     } catch (error: any) {
       console.error("Error creating appointment:", error);
@@ -299,6 +351,10 @@ export default function AppointmentsPage() {
 
   const handleUpdateAppointment = async () => {
     if (!selectedAppointment) return;
+    if (formData.clinics.length === 0) {
+      toast.error("Select at least one clinic.");
+      return;
+    }
 
     try {
       const appointmentData = {
@@ -309,6 +365,7 @@ export default function AppointmentsPage() {
         reason: formData.reason || undefined,
         notes: formData.notes || undefined,
         status: selectedAppointment.status,
+        clinics: formData.clinics,
       };
 
       await appointmentService.updateAppointment(selectedAppointment.id, appointmentData);
@@ -316,6 +373,7 @@ export default function AppointmentsPage() {
       setShowEditDialog(false);
       setSelectedAppointment(null);
       resetForm();
+      void loadStats();
       fetchAppointments();
     } catch (error: any) {
       console.error("Error updating appointment:", error);
@@ -331,6 +389,7 @@ export default function AppointmentsPage() {
     try {
       await appointmentService.deleteAppointment(appointment.id);
       toast.success("Appointment deleted successfully");
+      void loadStats();
       fetchAppointments();
     } catch (error: any) {
       console.error("Error deleting appointment:", error);
@@ -348,7 +407,14 @@ export default function AppointmentsPage() {
         await appointmentService.updateAppointment(appointment.id, { status: newStatus });
       }
 
-      toast.success(`Appointment ${newStatus} successfully`);
+      const label =
+        newStatus === "confirmed"
+          ? "marked as confirmed"
+          : newStatus === "cancelled"
+            ? "cancelled"
+            : `set to ${newStatus.replace(/_/g, " ")}`;
+      toast.success(`Appointment ${label}`);
+      void loadStats();
       fetchAppointments();
     } catch (error: any) {
       console.error("Error updating appointment status:", error);
@@ -360,6 +426,7 @@ export default function AppointmentsPage() {
     setSelectedAppointment(appointment);
     setFormData({
       appointment_type: appointment.appointment_type,
+      clinics: appointmentClinicsForForm(appointment),
       appointment_date: appointment.appointment_date,
       appointment_time: appointment.appointment_time,
       duration_minutes: appointment.duration_minutes,
@@ -460,18 +527,18 @@ export default function AppointmentsPage() {
         bg: "bg-amber-500/10",
       },
       {
+        label: "Confirmed",
+        value: statsData.confirmed,
+        icon: CheckCircle,
+        color: "text-green-600",
+        bg: "bg-green-500/10",
+      },
+      {
         label: "In progress",
         value: statsData.inProgress,
         icon: CheckCircle2,
         color: "text-emerald-500",
         bg: "bg-emerald-500/10",
-      },
-      {
-        label: "Completed",
-        value: statsData.completed,
-        icon: CheckCircle2,
-        color: "text-violet-500",
-        bg: "bg-violet-500/10",
       },
     ];
   }, [statsData, datePreset]);
@@ -489,7 +556,15 @@ export default function AppointmentsPage() {
             <p className="text-muted-foreground mt-1">Schedule and manage patient appointments</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button onClick={fetchAppointments} disabled={isLoading} variant="outline" className="shrink-0">
+            <Button
+              onClick={() => {
+                void loadStats();
+                void fetchAppointments();
+              }}
+              disabled={isLoading}
+              variant="outline"
+              className="shrink-0"
+            >
               <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? "animate-spin" : ""}`} />
               Refresh
             </Button>
@@ -560,9 +635,7 @@ export default function AppointmentsPage() {
                     <SelectItem value="scheduled">Scheduled</SelectItem>
                     <SelectItem value="confirmed">Confirmed</SelectItem>
                     <SelectItem value="in_progress">In Progress</SelectItem>
-                    <SelectItem value="completed">Completed</SelectItem>
                     <SelectItem value="cancelled">Cancelled</SelectItem>
-                    <SelectItem value="no_show">No Show</SelectItem>
                   </SelectContent>
                 </Select>
                 <Select value={typeFilter} onValueChange={setTypeFilter}>
@@ -736,6 +809,11 @@ export default function AppointmentsPage() {
                               {appointment.appointment_time} ({appointment.duration_minutes} min)
                             </span>
                             <span>•</span>
+                            <span className="inline-flex items-center gap-1">
+                              <Building2 className="h-3 w-3 shrink-0" />
+                              {formatAppointmentClinics(appointment)}
+                            </span>
+                            <span>•</span>
                             <span>{appointment.doctor_name || "No doctor assigned"}</span>
                           </div>
                         </div>
@@ -746,42 +824,41 @@ export default function AppointmentsPage() {
                           <Button variant="ghost" size="sm" onClick={() => openEditDialog(appointment)}>
                             <Edit className="h-4 w-4" />
                           </Button>
-                          <Select
-                            value=""
-                            onValueChange={(value) =>
-                              handleStatusChange(appointment, value as Appointment["status"])
-                            }
-                          >
-                            <SelectTrigger className="h-8 w-8 border-0 p-0">
-                              <MoreHorizontal className="h-4 w-4" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {appointment.status !== "confirmed" && (
-                                <SelectItem value="confirmed">
-                                  <CheckCircle className="mr-2 h-4 w-4" />
-                                  Confirm
-                                </SelectItem>
-                              )}
-                              {appointment.status !== "completed" && (
-                                <SelectItem value="completed">
-                                  <CheckCircle className="mr-2 h-4 w-4" />
-                                  Complete
-                                </SelectItem>
-                              )}
-                              {appointment.status !== "cancelled" && (
+                          {canScheduleVisitFromAppointment(appointment) && (
+                            <Button variant="outline" size="sm" className="h-8 shrink-0 gap-1 px-2 text-xs" asChild>
+                              <Link href={buildScheduleVisitHref(appointment)} title="Open New Visit with patient and date prefilled">
+                                <Stethoscope className="h-3.5 w-3.5" />
+                                <span className="hidden sm:inline">Schedule visit</span>
+                              </Link>
+                            </Button>
+                          )}
+                          {appointment.status !== "cancelled" && (
+                            <Select
+                              value=""
+                              onValueChange={(value) =>
+                                handleStatusChange(appointment, value as Appointment["status"])
+                              }
+                            >
+                              <SelectTrigger
+                                className="h-8 w-8 border-0 p-0"
+                                aria-label="Appointment actions"
+                              >
+                                <MoreHorizontal className="h-4 w-4" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {appointment.status === "scheduled" && (
+                                  <SelectItem value="confirmed">
+                                    <CheckCircle className="mr-2 h-4 w-4" />
+                                    Confirm (patient acknowledged for this date)
+                                  </SelectItem>
+                                )}
                                 <SelectItem value="cancelled">
                                   <XCircle className="mr-2 h-4 w-4" />
-                                  Cancel
+                                  Cancel appointment
                                 </SelectItem>
-                              )}
-                              {appointment.status !== "no_show" && (
-                                <SelectItem value="no_show">
-                                  <AlertCircle className="mr-2 h-4 w-4" />
-                                  No show
-                                </SelectItem>
-                              )}
-                            </SelectContent>
-                          </Select>
+                              </SelectContent>
+                            </Select>
+                          )}
                           <Button
                             variant="ghost"
                             size="sm"
@@ -949,6 +1026,51 @@ export default function AppointmentsPage() {
                   </SelectContent>
                 </Select>
               </div>
+              <div className="space-y-3">
+                <Label>Clinics *</Label>
+                <p className="text-xs text-muted-foreground">
+                  Select one or more clinics for this appointment (e.g. GOPD, Eye, Physiotherapy)
+                </p>
+                <div className="grid max-h-[280px] grid-cols-2 gap-2 overflow-y-auto rounded-lg border border-border p-2 md:grid-cols-3">
+                  {CLINICS.map((clinic) => {
+                    const isSelected = formData.clinics.includes(clinic);
+                    return (
+                      <button
+                        key={clinic}
+                        type="button"
+                        onClick={() => handleClinicToggle(clinic)}
+                        className={`rounded-md p-2 text-center transition-all ${
+                          isSelected
+                            ? "border border-teal-500 bg-teal-500/10"
+                            : "border border-transparent hover:border-primary/50"
+                        }`}
+                      >
+                        <p className={`text-sm font-medium ${isSelected ? "text-teal-600 dark:text-teal-400" : "text-foreground"}`}>
+                          {clinic}
+                        </p>
+                        {isSelected && <CheckCircle className="mx-auto mt-1 h-3 w-3 text-teal-600 dark:text-teal-400" />}
+                      </button>
+                    );
+                  })}
+                </div>
+                {formData.clinics.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {formData.clinics.map((clinic) => (
+                      <Badge key={clinic} variant="secondary" className="gap-1">
+                        {clinic}
+                        <button
+                          type="button"
+                          className="ml-1 hover:text-destructive"
+                          onClick={() => handleClinicToggle(clinic)}
+                          aria-label={`Remove ${clinic}`}
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+              </div>
               <div className="grid grid-cols-3 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="date">Date *</Label>
@@ -1007,7 +1129,7 @@ export default function AppointmentsPage() {
               </Button>
               <Button
                 onClick={handleCreateAppointment}
-                disabled={!selectedCreatePatient || !formData.appointment_date}
+                disabled={!selectedCreatePatient || !formData.appointment_date || formData.clinics.length === 0}
               >
                 Create Appointment
               </Button>
@@ -1025,7 +1147,7 @@ export default function AppointmentsPage() {
               </DialogTitle>
             </DialogHeader>
             <div className="grid gap-4 py-4">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label>Patient</Label>
                   <p className="rounded-md border border-border bg-muted/30 px-3 py-2 text-sm font-medium text-foreground">
@@ -1049,6 +1171,51 @@ export default function AppointmentsPage() {
                       <SelectItem value="routine">Routine</SelectItem>
                     </SelectContent>
                   </Select>
+                </div>
+                <div className="space-y-3 sm:col-span-2">
+                  <Label>Clinics *</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Select one or more clinics (same list as New Visit)
+                  </p>
+                  <div className="grid max-h-[240px] grid-cols-2 gap-2 overflow-y-auto rounded-lg border border-border p-2 md:grid-cols-3">
+                    {CLINICS.map((clinic) => {
+                      const isSelected = formData.clinics.includes(clinic);
+                      return (
+                        <button
+                          key={clinic}
+                          type="button"
+                          onClick={() => handleClinicToggle(clinic)}
+                          className={`rounded-md p-2 text-center transition-all ${
+                            isSelected
+                              ? "border border-teal-500 bg-teal-500/10"
+                              : "border border-transparent hover:border-primary/50"
+                          }`}
+                        >
+                          <p className={`text-sm font-medium ${isSelected ? "text-teal-600 dark:text-teal-400" : "text-foreground"}`}>
+                            {clinic}
+                          </p>
+                          {isSelected && <CheckCircle className="mx-auto mt-1 h-3 w-3 text-teal-600 dark:text-teal-400" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {formData.clinics.length > 0 && (
+                    <div className="flex flex-wrap gap-2">
+                      {formData.clinics.map((clinic) => (
+                        <Badge key={clinic} variant="secondary" className="gap-1">
+                          {clinic}
+                          <button
+                            type="button"
+                            className="ml-1 hover:text-destructive"
+                            onClick={() => handleClinicToggle(clinic)}
+                            aria-label={`Remove ${clinic}`}
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
               <div className="grid grid-cols-3 gap-4">
@@ -1147,6 +1314,14 @@ export default function AppointmentsPage() {
                   </div>
 
                   <div>
+                    <Label className="text-sm font-medium text-muted-foreground">Clinics</Label>
+                    <p className="inline-flex flex-wrap items-center gap-2 font-medium">
+                      <Building2 className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      {formatAppointmentClinics(selectedAppointment)}
+                    </p>
+                  </div>
+
+                  <div>
                     <Label className="text-sm font-medium text-muted-foreground">Type</Label>
                     <div className="mt-1">
                       <Badge variant="outline" className={getTypeBadgeClass(selectedAppointment.appointment_type)}>
@@ -1200,7 +1375,15 @@ export default function AppointmentsPage() {
                 </div>
               </div>
             )}
-            <DialogFooter>
+            <DialogFooter className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+              {selectedAppointment && canScheduleVisitFromAppointment(selectedAppointment) && (
+                <Button variant="default" className="gap-2" asChild>
+                  <Link href={buildScheduleVisitHref(selectedAppointment)}>
+                    <Stethoscope className="h-4 w-4" />
+                    Schedule visit
+                  </Link>
+                </Button>
+              )}
               <Button variant="outline" onClick={() => { setShowViewDialog(false); setSelectedAppointment(null); }}>
                 Close
               </Button>

@@ -56,6 +56,34 @@ export const WOUND_TYPES = [
   'Post-operative'
 ] as const;
 
+/** Anatomical sites for wound dressing / nursing location (consultation nursing order form). */
+export const WOUND_LOCATIONS = [
+  'Head / scalp',
+  'Face',
+  'Neck',
+  'Chest',
+  'Abdomen',
+  'Back',
+  'Left upper arm',
+  'Right upper arm',
+  'Left forearm',
+  'Right forearm',
+  'Left hand',
+  'Right hand',
+  'Left hip',
+  'Right hip',
+  'Left thigh',
+  'Right thigh',
+  'Left knee',
+  'Right knee',
+  'Left lower leg',
+  'Right lower leg',
+  'Left foot',
+  'Right foot',
+  'Sacral / coccyx',
+  'Other (specify in instructions)',
+] as const;
+
 export const DRESSING_SUPPLIES = [
   'Gauze',
   'Bandage',
@@ -153,21 +181,24 @@ export const REFERRAL_SPECIALTIES = [
 ] as const;
 
 export const REFERRAL_FACILITIES: ReferralFacility[] = [
-  // Internal Facilities
-  { name: 'NPA Medical Centre - Lagos', type: 'Internal' },
-  { name: 'NPA Medical Centre - Port Harcourt', type: 'Internal' },
-  { name: 'NPA Medical Centre - Calabar', type: 'Internal' },
-
   // External Facilities
+  { name: 'Federal Medical Centre, Ebute Meta, Lagos', type: 'External' },
   { name: 'Lagos University Teaching Hospital (LUTH)', type: 'External' },
-  { name: 'Lagos State University Teaching Hospital (LASUTH)', type: 'External' },
-  { name: 'National Hospital Abuja', type: 'External' },
-  { name: 'University of Port Harcourt Teaching Hospital', type: 'External' },
-  { name: 'University of Calabar Teaching Hospital', type: 'External' },
-  { name: 'St. Nicholas Hospital Lagos', type: 'External' },
-  { name: 'First Consultant Hospital Lagos', type: 'External' },
-  { name: 'Eko Hospital Lagos', type: 'External' },
-  { name: 'Cedarcrest Hospitals Abuja', type: 'External' },
+  { name: 'Federal Medical Center, Lokoja', type: 'External' },
+  { name: 'Jos University Teach Hosp. (JUTH) Jos', type: 'External' },
+  { name: 'Federal Medical Center, Gombe', type: 'External' },
+  { name: 'University Of Maiduguri Teaching Hospital, Maiduguri', type: 'External' },
+  { name: 'Federal Medical Center, Jalingo', type: 'External' },
+  { name: 'Federal Medical Center, Birnin-Kebbi', type: 'External' },
+  { name: 'Aminu Kano Teaching Hospital, Kano', type: 'External' },
+  { name: 'Federal Medical Center, Owo', type: 'External' },
+  { name: 'Bowen University Teaching Hospital, Ogbomosho', type: 'External' },
+  { name: 'Federal medical center, Asaba', type: 'External' },
+  { name: 'Nigerian Navy Hospital, Calabar', type: 'External' },
+  { name: 'Federal Medical Center Owerri', type: 'External' },
+  { name: 'University Of Nigeria Teaching Hospital, Enugu', type: 'External' },
+  { name: 'Hospital, Enugu Army Reference Hospital, Kaduna', type: 'External' },
+  { name: 'Other', type: 'External' },
 ];
 
 export const REFERRAL_REASONS = [
