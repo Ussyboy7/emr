@@ -79,13 +79,17 @@ export default function InventoryPage() {
   // Load all inventory for stats calculation
   const loadAllInventoryForStats = async () => {
     try {
-      const response = await pharmacyService.getInventory({
-        page: 1,
-        page_size: 10000, // Load a large number for stats
-        location,
-      });
-      const transformed = transformInventoryItems(response.results);
-      setAllInventoryForStats(transformed);
+      const [inventoryResponse, medicationsResponse] = await Promise.all([
+        pharmacyService.getInventory({
+          page: 1,
+          page_size: 10000, // Load a large number for stats
+          location,
+        }),
+        pharmacyService.getMedications({ page: 1, page_size: 10000 }),
+      ]);
+      const transformed = transformInventoryItems(inventoryResponse.results);
+      const merged = mergeWithDrugMaster(transformed, medicationsResponse.results || []);
+      setAllInventoryForStats(merged);
     } catch (err) {
       console.error('Error loading all inventory for stats:', err);
     }
@@ -136,31 +140,82 @@ export default function InventoryPage() {
     });
   };
 
+  const mergeWithDrugMaster = (items: MedicationInventoryItem[], medications: any[]): MedicationInventoryItem[] => {
+    const merged = [...items];
+    const existingMedicationIds = new Set(
+      items
+        .map((it) => it.medicationId)
+        .filter((id): id is number => typeof id === 'number' && !Number.isNaN(id))
+    );
+
+    medications.forEach((med: any) => {
+      const medId = typeof med?.id === 'number' ? med.id : Number(med?.id);
+      if (!medId || Number.isNaN(medId) || existingMedicationIds.has(medId)) return;
+
+      merged.push({
+        id: `master-${medId}`,
+        medicationId: medId,
+        name: med.name || 'Unknown',
+        genericName: med.generic_name || med.generic?.name || '',
+        category: med.category || 'All Categories',
+        strength: med.strength || '',
+        dosageForm: med.form || med.dosage_form || '',
+        packSize: med.pack_size || 10,
+        manufacturer: med.manufacturer || '',
+        currentStock: 0,
+        minimumStock: Number(med.min_stock_level ?? 0),
+        lastRestocked: '',
+        expiryDate: '',
+        batches: [],
+      });
+    });
+
+    return merged;
+  };
+
   const loadInventory = async () => {
     try {
       setLoading(true);
       setError(null);
-      
-      const params: any = {
-        page: currentPage,
-        page_size: itemsPerPage,
-        search: searchQuery || undefined,
-        location,
-      };
 
-      if (categoryFilter !== 'All Categories') {
-        params.medication__category = categoryFilter;
-      }
-      
-      if (stockFilter !== 'all') {
-        params.stock_status = stockFilter;
-      }
+      // Load full inventory for this location, then merge with drug master to include zero-stock items.
+      const [inventoryResponse, medicationsResponse] = await Promise.all([
+        pharmacyService.getInventory({
+          page: 1,
+          page_size: 10000,
+          location,
+        }),
+        pharmacyService.getMedications({ page: 1, page_size: 10000 }),
+      ]);
 
-      const response = await pharmacyService.getInventory(params);
-      setTotalCount(response.count || response.results.length);
-      // Transform API data to frontend format
-      const transformed = transformInventoryItems(response.results);
-      setInventory(transformed);
+      const transformed = transformInventoryItems(inventoryResponse.results);
+      const merged = mergeWithDrugMaster(transformed, medicationsResponse.results || []);
+
+      const q = searchQuery.trim().toLowerCase();
+      const filtered = merged.filter((med) => {
+        const matchesSearch =
+          !q ||
+          med.name.toLowerCase().includes(q) ||
+          med.genericName.toLowerCase().includes(q);
+
+        const matchesCategory =
+          categoryFilter === 'All Categories' || med.category === categoryFilter;
+
+        const status = med.currentStock === 0 ? 'out' : med.currentStock <= med.minimumStock ? 'low' : 'normal';
+        const matchesStock =
+          stockFilter === 'all' ||
+          (stockFilter === 'out' && status === 'out') ||
+          (stockFilter === 'low' && status === 'low') ||
+          (stockFilter === 'normal' && status === 'normal');
+
+        return matchesSearch && matchesCategory && matchesStock;
+      });
+
+      const start = (currentPage - 1) * itemsPerPage;
+      const paginated = filtered.slice(start, start + itemsPerPage);
+
+      setTotalCount(filtered.length);
+      setInventory(paginated);
     } catch (err: any) {
       setError(err.message || 'Failed to load inventory');
       console.error('Error loading inventory:', err);

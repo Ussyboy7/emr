@@ -110,15 +110,18 @@ export default function WarehouseStorePage() {
   const loadStoreInventory = async () => {
     try {
       setInventoryLoading(true);
-      const response = await pharmacyService.getInventory({
-        page: 1,
-        page_size: 10000,
-        location: PHARMACY_LOCATIONS.STORE,
-      });
+      const [inventoryResponse, medicationsResponse] = await Promise.all([
+        pharmacyService.getInventory({
+          page: 1,
+          page_size: 10000,
+          location: PHARMACY_LOCATIONS.STORE,
+        }),
+        pharmacyService.getMedications({ page: 1, page_size: 10000 }),
+      ]);
 
       const grouped = new Map<number, MedicationWithStock>();
 
-      response.results.forEach((item) => {
+      inventoryResponse.results.forEach((item) => {
         const medId = typeof item.medication === "number" ? item.medication : (item.medication as any)?.id;
         if (!medId) return;
 
@@ -142,6 +145,24 @@ export default function WarehouseStorePage() {
         const med = grouped.get(medId)!;
         med.storeQuantity += Number(item.quantity || 0);
         med.batches.push(item);
+      });
+
+      // Ensure medications from Drug Master always appear, even without stock batches.
+      medicationsResponse.results.forEach((med: any) => {
+        if (!med?.id || grouped.has(med.id)) return;
+        grouped.set(med.id, {
+          id: med.id,
+          name: med.name || "Unknown",
+          generic: med.generic,
+          generic_name: med.generic_name || med.generic?.name || "",
+          strength: med.strength || "",
+          form: med.form || "",
+          category: med.category || "",
+          packSize: (typeof med.pack_size === "number" && med.pack_size > 0) ? med.pack_size : 10,
+          storeQuantity: 0,
+          minimumStock: Number(med.min_stock_level ?? 0),
+          batches: [],
+        });
       });
 
       setStoreInventory(Array.from(grouped.values()).sort((a, b) => a.name.localeCompare(b.name)));
