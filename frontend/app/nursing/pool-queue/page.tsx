@@ -440,13 +440,16 @@ export default function NursingPoolQueuePage() {
           const roomName = queueVisitToRoom.get(visit.id);
           const sentToPhysio = Boolean(physioCheckedInByVisitId[visit.id]);
           const sentToEyeClinic = Boolean(eyeCheckedInByVisitId[visit.id]);
+          const visitClinics = (visit.clinics && visit.clinics.length > 0 ? visit.clinics : [visit.clinic]).filter(Boolean) as string[];
+          const hasPhysioClinic = visitClinics.some((c: string) => clinicMatches(c, 'Physiotherapy'));
+          const hasEyeClinic = visitClinics.some((c: string) => clinicMatches(c, 'Eye Clinic'));
           
           if (roomName) {
             // Patient has been sent to a room
             nursingStatus = 'Sent to Room';
-          } else if (sentToEyeClinic && clinicMatches(visit.clinic || '', 'Eye Clinic')) {
+          } else if (sentToEyeClinic && hasEyeClinic) {
             nursingStatus = 'Sent to Eye Clinic';
-          } else if (sentToPhysio && clinicMatches(visit.clinic || '', 'Physiotherapy')) {
+          } else if (sentToPhysio && hasPhysioClinic) {
             nursingStatus = 'Sent to Physiotherapy';
           } else if (vitalsData) {
             // Check if vitals are complete (have essential measurements - only temp and pulse required)
@@ -750,8 +753,8 @@ export default function NursingPoolQueuePage() {
           [patient.visitNumericId]: { orderId: Number(order.id), status: String(order.status || 'scheduled') },
         }));
       }
-      toast.success('Sent to Physiotherapy', {
-        description: `${patient.name} is now in the Physiotherapy queue`,
+      toast.success('Checked in to Physiotherapy', {
+        description: `${patient.name} checked in to the Physiotherapy queue`,
       });
       await loadData();
     } catch (err: any) {
@@ -1163,7 +1166,7 @@ export default function NursingPoolQueuePage() {
                     <SelectItem value="vitals-recorded">Vitals Recorded</SelectItem>
                     <SelectItem value="ready-for-consultation">Ready for Consultation</SelectItem>
                     <SelectItem value="sent-to-room">Sent to Room</SelectItem>
-                    <SelectItem value="sent-to-physiotherapy">Sent to Physiotherapy</SelectItem>
+                    <SelectItem value="sent-to-physiotherapy">Checked in to Physiotherapy</SelectItem>
                   </SelectContent>
                 </Select>
                 <Select value={typeFilter} onValueChange={setTypeFilter}>
@@ -1240,7 +1243,7 @@ export default function NursingPoolQueuePage() {
                             {patient.nursingStatus === 'Sent to Room' && patient.consultationRoom
                               ? `Sent to ${patient.consultationRoom}`
                               : patient.nursingStatus === 'Sent to Physiotherapy'
-                                ? 'Sent to Physiotherapy'
+                                ? 'Checked in to Physiotherapy'
                                 : patient.nursingStatus}
                           </Badge>
                         </div>
@@ -1267,26 +1270,63 @@ export default function NursingPoolQueuePage() {
                             const hasOtherClinics = patient.clinics?.some((c: string) => !clinicMatches(c, 'Physiotherapy') && !clinicMatches(c, 'Eye Clinic'));
                             const isOnlyPhysio = hasPhysio && !hasOtherClinics;
                             const isOnlyEye = hasEye && !hasOtherClinics;
-                            
-                            // If patient has multiple clinics, always show "Send" button for consultation rooms
-                            // Backend will automatically create queue entries for all matching clinic rooms
+                            const canRoute = patient.nursingStatus === 'Vitals Recorded' || patient.nursingStatus === 'Ready for Consultation';
+
+                            // Multi-clinic: allow explicit direct sends to specialty clinics and room routing in parallel.
                             if (patient.clinics && patient.clinics.length > 1) {
-                              // Multi-clinic patient - show Send button, backend handles routing to all clinics
-                              const sentToSpecialtyClinic = patient.sentToPhysio || patient.sentToEyeClinic;
-                              return sentToSpecialtyClinic ? (
-                                <div className="h-7 w-7 flex items-center justify-center rounded border border-indigo-500/50 text-indigo-600 dark:text-indigo-400 bg-indigo-500/10">
-                                  <CheckCircle2 className="h-4 w-4" />
+                              if (!canRoute) return null;
+                              return (
+                                <div className="flex items-center gap-1">
+                                  {hasPhysio && (
+                                    patient.sentToPhysio ? (
+                                      <div className="h-7 w-7 flex items-center justify-center rounded border border-indigo-500/50 text-indigo-600 dark:text-indigo-400 bg-indigo-500/10">
+                                        <CheckCircle2 className="h-4 w-4" />
+                                      </div>
+                                    ) : (
+                                      <Button
+                                        size="sm"
+                                        onClick={() => handleSendToPhysio(patient)}
+                                        className="h-7 px-2 bg-indigo-500 hover:bg-indigo-600 text-white text-xs"
+                                        disabled={sendingToPhysioVisitId === patient.visitNumericId}
+                                      >
+                                        {sendingToPhysioVisitId === patient.visitNumericId ? (
+                                          <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                        ) : (
+                                          <Activity className="h-3 w-3 mr-1" />
+                                        )}
+                                        Physio
+                                      </Button>
+                                    )
+                                  )}
+
+                                  {hasEye && (
+                                    patient.sentToEyeClinic ? (
+                                      <div className="h-7 w-7 flex items-center justify-center rounded border border-blue-500/50 text-blue-600 dark:text-blue-400 bg-blue-500/10">
+                                        <CheckCircle2 className="h-4 w-4" />
+                                      </div>
+                                    ) : (
+                                      <Button
+                                        size="sm"
+                                        onClick={() => handleSendToEyeClinic(patient)}
+                                        className="h-7 px-2 bg-blue-500 hover:bg-blue-600 text-white text-xs"
+                                      >
+                                        <Eye className="h-3 w-3 mr-1" />
+                                        Eye
+                                      </Button>
+                                    )
+                                  )}
+
+                                  {hasOtherClinics && (
+                                    <Button
+                                      size="sm"
+                                      onClick={() => openRoomPicker(patient)}
+                                      className="h-7 px-2 bg-emerald-500 hover:bg-emerald-600 text-white text-xs"
+                                    >
+                                      <ArrowRight className="h-3 w-3 mr-1" />
+                                      Send
+                                    </Button>
+                                  )}
                                 </div>
-                              ) : (
-                                (patient.nursingStatus === 'Vitals Recorded' || patient.nursingStatus === 'Ready for Consultation') && (
-                                  <Button 
-                                    size="sm" 
-                                    onClick={() => openRoomPicker(patient)} 
-                                    className="h-7 px-2 bg-emerald-500 hover:bg-emerald-600 text-white text-xs"
-                                  >
-                                    <ArrowRight className="h-3 w-3 mr-1" />Send
-                                  </Button>
-                                )
                               );
                             }
                             
@@ -1338,7 +1378,7 @@ export default function NursingPoolQueuePage() {
                             }
 
                             // General or other single-clinic patient (e.g. GOPD) - send to consultation rooms
-                            if (patient.nursingStatus === 'Vitals Recorded' || patient.nursingStatus === 'Ready for Consultation') {
+                            if (canRoute) {
                               return (
                                 <Button
                                   size="sm"

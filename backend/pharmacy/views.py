@@ -1202,15 +1202,15 @@ class StockRequestViewSet(viewsets.ModelViewSet):
                 {'error': f'Cannot fulfill request with status {stock_request.status}'},
                 status=status.HTTP_400_BAD_REQUEST
             )
+        if stock_request.status == 'pending':
+            return Response(
+                {'error': 'Request must be approved before issuing stock.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
-        # Create Stock Issue
-        issue = StockIssue.objects.create(
-            request=stock_request,
-            issued_by=request.user,
-            notes=f"Fulfilled request {stock_request.request_id}"
-        )
-
+        issue = None
         lines_created = 0
+        unfulfilled_items = []
         
         # Process each requested item
         for item in stock_request.items.all():
@@ -1219,12 +1219,14 @@ class StockRequestViewSet(viewsets.ModelViewSet):
                 continue
 
             # Find available inventory in source location (e.g. 'Store')
-            source_inventory = MedicationInventory.objects.filter(
+            source_inventory_qs = MedicationInventory.objects.filter(
                 medication=item.medication,
                 location=stock_request.from_location,
                 quantity__gt=0,
                 expiry_date__gt=timezone.now().date()
             ).order_by('expiry_date') # FIFO
+            source_inventory = list(source_inventory_qs)
+            available_qty = sum((inv.quantity for inv in source_inventory), Decimal('0'))
             
             qty_to_fulfill = remaining_needed
             
@@ -1233,6 +1235,16 @@ class StockRequestViewSet(viewsets.ModelViewSet):
                     break
                 
                 transfer_qty = min(inv_item.quantity, qty_to_fulfill)
+                if transfer_qty <= 0:
+                    continue
+
+                # Create Stock Issue lazily only when we can actually transfer stock.
+                if issue is None:
+                    issue = StockIssue.objects.create(
+                        request=stock_request,
+                        issued_by=request.user,
+                        notes=f"Fulfilled request {stock_request.request_id}"
+                    )
                 
                 # 1. Deduct from source
                 inv_item.quantity -= transfer_qty
@@ -1302,6 +1314,14 @@ class StockRequestViewSet(viewsets.ModelViewSet):
             fulfilled_now = remaining_needed - qty_to_fulfill
             item.fulfilled_quantity += fulfilled_now
             item.save()
+            if qty_to_fulfill > 0:
+                unfulfilled_items.append({
+                    'medication': item.medication.name,
+                    'requested': str(remaining_needed),
+                    'available': str(available_qty),
+                    'shortfall': str(qty_to_fulfill),
+                    'reason': 'insufficient_or_expired_stock_in_source_location',
+                })
 
         # Update Request Status
         all_fulfilled = not stock_request.items.filter(fulfilled_quantity__lt=F('quantity')).exists()
@@ -1316,18 +1336,27 @@ class StockRequestViewSet(viewsets.ModelViewSet):
             pass
 
         if lines_created == 0 and not all_fulfilled:
-             # If no lines created and not all fulfilled, return detailed error
-             return Response(
-                 {'error': 'Could not issue stock. Please check if items are available in Store inventory and not expired.'},
-                 status=status.HTTP_400_BAD_REQUEST
-             )
+            # If no lines created and not all fulfilled, return detailed error to help operators act quickly.
+            details = []
+            for item in unfulfilled_items[:3]:
+                details.append(
+                    f"{item['medication']}: requested {item['requested']}, available {item['available']}, shortfall {item['shortfall']}"
+                )
+            error_message = (
+                f"Could not issue stock from {stock_request.from_location}. "
+                + ("; ".join(details) if details else "No unexpired stock available for requested items.")
+            )
+            return Response(
+                {'error': error_message, 'unfulfilled_items': unfulfilled_items},
+                status=status.HTTP_400_BAD_REQUEST
+            )
         
         stock_request.save()
 
         # Return result
         return Response({
             'request': StockRequestSerializer(stock_request).data,
-            'issue': StockIssueSerializer(issue).data
+            'issue': StockIssueSerializer(issue).data if issue else None
         })
 
     @action(detail=True, methods=['post'])

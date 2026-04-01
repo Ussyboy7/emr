@@ -495,6 +495,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   const [showWardAdmissionDetail, setShowWardAdmissionDetail] = useState(false);
   const [selectedWardAdmission, setSelectedWardAdmission] = useState<WardAdmission | null>(null);
   const [isEnding, setIsEnding] = useState(false);
+  const [isStartingSession, setIsStartingSession] = useState(false);
   const [followUpRequired, setFollowUpRequired] = useState(false);
   const [followUpDate, setFollowUpDate] = useState("");
   const [followUpReason, setFollowUpReason] = useState("");
@@ -2129,17 +2130,28 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   }, [sessionActive, sessionId, medicalNotes]);
 
   const handleStartSession = async (patient: Patient) => {
+    if (isStartingSession) return;
+    setIsStartingSession(true);
     try {
       // Check if there's already an active session
       if (sessionActive && sessionId) {
-        const confirmed = window.confirm(
-          `There is already an active session with ${currentPatient?.name || 'a patient'}. ` +
-          `Do you want to end that session and start a new one with ${patient.name}?`
-        );
-        if (!confirmed) {
+        const isSamePatient = currentPatient?.id === patient.id;
+        if (isSamePatient) {
+          toast.info(`Continuing active session with ${patient.name}`);
           return;
         }
-        // End the current session first
+
+        const shouldSwitchPatient = window.confirm(
+          `There is an active session with ${currentPatient?.name || 'a patient'}.\n\n` +
+          `Click OK to switch to ${patient.name} (end current session and start/resume selected patient).\n` +
+          `Click Cancel to keep current session.`
+        );
+        if (!shouldSwitchPatient) {
+          toast.info(`Kept current session with ${currentPatient?.name || 'current patient'}`);
+          return;
+        }
+
+        // End current patient session before switching.
         try {
           await consultationService.endSession(sessionId);
         } catch (endErr) {
@@ -2161,7 +2173,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         return;
       }
       
-      const sessionData = await apiFetch<{ id: number }>('/consultation/sessions/', {
+      const sessionData = await apiFetch<{ id: number; resumed?: boolean; started_at?: string }>('/consultation/sessions/', {
         method: 'POST',
         body: JSON.stringify({
           room: numericRoomId,
@@ -2171,6 +2183,12 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           // Note: priority is for ConsultationQueue, not ConsultationSession
         }),
       });
+
+      if (sessionData?.resumed) {
+        await restoreActiveSession(sessionData.id);
+        toast.success(`Resumed active session with ${patient.name}`);
+        return;
+      }
       
       setCurrentPatient(patient);
       setSessionActive(true);
@@ -2226,6 +2244,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     } catch (err: any) {
       console.error('Error starting session:', err);
       toast.error(err.message || 'Failed to start consultation session');
+    } finally {
+      setIsStartingSession(false);
     }
   };
 
@@ -4422,6 +4442,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       for (const order of draftOrders) {
         await physioService.createOrder({
           patient: numericPatientId,
+          visit: numericVisitId && !isNaN(numericVisitId) ? numericVisitId : undefined,
           diagnosis: order.diagnosis,
           chief_complaint: order.chiefComplaint,
           treatment_goal: order.treatmentGoal,
@@ -4578,7 +4599,14 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                     <div className="w-10 h-10 bg-emerald-600 rounded-full flex items-center justify-center"><Stethoscope className="h-5 w-5 text-white" /></div>
                     <div><div className="font-medium text-gray-900 dark:text-white">Ready to consult?</div><div className="text-sm text-gray-600 dark:text-gray-400">{patients.length} patient{patients.length !== 1 ? "s" : ""} waiting for consultation</div></div>
                   </div>
-                  <Button size="lg" onClick={() => handleStartSession(patients[0])} className="bg-emerald-600 hover:bg-emerald-700 shadow-lg">Start with Next Patient</Button>
+                  <Button
+                    size="lg"
+                    onClick={() => handleStartSession(patients[0])}
+                    disabled={isStartingSession}
+                    className="bg-emerald-600 hover:bg-emerald-700 shadow-lg"
+                  >
+                    {isStartingSession ? "Starting..." : "Start with Next Patient"}
+                  </Button>
                 </div>
               </CardContent>
             </Card>
@@ -4609,7 +4637,14 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                               {patient.allergies.length > 0 && <div className="mt-2 flex items-center gap-1 text-xs"><AlertTriangle className="h-3 w-3 text-red-500" /><span className="text-red-600 dark:text-red-400 font-medium">Allergies: {patient.allergies.join(", ")}</span></div>}
                             </div>
                           </div>
-                          <Button onClick={() => handleStartSession(patient)} className="bg-emerald-600 hover:bg-emerald-700 shadow-md"><Stethoscope className="mr-2 h-4 w-4" />Start Session</Button>
+                          <Button
+                            onClick={() => handleStartSession(patient)}
+                            disabled={isStartingSession}
+                            className="bg-emerald-600 hover:bg-emerald-700 shadow-md"
+                          >
+                            <Stethoscope className="mr-2 h-4 w-4" />
+                            {isStartingSession ? "Starting..." : "Start Session"}
+                          </Button>
                         </div>
                       </CardContent>
                     </Card>
@@ -8942,10 +8977,11 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                   setShowRoomQueueDialog(false);
                                   handleStartSession(patient);
                                 }}
+                                disabled={isStartingSession}
                                 className="bg-emerald-500 hover:bg-emerald-600 text-white"
                               >
                                 <Stethoscope className="h-4 w-4 mr-1" />
-                                Start
+                                {isStartingSession ? "Starting..." : "Start"}
                               </Button>
                             )}
                           </div>

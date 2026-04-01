@@ -377,13 +377,23 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
         let combinedVisits = [...transformedVisits];
 
         if (consultationsData.status === 'fulfilled' && consultationsData.value?.results) {
+          const getSessionDateParts = (session: any) => {
+            const rawDate = session.started_at || '';
+            if (!rawDate) return { date: '', time: '' };
+            const parsed = new Date(rawDate);
+            if (Number.isNaN(parsed.getTime())) return { date: '', time: '' };
+            return {
+              date: parsed.toLocaleDateString(),
+              time: parsed.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+            };
+          };
+
           const transformedSessions = consultationsData.value.results.map((session: any) => ({
+            ...getSessionDateParts(session),
             id: `session-${session.id}`,
             numericId: session.id,
             visitId: session.session_id || session.id.toString(),
             patientId: numericId.toString(),
-            date: session.created_at ? new Date(session.created_at).toLocaleDateString() : session.date || '',
-            time: session.created_at ? new Date(session.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '',
             type: 'Consultation',
             department: 'Consultation',
             doctor: session.doctor?.name || session.doctor_name || 'Unknown',
@@ -466,10 +476,17 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
 
       // Consultation sessions are now processed within visits above
       if (consultationsData.status === 'fulfilled' && consultationsData.value?.results) {
+        const getSessionDate = (session: any) => {
+          const rawDate = session.started_at || '';
+          if (!rawDate) return '';
+          const parsed = new Date(rawDate);
+          if (Number.isNaN(parsed.getTime())) return '';
+          return parsed.toLocaleDateString();
+        };
         // Sessions are already combined with visits above, just store separately if needed elsewhere
         const transformedSessions = consultationsData.value.results.map((session: any) => ({
           id: session.id?.toString() || String(session.id),
-          date: session.created_at ? new Date(session.created_at).toLocaleDateString() : session.date || '',
+          date: getSessionDate(session),
           doctor: session.doctor?.name || session.doctor_name || 'Unknown',
           clinic: session.clinic_name || session.room?.clinic_name || 'GOPD',
           room: session.room?.name || '',

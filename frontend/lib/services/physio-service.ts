@@ -21,6 +21,7 @@ export interface PhysioTemplate {
 export interface PhysioOrder {
   id: number;
   patient: number;
+  visit?: number;
   patient_name: string;
   patient_id: string;
   ordered_by: number;
@@ -171,6 +172,7 @@ class PhysioService {
     priority?: string;
     clinic?: string;
     patient?: string;
+    visit?: number;
     consultation_session?: number;
     search?: string;
     page?: number;

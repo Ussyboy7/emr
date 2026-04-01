@@ -16,7 +16,7 @@ import { toast } from "sonner";
 import {
   Search, Eye, Edit, Clock, CheckCircle2, Activity, Calendar, User, FileText, Pill, TestTube,
   Save, Loader2, Stethoscope, History, Filter, FlaskConical, Syringe, LayoutGrid, List,
-  Users, TrendingUp, ArrowRight, AlertTriangle, RefreshCw, Plus, X
+  Users, TrendingUp, ArrowRight, AlertTriangle, RefreshCw, Plus, X, ScanLine
 } from "lucide-react";
 import Link from "next/link";
 import { apiFetch } from '@/lib/api-client';
@@ -1188,100 +1188,143 @@ export default function ConsultationHistoryPage() {
             {selectedConsultation && (
               <Tabs value={editActiveTab} onValueChange={setEditActiveTab} className="w-full mt-2">
                 <TabsList className="grid w-full grid-cols-5 h-10 gap-1 p-1">
-                  <TabsTrigger value="notes" className="text-xs sm:text-sm">Notes</TabsTrigger>
-                  <TabsTrigger value="prescriptions" className="text-xs sm:text-sm">Prescriptions</TabsTrigger>
-                  <TabsTrigger value="lab" className="text-xs sm:text-sm">Lab</TabsTrigger>
-                  <TabsTrigger value="radiology" className="text-xs sm:text-sm">Radiology</TabsTrigger>
-                  <TabsTrigger value="physio" className="text-xs sm:text-sm">Physio</TabsTrigger>
+                  <TabsTrigger value="notes" className="text-xs sm:text-sm flex items-center gap-1">
+                    <FileText className="h-3.5 w-3.5" />
+                    Notes
+                  </TabsTrigger>
+                  <TabsTrigger value="prescriptions" className="text-xs sm:text-sm flex items-center gap-1">
+                    <Pill className="h-3.5 w-3.5" />
+                    Prescriptions
+                  </TabsTrigger>
+                  <TabsTrigger value="lab" className="text-xs sm:text-sm flex items-center gap-1">
+                    <TestTube className="h-3.5 w-3.5" />
+                    Lab
+                  </TabsTrigger>
+                  <TabsTrigger value="radiology" className="text-xs sm:text-sm flex items-center gap-1">
+                    <ScanLine className="h-3.5 w-3.5" />
+                    Radiology
+                  </TabsTrigger>
+                  <TabsTrigger value="physio" className="text-xs sm:text-sm flex items-center gap-1">
+                    <Activity className="h-3.5 w-3.5" />
+                    Physio
+                  </TabsTrigger>
                 </TabsList>
                 <TabsContent value="notes" className="space-y-5 mt-5">
-                  {/* Match consultation room order: Presentation → HPI → Exam → Diagnosis → Assessment → Plan → Status */}
-                  <div className="space-y-3">
-                    <div className="space-y-1.5">
-                      <Label>Presentation Complaint</Label>
-                      <Textarea value={editForm.presentationComplaint} onChange={(e) => setEditForm(prev => ({ ...prev, presentationComplaint: e.target.value }))} placeholder="Chief complaint or presenting symptoms..." rows={3} className="mt-0" />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label>History of Present Illness</Label>
-                      <Textarea value={editForm.historyOfPresentIllness} onChange={(e) => setEditForm(prev => ({ ...prev, historyOfPresentIllness: e.target.value }))} placeholder="Detailed history..." rows={4} className="mt-0" />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label>Physical Examination</Label>
-                      <Textarea value={editForm.physicalExamination} onChange={(e) => setEditForm(prev => ({ ...prev, physicalExamination: e.target.value }))} placeholder="Examination findings..." rows={4} className="mt-0" />
-                    </div>
-                  </div>
-
-                  <div className="space-y-3 pt-2 border-t">
-                    <div className="flex items-center justify-between">
-                      <Label className="text-base font-semibold">Diagnosis (ICD-10)</Label>
-                      <Button variant="outline" size="sm" onClick={() => setShowAddDiagnosisInEdit(true)}>
-                        <Plus className="h-4 w-4 mr-1" />Add Diagnosis
-                      </Button>
-                    </div>
-                    {editForm.diagnosisCodes.length === 0 ? (
-                      <div className="p-4 rounded-lg border border-dashed text-center text-muted-foreground">
-                        <Stethoscope className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                        <p className="text-sm">No diagnoses added yet</p>
-                        <p className="text-xs">Click &quot;Add Diagnosis&quot; to add ICD-10 codes</p>
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <FileText className="h-5 w-5 text-emerald-500" />
+                        Medical Notes
+                      </CardTitle>
+                      <CardDescription>Document the consultation findings and plan</CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-5">
+                      {/* Match consultation room order: Presentation → HPI → Exam → Diagnosis → Assessment → Plan → Status */}
+                      <div className="space-y-3">
+                        <div className="space-y-1.5">
+                          <Label>Presentation Complaint</Label>
+                          <Textarea value={editForm.presentationComplaint} onChange={(e) => setEditForm(prev => ({ ...prev, presentationComplaint: e.target.value }))} placeholder="Chief complaint or presenting symptoms..." rows={3} className="mt-0" />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label>History of Present Illness</Label>
+                          <Textarea value={editForm.historyOfPresentIllness} onChange={(e) => setEditForm(prev => ({ ...prev, historyOfPresentIllness: e.target.value }))} placeholder="Detailed history..." rows={4} className="mt-0" />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label>Physical Examination</Label>
+                          <Textarea value={editForm.physicalExamination} onChange={(e) => setEditForm(prev => ({ ...prev, physicalExamination: e.target.value }))} placeholder="Examination findings..." rows={4} className="mt-0" />
+                        </div>
                       </div>
-                    ) : (
-                      <div className="space-y-2">
-                        {editForm.diagnosisCodes.map((dx) => {
-                          const typeStyles = dx.type === 'Primary' ? 'bg-rose-50 dark:bg-rose-900/20 border-rose-200 dark:border-rose-800' : dx.type === 'Secondary' ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800' : 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800';
-                          const typeBadgeStyles = dx.type === 'Primary' ? 'bg-rose-500/15 text-rose-700 dark:text-rose-300 border-rose-300 dark:border-rose-700' : dx.type === 'Secondary' ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-700' : 'bg-blue-500/15 text-blue-700 dark:text-blue-300 border-blue-300 dark:border-blue-700';
-                          return (
-                            <div key={dx.id} className={`p-3 rounded-lg border flex items-start justify-between gap-3 ${typeStyles}`}>
-                              <div className="flex-1 min-w-0">
-                                <div className="flex flex-wrap items-center gap-2 mb-1.5">
-                                  <Badge variant="outline" className={`text-xs font-medium shrink-0 ${typeBadgeStyles}`}>{dx.type}</Badge>
-                                  <span className="font-mono text-sm font-semibold text-foreground">{dx.code}</span>
+
+                      <div className="space-y-3 pt-2 border-t">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-base font-semibold">Diagnosis (ICD-10)</Label>
+                          <Button variant="outline" size="sm" onClick={() => setShowAddDiagnosisInEdit(true)}>
+                            <Plus className="h-4 w-4 mr-1" />Add Diagnosis
+                          </Button>
+                        </div>
+                        {editForm.diagnosisCodes.length === 0 ? (
+                          <div className="p-4 rounded-lg border border-dashed text-center text-muted-foreground">
+                            <Stethoscope className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                            <p className="text-sm">No diagnoses added yet</p>
+                            <p className="text-xs">Click &quot;Add Diagnosis&quot; to add ICD-10 codes</p>
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            {editForm.diagnosisCodes.map((dx) => {
+                              const typeStyles = dx.type === 'Primary' ? 'bg-rose-50 dark:bg-rose-900/20 border-rose-200 dark:border-rose-800' : dx.type === 'Secondary' ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800' : 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800';
+                              const typeBadgeStyles = dx.type === 'Primary' ? 'bg-rose-500/15 text-rose-700 dark:text-rose-300 border-rose-300 dark:border-rose-700' : dx.type === 'Secondary' ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-700' : 'bg-blue-500/15 text-blue-700 dark:text-blue-300 border-blue-300 dark:border-blue-700';
+                              return (
+                                <div key={dx.id} className={`p-3 rounded-lg border flex items-start justify-between gap-3 ${typeStyles}`}>
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex flex-wrap items-center gap-2 mb-1.5">
+                                      <Badge variant="outline" className={`text-xs font-medium shrink-0 ${typeBadgeStyles}`}>{dx.type}</Badge>
+                                      <span className="font-mono text-sm font-semibold text-foreground">{dx.code}</span>
+                                    </div>
+                                    <p className="text-sm text-foreground/90 leading-snug">{dx.name}</p>
+                                    {dx.notes && <p className="text-xs text-muted-foreground mt-1.5">{dx.notes}</p>}
+                                  </div>
+                                  <Button variant="ghost" size="sm" className="h-8 w-8 p-0 shrink-0 rounded-full" onClick={() => setEditForm(prev => ({ ...prev, diagnosisCodes: prev.diagnosisCodes.filter(d => d.id !== dx.id) }))} title="Remove diagnosis">
+                                    <X className="h-4 w-4" />
+                                  </Button>
                                 </div>
-                                <p className="text-sm text-foreground/90 leading-snug">{dx.name}</p>
-                                {dx.notes && <p className="text-xs text-muted-foreground mt-1.5">{dx.notes}</p>}
-                              </div>
-                              <Button variant="ghost" size="sm" className="h-8 w-8 p-0 shrink-0 rounded-full" onClick={() => setEditForm(prev => ({ ...prev, diagnosisCodes: prev.diagnosisCodes.filter(d => d.id !== dx.id) }))} title="Remove diagnosis">
-                                <X className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          );
-                        })}
+                              );
+                            })}
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
 
-                  <div className="space-y-3 pt-2 border-t">
-                    <div className="space-y-1.5">
-                      <Label>Assessment</Label>
-                      <Textarea value={editForm.assessment} onChange={(e) => setEditForm(prev => ({ ...prev, assessment: e.target.value }))} placeholder="Clinical assessment and reasoning..." rows={3} className="mt-0" />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label>Plan</Label>
-                      <Textarea value={editForm.plan} onChange={(e) => setEditForm(prev => ({ ...prev, plan: e.target.value }))} placeholder="Treatment plan, follow-up instructions..." rows={4} className="mt-0" />
-                    </div>
-                  </div>
+                      <div className="space-y-3 pt-2 border-t">
+                        <div className="space-y-1.5">
+                          <Label>Assessment</Label>
+                          <Textarea value={editForm.assessment} onChange={(e) => setEditForm(prev => ({ ...prev, assessment: e.target.value }))} placeholder="Clinical assessment and reasoning..." rows={3} className="mt-0" />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label>Plan</Label>
+                          <Textarea value={editForm.plan} onChange={(e) => setEditForm(prev => ({ ...prev, plan: e.target.value }))} placeholder="Treatment plan, follow-up instructions..." rows={4} className="mt-0" />
+                        </div>
+                      </div>
 
-                  <div className="space-y-1.5 pt-2 border-t">
-                    <Label>Status</Label>
-                    <Select value={editForm.status} onValueChange={(v) => setEditForm(prev => ({ ...prev, status: v as "Completed" | "In Progress" }))}>
-                      <SelectTrigger className="mt-0 w-full max-w-[200px]"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="In Progress">In Progress</SelectItem>
-                        <SelectItem value="Completed">Completed</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
+                      <div className="space-y-1.5 pt-2 border-t">
+                        <Label>Status</Label>
+                        <Select value={editForm.status} onValueChange={(v) => setEditForm(prev => ({ ...prev, status: v as "Completed" | "In Progress" }))}>
+                          <SelectTrigger className="mt-0 w-full max-w-[200px]"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="In Progress">In Progress</SelectItem>
+                            <SelectItem value="Completed">Completed</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </CardContent>
+                  </Card>
                 </TabsContent>
                 <TabsContent value="prescriptions" className="mt-4">
-                  {loadingOrders ? (
-                    <div className="flex items-center justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
-                  ) : (
-                    <div className="space-y-3">
+                  <Card>
+                    <CardHeader>
                       <div className="flex items-center justify-between">
-                        <Label className="text-base font-semibold">Prescriptions (this session)</Label>
-                        <Button variant="outline" size="sm" onClick={() => setShowAddPrescription(true)}><Plus className="h-4 w-4 mr-1" />Add prescription</Button>
+                        <div>
+                          <CardTitle className="flex items-center gap-2">
+                            <Pill className="h-5 w-5 text-violet-500" />
+                            Prescriptions
+                          </CardTitle>
+                          <CardDescription>Prescribe medications - will be sent to Pharmacy queue</CardDescription>
+                        </div>
+                        <Button variant="outline" size="sm" onClick={() => setShowAddPrescription(true)}>
+                          <Plus className="h-4 w-4 mr-1" />Add Medication
+                        </Button>
                       </div>
-                      {editPrescriptions.length === 0 ? (
-                        <div className="p-4 rounded-lg border border-dashed text-center text-muted-foreground text-sm">No prescriptions for this consultation. Click Add prescription to create one.</div>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {loadingOrders ? (
+                        <div className="flex items-center justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+                      ) : editPrescriptions.length === 0 ? (
+                        <div className="text-center py-12 bg-gradient-to-b from-violet-50 to-violet-100/50 dark:from-violet-900/10 dark:to-violet-900/5 rounded-lg border-2 border-dashed border-violet-200 dark:border-violet-800">
+                          <Pill className="h-12 w-12 mx-auto mb-3 text-violet-500 opacity-60" />
+                          <p className="font-medium text-violet-900 dark:text-violet-100 mb-1">No prescriptions yet</p>
+                          <p className="text-sm text-muted-foreground mb-4">Add medications to be sent to the Pharmacy</p>
+                          <Button variant="outline" size="sm" onClick={() => setShowAddPrescription(true)} className="border-violet-300 text-violet-700 hover:bg-violet-100">
+                            <Plus className="h-4 w-4 mr-1" />Add First Medication
+                          </Button>
+                        </div>
                       ) : (
                         <ul className="space-y-2">
                           {editPrescriptions.map((rx: any) => {
@@ -1302,20 +1345,49 @@ export default function ConsultationHistoryPage() {
                           })}
                         </ul>
                       )}
-                    </div>
-                  )}
+                      <div className="p-4 rounded-lg bg-violet-50 dark:bg-violet-900/20 border border-violet-200 dark:border-violet-800">
+                        <h4 className="font-medium text-violet-900 dark:text-violet-100 mb-2 flex items-center gap-2">
+                          <Activity className="h-4 w-4" />Prescription Workflow
+                        </h4>
+                        <div className="flex items-center gap-2 text-xs text-violet-700 dark:text-violet-300 flex-wrap">
+                          <Badge variant="outline" className="bg-violet-100 dark:bg-violet-900/30">Ordered</Badge>
+                          <span>→</span>
+                          <Badge variant="outline" className="bg-blue-100 dark:bg-blue-900/30">Processing</Badge>
+                          <span>→</span>
+                          <Badge variant="outline" className="bg-emerald-100 dark:bg-emerald-900/30">Dispensed ✓</Badge>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
                 </TabsContent>
                 <TabsContent value="lab" className="mt-4">
-                  {loadingOrders ? (
-                    <div className="flex items-center justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
-                  ) : (
-                    <div className="space-y-3">
+                  <Card>
+                    <CardHeader>
                       <div className="flex items-center justify-between">
-                        <Label className="text-base font-semibold">Lab orders (this session)</Label>
-                        <Button variant="outline" size="sm" onClick={() => setShowAddLabOrder(true)}><Plus className="h-4 w-4 mr-1" />Add lab order</Button>
+                        <div>
+                          <CardTitle className="flex items-center gap-2">
+                            <TestTube className="h-5 w-5 text-blue-500" />
+                            Lab Orders
+                          </CardTitle>
+                          <CardDescription>Request laboratory tests - Orders are sent to Lab Tech queue</CardDescription>
+                        </div>
+                        <Button size="sm" onClick={() => setShowAddLabOrder(true)} className="bg-amber-500 hover:bg-amber-600">
+                          <Plus className="h-4 w-4 mr-1" />Add Test
+                        </Button>
                       </div>
-                      {editLabOrders.length === 0 ? (
-                        <div className="p-4 rounded-lg border border-dashed text-center text-muted-foreground text-sm">No lab orders. Click Add lab order to create one.</div>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {loadingOrders ? (
+                        <div className="flex items-center justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+                      ) : editLabOrders.length === 0 ? (
+                        <div className="text-center py-12 bg-gradient-to-b from-amber-50 to-amber-100/50 dark:from-amber-900/10 dark:to-amber-900/5 rounded-lg border-2 border-dashed border-amber-200 dark:border-amber-800">
+                          <TestTube className="h-12 w-12 mx-auto mb-3 text-amber-500 opacity-60" />
+                          <p className="font-medium text-amber-900 dark:text-amber-100 mb-1">No lab orders yet</p>
+                          <p className="text-sm text-muted-foreground mb-4">Order tests to be processed by the lab</p>
+                          <Button variant="outline" size="sm" onClick={() => setShowAddLabOrder(true)} className="border-amber-300 text-amber-700 hover:bg-amber-100">
+                            <Plus className="h-4 w-4 mr-1" />Order First Test
+                          </Button>
+                        </div>
                       ) : (
                         <ul className="space-y-2">
                           {editLabOrders.map((order: any) => (
@@ -1326,20 +1398,49 @@ export default function ConsultationHistoryPage() {
                           ))}
                         </ul>
                       )}
-                    </div>
-                  )}
+                      <div className="p-4 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
+                        <h4 className="font-medium text-blue-900 dark:text-blue-100 mb-2 flex items-center gap-2">
+                          <Activity className="h-4 w-4" />Lab Order Workflow
+                        </h4>
+                        <div className="flex items-center gap-2 text-xs text-blue-700 dark:text-blue-300 flex-wrap">
+                          <Badge variant="outline" className="bg-blue-100 dark:bg-blue-900/30">Ordered</Badge>
+                          <span>→</span>
+                          <Badge variant="outline" className="bg-amber-100 dark:bg-amber-900/30">Results Ready</Badge>
+                          <span>→</span>
+                          <Badge variant="outline" className="bg-emerald-100 dark:bg-emerald-900/30">Verified ✓</Badge>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
                 </TabsContent>
                 <TabsContent value="radiology" className="mt-4">
-                  {loadingOrders ? (
-                    <div className="flex items-center justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
-                  ) : (
-                    <div className="space-y-3">
+                  <Card>
+                    <CardHeader>
                       <div className="flex items-center justify-between">
-                        <Label className="text-base font-semibold">Radiology orders (this session)</Label>
-                        <Button variant="outline" size="sm" onClick={() => setShowAddRadiologyOrder(true)}><Plus className="h-4 w-4 mr-1" />Add radiology order</Button>
+                        <div>
+                          <CardTitle className="flex items-center gap-2">
+                            <ScanLine className="h-5 w-5 text-indigo-500" />
+                            Radiology Orders
+                          </CardTitle>
+                          <CardDescription>Order imaging studies - X-rays, CT, MRI, Ultrasound</CardDescription>
+                        </div>
+                        <Button variant="outline" size="sm" onClick={() => setShowAddRadiologyOrder(true)}>
+                          <Plus className="h-4 w-4 mr-1" />Add Imaging
+                        </Button>
                       </div>
-                      {editRadiologyOrders.length === 0 ? (
-                        <div className="p-4 rounded-lg border border-dashed text-center text-muted-foreground text-sm">No radiology orders. Click Add radiology order to create one.</div>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {loadingOrders ? (
+                        <div className="flex items-center justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+                      ) : editRadiologyOrders.length === 0 ? (
+                        <div className="text-center py-12 bg-gradient-to-b from-indigo-50 to-indigo-100/50 dark:from-indigo-900/10 dark:to-indigo-900/5 rounded-lg border-2 border-dashed border-indigo-200 dark:border-indigo-800">
+                          <ScanLine className="h-12 w-12 mx-auto mb-3 text-indigo-500 opacity-60" />
+                          <p className="font-medium text-indigo-900 dark:text-indigo-100 mb-1">No radiology orders yet</p>
+                          <p className="text-sm text-muted-foreground mb-4">Order imaging studies for diagnosis</p>
+                          <Button variant="outline" size="sm" onClick={() => setShowAddRadiologyOrder(true)} className="border-indigo-300 text-indigo-700 hover:bg-indigo-100">
+                            <Plus className="h-4 w-4 mr-1" />Add First Order
+                          </Button>
+                        </div>
                       ) : (
                         <ul className="space-y-2">
                           {editRadiologyOrders.map((order: any) => (
@@ -1350,20 +1451,51 @@ export default function ConsultationHistoryPage() {
                           ))}
                         </ul>
                       )}
-                    </div>
-                  )}
+                      <div className="p-4 rounded-lg bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800">
+                        <h4 className="font-medium text-indigo-900 dark:text-indigo-100 mb-2 flex items-center gap-2">
+                          <Activity className="h-4 w-4" />Radiology Order Workflow
+                        </h4>
+                        <div className="flex items-center gap-2 text-xs text-indigo-700 dark:text-indigo-300 flex-wrap">
+                          <Badge variant="outline" className="bg-indigo-100 dark:bg-indigo-900/30">Ordered</Badge>
+                          <span>→</span>
+                          <Badge variant="outline" className="bg-blue-100 dark:bg-blue-900/30">Scheduled</Badge>
+                          <span>→</span>
+                          <Badge variant="outline" className="bg-emerald-100 dark:bg-emerald-900/30">Completed ✓</Badge>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
                 </TabsContent>
                 <TabsContent value="physio" className="mt-4">
-                  {loadingOrders ? (
-                    <div className="flex items-center justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
-                  ) : (
-                    <div className="space-y-3">
+                  <Card>
+                    <CardHeader>
                       <div className="flex items-center justify-between">
-                        <Label className="text-base font-semibold">Physiotherapy orders (this session)</Label>
-                        <Button variant="outline" size="sm" onClick={() => setShowAddPhysioOrder(true)}><Plus className="h-4 w-4 mr-1" />Add physio order</Button>
+                        <div>
+                          <CardTitle className="flex items-center gap-2">
+                            <Activity className="h-5 w-5 text-teal-500" />
+                            Physiotherapy Orders
+                          </CardTitle>
+                          <CardDescription>
+                            Order physiotherapy treatment sessions — will be sent to Physiotherapy pool queue.
+                          </CardDescription>
+                        </div>
+                        <Button variant="outline" size="sm" onClick={() => setShowAddPhysioOrder(true)}>
+                          <Plus className="h-4 w-4 mr-1" />Add Physio Order
+                        </Button>
                       </div>
-                      {editPhysioOrders.length === 0 ? (
-                        <div className="p-4 rounded-lg border border-dashed text-center text-muted-foreground text-sm">No physio orders. Click Add physio order to create one.</div>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {loadingOrders ? (
+                        <div className="flex items-center justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+                      ) : editPhysioOrders.length === 0 ? (
+                        <div className="text-center py-12 bg-gradient-to-b from-emerald-50 to-emerald-100/50 dark:from-emerald-900/10 dark:to-emerald-900/5 rounded-lg border-2 border-dashed border-emerald-200 dark:border-emerald-800">
+                          <Activity className="h-12 w-12 mx-auto mb-3 text-emerald-500 opacity-60" />
+                          <p className="font-medium text-emerald-900 dark:text-emerald-100 mb-1">No physiotherapy orders yet</p>
+                          <p className="text-sm text-muted-foreground mb-4">Order physiotherapy treatment sessions</p>
+                          <Button variant="outline" size="sm" onClick={() => setShowAddPhysioOrder(true)} className="border-emerald-300 text-emerald-700 hover:bg-emerald-100">
+                            <Plus className="h-4 w-4 mr-1" />Add First Physio Order
+                          </Button>
+                        </div>
                       ) : (
                         <ul className="space-y-2">
                           {editPhysioOrders.map((order: any) => (
@@ -1374,8 +1506,22 @@ export default function ConsultationHistoryPage() {
                           ))}
                         </ul>
                       )}
-                    </div>
-                  )}
+                      <div className="p-4 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800">
+                        <h4 className="font-medium text-emerald-900 dark:text-emerald-100 mb-2 flex items-center gap-2">
+                          <Activity className="h-4 w-4" />Physio Workflow
+                        </h4>
+                        <div className="flex items-center gap-2 text-xs text-emerald-700 dark:text-emerald-300 flex-wrap">
+                          <Badge variant="outline" className="bg-emerald-100 dark:bg-emerald-900/30">Sent</Badge>
+                          <span>→</span>
+                          <Badge variant="outline" className="bg-blue-100 dark:bg-blue-900/30">Scheduled</Badge>
+                          <span>→</span>
+                          <Badge variant="outline" className="bg-amber-100 dark:bg-amber-900/30">In Progress</Badge>
+                          <span>→</span>
+                          <Badge variant="outline" className="bg-emerald-100 dark:bg-emerald-900/30">Completed ✓</Badge>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
                 </TabsContent>
               </Tabs>
             )}

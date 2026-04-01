@@ -122,6 +122,8 @@ const menuSections: MenuSection[] = [
       { label: "Procedures", href: "/nursing/procedures", icon: Syringe },
       { label: "Procedures History", href: "/nursing/procedures/history", icon: ClipboardList },
       { label: "Ward Care", href: "/nursing/wards", icon: Building2 },
+      { label: "Ward Stock", href: "/nursing/inventory", icon: Database },
+      { label: "Drug Requests", href: "/nursing/requests", icon: Send },
     ],
   },
   {

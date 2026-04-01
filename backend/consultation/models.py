@@ -79,6 +79,20 @@ class ConsultationSession(models.Model):
     class Meta:
         db_table = 'consultation_sessions'
         ordering = ['-started_at']
+        constraints = [
+            # Prevent more than one active session for the same visit.
+            models.UniqueConstraint(
+                fields=['visit'],
+                condition=models.Q(status='active', visit__isnull=False),
+                name='uniq_active_consult_session_per_visit',
+            ),
+            # Additional guard for rows without visit linkage.
+            models.UniqueConstraint(
+                fields=['patient', 'room'],
+                condition=models.Q(status='active'),
+                name='uniq_active_consult_session_per_patient_room',
+            ),
+        ]
     
     def save(self, *args, **kwargs):
         if not self.session_id or self.session_id.strip() == '':

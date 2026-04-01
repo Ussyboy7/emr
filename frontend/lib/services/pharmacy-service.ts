@@ -618,6 +618,11 @@ class PharmacyService {
     search?: string;
     page?: number;
     page_size?: number;
+    to_location?: string;
+    from_location?: string;
+    date_after?: string;
+    date_before?: string;
+    [key: string]: string | number | undefined;
   }): Promise<{ results: StockRequest[]; count: number }> {
     const query = buildQueryString(params || {});
     return apiFetch<{ results: StockRequest[]; count: number }>(`/v1/pharmacy/stock-requests/${query}`);
@@ -636,6 +641,29 @@ class PharmacyService {
       body: JSON.stringify({
         from_location: PHARMACY_LOCATIONS.STORE,
         to_location: PHARMACY_LOCATIONS.DISPENSARY,
+        notes: data.notes || '',
+        items: data.items.map((i) => ({
+          medication: i.medication,
+          quantity: i.quantity,
+          notes: i.notes || '',
+        })),
+      }),
+    });
+  }
+
+  async createNursingStockRequest(data: {
+    notes?: string;
+    items: Array<{
+      medication: number;
+      quantity: number;
+      notes?: string;
+    }>;
+  }): Promise<StockRequest> {
+    return apiFetch<StockRequest>('/v1/pharmacy/stock-requests/', {
+      method: 'POST',
+      body: JSON.stringify({
+        from_location: PHARMACY_LOCATIONS.STORE,
+        to_location: PHARMACY_LOCATIONS.WARD_CARE,
         notes: data.notes || '',
         items: data.items.map((i) => ({
           medication: i.medication,

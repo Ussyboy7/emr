@@ -5,6 +5,7 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.pagination import PageNumberPagination
 from django_filters.rest_framework import DjangoFilterBackend
@@ -148,6 +149,17 @@ class PatientViewSet(viewsets.ModelViewSet):
             new_values={'is_active': False},
             request=self.request,
         )
+
+    def destroy(self, request, *args, **kwargs):
+        """
+        Restrict patient deletion to super admin/admin users.
+        """
+        user = request.user
+        role = (getattr(user, 'system_role', '') or '').strip().lower()
+        is_admin_user = user.is_superuser or role in {'system administrator', 'admin staff'}
+        if not is_admin_user:
+            raise PermissionDenied('Only super admin or admin users can delete patients.')
+        return super().destroy(request, *args, **kwargs)
     
     @action(detail=False, methods=['get'], url_path='counts')
     def counts(self, request):

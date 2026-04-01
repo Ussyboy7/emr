@@ -11,6 +11,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django.utils import timezone
 from django.db import transaction
+from django.db import IntegrityError
 from django.db.models import Prefetch
 from laboratory.pagination import FlexiblePageNumberPagination
 
@@ -111,21 +112,87 @@ class ConsultationSessionViewSet(viewsets.ModelViewSet):
 
         return qs
     
-    def perform_create(self, serializer):
-        """Create consultation session and log audit."""
-        # Set the doctor field using multiple fallback strategies
-        data = serializer.validated_data.copy()
+    def _resolve_active_session_for_create(self, data):
+        """
+        Return existing active session that should be resumed.
+        Priority:
+        1) same visit (strict)
+        2) same patient+room (fallback when visit is absent)
+        """
+        visit = data.get('visit')
+        if visit:
+            existing = (
+                ConsultationSession.objects
+                .filter(visit=visit, status='active')
+                .order_by('-started_at')
+                .first()
+            )
+            if existing:
+                return existing
+
+        patient = data.get('patient')
+        room = data.get('room')
+        if patient and room:
+            return (
+                ConsultationSession.objects
+                .filter(patient=patient, room=room, status='active')
+                .order_by('-started_at')
+                .first()
+            )
+        return None
+
+    def _prepare_session_create_data(self, validated_data):
+        data = validated_data.copy()
         if 'doctor' not in data or data['doctor'] is None:
             doctor = self._find_doctor_for_session(data)
             if doctor:
                 data['doctor'] = doctor
+        return data
 
-        session = serializer.save(created_by=self.request.user, **data)
+    def _log_session_create(self, session):
+        AuditService.log_activity(
+            user=self.request.user,
+            action='create',
+            object_type='consultation_session',
+            object_id=str(session.id),
+            module='consultation',
+            object_repr=f'Session {session.session_id}',
+            description=f'Started consultation session {session.session_id} for patient {session.patient.get_full_name()}',
+            new_values={'session_id': session.session_id, 'status': session.status, 'room': str(session.room.id) if session.room else ''},
+            request=self.request,
+        )
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = self._prepare_session_create_data(serializer.validated_data)
+
+        # Idempotent create: resume existing active session instead of creating duplicates.
+        existing = self._resolve_active_session_for_create(data)
+        if existing:
+            payload = self.get_serializer(existing).data
+            payload['resumed'] = True
+            return Response(payload, status=status.HTTP_200_OK)
+
+        try:
+            session = serializer.save(created_by=self.request.user, **data)
+        except IntegrityError:
+            # Handle race conditions against DB-level unique constraints by returning the now-existing session.
+            existing_after_race = self._resolve_active_session_for_create(data)
+            if existing_after_race:
+                payload = self.get_serializer(existing_after_race).data
+                payload['resumed'] = True
+                return Response(payload, status=status.HTTP_200_OK)
+            raise
+
+        self._log_session_create(session)
+        headers = self.get_success_headers(serializer.data)
+        payload = self.get_serializer(session).data
+        payload['resumed'] = False
+        return Response(payload, status=status.HTTP_201_CREATED, headers=headers)
 
     def _find_doctor_for_session(self, data):
         """Find appropriate doctor for consultation session using multiple strategies."""
-        from accounts.models import User
-
         user = self.request.user
 
         # Strategy 1: ALWAYS use the requesting user who performed the action
@@ -142,17 +209,6 @@ class ConsultationSessionViewSet(viewsets.ModelViewSet):
         # Only use the requesting user who performed the consultation
         # No fallback to other doctors - the actual performer is recorded
         return None
-        AuditService.log_activity(
-            user=self.request.user,
-            action='create',
-            object_type='consultation_session',
-            object_id=str(session.id),
-            module='consultation',
-            object_repr=f'Session {session.session_id}',
-            description=f'Started consultation session {session.session_id} for patient {session.patient.get_full_name()}',
-            new_values={'session_id': session.session_id, 'status': session.status, 'room': str(session.room.id) if session.room else ''},
-            request=self.request,
-        )
     
     @action(detail=True, methods=['post'])
     def end(self, request, pk=None):

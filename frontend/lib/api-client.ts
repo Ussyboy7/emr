@@ -530,8 +530,9 @@ export const apiFetch = async <T = unknown>(path: string, options: FetchOptions 
 
         // NOTE:
         // - Some parts of the app intentionally probe optional endpoints and treat 404 as "not supported".
-        // - Avoid spamming console.error for 404s; callers can still branch on (err as any).status.
-        if (response.status !== 404) {
+        // - For expected business-validation failures (4xx), callers should surface toast/messages
+        //   without noisy console stack traces. Keep console.error for server-side failures only.
+        if (response.status >= 500) {
           console.error(`API request failed with status ${response.status}`, {
             url: response.url,
             status: response.status,

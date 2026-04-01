@@ -13,7 +13,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "sonner";
 import { pharmacyService, type StockRequest, type StockRequestItem } from "@/lib/services";
-import { Send, CheckCircle2, Clock, Loader2, Eye, Zap, Search, Plus, Minus, HelpCircle } from "lucide-react";
+import { PHARMACY_LOCATIONS } from "@/lib/constants/pharmacy-locations";
+import { Send, CheckCircle2, Clock, Loader2, Eye, Zap, Search, Plus, Minus, HelpCircle, Building2 } from "lucide-react";
 
 function useDebouncedValue<T>(value: T, delay: number): T {
   const [debounced, setDebounced] = useState(value);
@@ -37,6 +38,8 @@ export default function StoreRequestsPage() {
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isSavingQuantities, setIsSavingQuantities] = useState(false);
+
+  const [requestTab, setRequestTab] = useState<"dispensary" | "ward">("dispensary");
 
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(50);
@@ -68,6 +71,7 @@ export default function StoreRequestsPage() {
       const baseParams: Record<string, string | number> = { page: 1, page_size: 1 };
       if (debouncedSearchQuery.trim()) baseParams.search = debouncedSearchQuery.trim();
       Object.assign(baseParams, buildDateParams());
+      baseParams.to_location = requestTab === "dispensary" ? PHARMACY_LOCATIONS.DISPENSARY : PHARMACY_LOCATIONS.WARD_CARE;
       const [all, pending, approved, fulfilled, partResp] = await Promise.all([
         pharmacyService.getStockRequests(baseParams),
         pharmacyService.getStockRequests({ ...baseParams, status: "pending" }),
@@ -92,6 +96,7 @@ export default function StoreRequestsPage() {
       const params: Record<string, string | number> = {
         page: currentPage,
         page_size: itemsPerPage,
+        to_location: requestTab === "dispensary" ? PHARMACY_LOCATIONS.DISPENSARY : PHARMACY_LOCATIONS.WARD_CARE,
       };
       if (statusFilter && statusFilter !== "all") params.status = statusFilter;
       if (debouncedSearchQuery.trim()) params.search = debouncedSearchQuery.trim();
@@ -109,11 +114,11 @@ export default function StoreRequestsPage() {
 
   useEffect(() => {
     loadRequests();
-  }, [statusFilter, currentPage, itemsPerPage, debouncedSearchQuery, dateFilter]);
+  }, [statusFilter, currentPage, itemsPerPage, debouncedSearchQuery, dateFilter, requestTab]);
 
   useEffect(() => {
     loadStats();
-  }, [debouncedSearchQuery, statusFilter, dateFilter]);
+  }, [debouncedSearchQuery, statusFilter, dateFilter, requestTab]);
 
   const handleOpenDetails = (req: StockRequest) => {
     setSelectedRequest(req);
@@ -190,12 +195,18 @@ export default function StoreRequestsPage() {
     try {
       setIsProcessing(true);
       await pharmacyService.fulfillStockRequest(requestId);
-      toast.success("Request issued - awaiting dispensary confirmation");
+      toast.success(requestTab === "dispensary" ? "Request issued — awaiting dispensary confirmation" : "Request issued — awaiting ward nurse confirmation");
       setShowDetailsModal(false);
       setSelectedRequest(null);
       await loadRequests();
     } catch (err: any) {
-      toast.error(err?.message || "Failed to issue request");
+      const msg =
+        err?.apiMessage ||
+        err?.message ||
+        (typeof err?.body === "string" && err.body.trim() ? err.body : undefined) ||
+        (typeof err?.body === "object" ? (err.body.error || err.body.detail) : undefined) ||
+        "Failed to issue request";
+      toast.error(msg);
     } finally {
       setIsProcessing(false);
     }
@@ -215,7 +226,7 @@ export default function StoreRequestsPage() {
       pending: { label: "Pending Review", cls: "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-200", tip: "Awaiting store approval" },
       approved: { label: "Approved", cls: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-200", tip: "Ready to issue" },
       partially_fulfilled: { label: "Partially Issued", cls: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200", tip: "Some items issued" },
-      fulfilled: { label: "Issued (Awaiting Confirm)", cls: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-200", tip: "Stock issued; dispensary must confirm receipt" },
+      fulfilled: { label: "Issued (Awaiting Confirm)", cls: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-200", tip: requestTab === "dispensary" ? "Stock issued; dispensary must confirm receipt" : "Stock issued; ward nurse must confirm receipt" },
       received: { label: "Confirmed", cls: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200" },
     };
     const cfg = map[status] || { label: status, cls: "" };
@@ -243,8 +254,38 @@ export default function StoreRequestsPage() {
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl sm:text-3xl font-bold text-foreground">Store Requests</h1>
-            <p className="text-muted-foreground mt-1">Review, approve, and issue stock to dispensary</p>
+            <p className="text-muted-foreground mt-1">
+              {requestTab === "dispensary"
+                ? "Review, approve, and issue stock to Dispensary"
+                : "Review, approve, and issue stock to Ward Care (nursing)"}
+            </p>
           </div>
+        </div>
+
+        {/* Tab switcher */}
+        <div className="flex gap-1 p-1 bg-muted rounded-lg w-fit">
+          <button
+            onClick={() => { setRequestTab("dispensary"); setCurrentPage(1); }}
+            className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+              requestTab === "dispensary"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            <Send className="h-4 w-4" />
+            Dispensary
+          </button>
+          <button
+            onClick={() => { setRequestTab("ward"); setCurrentPage(1); }}
+            className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+              requestTab === "ward"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            <Building2 className="h-4 w-4" />
+            Ward Care
+          </button>
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -348,7 +389,7 @@ export default function StoreRequestsPage() {
                               Approve
                             </Button>
                           )}
-                          {(req.status === "approved" || req.status === "pending") && (
+                          {req.status === "approved" && (
                             <Button size="sm" onClick={() => handleFulfillRequest(req.id)} disabled={isProcessing} className="bg-green-600 hover:bg-green-700">
                               {isProcessing ? "Issuing..." : "Issue"}
                             </Button>
@@ -462,9 +503,11 @@ export default function StoreRequestsPage() {
                           {isProcessing ? "Approving..." : "Approve"}
                         </Button>
                       )}
-                      <Button onClick={() => handleFulfillRequest(selectedRequest.id)} disabled={isProcessing} className="bg-green-600 hover:bg-green-700">
-                        {isProcessing ? "Issuing..." : "Issue to Dispensary"}
-                      </Button>
+                      {selectedRequest.status === "approved" && (
+                        <Button onClick={() => handleFulfillRequest(selectedRequest.id)} disabled={isProcessing} className="bg-green-600 hover:bg-green-700">
+                          {isProcessing ? "Issuing..." : requestTab === "dispensary" ? "Issue to Dispensary" : "Issue to Ward Care"}
+                        </Button>
+                      )}
                     </>
                   )}
                 </DialogFooter>

@@ -18,6 +18,7 @@ import { useRouter } from 'next/navigation';
 import { patientService, type Patient as ApiPatient } from '@/lib/services';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
+import { useCurrentUser } from '@/hooks/use-current-user';
 import { 
   Search, Filter, Users, Phone, Eye, 
   UserPlus, Calendar, FileText, Edit, X, Loader2,
@@ -169,6 +170,13 @@ const getDisplayAge = (age?: number, dob?: string): string => {
   return 'Age unknown';
 };
 
+const normalizeGender = (value?: string): 'male' | 'female' | '' => {
+  const g = (value || '').trim().toLowerCase();
+  if (g === 'male') return 'male';
+  if (g === 'female') return 'female';
+  return '';
+};
+
 // Transform backend patient to frontend format
 const transformPatient = (apiPatient: ApiPatient): Patient => {
   const categoryMap: Record<string, string> = {
@@ -191,15 +199,15 @@ const transformPatient = (apiPatient: ApiPatient): Patient => {
     employeeType: apiPatient.employee_type || '',
     division: apiPatient.division || '',
     age: apiPatient.age || 0,
-    gender: apiPatient.gender === 'male' ? 'Male' : 'Female',
+    gender: normalizeGender(apiPatient.gender) === 'female' ? 'Female' : normalizeGender(apiPatient.gender) === 'male' ? 'Male' : 'Not specified',
     dob: apiPatient.date_of_birth || '',
     phone: apiPatient.phone || '',
     email: apiPatient.email || '',
     bloodGroup: apiPatient.blood_group || '',
     address: apiPatient.residential_address || apiPatient.permanent_address || '',
     emergencyContact: apiPatient.nok_first_name ? `${apiPatient.nok_first_name} ${apiPatient.nok_middle_name || ''} - ${apiPatient.nok_phone || ''}`.trim() : '',
-    lastVisit: '', // Will be populated if visit data is available
-    totalVisits: 0, // Will be populated if visit data is available
+    lastVisit: apiPatient.last_visit_at ? formatDate(apiPatient.last_visit_at) : '—',
+    totalVisits: Number(apiPatient.total_visits || 0),
     location: getLocation(apiPatient),
     photoUrl: getPhotoUrl(apiPatient.photo),
     registeredAt: apiPatient.created_at?.split('T')[0] || '',
@@ -213,6 +221,7 @@ const categories = ["All Categories", "Employee", "Retiree", "Dependent", "NonNP
 
 export default function PatientsListPage() {
   const router = useRouter();
+  const { currentUser } = useCurrentUser();
   const { locations: locationOptions } = useLocationOptions({ includeAll: true });
   const [patients, setPatients] = useState<Patient[]>([]);
   const [loading, setLoading] = useState(true);
@@ -276,8 +285,16 @@ export default function PatientsListPage() {
   const [isRetireeConversionOpen, setIsRetireeConversionOpen] = useState(false);
   const [convertingToRetiree, setConvertingToRetiree] = useState(false);
   const [patientToConvert, setPatientToConvert] = useState<Patient | null>(null);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [patientToDelete, setPatientToDelete] = useState<Patient | null>(null);
+  const [deletingPatient, setDeletingPatient] = useState(false);
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+
+  const canDeletePatients = useMemo(() => {
+    if (currentUser?.isSuperuser) return true;
+    return (currentUser?.systemRole || '').toLowerCase().includes('admin');
+  }, [currentUser?.isSuperuser, currentUser?.systemRole]);
   
   // Reset form when selectedPatient changes (new patient selected for editing)
   useEffect(() => {
@@ -356,6 +373,37 @@ export default function PatientsListPage() {
       
       // Transform patients (visit data will be fetched on-demand when viewing patient details)
       const transformedPatients = response.results.map(apiPatient => transformPatient(apiPatient));
+
+      // Backward-compatible fallback:
+      // If backend hasn't reloaded the new `total_visits`/`last_visit_at` fields yet,
+      // compute last visit + visit count per patient for the current page.
+      const needsVisitFallback = response.results.some(
+        (p: any) => p.total_visits === undefined || p.last_visit_at === undefined
+      );
+      if (needsVisitFallback) {
+        await Promise.allSettled(
+          transformedPatients.map(async (patient) => {
+            const pid = Number(patient.numericId || patient.id);
+            if (!Number.isFinite(pid) || pid <= 0) return;
+            try {
+              const visits = await patientService.getPatientVisits(pid);
+              patient.totalVisits = visits.length;
+              if (visits.length > 0) {
+                const latest = [...visits].sort((a, b) => {
+                  const aTs = new Date(`${a.date}T${a.time || '00:00:00'}`).getTime();
+                  const bTs = new Date(`${b.date}T${b.time || '00:00:00'}`).getTime();
+                  return bTs - aTs;
+                })[0];
+                patient.lastVisit = latest?.date ? formatDate(latest.date) : '—';
+              } else {
+                patient.lastVisit = '—';
+              }
+            } catch {
+              // Keep default values if fallback call fails.
+            }
+          })
+        );
+      }
       
       // Fetch employment details for Employee and Retiree patients
       await Promise.allSettled(
@@ -433,6 +481,11 @@ export default function PatientsListPage() {
     setIsRetireeConversionOpen(true);
   };
 
+  const openDeletePatient = (patient: Patient) => {
+    setPatientToDelete(patient);
+    setIsDeleteDialogOpen(true);
+  };
+
   const handleRetireeConversion = async () => {
     if (!patientToConvert) return;
 
@@ -460,6 +513,28 @@ export default function PatientsListPage() {
       toast.error(error?.message || 'Failed to convert patient to retiree');
     } finally {
       setConvertingToRetiree(false);
+    }
+  };
+
+  const handleDeletePatient = async () => {
+    if (!patientToDelete) return;
+    const numericId = Number(patientToDelete.numericId || patientToDelete.id);
+    if (!Number.isFinite(numericId) || numericId <= 0) {
+      toast.error('Invalid patient identifier');
+      return;
+    }
+
+    setDeletingPatient(true);
+    try {
+      await patientService.deletePatient(numericId);
+      toast.success(`Patient ${patientToDelete.name} deleted`);
+      setIsDeleteDialogOpen(false);
+      setPatientToDelete(null);
+      await loadPatients();
+    } catch (error: any) {
+      toast.error(error?.message || 'Failed to delete patient');
+    } finally {
+      setDeletingPatient(false);
     }
   };
 
@@ -578,7 +653,7 @@ export default function PatientsListPage() {
       const formData = {
         title: normalizedTitle,
         personalNumber: (apiPatient.personal_number || '').trim(),
-        gender: (apiPatient.gender === 'female' ? 'female' : 'male') as 'male' | 'female',
+        gender: (normalizeGender(apiPatient.gender) || 'male') as 'male' | 'female',
         firstName: apiPatient.first_name || '',
         lastName: apiPatient.surname || '',
         middleName: apiPatient.middle_name || '',
@@ -1035,6 +1110,17 @@ export default function PatientsListPage() {
                               <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openEditModal(patient)} title="Edit Patient">
                                 <Edit className="h-4 w-4 text-muted-foreground hover:text-blue-500" />
                               </Button>
+                              {canDeletePatients && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-7 w-7 p-0"
+                                  onClick={() => openDeletePatient(patient)}
+                                  title="Delete Patient"
+                                >
+                                  <Trash2 className="h-4 w-4 text-muted-foreground hover:text-red-500" />
+                                </Button>
+                              )}
                               {patient.category === 'Employee' && (
                                 <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openRetireeConversion(patient)} title="Convert to Retiree">
                                   <UserCheck className="h-4 w-4 text-muted-foreground hover:text-orange-500" />
@@ -1053,15 +1139,10 @@ export default function PatientsListPage() {
                             <span>{getDisplayAge(patient.age, patient.dob)} {patient.gender}</span>
                             <span>•</span>
                             <span className="flex items-center gap-1"><Phone className="h-3 w-3" />{patient.phone || 'No phone'}</span>
-                            {patient.location ? (
+                            {patient.division && (
                               <>
                                 <span>•</span>
-                                <span className="truncate max-w-[120px]">{patient.location}</span>
-                              </>
-                            ) : (
-                              <>
-                                <span>•</span>
-                                <span className="text-muted-foreground italic">Location not set</span>
+                                <span className="truncate max-w-[120px]">{patient.division}</span>
                               </>
                             )}
                             <span>•</span>
@@ -2031,28 +2112,28 @@ export default function PatientsListPage() {
                 Convert to Retiree Status
               </AlertDialogTitle>
               <AlertDialogDescription>
-                {patientToConvert && (
-                  <div className="space-y-3">
-                    <p>
-                      Are you sure you want to convert <strong>{patientToConvert.name}</strong> from Employee to Retiree status?
-                    </p>
-                    <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3">
-                      <p className="text-sm text-amber-800 dark:text-amber-200">
-                        <strong>What happens:</strong>
-                      </p>
-                      <ul className="text-sm text-amber-700 dark:text-amber-300 mt-2 space-y-1">
-                        <li>• Patient category changes from "Employee" to "Retiree"</li>
-                        <li>• Patient ID will be updated (E-XXX → R-XXX format)</li>
-                        <li>• All existing medical records and history are preserved</li>
-                        <li>• Employee dependents become retiree dependents</li>
-                      </ul>
-                    </div>
-                    <p className="text-sm text-muted-foreground">
-                      This action maintains data integrity and prevents duplicate patient records.
-                    </p>
-                  </div>
-                )}
+                {patientToConvert
+                  ? `Are you sure you want to convert ${patientToConvert.name} from Employee to Retiree status?`
+                  : 'Are you sure you want to convert this patient to retiree status?'}
               </AlertDialogDescription>
+              {patientToConvert && (
+                <div className="space-y-3">
+                  <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3">
+                    <p className="text-sm text-amber-800 dark:text-amber-200">
+                      <strong>What happens:</strong>
+                    </p>
+                    <ul className="text-sm text-amber-700 dark:text-amber-300 mt-2 space-y-1">
+                      <li>• Patient category changes from "Employee" to "Retiree"</li>
+                      <li>• Patient ID will be updated (E-XXX → R-XXX format)</li>
+                      <li>• All existing medical records and history are preserved</li>
+                      <li>• Employee dependents become retiree dependents</li>
+                    </ul>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    This action maintains data integrity and prevents duplicate patient records.
+                  </p>
+                </div>
+              )}
             </AlertDialogHeader>
             <AlertDialogFooter>
               <AlertDialogCancel onClick={() => setIsRetireeConversionOpen(false)}>
@@ -2072,6 +2153,44 @@ export default function PatientsListPage() {
                   <>
                     <UserCheck className="h-4 w-4 mr-2" />
                     Convert to Retiree
+                  </>
+                )}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle className="flex items-center gap-2">
+                <Trash2 className="h-5 w-5 text-red-500" />
+                Delete Patient
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                {patientToDelete
+                  ? `Are you sure you want to delete ${patientToDelete.name} (${patientToDelete.id})? This performs a soft delete and will remove the patient from active lists.`
+                  : 'Are you sure you want to delete this patient?'}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel onClick={() => setIsDeleteDialogOpen(false)} disabled={deletingPatient}>
+                Cancel
+              </AlertDialogCancel>
+              <AlertDialogAction
+                onClick={handleDeletePatient}
+                disabled={deletingPatient}
+                className="bg-red-600 hover:bg-red-700"
+              >
+                {deletingPatient ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Delete
                   </>
                 )}
               </AlertDialogAction>

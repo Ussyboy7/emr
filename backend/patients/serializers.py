@@ -108,12 +108,15 @@ class PatientListSerializer(serializers.ModelSerializer):
     age_display = serializers.ReadOnlyField()
     gender = serializers.SerializerMethodField()
     photo = serializers.SerializerMethodField()
+    total_visits = serializers.SerializerMethodField()
+    last_visit_at = serializers.SerializerMethodField()
     
     class Meta:
         model = Patient
         fields = [
             'id', 'patient_id', 'category', 'full_name', 'gender', 'age',
             'age_display', 'personal_number', 'phone', 'email', 'blood_group', 'is_active', 'created_at', 'photo',
+            'total_visits', 'last_visit_at',
         ]
         read_only_fields = ['id', 'patient_id', 'created_at', 'age']
     
@@ -129,6 +132,16 @@ class PatientListSerializer(serializers.ModelSerializer):
             # Return relative URL - frontend will construct full URL
             return obj.photo.url
         return None
+
+    def get_total_visits(self, obj):
+        return obj.visits.count()
+
+    def get_last_visit_at(self, obj):
+        last_visit = obj.visits.order_by('-date', '-time', '-created_at').first()
+        if not last_visit:
+            return None
+        # Combine visit date+time to preserve chronology in UI
+        return f"{last_visit.date}T{last_visit.time}"
     
 
 

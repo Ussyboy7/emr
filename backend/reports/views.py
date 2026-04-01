@@ -723,7 +723,7 @@ class DispensedPrescriptionsReportView(views.APIView):
                 'unit': row.get('unit') or '',
                 'quantity_dispensed': float(row.get('total_dispensed_quantity') or 0),
             })
-
+        
         return Response({
             'data': monthly_data,
             'summary': {

@@ -66,7 +66,7 @@ export default function PhysioPoolQueuePage() {
   const [authError, setAuthError] = useState<unknown | null>(null);
   useAuthRedirect(authError);
   const { currentUser } = useCurrentUser();
-  const physioId = currentUser?.id ? Number(currentUser.id) : 1;
+  const physioId = currentUser?.id ? Number(currentUser.id) : null;
 
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState('pending');
@@ -469,6 +469,11 @@ export default function PhysioPoolQueuePage() {
         toast.success('Session updated successfully');
         // Session updated successfully
       } else {
+        if (!physioId) {
+          toast.error('Unable to identify physiotherapist. Please re-login and try again.');
+          setIsSubmitting(false);
+          return;
+        }
         // Get existing sessions to determine next session number
         const existingSessions = await physioService.getSessions({ order: selectedOrder.id });
         const nextSessionNumber = existingSessions.results.length + 1;
@@ -476,7 +481,7 @@ export default function PhysioPoolQueuePage() {
         // Create comprehensive session with all assessment data
         const sessionPayload = {
           order: selectedOrder.id,
-          physiotherapist: physioId, // TODO: Get current user ID from auth context
+          physiotherapist: physioId,
           session_number: nextSessionNumber,
           scheduled_at: new Date().toISOString(),
           presenting_complaint: sessionData.presenting_complaint,
@@ -687,10 +692,14 @@ export default function PhysioPoolQueuePage() {
 
   const handleScheduleNextSession = async () => {
     if (!selectedOrder || !scheduledAt) return;
+    if (!physioId) {
+      toast.error('Unable to identify physiotherapist. Please re-login and try again.');
+      return;
+    }
     setIsSubmitting(true);
 
     try {
-      await physioService.createNextSession(selectedOrder.id, scheduledAt, 1, sessionNotes); // TODO: Get current user ID
+      await physioService.createNextSession(selectedOrder.id, scheduledAt, physioId, sessionNotes);
       toast.success('Next session scheduled successfully');
       setIsScheduleNextDialogOpen(false);
       setSelectedOrder(null);
@@ -746,7 +755,7 @@ export default function PhysioPoolQueuePage() {
         priority: 'routine' // Default priority for physio-initiated treatments
       } as any);
 
-      toast.success('New treatment course created successfully');
+      toast.success('New physio order created successfully');
       setIsNewTreatmentDialogOpen(false);
       setSelectedOrder(null);
       setNewTreatmentData({
@@ -1280,6 +1289,10 @@ export default function PhysioPoolQueuePage() {
                           <Button
                             onClick={async () => {
                               try {
+                                if (!physioId) {
+                                  toast.error('Unable to identify physiotherapist. Please re-login and try again.');
+                                  return;
+                                }
                                 await loadPatientVitals(selectedOrder.patient);
                                 // Continue Session = always start a NEW session (next in sequence), never edit the last session's notes
                                 const existingSessions = await physioService.getSessions({ order: selectedOrder.id });
@@ -1289,7 +1302,7 @@ export default function PhysioPoolQueuePage() {
 
                                 const sessionPayload = {
                                   order: selectedOrder.id,
-                                  physiotherapist: physioId, // TODO: Get current user ID from auth context
+                                  physiotherapist: physioId,
                                   session_number: nextSessionNumber,
                                   scheduled_at: new Date().toISOString(),
                                   status: 'in_progress',
@@ -1414,7 +1427,7 @@ export default function PhysioPoolQueuePage() {
                           Extend Treatment
                         </Button>
                       )}
-                      {/* New treatment course for same patient */}
+                      {/* New physiotherapy order for same patient */}
                       <Button
                         onClick={() => { setIsNewTreatmentDialogOpen(true); setIsViewDialogOpen(false); }}
                         variant="outline"
@@ -1422,7 +1435,7 @@ export default function PhysioPoolQueuePage() {
                         className="border-green-500 text-green-600 hover:bg-green-50 hover:border-green-600"
                       >
                         <Plus className="h-4 w-4 mr-2" />
-                        New Course
+                        Create New Physio Order
                       </Button>
                       <Button
                         variant="outline"

@@ -42,12 +42,12 @@ class PhysioOrderViewSet(viewsets.ModelViewSet):
     """ViewSet for managing physiotherapy orders."""
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['status', 'patient', 'priority', 'consultation_session']
+    filterset_fields = ['status', 'patient', 'priority', 'consultation_session', 'visit']
     search_fields = ['patient__full_name', 'patient__patient_id', 'diagnosis', 'chief_complaint']
     ordering = ['-ordered_at']
 
     def get_queryset(self):
-        return PhysioOrder.objects.select_related('patient', 'ordered_by').all()
+        return PhysioOrder.objects.select_related('patient', 'ordered_by', 'visit').all()
 
     def get_serializer_class(self):
         if self.action == 'create':
@@ -90,10 +90,13 @@ class PhysioOrderViewSet(viewsets.ModelViewSet):
         except Visit.DoesNotExist:
             return Response({"detail": "Visit not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        clinic = normalize_clinic_name(visit.clinic or "")
-        if clinic != "Physiotherapy":
+        raw_clinics = list(visit.clinics or [])
+        if visit.clinic and visit.clinic not in raw_clinics:
+            raw_clinics.append(visit.clinic)
+        normalized_clinics = [normalize_clinic_name(c or "") for c in raw_clinics if c]
+        if "Physiotherapy" not in normalized_clinics:
             return Response(
-                {"detail": f"Visit clinic must be Physiotherapy (got '{clinic}')."},
+                {"detail": f"Visit clinics must include Physiotherapy (got '{', '.join(normalized_clinics) or 'none'}')."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -101,31 +104,23 @@ class PhysioOrderViewSet(viewsets.ModelViewSet):
         now = timezone.now()
         created = False
 
+        # Strictly bind check-in to this visit only (never reuse another visit's order).
         order = (
             PhysioOrder.objects.filter(
                 patient=patient,
-                consultation_session__isnull=True,
-                ordered_at__date=visit.date,
+                visit=visit,
                 status__in=["pending", "scheduled", "in_progress"],
             )
             .order_by("-ordered_at")
             .first()
         )
-        if not order:
-            order = (
-                PhysioOrder.objects.filter(
-                    patient=patient,
-                    status__in=["pending", "scheduled", "in_progress"],
-                )
-                .order_by("-ordered_at")
-                .first()
-            )
 
         if not order:
             last_order = PhysioOrder.objects.filter(patient=patient).order_by("-ordered_at").first()
             order = PhysioOrder.objects.create(
                 patient=patient,
                 ordered_by=request.user,
+                visit=visit,
                 consultation_session=None,
                 diagnosis=(last_order.diagnosis if last_order else "") or "",
                 chief_complaint=(last_order.chief_complaint if last_order else "") or "Physiotherapy follow-up",
@@ -138,10 +133,13 @@ class PhysioOrderViewSet(viewsets.ModelViewSet):
             )
             created = True
         else:
+            # Backfill visit link for older rows created before strict visit-linking.
+            if order.visit_id is None:
+                order.visit = visit
             if order.status == "pending":
                 order.status = "scheduled"
                 order.scheduled_at = order.scheduled_at or now
-                order.save()
+            order.save()
 
         try:
             from notifications.services import NotificationService
@@ -189,6 +187,14 @@ class PhysioOrderViewSet(viewsets.ModelViewSet):
         results = {}
 
         for visit in visits:
+            raw_clinics = list(visit.clinics or [])
+            if visit.clinic and visit.clinic not in raw_clinics:
+                raw_clinics.append(visit.clinic)
+            normalized_clinics = [normalize_clinic_name(c or "") for c in raw_clinics if c]
+            if "Physiotherapy" not in normalized_clinics:
+                results[str(visit.id)] = {"checked_in": False}
+                continue
+
             patient = getattr(visit, "patient", None)
             if not patient:
                 results[str(visit.id)] = {"checked_in": False}
@@ -197,23 +203,12 @@ class PhysioOrderViewSet(viewsets.ModelViewSet):
             order = (
                 PhysioOrder.objects.filter(
                     patient=patient,
-                    consultation_session__isnull=True,
-                    ordered_at__date=visit.date,
-                    status__in=["pending", "scheduled", "in_progress"],
+                    visit=visit,
+                    status__in=["pending", "scheduled", "in_progress", "completed"],
                 )
                 .order_by("-ordered_at")
                 .first()
             )
-
-            if not order:
-                order = (
-                    PhysioOrder.objects.filter(
-                        patient=patient,
-                        status__in=["pending", "scheduled", "in_progress"],
-                    )
-                    .order_by("-ordered_at")
-                    .first()
-                )
 
             if not order:
                 results[str(visit.id)] = {"checked_in": False}
