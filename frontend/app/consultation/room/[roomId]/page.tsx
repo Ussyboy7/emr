@@ -66,6 +66,10 @@ import { LARGE_PAGE_SIZE } from '@/lib/constants/ui';
 import { safeAsync, logError } from '@/lib/utils/error-handling';
 import { LAB_OTHER_TEMPLATE_CODE } from '@/components/consultation/orders/LabOrderModal';
 import { RAD_OTHER_TEMPLATE_CODE } from '@/components/consultation/orders/RadiologyOrderModal';
+import {
+  getPresentingComplaintOptions,
+  type PresentingComplaintCategory,
+} from '@/lib/constants/presenting-complaints';
 import { LabCompletedReportDialog } from '@/components/laboratory/LabCompletedReportDialog';
 import {
   transformApiRowToCompletedTest,
@@ -144,6 +148,48 @@ const formatPriority = (p: string | undefined): string => {
   if (s === 'urgent') return 'Urgent';
   if (s === 'routine') return 'Routine';
   return String(p);
+};
+
+const splitPresentationComplaintLines = (value: string): string[] =>
+  value
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+const joinPresentationComplaintLines = (selected: string[], customText: string): string => {
+  const customLines = customText
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  return [...selected, ...customLines].join('\n');
+};
+
+const parsePresentationComplaintValue = (
+  value: string,
+  optionLabelMap: Map<string, string>,
+  optionSet: Set<string>
+): { selected: string[]; customText: string } => {
+  const selectedNormalized = new Set<string>();
+  const selected: string[] = [];
+  const custom: string[] = [];
+
+  for (const line of splitPresentationComplaintLines(value)) {
+    const normalized = line.toLowerCase();
+    if (optionSet.has(normalized)) {
+      if (!selectedNormalized.has(normalized)) {
+        selectedNormalized.add(normalized);
+        selected.push(optionLabelMap.get(normalized) ?? line);
+      }
+      continue;
+    }
+    custom.push(line);
+  }
+
+  return {
+    selected,
+    customText: custom.join('\n'),
+  };
 };
 
 const normalizeGenderLabel = (value: unknown): string => {
@@ -507,6 +553,76 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   const [followUpDate, setFollowUpDate] = useState("");
   const [followUpReason, setFollowUpReason] = useState("");
   const [medicalNotes, setMedicalNotes] = useState({ presentationComplaint: "", historyOfPresentIllness: "", physicalExamination: "", assessment: "", plan: "" });
+  const [presentingComplaintLibrary, setPresentingComplaintLibrary] = useState<PresentingComplaintCategory[]>([]);
+  const [presentationComplaintSearch, setPresentationComplaintSearch] = useState("");
+  const presentingComplaintOptions = useMemo(
+    () => getPresentingComplaintOptions(presentingComplaintLibrary),
+    [presentingComplaintLibrary]
+  );
+  const presentingComplaintOptionSet = useMemo(
+    () => new Set(presentingComplaintOptions.map((option) => option.normalizedLabel)),
+    [presentingComplaintOptions]
+  );
+  const presentingComplaintLabelMap = useMemo(
+    () => new Map(presentingComplaintOptions.map((option) => [option.normalizedLabel, option.label])),
+    [presentingComplaintOptions]
+  );
+  const parsedPresentationComplaint = useMemo(
+    () =>
+      parsePresentationComplaintValue(
+        medicalNotes.presentationComplaint,
+        presentingComplaintLabelMap,
+        presentingComplaintOptionSet
+      ),
+    [medicalNotes.presentationComplaint, presentingComplaintLabelMap, presentingComplaintOptionSet]
+  );
+  const selectedPresentingComplaintSet = useMemo(
+    () => new Set(parsedPresentationComplaint.selected.map((item) => item.trim().toLowerCase())),
+    [parsedPresentationComplaint.selected]
+  );
+  const filteredPresentationComplaintGroups = useMemo(() => {
+    const query = presentationComplaintSearch.trim().toLowerCase();
+    return presentingComplaintLibrary.map((group) => ({
+      category: group.category,
+      complaints: group.complaints.filter((complaint) =>
+        query.length === 0 ? true : complaint.toLowerCase().includes(query)
+      ),
+    })).filter((group) => group.complaints.length > 0);
+  }, [presentingComplaintLibrary, presentationComplaintSearch]);
+  const togglePresentationComplaintSelection = useCallback(
+    (complaint: string) => {
+      const normalizedComplaint = complaint.trim().toLowerCase();
+      if (!normalizedComplaint) return;
+
+      setMedicalNotes((prev) => {
+        const parsed = parsePresentationComplaintValue(
+          prev.presentationComplaint,
+          presentingComplaintLabelMap,
+          presentingComplaintOptionSet
+        );
+        const selectedSet = new Set(parsed.selected.map((item) => item.trim().toLowerCase()));
+
+        if (selectedSet.has(normalizedComplaint)) {
+          selectedSet.delete(normalizedComplaint);
+        } else {
+          selectedSet.add(normalizedComplaint);
+        }
+
+        const selectedInLibraryOrder = presentingComplaintOptions
+          .filter((option) => selectedSet.has(option.normalizedLabel))
+          .map((option) => option.label);
+
+        return {
+          ...prev,
+          presentationComplaint: joinPresentationComplaintLines(
+            selectedInLibraryOrder,
+            parsed.customText
+          ),
+        };
+      });
+    },
+    [presentingComplaintLabelMap, presentingComplaintOptionSet, presentingComplaintOptions]
+  );
   const [diagnoses, setDiagnoses] = useState<Diagnosis[]>([]);
   const [icd10Codes, setIcd10Codes] = useState<ICD10Code[]>([]);
   const [icd10SearchResults, setIcd10SearchResults] = useState<ICD10Code[]>([]);
@@ -839,6 +955,34 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
   const [selectedPrescription, setSelectedPrescription] = useState<any | null>(null);
   const [showPrescriptionViewer, setShowPrescriptionViewer] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadPresentingComplaintLibrary = async () => {
+      try {
+        const categories = await consultationService.getPresentingComplaintLibrary();
+        if (cancelled) return;
+
+        const mappedLibrary: PresentingComplaintCategory[] = categories
+          .map((category) => ({
+            category: category.name,
+            complaints: (category.complaints || []).map((complaint) => complaint.label).filter(Boolean),
+          }))
+          .filter((entry) => entry.category.trim().length > 0);
+
+        setPresentingComplaintLibrary(mappedLibrary);
+      } catch (error) {
+        console.error('Failed to load presenting complaints library:', error);
+        setPresentingComplaintLibrary([]);
+      }
+    };
+
+    loadPresentingComplaintLibrary();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   
   // Vitals detail modal state
   const [selectedVital, setSelectedVital] = useState<VitalsData | null>(null);
@@ -5045,7 +5189,91 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
             <Card>
               <CardHeader><CardTitle>Medical Notes</CardTitle><CardDescription>Document the consultation findings and plan</CardDescription></CardHeader>
               <CardContent className="space-y-4">
-                <div className="space-y-2"><Label>Presentation Complaint</Label><Textarea value={medicalNotes.presentationComplaint} onChange={(e) => setMedicalNotes({ ...medicalNotes, presentationComplaint: e.target.value })} placeholder="Chief complaint or presenting symptoms..." rows={3} /></div>
+                <div className="space-y-2">
+                  <Label>Presentation Complaint</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Search and select one or more presenting complaints.
+                  </p>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      value={presentationComplaintSearch}
+                      onChange={(e) => setPresentationComplaintSearch(e.target.value)}
+                      placeholder="Search complaint library..."
+                      className="pl-9"
+                    />
+                  </div>
+                  <div className="max-h-64 overflow-y-auto rounded-md border p-2 space-y-2">
+                    {filteredPresentationComplaintGroups.length === 0 ? (
+                      <p className="px-1 py-2 text-sm text-muted-foreground">
+                        {presentingComplaintLibrary.length === 0
+                          ? 'No presenting complaints configured yet. Add entries in Admin > Settings > Consultation.'
+                          : 'No matching complaint found.'}
+                      </p>
+                    ) : (
+                      filteredPresentationComplaintGroups.map((group) => (
+                        <div key={group.category} className="space-y-1">
+                          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide px-1">
+                            {group.category}
+                          </p>
+                          {group.complaints.map((complaint) => {
+                            const normalizedComplaint = complaint.toLowerCase();
+                            const selected = selectedPresentingComplaintSet.has(normalizedComplaint);
+
+                            return (
+                              <div
+                                key={`${group.category}-${complaint}`}
+                                role="button"
+                                tabIndex={0}
+                                className="w-full flex items-start gap-2 rounded-md px-2 py-1.5 text-left hover:bg-muted/70 transition-colors cursor-pointer"
+                                onClick={() => togglePresentationComplaintSelection(complaint)}
+                                onKeyDown={(event) => {
+                                  if (event.key === 'Enter' || event.key === ' ') {
+                                    event.preventDefault();
+                                    togglePresentationComplaintSelection(complaint);
+                                  }
+                                }}
+                              >
+                                <Checkbox checked={selected} className="mt-0.5 pointer-events-none" />
+                                <span className="text-sm">{complaint}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                  {parsedPresentationComplaint.selected.length > 0 ? (
+                    <div className="flex flex-wrap gap-2">
+                      {parsedPresentationComplaint.selected.map((complaint) => (
+                        <Badge key={complaint} variant="secondary" className="text-xs">
+                          {complaint}
+                        </Badge>
+                      ))}
+                    </div>
+                  ) : null}
+                  <Textarea
+                    value={parsedPresentationComplaint.customText}
+                    onChange={(e) =>
+                      setMedicalNotes((prev) => {
+                        const parsed = parsePresentationComplaintValue(
+                          prev.presentationComplaint,
+                          presentingComplaintLabelMap,
+                          presentingComplaintOptionSet
+                        );
+                        return {
+                          ...prev,
+                          presentationComplaint: joinPresentationComplaintLines(
+                            parsed.selected,
+                            e.target.value
+                          ),
+                        };
+                      })
+                    }
+                    placeholder="Additional free-text complaint details (optional)..."
+                    rows={2}
+                  />
+                </div>
                 <div className="space-y-2"><Label>History of Present Illness</Label><Textarea value={medicalNotes.historyOfPresentIllness} onChange={(e) => setMedicalNotes({ ...medicalNotes, historyOfPresentIllness: e.target.value })} placeholder="Detailed history..." rows={4} /></div>
                 <div className="space-y-2"><Label>Physical Examination</Label><Textarea value={medicalNotes.physicalExamination} onChange={(e) => setMedicalNotes({ ...medicalNotes, physicalExamination: e.target.value })} placeholder="Examination findings..." rows={4} /></div>
                 

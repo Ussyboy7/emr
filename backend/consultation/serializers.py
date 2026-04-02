@@ -2,7 +2,17 @@
 Serializers for the Consultation app.
 """
 from rest_framework import serializers
-from .models import ConsultationRoom, ConsultationSession, ConsultationQueue, Referral, ResponsibilityFormIssuance, Diagnosis, ICD10Code
+from .models import (
+    ConsultationRoom,
+    ConsultationSession,
+    ConsultationQueue,
+    Referral,
+    ResponsibilityFormIssuance,
+    Diagnosis,
+    ICD10Code,
+    PresentingComplaintCategory,
+    PresentingComplaint,
+)
 from patients.serializers import PatientListSerializer, VitalReadingSerializer
 
 
@@ -291,3 +301,36 @@ class DiagnosisSerializer(serializers.ModelSerializer):
                 'category': obj.icd10_code.category,
             }
         return None
+
+
+class PresentingComplaintSerializer(serializers.ModelSerializer):
+    """Serializer for presenting complaint library items."""
+
+    category_name = serializers.CharField(source='category.name', read_only=True)
+
+    class Meta:
+        model = PresentingComplaint
+        fields = '__all__'
+
+
+class PresentingComplaintCategorySerializer(serializers.ModelSerializer):
+    """Serializer for presenting complaint categories."""
+
+    complaints = serializers.SerializerMethodField()
+    complaint_count = serializers.IntegerField(read_only=True)
+    active_complaint_count = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = PresentingComplaintCategory
+        fields = '__all__'
+
+    def get_complaints(self, obj):
+        include_complaints = bool(self.context.get('include_complaints'))
+        if not include_complaints:
+            return None
+
+        queryset = obj.complaints.all().order_by('sort_order', 'label')
+        if self.context.get('active_only'):
+            queryset = queryset.filter(is_active=True)
+
+        return PresentingComplaintSerializer(queryset, many=True, context=self.context).data

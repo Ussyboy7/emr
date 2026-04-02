@@ -684,7 +684,7 @@ export default function PrescriptionsPage() {
 
   // Load brands when pharmacist selects a generic in Substitute modal
   useEffect(() => {
-    if (substitutionForm.reason !== 'substitute' || !substitutionForm.selectedSubstitute || !substitutionMed) return;
+    if (substitutionForm.reason === 'brand_selection' || !substitutionForm.selectedSubstitute || !substitutionMed) return;
     const selected = substituteSearchResults.find((s) => s.id === substitutionForm.selectedSubstitute);
     if (!selected || selected.type !== 'generic') {
       setSubstituteBrandOptions([]);
@@ -1149,10 +1149,11 @@ export default function PrescriptionsPage() {
         return;
       }
 
-      const response = await pharmacyService.splitComboPrescriptionItem(rxId, itemId);
+      const splitResponse: any = await pharmacyService.splitComboPrescriptionItem(rxId, itemId);
+      const refreshed = await pharmacyService.getPrescription(rxId);
       const transformed = transformMedications(
-        response.medications || [],
-        response.status || String(selectedPrescription?.status ?? '')
+        refreshed.medications || [],
+        refreshed.status || String(selectedPrescription?.status ?? '')
       );
       setSelectedPrescriptionMedications(transformed);
       setSelectedMedications((prev) => prev.filter((id) => id !== medRowId));
@@ -1161,6 +1162,15 @@ export default function PrescriptionsPage() {
         delete next[medRowId];
         return next;
       });
+      setSelectedPrescription((prev: any) =>
+        prev ? { ...prev, status: mapApiPrescriptionStatusToUi(refreshed.status, prev.status) } : prev
+      );
+      const autoCreated = splitResponse?.split_warnings?.auto_created_components;
+      if (Array.isArray(autoCreated) && autoCreated.length > 0) {
+        toast.info(
+          `Split completed. Auto-created placeholder generic(s): ${autoCreated.join(', ')}. Please substitute/select brands during dispensing.`
+        );
+      }
       toast.success(`Split ${med.name} into components`);
       await loadPrescriptions({ silent: true });
     } catch (err: any) {
@@ -2323,6 +2333,10 @@ export default function PrescriptionsPage() {
                                         disabled={Boolean(splittingComboItemId)}
                                         onClick={async (e) => {
                                           e.stopPropagation();
+                                          const proceed = window.confirm(
+                                            'Split this combo into separate ingredient lines? Missing component generics will be auto-created as placeholders so you can substitute during dispensing.'
+                                          );
+                                          if (!proceed) return;
                                           await handleSplitComboMedication(med);
                                         }}
                                       >
@@ -2341,11 +2355,11 @@ export default function PrescriptionsPage() {
                                       size="sm"
                                       className="h-7 text-xs border-amber-300 text-amber-700 hover:bg-amber-50"
                                       disabled={isLoadingSubstitutes}
-                                      onClick={async (e) => {
-                                        e.stopPropagation();
-                                        // Debounce rapid clicks
-                                        if (substituteTimeoutRef.current) {
-                                          clearTimeout(substituteTimeoutRef.current);
+                                    onClick={async (e) => {
+                                      e.stopPropagation();
+                                      // Debounce rapid clicks
+                                      if (substituteTimeoutRef.current) {
+                                        clearTimeout(substituteTimeoutRef.current);
                                         }
 
                                         setIsLoadingSubstitutes(true);
@@ -2734,7 +2748,7 @@ export default function PrescriptionsPage() {
                 </div>
 
                 {/* Brand selection when substituting with generic */}
-                {substitutionForm.reason === 'substitute' &&
+                {substitutionForm.reason !== 'brand_selection' &&
                   substituteSearchResults.find((s) => s.id === substitutionForm.selectedSubstitute)?.type === 'generic' && (
                   <div className="space-y-2">
                     <Label className="text-sm">Select brand to dispense *</Label>
@@ -2800,7 +2814,7 @@ export default function PrescriptionsPage() {
                 {/* Summary */}
                 {substitutionForm.reason &&
                   substitutionForm.selectedSubstitute &&
-                  (substitutionForm.reason !== 'substitute' ||
+                  (substitutionForm.reason === 'brand_selection' ||
                     substituteSearchResults.find((s) => s.id === substitutionForm.selectedSubstitute)?.type !== 'generic' ||
                     substitutionForm.selectedSubstituteBrand) && (
                   <div className={`p-3 rounded-lg border ${
@@ -2847,7 +2861,7 @@ export default function PrescriptionsPage() {
                 disabled={
                   !substitutionForm.reason ||
                   !substitutionForm.selectedSubstitute ||
-                  (substitutionForm.reason === 'substitute' &&
+                  (substitutionForm.reason !== 'brand_selection' &&
                     substituteSearchResults.find((s) => s.id === substitutionForm.selectedSubstitute)?.type === 'generic' &&
                     !substitutionForm.selectedSubstituteBrand)
                 }
@@ -2863,9 +2877,36 @@ export default function PrescriptionsPage() {
 
                       if (selectedSub.type === 'generic') {
                         const brandId = substitutionForm.selectedSubstituteBrand;
-                        const brand = substituteBrandOptions.find((b) => b.id === brandId);
+                        let brand = substituteBrandOptions.find((b) => b.id === brandId);
+                        if (!brand && brandId) {
+                          try {
+                            const genericId = Number(selectedSub.id);
+                            const refreshedBrands = await pharmacyService.getMedications({
+                              generic: genericId,
+                              page_size: 100,
+                            });
+                            const mapped = (refreshedBrands.results || []).map((b: any) => ({
+                              id: String(b.id),
+                              name: b.name || '',
+                              strength: b.strength || '',
+                              type: 'brand' as const,
+                              stock: null,
+                              expiryDate: '',
+                              daysToExpiry: 0,
+                              unitPrice: 0,
+                              isNearExpiry: false,
+                            }));
+                            brand = mapped.find((b) => b.id === brandId);
+                            if (mapped.length > 0) {
+                              setSubstituteBrandOptions(mapped);
+                            }
+                          } catch (err) {
+                            console.error('Failed to refresh brand list for generic substitution:', err);
+                          }
+                        }
                         if (!brand) {
-                          throw new Error(`Please select a brand to dispense for "${selectedSub.name}"`);
+                          toast.error(`Please select a brand to dispense for "${selectedSub.name}"`);
+                          return;
                         }
                         medicationIdToUse = brand.id;
                         resolvedMedicationName = brand.name;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { SAVE_SIMULATION_DELAY } from '@/lib/constants/ui';
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -15,8 +15,9 @@ import { toast } from "sonner";
 import {
   Settings, Save, RefreshCw, Clock, Calendar, Bell, Shield, Database,
   Globe, Mail, Printer, Stethoscope, TestTube, Pill, ScanLine, Users,
-  AlertTriangle, CheckCircle2, FileText, Lock, Key
+  AlertTriangle, CheckCircle2, FileText, Lock, Key, Plus, Trash2
 } from "lucide-react";
+import { consultationService, type PresentingComplaint, type PresentingComplaintCategory } from "@/lib/services";
 
 export default function SystemSettingsPage() {
   const [isSaving, setIsSaving] = useState(false);
@@ -118,6 +119,126 @@ export default function SystemSettingsPage() {
     dailyDigest: false,
     weeklyReport: true,
   });
+
+  // Presenting complaints library (DB-backed)
+  const [libraryLoading, setLibraryLoading] = useState(false);
+  const [libraryCategories, setLibraryCategories] = useState<Array<PresentingComplaintCategory & { complaints: PresentingComplaint[] }>>([]);
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [newComplaintLabel, setNewComplaintLabel] = useState("");
+  const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(null);
+  const [librarySearch, setLibrarySearch] = useState("");
+
+  const loadPresentingComplaintLibrary = async () => {
+    setLibraryLoading(true);
+    try {
+      const categories = await consultationService.getPresentingComplaintLibrary({ include_inactive: true });
+      setLibraryCategories(categories);
+      if (categories.length > 0 && !selectedCategoryId) {
+        setSelectedCategoryId(categories[0].id);
+      }
+    } catch (error) {
+      console.error('Failed to load presenting complaint library', error);
+      toast.error('Failed to load presenting complaints library');
+    } finally {
+      setLibraryLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadPresentingComplaintLibrary();
+  }, []);
+
+  const filteredLibraryCategories = useMemo(() => {
+    const query = librarySearch.trim().toLowerCase();
+    if (!query) return libraryCategories;
+    return libraryCategories.filter((category) => {
+      if (category.name.toLowerCase().includes(query)) return true;
+      return (category.complaints || []).some((complaint) => complaint.label.toLowerCase().includes(query));
+    });
+  }, [libraryCategories, librarySearch]);
+
+  const handleAddCategory = async () => {
+    const name = newCategoryName.trim();
+    if (!name) return;
+    try {
+      await consultationService.createPresentingComplaintCategory({ name, is_active: true });
+      setNewCategoryName("");
+      toast.success('Category added');
+      await loadPresentingComplaintLibrary();
+    } catch (error: any) {
+      console.error('Failed to add category', error);
+      toast.error(error?.message || 'Failed to add category');
+    }
+  };
+
+  const handleToggleCategory = async (category: PresentingComplaintCategory) => {
+    try {
+      await consultationService.updatePresentingComplaintCategory(category.id, {
+        is_active: !category.is_active,
+      });
+      toast.success(`Category ${category.is_active ? 'deactivated' : 'activated'}`);
+      await loadPresentingComplaintLibrary();
+    } catch (error: any) {
+      console.error('Failed to update category', error);
+      toast.error(error?.message || 'Failed to update category');
+    }
+  };
+
+  const handleDeleteCategory = async (categoryId: number) => {
+    try {
+      await consultationService.deletePresentingComplaintCategory(categoryId);
+      if (selectedCategoryId === categoryId) {
+        setSelectedCategoryId(null);
+      }
+      toast.success('Category deleted');
+      await loadPresentingComplaintLibrary();
+    } catch (error: any) {
+      console.error('Failed to delete category', error);
+      toast.error(error?.message || 'Failed to delete category');
+    }
+  };
+
+  const handleAddComplaint = async () => {
+    const label = newComplaintLabel.trim();
+    if (!label || !selectedCategoryId) return;
+    try {
+      await consultationService.createPresentingComplaint({
+        category: selectedCategoryId,
+        label,
+        is_active: true,
+      });
+      setNewComplaintLabel("");
+      toast.success('Complaint added');
+      await loadPresentingComplaintLibrary();
+    } catch (error: any) {
+      console.error('Failed to add complaint', error);
+      toast.error(error?.message || 'Failed to add complaint');
+    }
+  };
+
+  const handleToggleComplaint = async (complaint: PresentingComplaint) => {
+    try {
+      await consultationService.updatePresentingComplaint(complaint.id, {
+        is_active: !complaint.is_active,
+      });
+      toast.success(`Complaint ${complaint.is_active ? 'deactivated' : 'activated'}`);
+      await loadPresentingComplaintLibrary();
+    } catch (error: any) {
+      console.error('Failed to update complaint', error);
+      toast.error(error?.message || 'Failed to update complaint');
+    }
+  };
+
+  const handleDeleteComplaint = async (complaintId: number) => {
+    try {
+      await consultationService.deletePresentingComplaint(complaintId);
+      toast.success('Complaint deleted');
+      await loadPresentingComplaintLibrary();
+    } catch (error: any) {
+      console.error('Failed to delete complaint', error);
+      toast.error(error?.message || 'Failed to delete complaint');
+    }
+  };
 
   const handleSave = async () => {
     setIsSaving(true);
@@ -230,6 +351,124 @@ export default function SystemSettingsPage() {
                   <div className="flex items-center justify-between p-4 bg-muted/50 rounded-lg"><div><Label>Require Diagnosis</Label><p className="text-sm text-muted-foreground">Diagnosis required to end session</p></div><Switch checked={consultationSettings.requireDiagnosis} onCheckedChange={(v) => setConsultationSettings(p => ({ ...p, requireDiagnosis: v }))} /></div>
                   <div className="flex items-center justify-between p-4 bg-muted/50 rounded-lg"><div><Label>Show Patient History</Label><p className="text-sm text-muted-foreground">Display previous visits in session</p></div><Switch checked={consultationSettings.showPatientHistory} onCheckedChange={(v) => setConsultationSettings(p => ({ ...p, showPatientHistory: v }))} /></div>
                 </div>
+                <Separator />
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h4 className="text-base font-semibold">Presenting Complaints Library</h4>
+                      <p className="text-sm text-muted-foreground">
+                        Manage categories and complaints used in consultation note selection.
+                      </p>
+                    </div>
+                    <Button variant="outline" onClick={loadPresentingComplaintLibrary} disabled={libraryLoading}>
+                      <RefreshCw className="h-4 w-4 mr-2" />
+                      Refresh
+                    </Button>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <Input
+                      value={newCategoryName}
+                      onChange={(e) => setNewCategoryName(e.target.value)}
+                      placeholder="New category name"
+                    />
+                    <Button onClick={handleAddCategory} disabled={!newCategoryName.trim()}>
+                      <Plus className="h-4 w-4 mr-2" />
+                      Add Category
+                    </Button>
+                    <Input
+                      value={librarySearch}
+                      onChange={(e) => setLibrarySearch(e.target.value)}
+                      placeholder="Search categories/complaints..."
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <Select
+                      value={selectedCategoryId ? String(selectedCategoryId) : undefined}
+                      onValueChange={(value) => setSelectedCategoryId(Number(value))}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select category for new complaint" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {libraryCategories.map((category) => (
+                          <SelectItem key={category.id} value={String(category.id)}>
+                            {category.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Input
+                      value={newComplaintLabel}
+                      onChange={(e) => setNewComplaintLabel(e.target.value)}
+                      placeholder="New complaint label"
+                    />
+                    <Button onClick={handleAddComplaint} disabled={!newComplaintLabel.trim() || !selectedCategoryId}>
+                      <Plus className="h-4 w-4 mr-2" />
+                      Add Complaint
+                    </Button>
+                  </div>
+
+                  <div className="space-y-3 max-h-[500px] overflow-y-auto border rounded-md p-3">
+                    {libraryLoading ? (
+                      <p className="text-sm text-muted-foreground">Loading complaint library...</p>
+                    ) : filteredLibraryCategories.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">No categories/complaints found.</p>
+                    ) : (
+                      filteredLibraryCategories.map((category) => (
+                        <div key={category.id} className="rounded-md border p-3 space-y-2">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div>
+                              <p className="font-medium">{category.name}</p>
+                              <p className="text-xs text-muted-foreground">
+                                {(category.complaints || []).length} complaints
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Button size="sm" variant="outline" onClick={() => handleToggleCategory(category)}>
+                                {category.is_active ? 'Deactivate' : 'Activate'}
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="text-red-600 border-red-200 hover:text-red-700"
+                                onClick={() => handleDeleteCategory(category.id)}
+                              >
+                                <Trash2 className="h-4 w-4 mr-1" />
+                                Delete
+                              </Button>
+                            </div>
+                          </div>
+
+                          <div className="space-y-1">
+                            {(category.complaints || []).map((complaint) => (
+                              <div key={complaint.id} className="flex items-center justify-between rounded bg-muted/40 px-2 py-1.5 gap-2">
+                                <p className="text-sm">{complaint.label}</p>
+                                <div className="flex items-center gap-2">
+                                  <Button size="sm" variant="outline" onClick={() => handleToggleComplaint(complaint)}>
+                                    {complaint.is_active ? 'Deactivate' : 'Activate'}
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="text-red-600 border-red-200 hover:text-red-700"
+                                    onClick={() => handleDeleteComplaint(complaint.id)}
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                              </div>
+                            ))}
+                            {(category.complaints || []).length === 0 ? (
+                              <p className="text-xs text-muted-foreground">No complaints in this category yet.</p>
+                            ) : null}
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
               </CardContent>
             </Card>
           </TabsContent>
@@ -339,4 +578,3 @@ export default function SystemSettingsPage() {
     </DashboardLayout>
   );
 }
-

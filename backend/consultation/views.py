@@ -7,17 +7,28 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import BasePermission
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django.utils import timezone
 from django.db import transaction
 from django.db import IntegrityError
-from django.db.models import Prefetch
+from django.db.models import Prefetch, Count, Q
 from laboratory.pagination import FlexiblePageNumberPagination
 
 logger = logging.getLogger(__name__)
 
-from .models import ConsultationRoom, ConsultationSession, ConsultationQueue, Referral, ResponsibilityFormIssuance, Diagnosis, ICD10Code
+from .models import (
+    ConsultationRoom,
+    ConsultationSession,
+    ConsultationQueue,
+    Referral,
+    ResponsibilityFormIssuance,
+    Diagnosis,
+    ICD10Code,
+    PresentingComplaintCategory,
+    PresentingComplaint,
+)
 from .serializers import (
     ConsultationRoomSerializer,
     ConsultationSessionSerializer,
@@ -26,6 +37,8 @@ from .serializers import (
     ResponsibilityFormIssuanceSerializer,
     DiagnosisSerializer,
     ICD10CodeSerializer,
+    PresentingComplaintCategorySerializer,
+    PresentingComplaintSerializer,
 )
 from audit.services import AuditService
 
@@ -46,6 +59,21 @@ def _parse_ymd_for_responsibility_form(value):
             if d is not None:
                 return d
     return parse_date(s)
+
+
+class IsComplaintLibraryManager(BasePermission):
+    """
+    Allow write access for administrative users who can manage reference libraries.
+    Read is handled by IsAuthenticated at viewset level.
+    """
+
+    def has_permission(self, request, view):
+        user = request.user
+        if not user or not user.is_authenticated:
+            return False
+        if getattr(user, 'is_superuser', False) or getattr(user, 'is_staff', False):
+            return True
+        return getattr(user, 'system_role', '') in {'System Administrator', 'Admin Staff'}
 
 
 class ConsultationRoomViewSet(viewsets.ModelViewSet):
@@ -1360,6 +1388,115 @@ class ICD10CodeViewSet(viewsets.ReadOnlyModelViewSet):
 
     def get_queryset(self):
         return ICD10Code.objects.filter(is_active=True)
+
+
+class PresentingComplaintCategoryViewSet(viewsets.ModelViewSet):
+    """Manage presenting complaint categories."""
+
+    serializer_class = PresentingComplaintCategorySerializer
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['is_active']
+    search_fields = ['name']
+    ordering_fields = ['sort_order', 'name', 'created_at']
+    ordering = ['sort_order', 'name']
+    pagination_class = None
+
+    def get_permissions(self):
+        if self.request.method in ('GET', 'HEAD', 'OPTIONS'):
+            return [IsAuthenticated()]
+        return [IsAuthenticated(), IsComplaintLibraryManager()]
+
+    def get_queryset(self):
+        queryset = PresentingComplaintCategory.objects.all().annotate(
+            complaint_count=Count('complaints'),
+            active_complaint_count=Count('complaints', filter=Q(complaints__is_active=True)),
+        )
+        active_only = str(self.request.query_params.get('active_only', '')).lower() in {'1', 'true', 'yes'}
+        if active_only:
+            queryset = queryset.filter(is_active=True)
+        return queryset.prefetch_related('complaints')
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context['include_complaints'] = str(self.request.query_params.get('include_complaints', '')).lower() in {
+            '1',
+            'true',
+            'yes',
+        }
+        context['active_only'] = str(self.request.query_params.get('active_only', '')).lower() in {
+            '1',
+            'true',
+            'yes',
+        }
+        return context
+
+
+class PresentingComplaintViewSet(viewsets.ModelViewSet):
+    """Manage presenting complaint library items."""
+
+    serializer_class = PresentingComplaintSerializer
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['category', 'is_active']
+    search_fields = ['label', 'category__name']
+    ordering_fields = ['sort_order', 'label', 'category__sort_order', 'created_at']
+    ordering = ['category__sort_order', 'sort_order', 'label']
+    pagination_class = None
+
+    def get_permissions(self):
+        if self.request.method in ('GET', 'HEAD', 'OPTIONS'):
+            return [IsAuthenticated()]
+        return [IsAuthenticated(), IsComplaintLibraryManager()]
+
+    def get_queryset(self):
+        queryset = PresentingComplaint.objects.select_related('category')
+        active_only = str(self.request.query_params.get('active_only', '')).lower() in {'1', 'true', 'yes'}
+        if active_only:
+            queryset = queryset.filter(is_active=True, category__is_active=True)
+        return queryset
+
+    @action(detail=False, methods=['get'])
+    def library(self, request):
+        """
+        Return grouped complaint library for consultation picker consumption.
+        Query params:
+        - include_inactive=1 (for admin screens)
+        """
+        include_inactive = str(request.query_params.get('include_inactive', '')).lower() in {'1', 'true', 'yes'}
+        category_qs = PresentingComplaintCategory.objects.all().order_by('sort_order', 'name')
+        if not include_inactive:
+            category_qs = category_qs.filter(is_active=True)
+
+        complaints_qs = PresentingComplaint.objects.select_related('category').order_by(
+            'category__sort_order', 'category__name', 'sort_order', 'label'
+        )
+        if not include_inactive:
+            complaints_qs = complaints_qs.filter(is_active=True, category__is_active=True)
+
+        complaints_by_category_id = {}
+        for complaint in complaints_qs:
+            complaints_by_category_id.setdefault(complaint.category_id, []).append(
+                {
+                    'id': complaint.id,
+                    'label': complaint.label,
+                    'is_active': complaint.is_active,
+                    'sort_order': complaint.sort_order,
+                    'category': complaint.category_id,
+                    'category_name': complaint.category.name,
+                }
+            )
+
+        results = []
+        for category in category_qs:
+            results.append(
+                {
+                    'id': category.id,
+                    'name': category.name,
+                    'is_active': category.is_active,
+                    'sort_order': category.sort_order,
+                    'complaints': complaints_by_category_id.get(category.id, []),
+                }
+            )
+        return Response(results)
 
 
 class DiagnosisViewSet(viewsets.ModelViewSet):

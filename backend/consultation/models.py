@@ -138,6 +138,56 @@ class ConsultationSession(models.Model):
         return f"{self.session_id} - {self.patient.get_full_name()}"
 
 
+class PresentingComplaintCategory(models.Model):
+    """Configurable category for presenting complaints library."""
+
+    name = models.CharField(max_length=120, unique=True, db_index=True)
+    is_active = models.BooleanField(default=True, db_index=True)
+    sort_order = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'presenting_complaint_categories'
+        ordering = ['sort_order', 'name']
+
+    def __str__(self):
+        return self.name
+
+
+class PresentingComplaint(models.Model):
+    """Configurable presenting complaint item selectable during consultation."""
+
+    category = models.ForeignKey(
+        PresentingComplaintCategory,
+        on_delete=models.PROTECT,
+        related_name='complaints',
+    )
+    label = models.CharField(max_length=255)
+    normalized_label = models.CharField(max_length=255, editable=False, db_index=True)
+    is_active = models.BooleanField(default=True, db_index=True)
+    sort_order = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'presenting_complaints'
+        ordering = ['category__sort_order', 'category__name', 'sort_order', 'label']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['category', 'normalized_label'],
+                name='uniq_presenting_complaint_per_category_normalized',
+            ),
+        ]
+
+    def save(self, *args, **kwargs):
+        self.normalized_label = (self.label or '').strip().lower()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.label
+
+
 class ConsultationQueue(models.Model):
     """
     Patient queue for consultation rooms.
@@ -377,4 +427,3 @@ class Diagnosis(models.Model):
 
     def __str__(self):
         return f"{self.patient.get_full_name()} - {self.icd10_code.code}: {self.icd10_code.description[:50]}"
-

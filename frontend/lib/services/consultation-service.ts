@@ -109,6 +109,30 @@ export interface ConsultationQueueItem {
   is_active: boolean;
 }
 
+export interface PresentingComplaintCategory {
+  id: number;
+  name: string;
+  is_active: boolean;
+  sort_order: number;
+  created_at?: string;
+  updated_at?: string;
+  complaint_count?: number;
+  active_complaint_count?: number;
+  complaints?: PresentingComplaint[];
+}
+
+export interface PresentingComplaint {
+  id: number;
+  category: number;
+  category_name?: string;
+  label: string;
+  normalized_label?: string;
+  is_active: boolean;
+  sort_order: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
 class ConsultationService {
   /**
    * Get consultation statistics for dashboard
@@ -266,6 +290,95 @@ class ConsultationService {
     await apiFetch(`/consultation/diagnoses/${id}/`, {
       method: 'DELETE',
     });
+  }
+
+  /**
+   * Presenting complaint categories
+   */
+  async getPresentingComplaintCategories(params?: {
+    active_only?: boolean;
+    include_complaints?: boolean;
+  }): Promise<PresentingComplaintCategory[]> {
+    const query = buildQueryString(params || {});
+    return apiFetch<PresentingComplaintCategory[]>(`/consultation/presenting-complaint-categories/${query}`);
+  }
+
+  async createPresentingComplaintCategory(
+    data: Partial<PresentingComplaintCategory>
+  ): Promise<PresentingComplaintCategory> {
+    return apiFetch<PresentingComplaintCategory>('/consultation/presenting-complaint-categories/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updatePresentingComplaintCategory(
+    id: number,
+    data: Partial<PresentingComplaintCategory>
+  ): Promise<PresentingComplaintCategory> {
+    return apiFetch<PresentingComplaintCategory>(`/consultation/presenting-complaint-categories/${id}/`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deletePresentingComplaintCategory(id: number): Promise<void> {
+    await apiFetch(`/consultation/presenting-complaint-categories/${id}/`, {
+      method: 'DELETE',
+    });
+  }
+
+  /**
+   * Presenting complaints
+   */
+  async getPresentingComplaints(params?: {
+    category?: number;
+    active_only?: boolean;
+    is_active?: boolean;
+    search?: string;
+  }): Promise<PresentingComplaint[]> {
+    const query = buildQueryString(params || {});
+    return apiFetch<PresentingComplaint[]>(`/consultation/presenting-complaints/${query}`);
+  }
+
+  async createPresentingComplaint(data: Partial<PresentingComplaint>): Promise<PresentingComplaint> {
+    return apiFetch<PresentingComplaint>('/consultation/presenting-complaints/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updatePresentingComplaint(
+    id: number,
+    data: Partial<PresentingComplaint>
+  ): Promise<PresentingComplaint> {
+    return apiFetch<PresentingComplaint>(`/consultation/presenting-complaints/${id}/`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deletePresentingComplaint(id: number): Promise<void> {
+    await apiFetch(`/consultation/presenting-complaints/${id}/`, {
+      method: 'DELETE',
+    });
+  }
+
+  async getPresentingComplaintLibrary(params?: { include_inactive?: boolean }): Promise<Array<{
+    id: number;
+    name: string;
+    is_active: boolean;
+    sort_order: number;
+    complaints: PresentingComplaint[];
+  }>> {
+    const query = buildQueryString(params || {});
+    return apiFetch<Array<{
+      id: number;
+      name: string;
+      is_active: boolean;
+      sort_order: number;
+      complaints: PresentingComplaint[];
+    }>>(`/consultation/presenting-complaints/library/${query}`);
   }
 }
 

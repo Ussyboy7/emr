@@ -577,14 +577,44 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
     @staticmethod
     def _resolve_generic_component(component_name: str):
         base_qs = GenericMedication.objects.filter(is_active=True)
-        exact = base_qs.filter(name__iexact=component_name).first()
-        if exact:
-            return exact
-        starts = base_qs.filter(name__istartswith=component_name).order_by('name').first()
-        if starts:
-            return starts
-        contains = base_qs.filter(name__icontains=component_name).order_by('name').first()
-        return contains
+        comp = (component_name or '').strip()
+        if not comp:
+            return None
+
+        def _is_combo_name(name: str) -> bool:
+            return len(combo_component_names_from_display_name(name or '')) > 1
+
+        # Strict mode (no fallback matching): exact single-ingredient generic name only.
+        exact_single = base_qs.filter(name__iexact=comp).order_by('name').first()
+        if exact_single and not _is_combo_name(exact_single.name):
+            return exact_single
+        return None
+
+    @staticmethod
+    def _create_placeholder_generic_for_component(component_name: str, source_item: PrescriptionItem):
+        """
+        Create a minimal single-ingredient generic placeholder so split can proceed.
+        Pharmacist can then select/substitute actual brand during dispensing.
+        """
+        comp = (component_name or '').strip()
+        if not comp:
+            return None
+
+        existing_exact = GenericMedication.objects.filter(name__iexact=comp).order_by('name').first()
+        if existing_exact:
+            return existing_exact
+
+        placeholder = GenericMedication.objects.create(
+            name=comp,
+            active_ingredient=comp,
+            category='Unmapped (Auto-created for combo split)',
+            strength='',
+            dosage_form=source_item.dosage_form or '',
+            unit=source_item.unit or '',
+            route=source_item.route or '',
+            is_active=True,
+        )
+        return placeholder
 
     @action(detail=True, methods=['post'], url_path='split-combo-item')
     def split_combo_item(self, request, pk=None):
@@ -624,11 +654,17 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
 
         resolved_components = []
         missing = []
+        auto_created_components = []
         for comp in component_names:
             generic = self._resolve_generic_component(comp)
             if not generic:
-                missing.append(comp)
-                continue
+                placeholder = self._create_placeholder_generic_for_component(comp, item)
+                if placeholder:
+                    generic = placeholder
+                    auto_created_components.append(comp)
+                else:
+                    missing.append(comp)
+                    continue
             resolved_components.append(generic)
 
         if missing:
@@ -699,8 +735,15 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
                 request=self.request,
             )
 
-        serializer = self.get_serializer(prescription)
-        return Response(serializer.data)
+        # Refresh instance so serializer sees newly created items instead of any stale prefetch cache.
+        prescription.refresh_from_db()
+        serializer = self.get_serializer(self.get_queryset().get(pk=prescription.pk))
+        payload = dict(serializer.data)
+        payload['split_warnings'] = {
+            'auto_created_components': auto_created_components,
+            'missing_components': missing,
+        }
+        return Response(payload)
     
     @action(detail=False, methods=['post'])
     def check_interactions(self, request):

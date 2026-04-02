@@ -3,7 +3,16 @@ URL configuration for the Consultation app.
 """
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import ConsultationRoomViewSet, ConsultationSessionViewSet, ConsultationQueueViewSet, ReferralViewSet, ICD10CodeViewSet, DiagnosisViewSet
+from .views import (
+    ConsultationRoomViewSet,
+    ConsultationSessionViewSet,
+    ConsultationQueueViewSet,
+    ReferralViewSet,
+    ICD10CodeViewSet,
+    DiagnosisViewSet,
+    PresentingComplaintCategoryViewSet,
+    PresentingComplaintViewSet,
+)
 
 router = DefaultRouter()
 router.register(r'rooms', ConsultationRoomViewSet, basename='consultation-room')
@@ -12,6 +21,8 @@ router.register(r'queue', ConsultationQueueViewSet, basename='consultation-queue
 router.register(r'referrals', ReferralViewSet, basename='referral')
 router.register(r'icd10-codes', ICD10CodeViewSet, basename='icd10-code')
 router.register(r'diagnoses', DiagnosisViewSet, basename='diagnosis')
+router.register(r'presenting-complaint-categories', PresentingComplaintCategoryViewSet, basename='presenting-complaint-category')
+router.register(r'presenting-complaints', PresentingComplaintViewSet, basename='presenting-complaint')
 
 # Explicit referral stamp route (registered before the router so it always resolves; avoids 404 if router
 # action registration is missing on older deployed images).
@@ -25,4 +36,3 @@ urlpatterns = [
     ),
     path("consultation/", include(router.urls)),
 ]
-

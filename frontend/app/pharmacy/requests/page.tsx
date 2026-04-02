@@ -51,7 +51,7 @@ export default function DispensaryRequestsPage() {
   const debouncedMedSearch = useDebouncedValue(medicationSearch, 300);
   const debouncedSearchQuery = useDebouncedValue(searchQuery, 300);
   const [selectedMedication, setSelectedMedication] = useState<Medication | null>(null);
-  const [requestQuantity, setRequestQuantity] = useState("100");
+  const [requestQuantity, setRequestQuantity] = useState("1");
   const [stats, setStats] = useState({ total: 0, pending: 0, approved: 0, confirmed: 0, awaitingConfirmation: 0 });
 
   const [requestTab, setRequestTab] = useState<"dispensary" | "ward">("dispensary");
@@ -173,7 +173,7 @@ export default function DispensaryRequestsPage() {
     setRequestItems([...requestItems, { medication: selectedMedication.id, quantity: qty }]);
     setSelectedMedication(null);
     setMedicationSearch("");
-    setRequestQuantity("100");
+    setRequestQuantity("1");
   };
 
   const handleCreateRequest = async () => {
@@ -494,6 +494,11 @@ export default function DispensaryRequestsPage() {
                         placeholder={(selectedMedication.pack_size ?? 1) > 1 ? "10" : "100"}
                         className="mt-1"
                       />
+                      {(selectedMedication.pack_size ?? 1) > 1 && (
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {`${Math.max(0, Number.parseInt(requestQuantity || "0", 10) || 0).toLocaleString()} packs = ${(Math.max(0, Number.parseInt(requestQuantity || "0", 10) || 0) * (selectedMedication.pack_size ?? 1)).toLocaleString()} units`}
+                        </p>
+                      )}
                     </div>
                   )}
                   {selectedMedication && (

@@ -124,7 +124,7 @@ export default function StoreRequestsPage() {
     setSelectedRequest(req);
     const qtyMap: Record<number, number> = {};
     (req.items || []).forEach((item: StockRequestItem) => {
-      if (item.id != null) qtyMap[item.id] = Number(item.quantity) || 0;
+      if (item.id != null) qtyMap[item.id] = toDisplayQuantity(Number(item.quantity) || 0, packSizeForItem(item));
     });
     setEditedQuantities(qtyMap);
     setShowDetailsModal(true);
@@ -153,7 +153,10 @@ export default function StoreRequestsPage() {
       setIsSavingQuantities(true);
       const items = validItems.map((item: StockRequestItem) => ({
         id: item.id!,
-        quantity: editedQuantities[item.id!] ?? Number(item.quantity),
+        quantity: toUnitsQuantity(
+          editedQuantities[item.id!] ?? toDisplayQuantity(Number(item.quantity), packSizeForItem(item)),
+          packSizeForItem(item),
+        ),
       }));
       const res = await pharmacyService.updateStockRequestItems(selectedRequest.id, items);
       toast.success(res?.message || "Quantities updated");
@@ -161,7 +164,7 @@ export default function StoreRequestsPage() {
         setSelectedRequest(res.request);
         const qtyMap: Record<number, number> = {};
         (res.request.items || []).forEach((item: StockRequestItem) => {
-          if (item.id != null) qtyMap[item.id] = Number(item.quantity) || 0;
+          if (item.id != null) qtyMap[item.id] = toDisplayQuantity(Number(item.quantity) || 0, packSizeForItem(item));
         });
         setEditedQuantities(qtyMap);
       }
@@ -182,6 +185,11 @@ export default function StoreRequestsPage() {
       toast.success("Request approved");
       if (selectedRequest?.id === requestId) {
         setSelectedRequest(updated);
+        const qtyMap: Record<number, number> = {};
+        (updated.items || []).forEach((item: StockRequestItem) => {
+          if (item.id != null) qtyMap[item.id] = toDisplayQuantity(Number(item.quantity) || 0, packSizeForItem(item));
+        });
+        setEditedQuantities(qtyMap);
       }
       await loadRequests();
     } catch (err: any) {
@@ -218,6 +226,19 @@ export default function StoreRequestsPage() {
     if (!packSize || packSize <= 1) return `${units.toLocaleString()} units`;
     const packs = Math.floor(units / packSize);
     return `${packs.toLocaleString()} packs (${units.toLocaleString()} units)`;
+  };
+  const toDisplayQuantity = (units: number, packSize: number | undefined | null) => {
+    if (!packSize || packSize <= 1) return units;
+    return Math.floor(units / packSize);
+  };
+  const toUnitsQuantity = (displayQty: number, packSize: number | undefined | null) => {
+    if (!packSize || packSize <= 1) return displayQty;
+    return displayQty * packSize;
+  };
+  const formatEditableQuantity = (displayQty: number, packSize: number | undefined | null) => {
+    if (!packSize || packSize <= 1) return `${displayQty.toLocaleString()} units`;
+    const units = toUnitsQuantity(displayQty, packSize);
+    return `${displayQty.toLocaleString()} packs (${units.toLocaleString()} units)`;
   };
   const packSizeForItem = (item: any) => item.medication_pack_size ?? null;
 
@@ -454,8 +475,8 @@ export default function StoreRequestsPage() {
                     {(selectedRequest.items || []).map((item: StockRequestItem) => {
                       const canEdit = selectedRequest.status === "pending" || selectedRequest.status === "approved";
                       const fulfilled = Number(item.fulfilled_quantity || 0);
-                      const qty = editedQuantities[item.id!] ?? Number(item.quantity);
                       const packSize = packSizeForItem(item);
+                      const qty = editedQuantities[item.id!] ?? toDisplayQuantity(Number(item.quantity), packSize);
                       return (
                         <div key={item.id} className="border rounded-lg p-3 bg-muted/30 flex justify-between items-center gap-3">
                           <div className="min-w-0 flex-1">
@@ -467,7 +488,12 @@ export default function StoreRequestsPage() {
                           </div>
                           {canEdit && fulfilled === 0 ? (
                             <div className="flex items-center gap-1 flex-shrink-0">
-                              <Button variant="outline" size="icon" className="h-7 w-7" onClick={() => handleQuantityChange(item.id!, -1, Number(item.quantity))}>
+                              <Button
+                                variant="outline"
+                                size="icon"
+                                className="h-7 w-7"
+                                onClick={() => handleQuantityChange(item.id!, -1, toDisplayQuantity(Number(item.quantity), packSize))}
+                              >
                                 <Minus className="h-3 w-3" />
                               </Button>
                               <Input
@@ -477,14 +503,19 @@ export default function StoreRequestsPage() {
                                 onChange={(e) => handleQuantityInput(item.id!, e.target.value)}
                                 className="w-16 h-8 text-center text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                               />
-                              <Button variant="outline" size="icon" className="h-7 w-7" onClick={() => handleQuantityChange(item.id!, 1, Number(item.quantity))}>
+                              <Button
+                                variant="outline"
+                                size="icon"
+                                className="h-7 w-7"
+                                onClick={() => handleQuantityChange(item.id!, 1, toDisplayQuantity(Number(item.quantity), packSize))}
+                              >
                                 <Plus className="h-3 w-3" />
                               </Button>
                             </div>
                           ) : fulfilled > 0 ? (
                             <span className="text-xs font-medium text-green-600">✓ {formatPackDisplay(fulfilled, packSize)} issued</span>
                           ) : (
-                            <span className="text-xs text-muted-foreground">{formatPackDisplay(qty, packSize)}</span>
+                            <span className="text-xs text-muted-foreground">{formatEditableQuantity(qty, packSize)}</span>
                           )}
                         </div>
                       );

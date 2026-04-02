@@ -43,6 +43,8 @@ export type {
   ConsultationQueueItem,
   ICD10Code,
   Diagnosis,
+  PresentingComplaintCategory,
+  PresentingComplaint,
 } from './consultation-service';
 export type {
   PhysioOrder,
@@ -74,4 +76,3 @@ export { medicalCertificateService } from './medical-certificate-service';
 
 // Export utility functions
 export { sanitizePatientForRendering } from './patient-service';
-
