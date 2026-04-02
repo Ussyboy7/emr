@@ -11,11 +11,13 @@ from rest_framework.permissions import IsAuthenticated
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django.utils import timezone
+from django.db import transaction
 from django.db.models import Q, F
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import never_cache
 from decimal import Decimal, InvalidOperation
 
+from .combo_utils import combo_component_names_from_display_name
 from .models import GenericMedication, Medication, MedicationInventory, Prescription, PrescriptionItem, Dispense, StockRequest, StockRequestItem, StockIssue, StockIssueLine, DispensaryReceiptLine
 from .serializers import (
     GenericMedicationSerializer,
@@ -260,6 +262,12 @@ class MedicationInventoryViewSet(viewsets.ModelViewSet):
     def _list_dispensary_receipts(self, request, *args, **kwargs):
         from rest_framework.response import Response
         queryset = self.get_queryset()
+        medication_id = request.query_params.get('medication')
+        if medication_id:
+            queryset = queryset.filter(medication_id=medication_id)
+        generic_id = request.query_params.get('medication__generic')
+        if generic_id:
+            queryset = queryset.filter(medication__generic_id=generic_id)
         search = (request.query_params.get('search') or '').strip()
         if search:
             queryset = queryset.filter(
@@ -515,16 +523,7 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
     
     def perform_update(self, serializer):
         """Update prescription and log audit."""
-        old_instance = self.get_object()
-        old_values = {
-            'status': old_instance.status,
-            'diagnosis': old_instance.diagnosis,
-        }
         prescription = serializer.save()
-        new_values = {
-            'status': prescription.status,
-            'diagnosis': prescription.diagnosis,
-        }
         
         # Log audit
         AuditService.log_prescription_action(
@@ -533,8 +532,6 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
             prescription=prescription,
             module='pharmacy',
             description=f'Updated prescription {prescription.prescription_id}',
-            old_values=old_values,
-            new_values=new_values,
             request=self.request,
         )
     
@@ -576,6 +573,134 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
         except Exception:
             # Notifications must never break prescription creation
             pass
+
+    @staticmethod
+    def _resolve_generic_component(component_name: str):
+        base_qs = GenericMedication.objects.filter(is_active=True)
+        exact = base_qs.filter(name__iexact=component_name).first()
+        if exact:
+            return exact
+        starts = base_qs.filter(name__istartswith=component_name).order_by('name').first()
+        if starts:
+            return starts
+        contains = base_qs.filter(name__icontains=component_name).order_by('name').first()
+        return contains
+
+    @action(detail=True, methods=['post'], url_path='split-combo-item')
+    def split_combo_item(self, request, pk=None):
+        """Split a combo prescription item (e.g., A/B) into separate component items."""
+        prescription = self.get_object()
+        raw_item_id = request.data.get('item_id')
+        if raw_item_id is None or raw_item_id == '':
+            return Response({'error': 'item_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            item_id = int(raw_item_id)
+        except (TypeError, ValueError):
+            return Response({'error': 'item_id must be a valid integer'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            item = prescription.medications.get(id=item_id)
+        except PrescriptionItem.DoesNotExist:
+            return Response({'error': f'Prescription item {item_id} not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        if item.is_dispensed or (item.dispensed_quantity or 0) > 0:
+            return Response(
+                {'error': 'Cannot split an item that has already been dispensed (fully or partially).'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        if getattr(item, 'superseded_at', None):
+            return Response(
+                {'error': 'This line was already superseded and cannot be split again.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        combo_name = getattr(getattr(item, 'generic', None), 'name', '') or ''
+        component_names = combo_component_names_from_display_name(combo_name)
+        if len(component_names) < 2:
+            return Response(
+                {'error': 'This medication is not recognized as a splittable combination.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        resolved_components = []
+        missing = []
+        for comp in component_names:
+            generic = self._resolve_generic_component(comp)
+            if not generic:
+                missing.append(comp)
+                continue
+            resolved_components.append(generic)
+
+        if missing:
+            return Response(
+                {
+                    'error': 'Some components are missing in Generic master.',
+                    'missing_components': missing,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        seen_gid = set()
+        unique_generics = []
+        for g in resolved_components:
+            if g.id in seen_gid:
+                continue
+            seen_gid.add(g.id)
+            unique_generics.append(g)
+
+        if len(unique_generics) < 2:
+            return Response(
+                {
+                    'error': 'Combination resolves to fewer than two distinct ingredients. '
+                    'Check generic names in the master list or contact support.',
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        with transaction.atomic():
+            created_ids = []
+            for generic in unique_generics:
+                created = PrescriptionItem.objects.create(
+                    prescription=prescription,
+                    generic=generic,
+                    medication=None,
+                    quantity=item.quantity,
+                    unit=item.unit,
+                    dosage_form=item.dosage_form or getattr(generic, 'dosage_form', '') or '',
+                    strength=item.strength or getattr(generic, 'strength', '') or '',
+                    dose=item.dose,
+                    frequency=item.frequency,
+                    duration=item.duration,
+                    route=item.route,
+                    instructions=item.instructions or f'Split from combo: {combo_name}',
+                    dispensed_quantity=0,
+                    is_dispensed=False,
+                )
+                created_ids.append(created.id)
+
+            old_med_name = item.medication.name if item.medication else combo_name
+            item.superseded_at = timezone.now()
+            item.superseded_split_into_ids = list(created_ids)
+            item.save(update_fields=['superseded_at', 'superseded_split_into_ids'])
+
+            prescription.recalculate_status()
+
+            AuditService.log_activity(
+                user=self.request.user,
+                action='update',
+                object_type='prescription',
+                object_id=str(prescription.id),
+                module='pharmacy',
+                object_repr=f'Prescription {prescription.prescription_id}',
+                description=f'Split combo medication "{old_med_name}" into component items.',
+                old_values={'item_id': int(item_id), 'medication': old_med_name},
+                new_values={'created_item_ids': created_ids, 'components': [g.name for g in unique_generics]},
+                metadata={'source_item_id': int(item_id), 'combo_name': combo_name},
+                request=self.request,
+            )
+
+        serializer = self.get_serializer(prescription)
+        return Response(serializer.data)
     
     @action(detail=False, methods=['post'])
     def check_interactions(self, request):
@@ -649,6 +774,11 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
 
         try:
             item = prescription.medications.get(id=item_id)
+            if getattr(item, 'superseded_at', None):
+                return Response(
+                    {'error': 'This line is a prescribing record only (e.g. original combo before split). Dispense the replacement lines instead.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             dispensed_medication = item.medication
 
             if receipt_line_id:
@@ -699,6 +829,20 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
             elif inventory:
                 batch_number = inventory.batch_number or ''
 
+            # Snapshot prescribed context at dispense-time so history remains immutable.
+            if not item.medication_id:
+                dispense_context = 'brand_selected_from_generic'
+            elif item.medication_id == dispensed_medication.id:
+                dispense_context = 'as_selected_brand'
+            else:
+                # If brand differs but generic family is same, treat as brand selection (not substitution).
+                item_generic_id = getattr(item.medication, 'generic_id', None)
+                dispensed_generic_id = getattr(dispensed_medication, 'generic_id', None)
+                if item_generic_id and dispensed_generic_id and item_generic_id == dispensed_generic_id:
+                    dispense_context = 'brand_selected_from_generic'
+                else:
+                    dispense_context = 'substituted'
+
             dispense = Dispense.objects.create(
                 prescription=prescription,
                 prescription_item=item,
@@ -708,6 +852,10 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
                 quantity=quantity,
                 unit=getattr(dispensed_medication, 'unit', None) or item.unit,
                 batch_number=batch_number,
+                prescribed_generic_name_snapshot=getattr(item.generic, 'name', '') or '',
+                prescribed_medication_name_snapshot=getattr(item.medication, 'name', '') or '',
+                prescribed_unit_snapshot=item.unit or '',
+                dispense_context_snapshot=dispense_context,
                 dispensed_by=request.user,
                 notes=request.data.get('notes', '')
             )
@@ -781,6 +929,12 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
                 return Response(
                     {'error': f'Prescription item {item_id} not found'},
                     status=status.HTTP_404_NOT_FOUND
+                )
+
+            if getattr(item, 'superseded_at', None):
+                return Response(
+                    {'error': 'This line is a prescribing record only and cannot be substituted.'},
+                    status=status.HTTP_400_BAD_REQUEST,
                 )
 
             old_medication = item.medication
@@ -867,18 +1021,21 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
         """Manually mark a prescription as fully dispensed/completed."""
         prescription = self.get_object()
 
-        # Mark all items as dispensed
+        # Mark all active (non-superseded) items as dispensed
         for item in prescription.medications.all():
+            if getattr(item, 'superseded_at', None):
+                continue
             if not item.is_dispensed:
                 item.is_dispensed = True
                 item.save(update_fields=['is_dispensed'])
 
         # Update prescription status
         prescription.status = 'dispensed'
+        if not prescription.dispensing_started_at:
+            prescription.dispensing_started_at = timezone.now()
         if not prescription.dispensed_at:
-            from django.utils import timezone
             prescription.dispensed_at = timezone.now()
-        prescription.save()
+        prescription.save(update_fields=['status', 'dispensing_started_at', 'dispensed_at'])
 
         # Log audit
         AuditService.log_activity(

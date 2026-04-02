@@ -286,6 +286,7 @@ class Prescription(models.Model):
     notes = models.TextField(blank=True)
     
     prescribed_at = models.DateTimeField(auto_now_add=True)
+    dispensing_started_at = models.DateTimeField(null=True, blank=True)
     dispensed_at = models.DateTimeField(null=True, blank=True)
     created_by = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, related_name='created_prescriptions')
     
@@ -308,6 +309,10 @@ class Prescription(models.Model):
             import random
             suffix = f"{random.randint(1000, 9999)}"
             self.prescription_id = f"RX-{timestamp}-{suffix}"
+
+        # Track when pharmacist starts attending to this prescription.
+        if self.status == 'dispensing' and not self.dispensing_started_at:
+            self.dispensing_started_at = timezone.now()
         super().save(*args, **kwargs)
     
     def recalculate_status(self):
@@ -322,12 +327,20 @@ class Prescription(models.Model):
             if self.status not in ['cancelled']:
                 self.status = 'pending'
             return
+
+        active_items = [item for item in all_items if not getattr(item, 'superseded_at', None)]
+        if not active_items:
+            if self.status not in ['cancelled']:
+                self.status = 'pending'
+            self.save(update_fields=['status', 'dispensing_started_at', 'dispensed_at'])
+            return
         
         # Check each item and ensure is_dispensed is correctly set
         all_dispensed = True
         has_partial = False
+        any_dispensed = False
         
-        for item in all_items:
+        for item in active_items:
             # Update is_dispensed based on actual dispensed quantity
             if item.dispensed_quantity >= item.quantity:
                 if not item.is_dispensed:
@@ -340,22 +353,27 @@ class Prescription(models.Model):
                 if item.is_dispensed:
                     item.is_dispensed = False
                     item.save(update_fields=['is_dispensed'])
+            if item.dispensed_quantity > 0:
+                any_dispensed = True
         
         # Update prescription status
         if all_dispensed:
             self.status = 'dispensed'
             if not self.dispensed_at:
                 self.dispensed_at = timezone.now()
-        elif has_partial:
+        elif has_partial or any_dispensed:
             self.status = 'partially_dispensed'
         else:
-            if self.status == 'dispensed':
+            if self.status == 'dispensing':
+                # Pharmacist has started attending; keep "dispensing" until items are dispensed or manually completed.
+                self.status = 'dispensing'
+            elif self.status == 'dispensed':
                 # If status was dispensed but items aren't, change to partially_dispensed
                 self.status = 'partially_dispensed'
             elif self.status not in ['cancelled']:
                 self.status = 'pending'
         
-        self.save(update_fields=['status', 'dispensed_at'])
+        self.save(update_fields=['status', 'dispensing_started_at', 'dispensed_at'])
     
     def __str__(self):
         return f"{self.prescription_id} - {self.patient.get_full_name()}"
@@ -385,6 +403,10 @@ class PrescriptionItem(models.Model):
     # Dispensing information
     dispensed_quantity = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     is_dispensed = models.BooleanField(default=False)
+
+    # Combo split (and similar): line kept as read-only prescribing record; dispense new rows only.
+    superseded_at = models.DateTimeField(null=True, blank=True)
+    superseded_split_into_ids = models.JSONField(default=list, blank=True)
     
     class Meta:
         db_table = 'prescription_items'
@@ -466,6 +488,10 @@ class Dispense(models.Model):
     quantity = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0)])
     unit = models.CharField(max_length=50)
     batch_number = models.CharField(max_length=100, blank=True)
+    prescribed_generic_name_snapshot = models.CharField(max_length=255, blank=True, default='')
+    prescribed_medication_name_snapshot = models.CharField(max_length=255, blank=True, default='')
+    prescribed_unit_snapshot = models.CharField(max_length=50, blank=True, default='')
+    dispense_context_snapshot = models.CharField(max_length=50, blank=True, default='')
     
     dispensed_by = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, related_name='dispensed_medications')
     dispensed_at = models.DateTimeField(auto_now_add=True)

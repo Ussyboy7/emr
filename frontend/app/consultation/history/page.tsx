@@ -33,6 +33,7 @@ import { PrescriptionOrderModal, type PrescriptionOrderSubmitInput } from "@/com
 import { LabOrderModal, type LabOrderSubmitInput } from "@/components/consultation/orders/LabOrderModal";
 import { RadiologyOrderModal, type RadiologyOrderSubmitInput } from "@/components/consultation/orders/RadiologyOrderModal";
 import { PhysioOrderModal, type PhysioOrderSubmitInput } from "@/components/consultation/orders/PhysioOrderModal";
+import { NursingOrderModal, type NursingOrderSubmitInput } from "@/components/consultation/orders/NursingOrderModal";
 
 // NOTE: doctor name is now taken directly from the session serializer (doctor_name)
 // to avoid per-row API calls in large lists.
@@ -261,6 +262,7 @@ export default function ConsultationHistoryPage() {
   const [editLabOrders, setEditLabOrders] = useState<any[]>([]);
   const [editRadiologyOrders, setEditRadiologyOrders] = useState<any[]>([]);
   const [editPhysioOrders, setEditPhysioOrders] = useState<any[]>([]);
+  const [editNursingOrders, setEditNursingOrders] = useState<any[]>([]);
   const [loadingOrders, setLoadingOrders] = useState(false);
   const [editActiveTab, setEditActiveTab] = useState('notes');
   // Add-order dialogs (Option A: use session-style modals, submit immediately)
@@ -268,6 +270,7 @@ export default function ConsultationHistoryPage() {
   const [showAddLabOrder, setShowAddLabOrder] = useState(false);
   const [showAddRadiologyOrder, setShowAddRadiologyOrder] = useState(false);
   const [showAddPhysioOrder, setShowAddPhysioOrder] = useState(false);
+  const [showAddNursingOrder, setShowAddNursingOrder] = useState(false);
   const [editOrderAllergies, setEditOrderAllergies] = useState<string[]>([]);
   const [editForm, setEditForm] = useState<{
     diagnosis: string;
@@ -590,11 +593,12 @@ export default function ConsultationHistoryPage() {
     const loadOrdersAndSession = async () => {
       setLoadingOrders(true);
       try {
-        const [rxRes, labRes, radRes, physioRes, session, diagnosesRes] = await Promise.all([
+        const [rxRes, labRes, radRes, physioRes, nursingRes, session, diagnosesRes] = await Promise.all([
           pharmacyService.getPrescriptions({ consultation_session: sessionId, page_size: 100 }),
           labService.getOrders({ consultation_session: sessionId, page_size: 100 }),
           radiologyService.getOrders({ consultation_session: sessionId, page_size: 100 }),
           physioService.getOrders({ consultation_session: sessionId, page_size: 100 }),
+          apiFetch<{ results: any[] }>(`/nursing/orders/?consultation_session=${sessionId}&page_size=100`),
           consultationService.getSession(sessionId),
           consultationService.getDiagnoses({ session: sessionId, page_size: 100 }),
         ]);
@@ -602,6 +606,7 @@ export default function ConsultationHistoryPage() {
         setEditLabOrders(labRes.results || []);
         setEditRadiologyOrders(radRes.results || []);
         setEditPhysioOrders(physioRes.results || []);
+        setEditNursingOrders(nursingRes.results || []);
 
         // Sync edit form with backend: notes and diagnoses (so Edit shows what was saved in the session)
         const diagnosisList = diagnosesRes?.results || [];
@@ -643,16 +648,18 @@ export default function ConsultationHistoryPage() {
     const sessionId = parseInt(selectedConsultation.id, 10);
     if (isNaN(sessionId)) return;
     try {
-      const [rxRes, labRes, radRes, physioRes] = await Promise.all([
+      const [rxRes, labRes, radRes, physioRes, nursingRes] = await Promise.all([
         pharmacyService.getPrescriptions({ consultation_session: sessionId, page_size: 100 }),
         labService.getOrders({ consultation_session: sessionId, page_size: 100 }),
         radiologyService.getOrders({ consultation_session: sessionId, page_size: 100 }),
         physioService.getOrders({ consultation_session: sessionId, page_size: 100 }),
+        apiFetch<{ results: any[] }>(`/nursing/orders/?consultation_session=${sessionId}&page_size=100`),
       ]);
       setEditPrescriptions(rxRes.results || []);
       setEditLabOrders(labRes.results || []);
       setEditRadiologyOrders(radRes.results || []);
       setEditPhysioOrders(physioRes.results || []);
+      setEditNursingOrders(nursingRes.results || []);
     } catch (err) {
       console.error('Error refetching orders:', err);
     }
@@ -794,6 +801,54 @@ export default function ConsultationHistoryPage() {
       priority: payload.priority,
     } as any);
     toast.success("Physiotherapy order added");
+    await loadEditOrdersRefetch();
+  };
+
+  const handleSubmitNursingOrder = async (payload: NursingOrderSubmitInput) => {
+    const patientId = getSelectedPatientId();
+    const sessionId = getSelectedSessionId();
+    if (!selectedConsultation || !patientId || !sessionId) {
+      toast.error("Invalid consultation/patient");
+      return;
+    }
+
+    const priorityMap: Record<string, "low" | "medium" | "high" | "urgent"> = {
+      Routine: "low",
+      Urgent: "high",
+      STAT: "urgent",
+    };
+
+    let description = payload.instructions;
+    let orderTypeForApi: string = payload.type;
+
+    if (payload.type === "Observation Admission") {
+      orderTypeForApi = "observation admission";
+      description = `Observation admission (Day Care) to ${payload.ward}. Diagnosis: ${payload.admissionDiagnosis}. Presenting complaint: ${payload.presentingComplaint || "N/A"}. ${payload.instructions}`;
+    } else if (payload.type === "Injection" && payload.medication) {
+      description = `${payload.medication} - ${payload.dosage || ""} via ${payload.route || ""}. ${payload.instructions}`;
+    } else if (payload.type === "Dressing") {
+      description = `${payload.woundType || "Wound"} dressing at ${payload.woundLocation || "site"}. ${payload.instructions}`;
+    } else if (payload.type === "IV Infusion" && payload.medication) {
+      description = `IV Infusion: ${payload.medication}${payload.dosage ? ` — ${payload.dosage}` : ""}. ${payload.instructions}`;
+    }
+
+    await apiFetch("/nursing/orders/", {
+      method: "POST",
+      body: JSON.stringify({
+        patient: patientId,
+        visit: selectedConsultation.visitId,
+        consultation_session: sessionId,
+        ordered_by: currentUser?.id ? Number(currentUser.id) : undefined,
+        order_type: orderTypeForApi,
+        description,
+        frequency: payload.type === "Injection" ? "As ordered" : "",
+        duration: "",
+        status: "pending",
+        priority: priorityMap[payload.priority] || "medium",
+      }),
+    });
+
+    toast.success("Nursing order added");
     await loadEditOrdersRefetch();
   };
 
@@ -1187,7 +1242,7 @@ export default function ConsultationHistoryPage() {
             </DialogHeader>
             {selectedConsultation && (
               <Tabs value={editActiveTab} onValueChange={setEditActiveTab} className="w-full mt-2">
-                <TabsList className="grid w-full grid-cols-5 h-10 gap-1 p-1">
+                <TabsList className="grid w-full grid-cols-6 h-10 gap-1 p-1">
                   <TabsTrigger value="notes" className="text-xs sm:text-sm flex items-center gap-1">
                     <FileText className="h-3.5 w-3.5" />
                     Notes
@@ -1207,6 +1262,10 @@ export default function ConsultationHistoryPage() {
                   <TabsTrigger value="physio" className="text-xs sm:text-sm flex items-center gap-1">
                     <Activity className="h-3.5 w-3.5" />
                     Physio
+                  </TabsTrigger>
+                  <TabsTrigger value="nursing" className="text-xs sm:text-sm flex items-center gap-1">
+                    <Syringe className="h-3.5 w-3.5" />
+                    Nursing
                   </TabsTrigger>
                 </TabsList>
                 <TabsContent value="notes" className="space-y-5 mt-5">
@@ -1523,6 +1582,59 @@ export default function ConsultationHistoryPage() {
                     </CardContent>
                   </Card>
                 </TabsContent>
+                <TabsContent value="nursing" className="mt-4">
+                  <Card>
+                    <CardHeader>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <CardTitle className="flex items-center gap-2">
+                            <Syringe className="h-5 w-5 text-cyan-500" />
+                            Nursing Orders
+                          </CardTitle>
+                          <CardDescription>Request nursing procedures - will be sent to Nursing queue.</CardDescription>
+                        </div>
+                        <Button variant="outline" size="sm" onClick={() => setShowAddNursingOrder(true)}>
+                          <Plus className="h-4 w-4 mr-1" />Add Nursing Order
+                        </Button>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {loadingOrders ? (
+                        <div className="flex items-center justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+                      ) : editNursingOrders.length === 0 ? (
+                        <div className="text-center py-12 bg-gradient-to-b from-cyan-50 to-cyan-100/50 dark:from-cyan-900/10 dark:to-cyan-900/5 rounded-lg border-2 border-dashed border-cyan-200 dark:border-cyan-800">
+                          <Syringe className="h-12 w-12 mx-auto mb-3 text-cyan-500 opacity-60" />
+                          <p className="font-medium text-cyan-900 dark:text-cyan-100 mb-1">No nursing orders yet</p>
+                          <p className="text-sm text-muted-foreground mb-4">Add procedures to be sent to Nursing</p>
+                          <Button variant="outline" size="sm" onClick={() => setShowAddNursingOrder(true)} className="border-cyan-300 text-cyan-700 hover:bg-cyan-100">
+                            <Plus className="h-4 w-4 mr-1" />Add First Nursing Order
+                          </Button>
+                        </div>
+                      ) : (
+                        <ul className="space-y-2">
+                          {editNursingOrders.map((order: any) => (
+                            <li key={order.id} className="p-3 rounded-lg border bg-muted/30 text-sm">
+                              <span className="font-medium capitalize">{order.order_type || "Nursing order"}</span>
+                              <p className="text-muted-foreground mt-1">{order.description || "—"}</p>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                      <div className="p-4 rounded-lg bg-cyan-50 dark:bg-cyan-900/20 border border-cyan-200 dark:border-cyan-800">
+                        <h4 className="font-medium text-cyan-900 dark:text-cyan-100 mb-2 flex items-center gap-2">
+                          <Activity className="h-4 w-4" />Nursing Order Workflow
+                        </h4>
+                        <div className="flex items-center gap-2 text-xs text-cyan-700 dark:text-cyan-300 flex-wrap">
+                          <Badge variant="outline" className="bg-cyan-100 dark:bg-cyan-900/30">Ordered</Badge>
+                          <span>→</span>
+                          <Badge variant="outline" className="bg-blue-100 dark:bg-blue-900/30">In Progress</Badge>
+                          <span>→</span>
+                          <Badge variant="outline" className="bg-emerald-100 dark:bg-emerald-900/30">Completed ✓</Badge>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </TabsContent>
               </Tabs>
             )}
             <DialogFooter>
@@ -1653,27 +1765,30 @@ export default function ConsultationHistoryPage() {
           onOpenChange={setShowAddPrescription}
           patientAllergies={editOrderAllergies}
           onSubmit={handleSubmitPrescription}
-          confirmLabel="Submit prescription order"
         />
 
         <LabOrderModal
           open={showAddLabOrder}
           onOpenChange={setShowAddLabOrder}
           onSubmit={handleSubmitLabOrder}
-          confirmLabel="Submit lab order"
         />
 
         <RadiologyOrderModal
           open={showAddRadiologyOrder}
           onOpenChange={setShowAddRadiologyOrder}
           onSubmit={handleSubmitRadiologyOrder}
-          confirmLabel="Submit radiology order"
         />
 
         <PhysioOrderModal
           open={showAddPhysioOrder}
           onOpenChange={setShowAddPhysioOrder}
           onSubmit={handleSubmitPhysioOrder}
+        />
+
+        <NursingOrderModal
+          open={showAddNursingOrder}
+          onOpenChange={setShowAddNursingOrder}
+          onSubmit={handleSubmitNursingOrder}
         />
       </div>
     </DashboardLayout>

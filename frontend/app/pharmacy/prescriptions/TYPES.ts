@@ -33,6 +33,12 @@ export interface MedicationItem {
   generic_name?: string; // Generic medication name
   substitution?: boolean; // Whether this is a substituted medication
   originalMedication?: string; // Original medication name if substituted
+  can_split_combo?: boolean;
+  combo_components?: string[];
+  /** Kept as read-only record after combo split */
+  prescribing_record_only?: boolean;
+  superseded_at?: string;
+  superseded_split_into_ids?: number[];
 }
 
 export interface Prescription {

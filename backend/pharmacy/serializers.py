@@ -2,6 +2,7 @@
 Serializers for the Pharmacy app.
 """
 from rest_framework import serializers
+from .combo_utils import combo_component_names_from_display_name
 from .models import GenericMedication, Medication, MedicationInventory, Prescription, PrescriptionItem, Dispense, StockRequest, StockRequestItem, StockIssue, StockIssueLine, DispensaryReceiptLine
 
 
@@ -216,6 +217,9 @@ class PrescriptionItemSerializer(serializers.ModelSerializer):
     dosage = serializers.SerializerMethodField()  # Legacy read alias for dose
     stock_dispensed_quantity = serializers.SerializerMethodField()
     stock_dispensed_unit = serializers.SerializerMethodField()
+    can_split_combo = serializers.SerializerMethodField()
+    combo_components = serializers.SerializerMethodField()
+    prescribing_record_only = serializers.SerializerMethodField()
     prescription = serializers.PrimaryKeyRelatedField(read_only=True)  # Make prescription read-only for nested writes
     
     generic = serializers.PrimaryKeyRelatedField(
@@ -352,6 +356,26 @@ class PrescriptionItemSerializer(serializers.ModelSerializer):
             return obj.unit
         except (AttributeError, TypeError, ValueError):
             return obj.unit if getattr(obj, 'unit', None) else ''
+
+    def _combo_components_from_name(self, name: str):
+        return combo_component_names_from_display_name(name)
+
+    def get_combo_components(self, obj):
+        generic_name = getattr(getattr(obj, 'generic', None), 'name', '') or ''
+        components = self._combo_components_from_name(generic_name)
+        return components if len(components) > 1 else []
+
+    def get_can_split_combo(self, obj):
+        if getattr(obj, 'superseded_at', None):
+            return False
+        if getattr(obj, 'is_dispensed', False):
+            return False
+        if float(getattr(obj, 'dispensed_quantity', 0) or 0) > 0:
+            return False
+        return len(self.get_combo_components(obj)) > 1
+
+    def get_prescribing_record_only(self, obj):
+        return bool(getattr(obj, 'superseded_at', None))
     
     class Meta:
         model = PrescriptionItem
@@ -359,8 +383,10 @@ class PrescriptionItemSerializer(serializers.ModelSerializer):
             'id', 'prescription', 'medication', 'generic', 'medication_name', 'medication_code',
             'medication_details', 'quantity', 'unit', 'dosage_form', 'strength', 'dose', 'dosage', 'frequency', 'duration', 'route',
             'instructions', 'dispensed_quantity', 'stock_dispensed_quantity', 'stock_dispensed_unit', 'is_dispensed',
+            'can_split_combo', 'combo_components',
+            'superseded_at', 'superseded_split_into_ids', 'prescribing_record_only',
         ]
-        read_only_fields = ['prescription']
+        read_only_fields = ['prescription', 'superseded_at', 'superseded_split_into_ids']
 
 
 class PrescriptionSerializer(serializers.ModelSerializer):
@@ -469,28 +495,16 @@ class DispenseSerializer(serializers.ModelSerializer):
     dispense_context = serializers.SerializerMethodField()
 
     def get_prescribed_generic_name(self, obj):
-        try:
-            if obj.prescription_item and obj.prescription_item.generic:
-                return obj.prescription_item.generic.name
-        except Exception:
-            pass
-        return ''
+        # No fallback: use immutable dispense-time snapshot only.
+        return getattr(obj, 'prescribed_generic_name_snapshot', '') or ''
 
     def get_prescribed_medication_name(self, obj):
-        try:
-            if obj.prescription_item and obj.prescription_item.medication:
-                return obj.prescription_item.medication.name
-        except Exception:
-            pass
-        return ''
+        # No fallback: use immutable dispense-time snapshot only.
+        return getattr(obj, 'prescribed_medication_name_snapshot', '') or ''
 
     def get_prescribed_unit(self, obj):
-        try:
-            if obj.prescription_item and obj.prescription_item.unit:
-                return obj.prescription_item.unit
-        except Exception:
-            pass
-        return ''
+        # No fallback: use immutable dispense-time snapshot only.
+        return getattr(obj, 'prescribed_unit_snapshot', '') or ''
 
     def get_dispense_context(self, obj):
         """
@@ -498,17 +512,9 @@ class DispenseSerializer(serializers.ModelSerializer):
         brand_selected_from_generic: item prescribed as generic, brand selected at dispense
         substituted: dispensed brand differs from prescribed brand on item
         """
-        try:
-            item = obj.prescription_item
-            if not item:
-                return 'as_selected_brand'
-            if not item.medication_id:
-                return 'brand_selected_from_generic'
-            if obj.medication_id and item.medication_id != obj.medication_id:
-                return 'substituted'
-            return 'as_selected_brand'
-        except Exception:
-            return 'as_selected_brand'
+        # No fallback inference from mutable prescription state.
+        # Return exactly what was snapshotted at dispense-time.
+        return getattr(obj, 'dispense_context_snapshot', '') or ''
     
     class Meta:
         model = Dispense

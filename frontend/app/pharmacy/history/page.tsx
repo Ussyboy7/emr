@@ -85,12 +85,11 @@ export default function DispenseHistoryPage() {
         // Extract doctor details
         const doctorName = prescription.prescribed_by_name || prescription.doctor_name || '';
         
-        const context = (dispense.dispense_context || 'as_selected_brand') as 'as_selected_brand' | 'brand_selected_from_generic' | 'substituted';
+        const context = (dispense.dispense_context || undefined) as 'as_selected_brand' | 'brand_selected_from_generic' | 'substituted' | undefined;
         const prescribedName =
-          dispense.prescribed_generic_name ||
-          dispense.prescribed_medication_name ||
-          dispense.medication_name ||
-          '';
+          context === 'brand_selected_from_generic'
+            ? (dispense.prescribed_generic_name || '')
+            : (dispense.prescribed_medication_name || '');
         const dispensedName = dispense.medication_name || '';
         const medications = [{
           prescribed: prescribedName,
@@ -105,13 +104,13 @@ export default function DispenseHistoryPage() {
         // Count substitutions
         const substitutions = medications.filter((m: any) => m.context === 'substituted').length;
         
-        // Calculate wait time (if prescription has prescribed_at)
+        // Calculate wait time from when pharmacist started attending this prescription.
         let waitTime = '0 min';
-        if (prescription.prescribed_at && dispense.dispensed_at) {
-          const prescribedAt = new Date(prescription.prescribed_at);
+        if (prescription.dispensing_started_at && dispense.dispensed_at) {
+          const prescribedAt = new Date(prescription.dispensing_started_at);
           const dispensedAt = new Date(dispense.dispensed_at);
           const waitTimeMs = dispensedAt.getTime() - prescribedAt.getTime();
-          const waitTimeMins = Math.floor(waitTimeMs / 60000);
+          const waitTimeMins = Math.max(0, Math.floor(waitTimeMs / 60000));
           waitTime = `${waitTimeMins} min`;
         }
         

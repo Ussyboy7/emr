@@ -28,8 +28,8 @@ class PrescriptionAdmin(admin.ModelAdmin):
 
 @admin.register(PrescriptionItem)
 class PrescriptionItemAdmin(admin.ModelAdmin):
-    list_display = ['prescription', 'medication', 'quantity', 'unit', 'is_dispensed']
-    list_filter = ['is_dispensed']
+    list_display = ['prescription', 'medication', 'quantity', 'unit', 'is_dispensed', 'superseded_at']
+    list_filter = ['is_dispensed', 'superseded_at']
     search_fields = ['prescription__prescription_id', 'medication__name']
 
 

@@ -691,7 +691,7 @@ export default function AppointmentsPage() {
             )}{" "}
             appointments
           </p>
-        </div>
+              </div>
 
         {isLoading ? (
           <Card>
@@ -700,7 +700,7 @@ export default function AppointmentsPage() {
               <p className="text-muted-foreground">Loading appointments…</p>
             </CardContent>
           </Card>
-        ) : appointments.length === 0 ? (
+            ) : appointments.length === 0 ? (
           <Card>
             <CardContent className="py-12 text-center">
               <CalendarDays className="mx-auto mb-3 h-12 w-12 text-blue-500 opacity-60" />
@@ -713,8 +713,8 @@ export default function AppointmentsPage() {
                 dateRange.from ||
                 dateRange.to ||
                 clinicFilter !== "all"
-                  ? "Try adjusting your filters"
-                  : "Create your first appointment to get started"}
+                    ? "Try adjusting your filters"
+                    : "Create your first appointment to get started"}
                 </p>
               {!searchQuery &&
                 statusFilter === "all" &&
@@ -732,12 +732,12 @@ export default function AppointmentsPage() {
                 >
                   <Plus className="mr-2 h-4 w-4" />
                   Create first appointment
-                </Button>
-              )}
+                  </Button>
+                )}
             </CardContent>
           </Card>
-        ) : (
-          <>
+            ) : (
+              <>
             <div className="space-y-2">
               {appointments.map((appointment) => {
                 const name = appointment.patient_name ?? "Patient";
@@ -779,7 +779,7 @@ export default function AppointmentsPage() {
                           className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${avatarBg}`}
                         >
                           <span className={`text-xs font-semibold ${avatarFg}`}>{initials}</span>
-                        </div>
+                          </div>
                         <div className="min-w-0 flex-1 overflow-hidden">
                           <div className="flex flex-wrap items-center gap-2">
                             <h3 className="truncate text-sm font-medium text-foreground">{name}</h3>
@@ -788,7 +788,7 @@ export default function AppointmentsPage() {
                               className={`h-5 px-1.5 py-0 text-[10px] ${getAppointmentListTypeOutline(t)}`}
                             >
                               {formatAppointmentTypeLabel(t)}
-                            </Badge>
+                          </Badge>
                             <Badge
                               variant="outline"
                               className={`h-5 px-1.5 py-0 text-[10px] ${getAppointmentListStatusOutline(appointment.status)}`}
@@ -805,7 +805,7 @@ export default function AppointmentsPage() {
                             </span>
                             <span>•</span>
                             <span className="inline-flex items-center gap-1">
-                              <Clock className="h-3 w-3" />
+                            <Clock className="h-3 w-3" />
                               {appointment.appointment_time} ({appointment.duration_minutes} min)
                             </span>
                             <span>•</span>
@@ -819,11 +819,11 @@ export default function AppointmentsPage() {
                         </div>
                         <div className="flex shrink-0 items-center gap-0.5">
                           <Button variant="ghost" size="sm" onClick={() => openViewDialog(appointment)}>
-                            <Eye className="h-4 w-4" />
-                          </Button>
+                              <Eye className="h-4 w-4" />
+                            </Button>
                           <Button variant="ghost" size="sm" onClick={() => openEditDialog(appointment)}>
-                            <Edit className="h-4 w-4" />
-                          </Button>
+                              <Edit className="h-4 w-4" />
+                            </Button>
                           {canScheduleVisitFromAppointment(appointment) && (
                             <Button variant="outline" size="sm" className="h-8 shrink-0 gap-1 px-2 text-xs" asChild>
                               <Link href={buildScheduleVisitHref(appointment)} title="Open New Visit with patient and date prefilled">
@@ -852,23 +852,23 @@ export default function AppointmentsPage() {
                                     Confirm (patient acknowledged for this date)
                                   </SelectItem>
                                 )}
-                                <SelectItem value="cancelled">
+                                  <SelectItem value="cancelled">
                                   <XCircle className="mr-2 h-4 w-4" />
                                   Cancel appointment
-                                </SelectItem>
+                                  </SelectItem>
                               </SelectContent>
                             </Select>
                           )}
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleDeleteAppointment(appointment)}
-                            className="text-red-600 hover:text-red-700"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </div>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleDeleteAppointment(appointment)}
+                              className="text-red-600 hover:text-red-700"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                  </div>
                     </CardContent>
                   </Card>
                 );
@@ -879,29 +879,29 @@ export default function AppointmentsPage() {
               <p className="text-sm text-muted-foreground">
                 Page {currentPage} of {totalPages}
               </p>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
                   onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
                   disabled={currentPage <= 1}
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                  Previous
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                      Previous
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
                   onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
                   disabled={currentPage >= totalPages}
-                >
-                  Next
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-          </>
-        )}
+                    >
+                      Next
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              </>
+            )}
 
         {/* Create Appointment Dialog */}
         <Dialog
@@ -921,7 +921,7 @@ export default function AppointmentsPage() {
               </DialogTitle>
             </DialogHeader>
             <div className="grid gap-4 py-4">
-              <div className="space-y-2">
+                <div className="space-y-2">
                 <Label>Patient *</Label>
                 {selectedCreatePatient ? (
                   <div className="flex items-center justify-between gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2.5">
@@ -1010,22 +1010,22 @@ export default function AppointmentsPage() {
                     </div>
                   </>
                 )}
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="type">Appointment Type *</Label>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="type">Appointment Type *</Label>
                 <Select value={formData.appointment_type} onValueChange={(value) => setFormData({ ...formData, appointment_type: value as Appointment["appointment_type"] })}>
                   <SelectTrigger id="type">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="consultation">Consultation</SelectItem>
-                    <SelectItem value="follow_up">Follow-up</SelectItem>
-                    <SelectItem value="emergency">Emergency</SelectItem>
-                    <SelectItem value="procedure">Procedure</SelectItem>
-                    <SelectItem value="routine">Routine</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="consultation">Consultation</SelectItem>
+                      <SelectItem value="follow_up">Follow-up</SelectItem>
+                      <SelectItem value="emergency">Emergency</SelectItem>
+                      <SelectItem value="procedure">Procedure</SelectItem>
+                      <SelectItem value="routine">Routine</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               <div className="space-y-3">
                 <Label>Clinics *</Label>
                 <p className="text-xs text-muted-foreground">

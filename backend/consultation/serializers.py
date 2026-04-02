@@ -71,17 +71,27 @@ class ConsultationSessionSerializer(serializers.ModelSerializer):
     doctor_name = serializers.CharField(source='doctor.get_full_name', read_only=True, allow_null=True)
     room_name = serializers.CharField(source='room.name', read_only=True)
     clinic_name = serializers.CharField(source='visit.clinic', read_only=True, allow_null=True)
+    active_duration_seconds = serializers.SerializerMethodField()
 
     def get_patient_gender(self, obj):
         p = getattr(obj, 'patient', None)
         if not p or not p.gender:
             return ''
         return p.get_gender_display()
+
+    def get_active_duration_seconds(self, obj):
+        if hasattr(obj, 'get_active_duration_seconds'):
+            return obj.get_active_duration_seconds()
+        return 0
     
     class Meta:
         model = ConsultationSession
         fields = '__all__'
         read_only_fields = ['session_id', 'started_at', 'created_at']
+        # DRF partial-update bug with conditional UniqueConstraint can raise KeyError
+        # when fields used by constraint condition (e.g. "status") are absent in PATCH payload.
+        # Keep DB constraints as source of truth; viewset create/update handles IntegrityError.
+        validators = []
 
 
 class ConsultationQueueSerializer(serializers.ModelSerializer):

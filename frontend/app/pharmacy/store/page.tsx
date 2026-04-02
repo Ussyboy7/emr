@@ -41,6 +41,7 @@ const adjustmentReasons = [
   'Theft/Loss',
   'Other',
 ];
+const EXPIRY_WARNING_DAYS = 180;
 
 export default function WarehouseStorePage() {
   // Inventory state
@@ -182,6 +183,7 @@ export default function WarehouseStorePage() {
     if (!expiryDate) return 9999;
     const today = new Date();
     const expiry = new Date(expiryDate);
+    if (Number.isNaN(expiry.getTime())) return 9999;
     const diffTime = expiry.getTime() - today.getTime();
     return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
   };
@@ -232,6 +234,13 @@ export default function WarehouseStorePage() {
         stockFilter === "all" ||
         (stockFilter === "out" && status === "Out of Stock") ||
         (stockFilter === "low" && status === "Low Stock") ||
+        (stockFilter === "near_expiry" &&
+          med.storeQuantity > 0 &&
+          (() => {
+            const nearestExpiry = getNearestExpiryDate(med.batches);
+            const days = getDaysUntilExpiry(nearestExpiry);
+            return days >= 0 && days <= EXPIRY_WARNING_DAYS;
+          })()) ||
         (stockFilter === "normal" && status === "In Stock");
 
       return matchesSearch && matchesCategory && matchesStock;
@@ -246,10 +255,24 @@ export default function WarehouseStorePage() {
   const stats = useMemo(() => {
     const outOfStock = storeInventory.filter((m) => m.storeQuantity === 0).length;
     const lowStock = storeInventory.filter((m) => m.storeQuantity > 0 && m.storeQuantity <= m.minimumStock).length;
+    const expiringSoon = storeInventory.filter((m) => {
+      if (m.storeQuantity <= 0) return false;
+      const nearestExpiry = getNearestExpiryDate(m.batches);
+      const days = getDaysUntilExpiry(nearestExpiry);
+      return days >= 0 && days <= EXPIRY_WARNING_DAYS;
+    }).length;
+    const expired = storeInventory.filter((m) => {
+      if (m.storeQuantity <= 0) return false;
+      const nearestExpiry = getNearestExpiryDate(m.batches);
+      const days = getDaysUntilExpiry(nearestExpiry);
+      return days < 0;
+    }).length;
     return {
       totalMedications: storeInventory.length,
       outOfStock,
       lowStock,
+      expiringSoon,
+      expired,
       totalUnits: storeInventory.reduce((sum, m) => sum + m.storeQuantity, 0),
     };
   }, [storeInventory]);
@@ -588,19 +611,33 @@ export default function WarehouseStorePage() {
             </Card>
           </div>
 
-          {(stats.outOfStock > 0 || stats.lowStock > 0) && (
+          {(stats.outOfStock > 0 || stats.lowStock > 0 || stats.expiringSoon > 0 || stats.expired > 0) && (
             <Card className="bg-gradient-to-r from-amber-50 to-red-50 dark:from-amber-900/20 dark:to-red-900/20 border-amber-200 dark:border-amber-800">
               <CardContent className="p-4">
-                <div className="flex items-center gap-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
                   <AlertTriangle className="h-5 w-5 text-amber-600" />
                   <div>
                     <p className="font-medium text-amber-800 dark:text-amber-400">Stock Alerts</p>
                     <p className="text-sm text-amber-700 dark:text-amber-500">
                       {stats.outOfStock > 0 && `${stats.outOfStock} item(s) out of stock. `}
                       {stats.lowStock > 0 && `${stats.lowStock} item(s) running low. `}
+                      {stats.expiringSoon > 0 && `${stats.expiringSoon} item(s) near expiry (<= ${EXPIRY_WARNING_DAYS} days). `}
+                      {stats.expired > 0 && `${stats.expired} item(s) already expired. `}
                       Consider restocking soon.
                     </p>
                   </div>
+                </div>
+                  {stats.expiringSoon > 0 && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="border-amber-300 text-amber-800 hover:bg-amber-100 dark:border-amber-700 dark:text-amber-300"
+                      onClick={() => setStockFilter("near_expiry")}
+                    >
+                      View Near Expiry
+                    </Button>
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -646,6 +683,7 @@ export default function WarehouseStorePage() {
                       <SelectItem value="all">All Status</SelectItem>
                       <SelectItem value="out">Out of Stock</SelectItem>
                       <SelectItem value="low">Low Stock</SelectItem>
+                      <SelectItem value="near_expiry">Near Expiry</SelectItem>
                       <SelectItem value="normal">In Stock</SelectItem>
                     </SelectContent>
                   </Select>
@@ -743,7 +781,7 @@ export default function WarehouseStorePage() {
                                 <span>•</span>
                                 <span
                                   className={`flex items-center gap-1 ${
-                                    daysUntilExpiry <= 90 ? "text-amber-600 dark:text-amber-400" : ""
+                                    daysUntilExpiry <= EXPIRY_WARNING_DAYS ? "text-amber-600 dark:text-amber-400" : ""
                                   } ${daysUntilExpiry < 0 ? "text-red-600 dark:text-red-400" : ""}`}
                                 >
                                   <Clock className="h-3 w-3" />

@@ -54,6 +54,7 @@ class ConsultationSession(models.Model):
     
     STATUS_CHOICES = [
         ('active', 'Active'),
+        ('paused', 'Paused'),
         ('completed', 'Completed'),
         ('cancelled', 'Cancelled'),
     ]
@@ -73,6 +74,9 @@ class ConsultationSession(models.Model):
     notes = models.TextField(blank=True)
     
     started_at = models.DateTimeField(auto_now_add=True)
+    last_resumed_at = models.DateTimeField(null=True, blank=True)
+    paused_at = models.DateTimeField(null=True, blank=True)
+    active_seconds = models.PositiveIntegerField(default=0)
     ended_at = models.DateTimeField(null=True, blank=True)
     created_by = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, related_name='created_consultations')
     
@@ -115,8 +119,20 @@ class ConsultationSession(models.Model):
                 new_num = 1
             
             self.session_id = f'SESS-{date_str}-{new_num:06d}'
+
+        if self.status == 'active' and not self.last_resumed_at:
+            self.last_resumed_at = timezone.now()
         
         super().save(*args, **kwargs)
+
+    def get_active_duration_seconds(self):
+        """Total active (doctor-attending) duration in seconds, excluding paused time."""
+        total = int(self.active_seconds or 0)
+        if self.status == 'active' and self.last_resumed_at:
+            delta = (timezone.now() - self.last_resumed_at).total_seconds()
+            if delta > 0:
+                total += int(delta)
+        return max(0, total)
     
     def __str__(self):
         return f"{self.session_id} - {self.patient.get_full_name()}"

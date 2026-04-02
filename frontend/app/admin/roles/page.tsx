@@ -71,6 +71,8 @@ const allPagePermissions: PagePermission[] = [
   { id: '/nursing/procedures', name: 'Procedures', description: 'Perform nursing procedures', module: 'Nursing' },
   { id: '/nursing/procedures/history', name: 'Procedures History', description: 'View procedures history', module: 'Nursing' },
   { id: '/nursing/wards', name: 'Ward Management', description: 'Manage ward operations', module: 'Nursing' },
+  { id: '/nursing/inventory', name: 'Ward Stock', description: 'View and manage ward stock inventory', module: 'Nursing' },
+  { id: '/nursing/requests', name: 'Drug Requests', description: 'Request drugs from Central Store to Ward Care', module: 'Nursing' },
 
   // Consultation
   { id: '/consultation', name: 'My Dashboard', description: 'Consultation Dashboard', module: 'Consultation' },
@@ -93,7 +95,10 @@ const allPagePermissions: PagePermission[] = [
   { id: '/pharmacy/history', name: 'Dispense History', description: 'View dispense history', module: 'Pharmacy' },
   { id: '/pharmacy/inventory', name: 'Inventory', description: 'Manage drug inventory', module: 'Pharmacy' },
   { id: '/pharmacy/requests', name: 'Requests', description: 'Request stock from Central Store', module: 'Pharmacy' },
+  { id: '/pharmacy/generics', name: 'Generics', description: 'Manage generic medication catalog', module: 'Pharmacy' },
+  { id: '/pharmacy/drugs', name: 'Drug Master', description: 'Manage branded drugs and mappings', module: 'Pharmacy' },
   { id: '/pharmacy/store', name: 'Central Store', description: 'Manage central store receipts and fulfillments', module: 'Pharmacy' },
+  { id: '/pharmacy/store/requests', name: 'Store Requests', description: 'Review and issue store requests', module: 'Pharmacy' },
   { id: '/pharmacy/analytics', name: 'Pharmacy Analytics', description: 'Dispensing and prescription analytics', module: 'Pharmacy' },
 
   // Radiology
@@ -108,6 +113,11 @@ const allPagePermissions: PagePermission[] = [
   { id: '/physiotherapy', name: 'Dashboard', description: 'Physiotherapy Dashboard', module: 'Physiotherapy' },
   { id: '/physiotherapy/pool-queue', name: 'Pool Queue', description: 'Manage physiotherapy pool queue', module: 'Physiotherapy' },
   { id: '/physiotherapy/completed', name: 'Completed Sessions', description: 'View completed sessions', module: 'Physiotherapy' },
+
+  // Eye Clinic
+  { id: '/eyecare', name: 'Dashboard', description: 'Eye Clinic Dashboard', module: 'Eye Clinic' },
+  { id: '/eyecare/pool-queue', name: 'Pool Queue', description: 'Manage Eye Clinic pool queue', module: 'Eye Clinic' },
+  { id: '/eyecare/completed', name: 'Completed Orders', description: 'View completed Eye Clinic orders', module: 'Eye Clinic' },
 
   // Analytics
   { id: '/analytics', name: 'Clinical Reports', description: 'View clinical reports', module: 'Analytics' },

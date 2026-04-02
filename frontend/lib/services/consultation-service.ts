@@ -80,7 +80,7 @@ export interface ConsultationSession {
   doctor_name?: string;
   visit?: number;
   clinic_name?: string;
-  status: 'active' | 'completed' | 'cancelled';
+  status: 'active' | 'paused' | 'completed' | 'cancelled';
   presentation_complaint?: string;
   history_of_presenting_illness?: string;
   physical_examination?: string;
@@ -88,6 +88,10 @@ export interface ConsultationSession {
   plan?: string;
   notes?: string;
   started_at: string;
+  last_resumed_at?: string;
+  paused_at?: string;
+  active_seconds?: number;
+  active_duration_seconds?: number;
   ended_at?: string;
 }
 
@@ -169,6 +173,18 @@ class ConsultationService {
    */
   async endSession(id: number): Promise<ConsultationSession> {
     return apiFetch<ConsultationSession>(`/consultation/sessions/${id}/end/`, {
+      method: 'POST',
+    });
+  }
+
+  async pauseSession(id: number): Promise<ConsultationSession> {
+    return apiFetch<ConsultationSession>(`/consultation/sessions/${id}/pause/`, {
+      method: 'POST',
+    });
+  }
+
+  async resumeSession(id: number): Promise<ConsultationSession> {
+    return apiFetch<ConsultationSession>(`/consultation/sessions/${id}/resume/`, {
       method: 'POST',
     });
   }

@@ -50,6 +50,7 @@ interface MedicationInventoryItem {
 }
 
 const categories = MEDICATION_CATEGORIES;
+const EXPIRY_WARNING_DAYS = 180;
 
 export default function InventoryPage() {
   const location = PHARMACY_LOCATIONS.DISPENSARY;
@@ -206,6 +207,12 @@ export default function InventoryPage() {
           stockFilter === 'all' ||
           (stockFilter === 'out' && status === 'out') ||
           (stockFilter === 'low' && status === 'low') ||
+          (stockFilter === 'near_expiry' &&
+            med.currentStock > 0 &&
+            (() => {
+              const days = getDaysUntilExpiry(med.expiryDate);
+              return days >= 0 && days <= EXPIRY_WARNING_DAYS;
+            })()) ||
           (stockFilter === 'normal' && status === 'normal');
 
         return matchesSearch && matchesCategory && matchesStock;
@@ -242,19 +249,26 @@ export default function InventoryPage() {
     }
   }, [searchQuery, categoryFilter, stockFilter]);
 
-  // Check for expiring soon items (within 90 days) - use allInventoryForStats
+  // Check for expiring soon items (within configured threshold) - use allInventoryForStats
   const getExpiringItems = useMemo(() => {
     const today = new Date();
-    const ninetyDaysFromNow = new Date(today.getTime() + 90 * 24 * 60 * 60 * 1000);
+    const thresholdDate = new Date(today.getTime() + EXPIRY_WARNING_DAYS * 24 * 60 * 60 * 1000);
     return allInventoryForStats.filter(med => {
+      if (med.currentStock <= 0 || !med.expiryDate) return false;
       const expiry = new Date(med.expiryDate);
-      return expiry <= ninetyDaysFromNow && expiry >= today;
+      if (Number.isNaN(expiry.getTime())) return false;
+      return expiry <= thresholdDate && expiry >= today;
     });
   }, [allInventoryForStats]);
 
   const getExpiredItems = useMemo(() => {
     const today = new Date();
-    return allInventoryForStats.filter(med => new Date(med.expiryDate) < today);
+    return allInventoryForStats.filter(med => {
+      if (med.currentStock <= 0 || !med.expiryDate) return false;
+      const expiry = new Date(med.expiryDate);
+      if (Number.isNaN(expiry.getTime())) return false;
+      return expiry < today;
+    });
   }, [allInventoryForStats]);
 
   // Stats - use allInventoryForStats to show everything in store, not just current page
@@ -274,8 +288,10 @@ export default function InventoryPage() {
   };
 
   const getDaysUntilExpiry = (expiryDate: string) => {
+    if (!expiryDate) return 9999;
     const today = new Date();
     const expiry = new Date(expiryDate);
+    if (Number.isNaN(expiry.getTime())) return 9999;
     const diffTime = expiry.getTime() - today.getTime();
     return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
   };
@@ -284,7 +300,7 @@ export default function InventoryPage() {
     const days = getDaysUntilExpiry(expiryDate);
     if (days < 0) return 'bg-red-500 text-white';
     if (days <= 30) return 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400';
-    if (days <= 90) return 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400';
+    if (days <= EXPIRY_WARNING_DAYS) return 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400';
     return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400';
   };
 
@@ -385,19 +401,33 @@ export default function InventoryPage() {
         </div>
 
         {/* Alerts Banner */}
-        {(stats.outOfStock > 0 || stats.lowStock > 0) && (
+        {(stats.outOfStock > 0 || stats.lowStock > 0 || stats.expiringSoon > 0 || stats.expired > 0) && (
           <Card className="bg-gradient-to-r from-amber-50 to-red-50 dark:from-amber-900/20 dark:to-red-900/20 border-amber-200 dark:border-amber-800">
             <CardContent className="p-4">
-              <div className="flex items-center gap-3">
-                <AlertTriangle className="h-5 w-5 text-amber-600" />
-                <div>
-                  <p className="font-medium text-amber-800 dark:text-amber-400">Stock Alerts</p>
-                  <p className="text-sm text-amber-700 dark:text-amber-500">
-                    {stats.outOfStock > 0 && `${stats.outOfStock} item(s) out of stock. `}
-                    {stats.lowStock > 0 && `${stats.lowStock} item(s) running low. `}
-                    Consider restocking soon.
-                  </p>
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <AlertTriangle className="h-5 w-5 text-amber-600" />
+                  <div>
+                    <p className="font-medium text-amber-800 dark:text-amber-400">Stock Alerts</p>
+                    <p className="text-sm text-amber-700 dark:text-amber-500">
+                      {stats.outOfStock > 0 && `${stats.outOfStock} item(s) out of stock. `}
+                      {stats.lowStock > 0 && `${stats.lowStock} item(s) running low. `}
+                      {stats.expiringSoon > 0 && `${stats.expiringSoon} item(s) near expiry (<= ${EXPIRY_WARNING_DAYS} days). `}
+                      {stats.expired > 0 && `${stats.expired} item(s) already expired. `}
+                      Consider restocking soon.
+                    </p>
+                  </div>
                 </div>
+                {stats.expiringSoon > 0 && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="border-amber-300 text-amber-800 hover:bg-amber-100 dark:border-amber-700 dark:text-amber-300"
+                    onClick={() => setStockFilter("near_expiry")}
+                  >
+                    View Near Expiry
+                  </Button>
+                )}
               </div>
             </CardContent>
           </Card>
@@ -438,6 +468,7 @@ export default function InventoryPage() {
                     <SelectItem value="all">All Status</SelectItem>
                     <SelectItem value="out">Out of Stock</SelectItem>
                     <SelectItem value="low">Low Stock</SelectItem>
+                    <SelectItem value="near_expiry">Near Expiry</SelectItem>
                     <SelectItem value="normal">In Stock</SelectItem>
                   </SelectContent>
                 </Select>
@@ -521,7 +552,7 @@ export default function InventoryPage() {
                           <span>•</span>
                           <span>{med.dosageForm}</span>
                           <span>•</span>
-                              <span className={`flex items-center gap-1 ${getDaysUntilExpiry(med.expiryDate) <= 90 ? 'text-amber-600 dark:text-amber-400' : ''} ${getDaysUntilExpiry(med.expiryDate) < 0 ? 'text-red-600 dark:text-red-400' : ''}`}>
+                              <span className={`flex items-center gap-1 ${getDaysUntilExpiry(med.expiryDate) <= EXPIRY_WARNING_DAYS ? 'text-amber-600 dark:text-amber-400' : ''} ${getDaysUntilExpiry(med.expiryDate) < 0 ? 'text-red-600 dark:text-red-400' : ''}`}>
                                 <Clock className="h-3 w-3" />
                                 {getDaysUntilExpiry(med.expiryDate) < 0 ? 'Expired' : 
                                  getDaysUntilExpiry(med.expiryDate) <= 30 ? `${getDaysUntilExpiry(med.expiryDate)}d` :
@@ -647,7 +678,7 @@ export default function InventoryPage() {
                   selectedMedication.batches.map((batch, idx) => {
                     const daysUntilExpiry = getDaysUntilExpiry(batch.expiryDate);
                     const isExpired = daysUntilExpiry < 0;
-                    const isExpiringSoon = daysUntilExpiry >= 0 && daysUntilExpiry <= 90;
+                    const isExpiringSoon = daysUntilExpiry >= 0 && daysUntilExpiry <= EXPIRY_WARNING_DAYS;
                     const sourceLabel = batch.sourceFromCentralStore?.from_location || batch.supplier || 'N/A';
                     const requestId = batch.sourceFromCentralStore?.request_id || '—';
                     const issuedDate = batch.sourceFromCentralStore?.issued_at?.split('T')[0] || '—';

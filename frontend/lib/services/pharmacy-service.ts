@@ -69,6 +69,12 @@ export interface PrescriptionItem {
   originalMedication?: any;
   stockLevel?: number;
   medication_details?: any;
+  can_split_combo?: boolean;
+  combo_components?: string[];
+  /** Original combo line kept after split; not for dispensing */
+  superseded_at?: string | null;
+  superseded_split_into_ids?: number[];
+  prescribing_record_only?: boolean;
 }
 
 export interface Medication {
@@ -311,6 +317,18 @@ class PharmacyService {
         reason: reason,
         notes: notes
       })
+    });
+  }
+
+  async splitComboPrescriptionItem(
+    prescriptionId: string | number,
+    itemId: string | number,
+  ): Promise<Prescription> {
+    return apiFetch<Prescription>(`/v1/pharmacy/prescriptions/${prescriptionId}/split-combo-item/`, {
+      method: 'POST',
+      body: JSON.stringify({
+        item_id: itemId,
+      }),
     });
   }
 

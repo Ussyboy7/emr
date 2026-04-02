@@ -571,23 +571,24 @@ export function PrescriptionOrderModal({
                           </div>
                           <div className="space-y-1 md:col-span-5">
                             <Label className="text-xs">Frequency <span className="text-red-500">*</span></Label>
-                            <Select value={mergedCfg.frequency || "Once daily (OD)"} onValueChange={(v) => updateMedicationConfig(medId, "frequency", v)}>
-                              <SelectTrigger className="h-8 text-xs">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="Once daily (OD)">Once daily (OD)</SelectItem>
-                                <SelectItem value="Twice daily (BD)">Twice daily (BD)</SelectItem>
-                                <SelectItem value="Three times daily (TDS)">Three times daily (TDS)</SelectItem>
-                                <SelectItem value="Four times daily (QDS)">Four times daily (QDS)</SelectItem>
-                                <SelectItem value="Every 6 hours (Q6H)">Every 6 hours</SelectItem>
-                                <SelectItem value="Every 8 hours (Q8H)">Every 8 hours</SelectItem>
-                                <SelectItem value="Every 12 hours (Q12H)">Every 12 hours</SelectItem>
-                                <SelectItem value="As needed (PRN)">As needed (PRN)</SelectItem>
-                                <SelectItem value="STAT (Single dose)">STAT (Single dose)</SelectItem>
-                                <SelectItem value="Weekly">Weekly</SelectItem>
-                              </SelectContent>
-                            </Select>
+                                <Select value={mergedCfg.frequency || "Once daily (OD)"} onValueChange={(v) => updateMedicationConfig(medId, "frequency", v)}>
+                                  <SelectTrigger className="h-8 text-xs">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="Once daily (OD)">Once daily (OD)</SelectItem>
+                                    <SelectItem value="Twice daily (BD)">Twice daily (BD)</SelectItem>
+                                    <SelectItem value="Three times daily (TDS)">Three times daily (TDS)</SelectItem>
+                                    <SelectItem value="Four times daily (QDS)">Four times daily (QDS)</SelectItem>
+                                    <SelectItem value="Every 6 hours (Q6H)">Every 6 hours</SelectItem>
+                                    <SelectItem value="Every 8 hours (Q8H)">Every 8 hours</SelectItem>
+                                    <SelectItem value="Every 12 hours (Q12H)">Every 12 hours</SelectItem>
+                                    <SelectItem value="At bedtime (Nocte)">At bedtime (Nocte)</SelectItem>
+                                    <SelectItem value="As needed (PRN)">As needed (PRN)</SelectItem>
+                                    <SelectItem value="STAT (Single dose)">STAT (Single dose)</SelectItem>
+                                    <SelectItem value="Weekly">Weekly</SelectItem>
+                                  </SelectContent>
+                                </Select>
                           </div>
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -669,11 +670,11 @@ export function PrescriptionOrderModal({
 
           {/* Clinical Indication */}
           <div className="space-y-2">
-            <Label>Clinical Indication *</Label>
+            <Label>Clinical Indication</Label>
             <Textarea
               value={clinicalIndication}
               onChange={(e) => setClinicalIndication(e.target.value)}
-              placeholder="Reason for prescription, clinical context, and special instructions..."
+              placeholder="Reason for prescription, clinical context, and special instructions (optional)..."
               rows={3}
             />
           </div>
@@ -694,7 +695,7 @@ export function PrescriptionOrderModal({
           </Button>
           <Button
             onClick={handleConfirm}
-            disabled={submitting || selectedMedications.length === 0 || !clinicalIndication.trim()}
+            disabled={submitting || selectedMedications.length === 0}
             className="bg-violet-600 hover:bg-violet-700"
           >
             {submitting ? (

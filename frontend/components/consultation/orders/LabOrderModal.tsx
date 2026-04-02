@@ -180,6 +180,10 @@ export function LabOrderModal({
     }
 
     const notes = clinicalNotes.trim();
+    if (!notes) {
+      toast.error("Clinical indication is required");
+      return;
+    }
     const hasOther = selectedTemplates.some((t) => (t.code || "").toUpperCase() === LAB_OTHER_TEMPLATE_CODE);
     if (hasOther && !notes) {
       toast.error('You selected "Other". Add clinical notes with the exact test name and instructions for the lab.');
@@ -332,20 +336,25 @@ export function LabOrderModal({
                 </SelectContent>
               </Select>
             </div>
+            <div className="space-y-2">
+              <Label>Est. TAT</Label>
+              <div className="h-10 px-3 py-2 border rounded-md text-sm text-muted-foreground bg-muted/50 flex items-center">
+                {priority === "stat" ? "30 min - 1 hour" : priority === "urgent" ? "1 - 2 hours" : "2 - 4 hours"}
+              </div>
+            </div>
           </div>
 
           <div className="space-y-2">
             <Label>
-              Clinical notes
-              {selectionIncludesOther && <span className="text-destructive"> *</span>}
+              Clinical indication <span className="text-destructive">*</span>
             </Label>
             <Textarea
               value={clinicalNotes}
               onChange={(e) => setClinicalNotes(e.target.value)}
               placeholder={
                 selectionIncludesOther
-                  ? "Required for “Other”: exact test / panel name, specimen, send-out lab, or special instructions for the laboratory…"
-                  : "Optional — add clinical context for the lab (especially if you selected Other)"
+                  ? "Reason for test and instructions for the lab. If you selected Other, write the exact test / panel / send-out details here."
+                  : "Reason for test and instructions for the lab."
               }
               rows={3}
             />
@@ -370,7 +379,7 @@ export function LabOrderModal({
             ) : (
               <>
                 <Plus className="h-4 w-4 mr-2" />
-                {confirmLabel || `Submit (${selected.size})`}
+                {confirmLabel || `Add ${selected.size ? `(${selected.size}) ` : ""}to Order`}
               </>
             )}
           </Button>

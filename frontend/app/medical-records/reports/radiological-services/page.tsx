@@ -224,15 +224,15 @@ export default function RadiologicalServicesReport() {
               </div>
               {viewMode === "year" ? (
                 <div>
-                  <Label>Year</Label>
-                  <Select value={year} onValueChange={setYear}>
+              <Label>Year</Label>
+              <Select value={year} onValueChange={setYear}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {years.map(y => (
-                        <SelectItem key={y} value={y}>{y}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                <SelectContent>
+                  {years.map(y => (
+                    <SelectItem key={y} value={y}>{y}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
                 </div>
               ) : (
                 <>
@@ -344,8 +344,8 @@ export default function RadiologicalServicesReport() {
               <p className="text-sm text-muted-foreground">Total Service Records</p>
               <p className="text-2xl sm:text-3xl font-bold text-emerald-600 dark:text-emerald-400">{summary.total_visits.toLocaleString()}</p>
               <p className="text-xs text-muted-foreground mt-1">Includes repeat services by the same patient</p>
-            </CardContent>
-          </Card>
+          </CardContent>
+        </Card>
         </div>
 
         <Card>

@@ -112,9 +112,9 @@ class ConsultationSessionViewSet(viewsets.ModelViewSet):
 
         return qs
     
-    def _resolve_active_session_for_create(self, data):
+    def _resolve_open_session_for_create(self, data):
         """
-        Return existing active session that should be resumed.
+        Return existing open session (active or paused) that should be resumed.
         Priority:
         1) same visit (strict)
         2) same patient+room (fallback when visit is absent)
@@ -123,7 +123,7 @@ class ConsultationSessionViewSet(viewsets.ModelViewSet):
         if visit:
             existing = (
                 ConsultationSession.objects
-                .filter(visit=visit, status='active')
+                .filter(visit=visit, status__in=['active', 'paused'])
                 .order_by('-started_at')
                 .first()
             )
@@ -135,11 +135,35 @@ class ConsultationSessionViewSet(viewsets.ModelViewSet):
         if patient and room:
             return (
                 ConsultationSession.objects
-                .filter(patient=patient, room=room, status='active')
+                .filter(patient=patient, room=room, status__in=['active', 'paused'])
                 .order_by('-started_at')
                 .first()
             )
         return None
+
+    def _activate_paused_session(self, session):
+        if session.status != 'paused':
+            return session
+        now = timezone.now()
+        session.status = 'active'
+        session.last_resumed_at = now
+        session.paused_at = None
+        session.save(update_fields=['status', 'last_resumed_at', 'paused_at'])
+        return session
+
+    def _pause_active_session(self, session):
+        if session.status != 'active':
+            return session
+        now = timezone.now()
+        elapsed = 0
+        if session.last_resumed_at:
+            elapsed = max(0, int((now - session.last_resumed_at).total_seconds()))
+        session.active_seconds = int(session.active_seconds or 0) + elapsed
+        session.status = 'paused'
+        session.paused_at = now
+        session.last_resumed_at = None
+        session.save(update_fields=['active_seconds', 'status', 'paused_at', 'last_resumed_at'])
+        return session
 
     def _prepare_session_create_data(self, validated_data):
         data = validated_data.copy()
@@ -167,9 +191,10 @@ class ConsultationSessionViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         data = self._prepare_session_create_data(serializer.validated_data)
 
-        # Idempotent create: resume existing active session instead of creating duplicates.
-        existing = self._resolve_active_session_for_create(data)
+        # Idempotent create: resume existing open session instead of creating duplicates.
+        existing = self._resolve_open_session_for_create(data)
         if existing:
+            existing = self._activate_paused_session(existing)
             payload = self.get_serializer(existing).data
             payload['resumed'] = True
             return Response(payload, status=status.HTTP_200_OK)
@@ -178,8 +203,9 @@ class ConsultationSessionViewSet(viewsets.ModelViewSet):
             session = serializer.save(created_by=self.request.user, **data)
         except IntegrityError:
             # Handle race conditions against DB-level unique constraints by returning the now-existing session.
-            existing_after_race = self._resolve_active_session_for_create(data)
+            existing_after_race = self._resolve_open_session_for_create(data)
             if existing_after_race:
+                existing_after_race = self._activate_paused_session(existing_after_race)
                 payload = self.get_serializer(existing_after_race).data
                 payload['resumed'] = True
                 return Response(payload, status=status.HTTP_200_OK)
@@ -211,15 +237,75 @@ class ConsultationSessionViewSet(viewsets.ModelViewSet):
         return None
     
     @action(detail=True, methods=['post'])
+    def pause(self, request, pk=None):
+        """Pause an active consultation session."""
+        session = self.get_object()
+        if session.status == 'paused':
+            return Response(ConsultationSessionSerializer(session).data)
+        if session.status != 'active':
+            return Response(
+                {'detail': 'Only active sessions can be paused.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        old_status = session.status
+        self._pause_active_session(session)
+        AuditService.log_activity(
+            user=self.request.user,
+            action='update',
+            object_type='consultation_session',
+            object_id=str(session.id),
+            module='consultation',
+            object_repr=f'Session {session.session_id}',
+            description=f'Paused consultation session {session.session_id}',
+            old_values={'status': old_status},
+            new_values={'status': session.status, 'paused_at': str(session.paused_at)},
+            request=self.request,
+        )
+        return Response(ConsultationSessionSerializer(session).data)
+
+    @action(detail=True, methods=['post'])
+    def resume(self, request, pk=None):
+        """Resume a paused consultation session."""
+        session = self.get_object()
+        if session.status == 'active':
+            return Response(ConsultationSessionSerializer(session).data)
+        if session.status != 'paused':
+            return Response(
+                {'detail': 'Only paused sessions can be resumed.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        old_status = session.status
+        self._activate_paused_session(session)
+        AuditService.log_activity(
+            user=self.request.user,
+            action='update',
+            object_type='consultation_session',
+            object_id=str(session.id),
+            module='consultation',
+            object_repr=f'Session {session.session_id}',
+            description=f'Resumed consultation session {session.session_id}',
+            old_values={'status': old_status},
+            new_values={'status': session.status, 'last_resumed_at': str(session.last_resumed_at)},
+            request=self.request,
+        )
+        return Response(ConsultationSessionSerializer(session).data)
+
+    @action(detail=True, methods=['post'])
     def end(self, request, pk=None):
         """End a consultation session and log audit."""
         from patients.models import Visit
         
         session = self.get_object()
         old_status = session.status
+        if session.status == 'active':
+            self._pause_active_session(session)
         session.status = 'completed'
         session.ended_at = timezone.now()
-        session.save()
+        session.paused_at = None
+        session.last_resumed_at = None
+        session.save(update_fields=['status', 'ended_at', 'paused_at', 'last_resumed_at'])
         
         # Update visit status to 'completed' if visit exists
         if session.visit:
@@ -288,8 +374,8 @@ class ConsultationSessionViewSet(viewsets.ModelViewSet):
         if completed_today.exists():
             durations = []
             for session in completed_today:
-                if session.ended_at and session.started_at:
-                    duration = (session.ended_at - session.started_at).total_seconds() / 60
+                duration = session.get_active_duration_seconds() / 60
+                if duration > 0:
                     durations.append(duration)
             if durations:
                 avg_duration = sum(durations) / len(durations)
@@ -350,9 +436,7 @@ class ConsultationSessionViewSet(viewsets.ModelViewSet):
         recent_sessions = sessions_qs.filter(status='completed').order_by('-ended_at')[:5]
         recent_sessions_data = []
         for session in recent_sessions:
-            duration = 0
-            if session.ended_at and session.started_at:
-                duration = round((session.ended_at - session.started_at).total_seconds() / 60, 0)
+            duration = round(session.get_active_duration_seconds() / 60, 0)
             
             # Calculate time ago
             dt = session.ended_at or session.started_at

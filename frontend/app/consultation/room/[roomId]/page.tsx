@@ -484,6 +484,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   const [sessionActive, setSessionActive] = useState(false);
   const [sessionId, setSessionId] = useState<number | null>(null);
   const [sessionStartTime, setSessionStartTime] = useState<Date | null>(null);
+  const [sessionBaseActiveSeconds, setSessionBaseActiveSeconds] = useState(0);
   const [sessionDuration, setSessionDuration] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -491,7 +492,13 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   useAuthRedirect(authError);
   const [activeTab, setActiveTab] = useState("notes");
   const [showEndDialog, setShowEndDialog] = useState(false);
+  const [showSwitchPatientDialog, setShowSwitchPatientDialog] = useState(false);
+  const [pendingSwitchPatient, setPendingSwitchPatient] = useState<Patient | null>(null);
   const [showRoomQueueDialog, setShowRoomQueueDialog] = useState(false);
+  const [showPausedSessionsDialog, setShowPausedSessionsDialog] = useState(false);
+  const [pausedSessions, setPausedSessions] = useState<ConsultationSession[]>([]);
+  const [loadingPausedSessions, setLoadingPausedSessions] = useState(false);
+  const [isResumingPausedSession, setIsResumingPausedSession] = useState(false);
   const [showWardAdmissionDetail, setShowWardAdmissionDetail] = useState(false);
   const [selectedWardAdmission, setSelectedWardAdmission] = useState<WardAdmission | null>(null);
   const [isEnding, setIsEnding] = useState(false);
@@ -1206,6 +1213,29 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       ]);
     }
   };
+
+  const loadPausedSessions = useCallback(async () => {
+    const numericRoomId = parseInt(roomId);
+    if (Number.isNaN(numericRoomId)) return;
+
+    setLoadingPausedSessions(true);
+    try {
+      const doctorId = currentUser?.id ? Number(currentUser.id) : undefined;
+      const resp = await consultationService.getSessions({
+        room: numericRoomId,
+        status: 'paused',
+        ...(doctorId ? { doctor: doctorId } : {}),
+        page: 1,
+        page_size: 100,
+      });
+      setPausedSessions(resp.results || []);
+    } catch (err) {
+      console.error('Error loading paused sessions:', err);
+      setPausedSessions([]);
+    } finally {
+      setLoadingPausedSessions(false);
+    }
+  }, [roomId, currentUser?.id]);
   
   // Refresh queue only (no full-page loading). `silent` = background poll (no toasts / queue button state).
   const refreshQueueData = useCallback(async (options?: { silent?: boolean }) => {
@@ -1281,13 +1311,14 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       // Filter out any null results
       const validPatients = transformedPatients.filter((p) => p !== null) as Patient[];
       setPatients(validPatients);
+      await loadPausedSessions();
     } catch (err: any) {
       console.error('Error refreshing queue:', err);
       if (!silent) toast.error('Failed to refresh queue');
     } finally {
       if (!silent) setIsRefreshingQueue(false);
     }
-  }, [roomId]);
+  }, [roomId, loadPausedSessions]);
   
   const loadRoomData = async () => {
     try {
@@ -1392,6 +1423,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         
         setRoom(transformedRoom);
         setPatients(validPatients);
+        await loadPausedSessions();
 
         
         // Check for active session and restore it
@@ -1493,12 +1525,15 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       setCurrentPatient(restoredPatient);
       setSessionActive(true);
       setSessionId(session.id);
-      setSessionStartTime(new Date(session.started_at));
+      const baseSeconds = Number((session as any).active_seconds ?? 0);
+      setSessionBaseActiveSeconds(Number.isFinite(baseSeconds) && baseSeconds > 0 ? baseSeconds : 0);
+      const resumedAt = (session as any).last_resumed_at ? new Date((session as any).last_resumed_at) : new Date(session.started_at);
+      setSessionStartTime(resumedAt);
       
       // Calculate session duration
       const now = new Date();
-      const startTime = new Date(session.started_at);
-      const minutes = Math.floor((now.getTime() - startTime.getTime()) / (1000 * 60));
+      const elapsedSinceResume = Math.max(0, Math.floor((now.getTime() - resumedAt.getTime()) / 1000));
+      const minutes = Math.floor((baseSeconds + elapsedSinceResume) / 60);
       setSessionDuration(minutes);
       
       // Enrich session with related data
@@ -2093,11 +2128,12 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     if (!sessionActive || !sessionStartTime) return;
     const interval = setInterval(() => {
       const now = new Date();
-      const minutes = Math.floor((now.getTime() - sessionStartTime.getTime()) / (1000 * 60));
+      const elapsedSinceResume = Math.max(0, Math.floor((now.getTime() - sessionStartTime.getTime()) / 1000));
+      const minutes = Math.floor((sessionBaseActiveSeconds + elapsedSinceResume) / 60);
       setSessionDuration(minutes);
     }, 60000);
     return () => clearInterval(interval);
-  }, [sessionActive, sessionStartTime]);
+  }, [sessionActive, sessionStartTime, sessionBaseActiveSeconds]);
 
   // Auto-save medical notes every 30 seconds
   useEffect(() => {
@@ -2129,7 +2165,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     return () => clearInterval(interval);
   }, [sessionActive, sessionId, medicalNotes]);
 
-  const handleStartSession = async (patient: Patient) => {
+  const handleStartSession = async (patient: Patient, confirmSwitch = false) => {
     if (isStartingSession) return;
     setIsStartingSession(true);
     try {
@@ -2141,21 +2177,29 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           return;
         }
 
-        const shouldSwitchPatient = window.confirm(
-          `There is an active session with ${currentPatient?.name || 'a patient'}.\n\n` +
-          `Click OK to switch to ${patient.name} (end current session and start/resume selected patient).\n` +
-          `Click Cancel to keep current session.`
-        );
-        if (!shouldSwitchPatient) {
-          toast.info(`Kept current session with ${currentPatient?.name || 'current patient'}`);
+        if (!confirmSwitch) {
+          setPendingSwitchPatient(patient);
+          // Avoid modal stacking race: close queue dialog first, then open switch dialog.
+          const openSwitchDialog = () => setShowSwitchPatientDialog(true);
+          if (showRoomQueueDialog) {
+            setShowRoomQueueDialog(false);
+            if (typeof window !== 'undefined') {
+              window.setTimeout(openSwitchDialog, 0);
+            } else {
+              openSwitchDialog();
+            }
+          } else {
+            openSwitchDialog();
+          }
           return;
         }
 
-        // End current patient session before switching.
+        // Pause current patient session before switching.
         try {
-          await consultationService.endSession(sessionId);
+          await consultationService.pauseSession(sessionId);
+          await loadPausedSessions();
         } catch (endErr) {
-          console.warn('Error ending previous session:', endErr);
+          console.warn('Error pausing previous session:', endErr);
           // Continue anyway - backend will handle conflicts
         }
       }
@@ -2179,13 +2223,14 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           room: numericRoomId,
           patient: numericPatientId,
           visit: numericVisitId,
-          status: 'active', // Valid choices: 'active', 'completed', 'cancelled'
+          status: 'active', // Valid choices: 'active', 'paused', 'completed', 'cancelled'
           // Note: priority is for ConsultationQueue, not ConsultationSession
         }),
       });
 
       if (sessionData?.resumed) {
         await restoreActiveSession(sessionData.id);
+        await loadPausedSessions();
         toast.success(`Resumed active session with ${patient.name}`);
         return;
       }
@@ -2193,7 +2238,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       setCurrentPatient(patient);
       setSessionActive(true);
       setSessionId(sessionData.id);
-      setSessionStartTime(new Date());
+      setSessionBaseActiveSeconds(0);
+      setSessionStartTime(sessionData.started_at ? new Date(sessionData.started_at) : new Date());
       setSessionDuration(0);
 
       // Load real patient history data
@@ -2249,6 +2295,39 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     }
   };
 
+  const confirmSwitchPatientStart = async () => {
+    const targetPatient = pendingSwitchPatient;
+    setShowSwitchPatientDialog(false);
+    setPendingSwitchPatient(null);
+    if (!targetPatient) return;
+    await handleStartSession(targetPatient, true);
+  };
+
+  const openPausedSessionsDialog = async () => {
+    setShowPausedSessionsDialog(true);
+    await loadPausedSessions();
+  };
+
+  const handleResumePausedSession = async (pausedSession: ConsultationSession) => {
+    if (!pausedSession?.id || isResumingPausedSession) return;
+    setIsResumingPausedSession(true);
+    try {
+      if (sessionActive && sessionId && sessionId !== pausedSession.id) {
+        await consultationService.pauseSession(sessionId);
+      }
+      await consultationService.resumeSession(pausedSession.id);
+      await restoreActiveSession(pausedSession.id);
+      await loadPausedSessions();
+      setShowPausedSessionsDialog(false);
+      toast.success(`Resumed session with ${pausedSession.patient_name || 'patient'}`);
+    } catch (err: any) {
+      console.error('Error resuming paused session:', err);
+      toast.error(err?.message || 'Failed to resume paused session');
+    } finally {
+      setIsResumingPausedSession(false);
+    }
+  };
+
   // Generate consultation session PDF
   const generateSessionPDF = async () => {
     if (!currentPatient || !sessionId) return null;
@@ -2261,7 +2340,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       id: freshSession.session_id || sessionId,
       date: freshSession.started_at ? new Date(freshSession.started_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
       time: freshSession.started_at ? `${formatTime(freshSession.started_at)} - ${freshSession.ended_at ? formatTime(freshSession.ended_at) : formatTime(new Date().toISOString())}` : '',
-      duration: freshSession.started_at && freshSession.ended_at ? `${Math.round((new Date(freshSession.ended_at).getTime() - new Date(freshSession.started_at).getTime()) / (1000 * 60))} min` : `${sessionDuration} min`,
+      duration: `${Math.round((Number((freshSession as any).active_duration_seconds ?? 0) || 0) / 60) || sessionDuration} min`,
       clinic: 'GOPD', // This would come from context
       room: freshSession.room_name || room?.name || 'Unknown',
       doctor: freshSession.doctor_name || 'Unknown Doctor',
@@ -3130,6 +3209,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       setSessionActive(false);
       setSessionId(null);
       setSessionStartTime(null);
+      setSessionBaseActiveSeconds(0);
       setSessionDuration(0);
       setMedicalNotes({ presentationComplaint: "", historyOfPresentIllness: "", physicalExamination: "", assessment: "", plan: "" });
       setDiagnoses([]);
@@ -3142,6 +3222,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       setFollowUpDate("");
       setFollowUpReason("");
       setShowEndDialog(false);
+      await loadPausedSessions();
     } catch (err: any) {
       console.error('Error ending session:', err);
       toast.error(err.message || 'Failed to end session properly');
@@ -4577,6 +4658,10 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
               </p>
             </div>
             <div className="flex items-center gap-2">
+              <Button variant="outline" onClick={openPausedSessionsDialog}>
+                <History className="mr-2 h-4 w-4" />
+                Paused Sessions ({pausedSessions.length})
+              </Button>
               <Button variant="outline" onClick={() => router.push("/consultation/start")}>
                 <ArrowLeft className="mr-2 h-4 w-4" />
                 Exit Room
@@ -4685,6 +4770,10 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
             </div>
           </div>
           <div className="flex gap-2">
+            <Button variant="outline" onClick={openPausedSessionsDialog}>
+              <History className="mr-2 h-4 w-4" />
+              Paused Sessions ({pausedSessions.length})
+            </Button>
             <Button variant="outline" onClick={() => setShowRoomQueueDialog(true)}>
               <Users className="mr-2 h-4 w-4" />
               Room Queue ({patients.length})
@@ -4976,54 +5065,69 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                       <p className="text-xs">Click "Add Diagnosis" to search and add ICD-10 codes</p>
                     </div>
                   ) : (
-                    <div className="space-y-2">
-                      {diagnoses.map((dx) => {
-                        const diagnosisType = dx.certainty === 'confirmed' ? 'Primary' : dx.certainty === 'probable' ? 'Secondary' : 'Differential';
-                        const typeStyles = dx.certainty === 'confirmed'
-                          ? 'bg-rose-50 dark:bg-rose-900/20 border-rose-200 dark:border-rose-800'
-                          : dx.certainty === 'probable'
-                            ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800'
-                            : 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800';
-                        const typeBadgeStyles = dx.certainty === 'confirmed'
-                          ? 'bg-rose-500/15 text-rose-700 dark:text-rose-300 border-rose-300 dark:border-rose-700'
-                          : dx.certainty === 'probable'
-                            ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-700'
-                            : 'bg-blue-500/15 text-blue-700 dark:text-blue-300 border-blue-300 dark:border-blue-700';
-                        return (
-                          <div key={dx.id} className={`p-2 rounded-md border flex items-start justify-between gap-2 ${typeStyles}`}>
-                            <div className="flex-1 min-w-0">
-                              <div className="flex flex-wrap items-center gap-1.5 mb-1">
-                                <Badge variant="outline" className={`text-[10px] leading-none font-medium h-5 px-1.5 py-0 shrink-0 ${typeBadgeStyles}`}>
-                                  {diagnosisType}
-                                </Badge>
-                                <span className="font-mono text-xs font-semibold text-foreground">{dx.icd10_code_details?.code || 'Unknown'}</span>
-                              </div>
-                              <p className="text-xs text-foreground/90 leading-snug">{dx.icd10_code_details?.description || dx.diagnosis_text || 'Unknown diagnosis'}</p>
-                              {(dx.notes || (dx.diagnosis_text && dx.diagnosis_text !== (dx.icd10_code_details?.description ?? ''))) && (
-                                <p className="text-[11px] text-muted-foreground mt-1 leading-snug">{dx.notes || dx.diagnosis_text}</p>
-                              )}
-                            </div>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-7 w-7 p-0 shrink-0 rounded-full"
-                              onClick={async () => {
-                                try {
-                                  await consultationService.deleteDiagnosis(dx.id);
-                                  setDiagnoses(diagnoses.filter(d => d.id !== dx.id));
-                                  toast.success('Diagnosis removed');
-                                } catch (err: any) {
-                                  console.error('Error deleting diagnosis:', err);
-                                  toast.error('Failed to remove diagnosis');
-                                }
-                              }}
-                              title="Remove diagnosis"
-                            >
-                              <X className="h-3.5 w-3.5" />
-                            </Button>
-                          </div>
-                        );
-                      })}
+                    <div className="rounded-lg border border-red-200 dark:border-red-900/50 bg-red-50/80 dark:bg-red-950/25 overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b border-red-200/80 dark:border-red-900/40 bg-red-100/50 dark:bg-red-950/40">
+                            <th className="text-left p-2.5 font-medium text-red-900 dark:text-red-200">ICD-10</th>
+                            <th className="text-left p-2.5 font-medium text-red-900 dark:text-red-200">Diagnosis</th>
+                            <th className="text-center p-2.5 font-medium text-red-900 dark:text-red-200">Type</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {diagnoses.map((dx) => {
+                            const diagnosisType = dx.certainty === 'confirmed' ? 'Primary' : dx.certainty === 'probable' ? 'Secondary' : 'Differential';
+                            const typeBadgeStyles = dx.certainty === 'confirmed'
+                              ? 'bg-red-500/15 text-red-700 border-red-500/35 dark:text-red-300'
+                              : dx.certainty === 'probable'
+                                ? 'bg-amber-500/15 text-amber-800 border-amber-500/35 dark:text-amber-300'
+                                : 'bg-blue-500/15 text-blue-800 border-blue-500/35 dark:text-blue-300';
+                            const diagnosisText = dx.icd10_code_details?.description || dx.diagnosis_text || 'Unknown diagnosis';
+                            const notesText = dx.notes || (dx.diagnosis_text && dx.diagnosis_text !== (dx.icd10_code_details?.description ?? '') ? dx.diagnosis_text : '');
+
+                            return (
+                              <tr key={dx.id} className="border-t border-red-200/60 dark:border-red-900/30 align-top">
+                                <td className="p-2.5 font-mono text-xs font-medium text-red-900 dark:text-red-100">
+                                  {dx.icd10_code_details?.code || 'Unknown'}
+                                </td>
+                                <td className="p-2.5 text-red-950 dark:text-red-50">
+                                  <div className="flex items-start justify-between gap-2">
+                                    <div className="min-w-0">
+                                      <p className="font-medium">{diagnosisText}</p>
+                                      {notesText ? (
+                                        <p className="text-xs text-muted-foreground mt-0.5">{notesText}</p>
+                                      ) : null}
+                                    </div>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-7 w-7 p-0 shrink-0 rounded-full"
+                                      onClick={async () => {
+                                        try {
+                                          await consultationService.deleteDiagnosis(dx.id);
+                                          setDiagnoses(diagnoses.filter(d => d.id !== dx.id));
+                                          toast.success('Diagnosis removed');
+                                        } catch (err: any) {
+                                          console.error('Error deleting diagnosis:', err);
+                                          toast.error('Failed to remove diagnosis');
+                                        }
+                                      }}
+                                      title="Remove diagnosis"
+                                    >
+                                      <X className="h-3.5 w-3.5" />
+                                    </Button>
+                                  </div>
+                                </td>
+                                <td className="p-2.5 text-center">
+                                  <Badge variant="outline" className={`text-[10px] ${typeBadgeStyles}`}>
+                                    {diagnosisType}
+                                  </Badge>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
                     </div>
                   )}
                 </div>
@@ -8793,6 +8897,138 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           </AlertDialogContent>
         </AlertDialog>
 
+        <Dialog
+          open={showSwitchPatientDialog}
+          onOpenChange={(open) => {
+            setShowSwitchPatientDialog(open);
+            if (!open) {
+              setPendingSwitchPatient(null);
+            }
+          }}
+        >
+          <DialogContent className="w-[95vw] sm:max-w-[620px]">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Users className="h-5 w-5 text-amber-500" />
+                Switch Consultation Patient?
+              </DialogTitle>
+              <DialogDescription>
+                You are currently consulting <strong>{currentPatient?.name || 'a patient'}</strong>.
+                <br />
+                We will pause this session and start/resume consultation with <strong>{pendingSwitchPatient?.name || 'the selected patient'}</strong>.
+                <br />
+                You can resume the paused session later from <strong>Paused Sessions</strong>.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setShowSwitchPatientDialog(false);
+                  setPendingSwitchPatient(null);
+                  toast.info(`Kept current session with ${currentPatient?.name || 'current patient'}`);
+                }}
+              >
+                Keep Current Session
+              </Button>
+              <Button
+                type="button"
+                onClick={confirmSwitchPatientStart}
+                className="bg-amber-600 hover:bg-amber-700"
+              >
+                Pause & Switch Patient
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Paused Sessions Dialog */}
+        <Dialog open={showPausedSessionsDialog} onOpenChange={setShowPausedSessionsDialog}>
+          <DialogContent className="w-[95vw] sm:max-w-[900px] max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <History className="h-5 w-5 text-amber-500" />
+                Paused Sessions - {room?.name || 'Consultation Room'}
+              </DialogTitle>
+              <DialogDescription>
+                Resume any previously paused consultation for this room.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-3 mt-4">
+              {loadingPausedSessions ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <Loader2 className="h-8 w-8 mx-auto mb-3 animate-spin" />
+                  Loading paused sessions...
+                </div>
+              ) : pausedSessions.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <History className="h-10 w-10 mx-auto mb-3 opacity-50" />
+                  <p className="font-medium">No paused sessions</p>
+                  <p className="text-sm">Paused consultations will appear here.</p>
+                </div>
+              ) : (
+                pausedSessions.map((ps) => {
+                  const activeSeconds = Number((ps as any).active_seconds ?? (ps as any).active_duration_seconds ?? 0) || 0;
+                  const minutes = Math.floor(activeSeconds / 60);
+                  return (
+                    <div key={ps.id} className="p-4 rounded-lg border bg-card">
+                      <div className="flex items-center justify-between gap-4">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="font-semibold truncate">{ps.patient_name || `Patient #${ps.patient}`}</p>
+                            <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-300">
+                              Paused
+                            </Badge>
+                          </div>
+                          <p className="text-sm text-muted-foreground mt-1">
+                            Session #{ps.session_id} • {ps.patient_id || 'No patient ID'} • Active time: {minutes} min
+                          </p>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Started: {formatDate(ps.started_at)} {formatTime(ps.started_at)}
+                          </p>
+                        </div>
+                        <Button
+                          onClick={() => handleResumePausedSession(ps)}
+                          disabled={isResumingPausedSession}
+                          className="bg-emerald-600 hover:bg-emerald-700"
+                        >
+                          {isResumingPausedSession ? (
+                            <>
+                              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                              Resuming...
+                            </>
+                          ) : (
+                            <>
+                              <Stethoscope className="h-4 w-4 mr-2" />
+                              Resume
+                            </>
+                          )}
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowPausedSessionsDialog(false)}>
+                Close
+              </Button>
+              <Button
+                variant="default"
+                disabled={loadingPausedSessions}
+                onClick={loadPausedSessions}
+              >
+                <RefreshCw className={`h-4 w-4 mr-2 ${loadingPausedSessions ? 'animate-spin' : ''}`} />
+                Refresh
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
         {/* Room Queue Dialog */}
         <Dialog open={showRoomQueueDialog} onOpenChange={setShowRoomQueueDialog}>
           <DialogContent className="w-[95vw] sm:max-w-[1000px] max-h-[90vh] overflow-y-auto">
@@ -8973,10 +9209,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                             {!isCurrentPatient && (
                               <Button
                                 size="sm"
-                                onClick={() => {
-                                  setShowRoomQueueDialog(false);
-                                  handleStartSession(patient);
-                                }}
+                                onClick={() => handleStartSession(patient)}
                                 disabled={isStartingSession}
                                 className="bg-emerald-500 hover:bg-emerald-600 text-white"
                               >
