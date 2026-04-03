@@ -1151,7 +1151,7 @@ export default function AppointmentsPage() {
                 <div className="space-y-2">
                   <Label>Patient</Label>
                   <p className="rounded-md border border-border bg-muted/30 px-3 py-2 text-sm font-medium text-foreground">
-                    {selectedAppointment?.patient_name ?? "—"}
+                    {selectedAppointment?.patient_name ?? ""}
                   </p>
                   <p className="text-xs text-muted-foreground">
                     To change the patient, cancel and create a new appointment.

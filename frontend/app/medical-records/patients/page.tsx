@@ -28,6 +28,7 @@ import { StandardPagination } from '@/components/StandardPagination';
 import { PatientOverviewModal } from '@/components/PatientOverviewModal';
 import { PatientAvatar } from "@/components/PatientAvatar";
 import { useLocationOptions } from '@/lib/hooks/use-location-options';
+import { joinDisplayParts } from '@/lib/utils/clinic-utils';
 import { AdvancedFiltersButton } from '@/components/AdvancedFiltersButton';
 
 // ==========================================
@@ -36,24 +37,24 @@ import { AdvancedFiltersButton } from '@/components/AdvancedFiltersButton';
 
 // Safe date formatting utility
 const formatDate = (dateString: string | undefined): string => {
-  if (!dateString) return 'N/A';
+  if (!dateString) return '';
   try {
     const date = new Date(dateString);
-    if (isNaN(date.getTime())) return 'Invalid Date';
+    if (isNaN(date.getTime())) return '';
     return date.toLocaleDateString();
   } catch {
-    return 'Invalid Date';
+    return '';
   }
 };
 
 const formatTime = (dateString: string | undefined): string => {
-  if (!dateString) return 'N/A';
+  if (!dateString) return '';
   try {
     const date = new Date(dateString);
-    if (isNaN(date.getTime())) return 'Invalid Time';
+    if (isNaN(date.getTime())) return '';
     return date.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
   } catch {
-    return 'Invalid Time';
+    return '';
   }
 };
 
@@ -199,14 +200,14 @@ const transformPatient = (apiPatient: ApiPatient): Patient => {
     employeeType: apiPatient.employee_type || '',
     division: apiPatient.division || '',
     age: apiPatient.age || 0,
-    gender: normalizeGender(apiPatient.gender) === 'female' ? 'Female' : normalizeGender(apiPatient.gender) === 'male' ? 'Male' : 'Not specified',
+    gender: normalizeGender(apiPatient.gender) === 'female' ? 'Female' : normalizeGender(apiPatient.gender) === 'male' ? 'Male' : '',
     dob: apiPatient.date_of_birth || '',
     phone: apiPatient.phone || '',
     email: apiPatient.email || '',
     bloodGroup: apiPatient.blood_group || '',
     address: apiPatient.residential_address || apiPatient.permanent_address || '',
     emergencyContact: apiPatient.nok_first_name ? `${apiPatient.nok_first_name} ${apiPatient.nok_middle_name || ''} - ${apiPatient.nok_phone || ''}`.trim() : '',
-    lastVisit: apiPatient.last_visit_at ? formatDate(apiPatient.last_visit_at) : '—',
+    lastVisit: apiPatient.last_visit_at ? formatDate(apiPatient.last_visit_at) : '',
     totalVisits: Number(apiPatient.total_visits || 0),
     location: getLocation(apiPatient),
     photoUrl: getPhotoUrl(apiPatient.photo),
@@ -394,9 +395,9 @@ export default function PatientsListPage() {
                   const bTs = new Date(`${b.date}T${b.time || '00:00:00'}`).getTime();
                   return bTs - aTs;
                 })[0];
-                patient.lastVisit = latest?.date ? formatDate(latest.date) : '—';
+                patient.lastVisit = latest?.date ? formatDate(latest.date) : '';
               } else {
-                patient.lastVisit = '—';
+                patient.lastVisit = '';
               }
             } catch {
               // Keep default values if fallback call fails.
@@ -1134,20 +1135,18 @@ export default function PatientsListPage() {
                           
                           {/* Row 2: Details */}
                           <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-wrap">
-                            <span>{patient.id}</span>
-                            <span>•</span>
-                            <span>{getDisplayAge(patient.age, patient.dob)} {patient.gender}</span>
-                            <span>•</span>
-                            <span className="flex items-center gap-1"><Phone className="h-3 w-3" />{patient.phone || 'No phone'}</span>
-                            {patient.division && (
-                              <>
-                                <span>•</span>
-                                <span className="truncate max-w-[120px]">{patient.division}</span>
-                              </>
+                            <span>
+                              {joinDisplayParts([
+                                patient.id,
+                                [getDisplayAge(patient.age, patient.dob), patient.gender].filter(Boolean).join(' ').trim(),
+                                patient.phone?.trim(),
+                                patient.division,
+                                patient.lastVisit ? `Last: ${patient.lastVisit}` : '',
+                              ])}
+                            </span>
+                            {typeof patient.totalVisits === 'number' && (
+                              <span className="text-teal-600 dark:text-teal-400">({patient.totalVisits} visits)</span>
                             )}
-                            <span>•</span>
-                            <span>Last: {patient.lastVisit}</span>
-                            <span className="text-teal-600 dark:text-teal-400">({patient.totalVisits} visits)</span>
                           </div>
                         </div>
                       </div>
@@ -1392,7 +1391,7 @@ export default function PatientsListPage() {
                               value={editPrincipalInfo?.personalNumber || ""}
                               readOnly
                               className="bg-muted"
-                              placeholder="—"
+                              placeholder=""
                             />
                             <p className="text-xs text-muted-foreground">
                               {editPrincipalInfo?.fullName
@@ -1436,7 +1435,7 @@ export default function PatientsListPage() {
                           <Select value={editForm.maritalStatus || undefined} onValueChange={(v) => setEditForm(prev => ({ ...prev, maritalStatus: v === 'not-specified' ? '' : v }))}>
                             <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="not-specified">Not specified</SelectItem>
+                              <SelectItem value="not-specified">Unspecified</SelectItem>
                               {maritalStatuses.map(status => <SelectItem key={status} value={status.toLowerCase()}>{status}</SelectItem>)}
                             </SelectContent>
                           </Select>
@@ -1461,7 +1460,7 @@ export default function PatientsListPage() {
                           <Select value={editForm.religion || undefined} onValueChange={(v) => setEditForm(prev => ({ ...prev, religion: v === 'not-specified' ? '' : v }))}>
                             <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="not-specified">Not specified</SelectItem>
+                              <SelectItem value="not-specified">Unspecified</SelectItem>
                               {religions.map(religion => <SelectItem key={religion} value={religion}>{religion}</SelectItem>)}
                             </SelectContent>
                           </Select>
@@ -1471,7 +1470,7 @@ export default function PatientsListPage() {
                           <Select value={editForm.tribe || undefined} onValueChange={(v) => setEditForm(prev => ({ ...prev, tribe: v === 'not-specified' ? '' : v }))}>
                             <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="not-specified">Not specified</SelectItem>
+                              <SelectItem value="not-specified">Unspecified</SelectItem>
                               {tribes.map(tribe => <SelectItem key={tribe} value={tribe}>{tribe}</SelectItem>)}
                             </SelectContent>
                           </Select>
@@ -1520,7 +1519,7 @@ export default function PatientsListPage() {
                           <Select value={editForm.stateOfResidence || undefined} onValueChange={(v) => setEditForm(prev => ({ ...prev, stateOfResidence: v === 'not-specified' ? '' : v }))}>
                             <SelectTrigger><SelectValue placeholder="Select state" /></SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="not-specified">Not specified</SelectItem>
+                              <SelectItem value="not-specified">Unspecified</SelectItem>
                               {NIGERIA_STATES.map(state => <SelectItem key={state} value={state}>{state}</SelectItem>)}
                             </SelectContent>
                           </Select>
@@ -1530,7 +1529,7 @@ export default function PatientsListPage() {
                           <Select value={editForm.stateOfOrigin || undefined} onValueChange={(v) => setEditForm(prev => ({ ...prev, stateOfOrigin: v === 'not-specified' ? '' : v }))}>
                             <SelectTrigger><SelectValue placeholder="Select state" /></SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="not-specified">Not specified</SelectItem>
+                              <SelectItem value="not-specified">Unspecified</SelectItem>
                               {NIGERIA_STATES.map(state => <SelectItem key={state} value={state}>{state}</SelectItem>)}
                             </SelectContent>
                           </Select>
@@ -1549,7 +1548,7 @@ export default function PatientsListPage() {
                           <Select value={editForm.bloodGroup || undefined} onValueChange={(v) => setEditForm(prev => ({ ...prev, bloodGroup: v === 'not-specified' ? '' : v }))}>
                             <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="not-specified">Not specified</SelectItem>
+                              <SelectItem value="not-specified">Unspecified</SelectItem>
                               {['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'].map(bg => <SelectItem key={bg} value={bg}>{bg}</SelectItem>)}
                             </SelectContent>
                           </Select>
@@ -1559,7 +1558,7 @@ export default function PatientsListPage() {
                           <Select value={editForm.genotype || undefined} onValueChange={(v) => setEditForm(prev => ({ ...prev, genotype: v === 'not-specified' ? '' : v }))}>
                             <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="not-specified">Not specified</SelectItem>
+                              <SelectItem value="not-specified">Unspecified</SelectItem>
                               {['AA', 'AS', 'SS', 'AC', 'SC'].map(g => <SelectItem key={g} value={g}>{g}</SelectItem>)}
                             </SelectContent>
                           </Select>
@@ -1992,7 +1991,7 @@ export default function PatientsListPage() {
                               <Select value={editForm.employeeType || undefined} onValueChange={(v) => setEditForm(prev => ({ ...prev, employeeType: v === 'not-specified' ? '' : v }))}>
                                 <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
                                 <SelectContent>
-                                  <SelectItem value="not-specified">Not specified</SelectItem>
+                                  <SelectItem value="not-specified">Unspecified</SelectItem>
                                   <SelectItem value="Officer">Officer</SelectItem>
                                   <SelectItem value="Staff">Staff</SelectItem>
                                 </SelectContent>
@@ -2003,7 +2002,7 @@ export default function PatientsListPage() {
                               <Select value={editForm.division || undefined} onValueChange={(v) => setEditForm(prev => ({ ...prev, division: v === 'not-specified' ? '' : v }))}>
                                 <SelectTrigger><SelectValue placeholder="Select division" /></SelectTrigger>
                                 <SelectContent>
-                                  <SelectItem value="not-specified">Not specified</SelectItem>
+                                  <SelectItem value="not-specified">Unspecified</SelectItem>
                                   {divisions.map(div => <SelectItem key={div} value={div}>{div}</SelectItem>)}
                                 </SelectContent>
                               </Select>
@@ -2013,7 +2012,7 @@ export default function PatientsListPage() {
                               <Select value={editForm.location || undefined} onValueChange={(v) => setEditForm(prev => ({ ...prev, location: v === 'not-specified' ? '' : v }))}>
                                 <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
                                 <SelectContent>
-                                  <SelectItem value="not-specified">Not specified</SelectItem>
+                                  <SelectItem value="not-specified">Unspecified</SelectItem>
                                   {locationOptions.filter((l) => l.value !== "all").map((l) => (
                                     <SelectItem key={l.value} value={l.value}>{l.label}</SelectItem>
                                   ))}
@@ -2037,7 +2036,7 @@ export default function PatientsListPage() {
                               <Select value={editForm.location || undefined} onValueChange={(v) => setEditForm(prev => ({ ...prev, location: v === 'not-specified' ? '' : v }))}>
                                 <SelectTrigger><SelectValue placeholder="Select location" /></SelectTrigger>
                                 <SelectContent>
-                                  <SelectItem value="not-specified">Not specified</SelectItem>
+                                  <SelectItem value="not-specified">Unspecified</SelectItem>
                                   {locationOptions.filter((l) => l.value !== "all").map((l) => (
                                     <SelectItem key={l.value} value={l.value}>{l.label}</SelectItem>
                                   ))}
@@ -2074,7 +2073,7 @@ export default function PatientsListPage() {
                           <Select value={editForm.nokRelationship || undefined} onValueChange={(v) => setEditForm(prev => ({ ...prev, nokRelationship: v === 'not-specified' ? '' : v }))}>
                             <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="not-specified">Not specified</SelectItem>
+                              <SelectItem value="not-specified">Unspecified</SelectItem>
                               {NOK_RELATIONSHIPS.map(rel => <SelectItem key={rel} value={rel}>{rel}</SelectItem>)}
                             </SelectContent>
                           </Select>

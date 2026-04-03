@@ -23,6 +23,19 @@ import {
   Loader2, User, Calendar, FileText, Stethoscope, RefreshCw, Send, Download
 } from 'lucide-react';
 
+function formatLabDateTime(isoString: string | undefined): string {
+  if (!isoString) return '';
+  try {
+    const date = new Date(isoString);
+    if (Number.isNaN(date.getTime())) return '';
+    const datePart = date.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+    const timePart = date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+    return `${datePart}, ${timePart}`;
+  } catch {
+    return '';
+  }
+}
+
 interface TestResult {
   parameter: string;
   value: string;
@@ -625,10 +638,12 @@ export default function ResultsVerificationPage() {
   const [error, setError] = useState<string | null>(null);
   const [verifiedError, setVerifiedError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [priorityFilter, setPriorityFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('today');
   const [genderFilter, setGenderFilter] = useState('all');
+  const [processingFilter, setProcessingFilter] = useState<'all' | 'in_house' | 'outsourced'>('all');
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -656,86 +671,48 @@ export default function ResultsVerificationPage() {
   const [rejectionReason, setRejectionReason] = useState('');
 
   const pendingResults = results.filter(r => r.status === 'Results Ready');
-  
-  const filteredResults = useMemo(() => pendingResults.filter(result => {
-    const matchesSearch = result.patient.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      result.orderId.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      result.testName.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesStatus = statusFilter === 'all' || result.overallStatus.toLowerCase() === statusFilter;
-    const matchesPriority = priorityFilter === 'all' || result.priority === priorityFilter;
-    const matchesGender = genderFilter === 'all' || result.patient.gender.toLowerCase() === genderFilter.toLowerCase();
-    
-    // Date filter (filter by test submitted date)
-    if (dateFilter !== 'all' && result.submittedAt) {
-      const submittedDate = new Date(result.submittedAt);
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      
-      if (dateFilter === 'today' && submittedDate.toDateString() !== today.toDateString()) return false;
-      if (dateFilter === 'week') {
-        const weekAgo = new Date(today);
-        weekAgo.setDate(weekAgo.getDate() - 7);
-        if (submittedDate < weekAgo) return false;
-      }
-      if (dateFilter === 'month') {
-        const monthAgo = new Date(today);
-        monthAgo.setMonth(monthAgo.getMonth() - 1);
-        if (submittedDate < monthAgo) return false;
-      }
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(searchQuery.trim()), 300);
+    return () => clearTimeout(t);
+  }, [searchQuery]);
+
+  // Search / status / priority / gender / processing come from API; date for pending uses submittedAt client-side
+  const filteredResults = useMemo(() => pendingResults.filter((result) => {
+    if (dateFilter === 'all' || !result.submittedAt) return true;
+    const submittedDate = new Date(result.submittedAt);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    if (dateFilter === 'today' && submittedDate.toDateString() !== today.toDateString()) return false;
+    if (dateFilter === 'week') {
+      const weekAgo = new Date(today);
+      weekAgo.setDate(weekAgo.getDate() - 7);
+      if (submittedDate < weekAgo) return false;
     }
-    
-    return matchesSearch && matchesStatus && matchesPriority && matchesGender;
-  }), [pendingResults, searchQuery, statusFilter, priorityFilter, dateFilter, genderFilter]);
+    if (dateFilter === 'month') {
+      const monthAgo = new Date(today);
+      monthAgo.setMonth(monthAgo.getMonth() - 1);
+      if (submittedDate < monthAgo) return false;
+    }
+    return true;
+  }), [pendingResults, dateFilter]);
 
   // Note: Since we're using server-side pagination, we display all filtered results
   // The API handles pagination, but we still filter client-side for search
   const paginatedResults = filteredResults;
 
-  const filteredVerifiedResults = useMemo(() => verifiedResults.filter(result => {
-    const matchesSearch = result.patient.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      result.orderId.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      result.testName.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesStatus = statusFilter === 'all' || result.overallStatus.toLowerCase() === statusFilter;
-    const matchesPriority = priorityFilter === 'all' || result.priority === priorityFilter;
-    const matchesGender = genderFilter === 'all' || result.patient.gender.toLowerCase() === genderFilter.toLowerCase();
-
-    // Date filter (filter by verification date for verified results)
-    if (dateFilter !== 'all' && result.verifiedAt) {
-      const verifiedDate = new Date(result.verifiedAt);
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-
-      if (dateFilter === 'today' && verifiedDate.toDateString() !== today.toDateString()) return false;
-      if (dateFilter === 'week') {
-        const weekAgo = new Date(today);
-        weekAgo.setDate(weekAgo.getDate() - 7);
-        if (verifiedDate < weekAgo) return false;
-      }
-      if (dateFilter === 'month') {
-        const monthAgo = new Date(today);
-        monthAgo.setMonth(monthAgo.getMonth() - 1);
-        if (verifiedDate < monthAgo) return false;
-      }
-    }
-
-    return matchesSearch && matchesStatus && matchesPriority && matchesGender;
-  }), [verifiedResults, searchQuery, statusFilter, priorityFilter, dateFilter, genderFilter]);
-
-  // Paginated results for verified tab
-  const verifiedPaginatedResults = filteredVerifiedResults.slice(
-    (verifiedCurrentPage - 1) * itemsPerPage,
-    verifiedCurrentPage * itemsPerPage
-  );
+  // Verified tab: filters applied server-side in loadVerifiedResults
+  const verifiedPaginatedResults = verifiedResults;
 
   // Reset to page 1 when filters change or items per page changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, statusFilter, priorityFilter, dateFilter, genderFilter, itemsPerPage]);
+  }, [debouncedSearch, statusFilter, priorityFilter, dateFilter, genderFilter, processingFilter, itemsPerPage]);
 
   // Reset verified page to 1 when filters change or items per page changes
   useEffect(() => {
     setVerifiedCurrentPage(1);
-  }, [searchQuery, statusFilter, priorityFilter, dateFilter, genderFilter, itemsPerPage]);
+  }, [debouncedSearch, statusFilter, priorityFilter, dateFilter, genderFilter, processingFilter, itemsPerPage]);
 
   // Load results function - memoized to prevent infinite loops
   const loadResults = useCallback(async () => {
@@ -770,8 +747,10 @@ export default function ResultsVerificationPage() {
       if (priorityFilter !== 'all') {
         params.priority = transformToBackendPriority(priorityFilter);
       }
-      // Note: searchQuery, dateFilter, genderFilter not yet implemented in backend
-      
+      if (debouncedSearch) params.search = debouncedSearch;
+      if (genderFilter !== 'all') params.gender = genderFilter;
+      if (processingFilter !== 'all') params.processing_method = processingFilter;
+
       const response = await labService.getPendingVerifications(params);
       setTotalCount(response.count || response.results.length);
       const transformedResults = response.results.map((r) => transformResult(r, templatesMap));
@@ -783,7 +762,7 @@ export default function ResultsVerificationPage() {
     } finally {
       setLoading(false);
     }
-  }, [currentPage, itemsPerPage, statusFilter, priorityFilter, searchQuery, dateFilter, genderFilter]);
+  }, [currentPage, itemsPerPage, statusFilter, priorityFilter, debouncedSearch, genderFilter, processingFilter]);
 
   const loadVerifiedResults = useCallback(async () => {
     try {
@@ -810,6 +789,7 @@ export default function ResultsVerificationPage() {
       const params: any = {
         page: verifiedCurrentPage,
         page_size: itemsPerPage,
+        status: 'verified',
       };
       if (statusFilter !== 'all') {
         params.overall_status = statusFilter;
@@ -817,7 +797,26 @@ export default function ResultsVerificationPage() {
       if (priorityFilter !== 'all') {
         params.priority = transformToBackendPriority(priorityFilter);
       }
-      // Note: searchQuery, dateFilter, genderFilter not yet implemented in backend
+      if (debouncedSearch) params.search = debouncedSearch;
+      if (genderFilter !== 'all') params.gender = genderFilter;
+      if (processingFilter !== 'all') params.processing_method = processingFilter;
+
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const yyyyMmDd = (d: Date) => d.toISOString().split('T')[0];
+      if (dateFilter === 'today') {
+        params.date = yyyyMmDd(today);
+      } else if (dateFilter === 'week') {
+        const weekAgo = new Date(today);
+        weekAgo.setDate(weekAgo.getDate() - 7);
+        params.start_date = yyyyMmDd(weekAgo);
+        params.end_date = yyyyMmDd(today);
+      } else if (dateFilter === 'month') {
+        const monthAgo = new Date(today);
+        monthAgo.setMonth(monthAgo.getMonth() - 1);
+        params.start_date = yyyyMmDd(monthAgo);
+        params.end_date = yyyyMmDd(today);
+      }
 
       const response = await labService.getVerifiedResults(params);
       setVerifiedTotalCount(response.count || response.results.length);
@@ -829,7 +828,7 @@ export default function ResultsVerificationPage() {
     } finally {
       setVerifiedLoading(false);
     }
-  }, [verifiedCurrentPage, itemsPerPage, statusFilter, priorityFilter, searchQuery, dateFilter, genderFilter]);
+  }, [verifiedCurrentPage, itemsPerPage, statusFilter, priorityFilter, debouncedSearch, dateFilter, genderFilter, processingFilter]);
 
   // Load results from API when page or filters change
   useEffect(() => {
@@ -882,12 +881,6 @@ export default function ResultsVerificationPage() {
   };
 
   const formatTime = (isoString: string) => new Date(isoString).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-  const getTimeSince = (isoString: string) => {
-    const diff = Date.now() - new Date(isoString).getTime();
-    const mins = Math.floor(diff / 60000);
-    if (mins < 60) return `${mins}m ago`;
-    return `${Math.floor(mins / 60)}h ago`;
-  };
 
   const handleVerify = async () => {
     if (!selectedResult) return;
@@ -1045,7 +1038,12 @@ export default function ResultsVerificationPage() {
               <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-3">
                 <div className="relative flex-1 min-w-[min(100%,16rem)]">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input placeholder="Search by patient, order ID, or test..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-10" />
+                  <Input
+                    placeholder="Patient, MRN, order ID, Lab ID (e.g. BT-26-0007), test…"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-10"
+                  />
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <Select value={dateFilter} onValueChange={setDateFilter}>
@@ -1081,6 +1079,17 @@ export default function ResultsVerificationPage() {
                       <SelectItem value="all">All Gender</SelectItem>
                       <SelectItem value="male">Male</SelectItem>
                       <SelectItem value="female">Female</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select
+                    value={processingFilter}
+                    onValueChange={(v) => setProcessingFilter(v as 'all' | 'in_house' | 'outsourced')}
+                  >
+                    <SelectTrigger className="w-[150px]"><SelectValue placeholder="Processing" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All processing</SelectItem>
+                      <SelectItem value="in_house">In-house</SelectItem>
+                      <SelectItem value="outsourced">Outsourced</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -1197,7 +1206,10 @@ export default function ResultsVerificationPage() {
                           <span>•</span>
                           <span>By: {result.submittedBy}</span>
                           <span>•</span>
-                          <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{getTimeSince(result.submittedAt)}</span>
+                          <span className="flex items-center gap-1" title="Submitted">
+                            <Clock className="h-3 w-3 shrink-0" />
+                            {formatLabDateTime(result.submittedAt) || '—'}
+                          </span>
                         </div>
                       </div>
                     </div>
@@ -1208,11 +1220,11 @@ export default function ResultsVerificationPage() {
         </div>
 
             {/* Pagination for Pending */}
-        {filteredResults.length > 0 && (
+        {totalCount > 0 && (
           <Card className="p-4">
             <StandardPagination
               currentPage={currentPage}
-              totalItems={filteredResults.length}
+              totalItems={totalCount}
               itemsPerPage={itemsPerPage}
               onPageChange={setCurrentPage}
               onItemsPerPageChange={setItemsPerPage}
@@ -1235,7 +1247,7 @@ export default function ResultsVerificationPage() {
                   <p className="text-red-600 dark:text-red-400">{verifiedError}</p>
                   <Button variant="outline" className="mt-4" onClick={loadVerifiedResults}>Retry</Button>
                 </CardContent></Card>
-              ) : filteredVerifiedResults.length === 0 ? (
+              ) : verifiedResults.length === 0 ? (
                 <Card><CardContent className="p-8 text-center text-muted-foreground">
                   <CheckCircle2 className="h-12 w-12 mx-auto mb-4 opacity-50" />
                   <p>No verified results found</p>
@@ -1295,7 +1307,10 @@ export default function ResultsVerificationPage() {
                               <span>•</span>
                               <span>Verified by: {result.verifiedBy || 'Unknown'}</span>
                               <span>•</span>
-                              <span className="flex items-center gap-1"><CheckCircle2 className="h-3 w-3" />{getTimeSince(result.verifiedAt || result.submittedAt)}</span>
+                              <span className="flex items-center gap-1" title="Verified">
+                                <CheckCircle2 className="h-3 w-3 shrink-0" />
+                                {formatLabDateTime(result.verifiedAt || result.submittedAt) || '—'}
+                              </span>
                             </div>
                           </div>
                         </div>
@@ -1306,11 +1321,11 @@ export default function ResultsVerificationPage() {
             </div>
 
             {/* Pagination for Verified */}
-            {filteredVerifiedResults.length > 0 && (
+            {verifiedTotalCount > 0 && (
               <Card className="p-4">
                 <StandardPagination
                   currentPage={verifiedCurrentPage}
-                  totalItems={filteredVerifiedResults.length}
+                  totalItems={verifiedTotalCount}
                   itemsPerPage={itemsPerPage}
                   onPageChange={setVerifiedCurrentPage}
                   onItemsPerPageChange={setItemsPerPage}

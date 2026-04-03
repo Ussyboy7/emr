@@ -62,6 +62,7 @@ class RadiologyOrderSerializer(serializers.ModelSerializer):
         if obj.patient:
             return {
                 'id': obj.patient.id,
+                'patient_id': getattr(obj.patient, 'patient_id', None),
                 'name': obj.patient.get_full_name(),
                 'age': getattr(obj.patient, 'age', None),
                 'gender': getattr(obj.patient, 'gender', None),
@@ -144,6 +145,7 @@ class RadiologyReportSerializer(serializers.ModelSerializer):
         if obj.patient:
             return {
                 'id': obj.patient.id,
+                'patient_id': getattr(obj.patient, 'patient_id', None),
                 'name': obj.patient.get_full_name(),
                 'age': getattr(obj.patient, 'age', None),
                 'gender': getattr(obj.patient, 'gender', None),

@@ -6,6 +6,18 @@
 import { apiFetch, buildQueryString } from '../api-client';
 
 /**
+ * Normalize API gender to a display label.
+ * Patient list serializer uses Django choice labels ("Male" / "Female");
+ * detail serializer uses raw values ("male" / "female"). Treat both consistently.
+ */
+export function formatPatientGenderLabel(gender: unknown): 'Male' | 'Female' | '' {
+  const s = String(gender ?? '').trim().toLowerCase();
+  if (s === 'male' || s === 'm') return 'Male';
+  if (s === 'female' || s === 'f') return 'Female';
+  return '';
+}
+
+/**
  * Safely validates and sanitizes patient data for rendering
  * Prevents "Objects are not valid as a React child" errors
  */
@@ -23,7 +35,7 @@ export function sanitizePatientForRendering(patient: any): any {
     name: typeof patient.full_name === 'string' ? String(patient.full_name) : (typeof patient.name === 'string' ? String(patient.name) : ''),
     age: typeof patient.age === 'number' ? patient.age : parseInt(String(patient.age || '0')) || 0,
     ageDisplay: patient.age_display ? String(patient.age_display) : undefined,
-    gender: String(patient.gender || ''),
+    gender: formatPatientGenderLabel(patient.gender) || String(patient.gender || ''),
     mrn: String(patient.patient_id ?? ''),
     personalNumber: String(patient.personal_number || ''),
     allergies: Array.isArray(patient.allergies)

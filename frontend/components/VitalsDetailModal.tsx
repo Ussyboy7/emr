@@ -102,17 +102,17 @@ export function VitalsDetailModal({
   const recordedRaw = vitals.recordedAt ?? vitals.recorded_at;
   const recordedAtStr = recordedRaw
     ? new Date(recordedRaw as string).toLocaleString()
-    : [vitals.date, vitals.time].filter(Boolean).join(", ") || "N/A";
+    : [vitals.date, vitals.time].filter(Boolean).join(", ") || "";
 
   const sysS = normalized.bloodPressureSystolic;
   const diaS = normalized.bloodPressureDiastolic;
   const bpValue =
     sysS && diaS
       ? `${formatVitalTileValue(sysS)}/${formatVitalTileValue(diaS)}`
-      : "—";
+      : "";
   const bmiStr = displayBmiFromVitals(normalized);
 
-  const rows: { label: string; value: string; unit: string; icon?: LucideIcon }[] = [
+  const allRows: { label: string; value: string; unit: string; icon?: LucideIcon }[] = [
     {
       label: "Temperature",
       value: formatVitalTileValue(normalized.temperature),
@@ -142,7 +142,7 @@ export function VitalsDetailModal({
     { label: "Height", value: formatVitalTileValue(normalized.height), unit: "cm" },
     {
       label: "BMI",
-      value: bmiStr ? formatVitalTileValue(bmiStr) : "—",
+      value: bmiStr ? formatVitalTileValue(bmiStr) : "",
       unit: bmiStr ? "kg/m²" : "",
     },
     { label: "Pain Scale", value: formatVitalTileValue(normalized.painScale), unit: "/10" },
@@ -154,8 +154,14 @@ export function VitalsDetailModal({
     { label: "RBS", value: formatVitalTileValue(normalized.randomBloodSugar), unit: "mg/dL" },
   ];
 
+  const rows = allRows.filter((item) => {
+    if (item.label === "Blood Pressure") return Boolean(bpValue);
+    return Boolean(item.value);
+  });
+
   const name = patientName?.trim() || "Patient";
   const pid = patientId?.trim();
+  const recordedByStr = vitalFieldToString(vitals.recordedBy ?? vitals.recorded_by_name);
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
@@ -166,26 +172,29 @@ export function VitalsDetailModal({
             Vitals - {name}
           </DialogTitle>
           <DialogDescription>
-            {pid ? `${pid} | ` : ""}
-            Recorded: {recordedAtStr}
+            {[pid ? `${pid}` : null, recordedAtStr ? `Recorded: ${recordedAtStr}` : null].filter(Boolean).join(" | ")}
           </DialogDescription>
         </DialogHeader>
         <div className="py-4">
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-            {rows.map((item, i) => (
-              <div key={i} className="p-3 rounded-lg bg-muted/50 text-center">
-                <p className="text-xs text-muted-foreground flex items-center justify-center gap-1">
-                  {item.icon && <item.icon className="h-3 w-3" />}
-                  {item.label}
-                </p>
-                <p className="text-lg font-semibold">
-                  {item.value}{" "}
-                  {item.unit ? (
-                    <span className="text-sm font-normal text-muted-foreground">{item.unit}</span>
-                  ) : null}
-                </p>
-              </div>
-            ))}
+            {rows.length === 0 ? (
+              <p className="col-span-full text-sm text-muted-foreground text-center py-4">No vitals recorded for this set.</p>
+            ) : (
+              rows.map((item, i) => (
+                <div key={i} className="p-3 rounded-lg bg-muted/50 text-center">
+                  <p className="text-xs text-muted-foreground flex items-center justify-center gap-1">
+                    {item.icon && <item.icon className="h-3 w-3" />}
+                    {item.label}
+                  </p>
+                  <p className="text-lg font-semibold">
+                    {item.value}{" "}
+                    {item.unit ? (
+                      <span className="text-sm font-normal text-muted-foreground">{item.unit}</span>
+                    ) : null}
+                  </p>
+                </div>
+              ))
+            )}
           </div>
           {normalized.notes ? (
             <div className="mt-4 p-3 rounded-lg bg-blue-500/10 border border-blue-500/20">
@@ -193,10 +202,9 @@ export function VitalsDetailModal({
               <p className="text-sm text-foreground mt-1 whitespace-pre-wrap">{normalized.notes}</p>
             </div>
           ) : null}
-          <p className="text-xs text-muted-foreground mt-4">
-            Recorded by:{" "}
-            {vitalFieldToString(vitals.recordedBy ?? vitals.recorded_by_name) || "Unknown"}
-          </p>
+          {recordedByStr ? (
+            <p className="text-xs text-muted-foreground mt-4">Recorded by: {recordedByStr}</p>
+          ) : null}
         </div>
         <DialogFooter>
           <Button type="button" variant="outline" onClick={onClose}>

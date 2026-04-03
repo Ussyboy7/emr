@@ -1334,9 +1334,7 @@ export function MedicalHistoryTab({
                   <div className="border rounded-md p-3 bg-muted/30 whitespace-pre-wrap text-sm">
                     {selectedCertificate.findings}
                   </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground">—</p>
-                )}
+                ) : null}
               </div>
 
               <div>
@@ -1345,9 +1343,7 @@ export function MedicalHistoryTab({
                   <div className="border rounded-md p-3 bg-muted/30 whitespace-pre-wrap text-sm">
                     {selectedCertificate.recommendations}
                   </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground">—</p>
-                )}
+                ) : null}
               </div>
             </div>
           ) : (

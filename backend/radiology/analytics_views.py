@@ -1,4 +1,6 @@
 """Radiology module analytics API."""
+from collections import defaultdict
+
 from django.db.models import Count, Q
 from django.db.models.functions import TruncDate
 from rest_framework.permissions import IsAuthenticated
@@ -81,6 +83,41 @@ class RadiologyAnalyticsSummaryView(APIView):
             .order_by("-count")
         )
         processing_method = {r["processing_method"]: r["count"] for r in method_rows}
+        in_house_count = processing_method.get("in_house", 0)
+        outsourced_count = processing_method.get("outsourced", 0)
+        processing_summary = {
+            "in_house": in_house_count,
+            "outsourced": outsourced_count,
+            "unassigned": max(studies_total - in_house_count - outsourced_count, 0),
+            "total": studies_total,
+        }
+
+        procedure_method_rows = (
+            studies_qs.values("procedure", "processing_method")
+            .annotate(count=Count("id"))
+            .order_by("procedure")
+        )
+        procedures_processing = defaultdict(
+            lambda: {
+                "procedure": "",
+                "total": 0,
+                "processing": {"in_house": 0, "outsourced": 0, "unassigned": 0},
+            }
+        )
+        for row in procedure_method_rows:
+            procedure = (row.get("procedure") or "Unknown procedure").strip()
+            method = (row.get("processing_method") or "").strip().lower()
+            normalized_method = method if method in {"in_house", "outsourced"} else "unassigned"
+            count = int(row.get("count", 0) or 0)
+            bucket = procedures_processing[procedure]
+            bucket["procedure"] = procedure
+            bucket["total"] += count
+            bucket["processing"][normalized_method] += count
+
+        procedures_processing_breakdown = sorted(
+            procedures_processing.values(),
+            key=lambda x: (-x["total"], x["procedure"]),
+        )
 
         daily = (
             RadiologyStudy.objects.filter(study_filter)
@@ -131,6 +168,8 @@ class RadiologyAnalyticsSummaryView(APIView):
                 "studies_by_modality": by_modality,
                 "studies_by_template_category": by_template_category,
                 "studies_by_processing_method": processing_method,
+                "studies_processing_summary": processing_summary,
+                "procedures_by_processing_method": procedures_processing_breakdown,
                 "orders_by_priority": orders_by_priority,
                 "by_day": by_day,
                 "top_procedures": [

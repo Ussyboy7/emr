@@ -121,7 +121,7 @@ export function ResponsibilityFormHistoryTable(props: {
             {[...forms]
               .sort((a, b) => a.sequence_number - b.sequence_number)
               .map((form) => {
-              const facility = (form.hospital_name_snapshot || "").trim() || referralFacilityLabel || "—";
+              const facility = (form.hospital_name_snapshot || "").trim() || referralFacilityLabel || "";
               const effStatus = effectiveResponsibilityFormStatus(form);
               const statusLabel = toLabel(effStatus);
               const stamped = Boolean(form.records_acknowledged_at);
@@ -166,7 +166,7 @@ export function ResponsibilityFormHistoryTable(props: {
                           {acknowledgingFormId === form.id ? "Saving…" : "Acknowledge stamp"}
                         </Button>
                       ) : (
-                        <span className="text-xs text-muted-foreground">—</span>
+                        <span className="text-xs text-muted-foreground" />
                       )}
                     </TableCell>
                   ) : null}

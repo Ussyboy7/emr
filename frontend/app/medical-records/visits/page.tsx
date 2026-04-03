@@ -25,7 +25,10 @@ import { StandardPagination } from '@/components/StandardPagination';
 import { CustomDateRangeButton } from '@/components/CustomDateRangeButton';
 import { AdvancedDateRangeDialog } from '@/components/AdvancedDateRangeDialog';
 import { getAllClinicsWithAll, CLINICS } from '@/lib/constants/clinics';
-import { normalizeClinicName } from '@/lib/utils/clinic-utils';
+import {
+  normalizeClinicName,
+  getVisitServiceClinicsDisplay,
+} from '@/lib/utils/clinic-utils';
 import { useLocationOptions } from '@/lib/hooks/use-location-options';
 import { ConsultationReportModal } from '@/components/consultation/ConsultationReportModal';
 import { loadConsultationReportSession, type ConsultationReportSession } from '@/lib/consultation-report';
@@ -104,7 +107,7 @@ export default function VisitsPage() {
            visit.status === 'in_progress' ? 'In Progress' :
            visit.status === 'completed' ? 'Completed' :
            visit.status === 'cancelled' ? 'Cancelled' : visit.status,
-    department: visit.clinic || 'GOPD',
+    department: getVisitServiceClinicsDisplay({ clinic: visit.clinic, clinics: visit.clinics }),
     notes: visit.clinical_notes || '',
     location: visit.location || '',
     isNewRegistration: Boolean(visit.is_new_registration),
@@ -685,7 +688,7 @@ export default function VisitsPage() {
                           })}
                         </div>
                       ) : (
-                        <span>{visit.clinic || 'GOPD'}</span>
+                        <span>{visit.department}</span>
                       )}
                       <span>•</span>
                       <span>{visit.location}</span>
@@ -870,16 +873,22 @@ export default function VisitsPage() {
                     <p className="font-medium">{selectedVisit.status}</p>
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label className="text-muted-foreground">Clinic</Label>
-                    <p className="font-medium">{selectedVisit.clinic || 'Not specified'}</p>
+                {(selectedVisit.department || selectedVisit.location) && (
+                  <div className="grid grid-cols-2 gap-4">
+                    {selectedVisit.department ? (
+                      <div className="space-y-2">
+                        <Label className="text-muted-foreground">Clinic</Label>
+                        <p className="font-medium">{selectedVisit.department}</p>
+                      </div>
+                    ) : null}
+                    {selectedVisit.location ? (
+                      <div className="space-y-2">
+                        <Label className="text-muted-foreground">Location</Label>
+                        <p className="font-medium">{selectedVisit.location}</p>
+                      </div>
+                    ) : null}
                   </div>
-                  <div className="space-y-2">
-                    <Label className="text-muted-foreground">Location</Label>
-                    <p className="font-medium">{selectedVisit.location || 'Not specified'}</p>
-                  </div>
-                </div>
+                )}
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label className="text-muted-foreground">Date</Label>

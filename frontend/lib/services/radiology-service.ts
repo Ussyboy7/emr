@@ -102,6 +102,21 @@ export interface RadiologyAnalyticsSummary {
   studies_by_modality: Record<string, number>;
   studies_by_template_category: Record<string, number>;
   studies_by_processing_method: Record<string, number>;
+  studies_processing_summary?: {
+    in_house: number;
+    outsourced: number;
+    unassigned: number;
+    total: number;
+  };
+  procedures_by_processing_method?: Array<{
+    procedure: string;
+    total: number;
+    processing: {
+      in_house: number;
+      outsourced: number;
+      unassigned: number;
+    };
+  }>;
   orders_by_priority: Record<string, number>;
   by_day: Array<{ date: string; studies: number; orders: number }>;
   top_procedures: Array<{ procedure: string; count: number }>;
@@ -116,6 +131,8 @@ class RadiologyService {
     doctor?: string;
     priority?: string;
     search?: string;
+    /** Orders that have at least one study with this processing method */
+    processing_method?: 'in_house' | 'outsourced';
     page?: number;
     page_size?: number;
     consultation_session?: number;

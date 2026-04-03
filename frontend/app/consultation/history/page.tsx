@@ -26,7 +26,10 @@ import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { useCurrentUser } from '@/hooks/use-current-user';
 import { CLINICS } from '@/lib/constants/clinics';
-import { clinicMatches } from '@/lib/utils/clinic-utils';
+import {
+  clinicMatches,
+  getVisitServiceClinicsDisplay,
+} from '@/lib/utils/clinic-utils';
 import { ConsultationRecord } from '@/components/consultation/ConsultationDetailModal';
 import { ConsultationReportModal } from '@/components/consultation/ConsultationReportModal';
 import { PrescriptionOrderModal, type PrescriptionOrderSubmitInput } from "@/components/consultation/orders/PrescriptionOrderModal";
@@ -384,8 +387,11 @@ export default function ConsultationHistoryPage() {
               doctorId: doctorId,
               date: visitDate,
               time: visitTime,
-              clinic: session.clinic_name || 'GOPD',
-              room: session.room_name || 'Unknown',
+              clinic: getVisitServiceClinicsDisplay({
+                clinic: session.clinic_name,
+                clinics: session.visit_clinics,
+              }),
+              room: session.room_name || '',
               diagnosis,
               diagnosisCodes,
               presentationComplaint,
@@ -1397,7 +1403,7 @@ export default function ConsultationHistoryPage() {
                                     ))}
                                   </ul>
                                 ) : (
-                                  <p className="text-muted-foreground">—</p>
+                                  <p className="text-muted-foreground text-xs">No medications on this prescription</p>
                                 )}
                               </li>
                             );
@@ -1452,7 +1458,12 @@ export default function ConsultationHistoryPage() {
                           {editLabOrders.map((order: any) => (
                             <li key={order.id} className="p-3 rounded-lg border bg-muted/30 text-sm">
                               <span className="font-medium">{order.order_id || `#${order.id}`}</span>
-                              <p className="text-muted-foreground mt-1">{order.tests?.map((t: any) => t.name || t.template?.name).filter(Boolean).join(', ') || '—'}</p>
+                              {(() => {
+                                const testsLine = order.tests?.map((t: any) => t.name || t.template?.name).filter(Boolean).join(', ');
+                                return testsLine ? (
+                                  <p className="text-muted-foreground mt-1">{testsLine}</p>
+                                ) : null;
+                              })()}
                             </li>
                           ))}
                         </ul>
@@ -1505,7 +1516,12 @@ export default function ConsultationHistoryPage() {
                           {editRadiologyOrders.map((order: any) => (
                             <li key={order.id} className="p-3 rounded-lg border bg-muted/30 text-sm">
                               <span className="font-medium">{order.order_id || `#${order.id}`}</span>
-                              <p className="text-muted-foreground mt-1">{order.studies?.map((s: any) => s.procedure).filter(Boolean).join(', ') || '—'}</p>
+                              {(() => {
+                                const studiesLine = order.studies?.map((s: any) => s.procedure).filter(Boolean).join(', ');
+                                return studiesLine ? (
+                                  <p className="text-muted-foreground mt-1">{studiesLine}</p>
+                                ) : null;
+                              })()}
                             </li>
                           ))}
                         </ul>
@@ -1614,8 +1630,10 @@ export default function ConsultationHistoryPage() {
                         <ul className="space-y-2">
                           {editNursingOrders.map((order: any) => (
                             <li key={order.id} className="p-3 rounded-lg border bg-muted/30 text-sm">
-                              <span className="font-medium capitalize">{order.order_type || "Nursing order"}</span>
-                              <p className="text-muted-foreground mt-1">{order.description || "—"}</p>
+                              <span className="font-medium capitalize">{order.order_type || ''}</span>
+                              {order.description ? (
+                                <p className="text-muted-foreground mt-1">{order.description}</p>
+                              ) : null}
                             </li>
                           ))}
                         </ul>

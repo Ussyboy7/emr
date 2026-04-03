@@ -5,7 +5,7 @@ import { DashboardLayout } from '@/components/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, Pill, ClipboardList, Package, Clock, CheckCircle2, AlertTriangle, Activity, ArrowRight, UserCheck, Database, TrendingUp } from 'lucide-react';
+import { Loader2, Pill, ClipboardList, Package, Clock, CheckCircle2, AlertTriangle, Activity, ArrowRight, UserCheck, Database, TrendingUp, Notebook } from 'lucide-react';
 import Link from 'next/link';
 
 export default function PharmacyPage() {
@@ -165,7 +165,7 @@ export default function PharmacyPage() {
               <span className="text-xs sm:text-sm font-medium">Prescriptions Queue</span>
               <span className="text-[10px] sm:text-xs opacity-90">Pending prescriptions</span>
             </Button>
-            <Button onClick={() => window.location.href = '/pharmacy/dispense'} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-violet-500/30 hover:bg-violet-500/10 border-l-4 border-l-violet-500">
+            <Button onClick={() => window.location.href = '/pharmacy/history'} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-violet-500/30 hover:bg-violet-500/10 border-l-4 border-l-violet-500">
               <CheckCircle2 className="h-5 w-5 sm:h-6 sm:w-6 text-violet-500 dark:text-violet-400" />
               <span className="text-xs sm:text-sm font-medium">Dispense History</span>
               <span className="text-[10px] sm:text-xs text-muted-foreground">Completed dispensations</span>
@@ -175,10 +175,10 @@ export default function PharmacyPage() {
               <span className="text-xs sm:text-sm font-medium">Inventory</span>
               <span className="text-[10px] sm:text-xs text-muted-foreground">Stock management</span>
             </Button>
-            <Button onClick={() => window.location.href = '/pharmacy/reports'} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-violet-500/30 hover:bg-violet-500/10 border-l-4 border-l-emerald-500">
-              <UserCheck className="h-5 w-5 sm:h-6 sm:w-6 text-emerald-500 dark:text-emerald-400" />
-              <span className="text-xs sm:text-sm font-medium">Quality Control</span>
-              <span className="text-[10px] sm:text-xs text-muted-foreground">QC management</span>
+            <Button onClick={() => window.location.href = '/pharmacy/analytics'} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-violet-500/30 hover:bg-violet-500/10 border-l-4 border-l-emerald-500">
+              <Notebook className="h-5 w-5 sm:h-6 sm:w-6 text-emerald-500 dark:text-emerald-400" />
+              <span className="text-xs sm:text-sm font-medium">Analytics</span>
+              <span className="text-[10px] sm:text-xs text-muted-foreground">Analytics</span>
             </Button>
           </div>
         </div>

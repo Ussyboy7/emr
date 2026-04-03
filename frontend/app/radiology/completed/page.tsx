@@ -24,6 +24,7 @@ import {
   CheckCircle2, Search, Eye, Clock, AlertTriangle,
   Stethoscope, RefreshCw, Download, Loader2, Printer
 } from 'lucide-react';
+import { joinDisplayParts } from '@/lib/utils/clinic-utils';
 
 export default function CompletedReportsPage() {
   const [reports, setReports] = useState<CompletedRadiologyReport[]>([]);
@@ -380,17 +381,29 @@ export default function CompletedReportsPage() {
 
                           {/* Row 2: Details */}
                           <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-wrap">
-                            <span>{report.patient.age !== null && report.patient.age !== undefined ? `${report.patient.age}y` : ''} {report.patient.gender}</span>
-                            <span>•</span>
-                            <span>{report.orderId}</span>
-                            <span>•</span>
-                            <span>{report.studyName}</span>
-                            <span>•</span>
-                            <span>{report.clinic || 'Main Clinic'}</span>
-                            <span>•</span>
-                            <span>{completed.date} {completed.time}</span>
-                            <span>•</span>
-                            <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{report.turnaroundTime}</span>
+                            <span>
+                              {joinDisplayParts([
+                                joinDisplayParts(
+                                  [
+                                    report.patient.age !== null && report.patient.age !== undefined
+                                      ? `${report.patient.age}y`
+                                      : '',
+                                    report.patient.gender,
+                                  ],
+                                  ' '
+                                ),
+                                report.orderId,
+                                report.studyName,
+                                report.clinic,
+                                `${completed.date} ${completed.time}`.trim(),
+                              ])}
+                            </span>
+                            {report.turnaroundTime ? (
+                              <span className="flex items-center gap-1">
+                                <Clock className="h-3 w-3" />
+                                {report.turnaroundTime}
+                              </span>
+                            ) : null}
                           </div>
                         </div>
                       </div>

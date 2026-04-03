@@ -109,13 +109,22 @@ class RadiologyOrderViewSet(viewsets.ModelViewSet):
     serializer_class = RadiologyOrderSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['patient', 'doctor', 'priority', 'consultation_session', 'visit']
-    search_fields = ['order_id', 'clinical_notes']
+    search_fields = [
+        'order_id',
+        'clinical_notes',
+        'provisional_diagnosis',
+        'studies__procedure',
+        'studies__body_part',
+        'studies__modality',
+        'patient__first_name',
+        'patient__surname',
+        'patient__patient_id',
+    ]
     ordering_fields = ['ordered_at']
     ordering = ['-ordered_at']
 
-
     def get_queryset(self):
-        return (
+        qs = (
             RadiologyOrder.objects.all()
             .select_related('patient', 'doctor', 'visit', 'consultation_session', 'created_by')
             .prefetch_related(
@@ -124,6 +133,10 @@ class RadiologyOrderViewSet(viewsets.ModelViewSet):
                 'visit__diagnoses__icd10_code',
             )
         )
+        pm = self.request.query_params.get('processing_method')
+        if pm in ('in_house', 'outsourced'):
+            qs = qs.filter(studies__processing_method=pm).distinct()
+        return qs
 
     def list(self, request, *args, **kwargs):
         logger.debug("RadiologyOrderViewSet.list() called")

@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Loader2, FlaskConical, TestTube, FileSearch, Clock, CheckCircle2, AlertTriangle, Activity, ArrowRight, UserCheck, ClipboardList, TrendingUp } from 'lucide-react';
 import Link from 'next/link';
 import { labService } from '@/lib/services';
+import { joinDisplayParts } from '@/lib/utils/clinic-utils';
 
 export default function LaboratoryPage() {
   const [loading, setLoading] = useState(true);
@@ -259,8 +260,18 @@ export default function LaboratoryPage() {
                     {recentOrders.slice(0, 3).map((order: any) => (
                       <div key={order.id} className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
                         <div>
-                          <p className="font-medium text-sm">{order.patient?.name || 'Unknown Patient'}</p>
-                          <p className="text-xs text-muted-foreground">{order.tests?.length || 0} test(s) - {order.clinic || 'General'}</p>
+                          {order.patient?.name ? (
+                            <p className="font-medium text-sm">{order.patient.name}</p>
+                          ) : null}
+                          {(() => {
+                            const sub = joinDisplayParts([
+                              typeof order.tests?.length === 'number' ? `${order.tests.length} test(s)` : '',
+                              order.clinic,
+                            ]);
+                            return sub ? (
+                              <p className="text-xs text-muted-foreground">{sub}</p>
+                            ) : null;
+                          })()}
                         </div>
                         <Badge variant="outline" className="text-xs">
                           {order.tests?.[0]?.status?.replace('_', ' ') || 'pending'}
@@ -300,7 +311,12 @@ export default function LaboratoryPage() {
                       <div>
                         <p className="text-sm font-medium">{order.patient?.name || 'Unknown'}</p>
                         <p className="text-xs text-muted-foreground">
-                          {new Date(order.ordered_at).toLocaleDateString()}
+                          {order.ordered_at
+                            ? new Date(order.ordered_at).toLocaleString(undefined, {
+                                dateStyle: 'medium',
+                                timeStyle: 'short',
+                              })
+                            : ''}
                         </p>
                       </div>
                     </div>

@@ -825,44 +825,58 @@ export default function DrugMasterPage() {
             {drugDetailsLoading && <div className="text-sm text-muted-foreground">Refreshing…</div>}
             {selectedDrug && (
               <div className="grid grid-cols-2 gap-4 bg-muted/50 rounded-lg p-4 text-sm">
-                <div>
-                  <p className="text-muted-foreground">Generic</p>
-                  <p className="font-medium">{selectedDrug.generic?.name || selectedDrug.generic_name || "—"}</p>
-                </div>
+                {(selectedDrug.generic?.name || selectedDrug.generic_name) && (
+                  <div>
+                    <p className="text-muted-foreground">Generic</p>
+                    <p className="font-medium">{selectedDrug.generic?.name || selectedDrug.generic_name}</p>
+                  </div>
+                )}
                 <div>
                   <p className="text-muted-foreground">Code</p>
                   <p className="font-medium">{selectedDrug.code}</p>
                 </div>
-                <div>
-                  <p className="text-muted-foreground">Strength</p>
-                  <p className="font-medium">{selectedDrug.strength || "—"}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">Form</p>
-                  <p className="font-medium">{selectedDrug.form || "—"}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">Unit</p>
-                  <p className="font-medium">{selectedDrug.unit || "—"}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">Category</p>
-                  <p className="font-medium">{selectedDrug.category || "—"}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">Manufacturer</p>
-                  <p className="font-medium">{selectedDrug.manufacturer || "—"}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">Pack Size</p>
-                  <p className="font-medium">{typeof selectedDrug.pack_size === "number" ? selectedDrug.pack_size : "—"}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">Minimum Stock Level</p>
-                  <p className="font-medium">
-                    {selectedDrug.min_stock_level !== undefined && selectedDrug.min_stock_level !== null ? Number(selectedDrug.min_stock_level) : "—"}
-                  </p>
-                </div>
+                {selectedDrug.strength && (
+                  <div>
+                    <p className="text-muted-foreground">Strength</p>
+                    <p className="font-medium">{selectedDrug.strength}</p>
+                  </div>
+                )}
+                {selectedDrug.form && (
+                  <div>
+                    <p className="text-muted-foreground">Form</p>
+                    <p className="font-medium">{selectedDrug.form}</p>
+                  </div>
+                )}
+                {selectedDrug.unit && (
+                  <div>
+                    <p className="text-muted-foreground">Unit</p>
+                    <p className="font-medium">{selectedDrug.unit}</p>
+                  </div>
+                )}
+                {selectedDrug.category && (
+                  <div>
+                    <p className="text-muted-foreground">Category</p>
+                    <p className="font-medium">{selectedDrug.category}</p>
+                  </div>
+                )}
+                {selectedDrug.manufacturer && (
+                  <div>
+                    <p className="text-muted-foreground">Manufacturer</p>
+                    <p className="font-medium">{selectedDrug.manufacturer}</p>
+                  </div>
+                )}
+                {typeof selectedDrug.pack_size === "number" && (
+                  <div>
+                    <p className="text-muted-foreground">Pack Size</p>
+                    <p className="font-medium">{selectedDrug.pack_size}</p>
+                  </div>
+                )}
+                {selectedDrug.min_stock_level !== undefined && selectedDrug.min_stock_level !== null && (
+                  <div>
+                    <p className="text-muted-foreground">Minimum Stock Level</p>
+                    <p className="font-medium">{Number(selectedDrug.min_stock_level)}</p>
+                  </div>
+                )}
                 <div className="col-span-2">
                   <p className="text-muted-foreground">Status</p>
                   <p className="font-medium">{selectedDrug.is_active ? "Active" : "Inactive"}</p>

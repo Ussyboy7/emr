@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { toast } from "sonner";
 import { visitService, patientService, consultationService, pharmacyService, labService, radiologyService } from '@/lib/services';
 import { isAuthenticationError } from '@/lib/auth-errors';
+import { getVisitServiceClinicsDisplay } from '@/lib/utils/clinic-utils';
 import {
   Calendar, Clock, CheckCircle2, Loader2, RefreshCw, AlertTriangle,
   ClipboardList, Heart, Stethoscope, Pill, TestTube, User, Building2, ScanLine
@@ -83,8 +84,15 @@ export function VisitDetailModal({ visit: visitProp, visitId: visitIdProp, isOpe
             date: sessionData.started_at?.split('T')[0] || '',
             time: sessionData.started_at?.split('T')[1]?.substring(0, 5) || '',
             visit_type: 'Consultation',
-            clinic: (sessionData.room as any)?.clinic_name || (sessionData.room as any)?.clinic?.name || 'GOPD',
-            doctor_name: (sessionData.doctor as any)?.name || (sessionData.doctor as any)?.get_full_name || sessionData.doctor_name || 'Unknown',
+            clinic: getVisitServiceClinicsDisplay({
+              clinic: (sessionData as any).clinic_name,
+              clinics: (sessionData as any).visit_clinics,
+            }),
+            doctor_name:
+              (sessionData.doctor as any)?.name ||
+              (sessionData.doctor as any)?.get_full_name ||
+              sessionData.doctor_name ||
+              '',
             clinical_notes: sessionData.notes || '',
             status: sessionData.status,
             created_at: sessionData.started_at,
@@ -224,7 +232,7 @@ export function VisitDetailModal({ visit: visitProp, visitId: visitIdProp, isOpe
               title: 'Consultation Started',
               description: 'Consultation session initiated',
               module: 'Consultation',
-              location: session.room_name || (session as any).clinic || 'Consultation Room',
+              location: session.room_name || undefined,
               status: 'completed',
               timestamp: session.started_at,
               staff: session.doctor_name,
@@ -241,7 +249,7 @@ export function VisitDetailModal({ visit: visitProp, visitId: visitIdProp, isOpe
                 title: 'Consultation Completed',
                 description: 'Consultation session ended',
                 module: 'Consultation',
-                location: session.room_name || (session as any).clinic || 'Consultation Room',
+                location: session.room_name || undefined,
                 status: 'completed',
                 timestamp: session.ended_at,
                 staff: session.doctor_name,
@@ -463,7 +471,10 @@ export function VisitDetailModal({ visit: visitProp, visitId: visitIdProp, isOpe
           title: 'Visit Completed',
           description: 'Patient visit concluded',
           module: 'Medical Records',
-          location: rawVisitData.clinic || 'Clinic',
+          location: getVisitServiceClinicsDisplay({
+            clinic: rawVisitData.clinic,
+            clinics: rawVisitData.clinics,
+          }) || undefined,
           status: 'completed',
           timestamp: rawVisitData.updated_at,
           icon: CheckCircle2,

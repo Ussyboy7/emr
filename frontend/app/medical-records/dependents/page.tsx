@@ -14,7 +14,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { toast } from "sonner";
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { patientService, type Patient as ApiPatient } from '@/lib/services';
+import { patientService, formatPatientGenderLabel, type Patient as ApiPatient } from '@/lib/services';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { 
@@ -167,7 +167,7 @@ export default function DependentsPage() {
                 name: dep.full_name ?? '',
                 dob: dep.date_of_birth || '',
                 age: dep.age || 0,
-                gender: dep.gender === 'male' ? 'Male' : 'Female',
+                gender: formatPatientGenderLabel(dep.gender),
                 relationship: dep.nok_relationship || 'Other',
                 primaryPatient: primaryPatient || { id: '', name: 'Unknown Principal', category: '' },
                 status: dep.is_active ? 'Active' : 'Inactive',
@@ -478,7 +478,7 @@ export default function DependentsPage() {
             name: dep.full_name ?? '',
             dob: dep.date_of_birth || '',
             age: dep.age || 0,
-            gender: dep.gender === 'male' ? 'Male' : 'Female',
+            gender: formatPatientGenderLabel(dep.gender),
             relationship: dep.nok_relationship || 'Other',
             primaryPatient: primaryPatient || { id: '', name: 'Unknown', category: '' },
             status: dep.is_active ? 'Active' : 'Inactive',
@@ -620,7 +620,7 @@ export default function DependentsPage() {
             name: dep.full_name ?? '',
             dob: dep.date_of_birth || '',
             age: dep.age || 0,
-            gender: dep.gender === 'male' ? 'Male' : 'Female',
+            gender: formatPatientGenderLabel(dep.gender),
             relationship: dep.nok_relationship || 'Other',
             primaryPatient: primaryPatient || { id: '', name: 'Unknown', category: '' },
             status: dep.is_active ? 'Active' : 'Inactive',
@@ -697,7 +697,7 @@ export default function DependentsPage() {
             name: dep.full_name ?? '',
             dob: dep.date_of_birth || '',
             age: dep.age || 0,
-            gender: dep.gender === 'male' ? 'Male' : 'Female',
+            gender: formatPatientGenderLabel(dep.gender),
             relationship: dep.nok_relationship || 'Other',
             primaryPatient: primaryPatient || { id: '', name: 'Unknown', category: '' },
             status: dep.is_active ? 'Active' : 'Inactive',
@@ -751,7 +751,7 @@ export default function DependentsPage() {
           firstName: dependentToEdit.first_name || '',
           lastName: dependentToEdit.surname || '',
           dob: dependentToEdit.date_of_birth || '',
-          gender: dependentToEdit.gender === 'male' ? 'Male' : 'Female',
+          gender: formatPatientGenderLabel(dependentToEdit.gender),
           relationship: dependentToEdit.nok_relationship || '',
           primaryPatientId: dep.primaryPatient.id,
           phone: dependentToEdit.phone || '',
@@ -1250,7 +1250,7 @@ export default function DependentsPage() {
                           <Select value={editForm.maritalStatus || undefined} onValueChange={(v) => setEditForm(prev => ({ ...prev, maritalStatus: v === 'not-specified' ? '' : v }))}>
                             <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="not-specified">Not specified</SelectItem>
+                              <SelectItem value="not-specified">Unspecified</SelectItem>
                               {maritalStatuses.map(status => <SelectItem key={status} value={status.toLowerCase()}>{status}</SelectItem>)}
                             </SelectContent>
                           </Select>
@@ -1262,7 +1262,7 @@ export default function DependentsPage() {
                           <Select value={editForm.religion || undefined} onValueChange={(v) => setEditForm(prev => ({ ...prev, religion: v === 'not-specified' ? '' : v }))}>
                             <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="not-specified">Not specified</SelectItem>
+                              <SelectItem value="not-specified">Unspecified</SelectItem>
                               {religions.map(religion => <SelectItem key={religion} value={religion}>{religion}</SelectItem>)}
                             </SelectContent>
                           </Select>
@@ -1272,7 +1272,7 @@ export default function DependentsPage() {
                           <Select value={editForm.tribe || undefined} onValueChange={(v) => setEditForm(prev => ({ ...prev, tribe: v === 'not-specified' ? '' : v }))}>
                             <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="not-specified">Not specified</SelectItem>
+                              <SelectItem value="not-specified">Unspecified</SelectItem>
                               {tribes.map(tribe => <SelectItem key={tribe} value={tribe}>{tribe}</SelectItem>)}
                             </SelectContent>
                           </Select>
@@ -1321,7 +1321,7 @@ export default function DependentsPage() {
                           <Select value={editForm.stateOfResidence || undefined} onValueChange={(v) => setEditForm(prev => ({ ...prev, stateOfResidence: v === 'not-specified' ? '' : v }))}>
                             <SelectTrigger><SelectValue placeholder="Select state" /></SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="not-specified">Not specified</SelectItem>
+                              <SelectItem value="not-specified">Unspecified</SelectItem>
                               {NIGERIA_STATES.map(state => <SelectItem key={state} value={state}>{state}</SelectItem>)}
                             </SelectContent>
                           </Select>
@@ -1331,7 +1331,7 @@ export default function DependentsPage() {
                           <Select value={editForm.stateOfOrigin || undefined} onValueChange={(v) => setEditForm(prev => ({ ...prev, stateOfOrigin: v === 'not-specified' ? '' : v }))}>
                             <SelectTrigger><SelectValue placeholder="Select state" /></SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="not-specified">Not specified</SelectItem>
+                              <SelectItem value="not-specified">Unspecified</SelectItem>
                               {NIGERIA_STATES.map(state => <SelectItem key={state} value={state}>{state}</SelectItem>)}
                             </SelectContent>
                           </Select>

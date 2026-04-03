@@ -267,16 +267,14 @@ export default function EyeClinicPage() {
                       <TableCell>{getPriorityBadge(order.priority)}</TableCell>
                       <TableCell>{getStatusBadge(order.status)}</TableCell>
                       <TableCell className="max-w-[200px] truncate">
-                        {order.diagnosis || '—'}
+                        {order.diagnosis || ''}
                       </TableCell>
                       <TableCell>
                         {order.scheduled_at ? (
                           <div className="text-sm">
                             {format(new Date(order.scheduled_at), 'MMM d, yyyy')}
                           </div>
-                        ) : (
-                          '—'
-                        )}
+                        ) : null}
                       </TableCell>
                       <TableCell>
                         <div className="flex gap-2">

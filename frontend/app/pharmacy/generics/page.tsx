@@ -556,26 +556,36 @@ export default function GenericsPage() {
             </DialogHeader>
             {selectedGeneric && (
               <div className="grid grid-cols-2 gap-4 bg-muted/50 rounded-lg p-4 text-sm">
-                <div className="col-span-2">
-                  <p className="text-muted-foreground">Active Ingredient</p>
-                  <p className="font-medium">{selectedGeneric.active_ingredient || "—"}</p>
-                </div>
-                <div className="col-span-2">
-                  <p className="text-muted-foreground">Category</p>
-                  <p className="font-medium">{selectedGeneric.category || "—"}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">Strength</p>
-                  <p className="font-medium">{selectedGeneric.strength || "—"}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">Dosage Form</p>
-                  <p className="font-medium">{selectedGeneric.dosage_form || "—"}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">Route</p>
-                  <p className="font-medium">{selectedGeneric.route || "—"}</p>
-                </div>
+                {selectedGeneric.active_ingredient && (
+                  <div className="col-span-2">
+                    <p className="text-muted-foreground">Active Ingredient</p>
+                    <p className="font-medium">{selectedGeneric.active_ingredient}</p>
+                  </div>
+                )}
+                {selectedGeneric.category && (
+                  <div className="col-span-2">
+                    <p className="text-muted-foreground">Category</p>
+                    <p className="font-medium">{selectedGeneric.category}</p>
+                  </div>
+                )}
+                {selectedGeneric.strength && (
+                  <div>
+                    <p className="text-muted-foreground">Strength</p>
+                    <p className="font-medium">{selectedGeneric.strength}</p>
+                  </div>
+                )}
+                {selectedGeneric.dosage_form && (
+                  <div>
+                    <p className="text-muted-foreground">Dosage Form</p>
+                    <p className="font-medium">{selectedGeneric.dosage_form}</p>
+                  </div>
+                )}
+                {selectedGeneric.route && (
+                  <div>
+                    <p className="text-muted-foreground">Route</p>
+                    <p className="font-medium">{selectedGeneric.route}</p>
+                  </div>
+                )}
                 <div className="col-span-2">
                   <p className="text-muted-foreground">Status</p>
                   <p className="font-medium">{selectedGeneric.is_active ? "Active" : "Inactive"}</p>

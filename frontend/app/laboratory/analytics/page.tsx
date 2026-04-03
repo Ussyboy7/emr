@@ -60,6 +60,52 @@ function labAnalyticsToCsv(d: LabAnalyticsSummary, viewMode: AnalyticsViewMode, 
   lines.push('');
   lines.push(['Code', 'Name', 'Count'].map(esc).join(','));
   (d.top_tests || []).forEach((t) => lines.push([t.code, t.name, String(t.count)].map(esc).join(',')));
+
+  lines.push('');
+  lines.push(['Processing method', 'Count'].map(esc).join(','));
+  const processingSummary = d.tests_processing_summary;
+  if (processingSummary) {
+    lines.push(['In-house', String(processingSummary.in_house)].map(esc).join(','));
+    lines.push(['Outsourced', String(processingSummary.outsourced)].map(esc).join(','));
+    lines.push(['Unassigned', String(processingSummary.unassigned)].map(esc).join(','));
+    lines.push(['Total', String(processingSummary.total)].map(esc).join(','));
+  } else {
+    Object.entries(d.tests_by_processing_method || {}).forEach(([method, count]) =>
+      lines.push([method, String(count)].map(esc).join(','))
+    );
+  }
+
+  lines.push('');
+  lines.push(['Major class', 'Total', 'In-house', 'Outsourced', 'Unassigned'].map(esc).join(','));
+  Object.entries(d.major_lab_classes || {}).forEach(([className, info]) => {
+    lines.push(
+      [
+        className,
+        String(info.total),
+        String(info.processing.in_house),
+        String(info.processing.outsourced),
+        String(info.processing.unassigned),
+      ].map(esc).join(',')
+    );
+  });
+
+  lines.push('');
+  lines.push(['Class', 'Code', 'Investigation', 'Count', 'In-house', 'Outsourced', 'Unassigned'].map(esc).join(','));
+  Object.entries(d.major_lab_classes || {}).forEach(([className, info]) => {
+    (info.investigations || []).forEach((inv) => {
+      lines.push(
+        [
+          className,
+          inv.code || '',
+          inv.name,
+          String(inv.count),
+          String(inv.processing.in_house),
+          String(inv.processing.outsourced),
+          String(inv.processing.unassigned),
+        ].map(esc).join(',')
+      );
+    });
+  });
   return lines.join('\n');
 }
 
@@ -177,6 +223,40 @@ export default function LaboratoryAnalyticsPage() {
     return Object.entries(data.tests_by_status).map(([name, count]) => ({
       name: name.replace(/_/g, ' '),
       count,
+    }));
+  }, [data]);
+
+  const processingMethodBar = useMemo(() => {
+    if (!data) return [];
+    const summary = data.tests_processing_summary;
+    if (summary) {
+      return [
+        { name: 'In-house', count: summary.in_house },
+        { name: 'Outsourced', count: summary.outsourced },
+        { name: 'Unassigned', count: summary.unassigned },
+      ].filter((x) => x.count > 0);
+    }
+    return Object.entries(data.tests_by_processing_method || {}).map(([name, count]) => ({
+      name: name === 'in_house' ? 'In-house' : name === 'outsourced' ? 'Outsourced' : name.replace(/_/g, ' '),
+      count,
+    }));
+  }, [data]);
+
+  const majorClassCards = useMemo(() => {
+    if (!data?.major_lab_classes) return [];
+    const classes = [
+      { key: 'hematology', label: 'Hematology' },
+      { key: 'chemistry', label: 'Chemistry' },
+      { key: 'microbiology', label: 'Microbiology' },
+    ];
+    return classes.map(({ key, label }) => ({
+      key,
+      label,
+      details: data.major_lab_classes?.[key] ?? {
+        total: 0,
+        processing: { in_house: 0, outsourced: 0, unassigned: 0 },
+        investigations: [],
+      },
     }));
   }, [data]);
 
@@ -317,7 +397,7 @@ export default function LaboratoryAnalyticsPage() {
               </Card>
             </div>
 
-            <div className="grid lg:grid-cols-2 gap-6">
+            <div className="grid lg:grid-cols-3 gap-6">
               <Card>
                 <CardHeader>
                   <CardTitle className="text-base">Test status mix</CardTitle>
@@ -365,6 +445,72 @@ export default function LaboratoryAnalyticsPage() {
                   )}
                 </CardContent>
               </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">In-house vs outsourced</CardTitle>
+                  <CardDescription>How investigations are being processed</CardDescription>
+                </CardHeader>
+                <CardContent className="h-[280px]">
+                  {processingMethodBar.length === 0 ? (
+                    <EmptyChart />
+                  ) : (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={processingMethodBar}>
+                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                        <XAxis dataKey="name" tick={{ fontSize: 10 }} />
+                        <YAxis tick={{ fontSize: 11 }} />
+                        <Tooltip />
+                        <Bar dataKey="count" fill="#0ea5e9" radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+
+            <div className="grid lg:grid-cols-3 gap-6">
+              {majorClassCards.map(({ key, label, details }) => (
+                <Card key={key}>
+                  <CardHeader>
+                    <CardTitle className="text-base">{label}</CardTitle>
+                    <CardDescription>
+                      Total: {details.total.toLocaleString()} • In-house: {details.processing.in_house.toLocaleString()} • Outsourced: {details.processing.outsourced.toLocaleString()}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {details.investigations.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">No investigations in this period</p>
+                    ) : (
+                      <div className="max-h-[300px] overflow-auto rounded-md border">
+                        <table className="w-full text-sm">
+                          <thead className="bg-muted/50 sticky top-0">
+                            <tr>
+                              <th className="text-left px-3 py-2 font-medium">Investigation</th>
+                              <th className="text-right px-3 py-2 font-medium">Count</th>
+                              <th className="text-right px-3 py-2 font-medium">In-house</th>
+                              <th className="text-right px-3 py-2 font-medium">Outsourced</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {details.investigations.map((inv) => (
+                              <tr key={`${inv.code}-${inv.name}`} className="border-t">
+                                <td className="px-3 py-2">
+                                  <div className="font-medium">{inv.name}</div>
+                                  {inv.code ? <div className="text-xs text-muted-foreground">{inv.code}</div> : null}
+                                </td>
+                                <td className="px-3 py-2 text-right tabular-nums">{inv.count.toLocaleString()}</td>
+                                <td className="px-3 py-2 text-right tabular-nums">{inv.processing.in_house.toLocaleString()}</td>
+                                <td className="px-3 py-2 text-right tabular-nums">{inv.processing.outsourced.toLocaleString()}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              ))}
             </div>
 
             <Card>

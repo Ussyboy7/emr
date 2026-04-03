@@ -131,7 +131,8 @@ services:
     volumes:
       - ./frontend:/app
       - /app/node_modules
-      - /app/.next
+      # Isolated from host .next; if dev 500s / ENOENT build-manifest, remove volume next-dev-cache
+      - next-dev-cache:/app/.next
     ports:
       - "3001:3001"
     depends_on:
@@ -142,4 +143,5 @@ volumes:
   postgres-data:
   media-data:
   static-data:
+  next-dev-cache:
 

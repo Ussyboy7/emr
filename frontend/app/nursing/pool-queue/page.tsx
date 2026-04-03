@@ -23,7 +23,12 @@ import {
   Heart, Wind, Droplets, Scale, Loader2, Save, X
 } from 'lucide-react';
 import { getAllClinicsWithAll } from '@/lib/constants/clinics';
-import { clinicMatches } from '@/lib/utils/clinic-utils';
+import {
+  clinicMatches,
+  getVisitServiceClinicsList,
+  getVisitServiceClinicsDisplay,
+  joinDisplayParts,
+} from '@/lib/utils/clinic-utils';
 import { PatientAvatar } from "@/components/PatientAvatar";
 import { VitalsDetailModal } from "@/components/VitalsDetailModal";
 import { vitalFieldToString } from "@/lib/vitals-display";
@@ -249,6 +254,7 @@ export default function NursingPoolQueuePage() {
           visit_type?: string | null;
           visit_status?: string | null;
           visit_clinic?: string | null;
+          visit_clinics?: string[] | null;
         };
 
         let sentVisitToRoom = new Map<number, { roomName: string; sentAt?: string; queueActive?: boolean; queueItem?: QueueItem }>();
@@ -337,7 +343,8 @@ export default function NursingPoolQueuePage() {
             status: qi.visit_status || 'completed',
             date: qi.visit_date || fallbackDate,
             time: (qi.visit_time as any) || fallbackTime,
-            clinic: qi.visit_clinic || 'GOPD',
+            clinic: qi.visit_clinic || '',
+            clinics: qi.visit_clinics || [],
             clinical_notes: '',
           } as Visit);
         });
@@ -440,7 +447,7 @@ export default function NursingPoolQueuePage() {
           const roomName = queueVisitToRoom.get(visit.id);
           const sentToPhysio = Boolean(physioCheckedInByVisitId[visit.id]);
           const sentToEyeClinic = Boolean(eyeCheckedInByVisitId[visit.id]);
-          const visitClinics = (visit.clinics && visit.clinics.length > 0 ? visit.clinics : [visit.clinic]).filter(Boolean) as string[];
+          const visitClinics = getVisitServiceClinicsList({ clinic: visit.clinic, clinics: visit.clinics });
           const hasPhysioClinic = visitClinics.some((c: string) => clinicMatches(c, 'Physiotherapy'));
           const hasEyeClinic = visitClinics.some((c: string) => clinicMatches(c, 'Eye Clinic'));
           
@@ -473,7 +480,7 @@ export default function NursingPoolQueuePage() {
             randomBloodSugar: vitalFieldToString(vitalsData.random_blood_sugar ?? vitalsData.randomBloodSugar),
             notes: typeof vitalsData.notes === 'string' ? vitalsData.notes : '',
             recordedAt: vitalsData.recorded_at || new Date().toISOString(),
-            recordedBy: vitalsData.recorded_by_name || 'Unknown',
+            recordedBy: vitalsData.recorded_by_name || '',
           } : undefined;
           
           return {
@@ -482,8 +489,8 @@ export default function NursingPoolQueuePage() {
             patientId: (visit as any).patient_id || '', // direct from backend
             visitId: visit.visit_id || String(visit.id), // Visit ID string (VIS-...)
             personalNumber: '', // Not used for search, keep empty
-            clinic: visit.clinic || 'GOPD',
-            clinics: (visit.clinics && visit.clinics.length > 0 ? visit.clinics : [visit.clinic]) as string[], // All clinics for this visit
+            clinic: getVisitServiceClinicsDisplay({ clinic: visit.clinic, clinics: visit.clinics }),
+            clinics: visitClinics,
             completedClinics: (visit.completed_clinics || []) as string[], // Completed clinics
             visitDate: visit.date,
             visitTime: visit.time,
@@ -1429,12 +1436,14 @@ export default function NursingPoolQueuePage() {
                             })}
                           </div>
                         ) : (
-                          <span>{patient.clinic || 'GOPD'}</span>
+                          <span>{patient.clinic}</span>
                         )}
-                        <span>•</span>
-                        <span>
-                          {patient.age != null && Number.isFinite(patient.age) ? `${patient.age}y` : '—'}
-                        </span>
+                        {patient.age != null && Number.isFinite(patient.age) ? (
+                          <>
+                            <span>•</span>
+                            <span>{`${patient.age}y`}</span>
+                          </>
+                        ) : null}
                         {patient.gender?.trim() ? (
                           <>
                             <span>•</span>
@@ -1693,9 +1702,12 @@ export default function NursingPoolQueuePage() {
                     <div className="flex items-center justify-between">
                       <div>
                         <h4 className="font-semibold">{room.name}</h4>
-                        <p className="text-sm text-muted-foreground">
-                          {room.doctor ? `${room.doctor} • ` : ''}{room.specialty || 'GOPD'}
-                        </p>
+                        {(() => {
+                          const sub = joinDisplayParts([room.doctor, room.specialty]);
+                          return sub ? (
+                            <p className="text-sm text-muted-foreground">{sub}</p>
+                          ) : null;
+                        })()}
                       </div>
                       <div className="text-right">
                         <Badge variant="outline" className={room.status === 'available' ? 'border-emerald-500 text-emerald-600' : 'border-rose-500 text-rose-600'}>

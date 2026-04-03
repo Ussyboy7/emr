@@ -17,7 +17,7 @@ import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { toast } from 'sonner';
-import { patientService, radiologyService } from '@/lib/services';
+import { patientService, radiologyService, formatPatientGenderLabel } from '@/lib/services';
 import { PatientAvatar } from '@/components/PatientAvatar';
 import { Icd10DiagnosesBlock } from '@/components/medical/Icd10DiagnosesBlock';
 import { AdvancedDateRangeDialog } from '@/components/AdvancedDateRangeDialog';
@@ -29,14 +29,29 @@ import {
   Beaker, Building2, Truck, RotateCcw, XCircle, TestTube, Plus
 } from 'lucide-react';
 
+const formatOrderedAtDisplay = (isoString: string | undefined): string => {
+  if (!isoString) return '';
+  try {
+    const date = new Date(isoString);
+    if (Number.isNaN(date.getTime())) return '';
+    const datePart = date.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+    const timePart = date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+    return `${datePart}, ${timePart}`;
+  } catch {
+    return '';
+  }
+};
+
 export default function RadiologyOrdersPage() {
   const [orders, setOrders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [priorityFilter, setPriorityFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('today');
   const [genderFilter, setGenderFilter] = useState('all');
+  const [processingFilter, setProcessingFilter] = useState<'all' | 'in_house' | 'outsourced'>('all');
   const [activeTab, setActiveTab] = useState('all');
   const [isDateFilterDialogOpen, setIsDateFilterDialogOpen] = useState(false);
   const [dateRange, setDateRange] = useState({ from: '', to: '' });
@@ -44,14 +59,6 @@ export default function RadiologyOrdersPage() {
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
-
-  const getTimeSince = (isoString: string) => {
-    const diff = Date.now() - new Date(isoString).getTime();
-    const mins = Math.floor(diff / 60000);
-    if (mins < 60) return `${mins}m ago`;
-    const hrs = Math.floor(mins / 60);
-    return `${hrs}h ago`;
-  };
 
   // Get study status badge color
   const getStudyStatusBadge = (status?: string) => {
@@ -120,11 +127,20 @@ export default function RadiologyOrdersPage() {
 
               {/* Row 2: Details */}
               <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-wrap">
-                <span>{order.patient_age || '36'}y {order.patient_gender || 'male'}</span>
+                <span>
+                  {order.patient_age != null ? `${order.patient_age}y` : ''}
+                  {order.patient_age != null ? ' ' : ''}
+                  {formatPatientGenderLabel(order.patient_details?.gender) ||
+                    formatPatientGenderLabel(order.patient_gender) ||
+                    (order.patient_gender ? String(order.patient_gender) : '')}
+                </span>
                 <span>•</span>
                 <span>{order.doctor_name || 'System Administrator'}</span>
                 <span>•</span>
-                <span>{getTimeSince(order.ordered_at)}</span>
+                <span className="flex items-center gap-1" title="When the order was placed">
+                  <Clock className="h-3 w-3 shrink-0" />
+                  {formatOrderedAtDisplay(order.ordered_at) || '—'}
+                </span>
                 <span>•</span>
                 <span>{order.studies?.length || 0} {order.studies?.length === 1 ? 'study' : 'studies'}</span>
                 <span>•</span>
@@ -289,6 +305,8 @@ export default function RadiologyOrdersPage() {
       const response = await radiologyService.getOrders({
         page: 1,
         page_size: 1000,
+        ...(debouncedSearch ? { search: debouncedSearch } : {}),
+        ...(processingFilter !== 'all' ? { processing_method: processingFilter } : {}),
       });
 
       setOrders(response.results || []);
@@ -302,7 +320,12 @@ export default function RadiologyOrdersPage() {
         setLoading(false);
       }
     }
-  }, []);
+  }, [debouncedSearch, processingFilter]);
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(searchQuery.trim()), 300);
+    return () => clearTimeout(t);
+  }, [searchQuery]);
 
   useEffect(() => {
     loadOrders();
@@ -448,7 +471,6 @@ export default function RadiologyOrdersPage() {
 
   // Base filtering (search/date/priority/gender)
   const baseFilteredOrders = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
     console.log('Applying filters:', { dateFilter, priorityFilter, genderFilter, totalOrders: orders.length });
     const matchesCustomDateRange = (orderedAt: string | undefined) => {
       if (!dateRange.from && !dateRange.to) return true;
@@ -507,26 +529,11 @@ export default function RadiologyOrdersPage() {
         }
       }
 
-      if (q) {
-        const studies = (order.studies || []).map((s: any) =>
-          `${String(s?.procedure || '')} ${String(s?.body_part || '')} ${String(s?.modality || '')}`
-        ).join(' ');
-        const haystack = [
-          order.order_id,
-          order.patient_name,
-          order.doctor_name,
-          order.clinical_notes,
-          order.provisional_diagnosis,
-          studies,
-        ]
-          .map((v) => String(v || '').toLowerCase())
-          .join(' ');
-        if (!haystack.includes(q)) return false;
-      }
+      // Search / processing_method are applied server-side in loadOrders when set
 
       return true;
     });
-  }, [orders, searchQuery, dateFilter, priorityFilter, genderFilter, dateRange.from, dateRange.to]);
+  }, [orders, dateFilter, priorityFilter, genderFilter, dateRange.from, dateRange.to]);
 
   // Tab/status filtering on top of base filters
   const filteredOrders = useMemo(() => {
@@ -548,7 +555,7 @@ export default function RadiologyOrdersPage() {
   // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, priorityFilter, dateFilter, genderFilter, activeTab, dateRange.from, dateRange.to]);
+  }, [searchQuery, priorityFilter, dateFilter, genderFilter, processingFilter, activeTab, dateRange.from, dateRange.to]);
 
   const clearDateRangeFilters = () => {
     setDateRange({ from: '', to: '' });
@@ -782,7 +789,7 @@ export default function RadiologyOrdersPage() {
                 <div className="relative flex-1 min-w-[min(100%,16rem)]">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input
-                    placeholder="Search orders..."
+                    placeholder="Patient, MRN, order ID (RAD-…), procedure, modality…"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     className="pl-10"
@@ -814,6 +821,17 @@ export default function RadiologyOrdersPage() {
                       <SelectItem value="all">All Gender</SelectItem>
                       <SelectItem value="male">Male</SelectItem>
                       <SelectItem value="female">Female</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select
+                    value={processingFilter}
+                    onValueChange={(v) => setProcessingFilter(v as 'all' | 'in_house' | 'outsourced')}
+                  >
+                    <SelectTrigger className="w-[150px]"><SelectValue placeholder="Processing" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All processing</SelectItem>
+                      <SelectItem value="in_house">In-house</SelectItem>
+                      <SelectItem value="outsourced">Outsourced</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -1205,15 +1223,29 @@ export default function RadiologyOrdersPage() {
                       <div>
                         <p className="font-medium">{selectedOrder.patient_name}</p>
                         <div className="mt-1 text-xs text-muted-foreground space-y-0.5">
-                          <p>
-                            Patient ID: {selectedOrder.patient_details?.id ?? selectedOrder.patient ?? '—'}
-                            {selectedPatientFull?.patient_id ? ` • ${selectedPatientFull.patient_id}` : ''}
-                          </p>
-                          <p>{selectedOrder.patient_details?.age}y {selectedOrder.patient_details?.gender}</p>
-                          {(selectedPatientFull?.phone || selectedPatientFull?.email) && (
+                          {(() => {
+                            const ids = [
+                              selectedOrder.patient_details?.id ?? selectedOrder.patient,
+                              selectedPatientFull?.patient_id,
+                            ].filter((v) => v != null && String(v).trim() !== '');
+                            const line = ids.map((v, i) => (i === 0 ? `Patient ID: ${v}` : String(v))).join(' • ');
+                            return line ? <p>{line}</p> : null;
+                          })()}
+                          {(selectedOrder.patient_details?.age != null || selectedOrder.patient_details?.gender) && (
                             <p>
-                              {selectedPatientFull?.phone ? selectedPatientFull.phone : '—'}
-                              {selectedPatientFull?.email ? ` • ${selectedPatientFull.email}` : ''}
+                              {[
+                                selectedOrder.patient_details?.age != null ? `${selectedOrder.patient_details.age}y` : '',
+                                selectedOrder.patient_details?.gender,
+                              ]
+                                .filter(Boolean)
+                                .join(' ')}
+                            </p>
+                          )}
+                          {(selectedPatientFull?.phone?.trim() || selectedPatientFull?.email?.trim()) && (
+                            <p>
+                              {[selectedPatientFull?.phone?.trim(), selectedPatientFull?.email?.trim()]
+                                .filter(Boolean)
+                                .join(' • ')}
                             </p>
                           )}
                           {(selectedPatientFull?.category || selectedOrder?.clinic) && (
@@ -1229,8 +1261,12 @@ export default function RadiologyOrdersPage() {
                   </div>
                   <div>
                     <p className="text-sm font-medium mb-2">Ordering Doctor</p>
-                    <p className="font-medium">{selectedOrder.doctor_name || 'System Administrator'}</p>
-                    <p className="text-xs text-muted-foreground">{selectedOrder.doctor_details?.specialty}</p>
+                    {selectedOrder.doctor_name?.trim() && (
+                      <p className="font-medium">{selectedOrder.doctor_name}</p>
+                    )}
+                    {selectedOrder.doctor_details?.specialty?.trim() && (
+                      <p className="text-xs text-muted-foreground">{selectedOrder.doctor_details.specialty}</p>
+                    )}
                   </div>
                 </div>
 

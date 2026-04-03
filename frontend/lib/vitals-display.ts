@@ -11,7 +11,7 @@ export function vitalFieldToString(v: unknown): string {
 }
 
 export function formatVitalTileValue(raw: string | undefined): string {
-  if (raw == null || String(raw).trim() === "") return "—";
+  if (raw == null || String(raw).trim() === "") return "";
   const n = Number(raw);
   if (!Number.isNaN(n) && Number.isFinite(n)) {
     return Number.isInteger(n) ? String(n) : parseFloat(n.toFixed(2)).toString();

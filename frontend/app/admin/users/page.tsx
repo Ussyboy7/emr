@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { UI_TRANSITION_DELAY } from '@/lib/constants/ui';
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -20,7 +20,7 @@ import { adminService, type User as ApiUser } from "@/lib/services";
 import {
   Users, Search, Plus, Edit, Trash2, MoreVertical, Eye, UserCog, Shield,
   Stethoscope, Syringe, FlaskConical, Pill, ScanLine, ClipboardList, Building2,
-  Phone, Mail, Calendar, BadgeCheck, AlertTriangle, CheckCircle2, XCircle,
+  Phone, Mail, Calendar, BadgeCheck, AlertTriangle, XCircle,
   Download, Upload, RefreshCw, Filter, UserPlus, Key, Lock, Unlock, Loader2
 } from "lucide-react";
 
@@ -209,19 +209,6 @@ export default function UserManagementPage() {
   // With server-side pagination and filtering, staff array contains only current page results
   const paginatedStaff = staff;
 
-
-  // Stats - with server-side pagination, only total count is accurate
-  const stats = useMemo(() => ({
-    total: totalCount,
-    active: '—', // Cannot calculate from paginated data
-    doctors: '—', // Cannot calculate from paginated data
-    nurses: '—', // Cannot calculate from paginated data
-    labScientists: '—', // Cannot calculate from paginated data
-    pharmacists: '—', // Cannot calculate from paginated data
-    radiologists: '—', // Cannot calculate from paginated data
-    medicalRecords: '—', // Cannot calculate from paginated data
-    systemAdmins: '—', // Cannot calculate from paginated data
-  }), [totalCount]);
 
   const getRoleIcon = (role: string) => {
     switch (role) {
@@ -510,71 +497,19 @@ export default function UserManagementPage() {
           </div>
         </div>
 
-        {/* Stats */}
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+        {/* Total matches API count for current search/filters (paginated list is one page only). */}
+        <div className="max-w-md">
           <Card className="border-l-4 border-l-blue-500">
             <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-              <div>
-                  <p className="text-sm text-muted-foreground">Total Staff</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-blue-600 dark:text-blue-400">{stats.total}</p>
-                </div>
-                <Users className="h-8 w-8 text-blue-500 opacity-50" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="border-l-4 border-l-emerald-500">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-              <div>
-                  <p className="text-sm text-muted-foreground">Active</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-emerald-600 dark:text-emerald-400">{stats.active}</p>
-                </div>
-                <CheckCircle2 className="h-8 w-8 text-emerald-500 opacity-50" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="border-l-4 border-l-teal-500">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-4">
                 <div>
-                  <p className="text-sm text-muted-foreground">Doctors</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-teal-600 dark:text-teal-400">{stats.doctors}</p>
-              </div>
-                <Stethoscope className="h-8 w-8 text-teal-500 opacity-50" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="border-l-4 border-l-rose-500">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-              <div>
-                  <p className="text-sm text-muted-foreground">Nurses</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-rose-600 dark:text-rose-400">{stats.nurses}</p>
+                  <p className="text-sm text-muted-foreground">Total staff (this filter)</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-blue-600 dark:text-blue-400">{totalCount}</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Role breakdown is not shown here because results are paginated.
+                  </p>
                 </div>
-                <Syringe className="h-8 w-8 text-rose-500 opacity-50" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="border-l-4 border-l-amber-500">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-              <div>
-                  <p className="text-sm text-muted-foreground">Lab Scientists</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-amber-600 dark:text-amber-400">{stats.labScientists}</p>
-                </div>
-                <FlaskConical className="h-8 w-8 text-amber-500 opacity-50" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="border-l-4 border-l-violet-500">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-              <div>
-                  <p className="text-sm text-muted-foreground">Pharmacists</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-violet-600 dark:text-violet-400">{stats.pharmacists}</p>
-                </div>
-                <Pill className="h-8 w-8 text-violet-500 opacity-50" />
+                <Users className="h-8 w-8 text-blue-500 opacity-50 shrink-0" />
               </div>
             </CardContent>
           </Card>

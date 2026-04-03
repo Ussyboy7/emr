@@ -56,7 +56,7 @@ function medLabel(m: PrescriptionReportMedicationRow): string {
     m.medication_name ||
     m.medication?.name ||
     m.name ||
-    'Unknown'
+    ''
   ).trim();
 }
 
@@ -99,21 +99,24 @@ function buildPrescriptionReportHTML(
       (m) => `
     <tr>
       <td>${escapeHtml(medLabel(m))}</td>
-      <td>${escapeHtml(medDose(m) || '—')}</td>
-      <td>${escapeHtml(String(m.frequency ?? '').trim() || '—')}</td>
-      <td>${escapeHtml(String(m.duration ?? '').trim() || '—')}</td>
-      <td>${escapeHtml(m.quantity != null && m.quantity !== '' ? String(m.quantity) : '—')}</td>
+      <td>${escapeHtml(medDose(m))}</td>
+      <td>${escapeHtml(String(m.frequency ?? '').trim())}</td>
+      <td>${escapeHtml(String(m.duration ?? '').trim())}</td>
+      <td>${escapeHtml(m.quantity != null && m.quantity !== '' ? String(m.quantity) : '')}</td>
     </tr>`
     )
     .join('');
 
+  const ageGenderLine = [patient?.age != null && patient.age !== '' ? `${patient.age} years` : '', patient?.gender || '']
+    .filter(Boolean)
+    .join(' / ');
   const patientBlock = patient
     ? `
   <div class="section">
     <h3>PATIENT INFORMATION</h3>
     <p><strong>Name:</strong> ${escapeHtml(patient.name)}</p>
     ${patient.patientId ? `<p><strong>Patient ID:</strong> ${escapeHtml(String(patient.patientId))}</p>` : ''}
-    <p><strong>Age / Gender:</strong> ${escapeHtml([patient.age != null && patient.age !== '' ? `${patient.age} years` : '', patient.gender || ''].filter(Boolean).join(' / ') || '—')}</p>
+    ${ageGenderLine ? `<p><strong>Age / Gender:</strong> ${escapeHtml(ageGenderLine)}</p>` : ''}
   </div>`
     : '';
 
@@ -132,9 +135,9 @@ function buildPrescriptionReportHTML(
           .map(
             (d) => `
         <tr>
-          <td>${escapeHtml(d.code || '—')}</td>
-          <td>${escapeHtml(d.name || '—')}${d.notes?.trim() ? `<br><span style="font-size:10pt;color:#555">${escapeHtml(d.notes)}</span>` : ''}</td>
-          <td>${escapeHtml(d.type || '—')}</td>
+          <td>${escapeHtml(d.code || '')}</td>
+          <td>${escapeHtml(d.name || '')}${d.notes?.trim() ? `<br><span style="font-size:10pt;color:#555">${escapeHtml(d.notes)}</span>` : ''}</td>
+          <td>${escapeHtml(d.type || '')}</td>
         </tr>`
           )
           .join('')}
@@ -180,8 +183,8 @@ function buildPrescriptionReportHTML(
   <div class="section">
     <h3>PRESCRIPTION DETAILS</h3>
     <div class="meta">
-      <div><strong>Date prescribed:</strong> ${escapeHtml(rx.date || '—')}</div>
-      <div><strong>Prescribing doctor:</strong> ${escapeHtml(rx.doctor || '—')}</div>
+      ${rx.date ? `<div><strong>Date prescribed:</strong> ${escapeHtml(rx.date)}</div>` : ''}
+      ${rx.doctor ? `<div><strong>Prescribing doctor:</strong> ${escapeHtml(rx.doctor)}</div>` : ''}
       <div><strong>Status:</strong> ${escapeHtml(statusLabel(rx.status))}</div>
     </div>
   </div>
@@ -288,30 +291,39 @@ export function PrescriptionReportDialog({
                   <p className="text-xs text-muted-foreground">Patient Name</p>
                   <p className="font-medium">{patient.name}</p>
                 </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">Patient ID</p>
-                  <p className="font-medium">{patient.patientId ?? '—'}</p>
-                </div>
-                <div className="col-span-2">
-                  <p className="text-xs text-muted-foreground">Age / Gender</p>
-                  <p className="font-medium">
-                    {[patient.age != null && patient.age !== '' ? `${patient.age} years` : null, patient.gender || null]
-                      .filter(Boolean)
-                      .join(' / ') || '—'}
-                  </p>
-                </div>
+                {patient.patientId != null && String(patient.patientId).trim() !== '' && (
+                  <div>
+                    <p className="text-xs text-muted-foreground">Patient ID</p>
+                    <p className="font-medium">{patient.patientId}</p>
+                  </div>
+                )}
+                {(() => {
+                  const ag = [patient.age != null && patient.age !== '' ? `${patient.age} years` : null, patient.gender || null]
+                    .filter(Boolean)
+                    .join(' / ');
+                  return ag ? (
+                    <div className="col-span-2">
+                      <p className="text-xs text-muted-foreground">Age / Gender</p>
+                      <p className="font-medium">{ag}</p>
+                    </div>
+                  ) : null;
+                })()}
               </div>
             )}
 
             <div className="grid grid-cols-2 gap-4 p-4 rounded-lg bg-muted/50">
-              <div>
-                <p className="text-xs text-muted-foreground">Date prescribed</p>
-                <p className="font-medium">{rx.date ?? '—'}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Prescribing doctor</p>
-                <p className="font-medium">{rx.doctor ?? '—'}</p>
-              </div>
+              {rx.date && (
+                <div>
+                  <p className="text-xs text-muted-foreground">Date prescribed</p>
+                  <p className="font-medium">{rx.date}</p>
+                </div>
+              )}
+              {rx.doctor && (
+                <div>
+                  <p className="text-xs text-muted-foreground">Prescribing doctor</p>
+                  <p className="font-medium">{rx.doctor}</p>
+                </div>
+              )}
               <div className="col-span-2 flex items-center gap-2">
                 <span className="text-xs text-muted-foreground">Status</span>
                 <Badge variant="outline" className={statusBadgeClass(rx.status)}>
@@ -338,9 +350,9 @@ export function PrescriptionReportDialog({
                     <tbody>
                       {rx.diagnoses.map((d, i) => (
                         <tr key={`${d.code}-${i}`} className="border-b">
-                          <td className="p-3 font-mono text-xs">{d.code || '—'}</td>
+                          <td className="p-3 font-mono text-xs">{d.code || ''}</td>
                           <td className="p-3">
-                            <div className="font-medium">{d.name || '—'}</div>
+                            <div className="font-medium">{d.name || ''}</div>
                             {d.notes?.trim() ? (
                               <div className="text-xs text-muted-foreground mt-1">{d.notes}</div>
                             ) : null}
@@ -399,15 +411,15 @@ export function PrescriptionReportDialog({
                       rx.medications.map((m, i) => (
                         <tr key={i} className="border-b">
                           <td className="p-3 font-medium">{medLabel(m)}</td>
-                          <td className="p-3">{medDose(m) || '—'}</td>
+                          <td className="p-3">{medDose(m)}</td>
                           <td className="p-3 text-muted-foreground">
-                            {String(m.frequency ?? '').trim() || '—'}
+                            {String(m.frequency ?? '').trim()}
                           </td>
                           <td className="p-3 text-muted-foreground">
-                            {String(m.duration ?? '').trim() || '—'}
+                            {String(m.duration ?? '').trim()}
                           </td>
                           <td className="p-3 text-muted-foreground">
-                            {m.quantity != null && m.quantity !== '' ? String(m.quantity) : '—'}
+                            {m.quantity != null && m.quantity !== '' ? String(m.quantity) : ''}
                           </td>
                         </tr>
                       ))

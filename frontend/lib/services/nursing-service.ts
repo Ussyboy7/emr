@@ -1,5 +1,6 @@
 import { apiFetch, buildQueryString } from '../api-client';
 import { visitService } from './visit-service';
+import { getVisitServiceClinicsDisplay } from '../utils/clinic-utils';
 import { wardService } from './ward-service';
 import { patientService } from './patient-service';
 
@@ -92,7 +93,7 @@ class NursingService {
           alerts.push({
             id: `visit-${visit.id}`,
             patient: visit.patient_name ?? '',
-            room: visit.clinic || 'Triage',
+            room: getVisitServiceClinicsDisplay({ clinic: visit.clinic, clinics: visit.clinics }) || '',
             alert: `${visit.visit_type} requires immediate attention`,
             time: '5 min ago',
             priority: 'high'

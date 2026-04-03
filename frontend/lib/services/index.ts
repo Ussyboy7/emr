@@ -75,4 +75,4 @@ export { nursingService } from './nursing-service';
 export { medicalCertificateService } from './medical-certificate-service';
 
 // Export utility functions
-export { sanitizePatientForRendering } from './patient-service';
+export { sanitizePatientForRendering, formatPatientGenderLabel } from './patient-service';

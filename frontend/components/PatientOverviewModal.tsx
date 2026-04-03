@@ -12,11 +12,14 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from "sonner";
-import { patientService, labService, pharmacyService, consultationService, radiologyService, physioService, wardService, medicalCertificateService, type Patient as ApiPatient } from '@/lib/services';
+import { patientService, labService, pharmacyService, consultationService, radiologyService, physioService, wardService, medicalCertificateService, formatPatientGenderLabel, type Patient as ApiPatient } from '@/lib/services';
 import { VisitDetailModal } from '@/components/VisitDetailModal';
 import { PatientAvatar } from "@/components/PatientAvatar";
 import { MedicalHistoryTab } from '@/components/patient-overview/MedicalHistoryTab';
 import { TimelineTab } from '@/components/patient-overview/TimelineTab';
+import {
+  getVisitServiceClinicsDisplay,
+} from '@/lib/utils/clinic-utils';
 import {
   User, Phone, Calendar, AlertCircle, Activity, Pill, TestTube,
   ChevronRight, AlertTriangle, Loader2, Mail, MapPin, Droplets,
@@ -399,7 +402,7 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
             doctor: session.doctor?.name || session.doctor_name || 'Unknown',
             diagnosis: session.assessment || '',
             status: session.status || 'completed',
-            clinic: session.clinic_name || session.room?.clinic_name || 'GOPD',
+            clinic: getVisitServiceClinicsDisplay({ clinic: session.clinic_name, clinics: session.visit_clinics }),
             notes: session.notes || '',
             source: 'consultation' // Mark as consultation session
           }));
@@ -488,7 +491,7 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
           id: session.id?.toString() || String(session.id),
           date: getSessionDate(session),
           doctor: session.doctor?.name || session.doctor_name || 'Unknown',
-          clinic: session.clinic_name || session.room?.clinic_name || 'GOPD',
+          clinic: getVisitServiceClinicsDisplay({ clinic: session.clinic_name, clinics: session.visit_clinics }),
           room: session.room?.name || '',
           status: session.status || 'completed',
           notes: session.notes || '',
@@ -642,7 +645,7 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
         dateOfBirth: formattedDateOfBirth,
         age: apiPatient.age || 0,
         ageDisplay: (apiPatient as any).age_display || undefined,
-        gender: apiPatient.gender === 'male' ? 'Male' : 'Female',
+        gender: formatPatientGenderLabel(apiPatient.gender),
         maritalStatus: sentenceCaseEnum(apiPatient.marital_status || ""),
         religion: (apiPatient as any).religion || '',
         tribe: (apiPatient as any).tribe || '',

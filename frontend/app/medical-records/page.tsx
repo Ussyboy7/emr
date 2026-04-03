@@ -10,6 +10,10 @@ import Link from 'next/link';
 import { patientService, visitService, type Visit } from '@/lib/services';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
+import {
+  getVisitServiceClinicsDisplay,
+  joinDisplayParts,
+} from '@/lib/utils/clinic-utils';
 
 interface PatientData {
   id: number;
@@ -330,9 +334,15 @@ export default function MedicalRecordsPage() {
                       <div key={visit.id} className="flex items-center justify-between p-3 rounded-lg border border-muted bg-muted/30 hover:bg-muted/50 transition-colors">
                         <div className="flex-1 min-w-0">
                           <p className="font-medium text-sm">{visit.patient_name ?? ''}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {visit.visit_type && visit.visit_type.charAt(0).toUpperCase() + visit.visit_type.slice(1).toLowerCase()} • {visit.clinic || 'GOPD'}
-                          </p>
+                          {(() => {
+                            const sub = joinDisplayParts([
+                              visit.visit_type && visit.visit_type.charAt(0).toUpperCase() + visit.visit_type.slice(1).toLowerCase(),
+                              getVisitServiceClinicsDisplay({ clinic: visit.clinic, clinics: visit.clinics }),
+                            ]);
+                            return sub ? (
+                              <p className="text-xs text-muted-foreground">{sub}</p>
+                            ) : null;
+                          })()}
                         </div>
                         <Badge variant="outline" className={
                           visit.status === 'in_progress' ? 'border-blue-500 text-blue-600' : 'border-amber-500 text-amber-600'
@@ -375,9 +385,12 @@ export default function MedicalRecordsPage() {
                         <p className="text-xs text-muted-foreground">
                           ID: {patient.patient_id}
                         </p>
-                        {(patient.age_display || patient.age) && (
+                        {(patient.age_display || patient.age != null || patient.gender) && (
                           <p className="text-xs text-muted-foreground mt-1">
-                            {patient.age_display || `${patient.age} years`} • {patient.gender || 'N/A'}
+                            {joinDisplayParts([
+                              patient.age_display || (patient.age != null ? `${patient.age} years` : ''),
+                              patient.gender,
+                            ])}
                           </p>
                         )}
                       </div>

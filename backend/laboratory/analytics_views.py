@@ -1,4 +1,6 @@
 """Laboratory module analytics API."""
+from collections import defaultdict
+
 from django.db.models import Count, Q
 from django.db.models.functions import TruncDate
 from rest_framework.permissions import IsAuthenticated
@@ -62,6 +64,14 @@ class LaboratoryAnalyticsSummaryView(APIView):
             .order_by("-count")
         )
         processing_method = {r["processing_method"]: r["count"] for r in method_rows}
+        in_house_count = processing_method.get("in_house", 0)
+        outsourced_count = processing_method.get("outsourced", 0)
+        processing_summary = {
+            "in_house": in_house_count,
+            "outsourced": outsourced_count,
+            "unassigned": max(tests_total - in_house_count - outsourced_count, 0),
+            "total": tests_total,
+        }
 
         daily = (
             LabTest.objects.filter(test_filter)
@@ -96,6 +106,77 @@ class LaboratoryAnalyticsSummaryView(APIView):
             (r["template__category"] or "uncategorized"): r["count"] for r in template_cat
         }
 
+        # Detailed investigation breakdown grouped by lab class
+        investigation_rows = (
+            tests_qs.values(
+                "template__category",
+                "code",
+                "name",
+                "processing_method",
+            )
+            .annotate(count=Count("id"))
+            .order_by("template__category", "name", "code")
+        )
+
+        grouped = defaultdict(
+            lambda: {
+                "total": 0,
+                "processing": {"in_house": 0, "outsourced": 0, "unassigned": 0},
+                "investigations": defaultdict(
+                    lambda: {
+                        "code": "",
+                        "name": "",
+                        "count": 0,
+                        "processing": {"in_house": 0, "outsourced": 0, "unassigned": 0},
+                    }
+                ),
+            }
+        )
+
+        for row in investigation_rows:
+            category_name = (row.get("template__category") or "uncategorized").strip().lower()
+            method = (row.get("processing_method") or "").strip().lower()
+            normalized_method = method if method in {"in_house", "outsourced"} else "unassigned"
+            test_count = int(row.get("count", 0) or 0)
+            code = row.get("code") or ""
+            name = row.get("name") or "Unknown"
+            key = f"{code}||{name}"
+
+            cat_bucket = grouped[category_name]
+            cat_bucket["total"] += test_count
+            cat_bucket["processing"][normalized_method] += test_count
+
+            inv_bucket = cat_bucket["investigations"][key]
+            inv_bucket["code"] = code
+            inv_bucket["name"] = name
+            inv_bucket["count"] += test_count
+            inv_bucket["processing"][normalized_method] += test_count
+
+        category_breakdown = {}
+        for category_name, bucket in grouped.items():
+            investigations = sorted(
+                bucket["investigations"].values(),
+                key=lambda x: (-x["count"], x["name"]),
+            )
+            category_breakdown[category_name] = {
+                "total": bucket["total"],
+                "processing": bucket["processing"],
+                "investigations": investigations,
+            }
+
+        major_classes = ["hematology", "chemistry", "microbiology"]
+        major_class_breakdown = {
+            class_name: category_breakdown.get(
+                class_name,
+                {
+                    "total": 0,
+                    "processing": {"in_house": 0, "outsourced": 0, "unassigned": 0},
+                    "investigations": [],
+                },
+            )
+            for class_name in major_classes
+        }
+
         return Response(
             {
                 "period": {
@@ -115,11 +196,14 @@ class LaboratoryAnalyticsSummaryView(APIView):
                 "npa_staff_linked_vs_non_npa": staff_split,
                 "tests_by_status": status_breakdown,
                 "tests_by_processing_method": processing_method,
+                "tests_processing_summary": processing_summary,
                 "by_day": by_day,
                 "top_tests": [
                     {"code": r["code"], "name": r["name"], "count": r["count"]}
                     for r in top_tests
                 ],
                 "tests_by_template_category": by_template_category,
+                "tests_by_category_with_investigations": category_breakdown,
+                "major_lab_classes": major_class_breakdown,
             }
         )

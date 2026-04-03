@@ -7,7 +7,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { patientService, type Patient as ApiPatient } from "@/lib/services";
+import { patientService, formatPatientGenderLabel, type Patient as ApiPatient } from "@/lib/services";
 import { useAuthRedirect } from "@/hooks/use-auth-redirect";
 import { isAuthenticationError } from "@/lib/auth-errors";
 import { Search, FileBarChart, Loader2, Users, ChevronRight, Stethoscope, Activity, FlaskConical, Pill, Heart } from "lucide-react";
@@ -276,7 +276,7 @@ export default function PatientRecordsPage() {
                           {p.age != null && (
                             <>
                               <span>•</span>
-                              <span>{p.age}y {p.gender === "male" ? "Male" : p.gender === "female" ? "Female" : ""}</span>
+                              <span>{p.age}y {formatPatientGenderLabel(p.gender)}</span>
                             </>
                           )}
                           {p.phone && (

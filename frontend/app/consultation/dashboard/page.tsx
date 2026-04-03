@@ -73,10 +73,10 @@ export default function DoctorDashboardPage() {
   };
 
   const CURRENT_DOCTOR = {
-    name: user?.name || user?.username || "Dr. Loading...",
-    specialty: user?.systemRole || "GOPD Practice",
-    location: "Main Clinic", // clinic_name not available in User type
-    employeeId: user?.employeeId || "EMP001"
+    name: user?.name || user?.username || "",
+    specialty: user?.systemRole ?? "",
+    location: "",
+    employeeId: user?.employeeId ?? "",
   };
 
   if (loading || !stats) {

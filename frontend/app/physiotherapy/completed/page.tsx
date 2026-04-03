@@ -17,6 +17,7 @@ import { physioService, type PhysioSession } from '@/lib/services';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { PatientAvatar } from "@/components/PatientAvatar";
+import { joinDisplayParts } from '@/lib/utils/clinic-utils';
 
 import {
   CheckCircle2, Search, Eye, Clock, Calendar, User,
@@ -821,7 +822,10 @@ export default function PhysioCompletedPage() {
                 Physiotherapy Session Report - {reportSession?.patient_name}
               </DialogTitle>
               <DialogDescription>
-                {reportSession?.id != null ? `PHY-${String(reportSession.id).padStart(6, '0')}` : '—'} · Session {reportSession?.session_number ?? '—'}
+                {joinDisplayParts([
+                  reportSession?.id != null ? `PHY-${String(reportSession.id).padStart(6, '0')}` : '',
+                  reportSession?.session_number != null ? `Session ${reportSession.session_number}` : '',
+                ])}
               </DialogDescription>
             </DialogHeader>
 
@@ -842,7 +846,15 @@ export default function PhysioCompletedPage() {
                   <SelectContent>
                     {orderSessionsForReport.map((s, idx) => (
                       <SelectItem key={s.id ?? `s-${idx}`} value={String(s.id ?? '')}>
-                        Session {s.session_number ?? '—'} — {s.scheduled_at ? new Date(s.scheduled_at).toLocaleString() : (s.id != null ? `PHY-${String(s.id).padStart(6, '0')}` : '—')}
+                        {joinDisplayParts([
+                          s.session_number != null ? `Session ${s.session_number}` : '',
+                          s.scheduled_at
+                            ? new Date(s.scheduled_at).toLocaleString()
+                            : s.id != null
+                              ? `PHY-${String(s.id).padStart(6, '0')}`
+                              : '',
+                          s.status?.replace('_', ' '),
+                        ])}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -884,15 +896,23 @@ export default function PhysioCompletedPage() {
                       <div className="space-y-1">
                         <p><span className="font-medium">Name:</span> {reportSession.patient_name}</p>
                         <p><span className="font-medium">ID:</span> {reportSession.patient_id}</p>
-                        <p><span className="font-medium">Physiotherapist:</span> {reportSession.physiotherapist_name || 'Not specified'}</p>
+                        {reportSession.physiotherapist_name?.trim() && (
+                          <p><span className="font-medium">Physiotherapist:</span> {reportSession.physiotherapist_name}</p>
+                        )}
                       </div>
                     </div>
                     <div className="space-y-2">
                       <h3 className="font-medium text-sm text-muted-foreground uppercase tracking-wide">Session Details</h3>
                       <div className="space-y-1">
-                        <p><span className="font-medium">Session:</span> {reportSession.session_number ?? '—'}</p>
-                        <p><span className="font-medium">Scheduled:</span> {reportSession.scheduled_at ? new Date(reportSession.scheduled_at).toLocaleString() : '—'}</p>
-                        <p><span className="font-medium">Completed:</span> {reportSession.completed_at ? new Date(reportSession.completed_at).toLocaleString() : '—'}</p>
+                        {reportSession.session_number != null && (
+                          <p><span className="font-medium">Session:</span> {reportSession.session_number}</p>
+                        )}
+                        {reportSession.scheduled_at && (
+                          <p><span className="font-medium">Scheduled:</span> {new Date(reportSession.scheduled_at).toLocaleString()}</p>
+                        )}
+                        {reportSession.completed_at && (
+                          <p><span className="font-medium">Completed:</span> {new Date(reportSession.completed_at).toLocaleString()}</p>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -918,19 +938,25 @@ export default function PhysioCompletedPage() {
                           {reportSession.presenting_complaint || 'Not documented'}
                         </p>
                       </div>
-                      <div className="space-y-2">
-                        <Label className="text-sm font-medium">Pain Assessment</Label>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div className="text-center p-3 bg-red-50 dark:bg-red-900/20 rounded border">
-                            <p className="text-xs text-muted-foreground">Before Treatment</p>
-                            <p className="text-xl font-bold text-red-600">{reportSession.pain_level_before != null ? `${reportSession.pain_level_before}/10` : '—'}</p>
-                          </div>
-                          <div className="text-center p-3 bg-green-50 dark:bg-green-900/20 rounded border">
-                            <p className="text-xs text-muted-foreground">After Treatment</p>
-                            <p className="text-xl font-bold text-green-600">{reportSession.pain_level_after != null ? `${reportSession.pain_level_after}/10` : '—'}</p>
+                      {(reportSession.pain_level_before != null || reportSession.pain_level_after != null) && (
+                        <div className="space-y-2">
+                          <Label className="text-sm font-medium">Pain Assessment</Label>
+                          <div className="grid grid-cols-2 gap-2">
+                            {reportSession.pain_level_before != null && (
+                              <div className="text-center p-3 bg-red-50 dark:bg-red-900/20 rounded border">
+                                <p className="text-xs text-muted-foreground">Before Treatment</p>
+                                <p className="text-xl font-bold text-red-600">{reportSession.pain_level_before}/10</p>
+                              </div>
+                            )}
+                            {reportSession.pain_level_after != null && (
+                              <div className="text-center p-3 bg-green-50 dark:bg-green-900/20 rounded border">
+                                <p className="text-xs text-muted-foreground">After Treatment</p>
+                                <p className="text-xl font-bold text-green-600">{reportSession.pain_level_after}/10</p>
+                              </div>
+                            )}
                           </div>
                         </div>
-                      </div>
+                      )}
                     </div>
                   </div>
 
@@ -1104,7 +1130,9 @@ export default function PhysioCompletedPage() {
                 <div className="border-t pt-4">
                   <div className="flex items-center justify-between text-xs text-muted-foreground">
                     <p>Report generated on {new Date().toLocaleString()}</p>
-                    <p>Session ID: {reportSession?.id != null ? `PHY-${String(reportSession.id).padStart(6, '0')}` : '—'}</p>
+                    {reportSession?.id != null && (
+                      <p>Session ID: PHY-{String(reportSession.id).padStart(6, '0')}</p>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1171,7 +1199,7 @@ export default function PhysioCompletedPage() {
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Pencil className="h-5 w-5 text-amber-500" />
-                Edit Session {editingSession?.session_number} — {editingSession?.patient_name}
+                {joinDisplayParts(['Edit Session', editingSession?.session_number, editingSession?.patient_name])}
               </DialogTitle>
               <DialogDescription>
                 Update assessment and treatment documentation. Changes will appear in the Session Report.

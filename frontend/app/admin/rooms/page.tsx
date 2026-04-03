@@ -595,7 +595,9 @@ export default function RoomManagementPage() {
                   <div><p className="text-xs text-muted-foreground">Floor</p><p className="font-medium">{selectedRoom.floor}</p></div>
                   <div><p className="text-xs text-muted-foreground">Specialty</p><p className="font-medium">{selectedRoom.specialty}</p></div>
                   <div><p className="text-xs text-muted-foreground">Capacity</p><p className="font-medium">{selectedRoom.capacity} persons</p></div>
-                  <div><p className="text-xs text-muted-foreground">Assigned Doctor</p><p className="font-medium">{selectedRoom.assignedDoctor || '—'}</p></div>
+                  {selectedRoom.assignedDoctor && (
+                    <div><p className="text-xs text-muted-foreground">Assigned Doctor</p><p className="font-medium">{selectedRoom.assignedDoctor}</p></div>
+                  )}
                 </div>
                 {selectedRoom.description && (
                   <div>

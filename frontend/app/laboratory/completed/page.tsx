@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { labService } from '@/lib/services';
+import { labService, formatPatientGenderLabel } from '@/lib/services';
 import { PatientAvatar } from "@/components/PatientAvatar";
 import { AdvancedDateRangeDialog } from '@/components/AdvancedDateRangeDialog';
 import { CustomDateRangeButton } from '@/components/CustomDateRangeButton';
@@ -34,6 +34,7 @@ export default function CompletedTestsPage() {
   const [dateFilter, setDateFilter] = useState('today');
   const [clinicFilter, setClinicFilter] = useState('all');
   const [genderFilter, setGenderFilter] = useState('all');
+  const [processingFilter, setProcessingFilter] = useState<'all' | 'in_house' | 'outsourced'>('all');
   const [isDateFilterDialogOpen, setIsDateFilterDialogOpen] = useState(false);
   const [dateRange, setDateRange] = useState({ from: '', to: '' });
   const [stats, setStats] = useState<{ total: number; normal: number; abnormal: number; critical: number }>({
@@ -92,6 +93,7 @@ export default function CompletedTestsPage() {
         overall_status: statusFilter !== 'all' ? statusFilter : undefined,
         clinic: clinicFilter !== 'all' ? clinicFilter : undefined,
         gender: genderFilter !== 'all' ? genderFilter : undefined,
+        processing_method: processingFilter !== 'all' ? processingFilter : undefined,
         date,
         start_date,
         end_date,
@@ -185,7 +187,7 @@ export default function CompletedTestsPage() {
     } finally {
       setLoading(false);
     }
-  }, [currentPage, itemsPerPage, debouncedSearchQuery, statusFilter, clinicFilter, genderFilter, dateFilter, dateRange.from, dateRange.to]);
+  }, [currentPage, itemsPerPage, debouncedSearchQuery, statusFilter, clinicFilter, genderFilter, processingFilter, dateFilter, dateRange.from, dateRange.to]);
 
   // Load completed tests from API when page changes
   useEffect(() => {
@@ -198,7 +200,7 @@ export default function CompletedTestsPage() {
   // Reset to page 1 when filters change or items per page changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [debouncedSearchQuery, statusFilter, clinicFilter, dateFilter, genderFilter, itemsPerPage, dateRange.from, dateRange.to]);
+  }, [debouncedSearchQuery, statusFilter, clinicFilter, dateFilter, genderFilter, processingFilter, itemsPerPage, dateRange.from, dateRange.to]);
 
   const clearDateRangeFilters = () => {
     setDateRange({ from: '', to: '' });
@@ -304,7 +306,12 @@ export default function CompletedTestsPage() {
             <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-3">
               <div className="relative flex-1 min-w-[min(100%,16rem)]">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input placeholder="Search by patient, order ID, or test..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-10" />
+                <Input
+                  placeholder="Patient, MRN, order ID, Lab ID (e.g. BT-26-0007), test…"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-10"
+                />
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <CustomDateRangeButton onClick={() => setIsDateFilterDialogOpen(true)} />
@@ -339,6 +346,17 @@ export default function CompletedTestsPage() {
                     <SelectItem value="all">All Gender</SelectItem>
                     <SelectItem value="male">Male</SelectItem>
                     <SelectItem value="female">Female</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select
+                  value={processingFilter}
+                  onValueChange={(v) => setProcessingFilter(v as 'all' | 'in_house' | 'outsourced')}
+                >
+                  <SelectTrigger className="w-[150px]"><SelectValue placeholder="Processing" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All processing</SelectItem>
+                    <SelectItem value="in_house">In-house</SelectItem>
+                    <SelectItem value="outsourced">Outsourced</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -414,7 +432,12 @@ export default function CompletedTestsPage() {
                         
                         {/* Row 2: Details */}
                         <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-wrap">
-                          <span>{test.patient.age !== null && test.patient.age !== undefined ? `${test.patient.age}y` : ''} {test.patient.gender}</span>
+                          <span>
+                            {test.patient.age !== null && test.patient.age !== undefined ? `${test.patient.age}y` : ''}
+                            {test.patient.age !== null && test.patient.age !== undefined ? ' ' : ''}
+                            {formatPatientGenderLabel(test.patient.gender) ||
+                              (test.patient.gender ? String(test.patient.gender) : '')}
+                          </span>
                           <span>•</span>
                           <span>{test.orderId}</span>
                           <span>•</span>

@@ -34,6 +34,7 @@ import { ConsultationReportModal } from '@/components/consultation/ConsultationR
 import { loadConsultationReportSession, type ConsultationReportSession } from '@/lib/consultation-report';
 import { getOrganizationLabHeader } from '@/lib/constants/organization';
 import { getOrganizationServicesHeader } from '@/lib/constants/organization';
+import { joinDisplayParts } from '@/lib/utils/clinic-utils';
 
 // Utility functions
 const formatDate = (dateString: string | undefined): string => {
@@ -516,14 +517,20 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
                     <p className="text-xs text-muted-foreground">Patient ID</p>
                     <p className="font-semibold text-blue-600">{patient.patient_id}</p>
                   </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground">Age</p>
-                    <p className="font-medium">{patient.age ?? '—'} years</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground">Gender</p>
-                    <p className="font-medium">{patient.gender === 'male' ? 'Male' : patient.gender === 'female' ? 'Female' : patient.gender ?? '—'}</p>
-                  </div>
+                  {patient.age != null && (
+                    <div>
+                      <p className="text-xs text-muted-foreground">Age</p>
+                      <p className="font-medium">{patient.age} years</p>
+                    </div>
+                  )}
+                  {(patient.gender === 'male' || patient.gender === 'female' || (patient.gender && String(patient.gender).trim())) && (
+                    <div>
+                      <p className="text-xs text-muted-foreground">Gender</p>
+                      <p className="font-medium">
+                        {patient.gender === 'male' ? 'Male' : patient.gender === 'female' ? 'Female' : patient.gender}
+                      </p>
+                    </div>
+                  )}
                   <div>
                     <p className="text-xs text-muted-foreground">Category</p>
                     <Badge className={`text-xs ${
@@ -1309,10 +1316,20 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
               </DialogTitle>
               {selectedPhysio && (
                 <DialogDescription>
-                  {selectedPhysioSession 
-                    ? `${selectedPhysioSession.patient_name || patient?.full_name || ''} · PHY-${String(selectedPhysioSession.id || '').padStart(6, '0')} · Session ${selectedPhysioSession.session_number ?? '—'}`
-                    : `PHY-${String(selectedPhysio.id || '').padStart(6, '0')} · ${formatDate(selectedPhysio.ordered_at)}`
-                  }
+                  {selectedPhysioSession
+                    ? joinDisplayParts([
+                        selectedPhysioSession.patient_name || patient?.full_name || '',
+                        selectedPhysioSession.id != null
+                          ? `PHY-${String(selectedPhysioSession.id).padStart(6, '0')}`
+                          : '',
+                        selectedPhysioSession.session_number != null
+                          ? `Session ${selectedPhysioSession.session_number}`
+                          : '',
+                      ])
+                    : joinDisplayParts([
+                        selectedPhysio.id != null ? `PHY-${String(selectedPhysio.id).padStart(6, '0')}` : '',
+                        formatDate(selectedPhysio.ordered_at),
+                      ])}
                 </DialogDescription>
               )}
             </DialogHeader>
@@ -1340,7 +1357,15 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
                       <SelectContent>
                         {selectedPhysioSessions.map((s, idx) => (
                           <SelectItem key={s.id ?? `s-${idx}`} value={String(s.id ?? '')}>
-                            Session {s.session_number ?? '—'} {s.status === 'completed' ? '(Completed)' : ''} — {s.scheduled_at ? new Date(s.scheduled_at).toLocaleString() : (s.id != null ? `PHY-${String(s.id).padStart(6, '0')}` : '—')}
+                            {joinDisplayParts([
+                              s.session_number != null ? `Session ${s.session_number}` : '',
+                              s.status === 'completed' ? '(Completed)' : '',
+                              s.scheduled_at
+                                ? new Date(s.scheduled_at).toLocaleString()
+                                : s.id != null
+                                  ? `PHY-${String(s.id).padStart(6, '0')}`
+                                  : '',
+                            ])}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -1414,16 +1439,26 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
                         <h3 className="font-medium text-sm text-muted-foreground uppercase tracking-wide">Patient Information</h3>
                         <div className="space-y-1">
                           <p><span className="font-medium">Name:</span> {selectedPhysioSession.patient_name || patient?.full_name || ''}</p>
-                          <p><span className="font-medium">ID:</span> {selectedPhysioSession.patient_id || patient?.patient_id || '—'}</p>
-                          <p><span className="font-medium">Physiotherapist:</span> {selectedPhysioSession.physiotherapist_name || 'Not specified'}</p>
+                          {(selectedPhysioSession.patient_id || patient?.patient_id) && (
+                            <p><span className="font-medium">ID:</span> {selectedPhysioSession.patient_id || patient?.patient_id}</p>
+                          )}
+                          {selectedPhysioSession.physiotherapist_name && (
+                            <p><span className="font-medium">Physiotherapist:</span> {selectedPhysioSession.physiotherapist_name}</p>
+                          )}
                         </div>
                       </div>
                       <div className="space-y-2">
                         <h3 className="font-medium text-sm text-muted-foreground uppercase tracking-wide">Session Details</h3>
                         <div className="space-y-1">
-                          <p><span className="font-medium">Session:</span> {selectedPhysioSession.session_number ?? '—'}</p>
-                          <p><span className="font-medium">Scheduled:</span> {selectedPhysioSession.scheduled_at ? new Date(selectedPhysioSession.scheduled_at).toLocaleString() : '—'}</p>
-                          <p><span className="font-medium">Completed:</span> {selectedPhysioSession.completed_at ? new Date(selectedPhysioSession.completed_at).toLocaleString() : '—'}</p>
+                          {selectedPhysioSession.session_number != null && (
+                            <p><span className="font-medium">Session:</span> {selectedPhysioSession.session_number}</p>
+                          )}
+                          {selectedPhysioSession.scheduled_at && (
+                            <p><span className="font-medium">Scheduled:</span> {new Date(selectedPhysioSession.scheduled_at).toLocaleString()}</p>
+                          )}
+                          {selectedPhysioSession.completed_at && (
+                            <p><span className="font-medium">Completed:</span> {new Date(selectedPhysioSession.completed_at).toLocaleString()}</p>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -1449,19 +1484,25 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
                             {selectedPhysioSession.presenting_complaint || 'Not documented'}
                           </p>
                         </div>
-                        <div className="space-y-2">
-                          <Label className="text-sm font-medium">Pain Assessment</Label>
-                          <div className="grid grid-cols-2 gap-2">
-                            <div className="text-center p-3 bg-red-50 dark:bg-red-900/20 rounded border">
-                              <p className="text-xs text-muted-foreground">Before Treatment</p>
-                              <p className="text-xl font-bold text-red-600">{selectedPhysioSession.pain_level_before != null ? `${selectedPhysioSession.pain_level_before}/10` : '—'}</p>
-                            </div>
-                            <div className="text-center p-3 bg-green-50 dark:bg-green-900/20 rounded border">
-                              <p className="text-xs text-muted-foreground">After Treatment</p>
-                              <p className="text-xl font-bold text-green-600">{selectedPhysioSession.pain_level_after != null ? `${selectedPhysioSession.pain_level_after}/10` : '—'}</p>
+                        {(selectedPhysioSession.pain_level_before != null || selectedPhysioSession.pain_level_after != null) && (
+                          <div className="space-y-2">
+                            <Label className="text-sm font-medium">Pain Assessment</Label>
+                            <div className="grid grid-cols-2 gap-2">
+                              {selectedPhysioSession.pain_level_before != null && (
+                                <div className="text-center p-3 bg-red-50 dark:bg-red-900/20 rounded border">
+                                  <p className="text-xs text-muted-foreground">Before Treatment</p>
+                                  <p className="text-xl font-bold text-red-600">{selectedPhysioSession.pain_level_before}/10</p>
+                                </div>
+                              )}
+                              {selectedPhysioSession.pain_level_after != null && (
+                                <div className="text-center p-3 bg-green-50 dark:bg-green-900/20 rounded border">
+                                  <p className="text-xs text-muted-foreground">After Treatment</p>
+                                  <p className="text-xl font-bold text-green-600">{selectedPhysioSession.pain_level_after}/10</p>
+                                </div>
+                              )}
                             </div>
                           </div>
-                        </div>
+                        )}
                       </div>
                     </div>
 
@@ -1635,7 +1676,9 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
                   <div className="border-t pt-4">
                     <div className="flex items-center justify-between text-xs text-muted-foreground">
                       <p>Report generated on {new Date().toLocaleString()}</p>
-                      <p>Session ID: {selectedPhysioSession?.id != null ? `PHY-${String(selectedPhysioSession.id).padStart(6, '0')}` : '—'}</p>
+                      {selectedPhysioSession?.id != null && (
+                        <p>Session ID: PHY-{String(selectedPhysioSession.id).padStart(6, '0')}</p>
+                      )}
                     </div>
                   </div>
                   </div>
@@ -1749,10 +1792,12 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
                         <p className="text-xs text-muted-foreground">Ward</p>
                         <p className="font-medium">{selectedWard.ward_name ?? ''}</p>
                       </div>
-                      <div>
-                        <p className="text-xs text-muted-foreground">Bed</p>
-                        <p className="font-medium">{selectedWard.bed_number ?? '—'}</p>
-                      </div>
+                      {selectedWard.bed_number != null && String(selectedWard.bed_number).trim() !== '' && (
+                        <div>
+                          <p className="text-xs text-muted-foreground">Bed</p>
+                          <p className="font-medium">{selectedWard.bed_number}</p>
+                        </div>
+                      )}
                       <div>
                         <p className="text-xs text-muted-foreground">Admission Type</p>
                         <p className="font-medium">{selectedWard.admission_type ?? ''}</p>
@@ -1798,14 +1843,18 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
                           : `${selectedWard.length_of_stay} day${selectedWard.length_of_stay === 1 ? '' : 's'}`}
                       </p>
                       </div>
-                      <div className="p-3 rounded-lg border">
-                        <p className="text-xs text-muted-foreground">Discharged</p>
-                        <p className="font-medium">{selectedWard.discharge_date ? `${formatDate(selectedWard.discharge_date)} ${formatTime(selectedWard.discharge_date)}` : '—'}</p>
-                      </div>
-                      <div className="p-3 rounded-lg border">
-                        <p className="text-xs text-muted-foreground">Admitting Doctor</p>
-                        <p className="font-medium">{selectedWard.admitting_doctor_name ?? '—'}</p>
-                      </div>
+                      {selectedWard.discharge_date && (
+                        <div className="p-3 rounded-lg border">
+                          <p className="text-xs text-muted-foreground">Discharged</p>
+                          <p className="font-medium">{`${formatDate(selectedWard.discharge_date)} ${formatTime(selectedWard.discharge_date)}`}</p>
+                        </div>
+                      )}
+                      {selectedWard.admitting_doctor_name?.trim() && (
+                        <div className="p-3 rounded-lg border">
+                          <p className="text-xs text-muted-foreground">Admitting Doctor</p>
+                          <p className="font-medium">{selectedWard.admitting_doctor_name}</p>
+                        </div>
+                      )}
                     </div>
 
                     {(selectedWard.discharge_summary || selectedWard.discharge_notes || selectedWard.discharge_diagnosis || selectedWard.follow_up_instructions) && (

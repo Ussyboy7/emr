@@ -22,6 +22,7 @@ import { PatientAvatar } from "@/components/PatientAvatar";
 import { apiFetch } from '@/lib/api-client';
 import { AdvancedDateRangeDialog } from '@/components/AdvancedDateRangeDialog';
 import { CustomDateRangeButton } from '@/components/CustomDateRangeButton';
+import { joinDisplayParts } from '@/lib/utils/clinic-utils';
 
 import {
   Users, Search, Stethoscope, Calendar, Clock, CheckCircle, CheckCircle2,
@@ -31,7 +32,7 @@ import {
 
 // Helper function to format relative time
 const formatRelativeTime = (dateString: string | null | undefined) => {
-  if (!dateString) return 'N/A';
+  if (!dateString) return '';
   try {
     const date = new Date(dateString);
     const now = new Date();
@@ -46,7 +47,7 @@ const formatRelativeTime = (dateString: string | null | undefined) => {
     if (diffDays < 7) return `${diffDays}d ago`;
     return date.toLocaleDateString();
   } catch {
-    return 'N/A';
+    return '';
   }
 };
 
@@ -1123,9 +1124,12 @@ export default function PhysioPoolQueuePage() {
                     <Badge variant="outline" className={getStatusColor(selectedOrder.status)}>
                       {selectedOrder.status.replace('_', ' ').toUpperCase()}
                     </Badge>
-                    <span className="text-sm text-muted-foreground">
-                      Ordered {formatRelativeTime(selectedOrder.ordered_at)}
-                    </span>
+                    {(() => {
+                      const rel = formatRelativeTime(selectedOrder.ordered_at);
+                      return rel ? (
+                        <span className="text-sm text-muted-foreground">Ordered {rel}</span>
+                      ) : null;
+                    })()}
                   </div>
 
                   {/* Patient & Doctor Info */}
@@ -1137,7 +1141,9 @@ export default function PhysioPoolQueuePage() {
                     </div>
                     <div>
                       <p className="text-xs text-muted-foreground mb-1">Ordering Doctor</p>
-                      <p className="font-medium text-base">{selectedOrder.ordered_by_name || 'Unknown'}</p>
+                      {selectedOrder.ordered_by_name?.trim() && (
+                        <p className="font-medium text-base">{selectedOrder.ordered_by_name}</p>
+                      )}
                       <p className="text-sm text-muted-foreground">Physiotherapy Referral</p>
                     </div>
                   </div>
@@ -1240,7 +1246,12 @@ export default function PhysioPoolQueuePage() {
                           .sort((a, b) => (a.session_number ?? 0) - (b.session_number ?? 0))
                           .map((s) => (
                             <div key={s.id} className="flex items-center justify-between px-3 py-2 text-sm">
-                              <span>Session {s.session_number ?? '—'} — {s.status?.replace('_', ' ')}</span>
+                              <span>
+                                {joinDisplayParts([
+                                  s.session_number != null ? `Session ${s.session_number}` : '',
+                                  s.status?.replace('_', ' '),
+                                ])}
+                              </span>
                               <Button variant="ghost" size="sm" className="h-8" onClick={() => openEditSession(s)}>
                                 <Pencil className="h-4 w-4 mr-1" />
                                 Edit
@@ -2138,7 +2149,11 @@ export default function PhysioPoolQueuePage() {
               <DialogHeader>
                 <DialogTitle className="flex items-center gap-2">
                   <Pencil className="h-5 w-5 text-amber-500" />
-                  Edit Session {editingSession?.session_number} — {(editingSession as any)?.patient_name || selectedOrder?.patient_name}
+                  {joinDisplayParts([
+                    'Edit Session',
+                    editingSession?.session_number,
+                    (editingSession as any)?.patient_name || selectedOrder?.patient_name,
+                  ])}
                 </DialogTitle>
                 <DialogDescription>Update assessment and treatment documentation. Changes will appear in the Session Report.</DialogDescription>
               </DialogHeader>

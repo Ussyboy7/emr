@@ -5,7 +5,7 @@ import { DashboardLayout } from '@/components/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, ScanLine, FileImage, FileSearch, Clock, CheckCircle2, AlertTriangle, Activity, ArrowRight, UserCheck, ClipboardList, RefreshCw, TrendingUp } from 'lucide-react';
+import { Loader2, ScanLine, FileImage, FileSearch, Clock, CheckCircle2, AlertTriangle, Activity, ArrowRight, UserCheck, ClipboardList, RefreshCw, TrendingUp, Notebook } from 'lucide-react';
 import Link from 'next/link';
 
 export default function RadiologyPage() {
@@ -170,13 +170,13 @@ export default function RadiologyPage() {
               <span className="text-xs sm:text-sm font-medium">Verification</span>
               <span className="text-[10px] sm:text-xs text-muted-foreground">Verify radiology reports</span>
             </Button>
-            <Button onClick={() => window.location.href = '/radiology/reports'} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-cyan-500/30 hover:bg-cyan-500/10 border-l-4 border-l-blue-500">
+            <Button onClick={() => window.location.href = '/radiology/analytics'} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-cyan-500/30 hover:bg-cyan-500/10 border-l-4 border-l-blue-500">
               <FileImage className="h-5 w-5 sm:h-6 sm:w-6 text-blue-500 dark:text-blue-400" />
-              <span className="text-xs sm:text-sm font-medium">Reports</span>
-              <span className="text-[10px] sm:text-xs text-muted-foreground">View completed reports</span>
+              <span className="text-xs sm:text-sm font-medium">Analytics</span>
+              <span className="text-[10px] sm:text-xs text-muted-foreground">View analytics and reports</span>
             </Button>
             <Button onClick={() => window.location.href = '/radiology/templates'} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-cyan-500/30 hover:bg-cyan-500/10 border-l-4 border-l-emerald-500">
-              <UserCheck className="h-5 w-5 sm:h-6 sm:w-6 text-emerald-500 dark:text-emerald-400" />
+              <Notebook className="h-5 w-5 sm:h-6 sm:w-6 text-emerald-500 dark:text-emerald-400" />
               <span className="text-xs sm:text-sm font-medium">Templates</span>
               <span className="text-[10px] sm:text-xs text-muted-foreground">Manage study templates</span>
             </Button>

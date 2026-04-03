@@ -83,6 +83,12 @@ class ConsultationSessionSerializer(serializers.ModelSerializer):
     clinic_name = serializers.CharField(source='visit.clinic', read_only=True, allow_null=True)
     active_duration_seconds = serializers.SerializerMethodField()
 
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        v = getattr(instance, 'visit', None)
+        data['visit_clinics'] = (getattr(v, 'clinics', None) or []) if v else []
+        return data
+
     def get_patient_gender(self, obj):
         p = getattr(obj, 'patient', None)
         if not p or not p.gender:

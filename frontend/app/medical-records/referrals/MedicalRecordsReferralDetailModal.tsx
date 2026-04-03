@@ -127,10 +127,12 @@ export function MedicalRecordsReferralDetailModal(props: {
                 <Label className="text-muted-foreground">Patient</Label>
                 <p>{referral.patient_name ?? ""}</p>
               </div>
-              <div>
-                <Label className="text-muted-foreground">Referred by</Label>
-                <p>{referral.referred_by_name || "—"}</p>
-              </div>
+              {referral.referred_by_name && (
+                <div>
+                  <Label className="text-muted-foreground">Referred by</Label>
+                  <p>{referral.referred_by_name}</p>
+                </div>
+              )}
               <div className="col-span-2">
                 <Label className="text-muted-foreground">Reason</Label>
                 <p className="p-2 bg-muted/50 rounded mt-1">{referral.reason}</p>
@@ -181,7 +183,7 @@ export function MedicalRecordsReferralDetailModal(props: {
                   <ResponsibilityFormHistoryTable
                     forms={forms}
                     loading={formsLoading}
-                    referralFacilityLabel={referral.facility || "—"}
+                    referralFacilityLabel={referral.facility || ""}
                     onPrint={(form) => onPrintForm(referral, form)}
                     isRecordsUser={isRecordsUser}
                     allowStampAcknowledgement={stampWorkflowActive}

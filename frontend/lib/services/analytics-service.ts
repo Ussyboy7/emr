@@ -9,7 +9,7 @@ import { visitService } from './visit-service';
 import labService from './lab-service';
 import { pharmacyService } from './pharmacy-service';
 import { radiologyService } from './radiology-service';
-import { normalizeClinicName } from '../utils/clinic-utils';
+import { getVisitServiceClinicsList, normalizeClinicName } from '../utils/clinic-utils';
 
 export interface AnalyticsStats {
   totalPatients: number;
@@ -220,11 +220,17 @@ class AnalyticsService {
     const visits = await visitService.getVisits({ page: 1 });
     const clinicCounts: Record<string, number> = {};
     
-    // Use standardized normalization utility
+    // Service clinics only — never visit.location (facility). No default clinic for missing data.
     visits.results.forEach((visit: any) => {
-      const rawClinic = visit.clinic || visit.location || 'GOPD';
-      const normalizedClinic = normalizeClinicName(rawClinic);
-      clinicCounts[normalizedClinic] = (clinicCounts[normalizedClinic] || 0) + 1;
+      const list = getVisitServiceClinicsList({ clinic: visit.clinic, clinics: visit.clinics });
+      if (list.length === 0) return;
+      const seen = new Set<string>();
+      for (const raw of list) {
+        const n = normalizeClinicName(raw);
+        if (!n || seen.has(n)) continue;
+        seen.add(n);
+        clinicCounts[n] = (clinicCounts[n] || 0) + 1;
+      }
     });
     
     const colors = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4'];
@@ -239,13 +245,7 @@ class AnalyticsService {
    * Get department stats
    */
   async getDepartmentStats(): Promise<DepartmentStats[]> {
-    // Would need to aggregate from consultations/visits
-    return [
-      { dept: 'GOPD', consultations: 1850, avgWait: 18, satisfaction: 92 },
-      { dept: 'Eye Clinic', consultations: 620, avgWait: 15, satisfaction: 94 },
-      { dept: 'Sickle Cell', consultations: 480, avgWait: 12, satisfaction: 96 },
-      { dept: 'Physiotherapy', consultations: 320, avgWait: 10, satisfaction: 95 },
-    ];
+    return [];
   }
 
   /**

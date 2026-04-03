@@ -133,10 +133,13 @@ class ConsultationSessionViewSet(viewsets.ModelViewSet):
         elif end_date:
             qs = qs.filter(started_at__date__lte=end_date)
 
-        # Clinic filtering (stored on Visit.clinic as a string; see serializer clinic_name source='visit.clinic')
+        # Service-clinic filter: primary Visit.clinic or membership in Visit.clinics (not facility/location).
         clinic = self.request.query_params.get('clinic')
         if clinic:
-            qs = qs.filter(visit__clinic=clinic)
+            from common.clinic_utils import normalize_clinic_name
+
+            c = normalize_clinic_name(clinic)
+            qs = qs.filter(Q(visit__clinic__iexact=c) | Q(visit__clinics__contains=[c]))
 
         return qs
     
@@ -654,15 +657,33 @@ class ConsultationQueueViewSet(viewsets.ModelViewSet):
                 except Exception as e:
                     logger.error(f'Failed to create eye order: {e}')
             
-            # Find all active consultation rooms for NON-physio clinics
+            # Other non-physio *service* lines (GOPD, Eye, etc.) → rooms at same *facility*
+            # with matching ConsultationRoom.specialty (not organization.Clinic.name).
             non_physio_clinics = [c for c in visit_clinics if 'physiotherapy' not in c.lower()]
-            
+
             if non_physio_clinics:
-                matching_rooms = ConsultationRoom.objects.filter(
-                    clinic__name__in=non_physio_clinics,
-                    status='active',
-                    is_active=True
-                ).exclude(id=room.id)  # Exclude the room we just created
+                from common.clinic_utils import normalize_clinic_name, resolve_visit_facility_clinic
+
+                facility = resolve_visit_facility_clinic(visit)
+                normalized_services = list(
+                    dict.fromkeys(normalize_clinic_name(c) for c in non_physio_clinics if c)
+                )
+                if normalized_services and facility:
+                    specialty_q = Q()
+                    for svc in normalized_services:
+                        specialty_q |= Q(specialty__iexact=svc)
+                    matching_rooms = (
+                        ConsultationRoom.objects.filter(
+                            clinic=facility,
+                            status='active',
+                            is_active=True,
+                        )
+                        .filter(specialty_q)
+                        .exclude(id=room.id)
+                        .distinct()
+                    )
+                else:
+                    matching_rooms = ConsultationRoom.objects.none()
                 
                 # Create queue items for each matching room
                 for matching_room in matching_rooms:

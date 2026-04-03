@@ -2225,36 +2225,46 @@ export default function NewPatientPage() {
                           .map((s) => (s || '').trim())
                           .filter(Boolean);
                         const core = parts.join(' ');
-                        if (!core && !titlePrefix) return '—';
+                        if (!core && !titlePrefix) return '';
                         return `${titlePrefix}${core}`.trim();
                       })()}
                     </span>
                   </div>
-                  <div className="flex items-start justify-between">
-                    <span className="text-muted-foreground">Gender</span>
-                    <span className="font-medium capitalize">{formData.gender || '—'}</span>
-                  </div>
-                  <div className="flex items-start justify-between">
-                    <span className="text-muted-foreground">Age</span>
-                    <span className="font-medium">{calculateAge || '—'}</span>
-                  </div>
+                  {formData.gender && (
+                    <div className="flex items-start justify-between">
+                      <span className="text-muted-foreground">Gender</span>
+                      <span className="font-medium capitalize">{formData.gender}</span>
+                    </div>
+                  )}
+                  {calculateAge && (
+                    <div className="flex items-start justify-between">
+                      <span className="text-muted-foreground">Age</span>
+                      <span className="font-medium">{calculateAge}</span>
+                    </div>
+                  )}
                   {showEmployeeWorkFields && (
                     <>
                       <Separator />
-                      <div className="flex items-start justify-between">
-                        <span className="text-muted-foreground">Type</span>
-                        <span className="font-medium capitalize">{formData.employeeType || '—'}</span>
-                      </div>
-                      <div className="flex items-start justify-between">
-                        <span className="text-muted-foreground">Division</span>
-                        <span className="font-medium text-right max-w-[150px] truncate capitalize">
-                          {formData.division?.replace(/-/g, ' ') || '—'}
-                        </span>
-                      </div>
-                      <div className="flex items-start justify-between">
-                        <span className="text-muted-foreground">Location</span>
-                        <span className="font-medium capitalize">{formData.location || '—'}</span>
-                      </div>
+                      {formData.employeeType && (
+                        <div className="flex items-start justify-between">
+                          <span className="text-muted-foreground">Type</span>
+                          <span className="font-medium capitalize">{formData.employeeType}</span>
+                        </div>
+                      )}
+                      {formData.division?.trim() && (
+                        <div className="flex items-start justify-between">
+                          <span className="text-muted-foreground">Division</span>
+                          <span className="font-medium text-right max-w-[150px] truncate capitalize">
+                            {formData.division.replace(/-/g, ' ')}
+                          </span>
+                        </div>
+                      )}
+                      {formData.location?.trim() && (
+                        <div className="flex items-start justify-between">
+                          <span className="text-muted-foreground">Location</span>
+                          <span className="font-medium capitalize">{formData.location}</span>
+                        </div>
+                      )}
                     </>
                   )}
                   {patientCategory === 'retiree' && (
@@ -2283,10 +2293,12 @@ export default function NewPatientPage() {
                       )}
                     </div>
                   </div>
-                  <div className="flex items-start justify-between">
-                    <span className="text-muted-foreground">Blood Group</span>
-                    <span className="font-medium">{formData.bloodGroup || '—'}</span>
-                  </div>
+                  {formData.bloodGroup && (
+                    <div className="flex items-start justify-between">
+                      <span className="text-muted-foreground">Blood Group</span>
+                      <span className="font-medium">{formData.bloodGroup}</span>
+                    </div>
+                  )}
                 </div>
 
                 <Separator />

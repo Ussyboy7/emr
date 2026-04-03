@@ -66,6 +66,34 @@ function radiologyAnalyticsToCsv(
   lines.push('');
   lines.push(['Procedure', 'Count'].map(esc).join(','));
   (d.top_procedures || []).forEach((p) => lines.push([p.procedure, String(p.count)].map(esc).join(',')));
+
+  lines.push('');
+  lines.push(['Processing method', 'Count'].map(esc).join(','));
+  const processingSummary = d.studies_processing_summary;
+  if (processingSummary) {
+    lines.push(['In-house', String(processingSummary.in_house)].map(esc).join(','));
+    lines.push(['Outsourced', String(processingSummary.outsourced)].map(esc).join(','));
+    lines.push(['Unassigned', String(processingSummary.unassigned)].map(esc).join(','));
+    lines.push(['Total', String(processingSummary.total)].map(esc).join(','));
+  } else {
+    Object.entries(d.studies_by_processing_method || {}).forEach(([method, count]) =>
+      lines.push([method, String(count)].map(esc).join(','))
+    );
+  }
+
+  lines.push('');
+  lines.push(['Procedure', 'Total', 'In-house', 'Outsourced', 'Unassigned'].map(esc).join(','));
+  (d.procedures_by_processing_method || []).forEach((row) =>
+    lines.push(
+      [
+        row.procedure,
+        String(row.total),
+        String(row.processing.in_house),
+        String(row.processing.outsourced),
+        String(row.processing.unassigned),
+      ].map(esc).join(',')
+    )
+  );
   return lines.join('\n');
 }
 
@@ -181,6 +209,22 @@ export default function RadiologyAnalyticsPage() {
   const modalityBar = useMemo(() => {
     if (!data?.studies_by_modality) return [];
     return Object.entries(data.studies_by_modality).map(([name, count]) => ({ name, count }));
+  }, [data]);
+
+  const processingMethodBar = useMemo(() => {
+    if (!data) return [];
+    const summary = data.studies_processing_summary;
+    if (summary) {
+      return [
+        { name: 'In-house', count: summary.in_house },
+        { name: 'Outsourced', count: summary.outsourced },
+        { name: 'Unassigned', count: summary.unassigned },
+      ].filter((x) => x.count > 0);
+    }
+    return Object.entries(data.studies_by_processing_method || {}).map(([name, count]) => ({
+      name: name === 'in_house' ? 'In-house' : name === 'outsourced' ? 'Outsourced' : name.replace(/_/g, ' '),
+      count,
+    }));
   }, [data]);
 
   return (
@@ -417,6 +461,28 @@ export default function RadiologyAnalyticsPage() {
                   )}
                 </CardContent>
               </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">In-house vs outsourced</CardTitle>
+                  <CardDescription>How imaging studies are being processed</CardDescription>
+                </CardHeader>
+                <CardContent className="h-[260px]">
+                  {processingMethodBar.length === 0 ? (
+                    <EmptyChart />
+                  ) : (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={processingMethodBar}>
+                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                        <XAxis dataKey="name" tick={{ fontSize: 10 }} />
+                        <YAxis tick={{ fontSize: 11 }} />
+                        <Tooltip />
+                        <Bar dataKey="count" fill="#0ea5e9" radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  )}
+                </CardContent>
+              </Card>
             </div>
 
             <Card>
@@ -442,6 +508,43 @@ export default function RadiologyAnalyticsPage() {
                       <Bar dataKey="count" fill="#06b6d4" radius={[0, 4, 4, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Procedure processing breakdown</CardTitle>
+                <CardDescription>Track each investigation by in-house vs outsourced routing</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {!data.procedures_by_processing_method || data.procedures_by_processing_method.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No procedure processing data in this period</p>
+                ) : (
+                  <div className="max-h-[340px] overflow-auto rounded-md border">
+                    <table className="w-full text-sm">
+                      <thead className="bg-muted/50 sticky top-0">
+                        <tr>
+                          <th className="text-left px-3 py-2 font-medium">Procedure</th>
+                          <th className="text-right px-3 py-2 font-medium">Total</th>
+                          <th className="text-right px-3 py-2 font-medium">In-house</th>
+                          <th className="text-right px-3 py-2 font-medium">Outsourced</th>
+                          <th className="text-right px-3 py-2 font-medium">Unassigned</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {data.procedures_by_processing_method.map((row) => (
+                          <tr key={row.procedure} className="border-t">
+                            <td className="px-3 py-2">{row.procedure}</td>
+                            <td className="px-3 py-2 text-right tabular-nums">{row.total.toLocaleString()}</td>
+                            <td className="px-3 py-2 text-right tabular-nums">{row.processing.in_house.toLocaleString()}</td>
+                            <td className="px-3 py-2 text-right tabular-nums">{row.processing.outsourced.toLocaleString()}</td>
+                            <td className="px-3 py-2 text-right tabular-nums">{row.processing.unassigned.toLocaleString()}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 )}
               </CardContent>
             </Card>

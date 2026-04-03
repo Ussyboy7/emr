@@ -14,6 +14,7 @@ import { apiFetch } from '@/lib/api-client';
 import { patientService, wardService, physioService, labService } from '@/lib/services';
 import { toast } from 'sonner';
 import { LabOrderModal, type LabOrderSubmitInput } from '@/components/consultation/orders/LabOrderModal';
+import { getVisitServiceClinicsDisplay } from '@/lib/utils/clinic-utils';
 
 // ==========================================
 // TYPE DEFINITIONS
@@ -177,6 +178,8 @@ export interface VisitData {
   notes?: string;
   clinic?: string;
   clinic_name?: string;
+  clinics?: string[];
+  visit_clinics?: string[];
   room?: number;
   room_name?: string;
   diagnosis?: string;
@@ -219,6 +222,8 @@ export interface ConsultationSessionData {
   created_by?: number;
   created_by_name?: string;
   clinic?: string;
+  clinic_name?: string;
+  visit_clinics?: string[];
   date?: string;
   time?: string;
 }
@@ -998,8 +1003,11 @@ const loadConsultationFromVisit = async (visitId: string | number): Promise<Cons
       doctorSpecialty: visit.doctor_specialty || consultationSession?.doctor_specialty || undefined,
       date: visit.visit_date || visit.date || new Date().toISOString().split('T')[0],
       time: visit.visit_time || visit.time || '',
-      clinic: visit.clinic_name || visit.clinic || 'GOPD',
-      room: consultationSession?.room_name || visit.room_name || 'Unknown',
+      clinic: getVisitServiceClinicsDisplay({
+        clinic: visit.clinic_name || visit.clinic,
+        clinics: visit.clinics || visit.visit_clinics,
+      }),
+      room: consultationSession?.room_name || visit.room_name || '',
       diagnosis: cleanClinicalText(consultationSession?.assessment || visit.diagnosis || ''),
       presentationComplaint: consultationSession?.presentation_complaint || '',
       historyOfPresentIllness: cleanClinicalText(consultationSession?.history_of_presenting_illness || ''),
@@ -1376,8 +1384,11 @@ const loadConsultationFromSession = async (sessionId: string | number): Promise<
       doctorSpecialty: session.doctor_specialty || undefined,
       date: visitDate,
       time: visitTime,
-      clinic: session.clinic || 'GOPD',
-      room: session.room_name || 'Unknown',
+      clinic: getVisitServiceClinicsDisplay({
+        clinic: session.clinic_name || session.clinic,
+        clinics: session.visit_clinics,
+      }),
+      room: session.room_name || '',
       diagnosis: session.assessment || '',
       presentationComplaint: session.presentation_complaint || '',
       diagnosisCodes: (() => {
@@ -1754,12 +1765,14 @@ export const ConsultationDetailModal = React.memo(function ConsultationDetailMod
                         <p className="text-xs text-gray-500 dark:text-gray-500">Oxygen Saturation</p>
                         <p className="text-lg font-semibold text-gray-800 dark:text-gray-200">{latestVitals.oxygenSaturation}%</p>
                       </div>
-                      <div className="p-3 border border-blue-200 dark:border-blue-800 rounded-lg">
-                        <p className="text-xs text-gray-500 dark:text-gray-500">Weight</p>
-                        <p className="text-lg font-semibold text-gray-800 dark:text-gray-200">
-                          {latestVitals.weight != null ? `${latestVitals.weight} kg` : '—'}
-                        </p>
-                      </div>
+                      {latestVitals.weight != null && (
+                        <div className="p-3 border border-blue-200 dark:border-blue-800 rounded-lg">
+                          <p className="text-xs text-gray-500 dark:text-gray-500">Weight</p>
+                          <p className="text-lg font-semibold text-gray-800 dark:text-gray-200">
+                            {latestVitals.weight} kg
+                          </p>
+                        </div>
+                      )}
                       {latestVitals.height != null && (
                         <div className="p-3 border border-blue-200 dark:border-blue-800 rounded-lg">
                           <p className="text-xs text-gray-500 dark:text-gray-500">Height</p>
@@ -2061,7 +2074,7 @@ export const ConsultationDetailModal = React.memo(function ConsultationDetailMod
                         <tbody>
                           {(safeConsultation.physioOrders || []).map((p) => (
                             <tr key={p.id} className="border-b border-gray-200 dark:border-gray-800">
-                              <td className="py-2 px-3 font-medium text-gray-800 dark:text-gray-200">{p.diagnosis || p.chiefComplaint || '—'}</td>
+                              <td className="py-2 px-3 font-medium text-gray-800 dark:text-gray-200">{p.diagnosis || p.chiefComplaint || ''}</td>
                               <td className="py-2 px-3 text-gray-600 dark:text-gray-400">{p.priority}</td>
                               <td className="py-2 px-3">
                                 <Badge variant="outline" className={p.status === 'completed' || p.status?.toLowerCase() === 'completed' ? 'bg-green-100 text-green-800 border-green-300 dark:bg-green-900/30 dark:text-green-400' : ''}>

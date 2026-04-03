@@ -12,9 +12,8 @@ import { Loader2, Plus, ScanLine, X } from "lucide-react";
 import { toast } from "sonner";
 import { radiologyService } from "@/lib/services";
 import { isAuthenticationError } from "@/lib/auth-errors";
-
-/** Reserved catalog code for studies not listed — describe the real exam in clinical indication / notes. */
-export const RAD_OTHER_TEMPLATE_CODE = "OTHER";
+import { joinDisplayParts } from "@/lib/utils/clinic-utils";
+import { RAD_OTHER_TEMPLATE_CODE } from "@/lib/constants/order-template-codes";
 
 export type RadiologyTemplateLike = {
   id: number;
@@ -304,18 +303,23 @@ export function RadiologyOrderModal({
                                       </Badge>
                                     )}
                                   </div>
-                                  <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
-                                    <span>{t.category || "—"}</span>
-                                    <span>•</span>
-                                    <span>{t.body_part || "N/A"}</span>
-                                    {t.radiation_exposure === "high" && (
-                                      <>
-                                        <span>•</span>
-                                        <Badge variant="outline" className="text-[9px] px-1 py-0 text-amber-600">
-                                          High Rad
-                                        </Badge>
-                                      </>
-                                    )}
+                                  <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-wrap">
+                                    {(() => {
+                                      const sub = joinDisplayParts([t.category, t.body_part]);
+                                      return (
+                                        <>
+                                          {sub ? <span>{sub}</span> : null}
+                                          {t.radiation_exposure === "high" && (
+                                            <>
+                                              {sub ? <span>•</span> : null}
+                                              <Badge variant="outline" className="text-[9px] px-1 py-0 text-amber-600">
+                                                High Rad
+                                              </Badge>
+                                            </>
+                                          )}
+                                        </>
+                                      );
+                                    })()}
                                   </div>
                                 </div>
                               </div>
@@ -339,13 +343,11 @@ export function RadiologyOrderModal({
                       <div key={id} className="flex items-center justify-between p-2 bg-muted rounded text-sm">
                         <div className="flex-1 min-w-0">
                           <div className="font-medium truncate">{t.name}</div>
-                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground flex-wrap">
                             <Badge variant="outline" className="text-[10px]">
                               {t.code}
                             </Badge>
-                            <span>{t.category || "—"}</span>
-                            <span>•</span>
-                            <span>{t.body_part || "—"}</span>
+                            <span>{joinDisplayParts([t.category, t.body_part])}</span>
                           </div>
                         </div>
                         <Button

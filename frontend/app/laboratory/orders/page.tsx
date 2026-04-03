@@ -17,7 +17,7 @@ import { toast } from "sonner";
 import { Checkbox } from "@/components/ui/checkbox";
 import { AdvancedDateRangeDialog } from '@/components/AdvancedDateRangeDialog';
 import { CustomDateRangeButton } from '@/components/CustomDateRangeButton';
-import { labService, type LabOrder as ApiLabOrder, type LabTest as ApiLabTest, type LabPartner } from '@/lib/services';
+import { labService, formatPatientGenderLabel, type LabOrder as ApiLabOrder, type LabTest as ApiLabTest, type LabPartner } from '@/lib/services';
 import { Icd10DiagnosesBlock } from '@/components/medical/Icd10DiagnosesBlock';
 import { transformLabTestStatus, transformPriority, transformToBackendPriority, transformProcessingMethod, transformToBackendProcessingMethod } from '@/lib/services/transformers';
 import { PatientAvatar } from "@/components/PatientAvatar";
@@ -51,6 +51,20 @@ const formatTime = (dateString: string | undefined): string => {
     return date.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
   } catch {
     return 'Invalid Time';
+  }
+};
+
+/** Lab order placed-at (ordered_at) — date + time of order sent */
+const formatOrderedAtDisplay = (isoString: string | undefined): string => {
+  if (!isoString) return '';
+  try {
+    const date = new Date(isoString);
+    if (isNaN(date.getTime())) return '';
+    const datePart = date.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+    const timePart = date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+    return `${datePart}, ${timePart}`;
+  } catch {
+    return '';
   }
 };
 
@@ -110,7 +124,7 @@ const transformOrder = (apiOrder: ApiLabOrder): LabOrder => {
       id: apiOrder.patient.id?.toString() || '',
       name: apiOrder.patient.name || 'Unknown',
       age: apiOrder.patient.age || 0,
-      gender: apiOrder.patient.gender || 'Unknown',
+      gender: formatPatientGenderLabel(apiOrder.patient?.gender) || apiOrder.patient?.gender || 'Unknown',
       personal_number: (apiOrder.patient as any).personal_number || undefined,
       division: (apiOrder.patient as any).division || undefined,
       photoUrl: (apiOrder.patient as any).photo || undefined,
@@ -677,6 +691,7 @@ export default function LabOrdersPage() {
   const [priorityFilter, setPriorityFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('today');
   const [genderFilter, setGenderFilter] = useState('all');
+  const [processingFilter, setProcessingFilter] = useState<'all' | 'in_house' | 'outsourced'>('all');
   const [activeTab, setActiveTab] = useState('pending');
   const [isDateFilterDialogOpen, setIsDateFilterDialogOpen] = useState(false);
   const [dateRange, setDateRange] = useState({ from: '', to: '' });
@@ -895,6 +910,15 @@ export default function LabOrdersPage() {
         }
       }
 
+      // Processing (in-house / outsourced) — also applied server-side; narrow current page if needed
+      if (processingFilter !== 'all') {
+        const hasMatch = order.tests.some((t) => {
+          const m = t.processingMethod === 'In-house' ? 'in_house' : t.processingMethod === 'Outsourced' ? 'outsourced' : '';
+          return m === processingFilter;
+        });
+        if (!hasMatch) return false;
+      }
+
       // Tab filtering (client-side for UX)
       if (activeTab === 'pending') return order.tests.some(t => t.status === 'Pending');
       if (activeTab === 'processing') return order.tests.some(t => t.status === 'Sample Collected' || t.status === 'Processing');
@@ -902,7 +926,7 @@ export default function LabOrdersPage() {
       if (activeTab === 'rejected') return order.tests.some(t => t.status === 'Rejected');
       return true; // All tab shows everything
     });
-  }, [orders, activeTab, dateFilter, genderFilter, dateRange.from, dateRange.to]);
+  }, [orders, activeTab, dateFilter, genderFilter, processingFilter, dateRange.from, dateRange.to]);
 
   // With server-side pagination, orders array contains only current page results
   const paginatedOrders = filteredOrders;
@@ -910,7 +934,7 @@ export default function LabOrdersPage() {
   // Reset to page 1 when filters change or items per page changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, priorityFilter, dateFilter, genderFilter, activeTab, itemsPerPage, dateRange.from, dateRange.to]);
+  }, [searchQuery, priorityFilter, dateFilter, genderFilter, processingFilter, activeTab, itemsPerPage, dateRange.from, dateRange.to]);
 
   const clearDateRangeFilters = () => {
     setDateRange({ from: '', to: '' });
@@ -934,9 +958,12 @@ export default function LabOrdersPage() {
         params.priority = transformToBackendPriority(priorityFilter);
       }
       if (searchQuery) {
-        params.search = searchQuery;
+        params.search = searchQuery.trim();
       }
-      // Note: dateFilter and genderFilter not yet implemented in backend
+      if (processingFilter !== 'all') {
+        params.processing_method = processingFilter;
+      }
+      // Note: dateFilter and genderFilter are client-side only (pagination)
 
       const response = await labService.getOrders(params);
       setTotalCount(response.count || response.results.length);
@@ -978,7 +1005,7 @@ export default function LabOrdersPage() {
         setLoading(false);
       }
     }
-  }, [currentPage, priorityFilter, searchQuery]);
+  }, [currentPage, priorityFilter, searchQuery, processingFilter]);
 
   // Load orders from API when page or filters change
   useEffect(() => {
@@ -1088,19 +1115,6 @@ export default function LabOrdersPage() {
       case 'Completed': return 'bg-emerald-500/10 text-emerald-600 border-emerald-500/50';
       default: return 'bg-gray-500/10 text-gray-600 border-gray-500/50';
     }
-  };
-
-  const formatTime = (isoString: string) => {
-    const date = new Date(isoString);
-    return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-  };
-
-  const getTimeSince = (isoString: string) => {
-    const diff = Date.now() - new Date(isoString).getTime();
-    const mins = Math.floor(diff / 60000);
-    if (mins < 60) return `${mins}m ago`;
-    const hrs = Math.floor(mins / 60);
-    return `${hrs}h ago`;
   };
 
   // Collect samples for selected tests (single or multiple)
@@ -1436,7 +1450,10 @@ export default function LabOrdersPage() {
                 <span>•</span>
                 <span className="flex items-center gap-1"><Stethoscope className="h-3 w-3" />{order.doctor.name}</span>
                 <span>•</span>
-                <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{getTimeSince(order.orderedAt)}</span>
+                <span className="flex items-center gap-1" title="When the order was placed">
+                  <Clock className="h-3 w-3 shrink-0" />
+                  {formatOrderedAtDisplay(order.orderedAt) || '—'}
+                </span>
                 <span>•</span>
                 <span>{order.tests.length} test{order.tests.length > 1 ? 's' : ''}</span>
                 <span>•</span>
@@ -1574,7 +1591,7 @@ export default function LabOrdersPage() {
                 <div className="relative flex-1 min-w-[min(100%,16rem)]">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input 
-                    placeholder="Search orders..." 
+                    placeholder="Patient, order ID, Lab ID (e.g. BT-26-0007)…" 
                     value={searchQuery} 
                     onChange={(e) => setSearchQuery(e.target.value)} 
                     className="pl-10" 
@@ -1606,6 +1623,17 @@ export default function LabOrdersPage() {
                       <SelectItem value="all">All Gender</SelectItem>
                       <SelectItem value="male">Male</SelectItem>
                       <SelectItem value="female">Female</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select
+                    value={processingFilter}
+                    onValueChange={(v) => setProcessingFilter(v as 'all' | 'in_house' | 'outsourced')}
+                  >
+                    <SelectTrigger className="w-[150px]"><SelectValue placeholder="Processing" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All processing</SelectItem>
+                      <SelectItem value="in_house">In-house</SelectItem>
+                      <SelectItem value="outsourced">Outsourced</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

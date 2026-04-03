@@ -674,7 +674,9 @@ export default function ProceduresHistoryPage() {
 
                 {/* Meta */}
                 <div className="flex items-center justify-between text-xs text-muted-foreground pt-2 border-t">
-                  <span className="flex items-center gap-1"><Stethoscope className="h-3 w-3" />Ordered by: {selectedProcedure.orderedBy || '—'}</span>
+                  {selectedProcedure.orderedBy && (
+                    <span className="flex items-center gap-1"><Stethoscope className="h-3 w-3" />Ordered by: {selectedProcedure.orderedBy}</span>
+                  )}
                   <span className="flex items-center gap-1"><User className="h-3 w-3" />Completed by: {selectedProcedure.completedBy}</span>
                 </div>
                 <p className="text-xs text-center text-muted-foreground">

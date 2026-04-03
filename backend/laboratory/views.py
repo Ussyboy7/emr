@@ -63,12 +63,20 @@ class LabOrderViewSet(viewsets.ModelViewSet):
     serializer_class = LabOrderSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['patient', 'doctor', 'priority', 'consultation_session', 'visit']
-    search_fields = ['order_id', 'clinical_notes']
+    search_fields = [
+        'order_id',
+        'clinical_notes',
+        'lab_number',
+        'tests__lab_number',
+        'patient__first_name',
+        'patient__surname',
+        'patient__patient_id',
+    ]
     ordering_fields = ['ordered_at']
     ordering = ['-ordered_at']
     
     def get_queryset(self):
-        return (
+        qs = (
             LabOrder.objects.all()
             .select_related('patient', 'doctor', 'visit', 'consultation_session', 'created_by')
             .prefetch_related(
@@ -77,6 +85,10 @@ class LabOrderViewSet(viewsets.ModelViewSet):
                 'visit__diagnoses__icd10_code',
             )
         )
+        pm = self.request.query_params.get('processing_method')
+        if pm in ('in_house', 'outsourced'):
+            qs = qs.filter(tests__processing_method=pm).distinct()
+        return qs
     
     def perform_create(self, serializer):
         # Set the doctor field using multiple fallback strategies
@@ -541,6 +553,8 @@ class LabResultViewSet(viewsets.ReadOnlyModelViewSet):
     filterset_fields = ['patient', 'overall_status', 'priority']
     search_fields = [
         'order__order_id',
+        'order__lab_number',
+        'test__lab_number',
         'patient__patient_id',
         'patient__surname',
         'patient__first_name',
@@ -602,6 +616,10 @@ class LabResultViewSet(viewsets.ReadOnlyModelViewSet):
         gender = self.request.query_params.get('gender')
         if gender:
             queryset = queryset.filter(order__patient__gender=gender)
+
+        pm = self.request.query_params.get('processing_method')
+        if pm in ('in_house', 'outsourced'):
+            queryset = queryset.filter(test__processing_method=pm)
 
         return queryset
 

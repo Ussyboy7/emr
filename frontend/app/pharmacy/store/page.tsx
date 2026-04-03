@@ -16,6 +16,7 @@ import { toast } from "sonner";
 import { pharmacyService, type MedicationInventory, type Medication, type BatchAdjustmentHistory } from "@/lib/services";
 import { PHARMACY_LOCATIONS } from "@/lib/constants/pharmacy-locations";
 import { MEDICATION_CATEGORIES } from "@/lib/constants/pharmacy";
+import { joinDisplayParts } from "@/lib/utils/clinic-utils";
 import { Package, Search, TrendingUp, AlertTriangle, Loader2, Eye, Send, Layers, Plus, ArrowUpDown, Upload, Hash, Pill, Clock, XCircle, CheckCircle2 } from "lucide-react";
 
 interface MedicationWithStock {
@@ -768,26 +769,24 @@ export default function WarehouseStorePage() {
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
-                            {med.generic_name && <span>{med.generic_name}</span>}
-                            <span>•</span>
-                            <span>{med.category || "Other"}</span>
-                            <span>•</span>
-                            <span>{med.form || "—"}</span>
-                            <span>•</span>
-                            <span>{med.batches.length} batch(es)</span>
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-wrap">
+                            <span>
+                              {joinDisplayParts([
+                                med.generic_name,
+                                med.category,
+                                med.form,
+                                `${med.batches.length} batch(es)`,
+                              ])}
+                            </span>
                             {nearestExpiry && (
-                              <>
-                                <span>•</span>
-                                <span
-                                  className={`flex items-center gap-1 ${
-                                    daysUntilExpiry <= EXPIRY_WARNING_DAYS ? "text-amber-600 dark:text-amber-400" : ""
-                                  } ${daysUntilExpiry < 0 ? "text-red-600 dark:text-red-400" : ""}`}
-                                >
-                                  <Clock className="h-3 w-3" />
-                                  {daysUntilExpiry < 0 ? "Expired" : daysUntilExpiry <= 30 ? `${daysUntilExpiry}d` : nearestExpiry}
-                                </span>
-                              </>
+                              <span
+                                className={`inline-flex items-center gap-1 ${
+                                  daysUntilExpiry <= EXPIRY_WARNING_DAYS ? "text-amber-600 dark:text-amber-400" : ""
+                                } ${daysUntilExpiry < 0 ? "text-red-600 dark:text-red-400" : ""}`}
+                              >
+                                <Clock className="h-3 w-3" />
+                                {daysUntilExpiry < 0 ? "Expired" : daysUntilExpiry <= 30 ? `${daysUntilExpiry}d` : nearestExpiry}
+                              </span>
                             )}
                           </div>
                         </div>
@@ -843,22 +842,30 @@ export default function WarehouseStorePage() {
                     <p className="text-muted-foreground">ID</p>
                     <p className="font-medium">{selectedMedication.id}</p>
                   </div>
-                  <div>
-                    <p className="text-muted-foreground">Generic Name</p>
-                    <p className="font-medium">{selectedMedication.generic_name || selectedMedication.generic?.name || "—"}</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground">Category</p>
-                    <p className="font-medium">{selectedMedication.category || "—"}</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground">Strength</p>
-                    <p className="font-medium">{selectedMedication.strength || "—"}</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground">Form</p>
-                    <p className="font-medium">{selectedMedication.form || "—"}</p>
-                  </div>
+                  {(selectedMedication.generic_name || selectedMedication.generic?.name) && (
+                    <div>
+                      <p className="text-muted-foreground">Generic Name</p>
+                      <p className="font-medium">{selectedMedication.generic_name || selectedMedication.generic?.name}</p>
+                    </div>
+                  )}
+                  {selectedMedication.category && (
+                    <div>
+                      <p className="text-muted-foreground">Category</p>
+                      <p className="font-medium">{selectedMedication.category}</p>
+                    </div>
+                  )}
+                  {selectedMedication.strength && (
+                    <div>
+                      <p className="text-muted-foreground">Strength</p>
+                      <p className="font-medium">{selectedMedication.strength}</p>
+                    </div>
+                  )}
+                  {selectedMedication.form && (
+                    <div>
+                      <p className="text-muted-foreground">Form</p>
+                      <p className="font-medium">{selectedMedication.form}</p>
+                    </div>
+                  )}
                   <div>
                     <p className="text-muted-foreground">Total Stock</p>
                     <p className="font-medium text-lg">{selectedMedication.storeQuantity}</p>
@@ -886,10 +893,12 @@ export default function WarehouseStorePage() {
 
                   <div className="bg-muted/50 rounded-lg p-4">
                     <h4 className="font-medium mb-2">Expiry Information</h4>
-                    <p className="text-sm">
-                      <span className="text-muted-foreground">Expiry Date:</span>{" "}
-                      <span className="font-medium">{getNearestExpiryDate(selectedMedication.batches) || "—"}</span>
-                    </p>
+                    {getNearestExpiryDate(selectedMedication.batches) ? (
+                      <p className="text-sm">
+                        <span className="text-muted-foreground">Expiry Date:</span>{" "}
+                        <span className="font-medium">{getNearestExpiryDate(selectedMedication.batches)}</span>
+                      </p>
+                    ) : null}
                   </div>
                 </div>
               </div>
@@ -980,7 +989,7 @@ export default function WarehouseStorePage() {
                 <div className="flex items-center gap-2 min-w-0">
                   <Hash className="h-5 w-5 text-muted-foreground" />
                   <span className="font-semibold truncate">
-                    {selectedHistoryBatch?.batch_number || "—"}
+                    {selectedHistoryBatch?.batch_number ?? ""}
                   </span>
                 </div>
                 {selectedHistoryBatch ? (
@@ -1017,7 +1026,7 @@ export default function WarehouseStorePage() {
                         const deltaUnits = Number(h.quantity_after || 0) - Number(h.quantity_before || 0);
                         const direction = deltaUnits >= 0 ? "Increase" : "Decrease";
                         const absUnits = Math.abs(deltaUnits);
-                        const dateLabel = h.created_at ? new Date(h.created_at).toLocaleString() : "—";
+                        const dateLabel = h.created_at ? new Date(h.created_at).toLocaleString() : "";
 
                         return (
                           <div key={h.id} className="pt-1 border-t border-border first:border-t-0">
@@ -1026,12 +1035,16 @@ export default function WarehouseStorePage() {
                                 <p className="font-medium">
                                   {direction} by {formatPackDisplay(absUnits, packSize)}
                                 </p>
-                                <p className="text-xs text-muted-foreground mt-1">
-                                  Reason: {h.adjustment_reason?.trim() ? h.adjustment_reason : "Not recorded"}
-                                </p>
-                                <p className="text-xs text-muted-foreground mt-1">
-                                  By: {h.created_by_name || "—"}
-                                </p>
+                                {h.adjustment_reason?.trim() ? (
+                                  <p className="text-xs text-muted-foreground mt-1">
+                                    Reason: {h.adjustment_reason}
+                                  </p>
+                                ) : null}
+                                {h.created_by_name ? (
+                                  <p className="text-xs text-muted-foreground mt-1">
+                                    By: {h.created_by_name}
+                                  </p>
+                                ) : null}
                                 {h.adjustment_notes ? (
                                   <p className="text-xs text-muted-foreground mt-1 break-words">
                                     Notes: {h.adjustment_notes}
@@ -1042,7 +1055,9 @@ export default function WarehouseStorePage() {
                                   {formatPackDisplay(Number(h.quantity_after || 0), packSize)}
                                 </p>
                               </div>
-                              <p className="text-xs text-muted-foreground whitespace-nowrap">{dateLabel}</p>
+                              {dateLabel ? (
+                                <p className="text-xs text-muted-foreground whitespace-nowrap">{dateLabel}</p>
+                              ) : null}
                             </div>
                           </div>
                         );

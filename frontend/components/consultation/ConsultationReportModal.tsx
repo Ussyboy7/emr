@@ -130,18 +130,23 @@ export function ConsultationReportModal({
                   <div className="space-y-1 text-sm">
                     <div><strong>Doctor:</strong> {session.doctor_name ?? ""}</div>
                     <div><strong>Clinic:</strong> {session.clinic_name ?? ""}</div>
-                    <div>
-                      <strong>Duration:</strong>{" "}
-                      {session.ended_at && session.started_at
-                        ? Math.round(
-                            (new Date(session.ended_at).getTime() - new Date(session.started_at).getTime()) / (1000 * 60)
-                          ) + " min"
-                        : session.started_at
+                    {(() => {
+                      const durationText =
+                        session.ended_at && session.started_at
                           ? Math.round(
-                              (Date.now() - new Date(session.started_at).getTime()) / (1000 * 60)
-                            ) + " min (ongoing)"
-                          : "—"}
-                    </div>
+                              (new Date(session.ended_at).getTime() - new Date(session.started_at).getTime()) / (1000 * 60)
+                            ) + " min"
+                          : session.started_at
+                            ? Math.round(
+                                (Date.now() - new Date(session.started_at).getTime()) / (1000 * 60)
+                              ) + " min (ongoing)"
+                            : "";
+                      return durationText ? (
+                        <div>
+                          <strong>Duration:</strong> {durationText}
+                        </div>
+                      ) : null;
+                    })()}
                     <div><strong>Room:</strong> {session.room_name ?? ""}</div>
                   </div>
                 </div>

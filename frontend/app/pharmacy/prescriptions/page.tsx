@@ -18,6 +18,7 @@ import { pharmacyService, type Prescription as ApiPrescription, type Prescriptio
 import { PHARMACY_LOCATIONS } from '@/lib/constants/pharmacy-locations';
 import { PatientAvatar } from "@/components/PatientAvatar";
 import { Icd10DiagnosesBlock } from '@/components/medical/Icd10DiagnosesBlock';
+import { joinDisplayParts } from '@/lib/utils/clinic-utils';
 import { 
   ClipboardList, Search, Eye, Clock, CheckCircle2, CheckCircle, Pill, Calendar,
   AlertTriangle, Package, User, Activity, Stethoscope,
@@ -1468,32 +1469,38 @@ export default function PrescriptionsPage() {
           </div>
 
           <div class="prescription-info">
-            <strong>Rx ID:</strong> ${prescription.id}<br>
-            <strong>Date:</strong> ${prescription.date} ${prescription.time}<br>
-            <strong>Doctor:</strong> ${prescription.doctor}<br>
-            <strong>Clinic:</strong> ${prescription.clinic || 'N/A'}
+            ${[
+              `<strong>Rx ID:</strong> ${prescription.id}`,
+              (prescription.date || prescription.time)
+                ? `<strong>Date:</strong> ${`${prescription.date || ''} ${prescription.time || ''}`.trim()}`
+                : '',
+              prescription.doctor ? `<strong>Doctor:</strong> ${prescription.doctor}` : '',
+              prescription.clinic ? `<strong>Clinic:</strong> ${prescription.clinic}` : '',
+            ].filter(Boolean).join('<br>')}
           </div>
 
           <div class="patient-info">
-            <strong>Patient:</strong> ${prescription.patient.name}<br>
-            <strong>Patient ID:</strong> ${prescription.patient.mrn}<br>
-            <strong>Diagnosis:</strong> ${prescription.specialInstructions || 'N/A'}
-            ${prescription.patient.allergies?.length > 0 ? `<br><strong>Allergies:</strong> ${prescription.patient.allergies.join(', ')}` : ''}
+            ${[
+              `<strong>Patient:</strong> ${prescription.patient.name}`,
+              prescription.patient.mrn ? `<strong>Patient ID:</strong> ${prescription.patient.mrn}` : '',
+              prescription.patient.allergies?.length > 0 ? `<strong>Allergies:</strong> ${prescription.patient.allergies.join(', ')}` : '',
+            ].filter(Boolean).join('<br>')}
           </div>
 
           <div class="medication-list">
             <strong>Medications:</strong>
-            ${transformedMeds.map(med => `
-              <div class="medication-item">
-                <strong>${med.name}</strong><br>
-                Dose: ${med.dosage}<br>
-                Quantity: ${med.quantity}<br>
-                Route: ${med.route}<br>
-                Frequency: ${med.frequency}<br>
-                Duration: ${med.duration}<br>
-                ${med.instructions ? `Instructions: ${med.instructions}` : ''}
-              </div>
-            `).join('')}
+            ${transformedMeds.map(med => {
+              const medLines = [
+                `<strong>${med.name}</strong>`,
+                med.dosage != null && String(med.dosage).trim() !== '' ? `Dose: ${med.dosage}` : '',
+                med.quantity != null && String(med.quantity).trim() !== '' ? `Quantity: ${med.quantity}` : '',
+                med.route != null && String(med.route).trim() !== '' ? `Route: ${med.route}` : '',
+                med.frequency != null && String(med.frequency).trim() !== '' ? `Frequency: ${med.frequency}` : '',
+                med.duration != null && String(med.duration).trim() !== '' ? `Duration: ${med.duration}` : '',
+                med.instructions ? `Instructions: ${med.instructions}` : '',
+              ].filter(Boolean).join('<br>');
+              return `<div class="medication-item">${medLines}</div>`;
+            }).join('')}
           </div>
 
           ${prescription.specialInstructions ? `
@@ -1834,19 +1841,34 @@ export default function PrescriptionsPage() {
 
                 {/* Patient Info */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 bg-muted/50 rounded-lg p-4 text-sm">
-                  <div><span className="text-muted-foreground">Patient ID:</span> <span className="font-medium">{(selectedPrescription as any).patient_details?.patient_id || selectedPrescription.patient}</span></div>
-                  <div><span className="text-muted-foreground">Age/Gender:</span> <span className="font-medium">{(selectedPrescription as any).patient_details?.age || 'Unknown'} / {(selectedPrescription as any).patient_details?.gender || 'Unknown'}</span></div>
-                  <div><span className="text-muted-foreground">Phone:</span> <span className="font-medium">{(selectedPrescription as any).patient_details?.phone || 'Not provided'}</span></div>
-                  <div><span className="text-muted-foreground">Doctor:</span> <span className="font-medium">{(selectedPrescription as any).doctor_name || selectedPrescription.doctor}</span></div>
-                  <div><span className="text-muted-foreground">Clinic:</span> <span className="font-medium">{(selectedPrescription as any).visit_details?.clinic || selectedPrescription.clinic || 'Not specified'}</span></div>
-                  <div>
-                    <span className="text-muted-foreground">Date:</span>{' '}
-                    <span className="font-medium">
-                      {selectedPrescription.prescribed_at
-                        ? `${new Date(selectedPrescription.prescribed_at).toLocaleDateString()} ${new Date(selectedPrescription.prescribed_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`
-                        : `${selectedPrescription.date || ''} ${selectedPrescription.time || ''}`}
-                    </span>
-                  </div>
+                  {((selectedPrescription as any).patient_details?.patient_id || selectedPrescription.patient) && (
+                    <div><span className="text-muted-foreground">Patient ID:</span> <span className="font-medium">{(selectedPrescription as any).patient_details?.patient_id || selectedPrescription.patient}</span></div>
+                  )}
+                  {joinDisplayParts([
+                    (selectedPrescription as any).patient_details?.age,
+                    (selectedPrescription as any).patient_details?.gender,
+                  ]) && (
+                    <div><span className="text-muted-foreground">Age/Gender:</span> <span className="font-medium">{joinDisplayParts([(selectedPrescription as any).patient_details?.age, (selectedPrescription as any).patient_details?.gender])}</span></div>
+                  )}
+                  {(selectedPrescription as any).patient_details?.phone && (
+                    <div><span className="text-muted-foreground">Phone:</span> <span className="font-medium">{(selectedPrescription as any).patient_details?.phone}</span></div>
+                  )}
+                  {((selectedPrescription as any).doctor_name || selectedPrescription.doctor) && (
+                    <div><span className="text-muted-foreground">Doctor:</span> <span className="font-medium">{(selectedPrescription as any).doctor_name || selectedPrescription.doctor}</span></div>
+                  )}
+                  {((selectedPrescription as any).visit_details?.clinic || selectedPrescription.clinic) && (
+                    <div><span className="text-muted-foreground">Clinic:</span> <span className="font-medium">{(selectedPrescription as any).visit_details?.clinic || selectedPrescription.clinic}</span></div>
+                  )}
+                  {(selectedPrescription.prescribed_at || selectedPrescription.date || selectedPrescription.time) && (
+                    <div>
+                      <span className="text-muted-foreground">Date:</span>{' '}
+                      <span className="font-medium">
+                        {selectedPrescription.prescribed_at
+                          ? `${new Date(selectedPrescription.prescribed_at).toLocaleDateString()} ${new Date(selectedPrescription.prescribed_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`
+                          : `${selectedPrescription.date || ''} ${selectedPrescription.time || ''}`.trim()}
+                      </span>
+                    </div>
+                  )}
                 </div>
 
                 {/* Allergies */}
@@ -1904,7 +1926,7 @@ export default function PrescriptionsPage() {
                           <div className="flex items-start justify-between mb-2">
                             <div>
                               <h5 className="font-medium flex items-center gap-2">
-                                {med.name || med.medication_name || 'Unknown Medication'}
+                                {med.name || med.medication_name || ''}
                                 {(med as any).prescribing_record_only && (
                                   <Badge variant="outline" className="text-xs font-normal border-slate-400 text-slate-700">
                                     Original order (superseded — not dispensed)
@@ -1912,18 +1934,24 @@ export default function PrescriptionsPage() {
                                 )}
                                 {med.substitution && <span className="text-amber-600 text-sm">🔄 Substituted</span>}
                               </h5>
-                              <p className="text-sm text-muted-foreground">{med.route || 'Oral'} • {med.frequency || 'As needed'} • {med.duration || 'As prescribed'}</p>
+                              {joinDisplayParts([med.route, med.frequency, med.duration]) ? (
+                                <p className="text-sm text-muted-foreground">{joinDisplayParts([med.route, med.frequency, med.duration])}</p>
+                              ) : null}
                               {med.substitution && (
                                 <p className="text-xs text-amber-700 mt-1">Originally: {med.originalMedication}</p>
                               )}
                             </div>
-                          <Badge variant="outline" className={getMedicationStatusColor(med.status || 'Unknown')}>
-                            {med.status || 'Unknown'}
+                          <Badge variant="outline" className={getMedicationStatusColor(med.status || '')}>
+                            {med.status || ''}
                           </Badge>
                         </div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-                          <div><span className="text-muted-foreground">Dose:</span> <span className="font-medium">{med.dosage || 'As prescribed'}</span></div>
-                          <div><span className="text-muted-foreground">Prescribed:</span> <span className="font-medium">{med.quantity || 'N/A'} {med.unit || ''}</span></div>
+                          {med.dosage != null && String(med.dosage).trim() !== '' && (
+                            <div><span className="text-muted-foreground">Dose:</span> <span className="font-medium">{med.dosage}</span></div>
+                          )}
+                          {(med.quantity != null && String(med.quantity).trim() !== '') || (med.unit != null && String(med.unit).trim() !== '') ? (
+                            <div><span className="text-muted-foreground">Prescribed:</span> <span className="font-medium">{joinDisplayParts([med.quantity, med.unit])}</span></div>
+                          ) : null}
                           <div>
                             <span className="text-muted-foreground">Dispensed:</span>{' '}
                             <span className="font-medium text-blue-600">
@@ -1999,7 +2027,21 @@ export default function PrescriptionsPage() {
                   <div className="flex items-center justify-between">
                     <div>
                       <span className="font-medium">{selectedPrescription.patient_details?.name ?? ''}</span>
-                      <span className="text-muted-foreground"> • ID: {selectedPrescription.patient_details?.patient_id || 'N/A'} • {selectedPrescription.patient_details?.age || 'N/A'}y {selectedPrescription.patient_details?.gender || 'N/A'}</span>
+                      {(() => {
+                        const sub = joinDisplayParts([
+                          selectedPrescription.patient_details?.patient_id
+                            ? `ID: ${selectedPrescription.patient_details.patient_id}`
+                            : '',
+                          selectedPrescription.patient_details?.age != null &&
+                          selectedPrescription.patient_details.age !== ''
+                            ? `${selectedPrescription.patient_details.age}y`
+                            : '',
+                          selectedPrescription.patient_details?.gender,
+                        ]);
+                        return sub ? (
+                          <span className="text-muted-foreground"> • {sub}</span>
+                        ) : null;
+                      })()}
                     </div>
                     <Badge variant="outline" className={getPriorityColor(selectedPrescription.priority)}>
                       {selectedPrescription.priority}
@@ -2021,10 +2063,25 @@ export default function PrescriptionsPage() {
 
                 {/* Prescription Details */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 bg-muted/30 rounded-lg p-4 text-sm">
-                  <div><span className="text-muted-foreground">Patient ID:</span> <span className="font-medium">{selectedPrescription.patient_details?.patient_id || 'N/A'}</span></div>
-                  <div><span className="text-muted-foreground">Doctor:</span> <span className="font-medium">{selectedPrescription.doctor_name || 'N/A'}</span></div>
-                  <div><span className="text-muted-foreground">Clinic:</span> <span className="font-medium">{selectedPrescription.visit_details?.clinic || 'Not specified'}</span></div>
-                  <div><span className="text-muted-foreground">Date:</span> <span className="font-medium">{selectedPrescription.prescribed_at ? new Date(selectedPrescription.prescribed_at).toLocaleDateString() : selectedPrescription.date || 'N/A'}</span></div>
+                  {selectedPrescription.patient_details?.patient_id && (
+                    <div><span className="text-muted-foreground">Patient ID:</span> <span className="font-medium">{selectedPrescription.patient_details.patient_id}</span></div>
+                  )}
+                  {selectedPrescription.doctor_name && (
+                    <div><span className="text-muted-foreground">Doctor:</span> <span className="font-medium">{selectedPrescription.doctor_name}</span></div>
+                  )}
+                  {selectedPrescription.visit_details?.clinic && (
+                    <div><span className="text-muted-foreground">Clinic:</span> <span className="font-medium">{selectedPrescription.visit_details.clinic}</span></div>
+                  )}
+                  {(selectedPrescription.prescribed_at || selectedPrescription.date) && (
+                    <div>
+                      <span className="text-muted-foreground">Date:</span>{' '}
+                      <span className="font-medium">
+                        {selectedPrescription.prescribed_at
+                          ? new Date(selectedPrescription.prescribed_at).toLocaleDateString()
+                          : selectedPrescription.date}
+                      </span>
+                    </div>
+                  )}
                 </div>
 
                 {/* Dispensing History */}
@@ -2416,7 +2473,12 @@ export default function PrescriptionsPage() {
                                       )}
                                       <div className="text-[10px] text-muted-foreground mt-1 space-y-1">
                                         <div>
-                                          Prescribed: {med.quantity} • Available: {Array.isArray(batches) ? batches.reduce((total, b) => total + Number(b.quantity || 0), 0) : '—'}
+                                          {joinDisplayParts([
+                                            med.quantity != null && med.quantity !== '' ? `Prescribed: ${med.quantity}` : '',
+                                            Array.isArray(batches)
+                                              ? `Available: ${batches.reduce((total, b) => total + Number(b.quantity || 0), 0)}`
+                                              : '',
+                                          ])}
                                         </div>
                                         {usesPackDispensing && (
                                           <div>
@@ -2469,11 +2531,7 @@ export default function PrescriptionsPage() {
                                           ? batches.reduce((total, b) => total + Number(b.quantity || 0), 0)
                                           : null;
                                         if (stock === null) {
-                                          return (
-                                            <div className="mt-1 p-2 rounded text-center font-medium bg-muted text-muted-foreground">
-                                              —
-                                            </div>
-                                          );
+                                          return <div className="mt-1 min-h-[2.25rem] rounded bg-muted/50" aria-hidden />;
                                         }
                                         return (
                                           <div className={`mt-1 p-2 rounded text-center font-medium ${stock < 50 ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'}`}>
@@ -2724,7 +2782,9 @@ export default function PrescriptionsPage() {
                               {sub.type !== 'generic' && (
                                 <div className="flex items-center gap-3 text-xs text-muted-foreground mt-1">
                                   <span>Stock: <strong className={(sub.stock || 0) < 50 ? 'text-red-600' : 'text-emerald-600'}>{Math.round(sub.stock || 0).toLocaleString()}</strong></span>
-                                  <span>Exp: <strong className={sub.isNearExpiry ? 'text-amber-600' : ''}>{sub.expiryDate || 'N/A'}</strong></span>
+                                  {sub.expiryDate ? (
+                                    <span>Exp: <strong className={sub.isNearExpiry ? 'text-amber-600' : ''}>{sub.expiryDate}</strong></span>
+                                  ) : null}
                                 </div>
                               )}
                             </div>

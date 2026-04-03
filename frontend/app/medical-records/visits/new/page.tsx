@@ -15,7 +15,7 @@ import { Badge } from '@/components/ui/badge';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
-import { patientService, visitService } from '@/lib/services';
+import { patientService, visitService, formatPatientGenderLabel } from '@/lib/services';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { 
@@ -86,7 +86,7 @@ function NewVisitPageContent() {
     numericId: p.id,
     name: p.full_name ?? '',
     age: p.age || 0,
-    gender: p.gender === 'male' ? 'Male' : 'Female',
+    gender: formatPatientGenderLabel(p.gender),
     bloodGroup: p.blood_group || '',
     allergies: p.allergies ? String(p.allergies).split(/[,\n]/).map((a: string) => a.trim()).filter(Boolean) : [],
   }), []);
@@ -220,8 +220,8 @@ function NewVisitPageContent() {
       const visitData = {
         patient: typeof patientId === 'string' ? parseInt(patientId, 10) : patientId,
         visit_type: formData.visitType,
-        clinic: normalizeClinicName(primaryClinic), // Primary clinic (backward compatibility)
-        clinics: formData.clinics.map(c => normalizeClinicName(c)), // All clinics
+        clinic: normalizeClinicName(primaryClinic) || primaryClinic.trim(),
+        clinics: formData.clinics.map((c) => normalizeClinicName(c)).filter((x): x is string => Boolean(x)),
         location: formData.location || '',
         date: formData.visitDate,
         // Ensure time is in HH:MM:SS format for Django
@@ -608,29 +608,39 @@ function NewVisitPageContent() {
                     </div>
                   </div>
                   <Separator />
-                  <div className="flex items-start justify-between">
-                    <span className="text-muted-foreground">Type</span>
-                    <span className="font-medium capitalize">{selectedVisitType?.label || '—'}</span>
-                  </div>
-                  <div className="flex items-start justify-between">
-                    <span className="text-muted-foreground">Clinic</span>
-                    <span className="font-medium text-right max-w-[120px] truncate">
-                      {formData.clinics.length > 0 ? formData.clinics.join(', ') : '—'}
-                    </span>
-                  </div>
-                  <div className="flex items-start justify-between">
-                    <span className="text-muted-foreground">Location</span>
-                    <span className="font-medium text-right max-w-[120px] truncate">{formData.location || '—'}</span>
-                  </div>
+                  {selectedVisitType?.label && (
+                    <div className="flex items-start justify-between">
+                      <span className="text-muted-foreground">Type</span>
+                      <span className="font-medium capitalize">{selectedVisitType.label}</span>
+                    </div>
+                  )}
+                  {formData.clinics.length > 0 && (
+                    <div className="flex items-start justify-between">
+                      <span className="text-muted-foreground">Clinic</span>
+                      <span className="font-medium text-right max-w-[120px] truncate">
+                        {formData.clinics.join(', ')}
+                      </span>
+                    </div>
+                  )}
+                  {formData.location?.trim() && (
+                    <div className="flex items-start justify-between">
+                      <span className="text-muted-foreground">Location</span>
+                      <span className="font-medium text-right max-w-[120px] truncate">{formData.location}</span>
+                    </div>
+                  )}
                   <Separator />
-                  <div className="flex items-start justify-between">
-                    <span className="text-muted-foreground">Date</span>
-                    <span className="font-medium">{formData.visitDate || '—'}</span>
-                  </div>
-                  <div className="flex items-start justify-between">
-                    <span className="text-muted-foreground">Time</span>
-                    <span className="font-medium">{formData.visitTime || '—'}</span>
-                  </div>
+                  {formData.visitDate && (
+                    <div className="flex items-start justify-between">
+                      <span className="text-muted-foreground">Date</span>
+                      <span className="font-medium">{formData.visitDate}</span>
+                    </div>
+                  )}
+                  {formData.visitTime && (
+                    <div className="flex items-start justify-between">
+                      <span className="text-muted-foreground">Time</span>
+                      <span className="font-medium">{formData.visitTime}</span>
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>

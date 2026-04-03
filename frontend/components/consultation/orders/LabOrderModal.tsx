@@ -12,9 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Loader2, Plus, TestTube, X } from "lucide-react";
 import { toast } from "sonner";
 import { labService } from "@/lib/services";
-
-/** Reserved catalog code for “not listed” tests — describe the real test in clinical notes. */
-export const LAB_OTHER_TEMPLATE_CODE = "OTHER";
+import { LAB_OTHER_TEMPLATE_CODE } from "@/lib/constants/order-template-codes";
 
 export type LabTemplateLike = {
   id: number;

@@ -117,9 +117,41 @@ export interface LabAnalyticsSummary {
   npa_staff_linked_vs_non_npa: { npa_staff_linked: number; non_npa: number };
   tests_by_status: Record<string, number>;
   tests_by_processing_method: Record<string, number>;
+  tests_processing_summary?: {
+    in_house: number;
+    outsourced: number;
+    unassigned: number;
+    total: number;
+  };
   by_day: Array<{ date: string; tests: number; orders: number }>;
   top_tests: Array<{ code: string; name: string; count: number }>;
   tests_by_template_category: Record<string, number>;
+  tests_by_category_with_investigations?: Record<
+    string,
+    {
+      total: number;
+      processing: { in_house: number; outsourced: number; unassigned: number };
+      investigations: Array<{
+        code: string;
+        name: string;
+        count: number;
+        processing: { in_house: number; outsourced: number; unassigned: number };
+      }>;
+    }
+  >;
+  major_lab_classes?: Record<
+    string,
+    {
+      total: number;
+      processing: { in_house: number; outsourced: number; unassigned: number };
+      investigations: Array<{
+        code: string;
+        name: string;
+        count: number;
+        processing: { in_house: number; outsourced: number; unassigned: number };
+      }>;
+    }
+  >;
 }
 
 class LabService {
@@ -132,6 +164,8 @@ class LabService {
     priority?: string;
     status?: string;
     search?: string;
+    /** Filter orders that have at least one test with this processing method */
+    processing_method?: 'in_house' | 'outsourced';
     page?: number;
     page_size?: number;
     consultation_session?: number;
@@ -347,6 +381,9 @@ class LabService {
     patient?: string;
     overall_status?: string;
     priority?: string;
+    search?: string;
+    gender?: string;
+    processing_method?: 'in_house' | 'outsourced';
     page?: number;
     page_size?: number;
   }): Promise<{ results: LabResult[]; count: number }> {
@@ -400,6 +437,7 @@ class LabService {
     clinic?: string;
     gender?: string;
     search?: string;
+    processing_method?: 'in_house' | 'outsourced';
     date?: string;
     start_date?: string;
     end_date?: string;
@@ -422,6 +460,7 @@ class LabService {
     clinic?: string;
     gender?: string;
     search?: string;
+    processing_method?: 'in_house' | 'outsourced';
     date?: string;
     start_date?: string;
     end_date?: string;
@@ -506,4 +545,3 @@ class LabService {
 
 export const labService = new LabService();
 export default labService;
-

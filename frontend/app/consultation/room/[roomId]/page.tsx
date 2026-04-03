@@ -46,6 +46,12 @@ import { apiFetch } from '@/lib/api-client';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { getPriorityLabel, getPriorityColor } from '@/lib/utils/priority';
+import {
+  getVisitServiceClinicsDisplay,
+  getVisitServiceClinicsList,
+  normalizeClinicName,
+  joinDisplayParts,
+} from '@/lib/utils/clinic-utils';
 import { PatientAvatar } from '@/components/PatientAvatar';
 import { VitalsDetailModal } from '@/components/VitalsDetailModal';
 import { useCurrentUser } from '@/hooks/use-current-user';
@@ -64,8 +70,10 @@ import {
 import { getOrganizationHeader, getOrganizationServicesHeader } from '@/lib/constants/organization';
 import { LARGE_PAGE_SIZE } from '@/lib/constants/ui';
 import { safeAsync, logError } from '@/lib/utils/error-handling';
-import { LAB_OTHER_TEMPLATE_CODE } from '@/components/consultation/orders/LabOrderModal';
-import { RAD_OTHER_TEMPLATE_CODE } from '@/components/consultation/orders/RadiologyOrderModal';
+import {
+  LAB_OTHER_TEMPLATE_CODE,
+  RAD_OTHER_TEMPLATE_CODE,
+} from '@/lib/constants/order-template-codes';
 import {
   getPresentingComplaintOptions,
   type PresentingComplaintCategory,
@@ -370,6 +378,8 @@ interface Patient {
   // Multi-clinic support
   clinics?: string[];
   completedClinics?: string[];
+  /** Primary visit.clinic from queue API */
+  visitClinic?: string;
 }
 
 interface ConsultationRoom {
@@ -1018,8 +1028,11 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     return consultations.map((session: any) => ({
       id: session.id?.toString() || '',
       date: formatDate(session.started_at),
-      doctor: session.doctor_name || currentUser?.name || 'Unknown Doctor',
-      clinic: session.clinic_name || (room as any)?.clinic_name || 'GOPD',
+      doctor: session.doctor_name || currentUser?.name || '',
+      clinic: getVisitServiceClinicsDisplay({
+        clinic: session.clinic_name,
+        clinics: session.visit_clinics,
+      }),
       sessionId: session.session_id || '',
       status: session.status || 'completed',
       started_at: session.started_at,
@@ -1449,6 +1462,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           // Multi-clinic support
           clinics: item.visit_clinics || [],
           completedClinics: item.visit_completed_clinics || [],
+          visitClinic: item.visit_clinic || '',
         };
       });
       
@@ -1541,6 +1555,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
             // Multi-clinic support
             clinics: item.visit_clinics || [],
             completedClinics: item.visit_completed_clinics || [],
+            visitClinic: item.visit_clinic || '',
           };
         });
         
@@ -1556,7 +1571,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           currentPatient: validPatients.length > 0 ? validPatients[0].name : undefined,
           startTime: undefined,
           doctor: (roomData as any).assigned_doctor || undefined,
-          specialtyFocus: roomData.specialty || 'General Practice',
+          specialtyFocus: roomData.specialty || '',
           totalConsultationsToday: 0,
           averageConsultationTime: 0,
           queue: sortedQueue.map((item: any, index: number) => ({
@@ -2485,10 +2500,13 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       date: freshSession.started_at ? new Date(freshSession.started_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
       time: freshSession.started_at ? `${formatTime(freshSession.started_at)} - ${freshSession.ended_at ? formatTime(freshSession.ended_at) : formatTime(new Date().toISOString())}` : '',
       duration: `${Math.round((Number((freshSession as any).active_duration_seconds ?? 0) || 0) / 60) || sessionDuration} min`,
-      clinic: 'GOPD', // This would come from context
-      room: freshSession.room_name || room?.name || 'Unknown',
-      doctor: freshSession.doctor_name || 'Unknown Doctor',
-      doctorSpecialty: room?.specialtyFocus || 'General Practice',
+      clinic: getVisitServiceClinicsDisplay({
+        clinic: (freshSession as any).clinic_name,
+        clinics: (freshSession as any).visit_clinics,
+      }),
+      room: freshSession.room_name || room?.name || '',
+      doctor: freshSession.doctor_name || '',
+      doctorSpecialty: room?.specialtyFocus || '',
       patient: {
         name: currentPatient.name,
         patientId: currentPatient.patientId,
@@ -2519,10 +2537,15 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         date: new Date().toISOString().split('T')[0],
         time: sessionStartTime ? `${formatTime(sessionStartTime.toISOString())} - ${formatTime(new Date().toISOString())}` : '',
         duration: `${sessionDuration} min`,
-        clinic: 'GOPD',
-        room: room?.name || 'Unknown',
-        doctor: currentUser?.name || 'Unknown Doctor',
-        doctorSpecialty: room?.specialtyFocus || 'General Practice',
+        clinic: currentPatient
+          ? getVisitServiceClinicsDisplay({
+              clinic: currentPatient.visitClinic,
+              clinics: currentPatient.clinics,
+            })
+          : '',
+        room: room?.name || '',
+        doctor: currentUser?.name || '',
+        doctorSpecialty: room?.specialtyFocus || '',
         patient: {
           name: currentPatient.name,
           patientId: currentPatient.patientId,
@@ -2948,22 +2971,25 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         <div class="section">
           <h3>Patient Information</h3>
           <p><strong>Name:</strong> ${session.patient_name ?? ''}</p>
-          <p><strong>Patient ID:</strong> ${session.patient_id || 'N/A'}</p>
-          <p><strong>Age:</strong> ${session.patient_age || 'N/A'} years</p>
-          <p><strong>Gender:</strong> ${session.patient_gender || 'N/A'}</p>
+          ${session.patient_id ? `<p><strong>Patient ID:</strong> ${session.patient_id}</p>` : ''}
+          ${session.patient_age != null && session.patient_age !== '' ? `<p><strong>Age:</strong> ${session.patient_age} years</p>` : ''}
+          ${session.patient_gender ? `<p><strong>Gender:</strong> ${session.patient_gender}</p>` : ''}
         </div>
 
         <div class="section">
           <h3>Consultation Details</h3>
-          <p><strong>Doctor:</strong> ${session.doctor_name || 'Unknown'}</p>
-          <p><strong>Clinic:</strong> ${session.clinic_name || 'Unknown'}</p>
-          <p><strong>Room:</strong> ${session.room_name || 'Unknown'}</p>
+          ${session.doctor_name ? `<p><strong>Doctor:</strong> ${session.doctor_name}</p>` : ''}
+          ${session.clinic_name ? `<p><strong>Clinic:</strong> ${session.clinic_name}</p>` : ''}
+          ${session.room_name ? `<p><strong>Room:</strong> ${session.room_name}</p>` : ''}
           <p><strong>Date & Time:</strong> ${formatDate(session.started_at)} ${formatTime(session.started_at)}</p>
-          <p><strong>Duration:</strong> ${session.ended_at && session.started_at
-            ? Math.round((new Date(session.ended_at).getTime() - new Date(session.started_at).getTime()) / (1000 * 60)) + ' minutes'
-            : session.started_at
-              ? Math.round((Date.now() - new Date(session.started_at).getTime()) / (1000 * 60)) + ' minutes (ongoing)'
-              : '—'}</p>
+          ${(() => {
+            const dur = session.ended_at && session.started_at
+              ? Math.round((new Date(session.ended_at).getTime() - new Date(session.started_at).getTime()) / (1000 * 60)) + ' minutes'
+              : session.started_at
+                ? Math.round((Date.now() - new Date(session.started_at).getTime()) / (1000 * 60)) + ' minutes (ongoing)'
+                : '';
+            return dur ? `<p><strong>Duration:</strong> ${dur}</p>` : '';
+          })()}
         </div>
 
         ${Object.keys(vitalsObj).length > 0 ? `
@@ -3272,20 +3298,30 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         const reasonForAppt = trimmedReason || 'Follow-up visit';
         try {
           const patientId = typeof currentPatient.id === 'string' ? parseInt(currentPatient.id, 10) : currentPatient.id;
-          await appointmentService.createAppointment({
-            patient: patientId,
-            appointment_type: 'follow_up',
-            appointment_date: followUpDate,
-            appointment_time: '09:00:00',
-            duration_minutes: 30,
-            reason: reasonForAppt,
-            notes: `Follow-up from consultation session ${sessionId}. Reason: ${reasonForAppt}`,
-            clinics: ['GOPD'],
-          });
-          debugConsultationRoom('Follow-up appointment created');
-          toast.success('Follow-up appointment saved', {
-            description: `${reasonForAppt} — ${followUpDate}. View it under Medical Records → Appointments.`,
-          });
+          const followUpClinics = getVisitServiceClinicsList({
+            clinic: currentPatient.visitClinic,
+            clinics: currentPatient.clinics,
+          })
+            .map((c) => normalizeClinicName(c))
+            .filter((c): c is string => Boolean(c));
+          if (followUpClinics.length === 0) {
+            toast.warning('Follow-up appointment was not saved (no service clinics on this visit).');
+          } else {
+            await appointmentService.createAppointment({
+              patient: patientId,
+              appointment_type: 'follow_up',
+              appointment_date: followUpDate,
+              appointment_time: '09:00:00',
+              duration_minutes: 30,
+              reason: reasonForAppt,
+              notes: `Follow-up from consultation session ${sessionId}. Reason: ${reasonForAppt}`,
+              clinics: followUpClinics,
+            });
+            debugConsultationRoom('Follow-up appointment created');
+            toast.success('Follow-up appointment saved', {
+              description: `${reasonForAppt} — ${followUpDate}. View it under Medical Records → Appointments.`,
+            });
+          }
         } catch (apptError: any) {
           const msg = apptError?.message || 'Could not create follow-up appointment';
           console.warn('Could not create follow-up appointment:', msg);
@@ -4798,7 +4834,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                 {room.name}
               </h1>
               <p className="text-muted-foreground mt-1">
-                Consultation Room • {room.specialtyFocus || "General Practice"} • {room.doctor || "No doctor assigned"}
+                {joinDisplayParts(['Consultation Room', room.specialtyFocus, room.doctor])}
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -6563,10 +6599,10 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                 <tbody className="divide-y">
                                   {paginatedLabs.map((lab: LabTestResult) => (
                                     <tr key={lab.id} className="hover:bg-muted/30">
-                                      <td className="px-4 py-3 text-muted-foreground">{lab.date || lab.completed_at || '—'}</td>
-                                      <td className="px-4 py-3 font-medium">{lab.test_name || 'Unknown Test'}</td>
-                                      <td className="px-4 py-3 text-muted-foreground">{lab.performedBy || '—'}</td>
-                                      <td className="px-4 py-3 text-muted-foreground">{lab.verifiedBy || '—'}</td>
+                                      <td className="px-4 py-3 text-muted-foreground">{lab.date || lab.completed_at || ''}</td>
+                                      <td className="px-4 py-3 font-medium">{lab.test_name || ''}</td>
+                                      <td className="px-4 py-3 text-muted-foreground">{lab.performedBy || ''}</td>
+                                      <td className="px-4 py-3 text-muted-foreground">{lab.verifiedBy || ''}</td>
                                       <td className="px-4 py-3 text-center">
                                         <Badge className={lab.status === 'Normal' ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}>
                                           {lab.status}
@@ -6697,8 +6733,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                     const reportedBy =
                                       (sd?.reported_by_name as string) ||
                                       (sd?.verified_by_name as string) ||
-                                      '—';
-                                    const verifiedBy = (sd?.verified_by_name as string) || '—';
+                                      '';
+                                    const verifiedBy = (sd?.verified_by_name as string) || '';
                                     return (
                                     <tr key={img.id} className="hover:bg-muted/30">
                                       <td className="px-4 py-3 text-muted-foreground">{formatDate(img.created_at)}</td>
@@ -9653,23 +9689,34 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                     <div>
                       <h4 className="text-sm font-semibold text-muted-foreground mb-2">CONSULTATION DETAILS</h4>
                       <div className="space-y-1 text-sm">
-                        <div><strong>Doctor:</strong> {selectedSession.doctor_name || 'Unknown'}</div>
-                        <div><strong>Clinic:</strong> {selectedSession.clinic_name || 'Unknown Clinic'}</div>
-                        <div>
-                          <strong>Duration:</strong>{' '}
-                          {selectedSession.ended_at && selectedSession.started_at
-                            ? Math.round(
-                                (new Date(selectedSession.ended_at).getTime() -
-                                  new Date(selectedSession.started_at).getTime()) /
-                                  (1000 * 60)
-                              ) + ' min'
-                            : selectedSession.started_at
+                        {selectedSession.doctor_name?.trim() && (
+                          <div><strong>Doctor:</strong> {selectedSession.doctor_name}</div>
+                        )}
+                        {selectedSession.clinic_name?.trim() && (
+                          <div><strong>Clinic:</strong> {selectedSession.clinic_name}</div>
+                        )}
+                        {(() => {
+                          const durationText =
+                            selectedSession.ended_at && selectedSession.started_at
                               ? Math.round(
-                                  (Date.now() - new Date(selectedSession.started_at).getTime()) / (1000 * 60)
-                                ) + ' min (ongoing)'
-                              : '—'}
-                        </div>
-                        <div><strong>Room:</strong> {selectedSession.room_name || 'Unknown Room'}</div>
+                                  (new Date(selectedSession.ended_at).getTime() -
+                                    new Date(selectedSession.started_at).getTime()) /
+                                    (1000 * 60)
+                                ) + ' min'
+                              : selectedSession.started_at
+                                ? Math.round(
+                                    (Date.now() - new Date(selectedSession.started_at).getTime()) / (1000 * 60)
+                                  ) + ' min (ongoing)'
+                                : '';
+                          return durationText ? (
+                            <div>
+                              <strong>Duration:</strong> {durationText}
+                            </div>
+                          ) : null;
+                        })()}
+                        {selectedSession.room_name?.trim() && (
+                          <div><strong>Room:</strong> {selectedSession.room_name}</div>
+                        )}
                       </div>
                     </div>
                   </div>

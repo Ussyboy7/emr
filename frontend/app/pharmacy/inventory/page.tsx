@@ -679,9 +679,10 @@ export default function InventoryPage() {
                     const daysUntilExpiry = getDaysUntilExpiry(batch.expiryDate);
                     const isExpired = daysUntilExpiry < 0;
                     const isExpiringSoon = daysUntilExpiry >= 0 && daysUntilExpiry <= EXPIRY_WARNING_DAYS;
-                    const sourceLabel = batch.sourceFromCentralStore?.from_location || batch.supplier || 'N/A';
-                    const requestId = batch.sourceFromCentralStore?.request_id || '—';
-                    const issuedDate = batch.sourceFromCentralStore?.issued_at?.split('T')[0] || '—';
+                    const sourceLabel =
+                      batch.sourceFromCentralStore?.from_location || batch.supplier || '';
+                    const requestId = batch.sourceFromCentralStore?.request_id || '';
+                    const issuedDate = batch.sourceFromCentralStore?.issued_at?.split('T')[0] || '';
                     
                     return (
                       <Card key={batch.id} className={`border-l-4 ${
@@ -711,21 +712,25 @@ export default function InventoryPage() {
                               <span className="text-muted-foreground">Received:</span>{' '}
                               <span className="font-medium">{batch.receivedDate}</span>
                             </div>
-                            <div>
-                              <span className="text-muted-foreground">Source:</span>{' '}
-                              <span className="font-medium">{sourceLabel}</span>
-                            </div>
-                            <div>
-                              <span className="text-muted-foreground">Request:</span>{' '}
-                              <span className="font-medium">{requestId}</span>
-                            </div>
+                            {sourceLabel ? (
+                              <div>
+                                <span className="text-muted-foreground">Source:</span>{' '}
+                                <span className="font-medium">{sourceLabel}</span>
+                              </div>
+                            ) : null}
+                            {requestId ? (
+                              <div>
+                                <span className="text-muted-foreground">Request:</span>{' '}
+                                <span className="font-medium">{requestId}</span>
+                              </div>
+                            ) : null}
                           </div>
-                          {batch.sourceFromCentralStore && (
+                          {batch.sourceFromCentralStore && issuedDate ? (
                             <div className="mt-2 text-xs">
                               <span className="text-muted-foreground">Issued:</span>{' '}
                               <span className="font-medium">{issuedDate}</span>
                             </div>
-                          )}
+                          ) : null}
                         </CardContent>
                       </Card>
                     );

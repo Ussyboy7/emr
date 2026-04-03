@@ -45,9 +45,9 @@ export function Icd10DiagnosesBlock({ diagnoses, className = '', compact }: Icd1
           <tbody>
             {rows.map((d, i) => (
               <tr key={`${d.code}-${i}`} className="border-t border-red-200/60 dark:border-red-900/30">
-                <td className={`${cell} font-mono text-xs text-red-900 dark:text-red-100`}>{d.code || '—'}</td>
+                <td className={`${cell} font-mono text-xs text-red-900 dark:text-red-100`}>{d.code || ''}</td>
                 <td className={`${cell} text-red-950 dark:text-red-50`}>
-                  <div className="font-medium">{d.name || '—'}</div>
+                  <div className="font-medium">{d.name || ''}</div>
                   {d.notes?.trim() ? (
                     <div className="text-xs text-muted-foreground mt-0.5">{d.notes}</div>
                   ) : null}
