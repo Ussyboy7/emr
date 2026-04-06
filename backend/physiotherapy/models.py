@@ -59,6 +59,21 @@ class PhysioOrder(models.Model):
     special_instructions = models.TextField(blank=True)
     priority = models.CharField(max_length=20, choices=PRIORITY_CHOICES, default='routine')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+
+    REFERRAL_SOURCE_CHOICES = [
+        ('unspecified', 'Unspecified'),
+        ('nursing', 'Nursing'),
+        ('doctor', 'Doctor / clinic'),
+        ('self', 'Self / walk-in'),
+        ('other', 'Other'),
+    ]
+    referral_source = models.CharField(
+        max_length=20,
+        choices=REFERRAL_SOURCE_CHOICES,
+        default='unspecified',
+        db_index=True,
+    )
+
     ordered_at = models.DateTimeField(auto_now_add=True)
     scheduled_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)

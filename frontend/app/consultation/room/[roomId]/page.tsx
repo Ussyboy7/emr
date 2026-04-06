@@ -4709,7 +4709,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           treatment_goal: order.treatmentGoal,
           special_instructions: order.specialInstructions || undefined,
           priority: order.priority,
-          consultation_session: sessionId
+          consultation_session: sessionId,
+          referral_source: 'doctor',
         } as any);
       }
 

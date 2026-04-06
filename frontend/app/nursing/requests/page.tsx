@@ -21,6 +21,41 @@ import { Send, Search, Plus, CheckCircle2, Clock, Loader2, Eye, HelpCircle, Pack
 const MEDICATION_SEARCH_LIMIT = 20;
 const MAX_QUANTITY = 100000;
 
+type CatalogTab = "all" | "iv_fluids" | "injectables" | "wound" | "consumables";
+
+const IV_FLUID_CATEGORIES = new Set([
+  "IVFluids",
+  "Electrolytes",
+  "ParenteralNutrition",
+  "PlasmaSubstitutes",
+  "Dialysis",
+  "PeritonealDialysis",
+]);
+const WOUND_CATEGORIES = new Set(["WoundCare", "Antiseptics", "Dermatological"]);
+
+function medicationMatchesCatalog(m: Medication, tab: CatalogTab): boolean {
+  if (tab === "all") return true;
+  const cat = m.category || "";
+  const form = (m.form || "").toLowerCase();
+  if (tab === "iv_fluids") return IV_FLUID_CATEGORIES.has(cat);
+  if (tab === "injectables") {
+    return (
+      form.includes("inject") ||
+      form.includes("ampoule") ||
+      ["Vaccines", "Biologicals", "Insulin", "Anticoagulants"].some((k) => cat.includes(k) || cat === k)
+    );
+  }
+  if (tab === "wound") return WOUND_CATEGORIES.has(cat);
+  if (tab === "consumables") {
+    return (
+      ["OralRehydration", "NasalDecongestants", "ThroatLozenges", "Nutritional"].includes(cat) ||
+      form.includes("syringe") ||
+      form.includes("needle")
+    );
+  }
+  return true;
+}
+
 function useDebouncedValue<T>(value: T, delay: number): T {
   const [debounced, setDebounced] = useState(value);
   useEffect(() => {
@@ -53,6 +88,7 @@ export default function NursingRequestsPage() {
   const debouncedSearchQuery = useDebouncedValue(searchQuery, 300);
   const [selectedMedication, setSelectedMedication] = useState<Medication | null>(null);
   const [requestQuantity, setRequestQuantity] = useState("10");
+  const [catalogTab, setCatalogTab] = useState<CatalogTab>("all");
   const [stats, setStats] = useState({ total: 0, pending: 0, approved: 0, confirmed: 0, awaitingConfirmation: 0 });
 
   const [currentPage, setCurrentPage] = useState(1);
@@ -196,9 +232,10 @@ export default function NursingRequestsPage() {
     if (!debouncedMedSearch.trim()) return [];
     const term = debouncedMedSearch.toLowerCase();
     return medications
+      .filter((med) => medicationMatchesCatalog(med, catalogTab))
       .filter((med) => med.name.toLowerCase().includes(term) || (med.code || "").toLowerCase().includes(term))
       .slice(0, MEDICATION_SEARCH_LIMIT);
-  }, [medications, debouncedMedSearch]);
+  }, [medications, debouncedMedSearch, catalogTab]);
 
   const formatPackDisplay = (units: number, packSize: number | undefined | null) => {
     if (!packSize || packSize <= 1) return `${units.toLocaleString()} units`;
@@ -430,6 +467,31 @@ export default function NursingRequestsPage() {
               <DialogDescription>Request medications from Central Store to Ward Care stock</DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
+              <div>
+                <Label className="text-xs text-muted-foreground">Requisition catalog (narrows search)</Label>
+                <div className="flex flex-wrap gap-2 mt-1">
+                  {(
+                    [
+                      ["all", "All items"],
+                      ["iv_fluids", "IV fluids / electrolytes"],
+                      ["injectables", "Injectables"],
+                      ["wound", "Wound care"],
+                      ["consumables", "Consumables / ORS"],
+                    ] as const
+                  ).map(([id, label]) => (
+                    <Button
+                      key={id}
+                      type="button"
+                      size="sm"
+                      variant={catalogTab === id ? "default" : "outline"}
+                      className="h-8 text-xs"
+                      onClick={() => setCatalogTab(id as CatalogTab)}
+                    >
+                      {label}
+                    </Button>
+                  ))}
+                </div>
+              </div>
               <div className="border rounded-lg p-4">
                 <div className="flex items-center gap-2 mb-3">
                   <h4 className="font-medium">Add Medications to Request</h4>

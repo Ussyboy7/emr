@@ -30,6 +30,13 @@ interface ServicesSummary {
   total_female: number;
 }
 
+interface MedicalCertificateSickLeave {
+  certificates_issued: number;
+  total_sick_leave_days: number;
+  male: number;
+  female: number;
+}
+
 export default function ServicesActivitiesReport() {
   const [year, setYear] = useState(new Date().getFullYear().toString());
   const [startDate, setStartDate] = useState("");
@@ -41,6 +48,7 @@ export default function ServicesActivitiesReport() {
     total_male: 0,
     total_female: 0,
   });
+  const [certificateSickLeave, setCertificateSickLeave] = useState<MedicalCertificateSickLeave | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   const setThisMonth = () => {
@@ -70,14 +78,20 @@ export default function ServicesActivitiesReport() {
         setIsLoading(false);
         return;
       }
-      const response = await apiFetch<{ data: ServiceData[]; summary: ServicesSummary }>(url);
+      const response = await apiFetch<{
+        data: ServiceData[];
+        summary: ServicesSummary;
+        medical_certificate_sick_leave?: MedicalCertificateSickLeave;
+      }>(url);
       setData(response.data || []);
       setSummary(response.summary || { total: 0, total_male: 0, total_female: 0 });
+      setCertificateSickLeave(response.medical_certificate_sick_leave ?? null);
     } catch (error: any) {
       console.error("Error fetching services report:", error);
       toast.error(error.message || "Failed to load services report");
       setData([]);
       setSummary({ total: 0, total_male: 0, total_female: 0 });
+      setCertificateSickLeave(null);
     } finally {
       setIsLoading(false);
     }
@@ -97,10 +111,26 @@ export default function ServicesActivitiesReport() {
     const headers = ["S/N", "Category", "Total", "Male", "Female", "%"];
     const rows = data.map(row => [row.sn, row.category, row.count, row.male, row.female, `${row.percentage}%`]);
     
+    const certLines: string[] = [];
+    if (certificateSickLeave) {
+      certLines.push("");
+      certLines.push("Medical certificates (illness / sick leave)");
+      certLines.push(
+        ["Certificates issued", certificateSickLeave.certificates_issued].join(","),
+      );
+      certLines.push(
+        ["Total calendar sick leave days", certificateSickLeave.total_sick_leave_days].join(","),
+      );
+      certLines.push(
+        ["Male patients", certificateSickLeave.male, "Female patients", certificateSickLeave.female].join(","),
+      );
+    }
+
     const csv = [
       headers.join(','),
       ...rows.map(row => row.join(',')),
-      `TOTAL,,${summary.total},${summary.total_male},${summary.total_female},100.0%`
+      `TOTAL,,${summary.total},${summary.total_male},${summary.total_female},100.0%`,
+      ...certLines,
     ].join('\n');
     
     const blob = new Blob([csv], { type: 'text/csv' });
@@ -278,6 +308,38 @@ export default function ServicesActivitiesReport() {
           </Card>
         </div>
 
+        {certificateSickLeave && (
+          <Card className="border-l-4 border-l-teal-500">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base flex items-center gap-2">
+                <FileText className="h-5 w-5 text-teal-600" />
+                Medical certificates (illness / sick leave)
+              </CardTitle>
+              <CardDescription>
+                Persisted certificates in the period — total calendar days summed from the sick leave days field.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 text-sm">
+              <div>
+                <p className="text-muted-foreground">Certificates issued</p>
+                <p className="text-xl font-semibold">{certificateSickLeave.certificates_issued.toLocaleString()}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Total sick leave days</p>
+                <p className="text-xl font-semibold">{certificateSickLeave.total_sick_leave_days.toLocaleString()}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Male patients</p>
+                <p className="text-xl font-semibold">{certificateSickLeave.male.toLocaleString()}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Female patients</p>
+                <p className="text-xl font-semibold">{certificateSickLeave.female.toLocaleString()}</p>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Data Table */}
         <Card>
           <CardHeader>
@@ -285,7 +347,9 @@ export default function ServicesActivitiesReport() {
               <Activity className="h-5 w-5" />
               Services & Activities - {viewMode === "year" ? year : `${startDate} to ${endDate}`}
             </CardTitle>
-            <CardDescription>Breakdown of services and activities performed</CardDescription>
+            <CardDescription>
+              Breakdown of services and activities performed. “Sick leave” rows are nursing orders; certificate totals are shown above.
+            </CardDescription>
           </CardHeader>
           <CardContent>
             {isLoading ? (

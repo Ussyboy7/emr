@@ -90,6 +90,38 @@ export interface Bed {
   has_iv_pole: boolean;
 }
 
+export interface AdmissionObservationVital {
+  id: number;
+  admission: number;
+  recorded_at: string;
+  temperature_c?: string | null;
+  pulse?: number | null;
+  respiratory_rate?: number | null;
+  bp_systolic?: number | null;
+  bp_diastolic?: number | null;
+  fbs_mmol?: string | null;
+  rbs_mmol?: string | null;
+  notes?: string;
+  recorded_by?: number | null;
+  recorded_by_name?: string | null;
+}
+
+export interface AdmissionTreatmentRow {
+  id: number;
+  admission: number;
+  drug_name: string;
+  dosage?: string;
+  route?: string;
+  time_administered?: string | null;
+  time_completed?: string | null;
+  drug_reaction?: string;
+  nurse_initials?: string;
+  doctor_initials?: string;
+  created_at: string;
+  recorded_by?: number | null;
+  recorded_by_name?: string | null;
+}
+
 class WardService {
   /**
    * Get all wards
@@ -338,6 +370,51 @@ class WardService {
   }): Promise<{ results: Bed[]; count: number }> {
     const query = buildQueryString(params || {});
     return apiFetch<{ results: Bed[]; count: number }>(`/beds/${query}`);
+  }
+
+  async getObservationVitals(params: { admission: number }): Promise<{ results: AdmissionObservationVital[]; count?: number }> {
+    const query = buildQueryString({ ...params, page_size: 500 });
+    return apiFetch<{ results: AdmissionObservationVital[]; count?: number }>(`/observation-vitals/${query}`);
+  }
+
+  async createObservationVital(data: {
+    admission: number;
+    temperature_c?: string;
+    pulse?: number;
+    respiratory_rate?: number;
+    bp_systolic?: number;
+    bp_diastolic?: number;
+    fbs_mmol?: string;
+    rbs_mmol?: string;
+    notes?: string;
+    recorded_at?: string;
+  }): Promise<AdmissionObservationVital> {
+    return apiFetch<AdmissionObservationVital>('/observation-vitals/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getTreatmentSheetRows(params: { admission: number }): Promise<{ results: AdmissionTreatmentRow[]; count?: number }> {
+    const query = buildQueryString({ ...params, page_size: 500 });
+    return apiFetch<{ results: AdmissionTreatmentRow[]; count?: number }>(`/treatment-sheet-rows/${query}`);
+  }
+
+  async createTreatmentSheetRow(data: {
+    admission: number;
+    drug_name: string;
+    dosage?: string;
+    route?: string;
+    time_administered?: string;
+    time_completed?: string;
+    drug_reaction?: string;
+    nurse_initials?: string;
+    doctor_initials?: string;
+  }): Promise<AdmissionTreatmentRow> {
+    return apiFetch<AdmissionTreatmentRow>('/treatment-sheet-rows/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
   }
 
 }

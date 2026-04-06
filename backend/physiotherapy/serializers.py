@@ -26,7 +26,7 @@ class PhysioOrderSerializer(serializers.ModelSerializer):
             'ordered_by', 'ordered_by_name', 'consultation_session',
             'visit',
             'diagnosis', 'chief_complaint', 'treatment_goal', 'special_instructions',
-            'priority', 'status', 'ordered_at', 'scheduled_at', 'completed_at',
+            'priority', 'status', 'referral_source', 'ordered_at', 'scheduled_at', 'completed_at',
             'sessions_completed'
         ]
         read_only_fields = ['id', 'ordered_at', 'patient_name', 'patient_id', 'ordered_by_name']
@@ -65,7 +65,7 @@ class PhysioOrderCreateSerializer(serializers.ModelSerializer):
         fields = [
             'patient', 'visit', 'consultation_session', 'diagnosis',
             'chief_complaint', 'treatment_goal', 'special_instructions',
-            'priority'
+            'priority', 'referral_source',
         ]
 
 

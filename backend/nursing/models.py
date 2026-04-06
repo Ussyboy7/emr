@@ -130,9 +130,31 @@ class Procedure(models.Model):
     description = models.TextField()
     site = models.CharField(max_length=200, blank=True, help_text="Body site where procedure was performed")
     notes = models.TextField(blank=True)
+
+    # Structured paper-spec fields (injections / wound care)
+    patient_status_category = models.CharField(
+        max_length=50,
+        blank=True,
+        help_text="e.g. Pensioner, ED, Employee, Dependent",
+    )
+    staff_category = models.CharField(
+        max_length=30,
+        blank=True,
+        help_text="Officer or Staff",
+    )
+    medication_name = models.CharField(max_length=200, blank=True)
+    dosage = models.CharField(max_length=200, blank=True)
+    route = models.CharField(max_length=100, blank=True)
+    nurse_initials = models.CharField(max_length=12, blank=True)
+    doctor_initials = models.CharField(max_length=12, blank=True)
+    wound_intervention = models.CharField(
+        max_length=30,
+        blank=True,
+        help_text="dressing, i_and_d, sutures, suture_removal",
+    )
     
     performed_by = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, related_name='performed_procedures')
-    performed_at = models.DateTimeField(auto_now_add=True)
+    performed_at = models.DateTimeField(default=timezone.now)
     
     class Meta:
         db_table = 'procedures'

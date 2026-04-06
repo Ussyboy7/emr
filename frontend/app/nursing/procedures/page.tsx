@@ -304,12 +304,26 @@ export default function ProceduresQueuePage() {
   const [dressingForm, setDressingForm] = useState({ dressingType: '', woundCondition: '', woundSize: '', drainage: '', painLevel: '', skinCondition: '', observations: '' });
   const [medicationForm, setMedicationForm] = useState({ site: '', notes: '' });
   const [wardAdmissionForm, setWardAdmissionForm] = useState({ notes: '' });
+  const [paperSpec, setPaperSpec] = useState({
+    patientStatusCategory: '',
+    staffCategory: '',
+    nurseInitials: '',
+    doctorInitials: '',
+    woundIntervention: '',
+  });
 
   const resetForms = () => {
     setInjectionForm(emptyInjectionForm());
     setDressingForm({ dressingType: '', woundCondition: '', woundSize: '', drainage: '', painLevel: '', skinCondition: '', observations: '' });
     setMedicationForm({ site: '', notes: '' });
     setWardAdmissionForm({ notes: '' });
+    setPaperSpec({
+      patientStatusCategory: '',
+      staffCategory: '',
+      nurseInitials: '',
+      doctorInitials: '',
+      woundIntervention: '',
+    });
   };
 
   const injectionSiteOptionsForDialog = useMemo(() => {
@@ -325,8 +339,18 @@ export default function ProceduresQueuePage() {
     if (!injectionForm.administeredTime.trim()) return false;
     if (injectionSiteNeedsLaterality(injectionForm.site) && !injectionForm.laterality) return false;
     if (injectionForm.immediateReaction === 'yes' && !injectionForm.reactionDetail.trim()) return false;
+    if (!paperSpec.patientStatusCategory.trim() || !paperSpec.staffCategory.trim()) return false;
+    if (!paperSpec.nurseInitials.trim() || !paperSpec.doctorInitials.trim()) return false;
     return true;
-  }, [selectedProcedure, injectionForm, injectionSiteOptionsForDialog]);
+  }, [selectedProcedure, injectionForm, injectionSiteOptionsForDialog, paperSpec]);
+
+  const dressingCanComplete = useMemo(() => {
+    if (!selectedProcedure || selectedProcedure.type !== 'dressing') return true;
+    if (!paperSpec.patientStatusCategory.trim() || !paperSpec.staffCategory.trim()) return false;
+    if (!paperSpec.nurseInitials.trim() || !paperSpec.doctorInitials.trim()) return false;
+    if (!paperSpec.woundIntervention.trim()) return false;
+    return true;
+  }, [selectedProcedure, paperSpec]);
   
   // Load nursing orders and wards from API
   useEffect(() => {
@@ -612,6 +636,29 @@ export default function ProceduresQueuePage() {
           toast.error('Describe the immediate reaction, or set immediate reaction to None.');
           return;
         }
+        if (!paperSpec.patientStatusCategory.trim() || !paperSpec.staffCategory.trim()) {
+          toast.error('Select patient status category and staff category (paper register).');
+          return;
+        }
+        if (!paperSpec.nurseInitials.trim() || !paperSpec.doctorInitials.trim()) {
+          toast.error('Nurse and doctor initials are required.');
+          return;
+        }
+      }
+
+      if (selectedProcedure.type === 'dressing') {
+        if (!paperSpec.patientStatusCategory.trim() || !paperSpec.staffCategory.trim()) {
+          toast.error('Select patient status category and staff category (paper register).');
+          return;
+        }
+        if (!paperSpec.nurseInitials.trim() || !paperSpec.doctorInitials.trim()) {
+          toast.error('Nurse and doctor initials are required.');
+          return;
+        }
+        if (!paperSpec.woundIntervention.trim()) {
+          toast.error('Select wound / procedure type (dressing, I&D, sutures, etc.).');
+          return;
+        }
       }
       
       // Map frontend type to backend procedure_type
@@ -834,6 +881,20 @@ export default function ProceduresQueuePage() {
         site: performedSite,
         notes,
         performed_by: currentUser?.id ? Number(currentUser.id) : null,  // Add the nurse who performed it
+        patient_status_category: paperSpec.patientStatusCategory || '',
+        staff_category: paperSpec.staffCategory || '',
+        nurse_initials: paperSpec.nurseInitials.trim(),
+        doctor_initials: paperSpec.doctorInitials.trim(),
+        medication_name:
+          selectedProcedure.type === 'injection'
+            ? (selectedProcedure.details.medication || '').slice(0, 200)
+            : selectedProcedure.type === 'dressing'
+              ? (selectedProcedure.details.woundType || '').slice(0, 200)
+              : '',
+        dosage:
+          selectedProcedure.type === 'injection' ? (selectedProcedure.details.dosage || '').slice(0, 200) : '',
+        route: selectedProcedure.type === 'injection' ? (selectedProcedure.details.route || '').slice(0, 100) : '',
+        wound_intervention: selectedProcedure.type === 'dressing' ? paperSpec.woundIntervention : '',
       };
       
       // Create procedure
@@ -1196,6 +1257,80 @@ export default function ProceduresQueuePage() {
                   )}
                 </div>
 
+                {(selectedProcedure.type === 'injection' || selectedProcedure.type === 'dressing') && (
+                  <div className="rounded-lg border border-border p-4 space-y-3 bg-muted/20">
+                    <p className="text-sm font-semibold text-foreground">Paper register (required)</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-2">
+                        <Label>Patient status *</Label>
+                        <Select
+                          value={paperSpec.patientStatusCategory}
+                          onValueChange={(v) => setPaperSpec((p) => ({ ...p, patientStatusCategory: v }))}
+                        >
+                          <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Pensioner">Pensioner</SelectItem>
+                            <SelectItem value="Employee">Employee</SelectItem>
+                            <SelectItem value="Dependent">Dependent</SelectItem>
+                            <SelectItem value="Retiree">Retiree</SelectItem>
+                            <SelectItem value="ED">Emergency / ED</SelectItem>
+                            <SelectItem value="Non-NPA">Non-NPA</SelectItem>
+                            <SelectItem value="Other">Other</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Staff category *</Label>
+                        <Select
+                          value={paperSpec.staffCategory}
+                          onValueChange={(v) => setPaperSpec((p) => ({ ...p, staffCategory: v }))}
+                        >
+                          <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Officer">Officer</SelectItem>
+                            <SelectItem value="Staff">Staff</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Nurse initials *</Label>
+                        <Input
+                          maxLength={12}
+                          value={paperSpec.nurseInitials}
+                          onChange={(e) => setPaperSpec((p) => ({ ...p, nurseInitials: e.target.value }))}
+                          placeholder="e.g. AN"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Doctor initials *</Label>
+                        <Input
+                          maxLength={12}
+                          value={paperSpec.doctorInitials}
+                          onChange={(e) => setPaperSpec((p) => ({ ...p, doctorInitials: e.target.value }))}
+                          placeholder="e.g. JD"
+                        />
+                      </div>
+                      {selectedProcedure.type === 'dressing' && (
+                        <div className="col-span-2 space-y-2">
+                          <Label>Wound / procedure *</Label>
+                          <Select
+                            value={paperSpec.woundIntervention}
+                            onValueChange={(v) => setPaperSpec((p) => ({ ...p, woundIntervention: v }))}
+                          >
+                            <SelectTrigger><SelectValue placeholder="Select procedure" /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="dressing">Dressing</SelectItem>
+                              <SelectItem value="i_and_d">Incision & drainage (I&D)</SelectItem>
+                              <SelectItem value="sutures">Sutures</SelectItem>
+                              <SelectItem value="suture_removal">Suture removal</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 {/* Type-specific forms */}
                 {selectedProcedure.type === 'injection' && (
                   <div className="grid grid-cols-2 gap-4">
@@ -1398,7 +1533,11 @@ export default function ProceduresQueuePage() {
               <Button variant="outline" onClick={() => setIsPerformDialogOpen(false)}>Cancel</Button>
               <Button
                 onClick={handleComplete}
-                disabled={isSubmitting || (selectedProcedure?.type === 'injection' && !injectionCanComplete)}
+                disabled={
+                  isSubmitting ||
+                  (selectedProcedure?.type === 'injection' && !injectionCanComplete) ||
+                  (selectedProcedure?.type === 'dressing' && !dressingCanComplete)
+                }
                 className={`text-white ${
                 selectedProcedure?.type === 'injection' ? 'bg-emerald-500 hover:bg-emerald-600' :
                 selectedProcedure?.type === 'dressing' ? 'bg-violet-500 hover:bg-violet-600' :

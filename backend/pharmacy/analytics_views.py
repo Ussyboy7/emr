@@ -2,7 +2,7 @@
 from decimal import Decimal
 
 from django.db.models import Count, Sum
-from django.db.models.functions import TruncDate
+from django.db.models.functions import TruncDate, TruncMonth
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -85,6 +85,24 @@ class PharmacyAnalyticsSummaryView(APIView):
             if row["day"]
         ]
 
+        monthly = (
+            Dispense.objects.filter(dispensed_at__gte=start_dt, dispensed_at__lte=end_dt)
+            .annotate(m=TruncMonth("dispensed_at"))
+            .values("m")
+            .annotate(events=Count("id"), quantity=Sum("quantity"), rx=Count("prescription_id", distinct=True))
+            .order_by("m")
+        )
+        by_month = [
+            {
+                "month": row["m"].strftime("%Y-%m") if row["m"] else None,
+                "dispense_events": row["events"],
+                "total_quantity": _dec_to_float(row["quantity"]),
+                "prescriptions": row["rx"],
+            }
+            for row in monthly
+            if row["m"]
+        ]
+
         top_medications = list(
             disp_qs.values("medication_id", "medication__name")
             .annotate(
@@ -130,6 +148,7 @@ class PharmacyAnalyticsSummaryView(APIView):
                 "patients_by_category": category,
                 "npa_staff_linked_vs_non_npa": staff_split,
                 "by_day": by_day,
+                "by_month": by_month,
                 "top_medications_by_quantity": [
                     {
                         "medication_id": r["medication_id"],

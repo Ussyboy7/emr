@@ -23,6 +23,7 @@ import { wardService, type Ward, type PatientAdmission, type WardAssignment } fr
 import { useCurrentUser } from '@/hooks/use-current-user';
 import { ResetFiltersButton } from '@/components/ResetFiltersButton';
 import { WardDoctorOrdersSection } from '@/components/ward/WardDoctorOrdersSection';
+import { ObservationChartDialog } from '@/components/ward/ObservationChartDialog';
 
 export default function WardCarePage() {
   const { currentUser } = useCurrentUser();
@@ -62,6 +63,8 @@ export default function WardCarePage() {
     escalate: false,
   });
   const [isSavingObservation, setIsSavingObservation] = useState(false);
+  const [observationChartOpen, setObservationChartOpen] = useState(false);
+  const [chartAdmission, setChartAdmission] = useState<PatientAdmission | null>(null);
 
   const getPatientAssignments = (admissionId: number) =>
     allAssignments.filter(a => a.admission === admissionId && a.is_active);
@@ -139,6 +142,11 @@ export default function WardCarePage() {
   const handleViewAdmission = (admission: PatientAdmission) => {
     setSelectedAdmission(admission);
     setShowAdmissionDetails(true);
+  };
+
+  const openObservationChart = (admission: PatientAdmission) => {
+    setChartAdmission(admission);
+    setObservationChartOpen(true);
   };
 
   const openObservationDialog = (admission: PatientAdmission) => {
@@ -574,15 +582,26 @@ export default function WardCarePage() {
                                       </Button>
                                     )}
                                     {admission.status === 'admitted' && (
-                                      <Button
-                                        size="icon"
-                                        variant="ghost"
-                                        className="h-7 w-7 text-teal-600 hover:text-teal-700 hover:bg-teal-50"
-                                        onClick={() => openObservationDialog(admission)}
-                                        title="Record Observation"
-                                      >
-                                        <Thermometer className="h-3.5 w-3.5" />
-                                      </Button>
+                                      <>
+                                        <Button
+                                          size="icon"
+                                          variant="ghost"
+                                          className="h-7 w-7 text-teal-600 hover:text-teal-700 hover:bg-teal-50"
+                                          onClick={() => openObservationDialog(admission)}
+                                          title="Record Observation"
+                                        >
+                                          <Thermometer className="h-3.5 w-3.5" />
+                                        </Button>
+                                        <Button
+                                          size="icon"
+                                          variant="ghost"
+                                          className="h-7 w-7 text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50"
+                                          onClick={() => openObservationChart(admission)}
+                                          title="Full observation chart (vitals + treatment sheet)"
+                                        >
+                                          <Activity className="h-3.5 w-3.5" />
+                                        </Button>
+                                      </>
                                     )}
                                     {admission.status === 'pending_discharge' && (
                                       <Button
@@ -836,22 +855,45 @@ export default function WardCarePage() {
                     <p className="text-sm text-muted-foreground text-center py-6">No observations recorded yet.</p>
                   )}
                   {selectedAdmission.status === 'admitted' && (
-                    <Button
-                      size="sm"
-                      className="w-full"
-                      onClick={() => {
-                        setShowAdmissionDetails(false);
-                        openObservationDialog(selectedAdmission);
-                      }}
-                    >
-                      <Thermometer className="h-4 w-4 mr-2" />Record New Observation
-                    </Button>
+                    <div className="flex flex-col gap-2">
+                      <Button
+                        size="sm"
+                        className="w-full"
+                        onClick={() => {
+                          setShowAdmissionDetails(false);
+                          openObservationDialog(selectedAdmission);
+                        }}
+                      >
+                        <Thermometer className="h-4 w-4 mr-2" />Record New Observation
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="w-full"
+                        onClick={() => {
+                          setShowAdmissionDetails(false);
+                          openObservationChart(selectedAdmission);
+                        }}
+                      >
+                        <Activity className="h-4 w-4 mr-2" />
+                        Full observation chart
+                      </Button>
+                    </div>
                   )}
                 </TabsContent>
               </Tabs>
             </DialogContent>
           </Dialog>
         )}
+
+        <ObservationChartDialog
+          open={observationChartOpen}
+          onOpenChange={(o) => {
+            setObservationChartOpen(o);
+            if (!o) setChartAdmission(null);
+          }}
+          admission={chartAdmission}
+        />
 
         {/* Record Observation Dialog */}
         {selectedAdmission && (

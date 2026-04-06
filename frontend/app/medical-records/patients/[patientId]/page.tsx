@@ -138,6 +138,13 @@ const buildMedicalCertificateHtmlFromRecord = (cert: any) => {
           : ""
       }
       ${
+        cert?.purpose === "illness" &&
+        cert?.sick_leave_days != null &&
+        Number(cert.sick_leave_days) >= 1
+          ? `\n\nNumber of sick leave days (calendar): ${escapeHtml(String(cert.sick_leave_days))}.`
+          : ""
+      }
+      ${
         findings
           ? `\n\nClinical findings:\n${escapeHtml(findings)}`
           : ""
@@ -2476,6 +2483,7 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
                           <th className="px-4 py-2 text-left font-medium">Certificate No</th>
                           <th className="px-4 py-2 text-left font-medium">Purpose</th>
                           <th className="px-4 py-2 text-left font-medium">Validity</th>
+                          <th className="px-4 py-2 text-left font-medium">Sick leave (days)</th>
                           <th className="px-4 py-2 text-center font-medium">Action</th>
                         </tr>
                       </thead>
@@ -2493,6 +2501,11 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
                             </td>
                             <td className="px-4 py-3 text-muted-foreground">
                               {formatDate(cert.valid_from)} - {formatDate(cert.valid_to)}
+                            </td>
+                            <td className="px-4 py-3 text-muted-foreground">
+                              {cert.purpose === "illness" && cert.sick_leave_days != null
+                                ? cert.sick_leave_days
+                                : "—"}
                             </td>
                             <td className="px-4 py-3 text-center">
                               <Button variant="ghost" size="sm" onClick={() => handlePrintMedicalCertificate(cert)}>

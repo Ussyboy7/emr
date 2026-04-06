@@ -458,3 +458,71 @@ class WardAssignment(models.Model):
         if notes:
             self.shift_notes = notes
         self.save()
+
+
+class AdmissionObservationVital(models.Model):
+    """
+    Continuous observation vitals chart (temp, pulse, RR, BP, FBS, RBS) per ward admission.
+    """
+
+    admission = models.ForeignKey(
+        PatientAdmission,
+        on_delete=models.CASCADE,
+        related_name="observation_vitals",
+    )
+    recorded_at = models.DateTimeField(default=timezone.now, db_index=True)
+    temperature_c = models.DecimalField(max_digits=4, decimal_places=1, null=True, blank=True)
+    pulse = models.PositiveSmallIntegerField(null=True, blank=True)
+    respiratory_rate = models.PositiveSmallIntegerField(null=True, blank=True)
+    bp_systolic = models.PositiveSmallIntegerField(null=True, blank=True)
+    bp_diastolic = models.PositiveSmallIntegerField(null=True, blank=True)
+    fbs_mmol = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    rbs_mmol = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    notes = models.CharField(max_length=500, blank=True)
+    recorded_by = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name="recorded_observation_vitals",
+    )
+
+    class Meta:
+        db_table = "admission_observation_vitals"
+        ordering = ["-recorded_at"]
+
+    def __str__(self):
+        return f"Vitals {self.recorded_at} — admission {self.admission_id}"
+
+
+class AdmissionTreatmentRow(models.Model):
+    """
+    Treatment sheet row: drug, times, reaction, nurse and doctor initials.
+    """
+
+    admission = models.ForeignKey(
+        PatientAdmission,
+        on_delete=models.CASCADE,
+        related_name="treatment_sheet_rows",
+    )
+    drug_name = models.CharField(max_length=200)
+    dosage = models.CharField(max_length=200, blank=True)
+    route = models.CharField(max_length=100, blank=True)
+    time_administered = models.TimeField(null=True, blank=True)
+    time_completed = models.TimeField(null=True, blank=True)
+    drug_reaction = models.CharField(max_length=500, blank=True)
+    nurse_initials = models.CharField(max_length=12, blank=True)
+    doctor_initials = models.CharField(max_length=12, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    recorded_by = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name="recorded_treatment_sheet_rows",
+    )
+
+    class Meta:
+        db_table = "admission_treatment_sheet_rows"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.drug_name} — admission {self.admission_id}"

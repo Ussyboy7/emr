@@ -13,6 +13,8 @@ export interface MedicalCertificate {
   purpose: MedicalCertificatePurpose;
   valid_from: string; // YYYY-MM-DD
   valid_to: string; // YYYY-MM-DD
+  /** Calendar days of sick leave (illness / sick leave certificates). */
+  sick_leave_days?: number | null;
   findings?: string;
   recommendations?: string;
   issued_by?: number;
@@ -39,6 +41,7 @@ export class MedicalCertificateService {
     purpose: MedicalCertificatePurpose;
     valid_from: string;
     valid_to: string;
+    sick_leave_days?: number | null;
     findings?: string;
     recommendations?: string;
   }): Promise<MedicalCertificate> {

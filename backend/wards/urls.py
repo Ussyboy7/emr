@@ -3,7 +3,14 @@ URL configuration for the Wards app.
 """
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import WardViewSet, PatientAdmissionViewSet, BedViewSet, WardAssignmentViewSet
+from .views import (
+    WardViewSet,
+    PatientAdmissionViewSet,
+    BedViewSet,
+    WardAssignmentViewSet,
+    AdmissionObservationVitalViewSet,
+    AdmissionTreatmentRowViewSet,
+)
 
 # Use manual URL patterns to avoid router conflicts
 urlpatterns = [
@@ -31,4 +38,35 @@ urlpatterns = [
     path('assignments/', WardAssignmentViewSet.as_view({'get': 'list', 'post': 'create'}), name='assignment-list'),
     path('assignments/<int:pk>/', WardAssignmentViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'update', 'delete': 'destroy'}), name='assignment-detail'),
     path('assignments/<int:pk>/complete/', WardAssignmentViewSet.as_view({'post': 'complete'}), name='assignment-complete'),
+
+    path(
+        'observation-vitals/',
+        AdmissionObservationVitalViewSet.as_view({'get': 'list', 'post': 'create'}),
+        name='observation-vital-list',
+    ),
+    path(
+        'observation-vitals/<int:pk>/',
+        AdmissionObservationVitalViewSet.as_view({
+            'get': 'retrieve',
+            'put': 'update',
+            'patch': 'partial_update',
+            'delete': 'destroy',
+        }),
+        name='observation-vital-detail',
+    ),
+    path(
+        'treatment-sheet-rows/',
+        AdmissionTreatmentRowViewSet.as_view({'get': 'list', 'post': 'create'}),
+        name='treatment-sheet-row-list',
+    ),
+    path(
+        'treatment-sheet-rows/<int:pk>/',
+        AdmissionTreatmentRowViewSet.as_view({
+            'get': 'retrieve',
+            'put': 'update',
+            'patch': 'partial_update',
+            'delete': 'destroy',
+        }),
+        name='treatment-sheet-row-detail',
+    ),
 ]

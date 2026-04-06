@@ -805,6 +805,7 @@ export default function ConsultationHistoryPage() {
       treatment_goal: payload.treatmentGoal || undefined,
       special_instructions: payload.specialInstructions || undefined,
       priority: payload.priority,
+      referral_source: 'doctor',
     } as any);
     toast.success("Physiotherapy order added");
     await loadEditOrdersRefetch();

@@ -230,6 +230,13 @@ export function MedicalHistoryTab({
           ? `The certificate is valid from ${escapeHtml(fromLabel)} to ${escapeHtml(toLabel)}.`
           : ""
       }
+      ${
+        cert?.purpose === 'illness' &&
+        cert?.sick_leave_days != null &&
+        Number(cert.sick_leave_days) >= 1
+          ? `\n\nNumber of sick leave days (calendar): ${escapeHtml(String(cert.sick_leave_days))}.`
+          : ''
+      }
       ${findings ? `\n\nClinical findings:\n${escapeHtml(findings)}` : ''}
       ${recommendations ? `\n\nRecommendations:\n${escapeHtml(recommendations)}` : ''}
     </div>
@@ -1176,6 +1183,7 @@ export function MedicalHistoryTab({
                         <th className="px-4 py-2 text-left font-medium">Certificate No</th>
                         <th className="px-4 py-2 text-left font-medium">Purpose</th>
                         <th className="px-4 py-2 text-left font-medium">Validity</th>
+                        <th className="px-4 py-2 text-left font-medium">Sick leave (days)</th>
                         <th className="px-4 py-2 text-center font-medium">Action</th>
                       </tr>
                     </thead>
@@ -1191,6 +1199,9 @@ export function MedicalHistoryTab({
                             <td className="px-4 py-3 text-muted-foreground">{cert.purpose ?? ''}</td>
                             <td className="px-4 py-3 text-muted-foreground">
                               {(from ? from.toLocaleDateString() : cert.valid_from ?? '')} - {(to ? to.toLocaleDateString() : cert.valid_to ?? '')}
+                            </td>
+                            <td className="px-4 py-3 text-muted-foreground">
+                              {cert.purpose === 'illness' && cert.sick_leave_days != null ? cert.sick_leave_days : '—'}
                             </td>
                             <td className="px-4 py-3 text-center">
                               <div className="flex items-center justify-center gap-2">
@@ -1326,6 +1337,12 @@ export function MedicalHistoryTab({
                   <p className="text-xs text-muted-foreground">Doctor</p>
                   <p className="font-medium">{selectedCertificate.doctor_name_snapshot ?? selectedCertificate.issued_by_name ?? ''}</p>
                 </div>
+                {selectedCertificate.purpose === 'illness' && selectedCertificate.sick_leave_days != null ? (
+                  <div className="space-y-1">
+                    <p className="text-xs text-muted-foreground">Sick leave (calendar days)</p>
+                    <p className="font-medium">{selectedCertificate.sick_leave_days}</p>
+                  </div>
+                ) : null}
               </div>
 
               <div>

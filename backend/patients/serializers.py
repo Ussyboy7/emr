@@ -366,6 +366,41 @@ class MedicalCertificateSerializer(serializers.ModelSerializer):
     patient_name = serializers.CharField(source="patient.get_full_name", read_only=True)
     issued_by_name = serializers.CharField(source="issued_by.get_full_name", read_only=True, allow_null=True)
 
+    def validate(self, attrs):
+        purpose = attrs.get("purpose")
+        if purpose is None and self.instance is not None:
+            purpose = self.instance.purpose
+
+        valid_from = attrs.get("valid_from")
+        valid_to = attrs.get("valid_to")
+        if valid_from is None and self.instance is not None:
+            valid_from = self.instance.valid_from
+        if valid_to is None and self.instance is not None:
+            valid_to = self.instance.valid_to
+
+        if "sick_leave_days" in attrs:
+            sick_leave_days = attrs["sick_leave_days"]
+        else:
+            sick_leave_days = self.instance.sick_leave_days if self.instance else None
+
+        if purpose == "illness":
+            days = sick_leave_days
+            if days is None and valid_from is not None and valid_to is not None:
+                delta = (valid_to - valid_from).days + 1
+                if delta >= 1:
+                    attrs["sick_leave_days"] = delta
+                    days = delta
+            if days is None:
+                raise serializers.ValidationError(
+                    {"sick_leave_days": "Sick leave days are required for illness / sick leave certificates (enter explicitly or set a valid date range)."}
+                )
+            if days < 1 or days > 366:
+                raise serializers.ValidationError(
+                    {"sick_leave_days": "Sick leave days must be between 1 and 366."}
+                )
+
+        return attrs
+
     class Meta:
         model = MedicalCertificate
         fields = [
@@ -376,6 +411,7 @@ class MedicalCertificateSerializer(serializers.ModelSerializer):
             "purpose",
             "valid_from",
             "valid_to",
+            "sick_leave_days",
             "findings",
             "recommendations",
             "issued_by",

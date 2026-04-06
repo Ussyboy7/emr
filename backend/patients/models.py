@@ -733,6 +733,9 @@ class MedicalCertificate(models.Model):
     valid_from = models.DateField()
     valid_to = models.DateField()
 
+    # Explicit sick leave duration (calendar days) for illness / sick leave certificates — used for HR reporting.
+    sick_leave_days = models.PositiveSmallIntegerField(null=True, blank=True)
+
     findings = models.TextField(blank=True)
     recommendations = models.TextField(blank=True)
 

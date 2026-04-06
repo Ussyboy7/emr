@@ -11,7 +11,7 @@ from django.http import HttpResponse
 import csv
 import json
 
-from patients.models import Patient, Visit
+from patients.models import Patient, Visit, MedicalCertificate
 from laboratory.models import LabOrder, LabTest
 from pharmacy.models import Prescription, MedicationInventory, PrescriptionItem
 from radiology.models import RadiologyOrder, RadiologyStudy
@@ -991,6 +991,20 @@ class ServicesActivitiesReportView(views.APIView):
             patient__gender='female'
         ).count()
         sick_leave = sick_leave_male + sick_leave_female
+
+        # Illness medical certificates (stored sick_leave_days + counts by patient gender)
+        cert_sick_qs = MedicalCertificate.objects.filter(purpose="illness").select_related("patient")
+        if parsed_start_date and parsed_end_date:
+            cert_sick_qs = cert_sick_qs.filter(
+                issued_at__date__gte=parsed_start_date,
+                issued_at__date__lte=parsed_end_date,
+            )
+        else:
+            cert_sick_qs = cert_sick_qs.filter(issued_at__year=year_int)
+        cert_sick_leave_days_sum = cert_sick_qs.aggregate(total=Sum("sick_leave_days"))["total"] or 0
+        cert_sick_male = cert_sick_qs.filter(patient__gender="male").count()
+        cert_sick_female = cert_sick_qs.filter(patient__gender="female").count()
+        cert_sick_issued = cert_sick_qs.count()
         
         # Get referrals from consultation with gender breakdown
         referrals = Referral.objects.select_related('patient')
@@ -1082,7 +1096,13 @@ class ServicesActivitiesReportView(views.APIView):
                 'total': total,
                 'total_male': total_male,
                 'total_female': total_female,
-            }
+            },
+            'medical_certificate_sick_leave': {
+                'certificates_issued': cert_sick_issued,
+                'total_sick_leave_days': cert_sick_leave_days_sum,
+                'male': cert_sick_male,
+                'female': cert_sick_female,
+            },
         })
 
 
@@ -1721,6 +1741,8 @@ class DiseasePatternReportView(views.APIView):
                     'id',
                     filter=~Q(patient__category__in=['employee', 'retiree'])
                 ),
+                male=Count('id', filter=Q(patient__gender='male')),
+                female=Count('id', filter=Q(patient__gender='female')),
             )
             .annotate(total=F('employee') + F('non_employee'))
             .order_by('-total', 'code')
@@ -1730,6 +1752,10 @@ class DiseasePatternReportView(views.APIView):
         for idx, row in enumerate(diagnosis_rows, 1):
             code = row.get('code') or 'UNSPECIFIED'
             description = row.get('description') or ''
+            male = row.get('male', 0) or 0
+            female = row.get('female', 0) or 0
+            total = row.get('total', 0) or 0
+            gender_other = max(0, (row.get('total', 0) or 0) - male - female)
             result.append({
                 'sn': idx,
                 'diagnosis': f"{code} - {description}" if description else code,
@@ -1737,18 +1763,27 @@ class DiseasePatternReportView(views.APIView):
                 'description': description,
                 'employee': row.get('employee', 0) or 0,
                 'non_employee': row.get('non_employee', 0) or 0,
-                'total': row.get('total', 0) or 0,
+                'male': male,
+                'female': female,
+                'gender_other': gender_other,
+                'total': total,
             })
         
         grand_total_e = sum(item['employee'] for item in result)
         grand_total_ne = sum(item['non_employee'] for item in result)
+        grand_total_m = sum(item['male'] for item in result)
+        grand_total_f = sum(item['female'] for item in result)
+        grand_total_go = sum(item['gender_other'] for item in result)
         
         return Response({
             'data': result,
             'summary': {
                 'total_employee': grand_total_e,
                 'total_non_employee': grand_total_ne,
-                'grand_total': grand_total_e + grand_total_ne
+                'grand_total': grand_total_e + grand_total_ne,
+                'total_male': grand_total_m,
+                'total_female': grand_total_f,
+                'total_gender_other': grand_total_go,
             }
         })
 

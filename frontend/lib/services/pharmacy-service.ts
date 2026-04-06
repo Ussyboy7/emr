@@ -1027,6 +1027,12 @@ export interface PharmacyAnalyticsSummary {
     total_quantity: number;
     prescriptions: number;
   }>;
+  by_month?: Array<{
+    month: string;
+    dispense_events: number;
+    total_quantity: number;
+    prescriptions: number;
+  }>;
   top_medications_by_quantity: Array<{
     medication_id: number;
     name: string;

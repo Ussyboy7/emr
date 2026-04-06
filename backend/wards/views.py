@@ -8,8 +8,15 @@ from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 
-from .models import Ward, Bed, PatientAdmission, WardAssignment
-from .serializers import WardSerializer, BedSerializer, PatientAdmissionSerializer, WardAssignmentSerializer
+from .models import Ward, Bed, PatientAdmission, WardAssignment, AdmissionObservationVital, AdmissionTreatmentRow
+from .serializers import (
+    WardSerializer,
+    BedSerializer,
+    PatientAdmissionSerializer,
+    WardAssignmentSerializer,
+    AdmissionObservationVitalSerializer,
+    AdmissionTreatmentRowSerializer,
+)
 from audit.services import AuditService
 
 
@@ -463,3 +470,35 @@ class WardAssignmentViewSet(viewsets.ModelViewSet):
             return Response({'message': 'Assignment completed successfully'})
         except ValueError as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class AdmissionObservationVitalViewSet(viewsets.ModelViewSet):
+    """Continuous observation vitals for a ward admission (filter: ?admission=)."""
+
+    permission_classes = [IsAuthenticated]
+    serializer_class = AdmissionObservationVitalSerializer
+    filter_backends = [DjangoFilterBackend, OrderingFilter]
+    filterset_fields = ["admission"]
+    ordering = ["-recorded_at"]
+
+    def get_queryset(self):
+        return AdmissionObservationVital.objects.select_related("admission", "recorded_by")
+
+    def perform_create(self, serializer):
+        serializer.save(recorded_by=self.request.user)
+
+
+class AdmissionTreatmentRowViewSet(viewsets.ModelViewSet):
+    """Treatment sheet rows for a ward admission (filter: ?admission=)."""
+
+    permission_classes = [IsAuthenticated]
+    serializer_class = AdmissionTreatmentRowSerializer
+    filter_backends = [DjangoFilterBackend, OrderingFilter]
+    filterset_fields = ["admission"]
+    ordering = ["-created_at"]
+
+    def get_queryset(self):
+        return AdmissionTreatmentRow.objects.select_related("admission", "recorded_by")
+
+    def perform_create(self, serializer):
+        serializer.save(recorded_by=self.request.user)

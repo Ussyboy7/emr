@@ -2,7 +2,7 @@
 Serializers for the Wards app.
 """
 from rest_framework import serializers
-from .models import Ward, Bed, PatientAdmission, WardAssignment
+from .models import Ward, Bed, PatientAdmission, WardAssignment, AdmissionObservationVital, AdmissionTreatmentRow
 
 
 class WardSerializer(serializers.ModelSerializer):
@@ -49,6 +49,24 @@ class PatientAdmissionSerializer(serializers.ModelSerializer):
         model = PatientAdmission
         fields = '__all__'
         read_only_fields = ['admission_id', 'created_at', 'updated_at', 'created_by', 'discharge_date', 'ward_assignment']
+
+
+class AdmissionObservationVitalSerializer(serializers.ModelSerializer):
+    recorded_by_name = serializers.CharField(source="recorded_by.get_full_name", read_only=True, allow_null=True)
+
+    class Meta:
+        model = AdmissionObservationVital
+        fields = "__all__"
+        read_only_fields = ["recorded_by", "recorded_by_name"]
+
+
+class AdmissionTreatmentRowSerializer(serializers.ModelSerializer):
+    recorded_by_name = serializers.CharField(source="recorded_by.get_full_name", read_only=True, allow_null=True)
+
+    class Meta:
+        model = AdmissionTreatmentRow
+        fields = "__all__"
+        read_only_fields = ["created_at", "recorded_by", "recorded_by_name"]
 
 
 class WardAssignmentSerializer(serializers.ModelSerializer):

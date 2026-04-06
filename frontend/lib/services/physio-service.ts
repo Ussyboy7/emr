@@ -33,6 +33,8 @@ export interface PhysioOrder {
   special_instructions: string;
   status: string;
   priority: string;
+  /** nursing | doctor | self | other | unspecified */
+  referral_source?: string;
   ordered_at: string;
   scheduled_at?: string;
   completed_at?: string;
@@ -174,6 +176,7 @@ class PhysioService {
     patient?: string;
     visit?: number;
     consultation_session?: number;
+    referral_source?: string;
     search?: string;
     page?: number;
     page_size?: number;

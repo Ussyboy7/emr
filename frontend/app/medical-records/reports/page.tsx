@@ -58,6 +58,16 @@ type PatientDocumentReportTile = ReportTile & {
   borderAccent: string;
 };
 
+/** Inclusive calendar days between two YYYY-MM-DD strings (avoids UTC edge cases). */
+function inclusiveCalendarDaysBetween(start: string, end: string): number | null {
+  const a = new Date(`${start}T12:00:00`);
+  const b = new Date(`${end}T12:00:00`);
+  if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime())) return null;
+  const days = Math.floor((b.getTime() - a.getTime()) / 86400000) + 1;
+  if (days < 1 || days > 366) return null;
+  return days;
+}
+
 const statisticalReports: StatisticalReportTile[] = [
   {
     id: "attendance-summary",
@@ -234,7 +244,19 @@ export default function ReportsPage() {
     startDate: "",
     endDate: "",
     referTo: "",
+    sickLeaveDays: "",
   });
+
+  useEffect(() => {
+    if (newReport.purpose !== "illness" || !newReport.startDate || !newReport.endDate) return;
+    const computed = inclusiveCalendarDaysBetween(newReport.startDate, newReport.endDate);
+    if (computed == null) return;
+    setNewReport((prev) => {
+      if (prev.purpose !== "illness") return prev;
+      if (prev.sickLeaveDays.trim() !== "") return prev;
+      return { ...prev, sickLeaveDays: String(computed) };
+    });
+  }, [newReport.purpose, newReport.startDate, newReport.endDate]);
 
   useEffect(() => {
     const q = certificatePatientSearch.trim();
@@ -288,6 +310,7 @@ export default function ReportsPage() {
     purposeLabel: string;
     validFrom?: string;
     validTo?: string;
+    sickLeaveDays?: number | null;
     findings?: string;
     recommendations?: string;
     doctorName: string;
@@ -301,6 +324,7 @@ export default function ReportsPage() {
       purposeLabel,
       validFrom,
       validTo,
+      sickLeaveDays,
       findings,
       recommendations,
       doctorName,
@@ -351,6 +375,11 @@ export default function ReportsPage() {
           : ""
       }
       ${
+        sickLeaveDays != null && sickLeaveDays >= 1
+          ? `\n\nNumber of sick leave days (calendar): ${escapeHtml(String(sickLeaveDays))}.`
+          : ""
+      }
+      ${
         findings?.trim()
           ? `\n\nClinical findings:\n${escapeHtml(findings.trim())}`
           : ""
@@ -388,12 +417,28 @@ export default function ReportsPage() {
       return;
     }
 
+    let sickLeaveDaysPayload: number | undefined;
+    if (newReport.purpose === "illness") {
+      const trimmed = newReport.sickLeaveDays.trim();
+      let n = trimmed === "" ? NaN : parseInt(trimmed, 10);
+      if (Number.isNaN(n) || n < 1) {
+        const fromRange = inclusiveCalendarDaysBetween(newReport.startDate, newReport.endDate);
+        if (fromRange != null) n = fromRange;
+      }
+      if (Number.isNaN(n) || n < 1 || n > 366) {
+        toast.error("Enter sick leave days (1–366), or use a valid start/end date range.");
+        return;
+      }
+      sickLeaveDaysPayload = n;
+    }
+
     try {
       const created = await medicalCertificateService.createCertificate({
         patient: patient.id,
         purpose: newReport.purpose as any,
         valid_from: newReport.startDate,
         valid_to: newReport.endDate,
+        ...(sickLeaveDaysPayload != null ? { sick_leave_days: sickLeaveDaysPayload } : {}),
         findings: newReport.findings,
         recommendations: newReport.recommendations,
       });
@@ -427,6 +472,7 @@ export default function ReportsPage() {
         purposeLabel: purposeLabelMap[created.purpose] || String(created.purpose),
         validFrom: formatDisplayDate(created.valid_from),
         validTo: formatDisplayDate(created.valid_to),
+        sickLeaveDays: created.sick_leave_days ?? sickLeaveDaysPayload ?? null,
         findings: created.findings,
         recommendations: created.recommendations,
         doctorName: created.doctor_name_snapshot || created.issued_by_name || "",
@@ -452,12 +498,22 @@ export default function ReportsPage() {
       startDate: "",
       endDate: "",
       referTo: "",
+      sickLeaveDays: "",
     });
   };
 
   const openNewReportModal = (type: string) => {
     resetCertificatePatientPicker();
-    setNewReport((prev) => ({ ...prev, type }));
+    setNewReport({
+      type,
+      purpose: "",
+      findings: "",
+      recommendations: "",
+      startDate: "",
+      endDate: "",
+      referTo: "",
+      sickLeaveDays: "",
+    });
     setIsNewReportOpen(true);
   };
 
@@ -773,7 +829,16 @@ export default function ReportsPage() {
                 <>
                   <div className="space-y-2">
                     <Label>Purpose</Label>
-                    <Select value={newReport.purpose} onValueChange={(v) => setNewReport((prev) => ({ ...prev, purpose: v }))}>
+                    <Select
+                      value={newReport.purpose}
+                      onValueChange={(v) =>
+                        setNewReport((prev) => ({
+                          ...prev,
+                          purpose: v,
+                          sickLeaveDays: v === "illness" ? prev.sickLeaveDays : "",
+                        }))
+                      }
+                    >
                       <SelectTrigger>
                         <SelectValue placeholder="Select purpose" />
                       </SelectTrigger>
@@ -803,6 +868,23 @@ export default function ReportsPage() {
                       />
                     </div>
                   </div>
+                  {newReport.purpose === "illness" && (
+                    <div className="space-y-2">
+                      <Label>Sick leave days (calendar) *</Label>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={366}
+                        inputMode="numeric"
+                        placeholder="e.g. 3 — pre-filled from date range when empty"
+                        value={newReport.sickLeaveDays}
+                        onChange={(e) => setNewReport((prev) => ({ ...prev, sickLeaveDays: e.target.value }))}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Required for illness certificates. Matches the number of calendar days from start to end date unless you override.
+                      </p>
+                    </div>
+                  )}
                 </>
               )}
 

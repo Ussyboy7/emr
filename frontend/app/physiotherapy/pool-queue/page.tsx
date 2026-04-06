@@ -71,6 +71,7 @@ export default function PhysioPoolQueuePage() {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState('pending');
+  const [referralSourceFilter, setReferralSourceFilter] = useState<string>('all');
   const [dateFilter, setDateFilter] = useState('today');
   const [isDateFilterDialogOpen, setIsDateFilterDialogOpen] = useState(false);
   const [dateRange, setDateRange] = useState({ from: '', to: '' });
@@ -189,6 +190,9 @@ export default function PhysioPoolQueuePage() {
       // Note: searchQuery, dateFilter not yet implemented in backend
 
       if (searchQuery) params.search = searchQuery;
+      if (referralSourceFilter && referralSourceFilter !== 'all') {
+        (params as any).referral_source = referralSourceFilter;
+      }
 
       const response = await physioService.getOrders(params);
       setTotalCount(response.count);
@@ -206,7 +210,7 @@ export default function PhysioPoolQueuePage() {
         setLoading(false);
       }
     }
-  }, [currentPage, itemsPerPage, searchQuery, dateFilter]);
+  }, [currentPage, itemsPerPage, searchQuery, dateFilter, referralSourceFilter]);
 
   useEffect(() => {
     loadOrders();
@@ -382,6 +386,7 @@ export default function PhysioPoolQueuePage() {
       }
 
       // Tab filtering
+      if (activeTab === 'all') return matchesSearch;
       if (activeTab === 'pending') return matchesSearch && order.status === 'pending';
       if (activeTab === 'scheduled') return matchesSearch && order.status === 'scheduled';
       if (activeTab === 'in_progress') return matchesSearch && order.status === 'in_progress';
@@ -753,7 +758,8 @@ export default function PhysioPoolQueuePage() {
         chief_complaint: newTreatmentData.chiefComplaint,
         treatment_goal: newTreatmentData.treatmentGoal,
         special_instructions: newTreatmentData.specialInstructions,
-        priority: 'routine' // Default priority for physio-initiated treatments
+        priority: 'routine', // Default priority for physio-initiated treatments
+        referral_source: 'self',
       } as any);
 
       toast.success('New physio order created successfully');
@@ -1046,6 +1052,13 @@ export default function PhysioPoolQueuePage() {
                         <SelectItem value="month">This Month</SelectItem>
                       </SelectContent>
                     </Select>
+                    <Select value={referralSourceFilter} onValueChange={setReferralSourceFilter}>
+                      <SelectTrigger className="w-[min(100%,200px)]"><SelectValue placeholder="Referral" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All referrals</SelectItem>
+                        <SelectItem value="nursing">Nursing referrals</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
               </div>
@@ -1292,7 +1305,7 @@ export default function PhysioPoolQueuePage() {
                           className="bg-teal-600 hover:bg-teal-700 text-white shadow-sm"
                         >
                           <Play className="h-4 w-4 mr-2" />
-                          Start Session
+                          Open session documentation
                         </Button>
                       )}
                       {selectedOrder.status === 'in_progress' && (
@@ -1401,7 +1414,7 @@ export default function PhysioPoolQueuePage() {
                             className="bg-green-600 hover:bg-green-700 text-white shadow-sm"
                           >
                             <CheckCircle className="h-4 w-4 mr-2" />
-                            Complete Session
+                            End session
                           </Button>
                           <Button
                             onClick={() => { handleCompleteOrder(selectedOrder); setIsViewDialogOpen(false); }}
@@ -1971,7 +1984,7 @@ export default function PhysioPoolQueuePage() {
                   Complete Physiotherapy Session
                 </DialogTitle>
                 <DialogDescription>
-                  Record treatment performed and update patient progress. Only this green <strong>Complete Session</strong> flow sets the session status to completed; it will appear under Physiotherapy → Completed Sessions. <strong>Save Session</strong> in Start/Continue does not.
+                  Record treatment performed and update patient progress. Only this green <strong>End session</strong> flow sets the session status to completed; it will appear under Physiotherapy → Completed Sessions. <strong>Save session</strong> in Open/Continue documentation does not.
                 </DialogDescription>
               </DialogHeader>
               {selectedOrder && currentSession && (
@@ -2137,7 +2150,7 @@ export default function PhysioPoolQueuePage() {
                   ) : (
                     <CheckCircle className="h-4 w-4 mr-2" />
                   )}
-                  Complete Session
+                  End session
                 </Button>
               </DialogFooter>
             </DialogContent>
@@ -2560,7 +2573,7 @@ export default function PhysioPoolQueuePage() {
                   ) : (
                     <Play className="h-4 w-4 mr-2" />
                   )}
-                  {currentSession ? 'Save Session' : 'Start Session'}
+                  {currentSession ? 'Save session' : 'Begin documentation'}
                 </Button>
               </DialogFooter>
             </DialogContent>

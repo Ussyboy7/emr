@@ -17,6 +17,7 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
+  ComposedChart,
   Legend,
   Line,
   LineChart,
@@ -83,6 +84,15 @@ function pharmacyAnalyticsToCsv(
   (d.top_medications_by_quantity || []).forEach((m) =>
     lines.push([m.name, String(m.total_quantity), String(m.dispense_events)].map(esc).join(','))
   );
+  if (d.by_month?.length) {
+    lines.push('');
+    lines.push(['Month', 'Dispense events', 'Total qty', 'Prescriptions'].map(esc).join(','));
+    d.by_month.forEach((row) =>
+      lines.push(
+        [row.month, String(row.dispense_events), String(row.total_quantity), String(row.prescriptions)].map(esc).join(',')
+      )
+    );
+  }
   return lines.join('\n');
 }
 
@@ -186,6 +196,15 @@ export default function PharmacyAnalyticsPage() {
     }));
   }, [data]);
 
+  const monthConsumption = useMemo(() => {
+    if (!data?.by_month?.length) return [];
+    return data.by_month.map((row) => ({
+      month: row.month ?? '',
+      qty: Number(row.total_quantity),
+      events: row.dispense_events,
+    }));
+  }, [data]);
+
   const topByQty = useMemo(() => {
     if (!data?.top_medications_by_quantity?.length) return [];
     return data.top_medications_by_quantity.slice(0, 15).map((m) => ({
@@ -271,6 +290,39 @@ export default function PharmacyAnalyticsPage() {
                         <Line type="monotone" dataKey="events" name="Dispense events" stroke="#7c3aed" strokeWidth={2} dot={false} />
                         <Line type="monotone" dataKey="rx" name="Prescriptions" stroke="#94a3b8" strokeWidth={2} dot={false} />
                       </LineChart>
+                    </ResponsiveContainer>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Drug consumption by month</CardTitle>
+                  <CardDescription>Total dispensed quantity per calendar month (mixed units — see note above)</CardDescription>
+                </CardHeader>
+                <CardContent className="h-[300px]">
+                  {monthConsumption.length === 0 ? (
+                    <EmptyChart />
+                  ) : (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <ComposedChart data={monthConsumption}>
+                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                        <XAxis dataKey="month" tick={{ fontSize: 10 }} />
+                        <YAxis yAxisId="qty" tick={{ fontSize: 11 }} />
+                        <YAxis yAxisId="events" orientation="right" tick={{ fontSize: 11 }} />
+                        <Tooltip />
+                        <Legend />
+                        <Bar yAxisId="qty" dataKey="qty" name="Total quantity" fill="#0d9488" radius={[4, 4, 0, 0]} />
+                        <Line
+                          yAxisId="events"
+                          type="monotone"
+                          dataKey="events"
+                          name="Dispense events"
+                          stroke="#6366f1"
+                          strokeWidth={2}
+                          dot={{ r: 3 }}
+                        />
+                      </ComposedChart>
                     </ResponsiveContainer>
                   )}
                 </CardContent>

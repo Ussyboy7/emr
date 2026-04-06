@@ -42,7 +42,7 @@ class PhysioOrderViewSet(viewsets.ModelViewSet):
     """ViewSet for managing physiotherapy orders."""
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['status', 'patient', 'priority', 'consultation_session', 'visit']
+    filterset_fields = ['status', 'patient', 'priority', 'consultation_session', 'visit', 'referral_source']
     search_fields = ['patient__full_name', 'patient__patient_id', 'diagnosis', 'chief_complaint']
     ordering = ['-ordered_at']
 
@@ -130,6 +130,7 @@ class PhysioOrderViewSet(viewsets.ModelViewSet):
                 status="scheduled",
                 scheduled_at=now,
                 sessions_completed=0,
+                referral_source="nursing",
             )
             created = True
         else:
