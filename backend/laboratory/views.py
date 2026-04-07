@@ -22,6 +22,29 @@ from .pagination import FlexiblePageNumberPagination
 from audit.services import AuditService
 
 
+def _has_meaningful_results_payload(payload) -> bool:
+    """
+    True only when at least one result value is clinically meaningful.
+    Empty strings/null/empty containers are treated as no result.
+    """
+    if not isinstance(payload, dict) or not payload:
+        return False
+
+    for value in payload.values():
+        if value is None:
+            continue
+        if isinstance(value, str):
+            if value.strip():
+                return True
+            continue
+        if isinstance(value, (list, tuple, set, dict)):
+            if len(value) > 0:
+                return True
+            continue
+        return True
+    return False
+
+
 class LabPartnerViewSet(viewsets.ModelViewSet):
     """CRUD for outsourced lab partners (dropdown + Django admin)."""
 
@@ -379,6 +402,22 @@ class LabOrderViewSet(viewsets.ModelViewSet):
             template = getattr(test, 'template', None)
             normal_range = getattr(template, 'normal_range', None) if template else None
             if isinstance(normal_range, dict) and normal_range:
+                # Canonicalize single-analyte alias payloads:
+                # map legacy {"Result": "..."} to the template parameter key and avoid storing duplicates.
+                if len(normal_range) == 1 and isinstance(results, dict):
+                    only_key = next(iter(normal_range.keys()))
+                    result_alias = str(results.get("Result", "")).strip()
+                    canonical_value = str(results.get(only_key, "")).strip()
+                    if result_alias and not canonical_value:
+                        results[only_key] = results.get("Result")
+                    # Remove alias only when canonical key is different from "Result".
+                    if (
+                        only_key != "Result"
+                        and "Result" in results
+                        and str(results.get(only_key, "")).strip() == result_alias
+                    ):
+                        results.pop("Result", None)
+
                 # Determine required keys if present; otherwise treat all template keys as required.
                 required_keys = [
                     k for k, v in normal_range.items()
@@ -386,10 +425,6 @@ class LabOrderViewSet(viewsets.ModelViewSet):
                 ]
                 if not required_keys:
                     required_keys = list(normal_range.keys())
-
-                # Special-case: single-analyte templates may store results under "Result".
-                if len(normal_range) == 1 and "Result" not in normal_range:
-                    required_keys = list(set(required_keys + ["Result"]))
 
                 # For multi-parameter templates, block the common bad shape: {"Result": "..."} only.
                 if len(normal_range) > 1 and set(results.keys()) == {"Result"}:
@@ -413,6 +448,14 @@ class LabOrderViewSet(viewsets.ModelViewSet):
             # Check if this was a rejected test being resubmitted
             was_rejected = test.status == 'rejected' or test.rejected_by is not None
             
+            has_structured_results = _has_meaningful_results_payload(results)
+            has_result_file = bool(result_file)
+            if not (has_structured_results or has_result_file):
+                return Response(
+                    {'error': 'No result values were provided. Enter at least one result or upload a result file.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
             test.results = results
             test.notes = notes
             if result_file:
@@ -584,14 +627,11 @@ class LabResultViewSet(viewsets.ReadOnlyModelViewSet):
         )
 
         if status_filter == 'results_ready':
-            # Only show results that are ready for verification (exclude rejected)
             queryset = queryset.filter(test__status='results_ready')
         elif status_filter == 'verified':
-            # Show verified results
             queryset = queryset.filter(test__status='verified')
         elif status_filter == 'all':
-            # Show all results (both pending and verified)
-            queryset = queryset.filter(test__status__in=['results_ready', 'verified'])
+            queryset = queryset.filter(Q(test__status='results_ready') | Q(test__status='verified'))
 
         # Date filtering (match Manage Visits style query params)
         # For verified history we filter by the verification date.
@@ -620,6 +660,15 @@ class LabResultViewSet(viewsets.ReadOnlyModelViewSet):
         pm = self.request.query_params.get('processing_method')
         if pm in ('in_house', 'outsourced'):
             queryset = queryset.filter(test__processing_method=pm)
+
+        # Final guard: include only rows with meaningful structured results or a real result file.
+        valid_ids = []
+        for row in queryset.iterator():
+            test = row.test
+            has_result_file = bool(test.result_file and getattr(test.result_file, "name", ""))
+            if _has_meaningful_results_payload(test.results) or has_result_file:
+                valid_ids.append(row.id)
+        queryset = queryset.filter(id__in=valid_ids)
 
         return queryset
 
@@ -650,6 +699,21 @@ class LabResultViewSet(viewsets.ReadOnlyModelViewSet):
         """Verify a lab result."""
         result = self.get_object()
         test = result.test
+
+        # Guardrail: block verification when there is no structured result and no uploaded file.
+        results_payload = test.results if isinstance(test.results, dict) else {}
+        has_structured_results = _has_meaningful_results_payload(results_payload)
+        has_result_file = bool(test.result_file and getattr(test.result_file, "name", ""))
+        if not (has_structured_results or has_result_file):
+            return Response(
+                {
+                    "error": (
+                        "Cannot verify this result yet. No result values or result file were found. "
+                        "Please submit results first."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         
         test.status = 'verified'
         test.verified_by = request.user
@@ -677,4 +741,3 @@ class LabResultViewSet(viewsets.ReadOnlyModelViewSet):
         )
         
         return Response(LabResultSerializer(result).data)
-

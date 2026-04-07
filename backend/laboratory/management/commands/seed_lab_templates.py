@@ -2,6 +2,8 @@
 Django management command to seed the database with core lab test templates.
 Run with: python manage.py seed_lab_templates
 """
+import re
+
 from django.core.management.base import BaseCommand
 from laboratory.models import LabTemplate
 
@@ -9,14 +11,37 @@ from laboratory.models import LabTemplate
 class Command(BaseCommand):
     help = 'Seed the database with core lab test templates'
 
+    @staticmethod
+    def _normalize_token(value: str) -> str:
+        return re.sub(r'[^a-z0-9]+', '', str(value or '').strip().lower())
+
+    def _canonical_template_name(self, name: str, code: str) -> str:
+        """
+        Keep template `name` human-readable and avoid repeating code.
+        Example: "Fasting Blood Sugar (FBS)" + code "FBS" -> "Fasting Blood Sugar".
+        """
+        raw = str(name or '').strip()
+        match = re.search(r'^(.*)\(([^()]*)\)\s*$', raw)
+        if not match:
+            return raw
+        base_name = match.group(1).strip()
+        suffix = match.group(2).strip()
+        if (
+            base_name
+            and self._normalize_token(suffix)
+            and self._normalize_token(suffix) == self._normalize_token(code)
+        ):
+            return base_name
+        return raw
+
     def handle(self, *args, **options):
         self.stdout.write('Seeding lab templates (non-destructive mode)...')
         self.stdout.write('Keeping existing LabOrder and LabTest records.')
 
         templates_data = [
             {
-                'name': 'Other (Others)',
-                'code': 'OTHER',
+                'name': 'Others (Specify in clinical notes)',
+                'code': 'OTHERS',
                 'category': 'chemistry',
                 'sample_type': 'See clinical notes',
                 'description': (
@@ -30,7 +55,7 @@ class Command(BaseCommand):
             },
             # HEMATOLOGY
             {
-                'name': 'Full Blood Count (FBC)',
+                'name': 'Full Blood Count',
                 'code': 'FBC',
                 'category': 'hematology',
                 'sample_type': 'EDTA Blood',
@@ -62,7 +87,7 @@ class Command(BaseCommand):
                 }
             },
             {
-                'name': 'Malaria Parasite (MP)',
+                'name': 'Malaria Parasite',
                 'code': 'MP',
                 'category': 'hematology',
                 'sample_type': 'EDTA Blood',
@@ -73,7 +98,7 @@ class Command(BaseCommand):
                 }
             },
             {
-                'name': 'Erythrocyte Sedimentation Rate (ESR)',
+                'name': 'Erythrocyte Sedimentation Rate',
                 'code': 'ESR',
                 'category': 'hematology',
                 'sample_type': 'Whole Blood',
@@ -98,7 +123,7 @@ class Command(BaseCommand):
                 }
             },
             {
-                'name': 'Haemoglobin Genotype (HB Genotype)',
+                'name': 'Haemoglobin Genotype',
                 'code': 'HB-GT',
                 'category': 'hematology',
                 'sample_type': 'EDTA Blood',
@@ -110,7 +135,7 @@ class Command(BaseCommand):
             },
             # CHEMISTRY
             {
-                'name': 'Glycosylated Hemoglobin (HbA1c)',
+                'name': 'Glycosylated Hemoglobin',
                 'code': 'HBA1C',
                 'category': 'chemistry',
                 'sample_type': 'EDTA Blood',
@@ -124,7 +149,7 @@ class Command(BaseCommand):
                 }
             },
             {
-                'name': 'Fasting Blood Sugar (FBS)',
+                'name': 'Fasting Blood Sugar',
                 'code': 'FBS',
                 'category': 'chemistry',
                 'sample_type': 'Fluoride Oxalate Blood',
@@ -135,7 +160,7 @@ class Command(BaseCommand):
                 }
             },
             {
-                'name': '2-Hour Postprandial Blood Sugar (2HPP)',
+                'name': '2-Hour Postprandial Blood Sugar',
                 'code': '2HPP',
                 'category': 'chemistry',
                 'sample_type': 'Fluoride Oxalate Blood',
@@ -146,7 +171,7 @@ class Command(BaseCommand):
                 }
             },
             {
-                'name': 'Random Blood Sugar (RBS)',
+                'name': 'Random Blood Sugar',
                 'code': 'RBS',
                 'category': 'chemistry',
                 'sample_type': 'Fluoride Oxalate Blood',
@@ -157,7 +182,7 @@ class Command(BaseCommand):
                 }
             },
             {
-                'name': 'Liver Function Test (LFT)',
+                'name': 'Liver Function Test',
                 'code': 'LFT',
                 'category': 'chemistry',
                 'sample_type': 'Serum',
@@ -176,7 +201,7 @@ class Command(BaseCommand):
                 }
             },
             {
-                'name': 'Renal Function Test (RFT)',
+                'name': 'Renal Function Test',
                 'code': 'RFT',
                 'category': 'chemistry',
                 'sample_type': 'Serum',
@@ -449,7 +474,7 @@ class Command(BaseCommand):
                 }
             },
             {
-                'name': 'Retroviral Screening (RVS)',
+                'name': 'Retroviral Screening',
                 'code': 'RVS',
                 'category': 'serology',
                 'sample_type': 'Serum',
@@ -460,7 +485,7 @@ class Command(BaseCommand):
                 }
             },
             {
-                'name': 'Hepatitis B Surface Antigen (HBsAg)',
+                'name': 'Hepatitis B Surface Antigen',
                 'code': 'HBSAG',
                 'category': 'serology',
                 'sample_type': 'Serum',
@@ -471,7 +496,7 @@ class Command(BaseCommand):
                 }
             },
             {
-                'name': 'Hepatitis C Virus Antibody (HCV)',
+                'name': 'Hepatitis C Virus Antibody',
                 'code': 'HCV',
                 'category': 'serology',
                 'sample_type': 'Serum',
@@ -610,10 +635,14 @@ class Command(BaseCommand):
         updated_count = 0
 
         for template_data in templates_data:
+            canonical_name = self._canonical_template_name(
+                template_data['name'],
+                template_data['code'],
+            )
             template, created = LabTemplate.objects.update_or_create(
                 code=template_data['code'],
                 defaults={
-                    'name': template_data['name'],
+                    'name': canonical_name,
                     'category': template_data.get('category', 'chemistry'),
                     'sample_type': template_data['sample_type'],
                     'description': template_data.get('description', ''),

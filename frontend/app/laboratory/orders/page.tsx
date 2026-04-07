@@ -729,9 +729,28 @@ export default function LabOrdersPage() {
   const templateFromNormalRange = (code: string, nr: any) => {
     if (!nr || typeof nr !== 'object') return undefined;
     const order = Array.isArray(nr._order) ? nr._order : null;
-    const keys = order
+    const baseKeys = order
       ? order.filter((k: any) => typeof k === 'string' && nr[k] != null)
       : Object.keys(nr).filter((k) => !k.startsWith('_'));
+
+    const normalizeMeta = (meta: any) => ({
+      unit: String(meta?.unit ?? '').trim().toLowerCase(),
+      range: String(meta?.range ?? meta?.normal_range ?? meta?.normalRange ?? meta?.normalRangeText ?? '').trim().toLowerCase(),
+      min: String(meta?.min ?? meta?.normalRangeMin ?? '').trim().toLowerCase(),
+      max: String(meta?.max ?? meta?.normalRangeMax ?? '').trim().toLowerCase(),
+    });
+
+    // Single-analyte templates may expose "Result" as an alias for the real parameter.
+    // Avoid showing both fields in result entry UI.
+    let keys = [...baseKeys];
+    if (keys.includes('Result') && keys.length > 1) {
+      const resultMeta = normalizeMeta(nr['Result']);
+      const aliasTarget = keys.find((k) => k !== 'Result' && JSON.stringify(normalizeMeta(nr[k])) === JSON.stringify(resultMeta));
+      if (aliasTarget) {
+        keys = keys.filter((k) => k !== 'Result');
+      }
+    }
+
     const fields = keys.map((name: string) => {
       const v = nr[name];
       let normalRange = v?.range || v?.normal_range || v?.normalRange || v?.normalRangeText || '';

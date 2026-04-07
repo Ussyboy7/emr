@@ -18,6 +18,7 @@ export interface CompletedTest {
   testCode: string;
   results: CompletedTestResultRow[];
   result_file?: string | null;
+  result_file_exists?: boolean;
   overallStatus: 'Normal' | 'Abnormal' | 'Critical';
   priority: 'Routine' | 'Urgent' | 'STAT';
   orderedAt: string;
@@ -75,6 +76,7 @@ export function transformApiRowToCompletedTest(
         : '< 1 min';
 
   const rf = test.result_file;
+  const resultFileExists = (test as any)?.result_file_exists !== false;
   const resultFileUrl =
     rf && typeof rf === 'string'
       ? rf.startsWith('http')
@@ -107,7 +109,7 @@ export function transformApiRowToCompletedTest(
     return '';
   };
 
-  const processedResults = Object.entries(test.results || {}).map(([key, value]) => {
+  const processedResultsRaw = Object.entries(test.results || {}).map(([key, value]) => {
     const valueStr = String(value);
     const valueNum = parseFloat(valueStr);
 
@@ -194,6 +196,21 @@ export function transformApiRowToCompletedTest(
     };
   });
 
+  // De-duplicate generic "Result" alias when a specific analyte row has the same value/range/unit.
+  const processedResults = (() => {
+    const generic = processedResultsRaw.find((r) => String(r.parameter).trim().toLowerCase() === 'result');
+    if (!generic) return processedResultsRaw;
+    const hasEquivalentSpecific = processedResultsRaw.some(
+      (r) =>
+        String(r.parameter).trim().toLowerCase() !== 'result' &&
+        String(r.value).trim() === String(generic.value).trim() &&
+        String(r.unit).trim().toLowerCase() === String(generic.unit).trim().toLowerCase() &&
+        String(r.normalRange).trim().toLowerCase() === String(generic.normalRange).trim().toLowerCase()
+    );
+    if (!hasEquivalentSpecific) return processedResultsRaw;
+    return processedResultsRaw.filter((r) => String(r.parameter).trim().toLowerCase() !== 'result');
+  })();
+
   let overallStatus: 'Normal' | 'Abnormal' | 'Critical' = 'Normal';
   if (test.overall_status) {
     const statusMap: Record<string, 'Normal' | 'Abnormal' | 'Critical'> = {
@@ -241,6 +258,7 @@ export function transformApiRowToCompletedTest(
     clinic,
     turnaroundTime,
     result_file: resultFileUrl,
+    result_file_exists: resultFileExists,
   };
 }
 

@@ -66,6 +66,15 @@ function downloadResultFile(url: string, filename: string) {
   document.body.removeChild(link);
 }
 
+function formatTestNameWithCode(name: string, code: string) {
+  const testName = String(name || '').trim();
+  const testCode = String(code || '').trim();
+  if (!testName) return testCode;
+  if (!testCode) return testName;
+  const alreadyHasCodeSuffix = new RegExp(`\\(${testCode.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}\\)\\s*$`, 'i').test(testName);
+  return alreadyHasCodeSuffix ? testName : `${testName} (${testCode})`;
+}
+
 export interface LabCompletedReportDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -80,6 +89,8 @@ export function LabCompletedReportDialog({
   test,
   hideLabWorkflowActions = false,
 }: LabCompletedReportDialogProps) {
+  const hasUsableResultFile = Boolean(test?.result_file && test?.result_file_exists !== false);
+
   const handlePrint = () => {
     if (!test) return;
     toast.info(`Printing result for ${test.patient.name}...`);
@@ -88,17 +99,19 @@ export function LabCompletedReportDialog({
 
   const handleFooterDownload = () => {
     if (!test) return;
-    if (test.result_file) {
+    if (hasUsableResultFile && test.result_file) {
       const name = displayNameFromLabResultFileUrl(test.result_file);
       downloadResultFile(test.result_file, name);
       toast.success(`Downloaded result for ${test.patient.name}`);
       return;
     }
-    toast.info('No PDF file is attached to this test.');
+    toast.info('No accessible PDF file is attached to this test.');
   };
 
   const pdfDisplayName =
-    test?.result_file != null ? displayNameFromLabResultFileUrl(test.result_file) : null;
+    hasUsableResultFile && test?.result_file != null
+      ? displayNameFromLabResultFileUrl(test.result_file)
+      : null;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -143,9 +156,7 @@ export function LabCompletedReportDialog({
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">Test Name</p>
-                <p className="font-medium">
-                  {test.testName} ({test.testCode})
-                </p>
+                <p className="font-medium">{formatTestNameWithCode(test.testName, test.testCode)}</p>
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">Clinic</p>
@@ -157,7 +168,7 @@ export function LabCompletedReportDialog({
               <h3 className="font-semibold mb-3 flex items-center gap-2">
                 <FlaskConical className="h-4 w-4 text-amber-500" />
                 Test Results
-                {(test.results.length > 0 || test.result_file) && (
+                {(test.results.length > 0 || hasUsableResultFile) && (
                   <Badge variant="outline" className={getOverallStatusBadge(test.overallStatus)}>
                     {test.overallStatus}
                   </Badge>
@@ -166,7 +177,7 @@ export function LabCompletedReportDialog({
 
               {test.results.length > 0 ? (
                 <>
-                  {pdfDisplayName != null && test.result_file && (
+                  {pdfDisplayName != null && hasUsableResultFile && test.result_file && (
                     <div className="mb-4 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <div className="flex items-start gap-3 min-w-0">
@@ -237,11 +248,11 @@ export function LabCompletedReportDialog({
                     </table>
                   </div>
                 </>
-              ) : test.result_file && pdfDisplayName != null ? (
+              ) : hasUsableResultFile && test.result_file && pdfDisplayName != null ? (
                 <div className="space-y-4">
                   <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
                     <p className="text-sm font-medium text-amber-900 dark:text-amber-100">
-                      {test.testName} ({test.testCode})
+                      {formatTestNameWithCode(test.testName, test.testCode)}
                     </p>
                     <p className="text-xs text-muted-foreground mt-1">Status: {test.overallStatus}</p>
                   </div>

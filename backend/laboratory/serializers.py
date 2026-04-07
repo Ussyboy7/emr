@@ -46,6 +46,7 @@ class LabTestSerializer(serializers.ModelSerializer):
     verified_by_name = serializers.SerializerMethodField()
     rejected_by_name = serializers.SerializerMethodField()
     order_details = serializers.SerializerMethodField()
+    result_file_exists = serializers.SerializerMethodField()
 
     def get_template_normal_range(self, obj):
         """
@@ -153,6 +154,25 @@ class LabTestSerializer(serializers.ModelSerializer):
             'priority': order.priority,
             'clinical_notes': order.clinical_notes or '',
         }
+
+    def get_result_file_exists(self, obj):
+        """
+        Return whether the stored result file path resolves to an existing file.
+        Prevents frontend from showing dead links that return 404.
+        """
+        rf = getattr(obj, "result_file", None)
+        if not rf:
+            return False
+        try:
+            name = getattr(rf, "name", "") or ""
+            if not name:
+                return False
+            storage = getattr(rf, "storage", None)
+            if storage is None:
+                return False
+            return bool(storage.exists(name))
+        except Exception:
+            return False
     
     class Meta:
         model = LabTest
@@ -327,4 +347,3 @@ class LabResultSerializer(serializers.ModelSerializer):
         model = LabResult
         fields = '__all__'
         read_only_fields = ['created_at']
-

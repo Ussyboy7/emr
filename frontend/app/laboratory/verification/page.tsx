@@ -54,6 +54,7 @@ interface LabResult {
   testCode: string;
   results: TestResult[];
   resultFile?: string; // PDF file URL
+  resultFileExists?: boolean;
   overallStatus: 'Normal' | 'Abnormal' | 'Critical';
   priority: 'Routine' | 'Urgent' | 'STAT';
   status: 'Results Ready' | 'Verified' | 'Completed';
@@ -542,6 +543,23 @@ const transformResult = (
         status,
       });
     });
+
+    // De-duplicate generic "Result" alias when a specific analyte row has the same value/range/unit.
+    const genericResultRow = results.find((r) => r.parameter.trim().toLowerCase() === 'result');
+    if (genericResultRow) {
+      const hasEquivalentSpecific = results.some(
+        (r) =>
+          r.parameter.trim().toLowerCase() !== 'result' &&
+          String(r.value).trim() === String(genericResultRow.value).trim() &&
+          String(r.unit).trim().toLowerCase() === String(genericResultRow.unit).trim().toLowerCase() &&
+          String(r.normalRange).trim().toLowerCase() === String(genericResultRow.normalRange).trim().toLowerCase()
+      );
+      if (hasEquivalentSpecific) {
+        const deduped = results.filter((r) => r.parameter.trim().toLowerCase() !== 'result');
+        results.length = 0;
+        results.push(...deduped);
+      }
+    }
   }
   
   // Determine overall status from individual results or use API value
@@ -568,6 +586,7 @@ const transformResult = (
   
   // Extract result file URL if available
   let resultFileUrl: string | undefined = undefined;
+  const resultFileExists = (testDetails as any)?.result_file_exists !== false;
   if (testDetails?.result_file) {
     const fileField = testDetails.result_file;
     if (typeof fileField === 'string') {
@@ -607,6 +626,7 @@ const transformResult = (
     testCode: testCode,
     results,
     resultFile: resultFileUrl,
+    resultFileExists,
     overallStatus,
     priority: transformPriority(apiResult.priority || order?.priority || 'routine') as 'Routine' | 'Urgent' | 'STAT',
     status: 'Results Ready',
@@ -1007,6 +1027,11 @@ export default function ResultsVerificationPage() {
   const openViewDialog = (result: LabResult) => { setSelectedResult(result); setIsViewDialogOpen(true); };
   const openVerifyDialog = (result: LabResult) => { setSelectedResult(result); setVerificationNotes(''); setIsVerifyDialogOpen(true); };
   const openRejectDialog = (result: LabResult) => { setSelectedResult(result); setRejectionReason(''); setIsRejectDialogOpen(true); };
+  const canVerifySelectedResult = Boolean(
+    selectedResult &&
+      ((selectedResult.results?.length || 0) > 0 ||
+        (selectedResult.resultFile && selectedResult.resultFileExists !== false))
+  );
 
   return (
     <DashboardLayout>
@@ -1386,7 +1411,7 @@ export default function ResultsVerificationPage() {
                         </tbody>
                       </table>
                     </div>
-                  ) : selectedResult.resultFile ? (
+                  ) : selectedResult.resultFile && selectedResult.resultFileExists !== false ? (
                     <div className="p-4 rounded-lg bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
@@ -1404,7 +1429,7 @@ export default function ResultsVerificationPage() {
                           variant="outline"
                           size="sm"
                           onClick={() => {
-                            if (selectedResult.resultFile) {
+                            if (selectedResult.resultFile && selectedResult.resultFileExists !== false) {
                               window.open(selectedResult.resultFile, '_blank');
                             }
                           }}
@@ -1442,7 +1467,11 @@ export default function ResultsVerificationPage() {
               <Button variant="outline" onClick={() => { setIsViewDialogOpen(false); if (selectedResult) openRejectDialog(selectedResult); }} className="text-rose-600">
                 <XCircle className="h-4 w-4 mr-2" />Reject
               </Button>
-              <Button onClick={() => { setIsViewDialogOpen(false); if (selectedResult) openVerifyDialog(selectedResult); }} className="bg-emerald-500 hover:bg-emerald-600">
+              <Button
+                onClick={() => { setIsViewDialogOpen(false); if (selectedResult) openVerifyDialog(selectedResult); }}
+                className="bg-emerald-500 hover:bg-emerald-600"
+                disabled={!canVerifySelectedResult}
+              >
                 <CheckCircle2 className="h-4 w-4 mr-2" />Verify
               </Button>
             </DialogFooter>
@@ -1538,4 +1567,3 @@ export default function ResultsVerificationPage() {
     </DashboardLayout>
   );
 }
-
