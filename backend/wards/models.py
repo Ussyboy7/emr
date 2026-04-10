@@ -462,7 +462,7 @@ class WardAssignment(models.Model):
 
 class AdmissionObservationVital(models.Model):
     """
-    Continuous observation vitals chart (temp, pulse, RR, BP, FBS, RBS) per ward admission.
+    Continuous observation vitals chart (temp, pulse, RR, BP, Fasting Blood Sugar, Random Blood Sugar) per ward admission.
     """
 
     admission = models.ForeignKey(

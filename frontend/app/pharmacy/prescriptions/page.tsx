@@ -49,6 +49,54 @@ const debugPharmacy = (...args: any[]) => {
   }
 };
 
+// Batch data caching to avoid repeated API calls
+const batchCache = new Map<number, { data: any[], timestamp: number }>();
+const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+
+const getCachedBatches = async (medicationId: number) => {
+  const now = Date.now();
+  const cached = batchCache.get(medicationId);
+
+  if (cached && (now - cached.timestamp) < CACHE_DURATION) {
+    debugPharmacy('Using cached batches for medication', medicationId);
+    return cached.data;
+  }
+
+  debugPharmacy('Fetching fresh batches for medication', medicationId);
+  try {
+    const batches = await pharmacyService.getMedicationBatches(medicationId);
+    batchCache.set(medicationId, { data: batches, timestamp: now });
+    return batches;
+  } catch (error) {
+    console.error('Error fetching medication batches:', error);
+    return [];
+  }
+};
+
+// Medication details caching
+const medicationCache = new Map<number, { data: any, timestamp: number }>();
+const MED_CACHE_DURATION = 10 * 60 * 1000; // 10 minutes
+
+const getCachedMedication = async (medicationId: number) => {
+  const now = Date.now();
+  const cached = medicationCache.get(medicationId);
+
+  if (cached && (now - cached.timestamp) < MED_CACHE_DURATION) {
+    debugPharmacy('Using cached medication details for', medicationId);
+    return cached.data;
+  }
+
+  debugPharmacy('Fetching fresh medication details for', medicationId);
+  try {
+    const med = await pharmacyService.getMedication(medicationId);
+    medicationCache.set(medicationId, { data: med, timestamp: now });
+    return med;
+  } catch (error) {
+    console.error('Error fetching medication details:', error);
+    return null;
+  }
+};
+
 /** Parse prescription / line-item ids from UI state (string or number). */
 const parseNumericId = (value: unknown): number | undefined => {
   if (value === null || value === undefined) return undefined;
@@ -1075,30 +1123,30 @@ export default function PrescriptionsPage() {
       return;
     }
 
-    // Validate batch selection for selected medications
-    const missingBatches = await Promise.all(selectedMedications.map(async (medId) => {
+    // Validate batch selection for selected medications (PARALLEL)
+    const validationResults = await Promise.all(selectedMedications.map(async (medId) => {
       const med = selectedPrescriptionMedications.find(m => m.id === medId);
       // If manually selected batch exists, it's valid
-      if (selectedBatches[medId]) return false;
-      
+      if (selectedBatches[medId]) return { medId, hasBatch: true };
+
       // If not manually selected, check if we can auto-select one (FEFO)
-      if (med && med.status !== 'Out of Stock') {
+      if (med && med.status !== 'Out of Stock' && med.medication) {
         try {
-          if (med.medication) {
-            const batches = await pharmacyService.getMedicationBatches(med.medication as number);
-            // If we have batches, we can auto-select, so it's not missing
-            if (batches.length > 0) return false;
-          }
+          const batches = await getCachedBatches(med.medication as number);
+          // If we have batches, we can auto-select, so it's not missing
+          return { medId, hasBatch: batches.length > 0 };
         } catch (err) {
           console.error('Error checking batches for validation:', err);
+          return { medId, hasBatch: false };
         }
       }
-      
+
       // If we reach here, no batch is selected and none can be auto-selected
-      return true;
+      return { medId, hasBatch: false };
     }));
 
-    if (missingBatches.some(isMissing => isMissing)) {
+    const missingBatches = validationResults.filter(result => !result.hasBatch);
+    if (missingBatches.length > 0) {
       toast.error('No stock batches available for one or more selected medications');
       return;
     }
@@ -1116,8 +1164,18 @@ export default function PrescriptionsPage() {
       return;
     }
 
-    // Proceed directly with dispensing
-    await proceedWithDispense();
+    // Optimistic UI update - show immediate feedback
+    setShowDispenseModal(false);
+    toast.success(`Dispensing ${selectedMedications.length} medication(s)...`, {
+      description: 'Please wait while we process your request'
+    });
+
+    // Proceed with dispensing in background
+    proceedWithDispense().catch((error) => {
+      console.error('Dispense failed:', error);
+      toast.error('Dispensing failed - please try again');
+      // Could add retry logic here
+    });
   };
 
   const handleSplitComboMedication = async (med: any) => {
@@ -1221,13 +1279,13 @@ export default function PrescriptionsPage() {
 
         const quantity = dispenseQuantities[medId] ?? getDefaultDispenseQuantity(med);
         const coverageQuantity = dispenseCoverageQuantities[medId] ?? getDefaultCoverageQuantity(med);
-        
-        // Use manually selected batch OR fetch auto-selected batch (FEFO)
+
+        // Use manually selected batch OR fetch auto-selected batch (FEFO) from cache
         let inventoryId = selectedBatches[medId] ? parseInt(selectedBatches[medId]) : undefined;
-        
+
         if (!inventoryId && med.medication) {
           try {
-            const batches = await pharmacyService.getMedicationBatches(med.medication);
+            const batches = await getCachedBatches(med.medication);
             if (batches.length > 0) {
               inventoryId = parseInt(batches[0].id); // First one is oldest due to FEFO sort
             }
@@ -1261,6 +1319,8 @@ export default function PrescriptionsPage() {
       await Promise.all(dispensePromises);
 
       toast.success(`${selectedMedications.length} medication(s) dispensed successfully for ${selectedPrescription?.patient?.name || 'patient'}`);
+
+      // Clean up state after successful dispense
       setShowDispenseModal(false);
       setSelectedPrescription(null);
       setSelectedMedications([]);
@@ -1268,6 +1328,14 @@ export default function PrescriptionsPage() {
       setDispenseCoverageQuantities({});
       setDispenseNotes('');
       setSelectedBatches({});
+
+      // Clear batch cache for affected medications to ensure fresh data
+      selectedMedications.forEach(medId => {
+        const med = selectedPrescriptionMedications.find(m => m.id === medId);
+        if (med?.medication) {
+          batchCache.delete(med.medication as number);
+        }
+      });
 
       // Force a status recalculation on the backend first
       try {
@@ -2319,12 +2387,8 @@ export default function PrescriptionsPage() {
                                     disabled={isLoadingBrands}
                                     onClick={async (e) => {
                                       e.stopPropagation();
-                                      // Debounce rapid clicks
-                                      if (brandSelectionTimeoutRef.current) {
-                                        clearTimeout(brandSelectionTimeoutRef.current);
-                                      }
 
-                                      setIsLoadingBrands(true);
+                                      // OPTIMISTIC UI: Open modal immediately
                                       setSubstitutionMed(med);
                                       setSubstituteSearchResults([]);
                                       setSubstitutionForm({
@@ -2336,7 +2400,14 @@ export default function PrescriptionsPage() {
                                       setSubstituteSearchQuery('');
                                       setBrandSelectionTargetName('');
                                       setBrandSelectionMode('select');
+                                      setShowSubstitutionModal(true);
+                                      setIsLoadingBrands(true);
 
+                                      toast.success('Loading brand options...', {
+                                        description: 'Please wait while we fetch available brands'
+                                      });
+
+                                      // BACKGROUND LOADING: Determine generic and load brands
                                       try {
                                         const isGenericSelection =
                                           (med as any).status === 'Pending' ||
@@ -2348,31 +2419,29 @@ export default function PrescriptionsPage() {
 
                                         if (isGenericSelection) {
                                           genericId = Number(med.generic || (med as any).medication_details?.generic_id || 0) || null;
-                                        } else {
-                                          const medDetail = await pharmacyService.getMedication(Number((med as any).medication));
-                                          genericId = medDetail.generic?.id ?? null;
-                                          targetName = medDetail.generic?.name || targetName;
+                                        } else if ((med as any).medication) {
+                                          // Use cached medication details
+                                          const medDetail = await getCachedMedication(Number((med as any).medication));
+                                          genericId = medDetail?.generic?.id ?? null;
+                                          targetName = medDetail?.generic?.name || targetName;
                                         }
 
                                         setBrandSelectionTargetName(targetName);
                                         brandSelectionGenericIdRef.current = genericId;
 
                                         if (genericId) {
-                                          setShowSubstitutionModal(true);
-                                          setIsLoadingBrands(false);
-                                          // Server-side load: initial brands for this generic
+                                          // Load brands in background
                                           performSubstituteSearch('');
                                         } else {
-                                          setShowSubstitutionModal(true);
-                                          setIsLoadingBrands(false);
                                           setSubstituteSearchResults([]);
                                           toast.error('Generic not found for this medication');
                                         }
                                       } catch (err) {
-                                        console.error('Failed to open brand selection:', err);
-                                        setIsLoadingBrands(false);
-                                        setShowSubstitutionModal(true);
+                                        console.error('Failed to load brand data:', err);
+                                        setSubstituteSearchResults([]);
                                         toast.error('Failed to load brands');
+                                      } finally {
+                                        setIsLoadingBrands(false);
                                       }
                                     }}
                                     >
@@ -2414,28 +2483,37 @@ export default function PrescriptionsPage() {
                                       disabled={isLoadingSubstitutes}
                                     onClick={async (e) => {
                                       e.stopPropagation();
-                                      // Debounce rapid clicks
-                                      if (substituteTimeoutRef.current) {
-                                        clearTimeout(substituteTimeoutRef.current);
-                                        }
 
+                                      // OPTIMISTIC UI: Open modal immediately
+                                      setSubstitutionMed(med);
+                                      setSubstituteSearchResults([]);
+                                      setSubstituteBrandOptions([]);
+                                      setSubstitutionForm({
+                                        reason: 'out_of_stock',
+                                        selectedSubstitute: '',
+                                        selectedSubstituteBrand: '',
+                                        notes: '',
+                                      });
+                                      setSubstituteSearchQuery('');
+                                      brandSelectionGenericIdRef.current = null;
+                                      setShowSubstitutionModal(true);
+
+                                      toast.success('Opening substitution options...', {
+                                        description: 'Loading available medication alternatives'
+                                      });
+
+                                      // BACKGROUND LOADING: Load initial substitute options
+                                      try {
                                         setIsLoadingSubstitutes(true);
-                                        setSubstitutionMed(med);
-                                        setSubstituteSearchResults([]);
-                                        setSubstituteBrandOptions([]);
-                                        setSubstitutionForm({
-                                          reason: 'out_of_stock',
-                                          selectedSubstitute: '',
-                                          selectedSubstituteBrand: '',
-                                          notes: '',
-                                        });
-                                        setSubstituteSearchQuery('');
-                                        brandSelectionGenericIdRef.current = null;
-
-                                        // Open modal immediately - server-side search on type (fast)
+                                        // performSubstituteSearch will be triggered by the modal's useEffect
+                                        // when the modal opens and detect the reason change
+                                      } catch (err) {
+                                        console.error('Failed to initialize substitution:', err);
+                                        toast.error('Failed to load substitution options');
+                                      } finally {
                                         setIsLoadingSubstitutes(false);
-                                        setShowSubstitutionModal(true);
-                                      }}
+                                      }
+                                    }}
                                     >
                                       <ArrowRightLeft className="h-3 w-3 mr-1" />
                                       Substitute

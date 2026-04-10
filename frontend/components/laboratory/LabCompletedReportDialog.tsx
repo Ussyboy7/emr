@@ -91,6 +91,11 @@ export function LabCompletedReportDialog({
 }: LabCompletedReportDialogProps) {
   const hasUsableResultFile = Boolean(test?.result_file && test?.result_file_exists !== false);
 
+  // Hide Unit and Normal Range columns if all results have empty unit and normalRange doesn't contain '-' (qualitative tests)
+  const hideUnitNormalColumns = test?.results.every(r =>
+    !r.unit?.trim() && (!r.normalRange?.trim() || !r.normalRange.includes('-'))
+  ) ?? false;
+
   const handlePrint = () => {
     if (!test) return;
     toast.info(`Printing result for ${test.patient.name}...`);
@@ -215,38 +220,48 @@ export function LabCompletedReportDialog({
                     </div>
                   )}
 
-                  <div className="overflow-x-auto border rounded-lg">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="border-b bg-muted/50">
-                          <th className="text-left p-3 font-medium">Parameter</th>
-                          <th className="text-left p-3 font-medium">Result</th>
-                          <th className="text-left p-3 font-medium">Unit</th>
-                          <th className="text-left p-3 font-medium">Normal Range</th>
-                          <th className="text-left p-3 font-medium">Status</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {test.results.map((r) => (
-                          <tr key={r.parameter} className="border-b">
-                            <td className="p-3 font-medium">{r.parameter}</td>
-                            <td className={`p-3 ${getResultStatusColor(r.status)}`}>{r.value || 'Pending'}</td>
-                            <td className="p-3 text-muted-foreground">{r.unit}</td>
-                            <td className="p-3 text-muted-foreground">{r.normalRange}</td>
-                            <td className="p-3">
-                              {r.status === 'Normal' ? (
-                                <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-                              ) : (
-                                <AlertTriangle
-                                  className={`h-4 w-4 ${r.status === 'Critical' ? 'text-rose-500' : 'text-amber-500'}`}
-                                />
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+
+
+                   <div className="overflow-x-auto border rounded-lg">
+                     <table className="w-full text-sm">
+                       <thead>
+                         <tr className="border-b bg-muted/50">
+                           <th className="text-left p-3 font-medium">Parameter</th>
+                           <th className="text-left p-3 font-medium">Result</th>
+                           {!hideUnitNormalColumns && (
+                             <th className="text-left p-3 font-medium">Unit</th>
+                           )}
+                           {!hideUnitNormalColumns && (
+                             <th className="text-left p-3 font-medium">Normal Range</th>
+                           )}
+                           <th className="text-left p-3 font-medium">Status</th>
+                         </tr>
+                       </thead>
+                       <tbody>
+                         {test.results.map((r) => (
+                           <tr key={r.parameter} className="border-b">
+                             <td className="p-3 font-medium">{r.parameter}</td>
+                             <td className={`p-3 ${getResultStatusColor(r.status)}`}>{r.value || 'Pending'}</td>
+                             {!hideUnitNormalColumns && (
+                               <td className="p-3 text-muted-foreground">{r.unit}</td>
+                             )}
+                             {!hideUnitNormalColumns && (
+                               <td className="p-3 text-muted-foreground">{r.normalRange}</td>
+                             )}
+                             <td className="p-3">
+                               {r.status === 'Normal' ? (
+                                 <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                               ) : (
+                                 <AlertTriangle
+                                   className={`h-4 w-4 ${r.status === 'Critical' ? 'text-rose-500' : 'text-amber-500'}`}
+                                 />
+                               )}
+                             </td>
+                           </tr>
+                         ))}
+                       </tbody>
+                     </table>
+                   </div>
                 </>
               ) : hasUsableResultFile && test.result_file && pdfDisplayName != null ? (
                 <div className="space-y-4">

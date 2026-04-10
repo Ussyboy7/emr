@@ -90,6 +90,10 @@ import {
 } from '@/lib/radiology/completedRadiologyReport';
 import { PrescriptionReportDialog } from '@/components/pharmacy/PrescriptionReportDialog';
 import {
+  PrescriptionOrderModal,
+  type PrescriptionOrderSubmitInput,
+} from '@/components/consultation/orders/PrescriptionOrderModal';
+import {
   summarizeLabTestForConsultationReport,
   reportFormatters,
 } from '@/lib/consultation-report';
@@ -159,16 +163,14 @@ const formatPriority = (p: string | undefined): string => {
 };
 
 const splitPresentationComplaintLines = (value: string): string[] =>
-  value
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean);
+  value.split('\n').map((line) => line.replace(/\r/g, ''));
 
 const joinPresentationComplaintLines = (selected: string[], customText: string): string => {
+  // Preserve custom free-text spacing exactly as typed by clinician.
   const customLines = customText
     .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean);
+    .map((line) => line.replace(/\r/g, ''))
+    .filter((line) => line.trim().length > 0);
 
   return [...selected, ...customLines].join('\n');
 };
@@ -183,7 +185,8 @@ const parsePresentationComplaintValue = (
   const custom: string[] = [];
 
   for (const line of splitPresentationComplaintLines(value)) {
-    const normalized = line.toLowerCase();
+    const normalized = line.trim().toLowerCase();
+    if (!normalized) continue;
     if (optionSet.has(normalized)) {
       if (!selectedNormalized.has(normalized)) {
         selectedNormalized.add(normalized);
@@ -3903,6 +3906,44 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     toast.success(`${selectedMeds.length} medication(s) added to prescription order`);
   };
 
+  const handleAddPrescriptionToOrder = async (payload: PrescriptionOrderSubmitInput) => {
+    if (payload.items.length === 0) {
+      toast.error('Please select at least one medication');
+      return;
+    }
+
+    const createdAt = Date.now();
+    const nextPrescriptions = payload.items.map((item, index) => {
+      const unit = (item.unit || 'tablet').trim();
+      const doseValue = (item.dosage || '').trim();
+      const normalizedDose = doseValue ? `${doseValue} ${unit}`.trim() : `1 ${unit}`.trim();
+
+      return {
+        id: `RX-${createdAt}-${item.medication}-${index}`,
+        medication: item.medication_name || 'Medication',
+        medicationId: item.medication,
+        genericName: item.medication_name || 'Medication',
+        unit,
+        strength: item.strength || '',
+        form: item.dosage_form || '',
+        dose: normalizedDose,
+        dosage: normalizedDose,
+        frequency: item.frequency || 'Once daily (OD)',
+        duration: item.duration || 'As directed',
+        quantity: item.quantity || 1,
+        route: item.route || 'Oral',
+        instructions: (item.instructions || payload.clinicalIndication || '').trim(),
+        priority: payload.priority,
+        status: 'Draft' as const,
+      };
+    });
+
+    setPrescriptions((prev) => [...prev, ...nextPrescriptions]);
+    toast.success(`${nextPrescriptions.length} medication(s) added to consultation`, {
+      description: 'Prescriptions will be sent to pharmacy when consultation is completed'
+    });
+  };
+
   const calculateQuantity = (frequency: string, durationDays: number, dosage: string | number = 1) => {
     if (frequency === 'STAT (Single dose)') {
       const dosageValue = typeof dosage === 'string' ? (parseFloat(dosage.replace(/[^\d.]/g, '')) || 1) : (dosage || 1);
@@ -5164,7 +5205,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                   ) : null}
                   {currentPatient.vitals.bloodSugar ? (
                     <div className="text-center p-3 bg-violet-50 dark:bg-violet-900/20 rounded-lg">
-                      <div className="text-xs text-muted-foreground">Blood sugar</div>
+                      <div className="text-xs text-muted-foreground">Fasting Blood Sugar (FBS)</div>
                       <div className="text-lg font-bold text-violet-700 dark:text-violet-300">
                         {currentPatient.vitals.bloodSugar} <span className="text-xs font-normal">mg/dL</span>
                       </div>
@@ -5172,10 +5213,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                   ) : null}
                   {currentPatient.vitals.randomBloodSugar ? (
                     <div className="text-center p-3 bg-fuchsia-50 dark:bg-fuchsia-900/20 rounded-lg">
-                      <div className="text-xs text-muted-foreground">RBS</div>
+                      <div className="text-xs text-muted-foreground">Random Blood Sugar (RBS)</div>
                       <div className="text-lg font-bold text-fuchsia-700 dark:text-fuchsia-300">
-                        {currentPatient.vitals.randomBloodSugar}{" "}
-                        <span className="text-xs font-normal">mg/dL</span>
+                        {currentPatient.vitals.randomBloodSugar} <span className="text-xs font-normal">mg/dL</span>
                       </div>
                     </div>
                   ) : null}
@@ -5240,7 +5280,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                       className="pl-9"
                     />
                   </div>
-                  <div className="max-h-64 overflow-y-auto rounded-md border p-2 space-y-2">
+                  <div className="max-h-72 overflow-y-auto rounded-md border p-2 space-y-2">
                     {filteredPresentationComplaintGroups.length === 0 ? (
                       <p className="px-1 py-2 text-sm text-muted-foreground">
                         {presentingComplaintLibrary.length === 0
@@ -5249,66 +5289,56 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                       </p>
                     ) : (
                       filteredPresentationComplaintGroups.map((group) => (
-                        <div key={group.category} className="space-y-1">
-                          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide px-1">
-                            {group.category}
-                          </p>
-                          {group.complaints.map((complaint) => {
-                            const normalizedComplaint = complaint.toLowerCase();
-                            const selected = selectedPresentingComplaintSet.has(normalizedComplaint);
+                        <details
+                          key={group.category}
+                          open={presentationComplaintSearch.trim().length > 0}
+                          className="rounded-md border bg-muted/20"
+                        >
+                          <summary className="px-3 py-2 cursor-pointer text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center justify-between">
+                            <span>{group.category}</span>
+                            <span className="normal-case text-[11px]">
+                              {group.complaints.filter((c) => selectedPresentingComplaintSet.has(c.toLowerCase())).length}/{group.complaints.length}
+                            </span>
+                          </summary>
+                          <div className="p-2 pt-0 space-y-1">
+                            {group.complaints.map((complaint) => {
+                              const normalizedComplaint = complaint.toLowerCase();
+                              const selected = selectedPresentingComplaintSet.has(normalizedComplaint);
 
-                            return (
-                              <div
-                                key={`${group.category}-${complaint}`}
-                                role="button"
-                                tabIndex={0}
-                                className="w-full flex items-start gap-2 rounded-md px-2 py-1.5 text-left hover:bg-muted/70 transition-colors cursor-pointer"
-                                onClick={() => togglePresentationComplaintSelection(complaint)}
-                                onKeyDown={(event) => {
-                                  if (event.key === 'Enter' || event.key === ' ') {
-                                    event.preventDefault();
-                                    togglePresentationComplaintSelection(complaint);
-                                  }
-                                }}
-                              >
-                                <Checkbox checked={selected} className="mt-0.5 pointer-events-none" />
-                                <span className="text-sm">{complaint}</span>
-                              </div>
-                            );
-                          })}
-                        </div>
+                              return (
+                                <div
+                                  key={`${group.category}-${complaint}`}
+                                  role="button"
+                                  tabIndex={0}
+                                  className="w-full flex items-start gap-2 rounded-md px-2 py-1.5 text-left hover:bg-muted/70 transition-colors cursor-pointer"
+                                  onClick={() => togglePresentationComplaintSelection(complaint)}
+                                  onKeyDown={(event) => {
+                                    if (event.key === 'Enter' || event.key === ' ') {
+                                      event.preventDefault();
+                                      togglePresentationComplaintSelection(complaint);
+                                    }
+                                  }}
+                                >
+                                  <Checkbox checked={selected} className="mt-0.5 pointer-events-none" />
+                                  <span className="text-sm">{complaint}</span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </details>
                       ))
                     )}
                   </div>
-                  {parsedPresentationComplaint.selected.length > 0 ? (
-                    <div className="flex flex-wrap gap-2">
-                      {parsedPresentationComplaint.selected.map((complaint) => (
-                        <Badge key={complaint} variant="secondary" className="text-xs">
-                          {complaint}
-                        </Badge>
-                      ))}
-                    </div>
-                  ) : null}
                   <Textarea
-                    value={parsedPresentationComplaint.customText}
+                    value={medicalNotes.presentationComplaint}
                     onChange={(e) =>
-                      setMedicalNotes((prev) => {
-                        const parsed = parsePresentationComplaintValue(
-                          prev.presentationComplaint,
-                          presentingComplaintLabelMap,
-                          presentingComplaintOptionSet
-                        );
-                        return {
-                          ...prev,
-                          presentationComplaint: joinPresentationComplaintLines(
-                            parsed.selected,
-                            e.target.value
-                          ),
-                        };
-                      })
+                      setMedicalNotes((prev) => ({
+                        ...prev,
+                        presentationComplaint: e.target.value,
+                      }))
                     }
                     placeholder="Additional free-text complaint details (optional)..."
-                    rows={2}
+                    rows={3}
                   />
                 </div>
                 <div className="space-y-2"><Label>History of Present Illness</Label><Textarea value={medicalNotes.historyOfPresentIllness} onChange={(e) => setMedicalNotes({ ...medicalNotes, historyOfPresentIllness: e.target.value })} placeholder="Detailed history..." rows={4} /></div>
@@ -5484,6 +5514,14 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
                 {prescriptions.length > 0 ? (
                   <div className="space-y-3">
+                    <div className="p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
+                      <div className="flex items-center gap-2 text-blue-700 dark:text-blue-400">
+                        <AlertTriangle className="h-4 w-4" />
+                        <span className="text-sm">
+                          <strong>Note:</strong> Prescriptions are drafted locally and will be sent to pharmacy when you complete the consultation.
+                        </span>
+                      </div>
+                    </div>
                     {prescriptions.map((rx, index) => {
                       const getStatusBadge = (status: string) => {
                         switch (status) {
@@ -7662,398 +7700,12 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           </DialogContent>
         </Dialog>
 
-        <Dialog open={showAddPrescription} onOpenChange={(open) => { 
-          setShowAddPrescription(open); 
-          if (!open) { 
-            setMedicationSearch("");
-            setSelectedMedications(new Set()); // Clear selections when closing
-            setMedicationConfigs(new Map()); // Clear configs when closing
-            setShowMedicationDropdown(false); 
-          }
-        }}>
-          <DialogContent className="w-[95vw] sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                <Pill className="h-5 w-5 text-violet-500" />
-                Add Prescription
-              </DialogTitle>
-              <DialogDescription>
-                Search and select medications, then configure dose details for each. All medications will be sent as one prescription order to Pharmacy queue.
-              </DialogDescription>
-            </DialogHeader>
-            
-            {/* Allergy Warning in Dialog */}
-            {currentPatient?.allergies && currentPatient.allergies.length > 0 && (
-              <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
-                <div className="flex items-center gap-2 text-red-700 dark:text-red-400 text-sm">
-                  <AlertTriangle className="h-4 w-4" />
-                  <span><strong>Allergies:</strong> {currentPatient.allergies.join(', ')}</span>
-                </div>
-              </div>
-            )}
-            
-            <div className="space-y-4 py-2">
-              {/* Medication Search */}
-              <div className="space-y-2">
-                <Label>Search and Select Medications *</Label>
-                <div className="relative" ref={medicationDropdownContainerRef}>
-                  <Input 
-                    placeholder="Search medications by name, generic name, or category..."
-                    value={medicationSearch} 
-                    onChange={(e) => {
-                      const searchValue = e.target.value;
-                      setMedicationSearch(searchValue);
-                      // Only show dropdown if user has typed something
-                      if (searchValue.trim()) {
-                        setShowMedicationDropdown(true);
-                      } else {
-                        setShowMedicationDropdown(false);
-                      }
-                    }}
-                    onFocus={() => {
-                      // Only show dropdown if there's search text
-                      if (medicationSearch.trim()) {
-                        setShowMedicationDropdown(true);
-                      }
-                    }}
-                  />
-                  {showMedicationDropdown && medicationSearch.trim() && (
-                    <div className="absolute z-50 w-full mt-1 bg-white dark:bg-gray-800 border rounded-md shadow-lg max-h-[300px] overflow-y-auto" data-medication-dropdown>
-                      {loadingMedications ? (
-                        <div className="p-4 text-center text-sm text-muted-foreground">
-                          <Loader2 className="h-4 w-4 animate-spin mx-auto mb-2" />
-                      Loading medications...
-                    </div>
-                      ) : filteredMedications.length === 0 ? (
-                        <div className="p-4 text-center text-sm text-muted-foreground">
-                          No medications found. Try a different search term.
-                        </div>
-                      ) : (
-                        filteredMedications.map((med) => {
-                          const isSelected = selectedMedications.has(typeof med.id === 'number' ? med.id : parseInt(med.id, 10));
-                        const isAllergyRisk = currentPatient?.allergies.some(allergy => 
-                          med.name?.toLowerCase().includes(allergy.toLowerCase()) || 
-                            (med.generic_name || '').toLowerCase().includes(allergy.toLowerCase())
-                        );
-                        return (
-                          <div 
-                            key={med.id}
-                            onClick={() => toggleMedicationSelection(med)}
-                              className={`p-3 hover:bg-muted cursor-pointer border-b last:border-b-0 flex items-start gap-3 ${
-                                isSelected ? 'bg-violet-50 dark:bg-violet-900/20' : ''
-                              }`}
-                            >
-                              <Checkbox checked={isSelected} onCheckedChange={() => toggleMedicationSelection(med)} />
-                              <div className="flex-1 min-w-0">
-                                <div className="font-medium text-sm flex items-center gap-2">
-                                  {formatMedicationVariantLabel(med)}
-                                  {isAllergyRisk && <AlertTriangle className="h-3 w-3 text-red-500" />}
-                                </div>
-                                <div className="text-xs text-muted-foreground mt-1">
-                                  {(med.generic_name || '')}
-                                </div>
-                                {isAllergyRisk && (
-                                  <div className="text-xs text-red-600 dark:text-red-400 mt-1">
-                                    ⚠️ Patient allergy risk
-                              </div>
-                            )}
-                          </div>
-                    </div>
-                          );
-                        })
-                  )}
-                    </div>
-                  )}
-                    </div>
-            {selectedMedications.size > 0 && (
-                  <div className="mt-2 space-y-2">
-                    <div className="text-sm font-medium">Selected Medications ({selectedMedications.size}):</div>
-                    <div className="flex flex-wrap gap-2">
-                      {Array.from(selectedMedications)
-                        .map((medId) => {
-                          const foundMedication = medications.find((m: any) => {
-                            const mId = typeof m.id === 'number' ? m.id : parseInt(m.id, 10);
-                            return mId === medId;
-                          });
-                          if (foundMedication) return foundMedication;
-                          const config = medicationConfigs.get(medId);
-                          if (!config) return null;
-                          return {
-                            id: medId,
-                            name: config.name || 'Medication',
-                            dosage_form: config.form || '',
-                            strength: config.strength || '',
-                            generic_name: config.generic_name || config.genericName || '',
-                          };
-                        })
-                        .filter((med): med is any => !!med)
-                        .map((med) => (
-                          <Badge key={med.id} variant="secondary" className="flex items-center gap-1">
-                            {formatMedicationVariantLabel(med)}
-                            <X
-                              className="h-3 w-3 cursor-pointer"
-                              onClick={() => toggleMedicationSelection(med)}
-                            />
-                          </Badge>
-                        ))}
-                  </div>
-                  <Button
-                      variant="ghost"
-                    size="sm"
-                      onClick={() => {
-                        setSelectedMedications(new Set());
-                        setMedicationConfigs(new Map());
-                      }}
-                      className="text-xs"
-                  >
-                    Clear All
-                  </Button>
-                </div>
-                )}
-              </div>
-
-              {/* Medication Configuration */}
-              {selectedMedications.size > 0 && (
-                <div className="space-y-4 border-t pt-4 mt-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <Label className="text-sm font-semibold">Configure Prescriptions</Label>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Set dose, frequency, duration, route, and instructions for each selected medication
-                      </p>
-                    </div>
-                    <Badge variant="outline" className="text-xs">
-                      {selectedMedications.size} medication{selectedMedications.size > 1 ? 's' : ''} selected
-                    </Badge>
-                  </div>
-
-                  <div className="space-y-3">
-                  {Array.from(selectedMedications).map((medId) => {
-                    const foundMedication = medications.find((m: any) => {
-                      const mId = typeof m.id === 'number' ? m.id : parseInt(m.id, 10);
-                      return mId === medId;
-                    });
-                    const existingConfig = medicationConfigs.get(medId);
-                    const med = foundMedication || (existingConfig ? {
-                      id: medId,
-                      name: existingConfig.name || 'Medication',
-                      generic_name: existingConfig.generic_name || existingConfig.genericName || '',
-                      unit: existingConfig.unit || inferDoseUnitFromForm(existingConfig.form),
-                      strength: existingConfig.strength || '',
-                      dosage_form: existingConfig.form || '',
-                      form: existingConfig.form || '',
-                    } : null);
-                    if (!med) return null;
-                    const config = existingConfig || {
-                      dosage: '',
-                      frequency: 'Once daily (OD)',
-                      durationDays: '',
-                      route: 'Oral',
-                      instructions: '',
-                      unit: inferDoseUnitFromForm((med as any).dosage_form || (med as any).form, (med as any).unit),
-                      strength: parseMedicationOptions((med as any).strength)[0] || '',
-                      form: parseMedicationOptions((med as any).dosage_form || (med as any).form)[0] || '',
-                    };
-                    return (
-                        <Card key={medId} className="border-l-4 border-l-violet-500">
-                          <CardContent className="p-4">
-                            <div className="flex items-start justify-between mb-3">
-                              <div>
-                                <div className="font-medium text-sm">{formatMedicationVariantLabel(med)}</div>
-                            <div className="text-xs text-muted-foreground">
-                                  {med.generic_name}
-                            </div>
-                          </div>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                                onClick={() => toggleMedicationSelection(med)}
-                                className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
-                          >
-                            <X className="h-3 w-3" />
-                          </Button>
-                        </div>
-                        
-                            <div className="space-y-3">
-                              <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
-                                <div className="space-y-1 md:col-span-7">
-                                  <Label className="text-xs">Dose per administration</Label>
-                                  <Input
-                                    type="number"
-                                    min="0.1"
-                                    step="0.1"
-                                    className="h-8 text-xs"
-                                    placeholder="e.g., 1, 5"
-                                    value={config.dosage || ''}
-                                    onChange={(e) => updateMedicationConfig(medId, 'dosage', e.target.value)}
-                                  />
-                                </div>
-                                <div className="space-y-1 md:col-span-5">
-                                  <Label className="text-xs">Dose Unit <span className="text-red-500">*</span></Label>
-                                  <Select
-                                    value={config.unit || 'tablet'}
-                                    onValueChange={(v) => updateMedicationConfig(medId, 'unit', v)}
-                                  >
-                                    <SelectTrigger className="h-8 text-xs">
-                                      <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      <SelectItem value="tablet">Tablet</SelectItem>
-                                      <SelectItem value="capsule">Capsule</SelectItem>
-                                      <SelectItem value="ml">ml</SelectItem>
-                                      <SelectItem value="drop">Drop</SelectItem>
-                                      <SelectItem value="puff">Puff</SelectItem>
-                                      <SelectItem value="vial">Vial</SelectItem>
-                                      <SelectItem value="ampoule">Ampoule</SelectItem>
-                                      <SelectItem value="sachet">Sachet</SelectItem>
-                                      <SelectItem value="unit">Unit</SelectItem>
-                                    </SelectContent>
-                                  </Select>
-                                </div>
-                              </div>
-                              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                                <div className="space-y-1 md:col-span-2">
-                                  <Label className="text-xs">Frequency <span className="text-red-500">*</span></Label>
-                                  <Select
-                                    value={config.frequency || 'Once daily (OD)'}
-                                    onValueChange={(v) => updateMedicationConfig(medId, 'frequency', v)}
-                                  >
-                                    <SelectTrigger className="h-8 text-xs">
-                                      <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      <SelectItem value="Once daily (OD)">Once daily (OD)</SelectItem>
-                                      <SelectItem value="Twice daily (BD)">Twice daily (BD)</SelectItem>
-                                      <SelectItem value="Three times daily (TDS)">Three times daily (TDS)</SelectItem>
-                                      <SelectItem value="Four times daily (QDS)">Four times daily (QDS)</SelectItem>
-                                      <SelectItem value="Every 6 hours (Q6H)">Every 6 hours</SelectItem>
-                                      <SelectItem value="Every 8 hours (Q8H)">Every 8 hours</SelectItem>
-                                      <SelectItem value="Every 12 hours (Q12H)">Every 12 hours</SelectItem>
-                                      <SelectItem value="At bedtime (Nocte)">At bedtime (Nocte)</SelectItem>
-                                      <SelectItem value="As needed (PRN)">As needed (PRN)</SelectItem>
-                                      <SelectItem value="STAT (Single dose)">STAT (Single dose)</SelectItem>
-                                      <SelectItem value="Weekly">Weekly</SelectItem>
-                                    </SelectContent>
-                                  </Select>
-                                </div>
-                                <div className="space-y-1">
-                                  <Label className="text-xs">Duration (days)</Label>
-                                  <Input
-                                    type="number"
-                                    min="1"
-                                    placeholder="e.g., 7, 14, 30"
-                                    className="h-8 text-xs"
-                                    value={config.durationDays || ''}
-                                    onChange={(e) => {
-                                      const value = e.target.value;
-                                      const days = value === '' ? '' : parseInt(value) || '';
-                                      updateMedicationConfig(medId, 'durationDays', days);
-                                    }}
-                                  />
-                                </div>
-                              </div>
-                              <div className="space-y-1">
-                                <Label className="text-xs">Route</Label>
-                                <Select
-                                  value={config.route || 'Oral'}
-                                  onValueChange={(v) => updateMedicationConfig(medId, 'route', v)}
-                                >
-                                  <SelectTrigger className="h-8 text-xs">
-                                    <SelectValue />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="Oral">Oral</SelectItem>
-                                    <SelectItem value="IV">Intravenous (IV)</SelectItem>
-                                    <SelectItem value="IM">Intramuscular (IM)</SelectItem>
-                                    <SelectItem value="SC">Subcutaneous (SC)</SelectItem>
-                                    <SelectItem value="Topical">Topical</SelectItem>
-                                    <SelectItem value="Inhalation">Inhalation</SelectItem>
-                                    <SelectItem value="Rectal">Rectal</SelectItem>
-                                    <SelectItem value="Ophthalmic">Ophthalmic</SelectItem>
-                                    <SelectItem value="Otic">Otic</SelectItem>
-                                  </SelectContent>
-                                </Select>
-                              </div>
-                              <div className="space-y-1">
-                                <Label className="text-xs">Instructions</Label>
-                                <Textarea
-                                  placeholder="e.g., Take with food; rotate injection sites; monitor glucose"
-                                  className="min-h-[72px] text-xs resize-y"
-                                  value={config.instructions || ''}
-                                  onChange={(e) => updateMedicationConfig(medId, 'instructions', e.target.value)}
-                                  rows={3}
-                                />
-                              </div>
-                            </div>
-                          </CardContent>
-                        </Card>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-              {/* Prescription Settings */}
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Priority</Label>
-                  <Select value={newPrescription.priority} onValueChange={(v) => setNewPrescription({ ...newPrescription, priority: v })}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Routine"><Badge className="bg-blue-100 text-blue-800">Routine</Badge></SelectItem>
-                      <SelectItem value="Urgent"><Badge className="bg-amber-100 text-amber-800">Urgent</Badge></SelectItem>
-                      <SelectItem value="STAT"><Badge className="bg-red-100 text-red-800">STAT</Badge></SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              {/* Clinical Indication */}
-              <div className="space-y-2">
-                <Label>Clinical Indication</Label>
-                <Textarea
-                  value={newPrescription.notes}
-                  onChange={(e) => setNewPrescription({ ...newPrescription, notes: e.target.value })}
-                  placeholder="Reason for prescription, clinical context, and special instructions (optional)..."
-                  rows={3}
-                />
-              </div>
-
-              {newPrescription.priority === 'STAT' && (
-                <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
-                  <p className="text-sm text-red-700 dark:text-red-300 flex items-center gap-2">
-                    <AlertTriangle className="h-4 w-4" />
-                    STAT prescriptions require immediate attention from pharmacy.
-                  </p>
-                </div>
-              )}
-            </div>
-
-
-            <DialogFooter>
-              <Button 
-                variant="outline" 
-                onClick={() => { 
-                  setShowAddPrescription(false); 
-                  setMedicationSearch("");
-                  setSelectedMedications(new Set());
-                }}
-              >
-                Cancel
-              </Button>
-                <Button 
-                onClick={addPrescription}
-                disabled={selectedMedications.size === 0}
-                  className="bg-violet-600 hover:bg-violet-700"
-                >
-                  <Pill className="h-4 w-4 mr-2" />
-                  Add Prescription{selectedMedications.size > 1 ? 's' : ''} to Order
-                </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+        <PrescriptionOrderModal
+          open={showAddPrescription}
+          onOpenChange={setShowAddPrescription}
+          patientAllergies={currentPatient?.allergies || []}
+          onSubmit={handleAddPrescriptionToOrder}
+        />
 
         <Dialog 
           open={showAddLabOrder} 
@@ -9450,11 +9102,11 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                       )}
                                       {patient.vitals.bloodSugar && (
                                         <span className="text-violet-600 dark:text-violet-400">
-                                          BS: {patient.vitals.bloodSugar}
+                                          FBS: {patient.vitals.bloodSugar}
                                         </span>
                                       )}
                                       {patient.vitals.randomBloodSugar && (
-                                        <span className="text-fuchsia-600 dark:text-fuchsia-400">
+                                        <span className="text-violet-600 dark:text-violet-400">
                                           RBS: {patient.vitals.randomBloodSugar}
                                         </span>
                                       )}

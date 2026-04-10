@@ -405,15 +405,15 @@ const testTemplates: Record<string, { name: string; fields: { name: string; unit
   STOOL_MICRO: {
     name: 'Stool Microscopy',
     fields: [
-      { name: 'Ova', unit: '', normalRange: 'Not seen' },
-      { name: 'Cysts', unit: '', normalRange: 'Not seen' },
-      { name: 'Trophozoites', unit: '', normalRange: 'Not seen' },
+      { name: 'Ova', unit: '', normalRange: '' },
+      { name: 'Cysts', unit: '', normalRange: '' },
+      { name: 'Trophozoites', unit: '', normalRange: '' },
     ]
   },
   BLOOD_FILM: {
     name: 'Blood Film for Malaria Parasite',
     fields: [
-      { name: 'Malaria Parasite', unit: '', normalRange: 'Not seen' },
+      { name: 'Malaria Parasite', unit: '', normalRange: '' },
       { name: 'Parasitemia', unit: '%', normalRange: '0' },
     ]
   },
@@ -2319,9 +2319,9 @@ export default function LabOrdersPage() {
 
                           return (
                             <div key={field.name} className="space-y-1">
-                              <div className="grid grid-cols-3 gap-4 items-center">
-                            <Label className="text-sm">{field.name}</Label>
-                            <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-4">
+                            <Label className="text-sm min-w-0 flex-shrink-0">{field.name}</Label>
+                            <div className="flex items-center gap-2 flex-1">
                               <Input
                                     value={value}
                                 onChange={(e) => setResultValues(prev => ({
@@ -2329,14 +2329,14 @@ export default function LabOrdersPage() {
                                   [field.name]: e.target.value
                                 }))}
                                 placeholder="Value"
-                                    className={`w-24 ${
+                                    className={`w-24 flex-shrink-0 ${
                                       validationStatus === 'critical' ? 'border-red-500 focus:border-red-500' :
                                       validationStatus === 'warning' ? 'border-amber-500 focus:border-amber-500' : ''
                                     }`}
                               />
-                              <span className="text-sm text-muted-foreground">{field.unit}</span>
+                              {field.unit && <span className="text-sm text-muted-foreground">{field.unit}</span>}
                             </div>
-                            <span className="text-xs text-muted-foreground">Normal: {field.normalRange}</span>
+                            {field.normalRange && <span className="text-xs text-muted-foreground flex-shrink-0">Normal: {field.normalRange}</span>}
                           </div>
                               {validationStatus === 'critical' && (
                                 <div className="text-xs text-red-600 dark:text-red-400 flex items-center gap-1 ml-32">

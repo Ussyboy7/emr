@@ -33,6 +33,7 @@ from .serializers import (
     ConsultationRoomSerializer,
     ConsultationSessionSerializer,
     ConsultationQueueSerializer,
+    ConsultationQueueByVisitSerializer,
     ReferralSerializer,
     ResponsibilityFormIssuanceSerializer,
     DiagnosisSerializer,
@@ -547,6 +548,28 @@ class ConsultationQueueViewSet(viewsets.ModelViewSet):
             qs = qs.filter(queued_at__date__lte=end_date)
 
         return qs
+
+    @action(detail=False, methods=['get'], url_path='by-visits')
+    def by_visits(self, request):
+        """Active consultation queue rows for specific visit IDs (small payload for nursing pool)."""
+        raw = (request.query_params.get('visit_ids') or '').strip()
+        if not raw:
+            return Response({'results': []})
+        parsed = []
+        for part in raw.split(','):
+            part = part.strip()
+            if part.isdigit():
+                parsed.append(int(part))
+        if not parsed:
+            return Response({'results': []})
+        parsed = parsed[:300]
+        qs = (
+            ConsultationQueue.objects.filter(is_active=True, visit_id__in=parsed)
+            .select_related('room', 'visit')
+            .order_by('priority', 'queued_at')
+        )
+        data = ConsultationQueueByVisitSerializer(qs, many=True).data
+        return Response({'results': data})
     
     def perform_create(self, serializer):
         """Create queue item(s) with duplicate prevention.

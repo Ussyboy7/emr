@@ -705,7 +705,7 @@ export default function PatientVitalsPage() {
                           <span>P: {vitals.pulse}</span>
                           <span>T: {vitals.temperature}°C</span>
                           <span>SpO2: {vitals.oxygenSaturation}%</span>
-                          {vitals.bloodSugar ? <span>BS: {vitals.bloodSugar}</span> : null}
+                          {vitals.bloodSugar ? <span>FBS: {vitals.bloodSugar}</span> : null}
                           {vitals.randomBloodSugar ? <span>RBS: {vitals.randomBloodSugar}</span> : null}
                           {vitals.recordedBy && <span className="ml-auto">Recorded by: {vitals.recordedBy}</span>}
                         </div>

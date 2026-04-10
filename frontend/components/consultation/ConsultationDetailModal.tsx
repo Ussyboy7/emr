@@ -620,7 +620,7 @@ const generateTimeline = (
           `BP: ${v.systolic}/${v.diastolic}`,
           `Temp: ${v.temperature}°C`,
           `HR: ${v.heartRate} bpm`,
-          v.bloodSugar != null && !Number.isNaN(Number(v.bloodSugar)) ? `BS: ${v.bloodSugar}` : null,
+          v.bloodSugar != null && !Number.isNaN(Number(v.bloodSugar)) ? `FBS: ${v.bloodSugar}` : null,
           v.randomBloodSugar != null && !Number.isNaN(Number(v.randomBloodSugar)) ? `RBS: ${v.randomBloodSugar}` : null,
         ]
           .filter(Boolean)
@@ -637,7 +637,7 @@ const generateTimeline = (
           `BP: ${v.systolic}/${v.diastolic}`,
           `Temp: ${v.temperature}°C`,
           `HR: ${v.heartRate} bpm`,
-          v.bloodSugar != null && !Number.isNaN(Number(v.bloodSugar)) ? `BS: ${v.bloodSugar}` : null,
+          v.bloodSugar != null && !Number.isNaN(Number(v.bloodSugar)) ? `FBS: ${v.bloodSugar}` : null,
           v.randomBloodSugar != null && !Number.isNaN(Number(v.randomBloodSugar)) ? `RBS: ${v.randomBloodSugar}` : null,
         ]
           .filter(Boolean)
@@ -1793,7 +1793,7 @@ export const ConsultationDetailModal = React.memo(function ConsultationDetailMod
                       )}
                       {latestVitals.bloodSugar != null && (
                         <div className="p-3 border border-violet-200 dark:border-violet-800 rounded-lg">
-                          <p className="text-xs text-gray-500 dark:text-gray-500">Blood sugar</p>
+                          <p className="text-xs text-gray-500 dark:text-gray-500">FBS</p>
                           <p className="text-lg font-semibold text-gray-800 dark:text-gray-200">{latestVitals.bloodSugar} mg/dL</p>
                         </div>
                       )}

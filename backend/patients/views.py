@@ -11,7 +11,7 @@ from rest_framework.pagination import PageNumberPagination
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django.shortcuts import get_object_or_404
-from django.db.models import OuterRef, Subquery
+from django.db.models import OuterRef, Subquery, Exists, Q
 
 from .models import Patient, Visit, VitalReading, MedicalHistory, MedicalCertificate
 from .serializers import (
@@ -43,6 +43,101 @@ def annotate_visit_history_flags(queryset):
         patient=OuterRef('patient')
     ).order_by('date', 'time', 'created_at', 'id').values('id')[:1]
     return queryset.annotate(first_visit_id=Subquery(first_visit_subquery))
+
+
+def _exclude_visits_with_completed_consultation(queryset):
+    """Visits that already have a completed consultation session (nursing pool should hide these)."""
+    from consultation.models import ConsultationSession
+
+    return queryset.filter(
+        ~Exists(
+            ConsultationSession.objects.filter(
+                visit_id=OuterRef('pk'),
+                status='completed',
+            )
+        )
+    )
+
+
+def _latest_vital_subqueries():
+    """Subqueries for the most recent vital row per visit (by recorded_at)."""
+    latest = VitalReading.objects.filter(visit_id=OuterRef('pk')).order_by('-recorded_at')
+    return (
+        Subquery(latest.values('temperature')[:1]),
+        Subquery(latest.values('heart_rate')[:1]),
+    )
+
+
+def apply_nursing_status_filter(queryset, nursing_status: str, request):
+    """
+    Narrow visits for nursing pool queue (expects queryset already limited, e.g. in_progress + date).
+    nursing_status: pending | vitals_incomplete | ready | sent_to_room
+    """
+    from consultation.models import ConsultationQueue
+
+    ns = (nursing_status or '').strip().lower()
+    if not ns or ns == 'all':
+        return queryset
+
+    if ns == 'pending':
+        return queryset.filter(~Exists(VitalReading.objects.filter(visit_id=OuterRef('pk'))))
+
+    lv_temp, lv_hr = _latest_vital_subqueries()
+    qs = queryset.annotate(_lv_temp=lv_temp, _lv_hr=lv_hr).annotate(
+        _has_vitals=Exists(VitalReading.objects.filter(visit_id=OuterRef('pk')))
+    )
+
+    if ns == 'vitals_incomplete':
+        return qs.filter(_has_vitals=True).filter(
+            Q(_lv_temp__isnull=True) | Q(_lv_hr__isnull=True)
+        )
+
+    if ns == 'ready':
+        return qs.filter(_has_vitals=True).filter(
+            _lv_temp__isnull=False,
+            _lv_hr__isnull=False,
+        )
+
+    if ns == 'sent_to_room':
+        q_items = ConsultationQueue.objects.filter(is_active=True, visit_id__isnull=False)
+        date = request.query_params.get('date')
+        start_date = request.query_params.get('start_date')
+        end_date = request.query_params.get('end_date')
+        if date:
+            q_items = q_items.filter(queued_at__date=date)
+        elif start_date:
+            q_items = q_items.filter(queued_at__date__gte=start_date)
+            if end_date:
+                q_items = q_items.filter(queued_at__date__lte=end_date)
+        elif end_date:
+            q_items = q_items.filter(queued_at__date__lte=end_date)
+        visit_ids = q_items.values('visit_id')
+        return queryset.filter(id__in=visit_ids)
+
+    return queryset
+
+
+def _nursing_pool_base_queryset_for_metrics(view, request):
+    """Shared base queryset: in_progress visits, optional nursing_pool exclusion, date + search + type + clinic."""
+    qs = Visit.objects.all().select_related('patient', 'doctor', 'created_by').prefetch_related('vital_readings')
+    date = request.query_params.get('date')
+    start_date = request.query_params.get('start_date')
+    end_date = request.query_params.get('end_date')
+    if date:
+        qs = qs.filter(date=date)
+    elif start_date:
+        qs = qs.filter(date__gte=start_date)
+        if end_date:
+            qs = qs.filter(date__lte=end_date)
+    elif end_date:
+        qs = qs.filter(date__lte=end_date)
+
+    qs = qs.filter(status='in_progress')
+    if request.query_params.get('nursing_pool') == '1':
+        qs = _exclude_visits_with_completed_consultation(qs)
+    qs = annotate_visit_history_flags(qs)
+    qs = view.filter_queryset(qs)
+    return qs
 
 
 class PatientViewSet(viewsets.ModelViewSet):
@@ -238,8 +333,32 @@ class VisitViewSet(viewsets.ModelViewSet):
                 queryset = queryset.filter(date__lte=end_date)
         elif end_date:
             queryset = queryset.filter(date__lte=end_date)
-        
-        return annotate_visit_history_flags(queryset)
+
+        if self.request.query_params.get('nursing_pool') == '1':
+            queryset = _exclude_visits_with_completed_consultation(queryset)
+
+        queryset = annotate_visit_history_flags(queryset)
+
+        nursing_status = self.request.query_params.get('nursing_status')
+        if nursing_status:
+            queryset = apply_nursing_status_filter(queryset, nursing_status, self.request)
+
+        return queryset
+
+    @action(detail=False, methods=['get'], url_path='nursing-pool-metrics')
+    def nursing_pool_metrics(self, request):
+        """
+        Aggregate counts for nursing pool dashboard cards (same filters as list: date, search, clinic, type, nursing_pool).
+        """
+        base = _nursing_pool_base_queryset_for_metrics(self, request)
+        return Response(
+            {
+                'total': base.count(),
+                'pending_vitals': apply_nursing_status_filter(base, 'pending', request).count(),
+                'ready_for_consultation': apply_nursing_status_filter(base, 'ready', request).count(),
+                'sent_to_room': apply_nursing_status_filter(base, 'sent_to_room', request).count(),
+            }
+        )
 
     def perform_update(self, serializer):
         """

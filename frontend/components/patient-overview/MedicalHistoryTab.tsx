@@ -1019,12 +1019,12 @@ export function MedicalHistoryTab({
                               <span>T: {vital.temp}°C</span>
                               <span>SpO2: {vital.spo2}%</span>
                               {vital.weight && vital.weight !== '-' && <span>Weight: {vital.weight} kg</span>}
-                              {vital.bloodSugar && vital.bloodSugar !== '-' && (
-                                <span>BS: {vital.bloodSugar} mg/dL</span>
-                              )}
-                              {vital.randomBloodSugar && vital.randomBloodSugar !== '-' && (
+                              {vital.bloodSugar && vital.bloodSugar !== '-' ? (
+                                <span>FBS: {vital.bloodSugar} mg/dL</span>
+                              ) : null}
+                              {vital.randomBloodSugar && vital.randomBloodSugar !== '-' ? (
                                 <span>RBS: {vital.randomBloodSugar} mg/dL</span>
-                              )}
+                              ) : null}
                             </div>
                           </div>
                           <Button

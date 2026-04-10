@@ -5,19 +5,20 @@ import { DashboardLayout } from '@/components/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, Stethoscope, Users, Pill, FlaskConical, Heart, Calendar, Clock, CheckCircle2, ArrowRight, UserCheck, Activity, Plus, Eye, Hospital, ClipboardList, AlertCircle } from 'lucide-react';
+import { Loader2, Stethoscope, Users, Pill, FlaskConical, Heart, Calendar, Clock, CheckCircle2, ArrowRight, UserCheck, Activity, Plus, Eye, Hospital, ClipboardList, AlertCircle, ScanLine } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { consultationService, pharmacyService, labService } from '@/lib/services';
+import { consultationService, pharmacyService, labService, radiologyService } from '@/lib/services';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { useCurrentUser } from '@/hooks/use-current-user';
 
 interface ConsultationStats {
   totalConsultations: number;
-  patientsSeen: number;
+  activeSessions: number;
   prescriptions: number;
   labOrders: number;
+  radiologyOrders: number;
   recentSessions: any[];
 }
 
@@ -31,9 +32,10 @@ export default function ConsultationPage() {
 
   const [stats, setStats] = useState<ConsultationStats>({
     totalConsultations: 0,
-    patientsSeen: 0,
+    activeSessions: 0,
     prescriptions: 0,
     labOrders: 0,
+    radiologyOrders: 0,
     recentSessions: [],
   });
 
@@ -43,8 +45,8 @@ export default function ConsultationPage() {
         setLoading(true);
         setError(null);
 
-        // Get today's date
-        const today = new Date().toISOString().split('T')[0];
+        // Get today's date (in local timezone)
+        const today = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD format
 
         // Fetch consultation sessions for today
         try {
@@ -55,16 +57,23 @@ export default function ConsultationPage() {
           
           // Filter sessions for today by doctor
           const todaySessions = sessions.filter((s: any) => {
-            const sessionDate = s.started_at ? new Date(s.started_at).toISOString().split('T')[0] : '';
+            const sessionDate = s.started_at ? new Date(s.started_at).toLocaleDateString('en-CA') : '';
             const isToday = sessionDate === today;
-            const isCurrentDoctor = currentUser && (s.doctor === currentUser.id || s.doctor_name === currentUser.name);
-            return isToday && isCurrentDoctor;
+            const isCurrentDoctor = !currentUser || (
+              String(s.doctor) === String(currentUser.id) ||
+              s.doctor_name === currentUser.name ||
+              s.doctor_name === currentUser.username
+            );
+
+
+
+            return isToday && isCurrentDoctor; // Restore doctor filter
           });
 
           setStats(prev => ({
             ...prev,
             totalConsultations: todaySessions.length,
-            patientsSeen: new Set(todaySessions.map((s: any) => s.patient)).size,
+            activeSessions: todaySessions.filter((s: any) => s.status === 'active').length,
             recentSessions: todaySessions.slice(0, 3),
           }));
         } catch (err) {
@@ -74,7 +83,7 @@ export default function ConsultationPage() {
           } else {
             setError('Failed to load consultation sessions');
           }
-          setStats(prev => ({ ...prev, totalConsultations: 0, patientsSeen: 0 }));
+          setStats(prev => ({ ...prev, totalConsultations: 0, activeSessions: 0, radiologyOrders: 0 }));
         }
 
         // Fetch prescriptions for today
@@ -86,7 +95,7 @@ export default function ConsultationPage() {
           
           // Filter prescriptions for today
           const todayPrescriptions = prescriptions.filter((p: any) => {
-            const prescDate = p.created_at ? new Date(p.created_at).toISOString().split('T')[0] : '';
+            const prescDate = p.prescribed_at ? new Date(p.prescribed_at).toLocaleDateString('en-CA') : '';
             return prescDate === today;
           });
 
@@ -96,7 +105,7 @@ export default function ConsultationPage() {
           }));
         } catch (err) {
           console.error('Error fetching prescriptions:', err);
-          setStats(prev => ({ ...prev, prescriptions: 0 }));
+          setStats(prev => ({ ...prev, prescriptions: 0, radiologyOrders: 0 }));
         }
 
         // Fetch lab orders for today
@@ -105,10 +114,10 @@ export default function ConsultationPage() {
             page_size: 100,
           });
           const labOrders = labOrdersResult.results || [];
-          
+
           // Filter lab orders for today
           const todayLabOrders = labOrders.filter((l: any) => {
-            const orderDate = l.created_at ? new Date(l.created_at).toISOString().split('T')[0] : '';
+            const orderDate = l.ordered_at ? new Date(l.ordered_at).toLocaleDateString('en-CA') : '';
             return orderDate === today;
           });
 
@@ -118,7 +127,29 @@ export default function ConsultationPage() {
           }));
         } catch (err) {
           console.error('Error fetching lab orders:', err);
-          setStats(prev => ({ ...prev, labOrders: 0 }));
+          setStats(prev => ({ ...prev, labOrders: 0, radiologyOrders: 0 }));
+        }
+
+        // Fetch radiology orders for today
+        try {
+          const radiologyResult = await radiologyService.getOrders({
+            page_size: 100,
+          });
+          const radiologyOrders = radiologyResult.results || [];
+
+          // Filter radiology orders for today
+          const todayRadiologyOrders = radiologyOrders.filter((r: any) => {
+            const orderDate = r.ordered_at ? new Date(r.ordered_at).toLocaleDateString('en-CA') : '';
+            return orderDate === today;
+          });
+
+          setStats(prev => ({
+            ...prev,
+            radiologyOrders: todayRadiologyOrders.length,
+          }));
+        } catch (err) {
+          console.error('Error fetching radiology orders:', err);
+          setStats(prev => ({ ...prev, radiologyOrders: 0 }));
         }
 
       } catch (err) {
@@ -186,6 +217,8 @@ export default function ConsultationPage() {
           </CardContent>
         </Card>
 
+
+
         {/* Today's Overview */}
         <div>
           <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
@@ -222,24 +255,28 @@ export default function ConsultationPage() {
                         </div>
                         {stats.totalConsultations === 0 ? (
                           <p className="text-xs text-green-600 dark:text-green-400 mt-1">No consultations</p>
-                        ) : null}
+                        ) : (
+                          <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1">Sessions today</p>
+                        )}
                       </div>
                     </div>
                   </CardContent>
                 </Card>
 
-                <Card className={`border-l-4 ${stats.patientsSeen === 0 ? 'border-l-green-500' : 'border-l-blue-500'}`}>
+                <Card className={`border-l-4 ${stats.radiologyOrders === 0 ? 'border-l-green-500' : 'border-l-cyan-500'}`}>
                   <CardContent className="p-4">
                     <div className="flex items-center justify-between">
                       <div>
-                        <p className="text-sm text-muted-foreground">Patients Seen</p>
+                        <p className="text-sm text-muted-foreground">Radiology Orders</p>
                         <div className="flex items-center gap-2 mt-1">
-                          <Users className={`h-5 w-5 ${stats.patientsSeen === 0 ? 'text-green-500 dark:text-green-400' : 'text-blue-500 dark:text-blue-400'}`} />
-                          <p className={`text-2xl sm:text-3xl font-bold ${stats.patientsSeen === 0 ? 'text-green-600 dark:text-green-400' : 'text-blue-600 dark:text-blue-400'}`}>{stats.patientsSeen}</p>
+                          <ScanLine className={`h-5 w-5 ${stats.radiologyOrders === 0 ? 'text-green-500 dark:text-green-400' : 'text-cyan-500 dark:text-cyan-400'}`} />
+                          <p className={`text-2xl sm:text-3xl font-bold ${stats.radiologyOrders === 0 ? 'text-green-600 dark:text-green-400' : 'text-cyan-600 dark:text-cyan-400'}`}>{stats.radiologyOrders}</p>
                         </div>
-                        {stats.patientsSeen === 0 ? (
-                          <p className="text-xs text-green-600 dark:text-green-400 mt-1">No patients seen</p>
-                        ) : null}
+                        {stats.radiologyOrders === 0 ? (
+                          <p className="text-xs text-green-600 dark:text-green-400 mt-1">No radiology orders</p>
+                        ) : (
+                          <p className="text-xs text-cyan-600 dark:text-cyan-400 mt-1">Imaging requested</p>
+                        )}
                       </div>
                     </div>
                   </CardContent>
@@ -381,10 +418,10 @@ export default function ConsultationPage() {
                     <span className="text-sm font-medium">Total Consultations:</span>
                     <Badge variant="outline">{stats.totalConsultations}</Badge>
                   </div>
-                  <div className="flex justify-between items-center p-3 rounded-lg bg-muted/30">
-                    <span className="text-sm font-medium">Patients Seen:</span>
-                    <Badge variant="outline">{stats.patientsSeen}</Badge>
-                  </div>
+                   <div className="flex justify-between items-center p-3 rounded-lg bg-muted/30">
+                     <span className="text-sm font-medium">Radiology Orders:</span>
+                     <Badge variant="outline">{stats.radiologyOrders}</Badge>
+                   </div>
                   <div className="flex justify-between items-center p-3 rounded-lg bg-muted/30">
                     <span className="text-sm font-medium">Prescriptions:</span>
                     <Badge variant="outline" className="text-purple-600">{stats.prescriptions}</Badge>

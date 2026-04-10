@@ -621,7 +621,7 @@ class VitalReading(models.Model):
         decimal_places=2,
         null=True,
         blank=True,
-        help_text="Blood sugar in mg/dL (e.g. fasting or general capillary glucose)",
+        help_text="Random blood sugar (RBS) in mg/dL",
     )
     random_blood_sugar = models.DecimalField(
         max_digits=6,

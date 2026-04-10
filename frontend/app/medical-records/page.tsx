@@ -217,7 +217,9 @@ export default function MedicalRecordsPage() {
                         </div>
                         {totalPatients === 0 ? (
                           <p className="text-xs text-green-600 dark:text-green-400 mt-1">No patients registered</p>
-                        ) : null}
+                        ) : (
+                          <p className="text-xs text-blue-600 dark:text-blue-400 mt-1">Registered patients</p>
+                        )}
                       </div>
                     </div>
                   </CardContent>
@@ -234,7 +236,9 @@ export default function MedicalRecordsPage() {
                         </div>
                         {activeVisitsToday === 0 ? (
                           <p className="text-xs text-green-600 dark:text-green-400 mt-1">No active visits</p>
-                        ) : null}
+                        ) : (
+                          <p className="text-xs text-blue-600 dark:text-blue-400 mt-1">Currently in consultation</p>
+                        )}
                       </div>
                     </div>
                   </CardContent>
@@ -302,7 +306,7 @@ export default function MedicalRecordsPage() {
               <span className="text-xs sm:text-sm font-medium">Start New Visit</span>
               <span className="text-[10px] sm:text-xs text-muted-foreground">Create patient consultations</span>
             </Button>
-            <Button onClick={() => window.location.href = '/medical-records/visits'} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-purple-500/30 hover:bg-purple-500/10 border-l-4 border-l-purple-500">
+            <Button onClick={() => window.location.href = '/medical-records/reports'} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-purple-500/30 hover:bg-purple-500/10 border-l-4 border-l-purple-500">
               <Activity className="h-5 w-5 sm:h-6 sm:w-6 text-purple-500 dark:text-purple-400" />
               <span className="text-xs sm:text-sm font-medium">View Reports</span>
               <span className="text-[10px] sm:text-xs text-muted-foreground">Medical certificates & reports</span>

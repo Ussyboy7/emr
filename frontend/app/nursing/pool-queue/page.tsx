@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { StandardPagination } from '@/components/StandardPagination';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -137,7 +137,25 @@ export default function NursingPoolQueuePage() {
     }
   };
   const [patients, setPatients] = useState<NursingPatient[]>([]);
+  /** Client-side buffer when filtering "Checked in to Physiotherapy" (not supported server-side). */
+  const [physioClientBuffer, setPhysioClientBuffer] = useState<NursingPatient[] | null>(null);
+  const [totalVisitCount, setTotalVisitCount] = useState(0);
+  const [poolMetrics, setPoolMetrics] = useState({
+    total: 0,
+    pending_vitals: 0,
+    ready_for_consultation: 0,
+    sent_to_room: 0,
+  });
+  /** Silent poll: reuse consultation queue maps (room labels) instead of refetching. */
+  const queueRoomCacheRef = useRef<Map<number, string>>(new Map());
+  const queueSentAtCacheRef = useRef<Map<number, string>>(new Map());
+  /** Silent poll: skip physio/eye/vitals refetch when this page's visit id set is unchanged. */
+  const visitEnrichmentKeyRef = useRef<string>('');
+  const physioEnrichmentCacheRef = useRef<Record<number, { orderId: number; status: string }>>({});
+  const eyeEnrichmentCacheRef = useRef<Record<number, { orderId: number; status: string }>>({});
+  const vitalsEnrichmentCacheRef = useRef<Map<number, unknown>>(new Map());
   const [rooms, setRooms] = useState<ConsultationRoom[]>([]);
+  const [roomsLoading, setRoomsLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [authError, setAuthError] = useState<unknown | null>(null);
@@ -146,14 +164,16 @@ export default function NursingPoolQueuePage() {
   const [physioCheckins, setPhysioCheckins] = useState<Record<number, { orderId: number; status: string }>>({});
   const [eyeCheckins, setEyeCheckins] = useState<Record<number, { orderId: number; status: string }>>({});
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('today');
   const [typeFilter, setTypeFilter] = useState('all');
   const [clinicFilter, setClinicFilter] = useState('all');
   const [isDateFilterDialogOpen, setIsDateFilterDialogOpen] = useState(false);
   const [dateRange, setDateRange] = useState({ from: '', to: '' });
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(50);
 
-  // Load visits and rooms from API - extracted as reusable function
   const loadData = useCallback(async (opts?: { silent?: boolean }): Promise<NursingPatient[] | null> => {
       const silent = opts?.silent;
       try {
@@ -162,34 +182,19 @@ export default function NursingPoolQueuePage() {
           setError(null);
         }
 
-        // Load rooms first
-        const roomsResult = await roomService.getRooms({ page_size: 200 });
-        const transformedRooms: ConsultationRoom[] = roomsResult.results.map((room: any) => ({
-          id: String(room.id),
-          name: room.name,
-          status: room.status?.toLowerCase() === 'active' ? 'available' as const : 'occupied' as const,
-          doctor: room.assigned_doctor || undefined,
-          specialty: room.specialty || '',
-          queueCount: 0, // Will be updated if we can get queue counts
-          currentPatient: undefined,
-        }));
-        setRooms(transformedRooms);
-
-        // Build date filter based on dateFilter selection
         let dateParam: string | undefined = undefined;
         let startDate: string | undefined = undefined;
         let endDate: string | undefined = undefined;
-        
+
         if (dateRange.from || dateRange.to) {
           startDate = dateRange.from || undefined;
           endDate = dateRange.to || undefined;
         } else if (dateFilter === 'today') {
-          const today = new Date().toISOString().split('T')[0];
-          dateParam = today;
+          dateParam = new Date().toISOString().split('T')[0];
         } else if (dateFilter === 'week') {
           const today = new Date();
           const weekStart = new Date(today);
-          weekStart.setDate(today.getDate() - today.getDay()); // Start of week (Sunday)
+          weekStart.setDate(today.getDate() - today.getDay());
           startDate = weekStart.toISOString().split('T')[0];
           endDate = today.toISOString().split('T')[0];
         } else if (dateFilter === 'month') {
@@ -198,243 +203,159 @@ export default function NursingPoolQueuePage() {
           startDate = monthStart.toISOString().split('T')[0];
           endDate = today.toISOString().split('T')[0];
         }
-        // 'all' means no date filter
 
-        // Fetch visits that should go to nursing
-        // Only visits with status 'in_progress' should appear in nursing pool queue
-        const result = await visitService.getVisits({
-          status: 'in_progress',
-          page_size: 300,
+        const metricsParams = {
+          status: 'in_progress' as const,
+          nursing_pool: 1 as const,
           date: dateParam,
           start_date: startDate,
           end_date: endDate,
-        });
-
-        // Fetch completed consultation sessions to exclude visits that have completed consultations
-        let completedConsultationVisits = new Set<number>();
-        try {
-          const completedQs = new URLSearchParams();
-          completedQs.set('status', 'completed');
-          completedQs.set('page_size', '1000');
-          if (dateParam) completedQs.set('date', dateParam);
-          if (startDate) completedQs.set('start_date', startDate);
-          if (endDate) completedQs.set('end_date', endDate);
-          const consultationSessionsResult = await apiFetch<{ results: any[] }>(`/consultation/sessions/?${completedQs.toString()}`);
-          completedConsultationVisits = new Set(consultationSessionsResult.results
-            .filter((session: any) => session.visit)
-            .map((session: any) => session.visit));
-        } catch (err) {
-          console.error('Error fetching completed consultation sessions:', err);
-        }
-
-        // Filter visits that should go to nursing:
-        // 1. Exclude cancelled visits (API already filters for 'in_progress' status)
-        // 2. Exclude visits with completed consultation sessions
-        const nursingVisits = result.results.filter(visit =>
-          visit.status !== 'cancelled' &&
-          !completedConsultationVisits.has(visit.id)
-        );
-
-        // When status filter is "all" or "sent-to-room", also load consultation queue
-        // history for the selected date range so "Sent to Room" can be shown for
-        // Today/Week/Month/All Time (including inactive queue items).
-        type QueueItem = {
-          visit?: number | null;
-          patient?: number | null;
-          patient_name?: string;
-          patient_age?: number | null;
-          patient_gender?: string | null;
-          patient_details?: { age?: number; gender?: string; patient_id?: string };
-          room_name?: string;
-          queued_at?: string;
-          is_active?: boolean;
-          visit_display_id?: string | null;
-          visit_date?: string | null;
-          visit_time?: string | null;
-          visit_type?: string | null;
-          visit_status?: string | null;
-          visit_clinic?: string | null;
-          visit_clinics?: string[] | null;
+          search: debouncedSearchQuery || undefined,
+          visit_type: typeFilter !== 'all' ? typeFilter : undefined,
+          clinic: clinicFilter !== 'all' ? clinicFilter : undefined,
         };
 
-        let sentVisitToRoom = new Map<number, { roomName: string; sentAt?: string; queueActive?: boolean; queueItem?: QueueItem }>();
-        if (statusFilter === 'all' || statusFilter === 'sent-to-room') {
-          try {
-            const qs = new URLSearchParams();
-            // NOTE: backend now supports `date/start_date/end_date` based on queued_at.
-            if (dateParam) qs.set('date', dateParam);
-            if (startDate) qs.set('start_date', startDate);
-            if (endDate) qs.set('end_date', endDate);
-            qs.set('ordering', '-queued_at');
-            qs.set('page_size', dateFilter === 'all' ? '1000' : '500');
+        const nursingStatusApi =
+          statusFilter === 'pending'
+            ? ('pending' as const)
+            : statusFilter === 'vitals-recorded'
+              ? ('vitals_incomplete' as const)
+              : statusFilter === 'ready-for-consultation'
+                ? ('ready' as const)
+                : statusFilter === 'sent-to-room'
+                  ? ('sent_to_room' as const)
+                  : undefined;
 
-            const queueResult = await apiFetch<{ results: QueueItem[] }>(`/consultation/queue/?${qs.toString()}`);
-            (queueResult.results || []).forEach((item) => {
-              const visitId = typeof item.visit === 'number' ? item.visit : item.visit ? parseInt(String(item.visit), 10) : null;
-              if (!visitId || !item.room_name) return;
-              // Because we request ordering=-queued_at, the first time we see a visit is the latest send-to-room record.
-              if (!sentVisitToRoom.has(visitId)) {
-                sentVisitToRoom.set(visitId, {
-                  roomName: item.room_name,
-                  sentAt: item.queued_at || undefined,
-                  queueActive: item.is_active,
-                  queueItem: item,
-                });
-              }
-            });
-          } catch (err) {
-            console.error('Error fetching consultation queue history:', err);
+        const usePhysioClientFilter = statusFilter === 'sent-to-physiotherapy';
+
+        const visitFetch = visitService.getVisits({
+          ...metricsParams,
+          nursing_status: usePhysioClientFilter ? undefined : nursingStatusApi,
+          page: usePhysioClientFilter ? 1 : currentPage,
+          page_size: usePhysioClientFilter ? 250 : itemsPerPage,
+        });
+
+        const result = await visitFetch;
+
+        if (!silent) {
+          try {
+            const metrics = await visitService.getNursingPoolMetrics(metricsParams);
+            setPoolMetrics(metrics);
+          } catch (me: any) {
+            if (me?.status === 404) {
+              setPoolMetrics({
+                total: result.count ?? result.results.length,
+                pending_vitals: 0,
+                ready_for_consultation: 0,
+                sent_to_room: 0,
+              });
+            } else {
+              throw me;
+            }
           }
         }
 
-        debugLog('All visits loaded:', result.results.length);
-        debugLog('Filtered nursing visits:', nursingVisits.length);
-        debugLog('Visit statuses found:', [...new Set(result.results.map(v => v.status))]);
+        const nursingVisits = result.results.filter((visit) => visit.status !== 'cancelled');
+        const combinedVisitIds = Array.from(new Set(nursingVisits.map((v) => v.id))).filter(Boolean);
+        const visitIdsKey = combinedVisitIds.slice().sort((a, b) => a - b).join(',');
 
-        // Use filtered results
-        const filteredResult = { ...result, results: nursingVisits };
+        let queueVisitToRoom: Map<number, string>;
+        let queueVisitToSentAt: Map<number, string>;
+        if (silent && queueRoomCacheRef.current.size > 0) {
+          queueVisitToRoom = new Map(queueRoomCacheRef.current);
+          queueVisitToSentAt = new Map(queueSentAtCacheRef.current);
+        } else {
+          queueVisitToRoom = new Map();
+          queueVisitToSentAt = new Map();
+          if (combinedVisitIds.length > 0) {
+            try {
+              let queueResult: { results: any[] };
+              try {
+                queueResult = await apiFetch<{ results: any[] }>(
+                  `/consultation/queue/by-visits/?visit_ids=${combinedVisitIds.join(',')}`
+                );
+              } catch (qe: any) {
+                if (qe?.status === 404) {
+                  queueResult = await apiFetch<{ results: any[] }>(
+                    '/consultation/queue/?is_active=true&page_size=250'
+                  );
+                } else {
+                  throw qe;
+                }
+              }
+              (queueResult.results || []).forEach((item: any) => {
+                if (item.visit != null && item.room_name) {
+                  const vid = typeof item.visit === 'number' ? item.visit : parseInt(String(item.visit), 10);
+                  queueVisitToRoom.set(vid, item.room_name);
+                  if (item.queued_at) queueVisitToSentAt.set(vid, item.queued_at);
+                }
+              });
+              queueRoomCacheRef.current = queueVisitToRoom;
+              queueSentAtCacheRef.current = queueVisitToSentAt;
+            } catch (err) {
+              console.error('Error fetching consultation queue:', err);
+            }
+          }
+        }
 
-        debugLog('Nursing pool queue - loaded visits:', filteredResult.results.length);
-        debugLog('Visit details:', filteredResult.results.map(v => ({
-          id: v.id,
-          patient: v.patient_name,
-          status: v.status,
-          date: v.date,
-          time: v.time
-        })));
-        
-        // Build a combined visit list:
-        // - nursingVisits: in_progress visits needing nursing work
-        // - sent-to-room visits: visits referenced by consultation queue in the selected date range
-        const combinedVisits: Visit[] = [...nursingVisits];
-        const existingVisitIds = new Set<number>(combinedVisits.map(v => v.id));
-        sentVisitToRoom.forEach((meta, visitId) => {
-          if (existingVisitIds.has(visitId)) return;
-          const qi = meta.queueItem;
-          if (!qi) return;
-          const patientId = typeof qi.patient === 'number' ? qi.patient : qi.patient ? parseInt(String(qi.patient), 10) : undefined;
-          if (!patientId) return;
-
-          // Create a minimal Visit-like object sufficient for display and vitals lookup.
-          // We prefer visit fields included in the queue serializer; fall back to queued_at date/time.
-          const queuedAt = qi.queued_at ? new Date(qi.queued_at) : null;
-          const fallbackDate = queuedAt ? queuedAt.toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
-          const fallbackTime = queuedAt ? queuedAt.toTimeString().slice(0, 8) : '00:00:00';
-
-          const qAge = qi.patient_age;
-          const dAge = qi.patient_details?.age;
-          const rowAge =
-            typeof qAge === 'number' && !Number.isNaN(qAge)
-              ? qAge
-              : typeof dAge === 'number' && !Number.isNaN(dAge)
-                ? dAge
-                : undefined;
-          const rowGender = qi.patient_gender ?? qi.patient_details?.gender;
-
-          combinedVisits.push({
-            id: visitId,
-            visit_id: qi.visit_display_id || `VIS-${visitId}`,
-            patient_id: qi.patient_details?.patient_id,
-            patient: patientId,
-            patient_name: qi.patient_name ?? '',
-            age: rowAge,
-            gender: rowGender,
-            visit_type: qi.visit_type || 'consultation',
-            status: qi.visit_status || 'completed',
-            date: qi.visit_date || fallbackDate,
-            time: (qi.visit_time as any) || fallbackTime,
-            clinic: qi.visit_clinic || '',
-            clinics: qi.visit_clinics || [],
-            clinical_notes: '',
-          } as Visit);
-        });
+        debugLog('Nursing pool queue - loaded visits:', nursingVisits.length);
 
         let physioCheckedInByVisitId: Record<number, { orderId: number; status: string }> = {};
         let eyeCheckedInByVisitId: Record<number, { orderId: number; status: string }> = {};
-        const combinedVisitIds = Array.from(new Set(combinedVisits.map(v => v.id))).filter(Boolean);
-        try {
-          if (combinedVisitIds.length > 0) {
-            const qs = new URLSearchParams();
-            qs.set('visit_ids', combinedVisitIds.join(','));
-            // Fetch physio checkins
-            const physioCheckins = await apiFetch<{ results: Record<string, { checked_in: boolean; order_id?: number; status?: string }> }>(
-              `/physiotherapy/orders/checkins-for-visits/?${qs.toString()}`
-            );
-            Object.entries(physioCheckins.results || {}).forEach(([visitIdRaw, payload]) => {
+        let vitalsMap = new Map<number, any>();
+
+        const reuseEnrichment = silent && visitIdsKey === visitEnrichmentKeyRef.current && visitIdsKey !== '';
+        if (reuseEnrichment) {
+          physioCheckedInByVisitId = { ...physioEnrichmentCacheRef.current };
+          eyeCheckedInByVisitId = { ...eyeEnrichmentCacheRef.current };
+          vitalsMap = new Map(vitalsEnrichmentCacheRef.current as Map<number, any>);
+        } else if (combinedVisitIds.length > 0) {
+          const visitIdsParam = combinedVisitIds.join(',');
+          try {
+            const [physioRes, eyeRes, vitalsRes] = await Promise.all([
+              apiFetch<{ results: Record<string, { checked_in: boolean; order_id?: number; status?: string }> }>(
+                `/physiotherapy/orders/checkins-for-visits/?visit_ids=${visitIdsParam}`
+              ),
+              apiFetch<{ results: Record<string, { checked_in: boolean; order_id?: number; status?: string }> }>(
+                `/eyecare/orders/checkins-for-visits/?visit_ids=${visitIdsParam}`
+              ),
+              apiFetch<{ results: Record<string, any> }>(
+                `/vitals/latest-by-visits/?visit_ids=${visitIdsParam}`
+              ),
+            ]);
+            Object.entries(physioRes.results || {}).forEach(([visitIdRaw, payload]) => {
               const visitId = Number(visitIdRaw);
-              if (!Number.isFinite(visitId)) return;
-              if (!payload?.checked_in) return;
-              if (typeof payload.order_id !== 'number') return;
+              if (!Number.isFinite(visitId) || !payload?.checked_in || typeof payload.order_id !== 'number') return;
               physioCheckedInByVisitId[visitId] = { orderId: payload.order_id, status: payload.status || 'scheduled' };
             });
-            
-            // Fetch eye clinic checkins
-            const eyeCheckins = await apiFetch<{ results: Record<string, { checked_in: boolean; order_id?: number; status?: string }> }>(
-              `/eyecare/orders/checkins-for-visits/?${qs.toString()}`
-            );
-            Object.entries(eyeCheckins.results || {}).forEach(([visitIdRaw, payload]) => {
+            Object.entries(eyeRes.results || {}).forEach(([visitIdRaw, payload]) => {
               const visitId = Number(visitIdRaw);
-              if (!Number.isFinite(visitId)) return;
-              if (!payload?.checked_in) return;
-              if (typeof payload.order_id !== 'number') return;
+              if (!Number.isFinite(visitId) || !payload?.checked_in || typeof payload.order_id !== 'number') return;
               eyeCheckedInByVisitId[visitId] = { orderId: payload.order_id, status: payload.status || 'scheduled' };
             });
+            Object.entries(vitalsRes.results || {}).forEach(([visitIdRaw, vital]) => {
+              const visitId = Number(visitIdRaw);
+              if (Number.isFinite(visitId)) vitalsMap.set(visitId, vital);
+            });
+            visitEnrichmentKeyRef.current = visitIdsKey;
+            physioEnrichmentCacheRef.current = physioCheckedInByVisitId;
+            eyeEnrichmentCacheRef.current = eyeCheckedInByVisitId;
+            vitalsEnrichmentCacheRef.current = vitalsMap;
+          } catch (err) {
+            debugLog('Enrichment (physio/eye/vitals) failed:', err);
           }
-        } catch (err) {
-          debugLog('Specialty clinic check-ins not available:', err);
+        } else {
+          visitEnrichmentKeyRef.current = '';
+          physioEnrichmentCacheRef.current = {};
+          eyeEnrichmentCacheRef.current = {};
+          vitalsEnrichmentCacheRef.current = new Map();
         }
+
         setPhysioCheckins(physioCheckedInByVisitId);
         setEyeCheckins(eyeCheckedInByVisitId);
 
-        // Latest vitals for every visit shown in the list (in-progress + queue-history rows).
-        const vitalsTargetVisitIds = Array.from(new Set(combinedVisits.map(v => v.id))).filter(Boolean);
-        const vitalsMap = new Map<number, any>();
-        if (vitalsTargetVisitIds.length > 0) {
-          try {
-            const vitalsResponse = await apiFetch<{ results: Record<string, any> }>(
-              `/vitals/latest-by-visits/?visit_ids=${vitalsTargetVisitIds.join(',')}`
-            );
-            Object.entries(vitalsResponse.results || {}).forEach(([visitIdRaw, vital]) => {
-              const visitId = Number(visitIdRaw);
-              if (Number.isFinite(visitId)) {
-                vitalsMap.set(visitId, vital);
-              }
-            });
-          } catch (err) {
-            console.error('Error fetching batched vitals:', err);
-          }
-        }
-
-        // Build visit -> room mapping for "Sent to Room" status.
-        // If we did not load history (because statusFilter isn't all/sent-to-room),
-        // fall back to active queue only to mark current sent-to-room visits.
-        let queueVisitToRoom = new Map<number, string>();
-        let queueVisitToSentAt = new Map<number, string>();
-        if (sentVisitToRoom.size > 0) {
-          sentVisitToRoom.forEach((meta, visitId) => {
-            queueVisitToRoom.set(visitId, meta.roomName);
-            if (meta.sentAt) queueVisitToSentAt.set(visitId, meta.sentAt);
-          });
-        } else {
-          try {
-            const queueResult = await apiFetch<{ results: any[] }>(`/consultation/queue/?is_active=true&page_size=1000`);
-            (queueResult.results || []).forEach((item: any) => {
-              if (item.visit && item.room_name) {
-                const vid = typeof item.visit === 'number' ? item.visit : parseInt(String(item.visit), 10);
-                queueVisitToRoom.set(vid, item.room_name);
-              }
-            });
-          } catch (err) {
-            console.error('Error fetching consultation queue:', err);
-          }
-        }
-        
-        // Don't filter out visits - show all visits, but mark those in queue as "Sent to Room"
-        const visitsNeedingNursing = combinedVisits; // Include queue-history visits when loaded
-        
-        // Transform visits to NursingPatient format
-        debugLog('Starting transformation of', visitsNeedingNursing.length, 'visits to nursing patients');
-        const transformedPatients: NursingPatient[] = visitsNeedingNursing.map((visit: Visit) => {
+        debugLog('Starting transformation of', nursingVisits.length, 'visits to nursing patients');
+        const transformedPatients: NursingPatient[] = nursingVisits.map((visit: Visit) => {
           // Calculate wait time (minutes since visit was created)
           const visitDateTime = new Date(`${visit.date}T${visit.time}`);
           const waitTime = Math.floor((Date.now() - visitDateTime.getTime()) / (1000 * 60));
@@ -510,8 +431,20 @@ export default function NursingPoolQueuePage() {
           };
         });
 
-        setPatients(transformedPatients);
-        return transformedPatients;
+        if (usePhysioClientFilter) {
+          const physioRows = transformedPatients.filter((p) => p.nursingStatus === 'Sent to Physiotherapy');
+          setPhysioClientBuffer(physioRows);
+          setTotalVisitCount(physioRows.length);
+          setPatients([]);
+        } else {
+          setPhysioClientBuffer(null);
+          setPatients(transformedPatients);
+          setTotalVisitCount(result.count ?? transformedPatients.length);
+        }
+
+        return usePhysioClientFilter
+          ? transformedPatients.filter((p) => p.nursingStatus === 'Sent to Physiotherapy')
+          : transformedPatients;
       } catch (err) {
         console.error('Error loading nursing pool data:', err);
         if (isAuthenticationError(err)) {
@@ -525,7 +458,22 @@ export default function NursingPoolQueuePage() {
           setLoading(false);
         }
       }
-  }, [dateFilter, statusFilter, dateRange.from, dateRange.to]);
+  }, [
+    dateFilter,
+    statusFilter,
+    dateRange.from,
+    dateRange.to,
+    debouncedSearchQuery,
+    typeFilter,
+    clinicFilter,
+    currentPage,
+    itemsPerPage,
+  ]);
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearchQuery(searchQuery), 300);
+    return () => clearTimeout(t);
+  }, [searchQuery]);
 
   // Load data when filters change
   useEffect(() => {
@@ -537,8 +485,17 @@ export default function NursingPoolQueuePage() {
   const [isViewVitalsDialogOpen, setIsViewVitalsDialogOpen] = useState(false);
   const [isRoomPickerOpen, setIsRoomPickerOpen] = useState(false);
 
+  const [tabHidden, setTabHidden] = useState(false);
+  useEffect(() => {
+    const sync = () => setTabHidden(typeof document !== 'undefined' && document.visibilityState === 'hidden');
+    sync();
+    document.addEventListener('visibilitychange', sync);
+    return () => document.removeEventListener('visibilitychange', sync);
+  }, []);
+
   useEffect(() => {
     if (
+      tabHidden ||
       isDateFilterDialogOpen ||
       isVitalsDialogOpen ||
       isViewVitalsDialogOpen ||
@@ -548,10 +505,11 @@ export default function NursingPoolQueuePage() {
     }
     const id = setInterval(() => {
       void loadData({ silent: true });
-    }, 15000);
+    }, 25000);
     return () => clearInterval(id);
   }, [
     loadData,
+    tabHidden,
     isDateFilterDialogOpen,
     isVitalsDialogOpen,
     isViewVitalsDialogOpen,
@@ -589,145 +547,68 @@ export default function NursingPoolQueuePage() {
   const [vitalsForm, setVitalsForm] = useState<VitalsData>(emptyVitals);
   const [isSubmitting, setIsSubmitting] = useState(false);
   
-  // Reload rooms when room picker opens
+  // Load rooms only when the room picker opens (not on every queue refresh).
   useEffect(() => {
-    if (isRoomPickerOpen) {
-      if (rooms.length > 0) return;
-      const loadRooms = async () => {
-        try {
-          const roomsResult = await roomService.getRooms({ page_size: 200 });
-          const transformedRooms: ConsultationRoom[] = roomsResult.results.map((room: any) => ({
-            id: String(room.id),
-            name: room.name,
-            status: room.status?.toLowerCase() === 'active' ? 'available' as const : 'occupied' as const,
-            doctor: room.assigned_doctor || undefined,
-            specialty: room.specialty || '',
-            queueCount: 0,
-            currentPatient: undefined,
-          }));
-          setRooms(transformedRooms);
-        } catch (err) {
-          console.error('Error loading rooms:', err);
-        }
-      };
-      loadRooms();
+    if (!isRoomPickerOpen) {
+      setRoomsLoading(false);
+      return;
     }
-  }, [isRoomPickerOpen, rooms.length]);
-  
-  // Pagination state
-  const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(50);
-
-  // Filter patients
-  const filteredPatients = patients.filter(p => {
-    const normalizeStatus = (s: string) => s.toLowerCase().trim().replace(/\s+/g, '-');
-    const searchLower = searchQuery.toLowerCase();
-    const matchesSearch = !searchQuery ||
-                         p.name.toLowerCase().includes(searchLower) ||
-                         p.patientId.toLowerCase().includes(searchLower) ||
-                         (p.visitId && p.visitId.toLowerCase().includes(searchLower)) ||
-                         (p.personalNumber && p.personalNumber.toLowerCase().includes(searchLower));
-    const matchesStatus = statusFilter === 'all' || normalizeStatus(p.nursingStatus) === statusFilter;
-    const matchesType = typeFilter === 'all' || p.visitType.toLowerCase() === typeFilter.toLowerCase();
-    const matchesClinic = clinicFilter === 'all' || clinicMatches(p.clinic, clinicFilter);
-
-    const passesAllFilters = matchesSearch && matchesStatus && matchesType && matchesClinic;
-    if (!passesAllFilters && patients.length > 0) {
-      debugLog('Patient filtered out:', p.name, {
-        matchesSearch,
-        matchesStatus,
-        matchesType,
-        matchesClinic,
-        statusFilter,
-        typeFilter,
-        clinicFilter,
-        patientStatus: p.nursingStatus
-      });
-    }
-    
-    // Date filter
-    const dateSource = (p.nursingStatus === 'Sent to Room' && p.sentAt) ? p.sentAt : p.visitDate;
-    const visitDate = new Date(dateSource);
-
-    if (dateRange.from || dateRange.to) {
-      if (Number.isNaN(visitDate.getTime())) return false;
-      if (dateRange.from) {
-        const from = new Date(`${dateRange.from}T00:00:00`);
-        if (visitDate < from) return false;
+    if (rooms.length > 0) return;
+    let cancelled = false;
+    const loadRooms = async () => {
+      setRoomsLoading(true);
+      try {
+        const roomsResult = await roomService.getRooms({ page_size: 200 });
+        if (cancelled) return;
+        const transformedRooms: ConsultationRoom[] = roomsResult.results.map((room: any) => ({
+          id: String(room.id),
+          name: room.name,
+          status: room.status?.toLowerCase() === 'active' ? 'available' as const : 'occupied' as const,
+          doctor: room.assigned_doctor || undefined,
+          specialty: room.specialty || '',
+          queueCount: 0,
+          currentPatient: undefined,
+        }));
+        setRooms(transformedRooms);
+      } catch (err) {
+        console.error('Error loading rooms:', err);
+      } finally {
+        if (!cancelled) setRoomsLoading(false);
       }
-      if (dateRange.to) {
-        const to = new Date(`${dateRange.to}T23:59:59.999`);
-        if (visitDate > to) return false;
-      }
-    } else if (dateFilter !== 'all') {
-      // For "Sent to Room", filter by the send timestamp (queued_at) when available.
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      
-      if (dateFilter === 'today' && visitDate.toDateString() !== today.toDateString()) return false;
-      if (dateFilter === 'week') {
-        const weekAgo = new Date(today);
-        weekAgo.setDate(weekAgo.getDate() - 7);
-        if (visitDate < weekAgo) return false;
-      }
-      if (dateFilter === 'month') {
-        const monthAgo = new Date(today);
-        monthAgo.setMonth(monthAgo.getMonth() - 1);
-        if (visitDate < monthAgo) return false;
-      }
-    }
-    
-    // Show all patients that have been to nursing (like Manage Visits)
-    return matchesSearch && matchesStatus && matchesType && matchesClinic;
-  });
-
-  // Sort newest first
-  const sortedPatients = [...filteredPatients].sort((a, b) => {
-    const getTimeKey = (p: NursingPatient) => {
-      const raw = (p.nursingStatus === 'Sent to Room' && p.sentAt)
-        ? p.sentAt
-        : `${p.visitDate}T${p.visitTime}`;
-      const t = new Date(raw).getTime();
-      return Number.isFinite(t) ? t : 0;
     };
-    const timeDiff = getTimeKey(b) - getTimeKey(a);
-    if (timeDiff !== 0) return timeDiff;
-    const typeOrder: Record<string, number> = { 'Emergency': 0, 'Consultation': 1, 'Follow-up': 2 };
-    const typeDiff = (typeOrder[a.visitType] ?? 3) - (typeOrder[b.visitType] ?? 3);
-    if (typeDiff !== 0) return typeDiff;
-    return (b.waitTime || 0) - (a.waitTime || 0);
-  });
+    void loadRooms();
+    return () => {
+      cancelled = true;
+    };
+  }, [isRoomPickerOpen, rooms.length]);
 
-  // Paginated patients
-  const paginatedPatients = useMemo(() => {
-    debugLog('Total patients:', patients.length);
-    debugLog('Filtered patients:', filteredPatients.length);
-    debugLog('Sorted patients:', sortedPatients.length);
-    debugLog('Current filters:', { statusFilter, typeFilter, clinicFilter, dateFilter, searchQuery });
+  /** Server returns one page; physiotherapy filter uses client buffer + slice. */
+  const displayedPatients = useMemo(() => {
+    if (physioClientBuffer) {
+      const start = (currentPage - 1) * itemsPerPage;
+      return physioClientBuffer.slice(start, start + itemsPerPage);
+    }
+    return patients;
+  }, [physioClientBuffer, patients, currentPage, itemsPerPage]);
 
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    const result = sortedPatients.slice(startIndex, startIndex + itemsPerPage);
-    debugLog('Paginated patients:', result.length);
-    return result;
-  }, [patients, filteredPatients, sortedPatients, currentPage, itemsPerPage, statusFilter, typeFilter, clinicFilter, dateFilter, searchQuery]);
-
-  // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, statusFilter, dateFilter, typeFilter, clinicFilter, dateRange.from, dateRange.to]);
+  }, [debouncedSearchQuery, statusFilter, dateFilter, typeFilter, clinicFilter, dateRange.from, dateRange.to]);
 
   const clearDateRangeFilters = () => {
     setDateRange({ from: '', to: '' });
     setIsDateFilterDialogOpen(false);
   };
 
-  // Stats - Show all patients that have been to nursing
-  const stats = {
-    totalInPool: patients.length, // All patients that went through nursing
-    pendingVitals: patients.filter(p => p.nursingStatus === 'Pending').length,
-    readyForConsultation: patients.filter(p => p.nursingStatus === 'Ready for Consultation').length,
-    sentToRooms: patients.filter(p => p.nursingStatus === 'Sent to Room').length,
-  };
+  const stats = useMemo(
+    () => ({
+      totalInPool: poolMetrics.total,
+      pendingVitals: poolMetrics.pending_vitals,
+      readyForConsultation: poolMetrics.ready_for_consultation,
+      sentToRooms: poolMetrics.sent_to_room,
+    }),
+    [poolMetrics]
+  );
 
 
   const openRecordVitals = (patient: NursingPatient) => {
@@ -806,21 +687,8 @@ export default function NursingPoolQueuePage() {
       // Find the visit ID from the selected patient
       const visitId = selectedPatient.id; // This is the visit ID
       
-      // Get patient ID from the visit
-      // Note: Visits in nursing pool queue have status 'in_progress', not 'completed'
-      // Build date filter based on current dateFilter state
-      let dateParam: string | undefined = undefined;
-      if (dateFilter === 'today') {
-        dateParam = new Date().toISOString().split('T')[0];
-      }
-      const visitsResult = await visitService.getVisits({ 
-        status: 'in_progress',
-        date: dateParam,
-        page_size: 500 
-      });
-      const visit = visitsResult.results.find((v: Visit) => String(v.id) === visitId);
-      
-      if (!visit) {
+      const visit = await visitService.getVisit(parseInt(visitId, 10));
+      if (!visit?.patient) {
         throw new Error('Visit not found');
       }
       
@@ -1213,13 +1081,17 @@ export default function NursingPoolQueuePage() {
           <>
             <div className="flex items-center justify-between px-1">
               <p className="text-sm text-muted-foreground">
-                Showing <span className="font-medium text-foreground">{sortedPatients.length}</span> patients
+                Showing{' '}
+                <span className="font-medium text-foreground">
+                  {physioClientBuffer ? physioClientBuffer.length : totalVisitCount}
+                </span>{' '}
+                patients
               </p>
             </div>
 
         {/* Patient Queue */}
         <div className="space-y-3">
-          {sortedPatients.length === 0 ? (
+          {displayedPatients.length === 0 ? (
             <Card>
               <CardContent className="flex flex-col items-center justify-center py-12">
                 <Users className="h-12 w-12 text-muted-foreground mb-4" />
@@ -1232,7 +1104,7 @@ export default function NursingPoolQueuePage() {
               </CardContent>
             </Card>
           ) : (
-            paginatedPatients.map((patient) => (
+            displayedPatients.map((patient) => (
               <Card key={patient.id} className={`border-l-4 ${getVisitTypeBorderColor(patient.visitType)} hover:shadow-md transition-shadow`}>
                 <CardContent className="py-3 px-4">
                   <div className="flex items-center gap-3">
@@ -1468,11 +1340,11 @@ export default function NursingPoolQueuePage() {
         </div>
 
         {/* Pagination */}
-        {sortedPatients.length > 0 && (
+        {(physioClientBuffer ? physioClientBuffer.length > 0 : totalVisitCount > 0) && (
           <Card className="p-4">
             <StandardPagination
               currentPage={currentPage}
-              totalItems={sortedPatients.length}
+              totalItems={physioClientBuffer ? physioClientBuffer.length : totalVisitCount}
               itemsPerPage={itemsPerPage}
               onPageChange={setCurrentPage}
               onItemsPerPageChange={setItemsPerPage}
@@ -1598,11 +1470,11 @@ export default function NursingPoolQueuePage() {
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label>Blood sugar (mg/dL)</Label>
+                  <Label>Fasting Blood Sugar (FBS) (mg/dL)</Label>
                   <Input type="number" placeholder="95" value={vitalsForm.bloodSugar} onChange={(e) => setVitalsForm(prev => ({ ...prev, bloodSugar: e.target.value }))} />
                 </div>
                 <div className="space-y-2">
-                  <Label>RBS (mg/dL)</Label>
+                  <Label>Random Blood Sugar (RBS) (mg/dL)</Label>
                   <Input type="number" placeholder="140" value={vitalsForm.randomBloodSugar} onChange={(e) => setVitalsForm(prev => ({ ...prev, randomBloodSugar: e.target.value }))} />
                 </div>
               </div>
@@ -1682,7 +1554,12 @@ export default function NursingPoolQueuePage() {
               </DialogDescription>
             </DialogHeader>
             <div className="py-4 space-y-3 max-h-[400px] overflow-y-auto">
-              {rooms.length === 0 ? (
+              {roomsLoading ? (
+                <div className="flex flex-col items-center justify-center py-12 gap-3 text-muted-foreground">
+                  <Loader2 className="h-10 w-10 animate-spin" />
+                  <p className="text-sm">Loading rooms…</p>
+                </div>
+              ) : rooms.length === 0 ? (
                 <div className="text-center py-8 text-muted-foreground">
                   <ArrowRight className="h-12 w-12 mx-auto mb-4 opacity-50" />
                   <p>No consultation rooms available</p>

@@ -16,6 +16,10 @@ export interface VisitFilters {
   ordering?: string;
   page?: number;
   page_size?: number;
+  /** Exclude visits that already have a completed consultation (nursing pool). */
+  nursing_pool?: 1 | '1';
+  /** Server-side nursing queue segment (requires nursing_pool=1). */
+  nursing_status?: 'pending' | 'vitals_incomplete' | 'ready' | 'sent_to_room';
 }
 
 class VisitService {
@@ -27,6 +31,21 @@ class VisitService {
     return apiFetch<{ results: Visit[]; count: number; next?: string; previous?: string }>(
       `/visits/${query}`
     );
+  }
+
+  /** Dashboard stats for nursing pool (same filters as getVisits except pagination / nursing_status). */
+  async getNursingPoolMetrics(
+    params?: Omit<VisitFilters, 'page' | 'page_size' | 'nursing_status'>
+  ): Promise<{
+    total: number;
+    pending_vitals: number;
+    ready_for_consultation: number;
+    sent_to_room: number;
+  }> {
+    const query = buildQueryString((params || {}) as Record<string, string | number | boolean | undefined>);
+    // Trailing slash before query (same pattern as `/visits/?page=1`) — Django route is `nursing-pool-metrics/`.
+    const path = query ? `/visits/nursing-pool-metrics/?${query.slice(1)}` : '/visits/nursing-pool-metrics/';
+    return apiFetch(path);
   }
 
   /**

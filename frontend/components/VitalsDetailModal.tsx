@@ -147,11 +147,15 @@ export function VitalsDetailModal({
     },
     { label: "Pain Scale", value: formatVitalTileValue(normalized.painScale), unit: "/10" },
     {
-      label: "Blood sugar",
+      label: "Fasting Blood Sugar (FBS)",
       value: formatVitalTileValue(normalized.bloodSugar),
       unit: "mg/dL",
     },
-    { label: "RBS", value: formatVitalTileValue(normalized.randomBloodSugar), unit: "mg/dL" },
+    {
+      label: "Random Blood Sugar (RBS)",
+      value: formatVitalTileValue(normalized.randomBloodSugar),
+      unit: "mg/dL",
+    },
   ];
 
   const rows = allRows.filter((item) => {

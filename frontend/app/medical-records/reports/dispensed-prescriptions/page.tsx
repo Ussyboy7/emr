@@ -377,52 +377,7 @@ export default function DispensedPrescriptionsReport() {
           </CardContent>
         </Card>
 
-        {/* Dispensed Items Table */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Pill className="h-5 w-5" />
-              Dispensed Items
-            </CardTitle>
-            <CardDescription>Aggregated quantities dispensed by medication</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {isLoading ? (
-              <div className="text-center py-10">
-                <RefreshCw className="h-8 w-8 mx-auto mb-4 animate-spin text-muted-foreground" />
-                <p className="text-muted-foreground">Loading dispensed items...</p>
-              </div>
-            ) : dispensedItems.length === 0 ? (
-              <div className="text-center py-10">
-                <Pill className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-                <p className="text-muted-foreground">No dispensed items found for this period</p>
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr className="border-b border-border">
-                      <th className="text-left p-3 text-sm font-medium text-muted-foreground">S/N</th>
-                      <th className="text-left p-3 text-sm font-medium text-muted-foreground">Medication</th>
-                      <th className="text-left p-3 text-sm font-medium text-muted-foreground">Unit</th>
-                      <th className="text-right p-3 text-sm font-medium text-muted-foreground">Quantity Dispensed</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {dispensedItems.map((r) => (
-                      <tr key={r.sn} className="border-b border-border hover:bg-muted/30 transition-colors">
-                        <td className="p-3 text-foreground">{r.sn}</td>
-                        <td className="p-3 font-medium text-foreground">{r.medication}</td>
-                        <td className="p-3 text-foreground">{r.unit || "-"}</td>
-                        <td className="p-3 text-right font-semibold text-foreground">{r.quantity_dispensed.toLocaleString()}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+
       </div>
     </DashboardLayout>
   );

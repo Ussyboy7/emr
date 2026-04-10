@@ -140,7 +140,7 @@ export function TimelineTab({
           `BP: ${vital.bp}`,
           `Pulse: ${vital.pulse} bpm`,
           `Temp: ${vital.temp}°C`,
-          vital.bloodSugar && vital.bloodSugar !== '-' ? `BS: ${vital.bloodSugar}` : null,
+          vital.bloodSugar && vital.bloodSugar !== '-' ? `FBS: ${vital.bloodSugar}` : null,
           vital.randomBloodSugar && vital.randomBloodSugar !== '-' ? `RBS: ${vital.randomBloodSugar}` : null,
         ]
           .filter(Boolean)
@@ -327,4 +327,3 @@ export function TimelineTab({
     </div>
   );
 }
-

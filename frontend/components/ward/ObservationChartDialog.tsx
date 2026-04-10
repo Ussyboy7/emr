@@ -169,7 +169,7 @@ export function ObservationChartDialog({ open, onOpenChange, admission }: Props)
         ) : (
           <div className="space-y-8">
             <section>
-              <h3 className="text-sm font-semibold mb-2">Continuous vitals (incl. FBS / RBS)</h3>
+              <h3 className="text-sm font-semibold mb-2">Continuous vitals (incl. Fasting Blood Sugar / Random Blood Sugar)</h3>
               <div className="overflow-x-auto border rounded-md">
                 <table className="w-full text-sm">
                   <thead className="bg-muted/50">
@@ -179,8 +179,8 @@ export function ObservationChartDialog({ open, onOpenChange, admission }: Props)
                       <th className="text-right p-2">Pulse</th>
                       <th className="text-right p-2">RR</th>
                       <th className="text-right p-2">BP</th>
-                      <th className="text-right p-2">FBS</th>
-                      <th className="text-right p-2">RBS</th>
+                      <th className="text-right p-2">Fasting Blood Sugar</th>
+                      <th className="text-right p-2">Random Blood Sugar</th>
                       <th className="text-left p-2">Notes</th>
                     </tr>
                   </thead>
@@ -238,11 +238,11 @@ export function ObservationChartDialog({ open, onOpenChange, admission }: Props)
                   <Input value={vitalForm.bpd} onChange={(e) => setVitalForm((p) => ({ ...p, bpd: e.target.value }))} />
                 </div>
                 <div>
-                  <Label className="text-xs">FBS (mmol/L)</Label>
+                  <Label className="text-xs">Fasting Blood Sugar (mmol/L)</Label>
                   <Input value={vitalForm.fbs} onChange={(e) => setVitalForm((p) => ({ ...p, fbs: e.target.value }))} />
                 </div>
                 <div>
-                  <Label className="text-xs">RBS (mmol/L)</Label>
+                  <Label className="text-xs">Random Blood Sugar (mmol/L)</Label>
                   <Input value={vitalForm.rbs} onChange={(e) => setVitalForm((p) => ({ ...p, rbs: e.target.value }))} />
                 </div>
                 <div className="col-span-2">

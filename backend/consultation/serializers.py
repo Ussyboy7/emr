@@ -177,6 +177,16 @@ class ConsultationQueueSerializer(serializers.ModelSerializer):
         validators = []
 
 
+class ConsultationQueueByVisitSerializer(serializers.ModelSerializer):
+    """Minimal fields for nursing pool: map visit → active room queue row."""
+
+    room_name = serializers.CharField(source='room.name', read_only=True)
+
+    class Meta:
+        model = ConsultationQueue
+        fields = ['visit', 'room_name', 'queued_at']
+
+
 class ReferralSerializer(serializers.ModelSerializer):
     """Serializer for Referral model."""
 

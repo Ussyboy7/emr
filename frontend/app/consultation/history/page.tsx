@@ -266,6 +266,9 @@ export default function ConsultationHistoryPage() {
   const [editRadiologyOrders, setEditRadiologyOrders] = useState<any[]>([]);
   const [editPhysioOrders, setEditPhysioOrders] = useState<any[]>([]);
   const [editNursingOrders, setEditNursingOrders] = useState<any[]>([]);
+  // Local draft prescriptions (like consultation room)
+  const [draftPrescriptions, setDraftPrescriptions] = useState<any[]>([]);
+
   const [loadingOrders, setLoadingOrders] = useState(false);
   const [editActiveTab, setEditActiveTab] = useState('notes');
   // Add-order dialogs (Option A: use session-style modals, submit immediately)
@@ -710,24 +713,92 @@ export default function ConsultationHistoryPage() {
       toast.error("Invalid consultation/patient");
       return;
     }
-    await pharmacyService.createPrescription({
+
+    if (payload.items.length === 0) {
+      toast.error('Please select at least one medication');
+      return;
+    }
+
+    // Debug: Log the payload being sent
+    const prescriptionPayload = {
       patient: patientId,
       visit: selectedConsultation.visitId,
       consultation_session: sessionId,
       notes: payload.clinicalIndication || undefined,
       items: payload.items.map((i) => ({
-        medication: i.medicationId,
+        medication: i.medication,
+        generic: i.generic || null, // Add generic ID
+        medication_name: i.medication_name,
         quantity: i.quantity,
         unit: i.unit,
-        dosage: i.dosage,
+        dose: i.dosage, // Use 'dose' not 'dosage'
         frequency: i.frequency,
         duration: i.duration,
+        route: i.route || 'Oral',
         instructions: i.instructions,
-      })),
-    } as any);
-    toast.success("Prescription added");
-    await loadEditOrdersRefetch();
+        dispensed_quantity: 0,
+        is_dispensed: false,
+      })) as any,
+    };
+
+    console.log('Sending prescription payload:', prescriptionPayload);
+
+    try {
+      const result = await pharmacyService.createPrescription(prescriptionPayload as any);
+      console.log('Prescription created successfully:', result);
+
+      toast.success("Prescription sent to pharmacy");
+      await loadEditOrdersRefetch();
+    } catch (error) {
+      console.error('Error creating prescription:', error);
+      toast.error('Failed to create prescription');
+    }
   };
+
+  const handleSaveDraftPrescriptions = async () => {
+    const patientId = getSelectedPatientId();
+    const sessionId = getSelectedSessionId();
+    if (!selectedConsultation || !patientId || !sessionId || draftPrescriptions.length === 0) {
+      toast.error("Invalid consultation/patient or no drafts to save");
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      // Group draft prescriptions by their properties and create actual prescriptions
+      // For simplicity, create one prescription with all medications
+      await pharmacyService.createPrescription({
+        patient: patientId,
+        visit: selectedConsultation.visitId,
+        consultation_session: sessionId,
+        notes: draftPrescriptions[0]?.instructions || undefined,
+        medications: draftPrescriptions.map((rx) => ({
+          medication: rx.medicationId,
+          medication_name: rx.medication,
+          quantity: rx.quantity,
+          unit: rx.unit,
+          dosage: rx.dosage,
+          frequency: rx.frequency,
+          duration: rx.duration,
+          route: rx.route,
+          instructions: rx.instructions,
+          dispensed_quantity: 0,
+          is_dispensed: false,
+        })) as any,
+      } as any);
+
+      setDraftPrescriptions([]);
+      toast.success("Prescriptions saved to pharmacy");
+      await loadEditOrdersRefetch();
+    } catch (error) {
+      console.error('Error saving draft prescriptions:', error);
+      toast.error('Failed to save prescriptions');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+
 
   const handleSubmitLabOrder = async (payload: LabOrderSubmitInput) => {
     const patientId = getSelectedPatientId();
@@ -1231,7 +1302,12 @@ export default function ConsultationHistoryPage() {
         />
 
         {/* Edit Modal */}
-        <Dialog open={showEditModal} onOpenChange={setShowEditModal}>
+        <Dialog open={showEditModal} onOpenChange={(open) => {
+          setShowEditModal(open);
+          if (!open) {
+            setDraftPrescriptions([]);
+          }
+        }}>
           <DialogContent className="w-[95vw] sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
@@ -1336,9 +1412,43 @@ export default function ConsultationHistoryPage() {
                               );
                             })}
                           </div>
-                        )}
-                      </div>
+                          )}
 
+                          {/* Draft Prescriptions */}
+                          {draftPrescriptions.length > 0 && (
+                            <div>
+                              <div className="flex items-center justify-between mb-2">
+                                <h4 className="text-sm font-medium text-amber-700 dark:text-amber-400">Draft Prescriptions</h4>
+                                <Button size="sm" onClick={handleSaveDraftPrescriptions} disabled={isSubmitting}>
+                                  {isSubmitting ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
+                                  Save to Pharmacy
+                                </Button>
+                              </div>
+                              <ul className="space-y-2">
+                                {draftPrescriptions.map((rx: any) => (
+                                  <li key={rx.id} className="p-3 rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-800 text-sm">
+                                    <div className="flex items-center justify-between mb-2">
+                                      <Badge variant="outline" className="text-xs bg-amber-100 text-amber-800 border-amber-300">Draft</Badge>
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => setDraftPrescriptions(prev => prev.filter(p => p.id !== rx.id))}
+                                        className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
+                                      >
+                                        <X className="h-3 w-3" />
+                                      </Button>
+                                    </div>
+                                    <div className="space-y-0.5">
+                                      <div>{rx.medication} — {rx.dosage} {rx.frequency} {rx.duration}</div>
+                                      {rx.instructions && <div className="text-xs text-muted-foreground mt-1">{rx.instructions}</div>}
+                                    </div>
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+
+                        </div>
                       <div className="space-y-3 pt-2 border-t">
                         <div className="space-y-1.5">
                           <Label>Assessment</Label>
@@ -1382,7 +1492,7 @@ export default function ConsultationHistoryPage() {
                     <CardContent className="space-y-4">
                       {loadingOrders ? (
                         <div className="flex items-center justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
-                      ) : editPrescriptions.length === 0 ? (
+                      ) : editPrescriptions.length === 0 && draftPrescriptions.length === 0 ? (
                         <div className="text-center py-12 bg-gradient-to-b from-violet-50 to-violet-100/50 dark:from-violet-900/10 dark:to-violet-900/5 rounded-lg border-2 border-dashed border-violet-200 dark:border-violet-800">
                           <Pill className="h-12 w-12 mx-auto mb-3 text-violet-500 opacity-60" />
                           <p className="font-medium text-violet-900 dark:text-violet-100 mb-1">No prescriptions yet</p>
@@ -1392,24 +1502,36 @@ export default function ConsultationHistoryPage() {
                           </Button>
                         </div>
                       ) : (
-                        <ul className="space-y-2">
-                          {editPrescriptions.map((rx: any) => {
-                            const items = rx.medications || rx.items || [];
-                            return (
-                              <li key={rx.id} className="p-3 rounded-lg border bg-muted/30 text-sm">
-                                {items.length ? (
-                                  <ul className="space-y-0.5">
-                                    {items.map((m: any, i: number) => (
-                                      <li key={i}>{m.medication_name || m.name} — {m.dosage} {m.frequency} {m.duration}</li>
-                                    ))}
-                                  </ul>
-                                ) : (
-                                  <p className="text-muted-foreground text-xs">No medications on this prescription</p>
-                                )}
-                              </li>
-                            );
-                          })}
-                        </ul>
+                        <div className="space-y-4">
+                          {/* Existing Prescriptions */}
+                          {editPrescriptions.length > 0 && (
+                            <div>
+                              <h4 className="text-sm font-medium text-muted-foreground mb-2">Existing Prescriptions</h4>
+                              <ul className="space-y-2">
+                                {editPrescriptions.map((rx: any) => {
+                                  const items = rx.medications || rx.items || [];
+                                  return (
+                                    <li key={rx.id} className="p-3 rounded-lg border bg-muted/30 text-sm">
+                                      <div className="flex items-center justify-between mb-2">
+                                        <Badge variant="outline" className="text-xs">{rx.status}</Badge>
+                                        <span className="text-xs text-muted-foreground">{new Date(rx.prescribed_at).toLocaleDateString()}</span>
+                                      </div>
+                                      {items.length ? (
+                                        <ul className="space-y-0.5">
+                                          {items.map((m: any, i: number) => (
+                                            <li key={i}>{m.medication_name || m.name} — {m.dosage} {m.frequency} {m.duration}</li>
+                                          ))}
+                                        </ul>
+                                      ) : (
+                                        <p className="text-muted-foreground text-xs">No medications on this prescription</p>
+                                      )}
+                                    </li>
+                                  );
+                                })}
+                              </ul>
+                            </div>
+                          )}
+                        </div>
                       )}
                       <div className="p-4 rounded-lg bg-violet-50 dark:bg-violet-900/20 border border-violet-200 dark:border-violet-800">
                         <h4 className="font-medium text-violet-900 dark:text-violet-100 mb-2 flex items-center gap-2">

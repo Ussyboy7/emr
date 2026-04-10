@@ -39,7 +39,9 @@ const frequencyToDailyDoses: Record<string, number> = {
 };
 
 export type PrescriptionOrderItemInput = {
-  medicationId: number;
+  medication: number;
+  medication_name?: string;
+  generic?: number | null;
   dosage: string;
   frequency: string;
   duration: string;
@@ -48,7 +50,7 @@ export type PrescriptionOrderItemInput = {
   dosage_form?: string;
   strength?: string;
   route?: string;
-  instructions: string;
+  instructions?: string;
 };
 
 export type PrescriptionOrderSubmitInput = {
@@ -61,6 +63,10 @@ type MedicationLike = {
   id: number | string;
   name?: string;
   generic_name?: string;
+  generic?: {
+    id: number;
+    name: string;
+  };
   form?: string;
   dosageForm?: string;
   dosage_form?: string;
@@ -208,6 +214,13 @@ export function PrescriptionOrderModal({
     return () => document.removeEventListener("pointerdown", handlePointerDown, true);
   }, [open, showMedicationDropdown]);
 
+  // Reset modal state when opening
+  useEffect(() => {
+    if (open) {
+      reset();
+    }
+  }, [open, reset]);
+
   const normalizeMedicationId = (id: number | string | undefined): number | null => {
     if (id == null) return null;
     const n = typeof id === "number" ? id : parseInt(id, 10);
@@ -304,11 +317,6 @@ export function PrescriptionOrderModal({
       toast.error("Please select at least one medication");
       return null;
     }
-    if (!clinicalIndication.trim()) {
-      toast.error("Please provide clinical indication");
-      return null;
-    }
-
     const items: PrescriptionOrderItemInput[] = [];
     const missing: string[] = [];
 
@@ -316,38 +324,39 @@ export function PrescriptionOrderModal({
       const med = medications.find((m) => normalizeMedicationId(m.id) === medId);
       const cfg = medicationConfigs.get(medId);
       const displayName = med?.name || cfg?.name || "Medication";
-      if (!cfg?.dosage?.trim()) missing.push(`${displayName} - dose required`);
       if (!cfg?.frequency) missing.push(`${displayName} - frequency required`);
       if (!cfg?.unit?.trim()) missing.push(`${displayName} - dose unit required`);
-      if (!cfg?.form?.trim()) missing.push(`${displayName} - form required`);
-      if (!cfg?.strength?.trim()) missing.push(`${displayName} - strength required`);
       if (!cfg) continue;
 
       // Quantity is inferred from dosage + frequency + durationDays (like room page)
       const dailyDoses = frequencyToDailyDoses[cfg.frequency] ?? 1;
       const dosageValue = parseFloat(String(cfg.dosage).replace(/[^\d.]/g, "")) || 1;
       const days = cfg.durationDays === "" ? 0 : cfg.durationDays || 0;
-      const qty =
+      const qty = Math.max(
         cfg.frequency === "STAT (Single dose)"
           ? dosageValue
-          : Math.ceil(dosageValue * dailyDoses * Math.max(days || 1, 1));
+          : Math.ceil(dosageValue * dailyDoses * Math.max(days || 1, 1)),
+        1
+      );
 
       items.push({
-        medicationId: medId,
+        medication: medId,
+        medication_name: med?.name || cfg.name || "",
+        generic: med?.generic?.id || null,
         unit: cfg.unit || med?.unit || "tablet",
         dosage_form: cfg.form || med?.dosage_form || med?.form || (med as any)?.dosageForm || "",
         strength: cfg.strength || med?.strength || "",
         route: cfg.route || "Oral",
         dosage: cfg.dosage || "As directed",
         frequency: cfg.frequency || "Once daily (OD)",
-        duration: days ? `${days} days` : "As directed",
-        quantity: qty,
+        duration: (days ? `${days} days` : "As directed") as string,
+        quantity: qty || 1,
         instructions: (cfg.instructions?.trim() || clinicalIndication.trim()),
       });
     }
 
     if (missing.length > 0) {
-      toast.error("Please complete required fields for each medication (dose, frequency, dose unit).");
+      toast.error("Please complete required fields for each medication (frequency and dose unit).");
       return null;
     }
 
@@ -359,10 +368,40 @@ export function PrescriptionOrderModal({
   };
 
   const handleConfirm = async () => {
-    const payload = buildSubmitPayload();
-    if (!payload) return;
+    if (selectedMedications.length === 0) {
+      toast.error('Please select at least one medication');
+      return;
+    }
+
+    setSubmitting(true);
     try {
-      setSubmitting(true);
+      const payload: PrescriptionOrderSubmitInput = {
+        priority,
+        clinicalIndication,
+        items: selectedMedications.map((medId): PrescriptionOrderItemInput => {
+          const med = medications.find((m) => normalizeMedicationId(m.id) === medId);
+          const cfg = medicationConfigs.get(medId);
+          if (!cfg) throw new Error(`Configuration missing for medication ${medId}`);
+
+          const displayMed = med || { id: medId, name: cfg.name, generic_name: cfg.generic_name, strength: cfg.strength, form: cfg.form, dosage_form: cfg.form };
+
+          return {
+            medication: medId,
+            medication_name: displayMed.name,
+            generic: med?.generic?.id || null,
+            dosage: cfg.dosage,
+            frequency: cfg.frequency,
+            duration: cfg.durationDays as string,
+            quantity: cfg.quantity || 1,
+            unit: cfg.unit,
+            dosage_form: cfg.form,
+            strength: cfg.strength,
+            route: cfg.route,
+            instructions: cfg.instructions,
+          };
+        }),
+      };
+
       await onSubmit(payload);
       onOpenChange(false);
       reset();
@@ -698,18 +737,18 @@ export function PrescriptionOrderModal({
             disabled={submitting || selectedMedications.length === 0}
             className="bg-violet-600 hover:bg-violet-700"
           >
-            {submitting ? (
+                {submitting ? (
               <>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                 Submitting...
               </>
-            ) : (
-              <>
-                <Plus className="h-4 w-4 mr-2" />
-                {confirmLabel || `Add Prescription${selectedMedications.length > 1 ? "s" : ""}`}
-              </>
-            )}
-          </Button>
+                ) : (
+                  <>
+                    <Plus className="h-4 w-4 mr-2" />
+                    {confirmLabel || `Add Prescription${selectedMedications.length > 1 ? "s" : ""}`}
+                  </>
+                )}
+              </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

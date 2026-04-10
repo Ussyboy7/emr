@@ -592,6 +592,72 @@ class PharmacyService {
   /**
    * Get pharmacy statistics
    */
+  async getRecentActivities(limit: number = 10): Promise<Array<{
+    id: string;
+    type: 'prescription_created' | 'prescription_dispensed' | 'inventory_updated' | 'dispensing_event';
+    title: string;
+    description: string;
+    timestamp: string;
+    icon: string;
+    color: string;
+  }>> {
+    try {
+      // Get recent prescriptions (created and dispensed)
+      const prescriptionsResponse = await this.getPrescriptions({ page: 1, page_size: limit });
+      const prescriptions = prescriptionsResponse.results;
+
+      const activities: Array<{
+        id: string;
+        type: 'prescription_created' | 'prescription_dispensed' | 'inventory_updated' | 'dispensing_event';
+        title: string;
+        description: string;
+        timestamp: string;
+        icon: string;
+        color: string;
+      }> = [];
+
+      prescriptions.forEach((rx: any) => {
+        // Prescription created activity
+        const patientName = rx.patient_name || 'Unknown Patient';
+        const statusText = rx.status === 'pending' ? 'awaiting review' :
+                          rx.status === 'approved' ? 'ready for dispensing' :
+                          rx.status === 'dispensed' ? 'completed' : rx.status;
+
+        activities.push({
+          id: `rx_created_${rx.id}`,
+          type: 'prescription_created',
+          title: 'New Prescription',
+          description: `${patientName} - ${statusText}`,
+          timestamp: rx.prescribed_at || rx.created_at,
+          icon: 'clipboard-list',
+          color: 'blue'
+        });
+
+        // If dispensed, add dispensing activity
+        if (rx.dispensed_at) {
+          activities.push({
+            id: `rx_dispensed_${rx.id}`,
+            type: 'prescription_dispensed',
+            title: 'Prescription Filled',
+            description: `${rx.patient_name || 'Unknown Patient'} - medications dispensed`,
+            timestamp: rx.dispensed_at,
+            icon: 'check-circle',
+            color: 'green'
+          });
+        }
+      });
+
+      // Sort by timestamp (most recent first) and limit
+      return activities
+        .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+        .slice(0, limit);
+
+    } catch (error) {
+      console.error('Error fetching recent pharmacy activities:', error);
+      return [];
+    }
+  }
+
   async getStats(): Promise<{
     pendingRx: number;
     dispensedToday: number;
@@ -603,11 +669,12 @@ class PharmacyService {
     const pendingRx = pendingResponse.count || pendingResponse.results.length;
     
     // Get dispensed today
-    const today = new Date().toISOString().split('T')[0];
+    const today = new Date().toLocaleDateString('en-CA');
     const dispensedResponse = await this.getPrescriptions({ status: 'dispensed', page: 1 });
     const dispensedToday = dispensedResponse.results.filter((rx: Prescription) => {
       if (rx.dispensed_at) {
-        return rx.dispensed_at.split('T')[0] === today;
+        const dispensedDate = new Date(rx.dispensed_at).toLocaleDateString('en-CA');
+        return dispensedDate === today;
       }
       return false;
     }).length;

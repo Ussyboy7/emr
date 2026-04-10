@@ -8,7 +8,7 @@ import {
   type AnalyticsViewMode,
 } from '@/components/analytics/AnalyticsReportLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { getReadableApiError } from '@/lib/api-client';
+import { apiFetch, getReadableApiError } from '@/lib/api-client';
 import { pharmacyService, type PharmacyAnalyticsSummary } from '@/lib/services';
 import { toast } from 'sonner';
 import { endOfMonth, format, startOfMonth } from 'date-fns';
@@ -29,9 +29,16 @@ import {
   YAxis,
 } from 'recharts';
 import type { LucideIcon } from 'lucide-react';
-import { BarChart3, Package, Pill, Users } from 'lucide-react';
+import { BarChart3, Package, Pill, Users, RefreshCw } from 'lucide-react';
 
 const CHART_COLORS = ['#7c3aed', '#3b82f6', '#10b981', '#f59e0b', '#ec4899', '#64748b', '#ef4444'];
+
+interface DispensedItemRow {
+  sn: number;
+  medication: string;
+  unit: string;
+  quantity_dispensed: number;
+}
 
 function toYmd(d: Date) {
   return format(d, 'yyyy-MM-dd');
@@ -103,6 +110,7 @@ export default function PharmacyAnalyticsPage() {
   const [endDate, setEndDate] = useState('');
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<PharmacyAnalyticsSummary | null>(null);
+  const [dispensedItems, setDispensedItems] = useState<DispensedItemRow[]>([]);
 
   const range = useMemo(
     () => analyticsRangeFromFilters(viewMode, year, startDate, endDate),
@@ -123,12 +131,27 @@ export default function PharmacyAnalyticsPage() {
     }
     setLoading(true);
     try {
+      // Fetch analytics data
       const res = await pharmacyService.getAnalyticsSummary(r.start, r.end);
       setData(res);
+
+      // Fetch dispensed items
+      let url = "/reports/dispensed-prescriptions/?";
+      if (viewMode === "year") {
+        url += `year=${year}`;
+      } else if (startDate && endDate) {
+        url += `start_date=${startDate}&end_date=${endDate}`;
+      }
+
+      const dispensedResponse = await apiFetch<{
+        dispensed_items: DispensedItemRow[];
+      }>(url);
+      setDispensedItems(dispensedResponse.dispensed_items || []);
     } catch (e: unknown) {
       console.error(e);
       toast.error(getReadableApiError(e));
       setData(null);
+      setDispensedItems([]);
     } finally {
       setLoading(false);
     }
@@ -469,6 +492,53 @@ export default function PharmacyAnalyticsPage() {
                       <Bar dataKey="qty" name="qty" fill="#5b21b6" radius={[0, 4, 4, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Dispensed Items Table */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Pill className="h-5 w-5" />
+                  Dispensed Items
+                </CardTitle>
+                <CardDescription>Aggregated quantities dispensed by medication</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {loading ? (
+                  <div className="text-center py-10">
+                    <RefreshCw className="h-8 w-8 mx-auto mb-4 animate-spin text-muted-foreground" />
+                    <p className="text-muted-foreground">Loading dispensed items...</p>
+                  </div>
+                ) : dispensedItems.length === 0 ? (
+                  <div className="text-center py-10">
+                    <Pill className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
+                    <p className="text-muted-foreground">No dispensed items found for this period</p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="border-b border-border">
+                          <th className="text-left p-3 text-sm font-medium text-muted-foreground">S/N</th>
+                          <th className="text-left p-3 text-sm font-medium text-muted-foreground">Medication</th>
+                          <th className="text-left p-3 text-sm font-medium text-muted-foreground">Unit</th>
+                          <th className="text-right p-3 text-sm font-medium text-muted-foreground">Quantity Dispensed</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {dispensedItems.map((r) => (
+                          <tr key={r.sn} className="border-b border-border hover:bg-muted/30 transition-colors">
+                            <td className="p-3 text-foreground">{r.sn}</td>
+                            <td className="p-3 font-medium text-foreground">{r.medication}</td>
+                            <td className="p-3 text-foreground">{r.unit || "-"}</td>
+                            <td className="p-3 text-right font-semibold text-foreground">{r.quantity_dispensed.toLocaleString()}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 )}
               </CardContent>
             </Card>
