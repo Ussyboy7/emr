@@ -336,7 +336,7 @@ export function AppSidebar() {
 
   return (
     <TooltipProvider delayDuration={0}>
-      <Sidebar collapsible="icon" className="border-r border-sidebar-border bg-sidebar">
+      <Sidebar collapsible="icon" className="border-r border-sidebar-border bg-sidebar print:hidden">
         <SidebarRail />
         <SidebarHeader className="border-b border-sidebar-border px-2 py-3">
           <div className={`flex items-center w-full min-w-0 ${isCollapsed ? 'flex-col gap-2' : 'justify-between'}`}>

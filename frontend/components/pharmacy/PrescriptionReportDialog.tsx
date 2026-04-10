@@ -172,6 +172,9 @@ function buildPrescriptionReportHTML(
     th { background: #f5f5f5; font-weight: 600; }
     .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; font-size: 11pt; }
     .footer { margin-top: 28px; text-align: center; font-size: 9pt; color: #666; border-top: 1px solid #ddd; padding-top: 12px; }
+    @media print {
+      html, body { height: auto !important; overflow: visible !important; margin: 0; }
+    }
   </style>
 </head>
 <body>

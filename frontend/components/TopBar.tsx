@@ -90,7 +90,7 @@ export const TopBar = () => {
   };
 
   return (
-    <header className="sticky top-0 z-40 w-full border-b border-sidebar-border bg-sidebar overflow-hidden">
+    <header className="sticky top-0 z-40 w-full border-b border-sidebar-border bg-sidebar overflow-hidden print:hidden">
       <div className="flex h-12 items-center gap-2 md:gap-3 px-3 md:px-4">
         {/* Mobile Sidebar Toggle */}
         <SidebarTrigger className="md:hidden h-8 w-8 text-sidebar-foreground hover:bg-sidebar-accent" />

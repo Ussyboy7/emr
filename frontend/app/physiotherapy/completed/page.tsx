@@ -831,7 +831,7 @@ export default function PhysioCompletedPage() {
 
             {/* Session switcher: Session 1, 2, 3... for the same order */}
             {orderSessionsForReport.length > 1 && (
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 print:hidden">
                 <Label className="text-sm font-medium">View</Label>
                 <Select
                   value={String(reportSession?.id ?? '')}
@@ -871,7 +871,7 @@ export default function PhysioCompletedPage() {
                       <h2 className="text-lg font-semibold text-blue-700">PHYSIOTHERAPY SESSION REPORT</h2>
                       <p className="text-sm text-muted-foreground">Nigerian Ports Authority Medical Services</p>
                     </div>
-                    <div className="text-right">
+                    <div className="text-right print:hidden">
                       <div className="flex gap-2">
                         <Button variant="outline" size="sm" onClick={() => { setIsSessionReportOpen(false); if (reportSession) openEdit(reportSession); }}>
                           <Pencil className="h-4 w-4 mr-1" />

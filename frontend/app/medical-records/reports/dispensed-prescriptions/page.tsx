@@ -166,7 +166,7 @@ export default function DispensedPrescriptionsReport() {
     <DashboardLayout>
       <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
         {/* Header */}
-        <div className="mb-2">
+        <div className="mb-2 print:hidden">
           <Button variant="ghost" size="sm" className="-ml-2 gap-2 px-2" asChild>
             <Link href="/medical-records/reports">
               <ArrowLeft className="h-4 w-4" />
@@ -183,7 +183,7 @@ export default function DispensedPrescriptionsReport() {
             </h1>
             <p className="text-muted-foreground mt-1">Monthly prescription dispensing statistics</p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 print:hidden">
             <Button variant="outline" onClick={fetchReport} disabled={isLoading}>
               <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
               Refresh
@@ -200,7 +200,7 @@ export default function DispensedPrescriptionsReport() {
         </div>
 
         {/* Quick Filter Buttons */}
-        <div className="flex gap-2">
+        <div className="flex gap-2 print:hidden">
           <Button
             variant={viewMode === "range" && startDate.includes(new Date().toISOString().slice(0, 7)) ? "default" : "outline"}
             onClick={setThisMonth}
@@ -220,7 +220,7 @@ export default function DispensedPrescriptionsReport() {
         </div>
 
         {/* Filters */}
-        <Card>
+        <Card className="print:hidden">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Calendar className="h-5 w-5" />

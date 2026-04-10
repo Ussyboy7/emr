@@ -5514,14 +5514,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
                 {prescriptions.length > 0 ? (
                   <div className="space-y-3">
-                    <div className="p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
-                      <div className="flex items-center gap-2 text-blue-700 dark:text-blue-400">
-                        <AlertTriangle className="h-4 w-4" />
-                        <span className="text-sm">
-                          <strong>Note:</strong> Prescriptions are drafted locally and will be sent to pharmacy when you complete the consultation.
-                        </span>
-                      </div>
-                    </div>
                     {prescriptions.map((rx, index) => {
                       const getStatusBadge = (status: string) => {
                         switch (status) {

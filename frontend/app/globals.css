@@ -144,3 +144,12 @@ All colors MUST be HSL.
   }
 }
 
+/* Let long dashboard pages paginate when using window.print() (overflow/100vh shells clip otherwise). */
+@media print {
+  html,
+  body {
+    height: auto !important;
+    overflow: visible !important;
+  }
+}
+

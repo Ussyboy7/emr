@@ -169,7 +169,7 @@ export default function DiseasePatternReport() {
   return (
     <DashboardLayout>
       <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
-        <div className="mb-2">
+        <div className="mb-2 print:hidden">
           <Button variant="ghost" size="sm" className="-ml-2 gap-2 px-2" asChild>
             <Link href="/medical-records/reports">
               <ArrowLeft className="h-4 w-4" />
@@ -188,7 +188,7 @@ export default function DiseasePatternReport() {
               Top ICD-10 diagnoses with employee / non-employee and male / female / other gender counts
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 print:hidden">
             <Button variant="outline" onClick={fetchReport} disabled={isLoading}>
               <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? "animate-spin" : ""}`} />
               Refresh
@@ -204,7 +204,7 @@ export default function DiseasePatternReport() {
           </div>
         </div>
 
-        <div className="flex gap-2">
+        <div className="flex gap-2 print:hidden">
           <Button
             variant={
               viewMode === "range" && startDate.includes(new Date().toISOString().slice(0, 7))
@@ -227,7 +227,7 @@ export default function DiseasePatternReport() {
           </Button>
         </div>
 
-        <Card>
+        <Card className="print:hidden">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Calendar className="h-5 w-5" />

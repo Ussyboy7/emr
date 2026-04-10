@@ -157,7 +157,7 @@ export default function RadiologicalServicesReport() {
   return (
     <DashboardLayout>
       <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
-        <div className="mb-2">
+        <div className="mb-2 print:hidden">
           <Button variant="ghost" size="sm" className="-ml-2 gap-2 px-2" asChild>
             <Link href="/medical-records/reports">
               <ArrowLeft className="h-4 w-4" />
@@ -174,7 +174,7 @@ export default function RadiologicalServicesReport() {
             </h1>
             <p className="text-muted-foreground mt-1">X-Ray, ECG, Ultrasound, CT Scan, MRI statistics</p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 print:hidden">
             <Button variant="outline" onClick={fetchReport} disabled={isLoading}>
               <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
               Refresh
@@ -190,7 +190,7 @@ export default function RadiologicalServicesReport() {
           </div>
         </div>
 
-        <div className="flex gap-2">
+        <div className="flex gap-2 print:hidden">
           <Button
             variant={viewMode === "range" && startDate.includes(new Date().toISOString().slice(0, 7)) ? "default" : "outline"}
             onClick={setThisMonth}
@@ -209,7 +209,7 @@ export default function RadiologicalServicesReport() {
           </Button>
         </div>
 
-        <Card>
+        <Card className="print:hidden">
           <CardContent className="p-4">
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <div>

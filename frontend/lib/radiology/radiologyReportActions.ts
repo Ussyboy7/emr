@@ -56,7 +56,9 @@ export function printRadiologyReport(report: CompletedRadiologyReport) {
             .timeline-item { margin: 5px 0; }
             .signatures { margin: 30px 0; }
             .signature-item { margin: 15px 0; border-top: 1px solid #ddd; padding-top: 10px; }
-            @media print { body { margin: 0; } }
+            @media print {
+              html, body { height: auto !important; overflow: visible !important; margin: 0; }
+            }
           </style>
         </head>
         <body>

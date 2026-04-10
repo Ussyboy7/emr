@@ -117,7 +117,7 @@ export function AnalyticsReportLayout({
           </h1>
           <p className="text-muted-foreground mt-1">{reportDescription}</p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 print:hidden">
           <Button variant="outline" onClick={onRefresh} disabled={loading} type="button">
             <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
             Refresh
@@ -136,7 +136,7 @@ export function AnalyticsReportLayout({
       </div>
 
       {/* Quick filters */}
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap gap-2 print:hidden">
         <Button
           type="button"
           variant={highlightThisMonth ? 'default' : 'outline'}
@@ -158,7 +158,7 @@ export function AnalyticsReportLayout({
       </div>
 
       {/* Filters card */}
-      <Card>
+      <Card className="print:hidden">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-lg">
             <Calendar className="h-5 w-5" />

@@ -1525,7 +1525,7 @@ export default function PrescriptionsPage() {
               border-radius: 4px;
             }
             @media print {
-              body { margin: 0; }
+              html, body { height: auto !important; overflow: visible !important; margin: 0; }
               .no-print { display: none; }
             }
           </style>
