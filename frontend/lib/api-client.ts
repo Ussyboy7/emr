@@ -487,7 +487,7 @@ export const apiFetch = async <T = unknown>(path: string, options: FetchOptions 
             }
             
             // Handle Django REST Framework validation errors
-            // Format: {"field_name": ["error message"]}
+            // Format: {"field_name": ["error message"]} or nested list errors e.g. {"items": [{"quantity": ["..."]}]}
             if (!apiMessage) {
               const fieldErrors = Object.entries(parsed as Record<string, unknown>).filter(
                 ([key, value]) =>
@@ -498,12 +498,32 @@ export const apiFetch = async <T = unknown>(path: string, options: FetchOptions 
                   Array.isArray(value) &&
                   value.length > 0
               );
-              
+
               if (fieldErrors.length > 0) {
-                // Take the first error message from the first field
                 const [fieldName, errors] = fieldErrors[0];
                 if (Array.isArray(errors) && errors.length > 0) {
-                  apiMessage = `${fieldName}: ${(errors as string[])[0]}`;
+                  const first = errors[0] as unknown;
+                  if (typeof first === 'string') {
+                    apiMessage = `${fieldName}: ${first}`;
+                  } else if (first && typeof first === 'object' && !Array.isArray(first)) {
+                    const nested = Object.entries(first as Record<string, unknown>)
+                      .map(([k, v]) => {
+                        if (Array.isArray(v) && v.length && typeof v[0] === 'string') return `${k}: ${(v as string[])[0]}`;
+                        try {
+                          return `${k}: ${JSON.stringify(v)}`;
+                        } catch {
+                          return `${k}: (invalid)`;
+                        }
+                      })
+                      .join('; ');
+                    apiMessage = nested ? `${fieldName}: ${nested}` : `${fieldName}: ${JSON.stringify(first)}`;
+                  } else {
+                    try {
+                      apiMessage = `${fieldName}: ${JSON.stringify(errors)}`;
+                    } catch {
+                      apiMessage = `${fieldName}: validation failed`;
+                    }
+                  }
                 }
               }
             }

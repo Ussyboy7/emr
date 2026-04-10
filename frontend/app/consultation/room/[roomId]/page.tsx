@@ -663,7 +663,11 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   const [prescriptions, setPrescriptions] = useState<{ 
     id: string;
     medication: string; 
-    medicationId?: number; // Store the actual medication ID from database
+    /** GenericMedication PK (required for pharmacy API `items[].generic`). */
+    genericId?: number;
+    /** Brand Medication PK when added from brand search (optional on prescription item). */
+    brandMedicationId?: number;
+    medicationId?: number; // Legacy: generic id when added from generic search; do not use alone for API if genericId is set
     genericName: string;
     unit?: string;
     strength?: string;
@@ -1923,7 +1927,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
             (rx.medications || []).map((item: any) => ({
               id: `RX-${rx.id}-${item.id}`,
               medication: item.medication?.name || item.medication_name || 'Unknown',
-              medicationId: item.generic || item.generic_id || item.medication?.id || item.medication_id,
+              genericId: item.generic ?? item.generic_id,
+              brandMedicationId: item.medication?.id ?? item.medication_id,
+              medicationId: item.generic ?? item.generic_id ?? item.medication?.id ?? item.medication_id,
               genericName: item.medication?.generic_name || item.generic_name || '',
               unit: item.unit || item.medication_details?.unit || 'tablet',
               strength: item.strength || item.medication_details?.strength || '',
@@ -3482,9 +3488,14 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       const skippedMedications: string[] = [];
       
       for (const rx of draftPrescriptions) {
-        // Use the stored generic ID (now stored in medicationId field)
-        let genericId: number | undefined = rx.medicationId;
-        
+        // Prefer explicit generic FK (from prescription modal / brand search). Fall back to medicationId for generic-only picker flow.
+        let genericId: number | undefined =
+          typeof rx.genericId === 'number' && Number.isFinite(rx.genericId) && rx.genericId > 0
+            ? rx.genericId
+            : typeof rx.medicationId === 'number' && Number.isFinite(rx.medicationId) && rx.medicationId > 0
+              ? rx.medicationId
+              : undefined;
+
         if (!genericId) {
           // Fallback: try to find generic by name
           const generic = medications.find((g: any) => g.name === rx.medication);
@@ -3495,8 +3506,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
             continue; // Skip this medication
           }
         }
-        
-        // Ensure genericId is a number
+
         const numericGenericId = typeof genericId === 'string' ? parseInt(genericId, 10) : genericId;
         
         if (!numericGenericId || isNaN(numericGenericId) || numericGenericId === 0) {
@@ -3514,10 +3524,18 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         const fallbackStrength = (generic as any)?.strength || '';
         const fallbackRoute = (generic as any)?.route || 'Oral';
         
-        // Add to items array - now using generic instead of medication
+        const qtyNum = Math.max(Number(rx.quantity) || 0, 0.01);
+        const brandId =
+          typeof rx.brandMedicationId === 'number' &&
+          Number.isFinite(rx.brandMedicationId) &&
+          rx.brandMedicationId > 0
+            ? rx.brandMedicationId
+            : undefined;
+
         prescriptionItems.push({
-          generic: numericGenericId, // Changed from medication to generic
-          quantity: rx.quantity,
+          generic: numericGenericId,
+          medication: brandId,
+          quantity: qtyNum,
           unit: rx.unit || fallbackUnit,
           dosage_form: rx.form || fallbackForm,
           strength: rx.strength || fallbackStrength,
@@ -3864,7 +3882,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       return {
         id: rxId,
         medication: med.name, // Generic name
-        medicationId: medicationId, // Generic ID
+        genericId: medicationId,
+        medicationId, // same as genericId for in-room generic search
         genericName: med.name, // Same as medication for generics
         unit: config.unit || inferDoseUnitFromForm(med.dosage_form || med.form, med.unit),
         strength: config.strength || med.strength || '',
@@ -3918,10 +3937,16 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       const doseValue = (item.dosage || '').trim();
       const normalizedDose = doseValue ? `${doseValue} ${unit}`.trim() : `1 ${unit}`.trim();
 
+      const genericPk =
+        typeof item.generic === 'number' && Number.isFinite(item.generic) && item.generic > 0
+          ? item.generic
+          : undefined;
       return {
         id: `RX-${createdAt}-${item.medication}-${index}`,
         medication: item.medication_name || 'Medication',
-        medicationId: item.medication,
+        genericId: genericPk,
+        brandMedicationId: item.medication,
+        medicationId: genericPk ?? item.medication,
         genericName: item.medication_name || 'Medication',
         unit,
         strength: item.strength || '',

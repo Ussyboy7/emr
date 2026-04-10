@@ -63,6 +63,8 @@ type MedicationLike = {
   id: number | string;
   name?: string;
   generic_name?: string;
+  /** Present on some API payloads when nested `generic` is omitted. */
+  generic_id?: number;
   generic?: {
     id: number;
     name: string;
@@ -227,6 +229,15 @@ export function PrescriptionOrderModal({
     return Number.isFinite(n) && n > 0 ? n : null;
   };
 
+  /** Pharmacy API requires GenericMedication PK on each line — resolve from nested generic or generic_id. */
+  const resolveGenericPk = (med: MedicationLike | undefined): number | null => {
+    const nested = med?.generic?.id;
+    if (typeof nested === "number" && Number.isFinite(nested) && nested > 0) return nested;
+    const gid = (med as { generic_id?: number })?.generic_id;
+    if (typeof gid === "number" && Number.isFinite(gid) && gid > 0) return gid;
+    return null;
+  };
+
   const toggleMedicationSelection = useCallback((med: MedicationLike) => {
     const medId = normalizeMedicationId(med.id);
     if (!medId) return;
@@ -328,6 +339,12 @@ export function PrescriptionOrderModal({
       if (!cfg?.unit?.trim()) missing.push(`${displayName} - dose unit required`);
       if (!cfg) continue;
 
+      const genericPk = resolveGenericPk(med);
+      if (!genericPk) {
+        missing.push(`${displayName} - missing generic link (re-search and select the product again)`);
+        continue;
+      }
+
       // Quantity is inferred from dosage + frequency + durationDays (like room page)
       const dailyDoses = frequencyToDailyDoses[cfg.frequency] ?? 1;
       const dosageValue = parseFloat(String(cfg.dosage).replace(/[^\d.]/g, "")) || 1;
@@ -342,7 +359,7 @@ export function PrescriptionOrderModal({
       items.push({
         medication: medId,
         medication_name: med?.name || cfg.name || "",
-        generic: med?.generic?.id || null,
+        generic: genericPk,
         unit: cfg.unit || med?.unit || "tablet",
         dosage_form: cfg.form || med?.dosage_form || med?.form || (med as any)?.dosageForm || "",
         strength: cfg.strength || med?.strength || "",
@@ -384,11 +401,15 @@ export function PrescriptionOrderModal({
           if (!cfg) throw new Error(`Configuration missing for medication ${medId}`);
 
           const displayMed = med || { id: medId, name: cfg.name, generic_name: cfg.generic_name, strength: cfg.strength, form: cfg.form, dosage_form: cfg.form };
+          const genPk = resolveGenericPk(med);
+          if (!genPk) {
+            throw new Error(`Missing generic id for ${displayMed.name || medId}`);
+          }
 
           return {
             medication: medId,
             medication_name: displayMed.name,
-            generic: med?.generic?.id || null,
+            generic: genPk,
             dosage: cfg.dosage,
             frequency: cfg.frequency,
             duration: cfg.durationDays as string,
