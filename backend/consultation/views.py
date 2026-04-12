@@ -2,6 +2,7 @@
 Views for the Consultation app.
 """
 import logging
+from django.db.models import Count, Q
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -13,7 +14,16 @@ from laboratory.pagination import FlexiblePageNumberPagination
 
 logger = logging.getLogger(__name__)
 
-from .models import ConsultationRoom, ConsultationSession, ConsultationQueue, Referral, Diagnosis, ICD10Code
+from .models import (
+    ConsultationRoom,
+    ConsultationSession,
+    ConsultationQueue,
+    Referral,
+    Diagnosis,
+    ICD10Code,
+    PresentingComplaintCategory,
+    PresentingComplaint,
+)
 from .serializers import (
     ConsultationRoomSerializer,
     ConsultationSessionSerializer,
@@ -21,6 +31,8 @@ from .serializers import (
     ReferralSerializer,
     DiagnosisSerializer,
     ICD10CodeSerializer,
+    PresentingComplaintCategorySerializer,
+    PresentingComplaintSerializer,
 )
 from audit.services import AuditService
 
@@ -707,3 +719,50 @@ class DiagnosisViewSet(viewsets.ModelViewSet):
             new_values={'icd10_code': diagnosis.icd10_code.code if diagnosis.icd10_code else '', 'status': diagnosis.status, 'certainty': diagnosis.certainty},
             request=self.request,
         )
+
+
+class PresentingComplaintCategoryViewSet(viewsets.ReadOnlyModelViewSet):
+    """Reference library: complaint categories (optional nested complaints via query params)."""
+
+    permission_classes = [IsAuthenticated]
+    serializer_class = PresentingComplaintCategorySerializer
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['is_active']
+    search_fields = ['name']
+    ordering_fields = ['sort_order', 'name', 'created_at']
+    ordering = ['sort_order', 'name']
+
+    def get_queryset(self):
+        return (
+            PresentingComplaintCategory.objects.annotate(
+                complaint_count=Count('complaints', distinct=True),
+                active_complaint_count=Count(
+                    'complaints',
+                    filter=Q(complaints__is_active=True),
+                    distinct=True,
+                ),
+            )
+            .prefetch_related('complaints')
+        )
+
+    def get_serializer_context(self):
+        ctx = super().get_serializer_context()
+        qp = self.request.query_params
+        ctx['include_complaints'] = qp.get('include_complaints', '').lower() in ('1', 'true', 'yes')
+        ctx['active_only'] = qp.get('active_only', 'true').lower() not in ('0', 'false', 'no')
+        return ctx
+
+
+class PresentingComplaintViewSet(viewsets.ReadOnlyModelViewSet):
+    """Reference library: presenting complaint options."""
+
+    permission_classes = [IsAuthenticated]
+    serializer_class = PresentingComplaintSerializer
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['category', 'is_active']
+    search_fields = ['label', 'normalized_label']
+    ordering_fields = ['sort_order', 'label', 'created_at']
+    ordering = ['category__sort_order', 'category__name', 'sort_order', 'label']
+
+    def get_queryset(self):
+        return PresentingComplaint.objects.select_related('category')
