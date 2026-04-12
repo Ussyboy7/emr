@@ -82,7 +82,8 @@ const statisticalReports: StatisticalReportTile[] = [
   {
     id: "clinic-attendance",
     title: "Clinic Attendance",
-    description: "Specialized clinic attendance (Diamond Club, Sickle Cell, Healthron, Eye, Physiotherapy)",
+    description:
+      "Specialized clinic attendance (Diamond, Sickle Cell, Healthron, Eye Clinic, Physiotherapy, GOPD, Dental)",
     icon: Stethoscope,
     href: "/medical-records/reports/clinic-attendance",
     borderAccent: "border-l-emerald-500",
@@ -151,8 +152,8 @@ const statisticalReports: StatisticalReportTile[] = [
   },
   {
     id: "gop-attendance",
-    title: "G.O.P Attendance",
-    description: "General Outpatient attendance statistics",
+    title: "GOPD Attendance",
+    description: "GOPD attendance statistics",
     icon: Building2,
     href: "/medical-records/reports/gop-attendance",
     borderAccent: "border-l-sky-500",

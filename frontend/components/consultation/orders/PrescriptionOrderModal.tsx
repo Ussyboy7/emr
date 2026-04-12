@@ -187,12 +187,18 @@ export function PrescriptionOrderModal({
         setLoadingMedications(true);
         const res = await pharmacyService.getMedications({ search: searchTerm, page_size: 50 } as any);
         if (requestId === searchRequestIdRef.current) {
-          setMedications((res as any)?.results || []);
+          const results = (res as any)?.results || [];
+          setMedications(results);
+          if (results.length === 0) {
+            console.warn(`No medications found for search term: "${searchTerm}"`);
+          }
         }
       } catch (err: any) {
         if (requestId === searchRequestIdRef.current) {
           console.error("Failed to search medications:", err);
-          toast.error("Failed to load medication search results.");
+          // Show detailed error
+          const errorMsg = err?.message || err?.detail || "Failed to load medication search results. Check that medications are added to the pharmacy.";
+          toast.error(errorMsg);
           setMedications([]);
         }
       } finally {
@@ -488,7 +494,10 @@ export function PrescriptionOrderModal({
                       Loading medications...
                     </div>
                   ) : filteredMedications.length === 0 ? (
-                    <div className="p-4 text-center text-sm text-muted-foreground">No medications found. Try a different search term.</div>
+                    <div className="p-4 text-center text-sm text-muted-foreground space-y-2">
+                      <div>No medications found for "{medicationSearch}"</div>
+                      <div className="text-xs text-muted-foreground/75">Try a different search term, or check that medications have been added to Pharmacy → Medications.</div>
+                    </div>
                   ) : (
                     filteredMedications.map((med) => {
                       const id = normalizeMedicationId(med.id);

@@ -80,9 +80,9 @@ export const FACILITY_CONFIG = {
     'Nursing'
   ] as const,
 
-  // Room/clinic types
+  // Room / site classification labels (not the master OPD type catalogue)
   clinicTypes: [
-    'General Outpatient (GOPD)',
+    'GOPD',
     'Specialist Clinic',
     'Emergency Department',
     'Laboratory',

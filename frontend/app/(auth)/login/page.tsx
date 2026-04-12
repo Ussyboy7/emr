@@ -128,9 +128,13 @@ export default function LoginPage() {
         const home = getHomeRouteFromAllowedPages(allowedPages);
         window.location.href = home || "/no-access";
       } catch (userError) {
-        // Permission-only routing: do not send users to a generic dashboard if we can't
-        // verify their permissions.
+        // Token was issued but /accounts/auth/me/ failed (wrong API URL, CORS, 5xx, etc.).
         console.warn("Failed to fetch user for permission-based redirect:", userError);
+        toast.error(
+          userError instanceof Error
+            ? `${userError.message} You can try again from the home page if you are signed in.`
+            : "Could not load your profile after sign-in. Check API URL, CORS, and that the backend is running."
+        );
         window.location.href = "/no-access";
       }
       // Don't reset isSubmitting on success - we're navigating away

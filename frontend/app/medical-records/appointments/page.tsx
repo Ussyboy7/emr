@@ -38,7 +38,7 @@ import {
 import { toast } from "sonner";
 import { appointmentService, type Appointment } from "@/lib/services/appointment-service";
 import { patientService, adminService, type Patient as ApiPatient } from "@/lib/services";
-import { CLINICS } from "@/lib/constants/clinics";
+import { useOutpatientClinicTypes } from "@/lib/hooks/use-outpatient-clinic-types";
 import { format } from "date-fns";
 
 /** Deep link to New Visit with patient + appointment date/time/type prefilled */
@@ -72,6 +72,7 @@ function formatAppointmentClinics(a: Appointment): string {
 }
 
 export default function AppointmentsPage() {
+  const { names: opdClinicNames } = useOutpatientClinicTypes();
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
@@ -1029,10 +1030,10 @@ export default function AppointmentsPage() {
               <div className="space-y-3">
                 <Label>Clinics *</Label>
                 <p className="text-xs text-muted-foreground">
-                  Select one or more clinics for this appointment (e.g. GOPD, Eye, Physiotherapy)
+                  Select one or more clinics for this appointment (e.g. GOPD, Eye Clinic, Physiotherapy)
                 </p>
                 <div className="grid max-h-[280px] grid-cols-2 gap-2 overflow-y-auto rounded-lg border border-border p-2 md:grid-cols-3">
-                  {CLINICS.map((clinic) => {
+                  {opdClinicNames.map((clinic) => {
                     const isSelected = formData.clinics.includes(clinic);
                     return (
                       <button
@@ -1178,7 +1179,7 @@ export default function AppointmentsPage() {
                     Select one or more clinics (same list as New Visit)
                   </p>
                   <div className="grid max-h-[240px] grid-cols-2 gap-2 overflow-y-auto rounded-lg border border-border p-2 md:grid-cols-3">
-                    {CLINICS.map((clinic) => {
+                    {opdClinicNames.map((clinic) => {
                       const isSelected = formData.clinics.includes(clinic);
                       return (
                         <button

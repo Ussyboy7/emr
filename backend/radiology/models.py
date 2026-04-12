@@ -5,6 +5,36 @@ from django.db import models
 from django.utils import timezone
 
 
+class ImagingPartner(models.Model):
+    """
+    External / outsourced imaging center partners (for outsourced processing).
+    Managed via Django admin or API; shown in radiology study processing UI.
+    """
+
+    name = models.CharField(max_length=200, unique=True)
+    code = models.CharField(
+        max_length=50,
+        blank=True,
+        help_text="Optional short code (e.g. for reports)",
+    )
+    phone = models.CharField(max_length=50, blank=True)
+    email = models.EmailField(blank=True)
+    notes = models.TextField(blank=True)
+    is_active = models.BooleanField(default=True, db_index=True)
+    sort_order = models.PositiveSmallIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "radiology_outsourced_partners"
+        ordering = ["sort_order", "name"]
+        verbose_name = "Imaging partner (outsourced)"
+        verbose_name_plural = "Imaging partners (outsourced)"
+
+    def __str__(self):
+        return self.name
+
+
 class RadiologyTemplate(models.Model):
     """
     Radiology investigation templates for common imaging procedures.

@@ -18,7 +18,6 @@ from radiology.models import RadiologyOrder, RadiologyStudy
 from nursing.models import NursingOrder, Procedure
 from consultation.models import Referral, ConsultationSession
 from django.db.models.functions import ExtractMonth, ExtractYear, TruncMonth
-from django.db.models import Q
 
 
 def _resolve_period_bounds(year=None, start_date=None, end_date=None, default_to_current_year=False):
@@ -1789,7 +1788,7 @@ class DiseasePatternReportView(views.APIView):
 
 
 class GOPAttendanceReportView(views.APIView):
-    """Generate General Outpatient (G.O.P) attendance report."""
+    """Generate GOPD (general outpatient) attendance report."""
     
     permission_classes = [IsAuthenticated]
     
@@ -1803,11 +1802,16 @@ class GOPAttendanceReportView(views.APIView):
             year_int = timezone.now().year
         from django.utils.dateparse import parse_date
         
-        # G.O.P typically means general outpatient visits (consultation type, general clinic, or routine visits)
+        # GOPD / legacy general-outpatient visit lines (primary clinic, JSON clinics list, or legacy labels)
         history_visits = Visit.objects.filter(
             status__in=['completed', 'in_progress']
         ).filter(
-            Q(visit_type='consultation') | Q(clinic__icontains='general') | Q(clinic__icontains='outpatient')
+            Q(visit_type='consultation')
+            | Q(clinic__icontains='general')
+            | Q(clinic__icontains='outpatient')
+            | Q(clinic__iexact='GOPD')
+            | Q(clinic__iexact='gopd')
+            | Q(clinics__contains=['GOPD'])
         ).select_related('patient').annotate(
             month=ExtractMonth('date')
         )

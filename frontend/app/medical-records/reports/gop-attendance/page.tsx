@@ -89,8 +89,8 @@ export default function GOPAttendanceReport() {
       setData(response.data || []);
       setSummary(response.summary || emptySummary);
     } catch (error: any) {
-      console.error("Error fetching G.O.P report:", error);
-      toast.error(error.message || "Failed to load G.O.P attendance report");
+      console.error("Error fetching GOPD report:", error);
+      toast.error(error.message || "Failed to load GOPD attendance report");
       setData([]);
       setSummary(emptySummary);
     } finally {
@@ -128,7 +128,7 @@ export default function GOPAttendanceReport() {
     const a = document.createElement('a');
     a.href = url;
     const period = viewMode === "year" ? year : `${startDate}_to_${endDate}`;
-    a.download = `gop_attendance_${period}.csv`;
+    a.download = `gopd_attendance_${period}.csv`;
     a.click();
     window.URL.revokeObjectURL(url);
     
@@ -153,9 +153,9 @@ export default function GOPAttendanceReport() {
           <div>
             <h1 className="text-2xl sm:text-3xl font-bold text-foreground flex items-center gap-3">
               <FileText className="h-8 w-8 text-blue-500" />
-              G.O.P Attendance Report
+              GOPD Attendance Report
             </h1>
-            <p className="text-muted-foreground mt-1">General Outpatient attendance statistics</p>
+            <p className="text-muted-foreground mt-1">GOPD attendance statistics</p>
           </div>
           <div className="flex items-center gap-2 print:hidden">
             <Button variant="outline" onClick={fetchReport} disabled={isLoading}>
@@ -308,7 +308,7 @@ export default function GOPAttendanceReport() {
         <div className="grid gap-4 md:grid-cols-5">
           <Card className="border-l-4 border-l-indigo-500">
             <CardHeader className="pb-2">
-              <CardTitle className="text-xs font-medium text-muted-foreground">First-Time GOP</CardTitle>
+              <CardTitle className="text-xs font-medium text-muted-foreground">First-time GOPD</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-indigo-600 dark:text-indigo-400">{summary.first_time_patients.toLocaleString()}</div>
@@ -324,7 +324,7 @@ export default function GOPAttendanceReport() {
           </Card>
           <Card className="border-l-4 border-l-slate-500">
             <CardHeader className="pb-2">
-              <CardTitle className="text-xs font-medium text-muted-foreground">Returning GOP</CardTitle>
+              <CardTitle className="text-xs font-medium text-muted-foreground">Returning GOPD</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-slate-700 dark:text-slate-300">{summary.returning_patients.toLocaleString()}</div>
@@ -352,7 +352,7 @@ export default function GOPAttendanceReport() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <FileText className="h-5 w-5" />
-              G.O.P Attendance by Category - {viewMode === "year" ? year : `${startDate} to ${endDate}`}
+              GOPD attendance by category — {viewMode === "year" ? year : `${startDate} to ${endDate}`}
             </CardTitle>
             <CardDescription>General outpatient attendance by category</CardDescription>
           </CardHeader>
@@ -400,7 +400,7 @@ export default function GOPAttendanceReport() {
               <div className="text-center py-12">
                 <FileText className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
                 <p className="text-lg font-medium mb-1">No data available</p>
-                <p className="text-sm text-muted-foreground">No G.O.P attendance records found for this year</p>
+                <p className="text-sm text-muted-foreground">No GOPD attendance records found for this year</p>
               </div>
             )}
           </CardContent>

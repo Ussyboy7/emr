@@ -22,13 +22,17 @@ import {
   Eye, Edit, CheckCircle2, Calendar, Activity, Thermometer,
   Heart, Wind, Droplets, Scale, Loader2, Save, X
 } from 'lucide-react';
-import { getAllClinicsWithAll } from '@/lib/constants/clinics';
+import {
+  buildVisitClinicFilterOptions,
+  ALL_CLINICS_FILTER_LABEL,
+} from '@/lib/constants/clinics';
 import {
   clinicMatches,
   getVisitServiceClinicsList,
   getVisitServiceClinicsDisplay,
   joinDisplayParts,
 } from '@/lib/utils/clinic-utils';
+import { useOutpatientClinicTypes } from '@/lib/hooks/use-outpatient-clinic-types';
 import { PatientAvatar } from "@/components/PatientAvatar";
 import { VitalsDetailModal } from "@/components/VitalsDetailModal";
 import { vitalFieldToString } from "@/lib/vitals-display";
@@ -45,9 +49,6 @@ const getVisitTypeLabel = (type: string) => {
   };
   return typeMap[type] || type.charAt(0).toUpperCase() + type.slice(1).replace(/_/g, '-');
 };
-
-// Constants - standardized clinic list
-const clinics = getAllClinicsWithAll();
 
 // Types
 interface Patient {
@@ -121,6 +122,11 @@ function parseOptionalFloat(raw: string | undefined): number | null {
 }
 
 export default function NursingPoolQueuePage() {
+  const { names: opdClinicNames } = useOutpatientClinicTypes();
+  const clinicFilterOptions = useMemo(
+    () => buildVisitClinicFilterOptions(opdClinicNames),
+    [opdClinicNames]
+  );
   // Debug logging (off by default). Enable in browser console:
   //   localStorage.setItem('debug_nursing_pool', '1')
   // Disable:
@@ -129,7 +135,6 @@ export default function NursingPoolQueuePage() {
     if (typeof window === 'undefined') return;
     try {
       if (window.localStorage?.getItem('debug_nursing_pool') === '1') {
-        // eslint-disable-next-line no-console
         console.log(...args);
       }
     } catch {
@@ -369,8 +374,12 @@ export default function NursingPoolQueuePage() {
           const sentToPhysio = Boolean(physioCheckedInByVisitId[visit.id]);
           const sentToEyeClinic = Boolean(eyeCheckedInByVisitId[visit.id]);
           const visitClinics = getVisitServiceClinicsList({ clinic: visit.clinic, clinics: visit.clinics });
-          const hasPhysioClinic = visitClinics.some((c: string) => clinicMatches(c, 'Physiotherapy'));
-          const hasEyeClinic = visitClinics.some((c: string) => clinicMatches(c, 'Eye Clinic'));
+          const hasPhysioClinic = visitClinics.some((c: string) =>
+            clinicMatches(c, 'Physiotherapy', opdClinicNames)
+          );
+          const hasEyeClinic = visitClinics.some((c: string) =>
+            clinicMatches(c, 'Eye Clinic', opdClinicNames)
+          );
           
           if (roomName) {
             // Patient has been sent to a room
@@ -478,7 +487,17 @@ export default function NursingPoolQueuePage() {
   // Load data when filters change
   useEffect(() => {
     loadData();
-  }, [loadData]);
+  }, [
+    dateFilter,
+    statusFilter,
+    dateRange.from,
+    dateRange.to,
+    debouncedSearchQuery,
+    typeFilter,
+    clinicFilter,
+    currentPage,
+    itemsPerPage,
+  ]);
 
   // Dialog states
   const [isVitalsDialogOpen, setIsVitalsDialogOpen] = useState(false);
@@ -1056,7 +1075,11 @@ export default function NursingPoolQueuePage() {
                 <Select value={clinicFilter} onValueChange={setClinicFilter}>
                   <SelectTrigger className="w-[140px]"><SelectValue placeholder="Clinic" /></SelectTrigger>
                   <SelectContent>
-                    {clinics.map(c => <SelectItem key={c} value={c === 'All Clinics' ? 'all' : c}>{c}</SelectItem>)}
+                    {clinicFilterOptions.map((c) => (
+                      <SelectItem key={c} value={c === ALL_CLINICS_FILTER_LABEL ? 'all' : c}>
+                        {c}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
                 <CustomDateRangeButton onClick={() => setIsDateFilterDialogOpen(true)} />
@@ -1144,9 +1167,17 @@ export default function NursingPoolQueuePage() {
                           )}
                           {/* Action buttons for sending patient to rooms */}
                           {(() => {
-                            const hasPhysio = patient.clinics?.some((c: string) => clinicMatches(c, 'Physiotherapy'));
-                            const hasEye = patient.clinics?.some((c: string) => clinicMatches(c, 'Eye Clinic'));
-                            const hasOtherClinics = patient.clinics?.some((c: string) => !clinicMatches(c, 'Physiotherapy') && !clinicMatches(c, 'Eye Clinic'));
+                            const hasPhysio = patient.clinics?.some((c: string) =>
+                              clinicMatches(c, 'Physiotherapy', opdClinicNames)
+                            );
+                            const hasEye = patient.clinics?.some((c: string) =>
+                              clinicMatches(c, 'Eye Clinic', opdClinicNames)
+                            );
+                            const hasOtherClinics = patient.clinics?.some(
+                              (c: string) =>
+                                !clinicMatches(c, 'Physiotherapy', opdClinicNames) &&
+                                !clinicMatches(c, 'Eye Clinic', opdClinicNames)
+                            );
                             const isOnlyPhysio = hasPhysio && !hasOtherClinics;
                             const isOnlyEye = hasEye && !hasOtherClinics;
                             const canRoute = patient.nursingStatus === 'Vitals Recorded' || patient.nursingStatus === 'Ready for Consultation';

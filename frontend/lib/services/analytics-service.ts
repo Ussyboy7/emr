@@ -6,6 +6,7 @@
 import { apiFetch, buildQueryString } from '../api-client';
 import { patientService } from './patient-service';
 import { visitService } from './visit-service';
+import { adminService } from './admin-service';
 import labService from './lab-service';
 import { pharmacyService } from './pharmacy-service';
 import { radiologyService } from './radiology-service';
@@ -217,6 +218,11 @@ class AnalyticsService {
    * Get clinic distribution
    */
   async getClinicDistribution(): Promise<ClinicDistribution[]> {
+    const typesRes = await adminService.getOutpatientClinicTypes({
+      is_active: true,
+      page_size: 500,
+    });
+    const canonicalNames = (typesRes.results || []).map((t) => t.name);
     const visits = await visitService.getVisits({ page: 1 });
     const clinicCounts: Record<string, number> = {};
     
@@ -226,7 +232,7 @@ class AnalyticsService {
       if (list.length === 0) return;
       const seen = new Set<string>();
       for (const raw of list) {
-        const n = normalizeClinicName(raw);
+        const n = normalizeClinicName(raw, canonicalNames);
         if (!n || seen.has(n)) continue;
         seen.add(n);
         clinicCounts[n] = (clinicCounts[n] || 0) + 1;

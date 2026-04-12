@@ -72,6 +72,24 @@ export interface Department {
   updated_at: string;
 }
 
+/** Master OPD visit clinic (GOPD, Eye Clinic, …) — not the physical facility. */
+export interface OutpatientClinicType {
+  id: number;
+  name: string;
+  code: string;
+  description?: string;
+  is_active: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FacilityVisitClinicRow {
+  id: number;
+  name: string;
+  code: string;
+}
+
 export interface AuditLog {
   id: number;
   user?: number;
@@ -263,6 +281,17 @@ class AdminService {
     return apiFetch<{ results: Clinic[]; count: number }>(`/organization/clinics/${query}`);
   }
 
+  /** Full-org KPIs for Admin → Facilities & Departments (not paginated). */
+  async getClinicAdminStats(): Promise<{
+    total_clinics: number;
+    active_clinics: number;
+    total_departments: number;
+    total_staff_links: number;
+    total_rooms: number;
+  }> {
+    return apiFetch(`/organization/clinics/admin-stats/`);
+  }
+
   /**
    * Get a single clinic
    */
@@ -295,6 +324,64 @@ class AdminService {
    */
   async deleteClinic(clinicId: number): Promise<void> {
     return apiFetch<void>(`/organization/clinics/${clinicId}/`, {
+      method: 'DELETE',
+    });
+  }
+
+  /** OPD visit clinic types offered at a facility (ordered). */
+  async getFacilityVisitClinics(facilityId: number): Promise<FacilityVisitClinicRow[]> {
+    return apiFetch<FacilityVisitClinicRow[]>(
+      `/organization/clinics/${facilityId}/visit_clinics/`
+    );
+  }
+
+  /** Replace which OPD types are offered at this facility. */
+  async setFacilityVisitClinics(
+    facilityId: number,
+    typeIds: number[]
+  ): Promise<FacilityVisitClinicRow[]> {
+    return apiFetch<FacilityVisitClinicRow[]>(
+      `/organization/clinics/${facilityId}/visit_clinics/`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ type_ids: typeIds }),
+      }
+    );
+  }
+
+  async getOutpatientClinicTypes(params?: {
+    is_active?: boolean;
+    search?: string;
+    page?: number;
+    page_size?: number;
+  }): Promise<{ results: OutpatientClinicType[]; count: number }> {
+    const query = buildQueryString((params || {}) as Record<string, string | number | boolean | undefined>);
+    return apiFetch<{ results: OutpatientClinicType[]; count: number }>(
+      `/organization/outpatient-clinic-types/${query}`
+    );
+  }
+
+  async createOutpatientClinicType(
+    data: Partial<Pick<OutpatientClinicType, 'name' | 'code' | 'description' | 'is_active' | 'sort_order'>>
+  ): Promise<OutpatientClinicType> {
+    return apiFetch<OutpatientClinicType>('/organization/outpatient-clinic-types/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateOutpatientClinicType(
+    id: number,
+    data: Partial<Pick<OutpatientClinicType, 'name' | 'code' | 'description' | 'is_active' | 'sort_order'>>
+  ): Promise<OutpatientClinicType> {
+    return apiFetch<OutpatientClinicType>(`/organization/outpatient-clinic-types/${id}/`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteOutpatientClinicType(id: number): Promise<void> {
+    return apiFetch<void>(`/organization/outpatient-clinic-types/${id}/`, {
       method: 'DELETE',
     });
   }

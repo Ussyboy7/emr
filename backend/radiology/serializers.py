@@ -2,7 +2,16 @@
 Serializers for the Radiology app.
 """
 from rest_framework import serializers
-from .models import RadiologyTemplate, RadiologyOrder, RadiologyStudy, RadiologyReport
+from .models import RadiologyTemplate, RadiologyOrder, RadiologyStudy, RadiologyReport, ImagingPartner
+
+
+class ImagingPartnerSerializer(serializers.ModelSerializer):
+    """Serializer for ImagingPartner model."""
+
+    class Meta:
+        model = ImagingPartner
+        fields = '__all__'
+        read_only_fields = ['created_at', 'updated_at']
 
 
 class RadiologyTemplateSerializer(serializers.ModelSerializer):

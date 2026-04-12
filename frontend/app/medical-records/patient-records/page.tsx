@@ -45,7 +45,8 @@ export default function PatientRecordsPage() {
   const [error, setError] = useState<string | null>(null);
   const [authError, setAuthError] = useState<unknown | null>(null);
   const [recentSearches, setRecentSearches] = useState<ApiPatient[]>([]);
-  
+  const [recentSearchesReady, setRecentSearchesReady] = useState(false);
+
   // Pagination
   const [currentPage, setCurrentPage] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
@@ -53,16 +54,80 @@ export default function PatientRecordsPage() {
   
   useAuthRedirect(authError);
 
-  // Load recent searches from localStorage on mount
+  // Recent list is cached in localStorage (browser-only), not from the server.
+  // Re-validate against the API so deleted / DB-reset patients disappear.
   useEffect(() => {
-    const stored = localStorage.getItem("recentPatientSearches");
-    if (stored) {
-      try {
-        setRecentSearches(JSON.parse(stored).slice(0, 5));
-      } catch {
-        // ignore
+    let cancelled = false;
+
+    (async () => {
+      const stored = localStorage.getItem("recentPatientSearches");
+      if (!stored) {
+        if (!cancelled) setRecentSearchesReady(true);
+        return;
       }
-    }
+
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(stored);
+      } catch {
+        localStorage.removeItem("recentPatientSearches");
+        if (!cancelled) setRecentSearchesReady(true);
+        return;
+      }
+
+      if (!Array.isArray(parsed) || parsed.length === 0) {
+        localStorage.removeItem("recentPatientSearches");
+        if (!cancelled) setRecentSearchesReady(true);
+        return;
+      }
+
+      const candidates = parsed
+        .slice(0, 5)
+        .filter((x): x is ApiPatient => {
+          if (!x || typeof x !== "object") return false;
+          const id = (x as ApiPatient).id;
+          return typeof id === "number" && Number.isFinite(id) && id > 0;
+        });
+
+      if (candidates.length === 0) {
+        localStorage.removeItem("recentPatientSearches");
+        if (!cancelled) {
+          setRecentSearches([]);
+          setRecentSearchesReady(true);
+        }
+        return;
+      }
+
+      const settled = await Promise.allSettled(
+        candidates.map((p) => patientService.getPatient(p.id))
+      );
+
+      if (cancelled) return;
+
+      const validated: ApiPatient[] = [];
+      settled.forEach((outcome, i) => {
+        if (outcome.status === "fulfilled") {
+          validated.push(outcome.value);
+        } else {
+          const status = (outcome.reason as { status?: number })?.status;
+          if (status !== 404) {
+            validated.push(candidates[i]);
+          }
+        }
+      });
+
+      setRecentSearches(validated);
+      if (validated.length === 0) {
+        localStorage.removeItem("recentPatientSearches");
+      } else {
+        localStorage.setItem("recentPatientSearches", JSON.stringify(validated));
+      }
+      setRecentSearchesReady(true);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const search = useCallback(async (page = 1) => {
@@ -316,10 +381,13 @@ export default function PatientRecordsPage() {
         {/* Initial State - Recent Searches or Instructions */}
         {!searched && !loading && (
           <>
-            {recentSearches.length > 0 && (
+            {recentSearchesReady && recentSearches.length > 0 && (
               <Card>
                 <CardContent className="p-4">
-                  <h3 className="text-sm font-medium text-muted-foreground mb-3">Recent Searches</h3>
+                  <h3 className="text-sm font-medium text-muted-foreground">Recent Searches</h3>
+                  <p className="text-xs text-muted-foreground mb-3 mt-1">
+                    Saved on this device when you open a record. Entries that no longer exist in the system are removed automatically.
+                  </p>
                   <div className="space-y-2">
                     {recentSearches.map((p) => (
                       <button

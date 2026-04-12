@@ -2,79 +2,27 @@
 Views for the Consultation app.
 """
 import logging
-from datetime import date
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from rest_framework.permissions import BasePermission
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django.utils import timezone
-from django.db import transaction
-from django.db import IntegrityError
-from django.db.models import Prefetch, Count, Q
 from laboratory.pagination import FlexiblePageNumberPagination
 
 logger = logging.getLogger(__name__)
 
-from .models import (
-    ConsultationRoom,
-    ConsultationSession,
-    ConsultationQueue,
-    Referral,
-    ResponsibilityFormIssuance,
-    Diagnosis,
-    ICD10Code,
-    PresentingComplaintCategory,
-    PresentingComplaint,
-)
+from .models import ConsultationRoom, ConsultationSession, ConsultationQueue, Referral, Diagnosis, ICD10Code
 from .serializers import (
     ConsultationRoomSerializer,
     ConsultationSessionSerializer,
     ConsultationQueueSerializer,
-    ConsultationQueueByVisitSerializer,
     ReferralSerializer,
-    ResponsibilityFormIssuanceSerializer,
     DiagnosisSerializer,
     ICD10CodeSerializer,
-    PresentingComplaintCategorySerializer,
-    PresentingComplaintSerializer,
 )
 from audit.services import AuditService
-
-
-def _parse_ymd_for_responsibility_form(value):
-    """Parse valid_from / valid_to from JSON: YYYY-MM-DD or ISO datetime (date prefix)."""
-    from django.utils.dateparse import parse_date
-
-    if value is None:
-        return None
-    s = str(value).strip()
-    if not s:
-        return None
-    if len(s) >= 10 and s[4] == "-" and s[7] == "-":
-        head = s[:10]
-        if len(head) == 10:
-            d = parse_date(head)
-            if d is not None:
-                return d
-    return parse_date(s)
-
-
-class IsComplaintLibraryManager(BasePermission):
-    """
-    Allow write access for administrative users who can manage reference libraries.
-    Read is handled by IsAuthenticated at viewset level.
-    """
-
-    def has_permission(self, request, view):
-        user = request.user
-        if not user or not user.is_authenticated:
-            return False
-        if getattr(user, 'is_superuser', False) or getattr(user, 'is_staff', False):
-            return True
-        return getattr(user, 'system_role', '') in {'System Administrator', 'Admin Staff'}
 
 
 class ConsultationRoomViewSet(viewsets.ModelViewSet):
@@ -112,7 +60,7 @@ class ConsultationSessionViewSet(viewsets.ModelViewSet):
     serializer_class = ConsultationSessionSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['room', 'patient', 'doctor', 'status', 'visit']
-    search_fields = ['session_id', 'notes', 'patient__first_name', 'patient__surname', 'patient__patient_id']
+    search_fields = ['session_id', 'notes']
     ordering_fields = ['started_at', 'ended_at']
     ordering = ['-started_at']
     
@@ -134,123 +82,28 @@ class ConsultationSessionViewSet(viewsets.ModelViewSet):
         elif end_date:
             qs = qs.filter(started_at__date__lte=end_date)
 
-        # Service-clinic filter: primary Visit.clinic or membership in Visit.clinics (not facility/location).
+        # Clinic filtering (stored on Visit.clinic as a string; see serializer clinic_name source='visit.clinic')
         clinic = self.request.query_params.get('clinic')
         if clinic:
-            from common.clinic_utils import normalize_clinic_name
-
-            c = normalize_clinic_name(clinic)
-            qs = qs.filter(Q(visit__clinic__iexact=c) | Q(visit__clinics__contains=[c]))
+            qs = qs.filter(visit__clinic=clinic)
 
         return qs
     
-    def _resolve_open_session_for_create(self, data):
-        """
-        Return existing open session (active or paused) that should be resumed.
-        Priority:
-        1) same visit (strict)
-        2) same patient+room (fallback when visit is absent)
-        """
-        visit = data.get('visit')
-        if visit:
-            existing = (
-                ConsultationSession.objects
-                .filter(visit=visit, status__in=['active', 'paused'])
-                .order_by('-started_at')
-                .first()
-            )
-            if existing:
-                return existing
-
-        patient = data.get('patient')
-        room = data.get('room')
-        if patient and room:
-            return (
-                ConsultationSession.objects
-                .filter(patient=patient, room=room, status__in=['active', 'paused'])
-                .order_by('-started_at')
-                .first()
-            )
-        return None
-
-    def _activate_paused_session(self, session):
-        if session.status != 'paused':
-            return session
-        now = timezone.now()
-        session.status = 'active'
-        session.last_resumed_at = now
-        session.paused_at = None
-        session.save(update_fields=['status', 'last_resumed_at', 'paused_at'])
-        return session
-
-    def _pause_active_session(self, session):
-        if session.status != 'active':
-            return session
-        now = timezone.now()
-        elapsed = 0
-        if session.last_resumed_at:
-            elapsed = max(0, int((now - session.last_resumed_at).total_seconds()))
-        session.active_seconds = int(session.active_seconds or 0) + elapsed
-        session.status = 'paused'
-        session.paused_at = now
-        session.last_resumed_at = None
-        session.save(update_fields=['active_seconds', 'status', 'paused_at', 'last_resumed_at'])
-        return session
-
-    def _prepare_session_create_data(self, validated_data):
-        data = validated_data.copy()
+    def perform_create(self, serializer):
+        """Create consultation session and log audit."""
+        # Set the doctor field using multiple fallback strategies
+        data = serializer.validated_data.copy()
         if 'doctor' not in data or data['doctor'] is None:
             doctor = self._find_doctor_for_session(data)
             if doctor:
                 data['doctor'] = doctor
-        return data
 
-    def _log_session_create(self, session):
-        AuditService.log_activity(
-            user=self.request.user,
-            action='create',
-            object_type='consultation_session',
-            object_id=str(session.id),
-            module='consultation',
-            object_repr=f'Session {session.session_id}',
-            description=f'Started consultation session {session.session_id} for patient {session.patient.get_full_name()}',
-            new_values={'session_id': session.session_id, 'status': session.status, 'room': str(session.room.id) if session.room else ''},
-            request=self.request,
-        )
-
-    def create(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        data = self._prepare_session_create_data(serializer.validated_data)
-
-        # Idempotent create: resume existing open session instead of creating duplicates.
-        existing = self._resolve_open_session_for_create(data)
-        if existing:
-            existing = self._activate_paused_session(existing)
-            payload = self.get_serializer(existing).data
-            payload['resumed'] = True
-            return Response(payload, status=status.HTTP_200_OK)
-
-        try:
-            session = serializer.save(created_by=self.request.user, **data)
-        except IntegrityError:
-            # Handle race conditions against DB-level unique constraints by returning the now-existing session.
-            existing_after_race = self._resolve_open_session_for_create(data)
-            if existing_after_race:
-                existing_after_race = self._activate_paused_session(existing_after_race)
-                payload = self.get_serializer(existing_after_race).data
-                payload['resumed'] = True
-                return Response(payload, status=status.HTTP_200_OK)
-            raise
-
-        self._log_session_create(session)
-        headers = self.get_success_headers(serializer.data)
-        payload = self.get_serializer(session).data
-        payload['resumed'] = False
-        return Response(payload, status=status.HTTP_201_CREATED, headers=headers)
+        session = serializer.save(created_by=self.request.user, **data)
 
     def _find_doctor_for_session(self, data):
         """Find appropriate doctor for consultation session using multiple strategies."""
+        from accounts.models import User
+
         user = self.request.user
 
         # Strategy 1: ALWAYS use the requesting user who performed the action
@@ -267,63 +120,18 @@ class ConsultationSessionViewSet(viewsets.ModelViewSet):
         # Only use the requesting user who performed the consultation
         # No fallback to other doctors - the actual performer is recorded
         return None
+        AuditService.log_activity(
+            user=self.request.user,
+            action='create',
+            object_type='consultation_session',
+            object_id=str(session.id),
+            module='consultation',
+            object_repr=f'Session {session.session_id}',
+            description=f'Started consultation session {session.session_id} for patient {session.patient.get_full_name()}',
+            new_values={'session_id': session.session_id, 'status': session.status, 'room': str(session.room.id) if session.room else ''},
+            request=self.request,
+        )
     
-    @action(detail=True, methods=['post'])
-    def pause(self, request, pk=None):
-        """Pause an active consultation session."""
-        session = self.get_object()
-        if session.status == 'paused':
-            return Response(ConsultationSessionSerializer(session).data)
-        if session.status != 'active':
-            return Response(
-                {'detail': 'Only active sessions can be paused.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        old_status = session.status
-        self._pause_active_session(session)
-        AuditService.log_activity(
-            user=self.request.user,
-            action='update',
-            object_type='consultation_session',
-            object_id=str(session.id),
-            module='consultation',
-            object_repr=f'Session {session.session_id}',
-            description=f'Paused consultation session {session.session_id}',
-            old_values={'status': old_status},
-            new_values={'status': session.status, 'paused_at': str(session.paused_at)},
-            request=self.request,
-        )
-        return Response(ConsultationSessionSerializer(session).data)
-
-    @action(detail=True, methods=['post'])
-    def resume(self, request, pk=None):
-        """Resume a paused consultation session."""
-        session = self.get_object()
-        if session.status == 'active':
-            return Response(ConsultationSessionSerializer(session).data)
-        if session.status != 'paused':
-            return Response(
-                {'detail': 'Only paused sessions can be resumed.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        old_status = session.status
-        self._activate_paused_session(session)
-        AuditService.log_activity(
-            user=self.request.user,
-            action='update',
-            object_type='consultation_session',
-            object_id=str(session.id),
-            module='consultation',
-            object_repr=f'Session {session.session_id}',
-            description=f'Resumed consultation session {session.session_id}',
-            old_values={'status': old_status},
-            new_values={'status': session.status, 'last_resumed_at': str(session.last_resumed_at)},
-            request=self.request,
-        )
-        return Response(ConsultationSessionSerializer(session).data)
-
     @action(detail=True, methods=['post'])
     def end(self, request, pk=None):
         """End a consultation session and log audit."""
@@ -331,13 +139,9 @@ class ConsultationSessionViewSet(viewsets.ModelViewSet):
         
         session = self.get_object()
         old_status = session.status
-        if session.status == 'active':
-            self._pause_active_session(session)
         session.status = 'completed'
         session.ended_at = timezone.now()
-        session.paused_at = None
-        session.last_resumed_at = None
-        session.save(update_fields=['status', 'ended_at', 'paused_at', 'last_resumed_at'])
+        session.save()
         
         # Update visit status to 'completed' if visit exists
         if session.visit:
@@ -406,8 +210,8 @@ class ConsultationSessionViewSet(viewsets.ModelViewSet):
         if completed_today.exists():
             durations = []
             for session in completed_today:
-                duration = session.get_active_duration_seconds() / 60
-                if duration > 0:
+                if session.ended_at and session.started_at:
+                    duration = (session.ended_at - session.started_at).total_seconds() / 60
                     durations.append(duration)
             if durations:
                 avg_duration = sum(durations) / len(durations)
@@ -468,7 +272,9 @@ class ConsultationSessionViewSet(viewsets.ModelViewSet):
         recent_sessions = sessions_qs.filter(status='completed').order_by('-ended_at')[:5]
         recent_sessions_data = []
         for session in recent_sessions:
-            duration = round(session.get_active_duration_seconds() / 60, 0)
+            duration = 0
+            if session.ended_at and session.started_at:
+                duration = round((session.ended_at - session.started_at).total_seconds() / 60, 0)
             
             # Calculate time ago
             dt = session.ended_at or session.started_at
@@ -548,28 +354,6 @@ class ConsultationQueueViewSet(viewsets.ModelViewSet):
             qs = qs.filter(queued_at__date__lte=end_date)
 
         return qs
-
-    @action(detail=False, methods=['get'], url_path='by-visits')
-    def by_visits(self, request):
-        """Active consultation queue rows for specific visit IDs (small payload for nursing pool)."""
-        raw = (request.query_params.get('visit_ids') or '').strip()
-        if not raw:
-            return Response({'results': []})
-        parsed = []
-        for part in raw.split(','):
-            part = part.strip()
-            if part.isdigit():
-                parsed.append(int(part))
-        if not parsed:
-            return Response({'results': []})
-        parsed = parsed[:300]
-        qs = (
-            ConsultationQueue.objects.filter(is_active=True, visit_id__in=parsed)
-            .select_related('room', 'visit')
-            .order_by('priority', 'queued_at')
-        )
-        data = ConsultationQueueByVisitSerializer(qs, many=True).data
-        return Response({'results': data})
     
     def perform_create(self, serializer):
         """Create queue item(s) with duplicate prevention.
@@ -680,33 +464,15 @@ class ConsultationQueueViewSet(viewsets.ModelViewSet):
                 except Exception as e:
                     logger.error(f'Failed to create eye order: {e}')
             
-            # Other non-physio *service* lines (GOPD, Eye, etc.) → rooms at same *facility*
-            # with matching ConsultationRoom.specialty (not organization.Clinic.name).
+            # Find all active consultation rooms for NON-physio clinics
             non_physio_clinics = [c for c in visit_clinics if 'physiotherapy' not in c.lower()]
-
+            
             if non_physio_clinics:
-                from common.clinic_utils import normalize_clinic_name, resolve_visit_facility_clinic
-
-                facility = resolve_visit_facility_clinic(visit)
-                normalized_services = list(
-                    dict.fromkeys(normalize_clinic_name(c) for c in non_physio_clinics if c)
-                )
-                if normalized_services and facility:
-                    specialty_q = Q()
-                    for svc in normalized_services:
-                        specialty_q |= Q(specialty__iexact=svc)
-                    matching_rooms = (
-                        ConsultationRoom.objects.filter(
-                            clinic=facility,
-                            status='active',
-                            is_active=True,
-                        )
-                        .filter(specialty_q)
-                        .exclude(id=room.id)
-                        .distinct()
-                    )
-                else:
-                    matching_rooms = ConsultationRoom.objects.none()
+                matching_rooms = ConsultationRoom.objects.filter(
+                    clinic__name__in=non_physio_clinics,
+                    status='active',
+                    is_active=True
+                ).exclude(id=room.id)  # Exclude the room we just created
                 
                 # Create queue items for each matching room
                 for matching_room in matching_rooms:
@@ -876,196 +642,13 @@ class ReferralViewSet(viewsets.ModelViewSet):
     search_fields = ['referral_id', 'specialty', 'facility', 'reason', 'clinical_summary']
     ordering_fields = ['referred_at', 'urgency']
     ordering = ['-referred_at']
-
-    def _expire_old_forms(self, referral=None):
-        """Auto-expire active responsibility forms past validity date."""
-        qs = ResponsibilityFormIssuance.objects.filter(status='active', valid_to__lt=date.today())
-        if referral is not None:
-            qs = qs.filter(referral=referral)
-        qs.update(status='expired')
     
     def get_queryset(self):
-        self._expire_old_forms()
-        qs = Referral.objects.all().select_related(
-            'patient',
-            'patient__principal_staff',
-            'visit',
-            'session',
-            'referred_by',
-            'created_by',
-            'referral_letter_acknowledged_by',
-        ).prefetch_related(
-            Prefetch(
-                'responsibility_forms',
-                queryset=ResponsibilityFormIssuance.objects.select_related(
-                    'issued_by', 'records_acknowledged_by'
-                ).order_by('-issue_date'),
-            ),
-        )
-
-        # Date filtering for referrals list pages
-        date = self.request.query_params.get('date')
-        start_date = self.request.query_params.get('start_date')
-        end_date = self.request.query_params.get('end_date')
-        if date:
-            qs = qs.filter(referred_at__date=date)
-        elif start_date:
-            qs = qs.filter(referred_at__date__gte=start_date)
-            if end_date:
-                qs = qs.filter(referred_at__date__lte=end_date)
-        elif end_date:
-            qs = qs.filter(referred_at__date__lte=end_date)
-
-        if self.action == 'list':
-            exclude_draft = str(self.request.query_params.get('exclude_draft', '')).lower()
-            if exclude_draft in ('1', 'true', 'yes'):
-                qs = qs.exclude(status='draft')
-            exclude_status = str(self.request.query_params.get('exclude_status', '')).strip()
-            if exclude_status:
-                # Comma-separated status values to exclude (e.g. "returned_for_correction")
-                statuses = [s.strip() for s in exclude_status.split(',') if s.strip()]
-                if statuses:
-                    qs = qs.exclude(status__in=statuses)
-        return qs
-
-    def retrieve(self, request, *args, **kwargs):
-        """If every issuance is stamped but status is still queue/review, fix it (e.g. stale prefetch during stamp)."""
-        instance = self.get_object()
-        is_super = getattr(request.user, 'is_superuser', False)
-        if self._is_records_officer(request.user) or is_super:
-            self._apply_approved_for_forms_when_all_stamped(instance, request, audit_manual=False)
-            instance.refresh_from_db()
-        serializer = self.get_serializer(instance)
-        return Response(serializer.data)
-
-    def _is_records_officer(self, user):
-        role = getattr(user, 'system_role', '') or ''
-        return role in ['Medical Records Officer', 'System Administrator']
-
-    def _is_referring_owner(self, user, referral):
-        uid = getattr(user, 'id', None)
-        if uid is None:
-            return False
-        return referral.referred_by_id == uid or referral.created_by_id == uid
-
-    def _all_responsibility_forms_have_records_stamp(self, referral_id):
-        """Fresh DB check — avoids stale prefetch on Referral.responsibility_forms after a stamp save."""
-        qs = ResponsibilityFormIssuance.objects.filter(referral_id=referral_id)
-        if not qs.exists():
-            return False
-        return not qs.filter(records_acknowledged_at__isnull=True).exists()
-
-    def _apply_approved_for_forms_when_all_stamped(self, referral, request, *, audit_manual=False):
-        """If status is queue/review and every issuance has records_acknowledged_at, set approved_for_forms."""
-        if referral.status not in ('submitted_to_records', 'records_review'):
-            return referral
-        if not self._all_responsibility_forms_have_records_stamp(referral.pk):
-            return referral
-        referral.status = 'approved_for_forms'
-        referral.approved_at = timezone.now()
-        referral.save(update_fields=['status', 'approved_at'])
-        desc = (
-            f'Approved referral {referral.referral_id} for responsibility forms (all stamps recorded)'
-            if audit_manual
-            else f'Auto-approved referral {referral.referral_id} (all responsibility stamps recorded)'
-        )
-        try:
-            AuditService.log_activity(
-                user=request.user,
-                action='approve',
-                object_type='referral',
-                object_id=str(referral.id),
-                module='consultation',
-                object_repr=f'Referral {referral.referral_id}',
-                description=desc,
-                new_values={'status': referral.status},
-                request=request,
-            )
-        except Exception:
-            pass
-        return referral
-
-    _CLINICIAN_NON_EDITABLE_FIELDS = frozenset(
-        {'patient', 'visit', 'session', 'status', 'referral_id', 'referred_at', 'created_by', 'referred_by'}
-    )
-
-    def partial_update(self, request, *args, **kwargs):
-        """Restrict status updates to records; clinicians may edit content only on draft/returned."""
-        referral = self.get_object()
-        user = request.user
-        is_records = self._is_records_officer(user)
-        is_super = getattr(user, 'is_superuser', False)
-
-        if 'status' in request.data and request.data.get('status') is not None:
-            if not is_records and not is_super:
-                return Response(
-                    {'detail': 'Only Medical Records can update referral status directly.'},
-                    status=status.HTTP_403_FORBIDDEN,
-                )
-
-        if not is_records and not is_super:
-            if referral.status not in ('draft', 'returned_for_correction'):
-                return Response(
-                    {'detail': 'Only draft or returned-for-correction referrals can be edited.'},
-                    status=status.HTTP_403_FORBIDDEN,
-                )
-            uid = user.id
-            if referral.referred_by_id != uid and referral.created_by_id != uid:
-                return Response(
-                    {'detail': 'You can only edit referrals you created or referred.'},
-                    status=status.HTTP_403_FORBIDDEN,
-                )
-            for key in request.data.keys():
-                if key in self._CLINICIAN_NON_EDITABLE_FIELDS:
-                    return Response(
-                        {'detail': f'Cannot update field "{key}" from this role.'},
-                        status=status.HTTP_403_FORBIDDEN,
-                    )
-
-        response = super().partial_update(request, *args, **kwargs)
-        try:
-            ref = self.get_object()
-            AuditService.log_activity(
-                user=request.user,
-                action='update',
-                object_type='referral',
-                object_id=str(ref.id),
-                module='consultation',
-                object_repr=f'Referral {ref.referral_id}',
-                description=f'Updated referral {ref.referral_id}',
-                new_values={'status': ref.status},
-                request=request,
-            )
-        except Exception:
-            pass
-        return response
-
-    def destroy(self, request, *args, **kwargs):
-        referral = self.get_object()
-        user = request.user
-        is_records = self._is_records_officer(user)
-        is_super = getattr(user, 'is_superuser', False)
-        if not is_records and not is_super:
-            if referral.status != 'draft':
-                return Response(
-                    {'detail': 'Only draft referrals can be deleted.'},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-            if not self._is_referring_owner(user, referral):
-                return Response(
-                    {'detail': 'You can only delete draft referrals you created or referred.'},
-                    status=status.HTTP_403_FORBIDDEN,
-                )
-        return super().destroy(request, *args, **kwargs)
+        return Referral.objects.all().select_related('patient', 'visit', 'session', 'referred_by', 'created_by')
     
     def perform_create(self, serializer):
-        """Create referral and log audit. Clinicians always start as draft until they submit to records."""
-        user = self.request.user
-        save_kwargs = {'created_by': user, 'referred_by': user}
-        if not self._is_records_officer(user) and not getattr(user, 'is_superuser', False):
-            save_kwargs['status'] = 'draft'
-            save_kwargs['submitted_at'] = None
-        referral = serializer.save(**save_kwargs)
+        """Create referral and log audit."""
+        referral = serializer.save(created_by=self.request.user, referred_by=self.request.user)
         AuditService.log_activity(
             user=self.request.user,
             action='create',
@@ -1077,344 +660,6 @@ class ReferralViewSet(viewsets.ModelViewSet):
             new_values={'referral_id': referral.referral_id, 'specialty': referral.specialty, 'facility': referral.facility, 'urgency': referral.urgency},
             request=self.request,
         )
-
-    @action(detail=True, methods=['post'])
-    def submit_to_records(self, request, pk=None):
-        referral = self.get_object()
-        is_records = self._is_records_officer(request.user)
-        is_super = getattr(request.user, 'is_superuser', False)
-        if not is_records and not is_super:
-            if not self._is_referring_owner(request.user, referral):
-                return Response(
-                    {'detail': 'Only the referring clinician can submit this referral to Medical Records.'},
-                    status=status.HTTP_403_FORBIDDEN,
-                )
-        if referral.status not in ['draft', 'returned_for_correction']:
-            return Response({'detail': 'Only draft/returned referrals can be submitted.'}, status=status.HTTP_400_BAD_REQUEST)
-        if not referral.responsibility_forms.exists():
-            return Response(
-                {
-                    'detail': (
-                        'Issue at least one responsibility form before sending this referral to Medical Records '
-                        'for acknowledgement.'
-                    )
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        referral.status = 'submitted_to_records'
-        referral.submitted_at = timezone.now()
-        referral.save(update_fields=['status', 'submitted_at'])
-        try:
-            AuditService.log_activity(
-                user=request.user,
-                action='submit',
-                object_type='referral',
-                object_id=str(referral.id),
-                module='consultation',
-                object_repr=f'Referral {referral.referral_id}',
-                description=f'Submitted referral {referral.referral_id} to Medical Records',
-                new_values={'status': referral.status},
-                request=request,
-            )
-        except Exception:
-            pass
-        return Response(ReferralSerializer(referral).data)
-
-    @action(detail=True, methods=['post'])
-    def return_for_correction(self, request, pk=None):
-        referral = self.get_object()
-        is_owner = self._is_referring_owner(request.user, referral)
-        is_super = getattr(request.user, 'is_superuser', False)
-        if not (is_owner or is_super):
-            return Response(
-                {'detail': 'Only the referring clinician can return this referral for correction.'},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-        if referral.status not in ('submitted_to_records', 'records_review', 'approved_for_forms'):
-            return Response(
-                {'detail': 'Referral cannot be sent back for correction from its current status.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        referral.status = 'returned_for_correction'
-        note = request.data.get('notes')
-        if note:
-            referral.notes = note
-        referral.reviewed_at = timezone.now()
-        referral.save(update_fields=['status', 'notes', 'reviewed_at'])
-        try:
-            AuditService.log_activity(
-                user=request.user,
-                action='update',
-                object_type='referral',
-                object_id=str(referral.id),
-                module='consultation',
-                object_repr=f'Referral {referral.referral_id}',
-                description=f'Returned referral {referral.referral_id} for correction',
-                new_values={'status': referral.status, 'notes': referral.notes},
-                request=request,
-            )
-        except Exception:
-            pass
-        return Response(ReferralSerializer(referral).data)
-
-    def acknowledge_responsibility_form(self, request, pk=None):
-        """Medical Records: confirm a specific responsibility form issuance was physically stamped. (URL: see consultation.urls)"""
-        if not self._is_records_officer(request.user):
-            return Response(
-                {'detail': 'Only Medical Records can acknowledge responsibility forms.'},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-        referral = self.get_object()
-        if referral.status in ('draft', 'closed', 'cancelled'):
-            return Response(
-                {'detail': 'Cannot acknowledge forms for this referral status.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        form_id = request.data.get('form_id')
-        if form_id is None or str(form_id).strip() == '':
-            return Response({'detail': 'form_id is required.'}, status=status.HTTP_400_BAD_REQUEST)
-        try:
-            form = referral.responsibility_forms.get(id=int(form_id))
-        except (ValueError, TypeError, ResponsibilityFormIssuance.DoesNotExist):
-            return Response({'detail': 'Form not found.'}, status=status.HTTP_404_NOT_FOUND)
-        if not form.records_acknowledged_at:
-            form.records_acknowledged_at = timezone.now()
-            form.records_acknowledged_by = request.user
-            form.save(update_fields=['records_acknowledged_at', 'records_acknowledged_by', 'updated_at'])
-            try:
-                AuditService.log_activity(
-                    user=request.user,
-                    action='update',
-                    object_type='responsibility_form',
-                    object_id=str(form.id),
-                    module='consultation',
-                    object_repr=f'{referral.referral_id} Form #{form.sequence_number}',
-                    description=(
-                        f'Acknowledged responsibility form #{form.sequence_number} (stamp) for {referral.referral_id}'
-                    ),
-                    request=request,
-                )
-            except Exception:
-                pass
-        referral.refresh_from_db()
-        self._apply_approved_for_forms_when_all_stamped(referral, request, audit_manual=False)
-        return Response(ResponsibilityFormIssuanceSerializer(form).data)
-
-    @action(detail=True, methods=['post'])
-    def approve_for_forms(self, request, pk=None):
-        """Mark referral approved for ongoing responsibility-form workflow after all stamps are recorded."""
-        if not self._is_records_officer(request.user):
-            return Response({'detail': 'Only Medical Records can approve referrals.'}, status=status.HTTP_403_FORBIDDEN)
-        referral = self.get_object()
-        if referral.status not in ('submitted_to_records', 'records_review'):
-            return Response(
-                {'detail': 'Referral must be submitted to records (or in review) before approval for forms.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        if not ResponsibilityFormIssuance.objects.filter(referral_id=referral.pk).exists():
-            return Response(
-                {'detail': 'No responsibility forms exist; issue at least one before approving.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        if ResponsibilityFormIssuance.objects.filter(
-            referral_id=referral.pk, records_acknowledged_at__isnull=True
-        ).exists():
-            return Response(
-                {
-                    'detail': (
-                        'Acknowledge each responsibility form (physical stamp) before Records acknowledged status. '
-                        'Use the per-form Acknowledge action in the records queue.'
-                    )
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        self._apply_approved_for_forms_when_all_stamped(referral, request, audit_manual=True)
-        referral.refresh_from_db()
-        return Response(ReferralSerializer(referral).data)
-
-    @action(detail=True, methods=['post'])
-    def close_referral(self, request, pk=None):
-        if not self._is_records_officer(request.user):
-            return Response({'detail': 'Only Medical Records can close referrals.'}, status=status.HTTP_403_FORBIDDEN)
-        referral = self.get_object()
-        referral.status = 'closed'
-        referral.closed_at = timezone.now()
-        referral.save(update_fields=['status', 'closed_at'])
-        try:
-            AuditService.log_activity(
-                user=request.user,
-                action='close',
-                object_type='referral',
-                object_id=str(referral.id),
-                module='consultation',
-                object_repr=f'Referral {referral.referral_id}',
-                description=f'Closed referral {referral.referral_id}',
-                new_values={'status': referral.status},
-                request=request,
-            )
-        except Exception:
-            pass
-        return Response(ReferralSerializer(referral).data)
-
-    @action(detail=True, methods=['get', 'post'])
-    def forms(self, request, pk=None):
-        """List or create responsibility form issuances for a referral."""
-        referral = self.get_object()
-        self._expire_old_forms(referral=referral)
-        if request.method == 'GET':
-            forms = referral.responsibility_forms.all().order_by('-issue_date')
-            return Response(ResponsibilityFormIssuanceSerializer(forms, many=True).data)
-
-        # POST: referring clinician (owner) or superuser only — not Medical Records (issuance is a clinical step).
-        user = request.user
-        is_owner = self._is_referring_owner(user, referral)
-        is_super = getattr(user, 'is_superuser', False)
-
-        if referral.status in ('closed', 'cancelled'):
-            return Response(
-                {'detail': 'Cannot issue responsibility forms on a closed or cancelled referral.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        if not (is_owner or is_super):
-            return Response(
-                {'detail': 'Only the referring clinician can issue responsibility forms for this referral.'},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
-        valid_from = request.data.get('valid_from')
-        valid_to = request.data.get('valid_to')
-        notes = request.data.get('notes', '')
-        if not valid_from or not valid_to:
-            return Response({'detail': 'valid_from and valid_to are required.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        try:
-            vf = _parse_ymd_for_responsibility_form(valid_from)
-            vt = _parse_ymd_for_responsibility_form(valid_to)
-            if vf is None or vt is None:
-                return Response(
-                    {'detail': 'valid_from and valid_to must be valid dates (YYYY-MM-DD).'},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-        except Exception:
-            return Response(
-                {'detail': 'Could not read valid_from / valid_to dates.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        if vf > vt:
-            return Response(
-                {'detail': 'valid_from must be on or before valid_to.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        override_active = str(request.data.get('override_active', '')).lower() in ['1', 'true', 'yes']
-        override_reason = request.data.get('override_reason', '')
-        # Only block (or require override) when the new window overlaps a still-current active form.
-        # Sequential months (e.g. Mar then Apr) do not overlap and do not need override.
-        active_current = referral.responsibility_forms.filter(status='active', valid_to__gte=date.today())
-        overlaps_active = False
-        for ex in active_current:
-            if not (vt < ex.valid_from or vf > ex.valid_to):
-                overlaps_active = True
-                break
-        if overlaps_active and not override_active:
-            return Response(
-                {
-                    'detail': (
-                        'These dates overlap an active responsibility form. Use different dates, or pass '
-                        'override_active=true with override_reason (e.g. correction or duplicate month).'
-                    )
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        if overlaps_active and override_active and not str(override_reason).strip():
-            return Response(
-                {'detail': 'override_reason is required when overriding an overlapping active form.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # Lock referral row so concurrent issuances cannot claim the same sequence_number (uniq per referral).
-        with transaction.atomic():
-            referral_locked = Referral.objects.select_for_update().get(pk=referral.pk)
-            last_seq = (
-                ResponsibilityFormIssuance.objects.filter(referral_id=referral_locked.pk)
-                .order_by('-sequence_number')
-                .values_list('sequence_number', flat=True)
-                .first()
-                or 0
-            )
-            issuance = ResponsibilityFormIssuance.objects.create(
-                referral=referral_locked,
-                sequence_number=last_seq + 1,
-                valid_from=vf,
-                valid_to=vt,
-                status='active',
-                hospital_name_snapshot=referral_locked.facility,
-                notes=notes,
-                issued_by=request.user,
-                document_file=request.FILES.get('document_file'),
-            )
-            # New issuance after initial approval must return to records for its own stamp acknowledgement.
-            if referral_locked.status == 'approved_for_forms':
-                referral_locked.status = 'records_review'
-                referral_locked.save(update_fields=['status'])
-        try:
-            AuditService.log_activity(
-                user=request.user,
-                action='create',
-                object_type='responsibility_form',
-                object_id=str(issuance.id),
-                module='consultation',
-                object_repr=f'{referral.referral_id} Form #{issuance.sequence_number}',
-                description=f'Issued responsibility form #{issuance.sequence_number} for referral {referral.referral_id}',
-                new_values={
-                    'referral_id': referral.referral_id,
-                    'sequence_number': issuance.sequence_number,
-                    'valid_from': str(issuance.valid_from),
-                    'valid_to': str(issuance.valid_to),
-                    'status': issuance.status,
-                    'override_reason': override_reason if override_active else '',
-                },
-                request=request,
-            )
-        except Exception:
-            pass
-        return Response(ResponsibilityFormIssuanceSerializer(issuance).data, status=status.HTTP_201_CREATED)
-
-    @action(detail=True, methods=['post'])
-    def update_form_status(self, request, pk=None):
-        """Update a responsibility form status (active/expired/revoked/used)."""
-        if not self._is_records_officer(request.user):
-            return Response({'detail': 'Only Medical Records can update form status.'}, status=status.HTTP_403_FORBIDDEN)
-        referral = self.get_object()
-        form_id = request.data.get('form_id')
-        new_status = request.data.get('status')
-        if not form_id or not new_status:
-            return Response({'detail': 'form_id and status are required.'}, status=status.HTTP_400_BAD_REQUEST)
-        try:
-            form = referral.responsibility_forms.get(id=form_id)
-        except ResponsibilityFormIssuance.DoesNotExist:
-            return Response({'detail': 'Form not found.'}, status=status.HTTP_404_NOT_FOUND)
-        allowed = {s[0] for s in ResponsibilityFormIssuance.STATUS_CHOICES}
-        if new_status not in allowed:
-            return Response({'detail': f'Invalid status. Use one of: {", ".join(sorted(allowed))}.'}, status=status.HTTP_400_BAD_REQUEST)
-        form.status = new_status
-        form.save(update_fields=['status', 'updated_at'])
-        try:
-            AuditService.log_activity(
-                user=request.user,
-                action='update',
-                object_type='responsibility_form',
-                object_id=str(form.id),
-                module='consultation',
-                object_repr=f'{referral.referral_id} Form #{form.sequence_number}',
-                description=f'Updated responsibility form #{form.sequence_number} status to {new_status}',
-                new_values={'status': form.status},
-                request=request,
-            )
-        except Exception:
-            pass
-        return Response(ResponsibilityFormIssuanceSerializer(form).data)
 
 
 class ICD10CodeViewSet(viewsets.ReadOnlyModelViewSet):
@@ -1432,115 +677,6 @@ class ICD10CodeViewSet(viewsets.ReadOnlyModelViewSet):
 
     def get_queryset(self):
         return ICD10Code.objects.filter(is_active=True)
-
-
-class PresentingComplaintCategoryViewSet(viewsets.ModelViewSet):
-    """Manage presenting complaint categories."""
-
-    serializer_class = PresentingComplaintCategorySerializer
-    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['is_active']
-    search_fields = ['name']
-    ordering_fields = ['sort_order', 'name', 'created_at']
-    ordering = ['sort_order', 'name']
-    pagination_class = None
-
-    def get_permissions(self):
-        if self.request.method in ('GET', 'HEAD', 'OPTIONS'):
-            return [IsAuthenticated()]
-        return [IsAuthenticated(), IsComplaintLibraryManager()]
-
-    def get_queryset(self):
-        queryset = PresentingComplaintCategory.objects.all().annotate(
-            complaint_count=Count('complaints'),
-            active_complaint_count=Count('complaints', filter=Q(complaints__is_active=True)),
-        )
-        active_only = str(self.request.query_params.get('active_only', '')).lower() in {'1', 'true', 'yes'}
-        if active_only:
-            queryset = queryset.filter(is_active=True)
-        return queryset.prefetch_related('complaints')
-
-    def get_serializer_context(self):
-        context = super().get_serializer_context()
-        context['include_complaints'] = str(self.request.query_params.get('include_complaints', '')).lower() in {
-            '1',
-            'true',
-            'yes',
-        }
-        context['active_only'] = str(self.request.query_params.get('active_only', '')).lower() in {
-            '1',
-            'true',
-            'yes',
-        }
-        return context
-
-
-class PresentingComplaintViewSet(viewsets.ModelViewSet):
-    """Manage presenting complaint library items."""
-
-    serializer_class = PresentingComplaintSerializer
-    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['category', 'is_active']
-    search_fields = ['label', 'category__name']
-    ordering_fields = ['sort_order', 'label', 'category__sort_order', 'created_at']
-    ordering = ['category__sort_order', 'sort_order', 'label']
-    pagination_class = None
-
-    def get_permissions(self):
-        if self.request.method in ('GET', 'HEAD', 'OPTIONS'):
-            return [IsAuthenticated()]
-        return [IsAuthenticated(), IsComplaintLibraryManager()]
-
-    def get_queryset(self):
-        queryset = PresentingComplaint.objects.select_related('category')
-        active_only = str(self.request.query_params.get('active_only', '')).lower() in {'1', 'true', 'yes'}
-        if active_only:
-            queryset = queryset.filter(is_active=True, category__is_active=True)
-        return queryset
-
-    @action(detail=False, methods=['get'])
-    def library(self, request):
-        """
-        Return grouped complaint library for consultation picker consumption.
-        Query params:
-        - include_inactive=1 (for admin screens)
-        """
-        include_inactive = str(request.query_params.get('include_inactive', '')).lower() in {'1', 'true', 'yes'}
-        category_qs = PresentingComplaintCategory.objects.all().order_by('sort_order', 'name')
-        if not include_inactive:
-            category_qs = category_qs.filter(is_active=True)
-
-        complaints_qs = PresentingComplaint.objects.select_related('category').order_by(
-            'category__sort_order', 'category__name', 'sort_order', 'label'
-        )
-        if not include_inactive:
-            complaints_qs = complaints_qs.filter(is_active=True, category__is_active=True)
-
-        complaints_by_category_id = {}
-        for complaint in complaints_qs:
-            complaints_by_category_id.setdefault(complaint.category_id, []).append(
-                {
-                    'id': complaint.id,
-                    'label': complaint.label,
-                    'is_active': complaint.is_active,
-                    'sort_order': complaint.sort_order,
-                    'category': complaint.category_id,
-                    'category_name': complaint.category.name,
-                }
-            )
-
-        results = []
-        for category in category_qs:
-            results.append(
-                {
-                    'id': category.id,
-                    'name': category.name,
-                    'is_active': category.is_active,
-                    'sort_order': category.sort_order,
-                    'complaints': complaints_by_category_id.get(category.id, []),
-                }
-            )
-        return Response(results)
 
 
 class DiagnosisViewSet(viewsets.ModelViewSet):

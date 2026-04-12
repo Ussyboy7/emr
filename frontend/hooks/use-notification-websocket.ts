@@ -78,7 +78,7 @@ export const useNotificationWebSocket = (options: UseNotificationWebSocketOption
       // Fallback to current window location
       baseUrl = `${window.location.protocol}//${window.location.host}`;
     }
-    baseUrl = baseUrl || 'http://localhost:8000';
+    baseUrl = baseUrl || "http://localhost:8001/api";
     
     // Determine protocol - use wss for https, ws for http
     let protocol = 'ws';
@@ -98,7 +98,7 @@ export const useNotificationWebSocket = (options: UseNotificationWebSocketOption
     
     // Ensure we have a valid host
     if (!host || host === '') {
-      host = typeof window !== 'undefined' ? window.location.host : 'localhost:8000';
+      host = typeof window !== "undefined" ? window.location.host : "localhost:8001";
     }
 
     // Construct WebSocket URL - ensure protocol:// is always present
@@ -112,7 +112,7 @@ export const useNotificationWebSocket = (options: UseNotificationWebSocketOption
         const fallbackProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
         return `${fallbackProtocol}://${window.location.host}/ws/notifications/`;
       }
-      return 'ws://localhost:8000/ws/notifications/';
+      return "ws://localhost:8001/ws/notifications/";
     }
     
     return wsUrl;

@@ -13,16 +13,35 @@ from django.utils import timezone
 
 from laboratory.pagination import FlexiblePageNumberPagination
 
-from .models import RadiologyTemplate, RadiologyOrder, RadiologyStudy, RadiologyReport
+from .models import RadiologyTemplate, RadiologyOrder, RadiologyStudy, RadiologyReport, ImagingPartner
 from .serializers import (
     RadiologyTemplateSerializer,
     RadiologyOrderSerializer,
     RadiologyStudySerializer,
     RadiologyReportSerializer,
+    ImagingPartnerSerializer,
 )
 from audit.services import AuditService
 
 logger = logging.getLogger(__name__)
+
+
+class ImagingPartnerViewSet(viewsets.ModelViewSet):
+    """CRUD for outsourced imaging partners (dropdown + Django admin)."""
+
+    permission_classes = [IsAuthenticated]
+    serializer_class = ImagingPartnerSerializer
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ["is_active"]
+    search_fields = ["name", "code", "email"]
+    ordering_fields = ["sort_order", "name", "created_at"]
+    ordering = ["sort_order", "name"]
+    # Small catalog: return a plain JSON array (avoids pagination quirks in clients).
+    pagination_class = None
+
+    def get_queryset(self):
+        return ImagingPartner.objects.all()
+
 
 class RadiologyTemplateViewSet(viewsets.ModelViewSet):
     """ViewSet for managing radiology investigation templates."""

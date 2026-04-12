@@ -25,11 +25,8 @@ import { loadConsultationReportSession, type ConsultationReportSession } from '@
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { useCurrentUser } from '@/hooks/use-current-user';
-import { CLINICS } from '@/lib/constants/clinics';
-import {
-  clinicMatches,
-  getVisitServiceClinicsDisplay,
-} from '@/lib/utils/clinic-utils';
+import { getVisitServiceClinicsDisplay } from '@/lib/utils/clinic-utils';
+import { useOutpatientClinicTypes } from '@/lib/hooks/use-outpatient-clinic-types';
 import { ConsultationRecord } from '@/components/consultation/ConsultationDetailModal';
 import { ConsultationReportModal } from '@/components/consultation/ConsultationReportModal';
 import { PrescriptionOrderModal, type PrescriptionOrderSubmitInput } from "@/components/consultation/orders/PrescriptionOrderModal";
@@ -231,6 +228,7 @@ const generateTimeline = (
 };
 
 export default function ConsultationHistoryPage() {
+  const { names: opdClinicNames } = useOutpatientClinicTypes();
   const { currentUser } = useCurrentUser();
   const [consultations, setConsultations] = useState<ConsultationRecordWithGender[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1143,8 +1141,10 @@ export default function ConsultationHistoryPage() {
                   <SelectTrigger className="w-[140px]"><SelectValue placeholder="Clinic" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Clinics</SelectItem>
-                    {CLINICS.map(clinic => (
-                      <SelectItem key={clinic} value={clinic}>{clinic}</SelectItem>
+                    {opdClinicNames.map((clinic) => (
+                      <SelectItem key={clinic} value={clinic}>
+                        {clinic}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>

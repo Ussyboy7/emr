@@ -104,7 +104,6 @@ const menuSections: MenuSection[] = [
       { label: "Manage Visits", href: "/medical-records/visits", icon: Calendar },
       { label: "Appointments", href: "/medical-records/appointments", icon: CalendarDays },
       { label: "Manage Dependents", href: "/medical-records/dependents", icon: UsersRound },
-      { label: "Referral queue (records)", href: "/medical-records/referrals", icon: ArrowRight },
       { label: "Reports", href: "/medical-records/reports", icon: FolderOpen },
     ],
   },
@@ -121,9 +120,7 @@ const menuSections: MenuSection[] = [
       { label: "Patient Vitals", href: "/nursing/patient-vitals", icon: Activity },
       { label: "Procedures", href: "/nursing/procedures", icon: Syringe },
       { label: "Procedures History", href: "/nursing/procedures/history", icon: ClipboardList },
-      { label: "Ward Care", href: "/nursing/wards", icon: Building2 },
-      { label: "Ward Stock", href: "/nursing/inventory", icon: Database },
-      { label: "Drug Requests", href: "/nursing/requests", icon: Send },
+      { label: "Ward Management", href: "/nursing/wards", icon: Building2 },
     ],
   },
   {
@@ -136,8 +133,8 @@ const menuSections: MenuSection[] = [
       { label: "Home", href: "/consultation", icon: LayoutDashboard },
       { label: "Start Consultation", href: "/consultation/start", icon: Play },
       { label: "Consultation History", href: "/consultation/history", icon: History },
-      { label: "Referrals & forms", href: "/consultation/referrals", icon: Send },
-      { label: "Ward Rounds", href: "/consultation/wards", icon: Building2 },
+      { label: "Ward Overview", href: "/consultation/wards", icon: Building2 },
+      { label: "Referrals", href: "/consultation/referrals", icon: ArrowRight },
     ],
   },
   {
@@ -152,7 +149,6 @@ const menuSections: MenuSection[] = [
       { label: "Results Verification", href: "/laboratory/verification", icon: ShieldCheck },
       { label: "Completed Tests", href: "/laboratory/completed", icon: CheckCircle },
       { label: "Test Templates", href: "/laboratory/templates", icon: FileText },
-      { label: "Analytics", href: "/laboratory/analytics", icon: BarChart3 },
     ],
   },
   {
@@ -171,7 +167,6 @@ const menuSections: MenuSection[] = [
       { label: "Drug master", href: "/pharmacy/drugs", icon: Pill },
       { label: "Central store", href: "/pharmacy/store", icon: Package },
       { label: "Store Requests", href: "/pharmacy/store/requests", icon: Send },
-      { label: "Analytics", href: "/pharmacy/analytics", icon: BarChart3 },
     ],
   },
   {
@@ -186,7 +181,7 @@ const menuSections: MenuSection[] = [
       { label: "Results Verification", href: "/radiology/verification", icon: ShieldCheck },
       { label: "Completed Studies", href: "/radiology/completed", icon: FileBarChart },
       { label: "Study Templates", href: "/radiology/templates", icon: FileText },
-      { label: "Analytics", href: "/radiology/analytics", icon: BarChart3 },
+
     ],
   },
   {
@@ -336,7 +331,7 @@ export function AppSidebar() {
 
   return (
     <TooltipProvider delayDuration={0}>
-      <Sidebar collapsible="icon" className="border-r border-sidebar-border bg-sidebar print:hidden">
+      <Sidebar collapsible="icon" className="border-r border-sidebar-border bg-sidebar">
         <SidebarRail />
         <SidebarHeader className="border-b border-sidebar-border px-2 py-3">
           <div className={`flex items-center w-full min-w-0 ${isCollapsed ? 'flex-col gap-2' : 'justify-between'}`}>

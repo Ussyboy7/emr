@@ -122,6 +122,19 @@ export interface RadiologyAnalyticsSummary {
   top_procedures: Array<{ procedure: string; count: number }>;
 }
 
+export interface ImagingPartner {
+  id: number;
+  name: string;
+  code?: string;
+  phone?: string;
+  email?: string;
+  notes?: string;
+  is_active: boolean;
+  sort_order: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
 class RadiologyService {
   /**
    * Get all radiology orders
@@ -461,6 +474,47 @@ class RadiologyService {
   async getAnalyticsSummary(start: string, end: string): Promise<RadiologyAnalyticsSummary> {
     const query = buildQueryString({ start, end });
     return apiFetch<RadiologyAnalyticsSummary>(`/radiology/analytics/summary/${query}`);
+  }
+
+  /**
+   * List outsourced imaging partners (for processing dropdown).
+   */
+  async getImagingPartners(params?: {
+    is_active?: boolean;
+    search?: string;
+    page?: number;
+    page_size?: number;
+  }): Promise<{ results: ImagingPartner[]; count: number }> {
+    const query = buildQueryString({
+      is_active: true,
+      page_size: 200,
+      ...params,
+    });
+    const path = `/radiology/imaging-partners/${query}`;
+    const raw = await apiFetch<ImagingPartner[] | { results?: ImagingPartner[]; count?: number }>(path);
+    const results = Array.isArray(raw) ? raw : raw?.results ?? [];
+    const count = Array.isArray(raw) ? raw.length : raw?.count ?? results.length;
+    return { results, count };
+  }
+
+  async createImagingPartner(data: Partial<ImagingPartner>): Promise<ImagingPartner> {
+    return apiFetch<ImagingPartner>('/radiology/imaging-partners/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateImagingPartner(id: number, data: Partial<ImagingPartner>): Promise<ImagingPartner> {
+    return apiFetch<ImagingPartner>(`/radiology/imaging-partners/${id}/`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteImagingPartner(id: number): Promise<void> {
+    return apiFetch<void>(`/radiology/imaging-partners/${id}/`, {
+      method: 'DELETE',
+    });
   }
 }
 

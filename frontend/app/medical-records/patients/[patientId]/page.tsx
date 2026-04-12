@@ -285,51 +285,87 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
   const [consultationsPage, setConsultationsPage] = useState(1);
   const [consultationsPerPage, setConsultationsPerPage] = useState(10);
 
-  // Load patient data — supports both numeric id and string patient_id (e.g. "NN-NYSC-01")
+  // Load patient data — supports DB pk, numeric-looking patient_id, and alphanumeric patient_id
   useEffect(() => {
     const loadPatient = async () => {
+      const raw = (patientId || '').trim();
+      if (!raw) {
+        setLoading(false);
+        return;
+      }
+
+      const resolveFromSearch = async (query: string) => {
+        const searchResult = await patientService.getPatients({ search: query });
+        const list = searchResult.results || [];
+        const q = query;
+        const qu = q.toUpperCase();
+        return (
+          list.find((p) => p.patient_id === q) ||
+          list.find((p) => p.patient_id && p.patient_id.toUpperCase() === qu) ||
+          list.find((p) => String(p.id) === q) ||
+          null
+        );
+      };
+
       try {
         setLoading(true);
         setError(null);
         let numericId: number;
+        let patientData: Patient;
 
-        const parsedId = parseInt(patientId, 10);
-        if (!isNaN(parsedId) && parsedId > 0) {
-          numericId = parsedId;
-        } else {
-          // URL has string patient_id (e.g. "E-A2962", "NN-NYSC-01") — resolve to numeric id
-          const searchResult = await patientService.getPatients({ search: patientId });
-          const matchedPatient = searchResult.results.find(
-            (p) =>
-              p.patient_id === patientId ||
-              (p.patient_id && p.patient_id.toUpperCase() === patientId.toUpperCase())
-          );
+        const allDigits = /^\d+$/.test(raw);
+
+        if (!allDigits) {
+          const matchedPatient = await resolveFromSearch(raw);
           if (!matchedPatient) {
-            throw new Error(`Patient with ID "${patientId}" not found`);
+            throw new Error(`Patient with ID "${raw}" not found`);
           }
           numericId = matchedPatient.id;
+          patientData = await patientService.getPatient(numericId);
+        } else {
+          const parsedId = parseInt(raw, 10);
+          if (!Number.isFinite(parsedId) || parsedId <= 0) {
+            throw new Error(`Patient with ID "${raw}" not found`);
+          }
+          try {
+            patientData = await patientService.getPatient(parsedId);
+            numericId = patientData.id;
+          } catch (e: any) {
+            const is404 = e?.status === 404;
+            if (!is404) throw e;
+            // Digits in the URL may be a human patient_id (e.g. "10042"), not the DB pk
+            const matchedPatient = await resolveFromSearch(raw);
+            if (!matchedPatient) throw e;
+            numericId = matchedPatient.id;
+            patientData = await patientService.getPatient(numericId);
+          }
         }
 
-        const patientData = await patientService.getPatient(numericId);
         setPatient(patientData);
-
-        // Load patient history
         await loadPatientHistory(numericId);
       } catch (err: any) {
-        console.error('Error loading patient:', err);
+        const status = err?.status as number | undefined;
+        const msg = String(err?.message || err?.apiMessage || '');
+        const notFound =
+          status === 404 ||
+          /no patient matches|not found/i.test(msg);
+
         if (isAuthenticationError(err)) {
           setAuthError(err);
+        } else if (notFound) {
+          setError(
+            'This patient could not be found. The ID may be wrong, the record may have been removed, or you may not have access.'
+          );
         } else {
-          setError(err.message || 'Failed to load patient data');
+          console.error('Error loading patient:', err);
+          setError(msg || 'Failed to load patient data');
         }
       } finally {
         setLoading(false);
       }
     };
 
-    if (patientId) {
-      loadPatient();
-    }
+    loadPatient();
   }, [patientId]);
 
   // Load patient history

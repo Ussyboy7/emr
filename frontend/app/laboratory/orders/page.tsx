@@ -24,7 +24,7 @@ import { PatientAvatar } from "@/components/PatientAvatar";
 import {
   TestTube, Search, Eye, Clock, CheckCircle2, Activity, FlaskConical, Loader2,
   Beaker, AlertTriangle, User, Calendar, FileText, Play, Stethoscope,
-  ClipboardList, Upload, Download, Building2, Truck, X, Droplets, Pipette, RotateCcw, XCircle
+  ClipboardList, Upload, Download, Building2, Truck, X, Droplets, Pipette, RotateCcw, XCircle, Plus
 } from 'lucide-react';
 
 // ==========================================
@@ -719,6 +719,21 @@ export default function LabOrdersPage() {
   const [customOutsourcedLab, setCustomOutsourcedLab] = useState('');
   const [labPartners, setLabPartners] = useState<LabPartner[]>([]);
   const [loadingLabPartners, setLoadingLabPartners] = useState(false);
+  
+  // Add Lab Partner dialog states
+  const [isAddPartnerDialogOpen, setIsAddPartnerDialogOpen] = useState(false);
+  const [newPartnerName, setNewPartnerName] = useState('');
+  const [newPartnerCode, setNewPartnerCode] = useState('');
+  const [newPartnerEmail, setNewPartnerEmail] = useState('');
+  const [newPartnerPhone, setNewPartnerPhone] = useState('');
+  const [isSubmittingPartner, setIsSubmittingPartner] = useState(false);
+
+  // Manage Lab Partners dialog states
+  const [isManagePartnersDialogOpen, setIsManagePartnersDialogOpen] = useState(false);
+  const [deletingPartnerId, setDeletingPartnerId] = useState<number | null>(null);
+  const [deleteConfirmPartnerId, setDeleteConfirmPartnerId] = useState<number | null>(null);
+  const [deleteConfirmPartnerName, setDeleteConfirmPartnerName] = useState<string>('');
+  
   const [resultEntryMode, setResultEntryMode] = useState<'values' | 'upload'>('values');
   const [resultValues, setResultValues] = useState<Record<string, string>>({});
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
@@ -1381,6 +1396,79 @@ export default function LabOrdersPage() {
       setLabPartners([]);
     } finally {
       setLoadingLabPartners(false);
+    }
+  };
+
+  const handleAddPartner = async () => {
+    if (!newPartnerName.trim()) {
+      toast.error('Partner name is required');
+      return;
+    }
+
+    setIsSubmittingPartner(true);
+    try {
+      const newPartner = await labService.createLabPartner({
+        name: newPartnerName.trim(),
+        code: newPartnerCode.trim() || undefined,
+        email: newPartnerEmail.trim() || undefined,
+        phone: newPartnerPhone.trim() || undefined,
+        is_active: true,
+      });
+
+      // Add to the list
+      setLabPartners((prev) => [...prev, newPartner]);
+
+      // Reset form and close dialog
+      setNewPartnerName('');
+      setNewPartnerCode('');
+      setNewPartnerEmail('');
+      setNewPartnerPhone('');
+      setIsAddPartnerDialogOpen(false);
+
+      // Select the new partner
+      setSelectedOutsourcedLab(newPartner.name);
+      setCustomOutsourcedLab('');
+
+      toast.success(`Lab partner "${newPartner.name}" added successfully`);
+    } catch (err: any) {
+      console.error('Failed to add lab partner:', err);
+      const msg = err?.message || 'Failed to add lab partner. Please try again.';
+      toast.error(msg);
+    } finally {
+      setIsSubmittingPartner(false);
+    }
+  };
+
+  const handleDeletePartner = (partnerId: number, partnerName: string) => {
+    setDeleteConfirmPartnerId(partnerId);
+    setDeleteConfirmPartnerName(partnerName);
+  };
+
+  const confirmDeletePartner = async () => {
+    if (deleteConfirmPartnerId === null) return;
+
+    setDeletingPartnerId(deleteConfirmPartnerId);
+    try {
+      await labService.deleteLabPartner(deleteConfirmPartnerId);
+
+      // Remove from the list
+      setLabPartners((prev) => prev.filter((p) => p.id !== deleteConfirmPartnerId));
+
+      // Clear selection if it was the deleted partner
+      if (selectedOutsourcedLab === deleteConfirmPartnerName) {
+        setSelectedOutsourcedLab('');
+        setCustomOutsourcedLab('');
+      }
+
+      toast.success(`Lab partner "${deleteConfirmPartnerName}" deleted successfully`);
+    } catch (err: any) {
+      console.error('Failed to delete lab partner:', err);
+      const msg = err?.message || 'Failed to delete lab partner. Please try again.';
+      toast.error(msg);
+    } finally {
+      setDeletingPartnerId(null);
+      setDeleteConfirmPartnerId(null);
+      setDeleteConfirmPartnerName('');
     }
   };
   
@@ -2128,7 +2216,29 @@ export default function LabOrdersPage() {
 
                 {processingMethod === 'Outsourced' && (
                   <div className="space-y-2">
-                    <Label>Select Lab Partner *</Label>
+                    <div className="flex items-center justify-between">
+                      <Label>Select Lab Partner *</Label>
+                      <div className="flex gap-2">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setIsManagePartnersDialogOpen(true)}
+                          className="text-xs h-auto p-1"
+                        >
+                          ⚙️ Manage
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setIsAddPartnerDialogOpen(true)}
+                          className="text-xs h-auto p-1"
+                        >
+                          + Add Partner
+                        </Button>
+                      </div>
+                    </div>
                     <Select
                       value={selectedOutsourcedLab}
                       onValueChange={(v) => {
@@ -2159,10 +2269,6 @@ export default function LabOrdersPage() {
                         />
                       </div>
                     )}
-                    <p className="text-xs text-muted-foreground">
-                      Add, edit, or deactivate partners in Django Admin → <span className="font-medium">Laboratory</span> →{' '}
-                      <span className="font-medium">Lab partners (outsourced)</span>.
-                    </p>
                   </div>
                 )}
               </div>
@@ -2176,6 +2282,213 @@ export default function LabOrdersPage() {
               >
                 {isSubmitting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Play className="h-4 w-4 mr-2" />}
                 Start Processing
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Add Lab Partner Dialog */}
+        <Dialog open={isAddPartnerDialogOpen} onOpenChange={setIsAddPartnerDialogOpen}>
+          <DialogContent className="w-[95vw] sm:max-w-[400px]">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Plus className="h-5 w-5 text-emerald-500" />
+                Add Lab Partner
+              </DialogTitle>
+              <DialogDescription>
+                Add a new external laboratory as an outsourced partner for test processing.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4 py-2">
+              <div className="space-y-1">
+                <Label htmlFor="partner-name">Partner Name *</Label>
+                <Input
+                  id="partner-name"
+                  value={newPartnerName}
+                  onChange={(e) => setNewPartnerName(e.target.value)}
+                  placeholder="e.g. Clinix Healthcare"
+                  disabled={isSubmittingPartner}
+                />
+              </div>
+
+              <div className="space-y-1">
+                <Label htmlFor="partner-code">Code (optional)</Label>
+                <Input
+                  id="partner-code"
+                  value={newPartnerCode}
+                  onChange={(e) => setNewPartnerCode(e.target.value)}
+                  placeholder="e.g. CLINIX"
+                  disabled={isSubmittingPartner}
+                />
+              </div>
+
+              <div className="space-y-1">
+                <Label htmlFor="partner-email">Email (optional)</Label>
+                <Input
+                  id="partner-email"
+                  type="email"
+                  value={newPartnerEmail}
+                  onChange={(e) => setNewPartnerEmail(e.target.value)}
+                  placeholder="e.g. contact@clinix.healthcare"
+                  disabled={isSubmittingPartner}
+                />
+              </div>
+
+              <div className="space-y-1">
+                <Label htmlFor="partner-phone">Phone (optional)</Label>
+                <Input
+                  id="partner-phone"
+                  value={newPartnerPhone}
+                  onChange={(e) => setNewPartnerPhone(e.target.value)}
+                  placeholder="e.g. +1-800-CLINIX"
+                  disabled={isSubmittingPartner}
+                />
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => setIsAddPartnerDialogOpen(false)}
+                disabled={isSubmittingPartner}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleAddPartner}
+                disabled={isSubmittingPartner || !newPartnerName.trim()}
+                className="bg-emerald-600 hover:bg-emerald-700"
+              >
+                {isSubmittingPartner ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Adding...
+                  </>
+                ) : (
+                  <>
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add Partner
+                  </>
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Manage Lab Partners Dialog */}
+        <Dialog open={isManagePartnersDialogOpen} onOpenChange={setIsManagePartnersDialogOpen}>
+          <DialogContent className="w-[95vw] sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Building2 className="h-5 w-5 text-blue-500" />
+                Manage Lab Partners
+              </DialogTitle>
+              <DialogDescription>
+                View and manage all lab partners for outsourced test processing.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-3 py-2">
+              {labPartners.length === 0 ? (
+                <div className="text-center py-6 text-muted-foreground">
+                  <p>No lab partners added yet.</p>
+                  <p className="text-xs mt-1">Click "Add Partner" to create one.</p>
+                </div>
+              ) : (
+                labPartners.map((partner) => (
+                  <div key={partner.id} className="flex items-start justify-between p-3 rounded-lg border">
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-sm">{partner.name}</p>
+                      {partner.code && (
+                        <p className="text-xs text-muted-foreground">Code: {partner.code}</p>
+                      )}
+                      {partner.email && (
+                        <p className="text-xs text-muted-foreground">📧 {partner.email}</p>
+                      )}
+                      {partner.phone && (
+                        <p className="text-xs text-muted-foreground">📞 {partner.phone}</p>
+                      )}
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleDeletePartner(partner.id, partner.name)}
+                      disabled={deletingPartnerId === partner.id}
+                      className="ml-2 text-red-600 hover:text-red-700 hover:bg-red-50"
+                    >
+                      {deletingPartnerId === partner.id ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <X className="h-4 w-4" />
+                      )}
+                    </Button>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => setIsManagePartnersDialogOpen(false)}
+              >
+                Close
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Delete Partner Confirmation Dialog */}
+        <Dialog open={deleteConfirmPartnerId !== null} onOpenChange={(open) => {
+          if (!open) {
+            setDeleteConfirmPartnerId(null);
+            setDeleteConfirmPartnerName('');
+          }
+        }}>
+          <DialogContent className="w-[95vw] sm:max-w-[400px]">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5 text-red-500" />
+                Delete Lab Partner?
+              </DialogTitle>
+            </DialogHeader>
+
+            <div className="space-y-4 py-4">
+              <p className="text-sm">
+                Are you sure you want to delete <strong>"{deleteConfirmPartnerName}"</strong>?
+              </p>
+              <p className="text-xs text-muted-foreground">
+                This action cannot be undone. The lab partner will be permanently removed from the system.
+              </p>
+            </div>
+
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setDeleteConfirmPartnerId(null);
+                  setDeleteConfirmPartnerName('');
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={confirmDeletePartner}
+                disabled={deletingPartnerId === deleteConfirmPartnerId}
+                className="bg-red-600 hover:bg-red-700"
+              >
+                {deletingPartnerId === deleteConfirmPartnerId ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  <>
+                    <X className="h-4 w-4 mr-2" />
+                    Delete Partner
+                  </>
+                )}
               </Button>
             </DialogFooter>
           </DialogContent>

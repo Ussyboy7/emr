@@ -4,12 +4,15 @@ import { useState, useEffect, useCallback } from "react";
 import { adminService } from "@/lib/services";
 
 export interface LocationOption {
+  /** Facility name (matches Visit/Patient `location` and organization.Clinic.name). */
   value: string;
   label: string;
+  /** organization.Clinic id — for per-facility visit-clinic lists. */
+  id: number;
 }
 
 /**
- * Fetches location options from Clinics & Departments (organization.Clinic).
+ * Fetches facility (site) options from organization.Clinic — Admin → Facilities & Departments.
  * Use for Create Visit, New Patient, Edit Visit/Patient, Admin Rooms - replaces hardcoded NPA locations.
  */
 export function useLocationOptions(options?: { includeAll?: boolean }) {
@@ -28,9 +31,10 @@ export function useLocationOptions(options?: { includeAll?: boolean }) {
       const opts: LocationOption[] = (response.results || []).map((c) => ({
         value: c.name,
         label: c.location ? `${c.name} • ${c.location}` : c.name,
+        id: c.id,
       }));
       if (options?.includeAll) {
-        setLocations([{ value: "all", label: "All Locations" }, ...opts]);
+        setLocations([{ value: "all", label: "All Locations", id: 0 }, ...opts]);
       } else {
         setLocations(opts);
       }

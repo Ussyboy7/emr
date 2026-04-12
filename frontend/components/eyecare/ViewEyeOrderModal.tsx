@@ -120,24 +120,18 @@ export function ViewEyeOrderModal({ open, onOpenChange, orderId }: ViewEyeOrderM
                       Visual Acuity
                     </h4>
                     <div className="grid grid-cols-3 gap-4">
-                      {order.visual_acuity_od && (
-                        <div>
-                          <div className="text-xs text-muted-foreground mb-1">OD (Right)</div>
-                          <div className="font-medium">{order.visual_acuity_od}</div>
-                        </div>
-                      )}
-                      {order.visual_acuity_os && (
-                        <div>
-                          <div className="text-xs text-muted-foreground mb-1">OS (Left)</div>
-                          <div className="font-medium">{order.visual_acuity_os}</div>
-                        </div>
-                      )}
-                      {order.visual_acuity_ou && (
-                        <div>
-                          <div className="text-xs text-muted-foreground mb-1">OU (Both)</div>
-                          <div className="font-medium">{order.visual_acuity_ou}</div>
-                        </div>
-                      )}
+                      <div>
+                        <div className="text-xs text-muted-foreground mb-1">OD (Right)</div>
+                        <div className="font-medium">{order.visual_acuity_od || '—'}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-muted-foreground mb-1">OS (Left)</div>
+                        <div className="font-medium">{order.visual_acuity_os || '—'}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-muted-foreground mb-1">OU (Both)</div>
+                        <div className="font-medium">{order.visual_acuity_ou || '—'}</div>
+                      </div>
                     </div>
                   </CardContent>
                 </Card>
@@ -149,18 +143,14 @@ export function ViewEyeOrderModal({ open, onOpenChange, orderId }: ViewEyeOrderM
                   <CardContent className="p-4">
                     <h4 className="font-medium mb-3">Refraction</h4>
                     <div className="grid grid-cols-2 gap-4">
-                      {order.refraction_od && (
-                        <div>
-                          <div className="text-xs text-muted-foreground mb-1">OD (Right)</div>
-                          <div className="font-medium">{order.refraction_od}</div>
-                        </div>
-                      )}
-                      {order.refraction_os && (
-                        <div>
-                          <div className="text-xs text-muted-foreground mb-1">OS (Left)</div>
-                          <div className="font-medium">{order.refraction_os}</div>
-                        </div>
-                      )}
+                      <div>
+                        <div className="text-xs text-muted-foreground mb-1">OD (Right)</div>
+                        <div className="font-medium">{order.refraction_od || '—'}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-muted-foreground mb-1">OS (Left)</div>
+                        <div className="font-medium">{order.refraction_os || '—'}</div>
+                      </div>
                     </div>
                   </CardContent>
                 </Card>
@@ -172,18 +162,14 @@ export function ViewEyeOrderModal({ open, onOpenChange, orderId }: ViewEyeOrderM
                   <CardContent className="p-4">
                     <h4 className="font-medium mb-3">Intraocular Pressure (mmHg)</h4>
                     <div className="grid grid-cols-2 gap-4">
-                      {order.iop_od && (
-                        <div>
-                          <div className="text-xs text-muted-foreground mb-1">OD (Right)</div>
-                          <div className="font-medium">{order.iop_od}</div>
-                        </div>
-                      )}
-                      {order.iop_os && (
-                        <div>
-                          <div className="text-xs text-muted-foreground mb-1">OS (Left)</div>
-                          <div className="font-medium">{order.iop_os}</div>
-                        </div>
-                      )}
+                      <div>
+                        <div className="text-xs text-muted-foreground mb-1">OD (Right)</div>
+                        <div className="font-medium">{order.iop_od || '—'}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-muted-foreground mb-1">OS (Left)</div>
+                        <div className="font-medium">{order.iop_os || '—'}</div>
+                      </div>
                     </div>
                   </CardContent>
                 </Card>

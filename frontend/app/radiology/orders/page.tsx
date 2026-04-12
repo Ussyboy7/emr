@@ -26,7 +26,7 @@ import {
   ClipboardList, Search, Eye, Calendar, Clock, Activity, CheckCircle2,
   FileBarChart, AlertTriangle, ScanLine, User, ArrowRight,
   CalendarDays, Loader2, Play, FileText,
-  Beaker, Building2, Truck, RotateCcw, XCircle, TestTube, Plus
+  Beaker, Building2, Truck, RotateCcw, XCircle, TestTube, Plus, X
 } from 'lucide-react';
 
 const formatOrderedAtDisplay = (isoString: string | undefined): string => {
@@ -212,6 +212,85 @@ export default function RadiologyOrdersPage() {
     }
   };
 
+  // Load Imaging Partners
+  const loadImagingPartners = useCallback(async () => {
+    setLoadingImagingPartners(true);
+    try {
+      const res = await radiologyService.getImagingPartners({ page_size: 200 });
+      setImagingPartners(res.results || []);
+    } catch (e: any) {
+      console.error('getImagingPartners failed', e?.status, e?.body, e);
+      toast.error('Failed to load imaging partners');
+      setImagingPartners([]);
+    } finally {
+      setLoadingImagingPartners(false);
+    }
+  }, []);
+
+  // Add Imaging Partner
+  const handleAddPartner = async () => {
+    if (!newPartnerName.trim()) {
+      toast.error('Partner name is required');
+      return;
+    }
+
+    setIsSubmittingPartner(true);
+    try {
+      const newPartner = await radiologyService.createImagingPartner({
+        name: newPartnerName.trim(),
+        code: newPartnerCode.trim() || undefined,
+        email: newPartnerEmail.trim() || undefined,
+        phone: newPartnerPhone.trim() || undefined,
+        is_active: true,
+        sort_order: imagingPartners.length
+      });
+
+      setImagingPartners((prev) => [...prev, newPartner]);
+      toast.success(`Imaging partner "${newPartner.name}" added successfully`);
+
+      setNewPartnerName('');
+      setNewPartnerCode('');
+      setNewPartnerEmail('');
+      setNewPartnerPhone('');
+      setIsSubmittingPartner(false);
+      setIsAddPartnerDialogOpen(false);
+    } catch (error: any) {
+      console.error('Add imaging partner error:', error);
+      toast.error(error?.message || 'Failed to add imaging partner');
+      setIsSubmittingPartner(false);
+    }
+  };
+
+  // Delete Imaging Partner
+  const handleDeletePartner = (partnerId: number, partnerName: string) => {
+    setDeleteConfirmPartnerId(partnerId);
+    setDeleteConfirmPartnerName(partnerName);
+  };
+
+  // Confirm Delete Imaging Partner
+  const confirmDeletePartner = async () => {
+    if (deleteConfirmPartnerId === null) return;
+
+    setDeletingPartnerId(deleteConfirmPartnerId);
+    try {
+      await radiologyService.deleteImagingPartner(deleteConfirmPartnerId);
+      setImagingPartners((prev) => prev.filter((p) => p.id !== deleteConfirmPartnerId));
+      toast.success(`Imaging partner "${deleteConfirmPartnerName}" deleted successfully`);
+    } catch (error: any) {
+      console.error('Delete imaging partner error:', error);
+      toast.error(error?.message || 'Failed to delete imaging partner');
+    } finally {
+      setDeletingPartnerId(null);
+      setDeleteConfirmPartnerId(null);
+      setDeleteConfirmPartnerName('');
+    }
+  };
+
+  // Load imaging partners on component mount
+  useEffect(() => {
+    loadImagingPartners();
+  }, [loadImagingPartners]);
+
   // Result entry state (like lab)
   const [selectedOrder, setSelectedOrder] = useState<any>(null);
   const [selectedStudy, setSelectedStudy] = useState<any>(null);
@@ -231,6 +310,20 @@ export default function RadiologyOrdersPage() {
   const [isProcessDialogOpen, setIsProcessDialogOpen] = useState(false);
   const [processingMethod, setProcessingMethod] = useState<'in_house' | 'outsourced'>('in_house');
   const [outsourcedLab, setOutsourcedLab] = useState('');
+
+  // Imaging Partners management (like lab partners)
+  const [imagingPartners, setImagingPartners] = useState<any[]>([]);
+  const [loadingImagingPartners, setLoadingImagingPartners] = useState(false);
+  const [isAddPartnerDialogOpen, setIsAddPartnerDialogOpen] = useState(false);
+  const [newPartnerName, setNewPartnerName] = useState('');
+  const [newPartnerCode, setNewPartnerCode] = useState('');
+  const [newPartnerEmail, setNewPartnerEmail] = useState('');
+  const [newPartnerPhone, setNewPartnerPhone] = useState('');
+  const [isSubmittingPartner, setIsSubmittingPartner] = useState(false);
+  const [isManagePartnersDialogOpen, setIsManagePartnersDialogOpen] = useState(false);
+  const [deletingPartnerId, setDeletingPartnerId] = useState<number | null>(null);
+  const [deleteConfirmPartnerId, setDeleteConfirmPartnerId] = useState<number | null>(null);
+  const [deleteConfirmPartnerName, setDeleteConfirmPartnerName] = useState<string>('');
 
   const [isAddStudyDialogOpen, setIsAddStudyDialogOpen] = useState(false);
   const [templates, setTemplates] = useState<any[]>([]);
@@ -954,12 +1047,45 @@ export default function RadiologyOrdersPage() {
 
                   {processingMethod === 'outsourced' && (
                     <div className="space-y-2">
-                      <Label>Select Lab Partner *</Label>
-                      <Input
-                        placeholder="Enter lab partner name"
+                      <div className="flex items-center justify-between">
+                        <Label>Select Imaging Partner *</Label>
+                        <div className="flex gap-2">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setIsManagePartnersDialogOpen(true)}
+                            className="text-xs h-auto p-1"
+                          >
+                            ⚙️ Manage
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setIsAddPartnerDialogOpen(true)}
+                            className="text-xs h-auto p-1"
+                          >
+                            + Add Partner
+                          </Button>
+                        </div>
+                      </div>
+                      <Select
                         value={outsourcedLab}
-                        onChange={(e) => setOutsourcedLab(e.target.value)}
-                      />
+                        onValueChange={setOutsourcedLab}
+                        disabled={loadingImagingPartners}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder={loadingImagingPartners ? 'Loading partners…' : 'Choose an imaging partner…'} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {imagingPartners.map((p) => (
+                            <SelectItem key={p.id} value={p.name}>
+                              {p.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                   )}
                 </div>
@@ -975,7 +1101,8 @@ export default function RadiologyOrdersPage() {
                 disabled={isSubmittingResults || (processingMethod === 'outsourced' && !outsourcedLab.trim())}
                 className="bg-blue-500 hover:bg-blue-600"
               >
-                {isSubmittingResults ? 'Starting...' : 'Start Processing'}
+                {isSubmittingResults ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Play className="h-4 w-4 mr-2" />}
+                Start Processing
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -1545,6 +1672,209 @@ export default function RadiologyOrdersPage() {
               </Button>
               <Button onClick={handleAddStudy} disabled={isAddingStudy || !selectedTemplate} className="bg-amber-500 hover:bg-amber-600">
                 {isAddingStudy ? 'Adding...' : 'Add Study'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Add Imaging Partner Dialog */}
+        <Dialog open={isAddPartnerDialogOpen} onOpenChange={setIsAddPartnerDialogOpen}>
+          <DialogContent className="w-[95vw] sm:max-w-[400px]">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Plus className="h-5 w-5 text-emerald-500" />
+                Add Imaging Partner
+              </DialogTitle>
+              <DialogDescription>
+                Add a new external imaging center as an outsourced partner for study processing.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4 py-2">
+              <div className="space-y-1">
+                <Label htmlFor="partner-name">Partner Name *</Label>
+                <Input
+                  id="partner-name"
+                  value={newPartnerName}
+                  onChange={(e) => setNewPartnerName(e.target.value)}
+                  placeholder="e.g. Metro Diagnostic Center"
+                  disabled={isSubmittingPartner}
+                />
+              </div>
+
+              <div className="space-y-1">
+                <Label htmlFor="partner-code">Code (optional)</Label>
+                <Input
+                  id="partner-code"
+                  value={newPartnerCode}
+                  onChange={(e) => setNewPartnerCode(e.target.value)}
+                  placeholder="e.g. METRO"
+                  disabled={isSubmittingPartner}
+                />
+              </div>
+
+              <div className="space-y-1">
+                <Label htmlFor="partner-email">Email (optional)</Label>
+                <Input
+                  id="partner-email"
+                  type="email"
+                  value={newPartnerEmail}
+                  onChange={(e) => setNewPartnerEmail(e.target.value)}
+                  placeholder="e.g. contact@metro.diagnostics"
+                  disabled={isSubmittingPartner}
+                />
+              </div>
+
+              <div className="space-y-1">
+                <Label htmlFor="partner-phone">Phone (optional)</Label>
+                <Input
+                  id="partner-phone"
+                  value={newPartnerPhone}
+                  onChange={(e) => setNewPartnerPhone(e.target.value)}
+                  placeholder="e.g. +1-800-METRO"
+                  disabled={isSubmittingPartner}
+                />
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => setIsAddPartnerDialogOpen(false)}
+                disabled={isSubmittingPartner}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleAddPartner}
+                disabled={isSubmittingPartner || !newPartnerName.trim()}
+                className="bg-emerald-600 hover:bg-emerald-700"
+              >
+                {isSubmittingPartner ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Adding...
+                  </>
+                ) : (
+                  <>
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add Partner
+                  </>
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Manage Imaging Partners Dialog */}
+        <Dialog open={isManagePartnersDialogOpen} onOpenChange={setIsManagePartnersDialogOpen}>
+          <DialogContent className="w-[95vw] sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Building2 className="h-5 w-5 text-blue-500" />
+                Manage Imaging Partners
+              </DialogTitle>
+              <DialogDescription>
+                View and manage all imaging partners for outsourced study processing.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-3 py-2">
+              {imagingPartners.length === 0 ? (
+                <div className="text-center py-6 text-muted-foreground">
+                  <p>No imaging partners added yet.</p>
+                  <p className="text-xs mt-1">Click "Add Partner" to create one.</p>
+                </div>
+              ) : (
+                imagingPartners.map((partner) => (
+                  <div key={partner.id} className="flex items-start justify-between p-3 rounded-lg border">
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-sm">{partner.name}</p>
+                      {partner.code && (
+                        <p className="text-xs text-muted-foreground">Code: {partner.code}</p>
+                      )}
+                      {partner.email && (
+                        <p className="text-xs text-muted-foreground">📧 {partner.email}</p>
+                      )}
+                      {partner.phone && (
+                        <p className="text-xs text-muted-foreground">📞 {partner.phone}</p>
+                      )}
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleDeletePartner(partner.id, partner.name)}
+                      disabled={deletingPartnerId === partner.id}
+                      className="ml-2 text-red-600 hover:text-red-700 hover:bg-red-50"
+                    >
+                      {deletingPartnerId === partner.id ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <X className="h-4 w-4" />
+                      )}
+                    </Button>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => setIsManagePartnersDialogOpen(false)}
+              >
+                Close
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Delete Imaging Partner Confirmation Dialog */}
+        <Dialog open={deleteConfirmPartnerId !== null} onOpenChange={(open) => {
+          if (!open) {
+            setDeleteConfirmPartnerId(null);
+            setDeleteConfirmPartnerName('');
+          }
+        }}>
+          <DialogContent className="w-[95vw] sm:max-w-[400px]">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5 text-red-500" />
+                Delete Imaging Partner
+              </DialogTitle>
+              <DialogDescription>
+                Are you sure you want to delete "{deleteConfirmPartnerName}"?
+              </DialogDescription>
+            </DialogHeader>
+
+            <p className="text-sm text-muted-foreground py-2">
+              This action will remove the imaging partner from the system. Studies already assigned to this partner will not be affected.
+            </p>
+
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setDeleteConfirmPartnerId(null);
+                  setDeleteConfirmPartnerName('');
+                }}
+                disabled={deletingPartnerId === deleteConfirmPartnerId}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={confirmDeletePartner}
+                disabled={deletingPartnerId === deleteConfirmPartnerId}
+              >
+                {deletingPartnerId === deleteConfirmPartnerId ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  'Delete'
+                )}
               </Button>
             </DialogFooter>
           </DialogContent>

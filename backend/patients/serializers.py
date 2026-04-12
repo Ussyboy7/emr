@@ -39,12 +39,13 @@ class PatientSerializer(serializers.ModelSerializer):
         return None
 
     def _resolve_location_clinic(self, location_str):
-        """Resolve location_clinic from location string when clinic exists."""
+        """Resolve location_clinic from facility name or numeric facility id."""
         if not location_str:
             return None
         try:
-            from organization.models import Clinic
-            return Clinic.objects.filter(name=location_str, is_active=True).first()
+            from organization.utils import resolve_facility_from_location_value
+
+            return resolve_facility_from_location_value(location_str)
         except Exception:
             return None
 
@@ -218,12 +219,13 @@ class VisitSerializer(serializers.ModelSerializer):
         return value
 
     def _resolve_location_clinic(self, location_str):
-        """Resolve location_clinic from location string when clinic exists."""
+        """Resolve location_clinic from facility name or numeric facility id."""
         if not location_str:
             return None
         try:
-            from organization.models import Clinic
-            return Clinic.objects.filter(name=location_str, is_active=True).first()
+            from organization.utils import resolve_facility_from_location_value
+
+            return resolve_facility_from_location_value(location_str)
         except Exception:
             return None
 

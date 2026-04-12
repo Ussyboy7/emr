@@ -24,23 +24,27 @@ import {
 import { StandardPagination } from '@/components/StandardPagination';
 import { CustomDateRangeButton } from '@/components/CustomDateRangeButton';
 import { AdvancedDateRangeDialog } from '@/components/AdvancedDateRangeDialog';
-import { getAllClinicsWithAll, CLINICS } from '@/lib/constants/clinics';
+import {
+  buildVisitClinicFilterOptions,
+  ALL_CLINICS_FILTER_LABEL,
+} from '@/lib/constants/clinics';
 import {
   normalizeClinicName,
   getVisitServiceClinicsDisplay,
 } from '@/lib/utils/clinic-utils';
 import { useLocationOptions } from '@/lib/hooks/use-location-options';
+import { useOutpatientClinicTypes } from '@/lib/hooks/use-outpatient-clinic-types';
 import { ConsultationReportModal } from '@/components/consultation/ConsultationReportModal';
 import { loadConsultationReportSession, type ConsultationReportSession } from '@/lib/consultation-report';
-
-// NPA Clinics - standardized list
-const clinics = getAllClinicsWithAll();
-
-// Visits data will be loaded from API
 
 export default function VisitsPage() {
   const router = useRouter();
   const { locations: locationOptions } = useLocationOptions();
+  const { names: opdClinicNames } = useOutpatientClinicTypes();
+  const clinicFilterOptions = useMemo(
+    () => buildVisitClinicFilterOptions(opdClinicNames),
+    [opdClinicNames]
+  );
   const [visits, setVisits] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -318,7 +322,7 @@ export default function VisitsPage() {
       
       const updateData: any = {
         visit_type: editForm.type || undefined,
-        clinic: editForm.clinic ? normalizeClinicName(editForm.clinic) : undefined,
+        clinic: editForm.clinic ? normalizeClinicName(editForm.clinic, opdClinicNames) : undefined,
         location: editForm.location || undefined,
         clinical_notes: editForm.notes || undefined,
       };
@@ -449,6 +453,7 @@ export default function VisitsPage() {
       'follow_up': 'Follow-up',
       'emergency': 'Emergency',
       'routine': 'Routine Checkup',
+      'responsility_form': 'Responsility Form',
     };
     return typeMap[type] || type;
   };
@@ -459,6 +464,7 @@ export default function VisitsPage() {
       'follow_up': 'border-blue-500/50 text-blue-600 dark:text-blue-400',
       'emergency': 'border-rose-500/50 text-rose-600 dark:text-rose-400',
       'routine': 'border-violet-500/50 text-violet-600 dark:text-violet-400',
+      'responsility_form': 'border-yellow-500/50 text-yellow-600 dark:text-yellow-400',
     };
     return styles[type] || 'border-muted-foreground/50 text-muted-foreground';
   };
@@ -468,6 +474,7 @@ export default function VisitsPage() {
       case 'emergency': return 'border-l-rose-500';
       case 'follow_up': return 'border-l-blue-500';
       case 'routine': return 'border-l-violet-500';
+      case 'responsility_form': return 'border-l-yellow-500';
       default: return 'border-l-teal-500';
     }
   };
@@ -584,12 +591,17 @@ export default function VisitsPage() {
                     <SelectItem value="follow_up">Follow-up</SelectItem>
                     <SelectItem value="emergency">Emergency</SelectItem>
                     <SelectItem value="routine">Routine Checkup</SelectItem>
+                    <SelectItem value="responsility_form">Responsility Form</SelectItem>
                   </SelectContent>
                 </Select>
                 <Select value={clinicFilter} onValueChange={setClinicFilter}>
                   <SelectTrigger className="w-[140px]"><SelectValue placeholder="Clinic" /></SelectTrigger>
                   <SelectContent>
-                    {clinics.map(c => <SelectItem key={c} value={c === 'All Clinics' ? 'all' : c}>{c}</SelectItem>)}
+                    {clinicFilterOptions.map((c) => (
+                      <SelectItem key={c} value={c === ALL_CLINICS_FILTER_LABEL ? 'all' : c}>
+                        {c}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -808,6 +820,7 @@ export default function VisitsPage() {
                     <SelectItem value="follow_up">Follow-up</SelectItem>
                     <SelectItem value="emergency">Emergency</SelectItem>
                     <SelectItem value="routine">Routine Checkup</SelectItem>
+                    <SelectItem value="responsility_form">Responsility Form</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -816,7 +829,11 @@ export default function VisitsPage() {
                   <Select value={editForm.clinic} onValueChange={(v) => setEditForm(prev => ({ ...prev, clinic: v }))}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      {CLINICS.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                      {opdClinicNames.map((c) => (
+                        <SelectItem key={c} value={c}>
+                          {c}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>

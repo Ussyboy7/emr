@@ -21,9 +21,9 @@ import {
   DoorOpen, Search, Plus, Eye, Edit, Trash2, CheckCircle2, XCircle, Clock,
   Loader2, Save, MapPin, Stethoscope, Users, Activity, Settings
 } from 'lucide-react';
-import { CLINICS } from '@/lib/constants/clinics';
 import { normalizeClinicName } from '@/lib/utils/clinic-utils';
 import { useLocationOptions } from '@/lib/hooks/use-location-options';
+import { useOutpatientClinicTypes } from '@/lib/hooks/use-outpatient-clinic-types';
 
 interface Room {
   id: string | number;
@@ -45,12 +45,10 @@ interface Room {
 
 // Rooms data will be loaded from API
 
-// NPA Clinics (for Specialty/Clinic Type) - standardized list
-const clinics = CLINICS;
-
 const roomTypes: string[] = ['Consultation', 'Procedure', 'Emergency', 'Examination'];
 
 export default function RoomManagementPage() {
+  const { names: opdClinicNames } = useOutpatientClinicTypes();
   const { locations: locationOptions } = useLocationOptions({ includeAll: true });
   const [rooms, setRooms] = useState<Room[]>([]);
   const [loading, setLoading] = useState(true);
@@ -206,7 +204,7 @@ export default function RoomManagementPage() {
         room_number: `ROOM-${String(rooms.length + 1).padStart(3, '0')}`, // Generate room number
         location: formData.location!,
         floor: formData.floor || '',
-        specialty: normalizeClinicName(formData.specialty!),
+        specialty: normalizeClinicName(formData.specialty!, opdClinicNames),
         capacity: formData.capacity || 2,
         status: backendStatus as 'active' | 'inactive' | 'maintenance',
       });
@@ -255,7 +253,7 @@ export default function RoomManagementPage() {
         name: formData.name,
         location: formData.location || '',
         floor: formData.floor || '',
-        specialty: normalizeClinicName(formData.specialty || ''),
+        specialty: normalizeClinicName(formData.specialty || '', opdClinicNames),
         capacity: formData.capacity || 2,
         status: backendStatus as 'active' | 'inactive' | 'maintenance',
       });
@@ -666,7 +664,11 @@ export default function RoomManagementPage() {
                   <Select value={formData.specialty} onValueChange={handleSpecialtyChange}>
                     <SelectTrigger><SelectValue placeholder="Select specialty" /></SelectTrigger>
                     <SelectContent>
-                      {clinics.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                      {opdClinicNames.map((c) => (
+                        <SelectItem key={c} value={c}>
+                          {c}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
@@ -746,7 +748,11 @@ export default function RoomManagementPage() {
                   <Select value={formData.specialty} onValueChange={handleSpecialtyChange}>
                     <SelectTrigger><SelectValue placeholder="Select specialty" /></SelectTrigger>
                     <SelectContent>
-                      {clinics.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                      {opdClinicNames.map((c) => (
+                        <SelectItem key={c} value={c}>
+                          {c}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>

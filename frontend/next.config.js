@@ -20,6 +20,17 @@ const contentSecurityPolicy = [
 const nextConfig = {
   reactStrictMode: true,
   transpilePackages: [],
+  /**
+   * In dev, proxy same-origin `/api/*` to Django so a mis-set `NEXT_PUBLIC_API_URL`
+   * (e.g. `http://localhost:3001/api`) still reaches the backend on :8001.
+   */
+  async rewrites() {
+    if (process.env.NODE_ENV !== "development") {
+      return [];
+    }
+    const target = (process.env.API_PROXY_TARGET || "http://127.0.0.1:8001").replace(/\/$/, "");
+    return [{ source: "/api/:path*", destination: `${target}/api/:path*` }];
+  },
   images: {
     remotePatterns: [
       {

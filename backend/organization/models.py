@@ -7,7 +7,8 @@ from django.conf import settings
 
 class Clinic(models.Model):
     """
-    Medical clinic within the organization.
+    Physical facility / site (e.g. Bode Thomas Clinic).
+    OPD visit lines (GOPD, Eye Clinic, …) are OutpatientClinicType via FacilityOutpatientClinic.
     """
     
     name = models.CharField(max_length=200, unique=True, db_index=True)
@@ -31,6 +32,55 @@ class Clinic(models.Model):
     
     def __str__(self):
         return self.name
+
+
+class OutpatientClinicType(models.Model):
+    """Master catalogue of visit-level OPD clinics (GOPD, Eye Clinic, Dental, …)."""
+
+    name = models.CharField(max_length=200, unique=True, db_index=True)
+    code = models.SlugField(max_length=80, unique=True, db_index=True)
+    description = models.TextField(blank=True)
+    is_active = models.BooleanField(default=True, db_index=True)
+    sort_order = models.PositiveSmallIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "outpatient_clinic_types"
+        ordering = ["sort_order", "name"]
+        verbose_name = "Visit clinic (OPD)"
+        verbose_name_plural = "Visit clinics (OPD)"
+
+    def __str__(self):
+        return self.name
+
+
+class FacilityOutpatientClinic(models.Model):
+    """Which OPD visit clinic types are offered at a facility."""
+
+    facility = models.ForeignKey(
+        Clinic,
+        on_delete=models.CASCADE,
+        related_name="outpatient_offerings",
+    )
+    clinic_type = models.ForeignKey(
+        OutpatientClinicType,
+        on_delete=models.CASCADE,
+        related_name="facility_offerings",
+    )
+    is_active = models.BooleanField(default=True, db_index=True)
+    sort_order = models.PositiveSmallIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "facility_outpatient_clinics"
+        unique_together = [["facility", "clinic_type"]]
+        ordering = ["sort_order", "clinic_type__name"]
+        indexes = [models.Index(fields=["facility", "is_active"])]
+
+    def __str__(self):
+        return f"{self.facility.name} → {self.clinic_type.name}"
 
 
 class Department(models.Model):

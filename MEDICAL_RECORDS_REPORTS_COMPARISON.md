@@ -53,12 +53,14 @@ This document compares the medical records reports functionality between the `em
    - Backend API: `/api/reports/attendance-summary/`
 
 ##### b) **Clinic Attendance** (`clinic-attendance/page.tsx`)
-   - Specialized clinic reports:
-     - Diamond Club
-     - Sickle Cell Clinic
+   - Specialized clinic reports (canonical OPD names from Admin → Visit clinics):
+     - Diamond
+     - Sickle Cell
      - Healthron
      - Eye Clinic
      - Physiotherapy
+     - GOPD
+     - Dental
    - Filtering by clinic and date range
    - Export capabilities
 
@@ -98,8 +100,8 @@ This document compares the medical records reports functionality between the `em
    - ICD-10 code statistics
    - Time-series analysis
 
-##### i) **G.O.P Attendance** (`gop-attendance/page.tsx`)
-   - General Outpatient attendance
+##### i) **GOPD Attendance** (`gop-attendance/page.tsx`)
+   - GOPD (general outpatient) attendance
    - By patient category
    - Monthly/Yearly trends
 
@@ -194,7 +196,7 @@ This document compares the medical records reports functionality between the `em
 1. **Clinic Attendance** - Specialized clinics
 2. **Disease Pattern** - Analytics and trends
 3. **Referral Tracking** - Referral management
-4. **G.O.P Attendance** - Outpatient statistics
+4. **GOPD Attendance** - GOPD / general outpatient statistics
 5. **Weekend Call Duty** - After-hours reporting
 6. **Radiological Services** - Imaging statistics
 

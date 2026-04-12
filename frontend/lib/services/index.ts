@@ -51,7 +51,15 @@ export type {
   PhysioSession,
   PhysioTemplate,
 } from './physio-service';
-export type { User, Role, Clinic, Department, AuditLog } from './admin-service';
+export type {
+  User,
+  Role,
+  Clinic,
+  Department,
+  AuditLog,
+  OutpatientClinicType,
+  FacilityVisitClinicRow,
+} from './admin-service';
 export type { Room } from './room-service';
 export type { MedicalCertificate, MedicalCertificatePurpose } from './medical-certificate-service';
 

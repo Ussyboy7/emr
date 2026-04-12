@@ -14,7 +14,7 @@ export interface Appointment {
   doctor_name?: string;
   clinic?: number;
   clinic_name?: string;
-  /** Canonical clinic names (same list as visits / CLINICS constant) */
+  /** OPD clinic names — align with organization OutpatientClinicType (API). */
   clinics?: string[];
   room?: number;
   room_name?: string;

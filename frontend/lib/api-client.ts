@@ -19,9 +19,45 @@ const LEGACY_ORIGINAL_ACCESS_TOKEN_KEY = "npa_ecm_original_access";
 const LEGACY_ORIGINAL_REFRESH_TOKEN_KEY = "npa_ecm_original_refresh";
 const LEGACY_ORIGINAL_ACCESS_EXP_KEY = "npa_ecm_original_access_exp";
 
-const getBaseUrl = () => {
-  const base = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8001/api";
-  return base.endsWith("/") ? base.slice(0, -1) : base;
+/**
+ * API root used by fetch() (must hit Django, not the Next.js dev server).
+ * - Treats empty `NEXT_PUBLIC_API_URL` as unset (common `??` pitfall: "" is not nullish).
+ * - Rewrites common mistake `http://localhost:3001/api` → `http://localhost:8001/api`.
+ * - If the value is only `http://localhost:8001` (no `/api`), appends `/api` so paths like
+ *   `/organization/...` resolve instead of returning DRF 404 "Not found.".
+ */
+const getBaseUrl = (): string => {
+  const fallback = "http://localhost:8001/api";
+  let raw = process.env.NEXT_PUBLIC_API_URL;
+  if (raw == null || String(raw).trim() === "") {
+    raw = fallback;
+  }
+  let base = String(raw).trim();
+  if (!base) {
+    base = fallback;
+  }
+  if (base.includes("localhost:3001") || base.includes("127.0.0.1:3001")) {
+    base = base
+      .replace(/localhost:3001/g, "localhost:8001")
+      .replace(/127\.0\.0\.1:3001/g, "127.0.0.1:8001");
+  }
+  const normalized = base.endsWith("/") ? base.slice(0, -1) : base;
+  const hasApiMount = /\/api(\/v1)?$/i.test(normalized);
+  if (!hasApiMount) {
+    try {
+      const parsed = new URL(normalized);
+      const local = parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1";
+      const djangoPort =
+        parsed.port === "8001" || parsed.port === "8000" || parsed.port === "8080";
+      const pathIsRoot = parsed.pathname === "" || parsed.pathname === "/";
+      if (local && djangoPort && pathIsRoot) {
+        return `${normalized}/api`;
+      }
+    } catch {
+      /* leave normalized as-is */
+    }
+  }
+  return normalized;
 };
 
 const isBrowser = () => typeof window !== "undefined";
@@ -634,6 +670,10 @@ export const login = async (username: string, password: string): Promise<LoginRe
         throw new Error("Account access denied");
       } else if (response.status === 429) {
         throw new Error("Too many login attempts. Please try again later");
+      } else if (response.status >= 500) {
+        throw new Error(
+          `Sign-in service error (${response.status}). Check that the API is running and NEXT_PUBLIC_API_URL matches the backend (default ${getBaseUrl()}).`
+        );
       } else {
         throw new Error("Login failed. Please try again");
       }
@@ -754,9 +794,10 @@ export const impersonateUser = async (username: string) => {
  * Get the media base URL from the API URL configuration
  */
 const getMediaBaseUrl = () => {
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8001/api";
-  // Remove '/api' from the end to get the base URL for media
-  return apiUrl.endsWith("/api") ? apiUrl.slice(0, -4) : apiUrl;
+  const apiRoot = getBaseUrl();
+  if (apiRoot.endsWith("/api")) return apiRoot.slice(0, -4);
+  if (apiRoot.endsWith("/api/v1")) return apiRoot.slice(0, -7);
+  return apiRoot;
 };
 
 /**

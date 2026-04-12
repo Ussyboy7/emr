@@ -1,6 +1,7 @@
 """
 Patient models for the EMR system.
 """
+
 from django.db import models
 from django.core.validators import RegexValidator, MinValueValidator, MaxValueValidator
 from django.utils import timezone
@@ -12,64 +13,66 @@ class Patient(models.Model):
     Patient demographic and personal information.
     Supports Employee, Retiree, NonNPA, and Dependent categories.
     """
-    
+
     CATEGORY_CHOICES = [
-        ('employee', 'Employee'),
-        ('retiree', 'Retiree'),
-        ('nonnpa', 'NonNPA'),
-        ('dependent', 'Dependent'),
+        ("employee", "Employee"),
+        ("retiree", "Retiree"),
+        ("nonnpa", "NonNPA"),
+        ("dependent", "Dependent"),
     ]
-    
+
     GENDER_CHOICES = [
-        ('male', 'Male'),
-        ('female', 'Female'),
+        ("male", "Male"),
+        ("female", "Female"),
     ]
-    
+
     MARITAL_STATUS_CHOICES = [
-        ('single', 'Single'),
-        ('married', 'Married'),
-        ('divorced', 'Divorced'),
-        ('widowed', 'Widowed'),
+        ("single", "Single"),
+        ("married", "Married"),
+        ("divorced", "Divorced"),
+        ("widowed", "Widowed"),
     ]
-    
+
     BLOOD_GROUP_CHOICES = [
-        ('A+', 'A+'),
-        ('A-', 'A-'),
-        ('B+', 'B+'),
-        ('B-', 'B-'),
-        ('AB+', 'AB+'),
-        ('AB-', 'AB-'),
-        ('O+', 'O+'),
-        ('O-', 'O-'),
+        ("A+", "A+"),
+        ("A-", "A-"),
+        ("B+", "B+"),
+        ("B-", "B-"),
+        ("AB+", "AB+"),
+        ("AB-", "AB-"),
+        ("O+", "O+"),
+        ("O-", "O-"),
     ]
-    
+
     GENOTYPE_CHOICES = [
-        ('AA', 'AA'),
-        ('AS', 'AS'),
-        ('SS', 'SS'),
-        ('AC', 'AC'),
-        ('SC', 'SC'),
+        ("AA", "AA"),
+        ("AS", "AS"),
+        ("SS", "SS"),
+        ("AC", "AC"),
+        ("SC", "SC"),
     ]
-    
+
     TITLE_CHOICES = [
-        ('mr', 'Mr'),
-        ('mrs', 'Mrs'),
-        ('ms', 'Ms'),
-        ('miss', 'Miss'),
-        ('dr', 'Dr'),
-        ('chief', 'Chief'),
-        ('engr', 'Engr'),
-        ('prof', 'Prof'),
-        ('alhaji', 'Alhaji'),
-        ('hajia', 'Hajia'),
-        ('mallam', 'Mallam'),
-        ('lady', 'Lady'),
+        ("mr", "Mr"),
+        ("mrs", "Mrs"),
+        ("ms", "Ms"),
+        ("miss", "Miss"),
+        ("dr", "Dr"),
+        ("chief", "Chief"),
+        ("engr", "Engr"),
+        ("prof", "Prof"),
+        ("alhaji", "Alhaji"),
+        ("hajia", "Hajia"),
+        ("mallam", "Mallam"),
+        ("lady", "Lady"),
     ]
-    
+
     # Patient Identification
     patient_id = models.CharField(max_length=50, unique=True, db_index=True)
-    category = models.CharField(max_length=20, choices=CATEGORY_CHOICES, default='employee')
-    
+    category = models.CharField(
+        max_length=20, choices=CATEGORY_CHOICES, default="employee"
+    )
+
     # Personal Details
     title = models.CharField(max_length=20, choices=TITLE_CHOICES, blank=True)
     surname = models.CharField(max_length=100)
@@ -77,45 +80,57 @@ class Patient(models.Model):
     middle_name = models.CharField(max_length=100, blank=True)
     gender = models.CharField(max_length=10, choices=GENDER_CHOICES)
     date_of_birth = models.DateField()
-    marital_status = models.CharField(max_length=20, choices=MARITAL_STATUS_CHOICES, blank=True)
+    marital_status = models.CharField(
+        max_length=20, choices=MARITAL_STATUS_CHOICES, blank=True
+    )
     religion = models.CharField(max_length=50, blank=True)
     tribe = models.CharField(max_length=50, blank=True)
-    occupation = models.CharField(max_length=100, blank=True, null=True)  # For Dependent and Retiree only
-    photo = models.ImageField(upload_to='patients/photos/', blank=True, null=True)
-    
+    occupation = models.CharField(
+        max_length=100, blank=True, null=True
+    )  # For Dependent and Retiree only
+    photo = models.ImageField(upload_to="patients/photos/", blank=True, null=True)
+
     # Employee/Retiree Specific
-    personal_number = models.CharField(max_length=50, blank=True, null=True, db_index=True)
-    employee_type = models.CharField(max_length=20, blank=True, null=True)  # Officer, Staff
+    personal_number = models.CharField(
+        max_length=50, blank=True, null=True, db_index=True
+    )
+    employee_type = models.CharField(
+        max_length=20, blank=True, null=True
+    )  # Officer, Staff
     division = models.CharField(max_length=100, blank=True, null=True)
     location = models.CharField(max_length=100, blank=True, null=True)
     location_clinic = models.ForeignKey(
-        'organization.Clinic',
+        "organization.Clinic",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name='patients',
-        help_text='Clinic/facility from Clinics & Departments (replaces free-text location when set)',
+        related_name="patients",
+        help_text="Clinic/facility from Clinics & Departments (replaces free-text location when set)",
     )
-    
+
     # NonNPA Specific
-    nonnpa_type = models.CharField(max_length=50, blank=True, null=True)  # Police, IT, NYSC, etc.
-    
+    nonnpa_type = models.CharField(
+        max_length=50, blank=True, null=True
+    )  # Police, IT, NYSC, etc.
+
     # Dependent Specific
-    dependent_type = models.CharField(max_length=50, blank=True, null=True)  # Employee Dependent, Retiree Dependent
+    dependent_type = models.CharField(
+        max_length=50, blank=True, null=True
+    )  # Employee Dependent, Retiree Dependent
     principal_staff = models.ForeignKey(
-        'self',
+        "self",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name='dependents',
-        limit_choices_to={'category__in': ['employee', 'retiree']}
+        related_name="dependents",
+        limit_choices_to={"category__in": ["employee", "retiree"]},
     )
-    
+
     # Contact Information
     email = models.EmailField(blank=True)
     phone_regex = RegexValidator(
-        regex=r'^\+?1?\d{9,15}$',
-        message="Phone number must be entered in the format: '+999999999'. Up to 15 digits allowed."
+        regex=r"^\+?1?\d{9,15}$",
+        message="Phone number must be entered in the format: '+999999999'. Up to 15 digits allowed.",
     )
     phone = models.CharField(validators=[phone_regex], max_length=17, blank=True)
     state_of_residence = models.CharField(max_length=100, blank=True)
@@ -123,12 +138,16 @@ class Patient(models.Model):
     state_of_origin = models.CharField(max_length=100, blank=True)
     lga = models.CharField(max_length=100, blank=True)
     permanent_address = models.TextField(blank=True)
-    
+
     # Medical Information
-    blood_group = models.CharField(max_length=5, choices=BLOOD_GROUP_CHOICES, blank=True)
+    blood_group = models.CharField(
+        max_length=5, choices=BLOOD_GROUP_CHOICES, blank=True
+    )
     genotype = models.CharField(max_length=5, choices=GENOTYPE_CHOICES, blank=True)
-    allergies = models.TextField(blank=True, help_text="Known allergies (comma-separated or newline-separated)")
-    
+    allergies = models.TextField(
+        blank=True, help_text="Known allergies (comma-separated or newline-separated)"
+    )
+
     # Next of Kin
     nok_surname = models.CharField(max_length=100, blank=True)
     nok_first_name = models.CharField(max_length=100, blank=True)
@@ -136,31 +155,31 @@ class Patient(models.Model):
     nok_relationship = models.CharField(max_length=50, blank=True)
     nok_address = models.TextField(blank=True)
     nok_phone = models.CharField(validators=[phone_regex], max_length=17, blank=True)
-    
+
     # Metadata
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     created_by = models.ForeignKey(
-        'accounts.User',
+        "accounts.User",
         on_delete=models.SET_NULL,
         null=True,
-        related_name='created_patients'
+        related_name="created_patients",
     )
     is_active = models.BooleanField(default=True)
-    
+
     class Meta:
-        db_table = 'patients'
-        ordering = ['-created_at']
+        db_table = "patients"
+        ordering = ["-created_at"]
         indexes = [
-            models.Index(fields=['patient_id']),
-            models.Index(fields=['personal_number']),
-            models.Index(fields=['category']),
-            models.Index(fields=['surname', 'first_name']),
+            models.Index(fields=["patient_id"]),
+            models.Index(fields=["personal_number"]),
+            models.Index(fields=["category"]),
+            models.Index(fields=["surname", "first_name"]),
         ]
-    
+
     def __str__(self):
         return f"{self.patient_id} - {self.get_full_name()}"
-    
+
     def get_full_name(self):
         """
         Canonical display name from stored fields only (no client-side reordering needed):
@@ -170,18 +189,18 @@ class Patient(models.Model):
         if self.title:
             title_lower = str(self.title).lower().strip()
             title_map = {
-                'mr': 'Mr',
-                'mrs': 'Mrs',
-                'ms': 'Ms',
-                'miss': 'Miss',
-                'dr': 'Dr',
-                'chief': 'Chief',
-                'engr': 'Engr',
-                'prof': 'Prof',
-                'alhaji': 'Alhaji',
-                'hajia': 'Hajia',
-                'mallam': 'Mallam',
-                'lady': 'Lady',
+                "mr": "Mr",
+                "mrs": "Mrs",
+                "ms": "Ms",
+                "miss": "Miss",
+                "dr": "Dr",
+                "chief": "Chief",
+                "engr": "Engr",
+                "prof": "Prof",
+                "alhaji": "Alhaji",
+                "hajia": "Hajia",
+                "mallam": "Mallam",
+                "lady": "Lady",
             }
             title_display = title_map.get(title_lower, str(self.title).title())
 
@@ -191,10 +210,10 @@ class Patient(models.Model):
                 s = str(value).strip()
                 if s:
                     segments.append(s)
-        core = ' '.join(segments)
+        core = " ".join(segments)
 
         if title_display and core:
-            return f'{title_display} {core}'
+            return f"{title_display} {core}"
         if title_display:
             return title_display
         return core
@@ -219,7 +238,7 @@ class Patient(models.Model):
             return 0, 0
 
         return years, months
-    
+
     @property
     def age(self):
         """Return completed years for compatibility with existing consumers."""
@@ -238,7 +257,7 @@ class Patient(models.Model):
             return f"{years} year{'s' if years != 1 else ''}"
 
         return f"{years} year{'s' if years != 1 else ''} {months} month{'s' if months != 1 else ''}"
-    
+
     def generate_patient_id(self):
         """
         Generate patient ID based on category:
@@ -249,39 +268,48 @@ class Patient(models.Model):
         """
         # Only generate if this is a new record (no pk) and patient_id is not set
         if not self.pk and not self.patient_id:
-            if self.category == 'employee':
+            if self.category == "employee":
                 if not self.personal_number:
-                    raise ValueError("Personal number is required for Employee patients")
+                    raise ValueError(
+                        "Personal number is required for Employee patients"
+                    )
                 self.patient_id = f"E-{self.personal_number.strip().upper()}"
-            
-            elif self.category == 'retiree':
+
+            elif self.category == "retiree":
                 if not self.personal_number:
                     raise ValueError("Personal number is required for Retiree patients")
                 self.patient_id = f"R-{self.personal_number.strip().upper()}"
-            
-            elif self.category == 'nonnpa':
+
+            elif self.category == "nonnpa":
                 if not self.nonnpa_type:
                     raise ValueError("Non-NPA type is required for Non-NPA patients")
                 # Count existing Non-NPA patients of the same type to get next number
                 count = Patient.objects.filter(
-                    category='nonnpa',
-                    nonnpa_type__iexact=self.nonnpa_type.strip()
+                    category="nonnpa", nonnpa_type__iexact=self.nonnpa_type.strip()
                 ).count()
-                sequence = str(count + 1).zfill(2)  # Zero-padded to 2 digits (01, 02, etc.)
+                sequence = str(count + 1).zfill(
+                    2
+                )  # Zero-padded to 2 digits (01, 02, etc.)
                 self.patient_id = f"NN-{self.nonnpa_type.strip().upper()}-{sequence}"
-            
-            elif self.category == 'dependent':
+
+            elif self.category == "dependent":
                 if not self.principal_staff_id and not self.principal_staff:
-                    raise ValueError("Principal staff is required for Dependent patients")
-                
+                    raise ValueError(
+                        "Principal staff is required for Dependent patients"
+                    )
+
                 # Ensure we have the principal_staff object loaded
                 if self.principal_staff_id and not self.principal_staff:
                     # Reload the principal_staff from database
-                    self.principal_staff = Patient.objects.get(pk=self.principal_staff_id)
+                    self.principal_staff = Patient.objects.get(
+                        pk=self.principal_staff_id
+                    )
 
                 # Validate that principal_staff is an employee or retiree
-                if self.principal_staff.category not in ['employee', 'retiree']:
-                    raise ValueError(f"Principal staff must be an employee or retiree. Found category: {self.principal_staff.category}")
+                if self.principal_staff.category not in ["employee", "retiree"]:
+                    raise ValueError(
+                        f"Principal staff must be an employee or retiree. Found category: {self.principal_staff.category}"
+                    )
 
                 # Ensure principal_staff has a patient_id
                 if not self.principal_staff.patient_id:
@@ -289,17 +317,20 @@ class Patient(models.Model):
                     self.principal_staff.save()
                     # Reload to get the generated patient_id
                     self.principal_staff.refresh_from_db()
-                
+
                 # Determine dependent prefix and base from principal
                 parent_category = self.principal_staff.category
-                base_number = (self.principal_staff.personal_number or "").strip().upper()
+                base_number = (
+                    (self.principal_staff.personal_number or "").strip().upper()
+                )
                 if not base_number:
-                    raise ValueError("Principal personal number is required to generate dependent patient_id")
+                    raise ValueError(
+                        "Principal personal number is required to generate dependent patient_id"
+                    )
                 prefix = "ED" if parent_category == "employee" else "RD"
                 # Count existing dependents for this principal
                 count = Patient.objects.filter(
-                    category='dependent',
-                    principal_staff_id=self.principal_staff.id
+                    category="dependent", principal_staff_id=self.principal_staff.id
                 ).count()
                 sequence = str(count + 1)  # No zero padding
                 self.patient_id = f"{prefix}-{base_number}-{sequence}"
@@ -313,44 +344,46 @@ class Patient(models.Model):
         """
         old_patient_id = self.patient_id
 
-        if self.category == 'employee':
+        if self.category == "employee":
             if not self.personal_number:
                 raise ValueError("Personal number is required for Employee patients")
             self.patient_id = f"E-{self.personal_number.strip().upper()}"
 
-        elif self.category == 'retiree':
+        elif self.category == "retiree":
             if not self.personal_number:
                 raise ValueError("Personal number is required for Retiree patients")
             self.patient_id = f"R-{self.personal_number.strip().upper()}"
 
-        elif self.category == 'nonnpa':
+        elif self.category == "nonnpa":
             if not self.nonnpa_type:
                 raise ValueError("Non-NPA type is required for Non-NPA patients")
             # For existing records, try to preserve the sequence if possible
-            if old_patient_id and old_patient_id.startswith('NN-'):
+            if old_patient_id and old_patient_id.startswith("NN-"):
                 # Keep existing sequence
-                parts = old_patient_id.split('-')
+                parts = old_patient_id.split("-")
                 if len(parts) >= 3:
                     sequence = parts[-1]
-                    self.patient_id = f"NN-{self.nonnpa_type.strip().upper()}-{sequence}"
+                    self.patient_id = (
+                        f"NN-{self.nonnpa_type.strip().upper()}-{sequence}"
+                    )
                 else:
                     # Generate new sequence
                     count = Patient.objects.filter(
-                        category='nonnpa',
-                        nonnpa_type__iexact=self.nonnpa_type.strip()
+                        category="nonnpa", nonnpa_type__iexact=self.nonnpa_type.strip()
                     ).count()
                     sequence = str(count + 1).zfill(2)
-                    self.patient_id = f"NN-{self.nonnpa_type.strip().upper()}-{sequence}"
+                    self.patient_id = (
+                        f"NN-{self.nonnpa_type.strip().upper()}-{sequence}"
+                    )
             else:
                 # Generate new sequence
                 count = Patient.objects.filter(
-                    category='nonnpa',
-                    nonnpa_type__iexact=self.nonnpa_type.strip()
+                    category="nonnpa", nonnpa_type__iexact=self.nonnpa_type.strip()
                 ).count()
                 sequence = str(count + 1).zfill(2)
                 self.patient_id = f"NN-{self.nonnpa_type.strip().upper()}-{sequence}"
 
-        elif self.category == 'dependent':
+        elif self.category == "dependent":
             if not self.principal_staff:
                 raise ValueError("Principal staff is required for Dependent patients")
             # For existing dependents, regenerate based on current principal
@@ -359,9 +392,8 @@ class Patient(models.Model):
             prefix = "ED" if parent_category == "employee" else "RD"
             # Find the sequence for this dependent among siblings
             siblings = Patient.objects.filter(
-                category='dependent',
-                principal_staff=self.principal_staff
-            ).order_by('created_at')
+                category="dependent", principal_staff=self.principal_staff
+            ).order_by("created_at")
 
             sequence = 1
             for sibling in siblings:
@@ -376,48 +408,50 @@ class Patient(models.Model):
     def clean(self):
         """Validate model fields before saving."""
         super().clean()
-        
+
         # Validate personal number uniqueness for Employee/Retiree
-        if self.personal_number and self.category in ['employee', 'retiree']:
+        if self.personal_number and self.category in ["employee", "retiree"]:
             validate_personal_number_uniqueness(
-                self.personal_number,
-                patient_id=self.pk,
-                category=self.category
+                self.personal_number, patient_id=self.pk, category=self.category
             )
-    
+
     def save(self, *args, **kwargs):
         """Override save to auto-generate patient_id for new patients."""
         # Validate before saving
         self.clean()
-        
+
         # Generate patient_id only for new records
         if not self.pk:
             self.generate_patient_id()
-            
+
             # Ensure uniqueness (handle edge cases)
             original_id = self.patient_id
             counter = 1
             while Patient.objects.filter(patient_id=self.patient_id).exists():
                 # Handle collisions by incrementing sequence
-                if self.category == 'dependent':
+                if self.category == "dependent":
                     # For dependents, increment the sequence (no zero padding)
-                    base_id = '-'.join(original_id.split('-')[:-1])
+                    base_id = "-".join(original_id.split("-")[:-1])
                     self.patient_id = f"{base_id}-{str(counter + 1)}"
-                elif self.category == 'nonnpa':
+                elif self.category == "nonnpa":
                     # For Non-NPA, increment the number
-                    parts = original_id.split('-')
+                    parts = original_id.split("-")
                     if len(parts) >= 3:
-                        base = '-'.join(parts[:-1])
+                        base = "-".join(parts[:-1])
                         self.patient_id = f"{base}-{str(counter + 1).zfill(2)}"
                     else:
                         self.patient_id = f"{original_id}-{counter}"
                 else:
                     # This should never happen due to validation, but handle gracefully
-                    raise ValueError(f"Unable to generate unique patient_id for {self.category}")
+                    raise ValueError(
+                        f"Unable to generate unique patient_id for {self.category}"
+                    )
                 counter += 1
                 if counter > 100:  # Safety limit
-                    raise ValueError(f"Unable to generate unique patient_id for {self.category}")
-        
+                    raise ValueError(
+                        f"Unable to generate unique patient_id for {self.category}"
+                    )
+
         super().save(*args, **kwargs)
 
 
@@ -425,149 +459,159 @@ class Visit(models.Model):
     """
     Patient visit/appointment record.
     """
-    
+
     VISIT_TYPE_CHOICES = [
-        ('consultation', 'Consultation'),
-        ('follow_up', 'Follow-up'),
-        ('emergency', 'Emergency'),
-        ('routine', 'Routine Checkup'),
+        ("consultation", "Consultation"),
+        ("follow_up", "Follow-up"),
+        ("emergency", "Emergency"),
+        ("routine", "Routine Checkup"),
+        ("responsibility_form", "Responsibility Form"),
     ]
-    
+
     STATUS_CHOICES = [
-        ('scheduled', 'Scheduled'),
-        ('in_progress', 'In Progress'),
-        ('completed', 'Completed'),
-        ('cancelled', 'Cancelled'),
+        ("scheduled", "Scheduled"),
+        ("in_progress", "In Progress"),
+        ("completed", "Completed"),
+        ("cancelled", "Cancelled"),
     ]
 
     ADMISSION_STATUS_CHOICES = [
-        ('outpatient', 'Outpatient'),
-        ('observation', 'Observation/Short Stay'),
-        ('admitted', 'Ward Admission'),
-        ('day_case', 'Day Case'),
+        ("outpatient", "Outpatient"),
+        ("observation", "Observation/Short Stay"),
+        ("admitted", "Ward Admission"),
+        ("day_case", "Day Case"),
     ]
-    
+
     visit_id = models.CharField(max_length=50, unique=True, db_index=True, blank=True)
-    patient = models.ForeignKey(Patient, on_delete=models.CASCADE, related_name='visits')
-    visit_type = models.CharField(max_length=20, choices=VISIT_TYPE_CHOICES, default='consultation')
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='scheduled')
-    admission_status = models.CharField(max_length=20, choices=ADMISSION_STATUS_CHOICES, default='outpatient')
-    
+    patient = models.ForeignKey(
+        Patient, on_delete=models.CASCADE, related_name="visits"
+    )
+    visit_type = models.CharField(
+        max_length=20, choices=VISIT_TYPE_CHOICES, default="consultation"
+    )
+    status = models.CharField(
+        max_length=20, choices=STATUS_CHOICES, default="scheduled"
+    )
+    admission_status = models.CharField(
+        max_length=20, choices=ADMISSION_STATUS_CHOICES, default="outpatient"
+    )
+
     # Visit Details
     date = models.DateField()
     time = models.TimeField()
-    clinic = models.CharField(max_length=100, blank=True)  # Primary clinic (for backward compatibility)
-    clinics = models.JSONField(default=list, blank=True)  # List of all clinics for this visit
-    completed_clinics = models.JSONField(default=list, blank=True)  # Clinics that have been completed
+    clinic = models.CharField(
+        max_length=100, blank=True
+    )  # Primary clinic (for backward compatibility)
+    clinics = models.JSONField(
+        default=list, blank=True
+    )  # List of all clinics for this visit
+    completed_clinics = models.JSONField(
+        default=list, blank=True
+    )  # Clinics that have been completed
     location = models.CharField(max_length=100, blank=True, null=True)
     location_clinic = models.ForeignKey(
-        'organization.Clinic',
+        "organization.Clinic",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name='visits',
-        help_text='Clinic/facility from Clinics & Departments (replaces free-text location when set)',
+        related_name="visits",
+        help_text="Clinic/facility from Clinics & Departments (replaces free-text location when set)",
     )
     doctor = models.ForeignKey(
-        'accounts.User',
+        "accounts.User",
         on_delete=models.SET_NULL,
         null=True,
-        related_name='patient_visits',
-        limit_choices_to={'system_role': 'Medical Doctor'}
+        related_name="patient_visits",
+        limit_choices_to={"system_role": "Medical Doctor"},
     )
     clinical_notes = models.TextField(blank=True)
-    
+
     # Metadata
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     created_by = models.ForeignKey(
-        'accounts.User',
+        "accounts.User",
         on_delete=models.SET_NULL,
         null=True,
-        related_name='created_visits'
+        related_name="created_visits",
     )
-    
+
     class Meta:
-        db_table = 'visits'
-        ordering = ['-date', '-time']
+        db_table = "visits"
+        ordering = ["-date", "-time"]
         indexes = [
-            models.Index(fields=['visit_id']),
-            models.Index(fields=['patient', '-date']),
-            models.Index(fields=['status']),
+            models.Index(fields=["visit_id"]),
+            models.Index(fields=["patient", "-date"]),
+            models.Index(fields=["status"]),
         ]
-    
+
     def generate_visit_id(self):
         """
         Generate a unique visit_id in the format: VIS-YYYYMMDD-NNNN
         Example: VIS-20241207-0001
         """
-        if not self.pk and (not self.visit_id or self.visit_id == ''):
+        if not self.pk and (not self.visit_id or self.visit_id == ""):
             from datetime import datetime
-            date_str = self.date.strftime('%Y%m%d')
-            
+
+            date_str = self.date.strftime("%Y%m%d")
+
             # Count visits on the same date to generate sequence number
             count = Visit.objects.filter(date=self.date).count()
-            sequence = str(count + 1).zfill(4)  # Zero-padded to 4 digits (0001, 0002, etc.)
-            
+            sequence = str(count + 1).zfill(
+                4
+            )  # Zero-padded to 4 digits (0001, 0002, etc.)
+
             self.visit_id = f"VIS-{date_str}-{sequence}"
-    
-    def save(self, *args, **kwargs):
-        """Override save to auto-generate visit_id for new visits and normalize clinic names."""
-        # Normalize clinic name before saving
-        if self.clinic:
-            from common.clinic_utils import normalize_clinic_name
-            self.clinic = normalize_clinic_name(self.clinic)
-        
-        if not self.pk:
-            self.generate_visit_id()
-            
-            # Handle collisions gracefully (should be rare)
-            original_id = self.visit_id
-            counter = 1
-            while Visit.objects.filter(visit_id=self.visit_id).exists():
-                # Handle collisions by incrementing sequence
-                parts = original_id.split('-')
-                if len(parts) >= 3:
-                    base = '-'.join(parts[:-1])
-                    self.visit_id = f"{base}-{str(int(parts[-1]) + counter).zfill(4)}"
-                else:
-                    # Fallback if format is unexpected
-                    self.visit_id = f"{original_id}-{counter}"
-                counter += 1
-                if counter > 1000:  # Safety limit
-                    raise ValueError(f"Unable to generate unique visit_id")
-        
-        super().save(*args, **kwargs)
-    
+
     def save(self, *args, **kwargs):
         """Override save to auto-generate visit_id, normalize clinic names, and handle multi-clinic."""
-        # Normalize primary clinic name
+        from common.clinic_utils import normalize_clinic_name
+
         if self.clinic:
-            from common.clinic_utils import normalize_clinic_name
             self.clinic = normalize_clinic_name(self.clinic)
-        
+
+        if self.clinics:
+            self.clinics = list(
+                dict.fromkeys(
+                    normalize_clinic_name(str(c))
+                    for c in self.clinics
+                    if c is not None and str(c).strip()
+                )
+            )
+        if self.completed_clinics:
+            self.completed_clinics = list(
+                dict.fromkeys(
+                    normalize_clinic_name(str(c))
+                    for c in self.completed_clinics
+                    if c is not None and str(c).strip()
+                )
+            )
+
         # Sync clinics list with primary clinic field
-        if self.clinic and self.clinic not in self.clinics:
-            if not self.clinics:  # Initialize if empty
+        clinics_list = self.clinics or []
+        if self.clinic and self.clinic not in clinics_list:
+            if not clinics_list:
                 self.clinics = [self.clinic]
             else:
-                self.clinics.append(self.clinic)
-        
+                self.clinics = [*clinics_list, self.clinic]
+
         # Ensure uniqueness of clinics
         if self.clinics:
-            self.clinics = list(dict.fromkeys(self.clinics))  # Remove duplicates while preserving order
-        
+            self.clinics = list(
+                dict.fromkeys(self.clinics)
+            )  # Remove duplicates while preserving order
+
         if not self.pk:
             self.generate_visit_id()
-            
+
             # Handle collisions gracefully (should be rare)
             original_id = self.visit_id
             counter = 1
             while Visit.objects.filter(visit_id=self.visit_id).exists():
                 # Handle collisions by incrementing sequence
-                parts = original_id.split('-')
+                parts = original_id.split("-")
                 if len(parts) >= 3:
-                    base = '-'.join(parts[:-1])
+                    base = "-".join(parts[:-1])
                     self.visit_id = f"{base}-{str(int(parts[-1]) + counter).zfill(4)}"
                 else:
                     # Fallback if format is unexpected
@@ -575,19 +619,19 @@ class Visit(models.Model):
                 counter += 1
                 if counter > 1000:  # Safety limit
                     raise ValueError(f"Unable to generate unique visit_id")
-        
+
         super().save(*args, **kwargs)
-    
+
     @property
     def pending_clinics(self):
         """Return list of clinics not yet completed."""
         return [c for c in self.clinics if c not in self.completed_clinics]
-    
+
     @property
     def is_fully_completed(self):
         """Check if all clinics have been completed."""
         return bool(self.clinics) and len(self.completed_clinics) == len(self.clinics)
-    
+
     def __str__(self):
         return f"{self.visit_id} - {self.patient.get_full_name()} - {self.date}"
 
@@ -596,20 +640,54 @@ class VitalReading(models.Model):
     """
     Patient vital signs readings.
     """
-    
-    visit = models.ForeignKey(Visit, on_delete=models.CASCADE, related_name='vital_readings', null=True, blank=True)
-    patient = models.ForeignKey(Patient, on_delete=models.CASCADE, related_name='vital_readings')
-    
+
+    visit = models.ForeignKey(
+        Visit,
+        on_delete=models.CASCADE,
+        related_name="vital_readings",
+        null=True,
+        blank=True,
+    )
+    patient = models.ForeignKey(
+        Patient, on_delete=models.CASCADE, related_name="vital_readings"
+    )
+
     # Vital Signs
-    temperature = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True, help_text="Temperature in Celsius")
+    temperature = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Temperature in Celsius",
+    )
     blood_pressure_systolic = models.IntegerField(null=True, blank=True)
     blood_pressure_diastolic = models.IntegerField(null=True, blank=True)
-    heart_rate = models.IntegerField(null=True, blank=True, help_text="Beats per minute")
-    respiratory_rate = models.IntegerField(null=True, blank=True, help_text="Breaths per minute")
-    oxygen_saturation = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True, help_text="SpO2 percentage")
-    weight = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True, help_text="Weight in kg")
-    height = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True, help_text="Height in cm")
-    bmi = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True, help_text="Body Mass Index")
+    heart_rate = models.IntegerField(
+        null=True, blank=True, help_text="Beats per minute"
+    )
+    respiratory_rate = models.IntegerField(
+        null=True, blank=True, help_text="Breaths per minute"
+    )
+    oxygen_saturation = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="SpO2 percentage",
+    )
+    weight = models.DecimalField(
+        max_digits=5, decimal_places=2, null=True, blank=True, help_text="Weight in kg"
+    )
+    height = models.DecimalField(
+        max_digits=5, decimal_places=2, null=True, blank=True, help_text="Height in cm"
+    )
+    bmi = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Body Mass Index",
+    )
     pain_scale = models.PositiveSmallIntegerField(
         null=True,
         blank=True,
@@ -630,42 +708,46 @@ class VitalReading(models.Model):
         blank=True,
         help_text="Random blood sugar (RBS) in mg/dL",
     )
-    
+
     # Additional Notes
     notes = models.TextField(blank=True)
-    
+
     # Metadata
     recorded_at = models.DateTimeField(auto_now_add=True)
     recorded_by = models.ForeignKey(
-        'accounts.User',
+        "accounts.User",
         on_delete=models.SET_NULL,
         null=True,
-        related_name='recorded_vitals'
+        related_name="recorded_vitals",
     )
-    
+
     class Meta:
-        db_table = 'vital_readings'
-        ordering = ['-recorded_at']
+        db_table = "vital_readings"
+        ordering = ["-recorded_at"]
         indexes = [
-            models.Index(fields=['patient', '-recorded_at']),
-            models.Index(fields=['visit']),
+            models.Index(fields=["patient", "-recorded_at"]),
+            models.Index(fields=["visit"]),
         ]
-    
+
     def __str__(self):
         return f"Vitals for {self.patient.get_full_name()} - {self.recorded_at.strftime('%Y-%m-%d %H:%M')}"
-    
+
     def save(self, *args, **kwargs):
         """Calculate BMI if weight and height are provided."""
         if self.weight and self.height:
             # Validate reasonable ranges (height in cm: 30-300, weight in kg: 1-500)
             if self.height < 30 or self.height > 300:
-                raise ValueError(f"Height must be between 30 and 300 cm. Got: {self.height} cm")
+                raise ValueError(
+                    f"Height must be between 30 and 300 cm. Got: {self.height} cm"
+                )
             if self.weight < 1 or self.weight > 500:
-                raise ValueError(f"Weight must be between 1 and 500 kg. Got: {self.weight} kg")
-            
+                raise ValueError(
+                    f"Weight must be between 1 and 500 kg. Got: {self.weight} kg"
+                )
+
             height_in_meters = self.height / 100
             if height_in_meters > 0:
-                calculated_bmi = round(self.weight / (height_in_meters ** 2), 2)
+                calculated_bmi = round(self.weight / (height_in_meters**2), 2)
                 # Cap BMI at 999.99 to fit within max_digits=5, decimal_places=2
                 # This handles edge cases where calculation exceeds field capacity
                 self.bmi = min(calculated_bmi, 999.99)
@@ -676,40 +758,54 @@ class MedicalHistory(models.Model):
     """
     Patient medical history including allergies, diagnoses, medications, etc.
     """
-    
-    patient = models.OneToOneField(Patient, on_delete=models.CASCADE, related_name='medical_history')
-    
+
+    patient = models.OneToOneField(
+        Patient, on_delete=models.CASCADE, related_name="medical_history"
+    )
+
     # Allergies
-    allergies = models.JSONField(default=list, blank=True, help_text="List of allergies")
-    
+    allergies = models.JSONField(
+        default=list, blank=True, help_text="List of allergies"
+    )
+
     # Diagnoses
-    diagnoses = models.JSONField(default=list, blank=True, help_text="List of diagnoses with status")
-    
+    diagnoses = models.JSONField(
+        default=list, blank=True, help_text="List of diagnoses with status"
+    )
+
     # Current Medications
-    current_medications = models.JSONField(default=list, blank=True, help_text="List of current medications")
-    
+    current_medications = models.JSONField(
+        default=list, blank=True, help_text="List of current medications"
+    )
+
     # Surgical History
-    surgical_history = models.JSONField(default=list, blank=True, help_text="List of past surgeries")
-    
+    surgical_history = models.JSONField(
+        default=list, blank=True, help_text="List of past surgeries"
+    )
+
     # Family History
-    family_history = models.JSONField(default=list, blank=True, help_text="Family medical history")
-    
+    family_history = models.JSONField(
+        default=list, blank=True, help_text="Family medical history"
+    )
+
     # Social History
-    social_history = models.JSONField(default=dict, blank=True, help_text="Smoking, alcohol, exercise, etc.")
-    
+    social_history = models.JSONField(
+        default=dict, blank=True, help_text="Smoking, alcohol, exercise, etc."
+    )
+
     # Metadata
     updated_at = models.DateTimeField(auto_now=True)
     updated_by = models.ForeignKey(
-        'accounts.User',
+        "accounts.User",
         on_delete=models.SET_NULL,
         null=True,
-        related_name='updated_medical_histories'
+        related_name="updated_medical_histories",
     )
-    
+
     class Meta:
-        db_table = 'medical_history'
-        verbose_name_plural = 'Medical Histories'
-    
+        db_table = "medical_history"
+        verbose_name_plural = "Medical Histories"
+
     def __str__(self):
         return f"Medical History for {self.patient.get_full_name()}"
 
@@ -727,7 +823,9 @@ class MedicalCertificate(models.Model):
         ("employment", "Employment Medical"),
     ]
 
-    patient = models.ForeignKey(Patient, on_delete=models.CASCADE, related_name="medical_certificates")
+    patient = models.ForeignKey(
+        Patient, on_delete=models.CASCADE, related_name="medical_certificates"
+    )
     purpose = models.CharField(max_length=20, choices=PURPOSE_CHOICES)
 
     valid_from = models.DateField()
@@ -740,7 +838,12 @@ class MedicalCertificate(models.Model):
     recommendations = models.TextField(blank=True)
 
     certificate_number = models.CharField(max_length=50, unique=True, db_index=True)
-    issued_by = models.ForeignKey("accounts.User", on_delete=models.SET_NULL, null=True, related_name="issued_medical_certificates")
+    issued_by = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name="issued_medical_certificates",
+    )
     issued_at = models.DateTimeField(auto_now_add=True)
 
     # Snapshot fields to keep printed certificates stable even if patient name changes.
@@ -760,7 +863,11 @@ class MedicalCertificate(models.Model):
     def _generate_certificate_number(self) -> str:
         year = timezone.now().year
         prefix = f"MC-{year}-"
-        last = MedicalCertificate.objects.filter(certificate_number__startswith=prefix).order_by("-certificate_number").first()
+        last = (
+            MedicalCertificate.objects.filter(certificate_number__startswith=prefix)
+            .order_by("-certificate_number")
+            .first()
+        )
         if last and last.certificate_number:
             try:
                 last_num = int(last.certificate_number.split("-")[-1])

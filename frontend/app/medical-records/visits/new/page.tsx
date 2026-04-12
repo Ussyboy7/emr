@@ -12,10 +12,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Separator } from '@/components/ui/separator';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
+
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
-import { patientService, visitService, formatPatientGenderLabel } from '@/lib/services';
+import { patientService, visitService, adminService, formatPatientGenderLabel } from '@/lib/services';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { 
@@ -23,12 +24,9 @@ import {
   MapPin, FileText, Users, CheckCircle2, Clock, Loader2, CheckCircle, X
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { CLINICS } from '@/lib/constants/clinics';
 import { normalizeClinicName } from '@/lib/utils/clinic-utils';
 import { useLocationOptions } from '@/lib/hooks/use-location-options';
-
-// NPA Clinics - standardized list
-const clinics = CLINICS;
+import { useOutpatientClinicTypes } from '@/lib/hooks/use-outpatient-clinic-types';
 
 // Visit Types (matching backend choices)
 const visitTypes = [
@@ -36,6 +34,7 @@ const visitTypes = [
   { value: 'follow_up', label: 'Follow-up', description: 'Follow-up visit for existing condition' },
   { value: 'emergency', label: 'Emergency', description: 'Urgent medical attention required' },
   { value: 'routine', label: 'Routine Checkup', description: 'Routine health checkup' },
+  { value: 'responsibility_form', label: 'Responsibility Form', description: 'Responsibility form for patients' },
 ];
 
 function NewVisitPageContent() {
@@ -46,7 +45,8 @@ function NewVisitPageContent() {
   const prefTime = searchParams.get('time');
   const prefVisitType = searchParams.get('visit_type');
   const { locations: locationOptions } = useLocationOptions();
-  
+  const { names: opdMasterNames } = useOutpatientClinicTypes();
+
   const [loading, setLoading] = useState(!!patientIdParam);
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -71,13 +71,55 @@ function NewVisitPageContent() {
     notes: '',
   });
 
+  const [visitClinicNames, setVisitClinicNames] = useState<string[]>([]);
+  const [visitClinicsLoading, setVisitClinicsLoading] = useState(false);
+
+  const facilityIdForLocation = useMemo(() => {
+    const loc = (formData.location || '').trim();
+    if (!loc) return null;
+    return locationOptions.find((o) => o.value === loc)?.id ?? null;
+  }, [formData.location, locationOptions]);
+
+  useEffect(() => {
+    setFormData((prev) => ({ ...prev, clinics: [] }));
+  }, [facilityIdForLocation]);
+
+  useEffect(() => {
+    if (!facilityIdForLocation) {
+      setVisitClinicNames([]);
+      setVisitClinicsLoading(false);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setVisitClinicsLoading(true);
+      try {
+        const rows = await adminService.getFacilityVisitClinics(facilityIdForLocation);
+        if (!cancelled) {
+          setVisitClinicNames((rows || []).map((r) => r.name));
+        }
+      } catch {
+        if (!cancelled) setVisitClinicNames([]);
+      } finally {
+        if (!cancelled) setVisitClinicsLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [facilityIdForLocation]);
+
   // Set date/time on client only to avoid hydration mismatch (new Date() differs server vs client)
   useEffect(() => {
+    // Validate visit type is one of the allowed values
+    const validVisitTypes = visitTypes.map(v => v.value);
+    const visitType = prefVisitType && validVisitTypes.includes(prefVisitType) ? prefVisitType : '';
+
     setFormData(prev => ({
       ...prev,
       visitDate: prev.visitDate || prefDate || new Date().toISOString().split('T')[0],
       visitTime: prev.visitTime || (prefTime && prefTime.length >= 5 ? prefTime.slice(0, 5) : prefTime) || new Date().toTimeString().slice(0, 5),
-      visitType: prev.visitType || prefVisitType || '',
+      visitType: prev.visitType || visitType,
     }));
   }, [prefDate, prefTime, prefVisitType]);
 
@@ -201,12 +243,23 @@ function NewVisitPageContent() {
     if (formData.location) completed++;
     if (formData.visitDate) completed++;
 
+
+
     return Math.round((completed / total) * 100);
   }, [selectedPatient, formData]);
 
   const handleSubmit = async () => {
     if (!selectedPatient || !formData.visitType || formData.clinics.length === 0 || !formData.location) {
       toast.error('Please fill in all required fields');
+      return;
+    }
+
+
+
+    // Validate visit type is one of the allowed values
+    const validVisitTypes = visitTypes.map(v => v.value);
+    if (!validVisitTypes.includes(formData.visitType)) {
+      toast.error(`Invalid visit type: ${formData.visitType}`);
       return;
     }
 
@@ -220,8 +273,10 @@ function NewVisitPageContent() {
       const visitData = {
         patient: typeof patientId === 'string' ? parseInt(patientId, 10) : patientId,
         visit_type: formData.visitType,
-        clinic: normalizeClinicName(primaryClinic) || primaryClinic.trim(),
-        clinics: formData.clinics.map((c) => normalizeClinicName(c)).filter((x): x is string => Boolean(x)),
+        clinic: normalizeClinicName(primaryClinic, opdMasterNames) || primaryClinic.trim(),
+        clinics: formData.clinics
+          .map((c) => normalizeClinicName(c, opdMasterNames))
+          .filter((x): x is string => Boolean(x)),
         location: formData.location || '',
         date: formData.visitDate,
         // Ensure time is in HH:MM:SS format for Django
@@ -462,35 +517,62 @@ function NewVisitPageContent() {
 
                 <Separator />
 
-                {/* Clinic & Location */}
+                {/* Facility (site) and clinics */}
                 <div className="space-y-4">
-                  {/* Multi-Clinic Selection */}
+                  <div className="space-y-2">
+                    <Label>Facility (location) *</Label>
+                    <p className="text-xs text-muted-foreground">Select the physical site where this visit will take place.</p>
+                    <Select value={formData.location} onValueChange={(v) => handleInputChange('location', v)} disabled={locationOptions.length === 0}>
+                      <SelectTrigger>
+                        <SelectValue placeholder={locationOptions.length === 0 ? "No facilities—add one in Admin" : "Select facility"} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {locationOptions.map((loc) => (
+                          <SelectItem key={loc.value} value={loc.value}>{loc.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
                   <div className="space-y-3">
-                    <Label>Clinics *</Label>
-                    <p className="text-xs text-muted-foreground">Select one or more clinics for this visit (e.g., GOPD, Eye, Physiotherapy)</p>
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-2 max-h-[300px] overflow-y-auto p-2 border rounded-lg">
-                      {clinics.map((clinic) => {
-                        const isSelected = formData.clinics.includes(clinic);
-                        return (
-                          <div
-                            key={clinic}
-                            onClick={() => handleClinicToggle(clinic)}
-                            className={`p-2 rounded-md cursor-pointer transition-all text-center ${
-                              isSelected
-                                ? 'border-teal-500 bg-teal-500/10'
-                                : 'border-border hover:border-primary/50'
-                            }`}
-                          >
-                            <p className={`font-medium text-sm ${isSelected ? 'text-teal-600 dark:text-teal-400' : 'text-foreground'}`}>
-                              {clinic}
-                            </p>
-                            {isSelected && (
-                              <CheckCircle className="h-3 w-3 mx-auto mt-1 text-teal-600 dark:text-teal-400" />
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
+                    <Label>Visit clinics *</Label>
+                    <p className="text-xs text-muted-foreground">Select one or more clinics or departments this visit is associated with. The first clinic selected will be the primary clinic for this visit.
+                    </p>
+                    {!formData.location.trim() ? (
+                      <p className="text-sm text-muted-foreground border rounded-lg p-4">Select a facility first.</p>
+                    ) : visitClinicsLoading ? (
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground border rounded-lg p-4">
+                        <Loader2 className="h-4 w-4 animate-spin" /> Loading visit clinics…
+                      </div>
+                    ) : visitClinicNames.length === 0 ? (
+                      <p className="text-sm text-amber-700 dark:text-amber-400 border border-amber-500/30 rounded-lg p-4">
+                        No visit clinics are configured for this facility. An administrator can assign them when editing the facility in Admin.
+                      </p>
+                    ) : (
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-2 max-h-[300px] overflow-y-auto p-2 border rounded-lg">
+                        {visitClinicNames.map((clinic) => {
+                          const isSelected = formData.clinics.includes(clinic);
+                          return (
+                            <div
+                              key={clinic}
+                              onClick={() => handleClinicToggle(clinic)}
+                              className={`p-2 rounded-md cursor-pointer transition-all text-center ${
+                                isSelected
+                                  ? 'border-teal-500 bg-teal-500/10'
+                                  : 'border-border hover:border-primary/50'
+                              }`}
+                            >
+                              <p className={`font-medium text-sm ${isSelected ? 'text-teal-600 dark:text-teal-400' : 'text-foreground'}`}>
+                                {clinic}
+                              </p>
+                              {isSelected && (
+                                <CheckCircle className="h-3 w-3 mx-auto mt-1 text-teal-600 dark:text-teal-400" />
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                     {formData.clinics.length > 0 && (
                       <div className="flex flex-wrap gap-2 mt-2">
                         {formData.clinics.map((clinic) => (
@@ -507,21 +589,6 @@ function NewVisitPageContent() {
                         ))}
                       </div>
                     )}
-                  </div>
-
-                  {/* Location */}
-                  <div className="space-y-2">
-                    <Label>Location *</Label>
-                    <Select value={formData.location} onValueChange={(v) => handleInputChange('location', v)} disabled={locationOptions.length === 0}>
-                      <SelectTrigger>
-                        <SelectValue placeholder={locationOptions.length === 0 ? "No locations—add clinics in Admin" : "Select location"} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {locationOptions.map((loc) => (
-                          <SelectItem key={loc.value} value={loc.value}>{loc.label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
                   </div>
                 </div>
 
@@ -605,9 +672,12 @@ function NewVisitPageContent() {
                           <span className="text-muted-foreground">Not selected</span>
                         </>
                       )}
-                    </div>
                   </div>
-                  <Separator />
+                </div>
+
+
+
+                <Separator />
                   {selectedVisitType?.label && (
                     <div className="flex items-start justify-between">
                       <span className="text-muted-foreground">Type</span>

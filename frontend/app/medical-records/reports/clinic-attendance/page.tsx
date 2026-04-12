@@ -14,7 +14,7 @@ import {
 import { toast } from "sonner";
 import { apiFetch } from "@/lib/api-client";
 import Link from "next/link";
-import { CLINICS, CLINIC_LABELS } from '@/lib/constants/clinics';
+import { useOutpatientClinicTypes } from "@/lib/hooks/use-outpatient-clinic-types";
 
 interface CategoryData {
   sn: number;
@@ -39,7 +39,8 @@ interface ClinicAttendanceSummary {
 }
 
 export default function ClinicAttendanceReport() {
-  const [selectedClinic, setSelectedClinic] = useState("Diamond");
+  const { types: opdClinicTypes, names: opdClinicNames } = useOutpatientClinicTypes();
+  const [selectedClinic, setSelectedClinic] = useState("");
   const [year, setYear] = useState(new Date().getFullYear().toString());
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
@@ -104,10 +105,14 @@ export default function ClinicAttendanceReport() {
     };
   };
 
-  const clinics = CLINICS.map(clinic => ({
-    value: clinic,
-    label: CLINIC_LABELS[clinic] || clinic
-  }));
+  useEffect(() => {
+    if (opdClinicTypes.length === 0) return;
+    const names = opdClinicTypes.map((t) => t.name);
+    setSelectedClinic((prev) => {
+      if (prev && names.includes(prev)) return prev;
+      return names[0];
+    });
+  }, [opdClinicTypes]);
 
   const setThisMonth = () => {
     const now = new Date();
@@ -124,9 +129,10 @@ export default function ClinicAttendanceReport() {
   };
 
   const fetchReport = async () => {
+    if (!selectedClinic) return;
     setIsLoading(true);
     try {
-      let url = `/reports/clinic-attendance/?clinic_type=${selectedClinic}`;
+      let url = `/reports/clinic-attendance/?clinic_type=${encodeURIComponent(selectedClinic)}`;
       
       if (viewMode === 'year') {
         url += `&year=${year}`;
@@ -152,6 +158,7 @@ export default function ClinicAttendanceReport() {
   }, []);
 
   useEffect(() => {
+    if (!selectedClinic) return;
     if ((viewMode === 'range' && startDate && endDate) || viewMode === 'year') {
       fetchReport();
     }
@@ -257,9 +264,9 @@ export default function ClinicAttendanceReport() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {clinics.map(clinic => (
-                      <SelectItem key={clinic.value} value={clinic.value}>
-                        {clinic.label}
+                    {opdClinicNames.map((name) => (
+                      <SelectItem key={name} value={name}>
+                        {name}
                       </SelectItem>
                     ))}
                   </SelectContent>

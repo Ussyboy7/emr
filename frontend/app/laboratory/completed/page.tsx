@@ -22,9 +22,10 @@ import {
   CheckCircle2, Search, Eye, Clock, AlertTriangle, Calendar,
   User, Stethoscope, RefreshCw, FlaskConical, Loader2
 } from 'lucide-react';
-import { CLINICS } from '@/lib/constants/clinics';
+import { useOutpatientClinicTypes } from '@/lib/hooks/use-outpatient-clinic-types';
 
 export default function CompletedTestsPage() {
+  const { names: opdClinicNames } = useOutpatientClinicTypes();
   const [tests, setTests] = useState<CompletedTest[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -337,7 +338,11 @@ export default function CompletedTestsPage() {
                   <SelectTrigger className="w-[160px]"><SelectValue placeholder="Clinic" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Clinics</SelectItem>
-                    {CLINICS.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                    {opdClinicNames.map((c) => (
+                      <SelectItem key={c} value={c}>
+                        {c}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
                 <Select value={genderFilter} onValueChange={setGenderFilter}>

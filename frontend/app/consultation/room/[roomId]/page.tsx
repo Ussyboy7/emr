@@ -55,6 +55,7 @@ import {
 import { PatientAvatar } from '@/components/PatientAvatar';
 import { VitalsDetailModal } from '@/components/VitalsDetailModal';
 import { useCurrentUser } from '@/hooks/use-current-user';
+import { useOutpatientClinicTypes } from '@/lib/hooks/use-outpatient-clinic-types';
 import { NPA_BRAND_NAME } from '@/lib/branding';
 import {
   ADMINISTRATION_ROUTES,
@@ -108,7 +109,6 @@ const debugConsultationRoom = (...args: any[]) => {
   if (typeof window === 'undefined') return;
   try {
     if (window.localStorage?.getItem('debug_consultation_room') === '1') {
-      // eslint-disable-next-line no-console
       console.log(...args);
     }
   } catch {
@@ -535,7 +535,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   const resolvedParams = use(params);
   const roomId = resolvedParams.roomId;
   const { currentUser } = useCurrentUser();
-
+  const { names: opdClinicNames } = useOutpatientClinicTypes();
 
   const [room, setRoom] = useState<ConsultationRoom | null>(null);
   const [patients, setPatients] = useState<Patient[]>([]);
@@ -3311,7 +3311,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
             clinic: currentPatient.visitClinic,
             clinics: currentPatient.clinics,
           })
-            .map((c) => normalizeClinicName(c))
+            .map((c) => normalizeClinicName(c, opdClinicNames))
             .filter((c): c is string => Boolean(c));
           if (followUpClinics.length === 0) {
             toast.warning('Follow-up appointment was not saved (no service clinics on this visit).');

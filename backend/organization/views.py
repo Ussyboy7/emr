@@ -1,14 +1,22 @@
 """
 Views for the Organization app.
 """
-from rest_framework import viewsets
-from rest_framework.permissions import IsAuthenticated
-from django_filters.rest_framework import DjangoFilterBackend
-from rest_framework.filters import SearchFilter, OrderingFilter
+from django.db import transaction
 from django.db.models import Count, Q
+from django_filters.rest_framework import DjangoFilterBackend
+from rest_framework import viewsets
+from rest_framework.decorators import action
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.filters import SearchFilter, OrderingFilter
 
-from .models import Clinic, Department, Room
-from .serializers import ClinicSerializer, DepartmentSerializer, RoomSerializer
+from .models import Clinic, Department, Room, OutpatientClinicType, FacilityOutpatientClinic
+from .serializers import (
+    ClinicSerializer,
+    DepartmentSerializer,
+    RoomSerializer,
+    OutpatientClinicTypeSerializer,
+)
 from audit.services import AuditService
 
 
@@ -36,6 +44,21 @@ class ClinicViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         """Create clinic and log audit."""
         clinic = serializer.save()
+        types = list(
+            OutpatientClinicType.objects.filter(is_active=True).order_by("sort_order", "name")
+        )
+        if types:
+            FacilityOutpatientClinic.objects.bulk_create(
+                [
+                    FacilityOutpatientClinic(
+                        facility=clinic,
+                        clinic_type=t,
+                        is_active=True,
+                        sort_order=i,
+                    )
+                    for i, t in enumerate(types)
+                ]
+            )
         AuditService.log_activity(
             user=self.request.user,
             action='create',
@@ -83,6 +106,106 @@ class ClinicViewSet(viewsets.ModelViewSet):
             request=self.request,
         )
         instance.delete()
+
+    @action(detail=False, methods=["get"], url_path="admin-stats")
+    def admin_stats(self, request):
+        """Aggregate counts for the Facilities & Departments admin KPI strip (full org, not paginated)."""
+        from django.contrib.auth import get_user_model
+
+        from consultation.models import ConsultationRoom
+
+        User = get_user_model()
+
+        total_clinics = Clinic.objects.count()
+        active_clinics = Clinic.objects.filter(is_active=True).count()
+        total_departments = Department.objects.count()
+
+        facility_users = User.objects.filter(clinic__isnull=False, is_active=True).count()
+        department_users = User.objects.filter(department__isnull=False, is_active=True).count()
+        total_staff_links = facility_users + department_users
+
+        org_rooms = Room.objects.filter(is_active=True, clinic__isnull=False).count()
+        consult_rooms = ConsultationRoom.objects.filter(is_active=True, clinic__isnull=False).count()
+        total_rooms = org_rooms + consult_rooms
+
+        return Response(
+            {
+                "total_clinics": total_clinics,
+                "active_clinics": active_clinics,
+                "total_departments": total_departments,
+                "total_staff_links": total_staff_links,
+                "total_rooms": total_rooms,
+            }
+        )
+
+    @action(detail=True, methods=["get", "put"])
+    def visit_clinics(self, request, pk=None):
+        """GET: OPD visit clinic types at this facility. PUT: replace offerings { type_ids: [id, ...] }."""
+        facility = self.get_object()
+        if request.method == "PUT":
+            ids = request.data.get("type_ids")
+            if not isinstance(ids, list):
+                return Response({"detail": "type_ids must be a list"}, status=400)
+            parsed = []
+            for x in ids:
+                try:
+                    parsed.append(int(x))
+                except (TypeError, ValueError):
+                    return Response({"detail": "type_ids must be integers"}, status=400)
+            unique_ids = []
+            for i in parsed:
+                if i not in unique_ids:
+                    unique_ids.append(i)
+            types = list(OutpatientClinicType.objects.filter(id__in=unique_ids))
+            found = {t.id for t in types}
+            if found != set(unique_ids):
+                return Response({"detail": "One or more type_ids are invalid"}, status=400)
+            type_by_id = {t.id: t for t in types}
+            ordered = [type_by_id[i] for i in unique_ids]
+            with transaction.atomic():
+                FacilityOutpatientClinic.objects.filter(facility=facility).delete()
+                FacilityOutpatientClinic.objects.bulk_create(
+                    [
+                        FacilityOutpatientClinic(
+                            facility=facility,
+                            clinic_type=t,
+                            is_active=True,
+                            sort_order=idx,
+                        )
+                        for idx, t in enumerate(ordered)
+                    ]
+                )
+
+        qs = (
+            FacilityOutpatientClinic.objects.filter(
+                facility=facility, is_active=True, clinic_type__is_active=True
+            )
+            .select_related("clinic_type")
+            .order_by("sort_order", "clinic_type__sort_order", "clinic_type__name")
+        )
+        return Response(
+            [
+                {
+                    "id": o.clinic_type_id,
+                    "name": o.clinic_type.name,
+                    "code": o.clinic_type.code,
+                }
+                for o in qs
+            ]
+        )
+
+
+class OutpatientClinicTypeViewSet(viewsets.ModelViewSet):
+    """CRUD for master OPD visit clinic types (GOPD, Eye Clinic, …)."""
+
+    permission_classes = [IsAuthenticated]
+    serializer_class = OutpatientClinicTypeSerializer
+    queryset = OutpatientClinicType.objects.all()
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ["is_active"]
+    search_fields = ["name", "code"]
+    ordering_fields = ["name", "sort_order", "created_at"]
+    ordering = ["sort_order", "name"]
 
 
 class DepartmentViewSet(viewsets.ModelViewSet):

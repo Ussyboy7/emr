@@ -383,7 +383,7 @@ export default function MedicalRecordsPage() {
               ) : recentPatients.length > 0 ? (
                 <div className="space-y-3">
                   {recentPatients.map((patient) => (
-                    <Link key={patient.id} href={`/medical-records/patients`} className="block">
+                    <Link key={patient.id} href={`/medical-records/patients/${patient.id}`} className="block">
                       <div className="p-3 rounded-lg border border-muted bg-muted/30 hover:bg-muted/50 transition-colors cursor-pointer">
                         <p className="font-medium text-sm">{patient.full_name ?? ''}</p>
                         <p className="text-xs text-muted-foreground">

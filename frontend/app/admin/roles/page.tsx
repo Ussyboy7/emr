@@ -126,7 +126,7 @@ const allPagePermissions: PagePermission[] = [
   { id: '/admin', name: 'Dashboard', description: 'Administration Dashboard', module: 'Administration' },
   { id: '/admin/users', name: 'User Management', description: 'Manage user accounts', module: 'Administration' },
   { id: '/admin/roles', name: 'Roles & Permissions', description: 'Manage roles and permissions', module: 'Administration' },
-  { id: '/admin/clinics', name: 'Clinics & Departments', description: 'Manage clinics and departments', module: 'Administration' },
+  { id: '/admin/clinics', name: 'Facilities & Departments', description: 'Facilities (sites), departments, and OPD visit clinics', module: 'Administration' },
   { id: '/admin/rooms', name: 'Room Management', description: 'Manage consultation rooms', module: 'Administration' },
   { id: '/admin/settings', name: 'System Settings', description: 'Access system settings', module: 'Administration' },
   { id: '/admin/audit', name: 'Audit Trail', description: 'View audit logs', module: 'Administration' },
