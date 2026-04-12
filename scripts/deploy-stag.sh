@@ -22,6 +22,9 @@ SERVER_IP="${SERVER_IP:-172.16.0.46}"
 STAGING_FRONTEND_URL="${STAGING_FRONTEND_URL:-http://172.16.0.46:4647}"
 STAGING_API_URL="${STAGING_API_URL:-http://172.16.0.46:8047}"
 BACKUP_DIR="${BACKUP_DIR:-${DEPLOY_PATH}/backups}"
+# Must match postgres service defaults in docker-compose.stag.yml (override if you customize DB_NAME/DB_USER)
+STAG_DB_USER="${STAG_DB_USER:-emradmin}"
+STAG_DB_NAME="${STAG_DB_NAME:-emr_db_stag}"
 
 print_status() {
     echo -e "${GREEN}[INFO]${NC} $1"
@@ -118,7 +121,7 @@ backup_database() {
     
     # Check if postgres container exists
     if docker ps -a --format "{{.Names}}" | grep -q "emr-postgres-stag"; then
-        if docker exec emr-postgres-stag pg_dump -U postgres emr_stag > "$backup_file" 2>/dev/null; then
+        if docker exec emr-postgres-stag pg_dump -U "$STAG_DB_USER" "$STAG_DB_NAME" > "$backup_file" 2>/dev/null; then
             print_status "Database backed up to: $backup_file"
             echo "$backup_file" > "${BACKUP_DIR}/.latest_backup"
         else
@@ -214,7 +217,7 @@ rollback() {
         # Restore database if container exists
         if docker ps -a --format "{{.Names}}" | grep -q "emr-postgres-stag"; then
             print_step "Restoring database from backup..."
-            docker exec -i emr-postgres-stag psql -U postgres emr_stag < "$latest_backup" 2>/dev/null || print_warning "Database restore failed"
+            docker exec -i emr-postgres-stag psql -U "$STAG_DB_USER" -d "$STAG_DB_NAME" < "$latest_backup" 2>/dev/null || print_warning "Database restore failed"
         fi
         
         # Restart services from previous state

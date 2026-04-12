@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import timedelta
 from pathlib import Path
 import os
+from urllib.parse import quote
 
 from dotenv import load_dotenv
 
@@ -270,14 +271,19 @@ else:
 # Celery Configuration
 # ---------------------------------------------------------------------------
 
-CELERY_BROKER_URL = os.getenv(
-    "CELERY_BROKER_URL",
-    f"redis://{os.getenv('REDIS_HOST', 'localhost')}:{os.getenv('REDIS_PORT', '6379')}/0"
-)
-CELERY_RESULT_BACKEND = os.getenv(
-    "CELERY_RESULT_BACKEND",
-    f"redis://{os.getenv('REDIS_HOST', 'localhost')}:{os.getenv('REDIS_PORT', '6379')}/0"
-)
+def _default_celery_redis_url(db_index: str = "0") -> str:
+    """Build a Redis URL for Celery; include password when REDIS_PASSWORD is set (staging/prod)."""
+    host = os.getenv("REDIS_HOST", "localhost")
+    port = os.getenv("REDIS_PORT", "6379")
+    password = (os.getenv("REDIS_PASSWORD") or "").strip()
+    if password:
+        safe_pw = quote(password, safe="")
+        return f"redis://:{safe_pw}@{host}:{port}/{db_index}"
+    return f"redis://{host}:{port}/{db_index}"
+
+
+CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", _default_celery_redis_url("0"))
+CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", _default_celery_redis_url("0"))
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
