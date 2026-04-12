@@ -98,11 +98,12 @@ services:
       - emr-network-stag
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health/"]
+      # Liveness only — startup runs migrations/backup/collectstatic and can exceed a short start_period.
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health/live/"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      start_period: 120s
     logging:
       driver: "json-file"
       options:

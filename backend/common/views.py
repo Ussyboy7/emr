@@ -15,6 +15,15 @@ from .services import FileUploadService, EmailService, SMSService, BackupService
 
 
 @require_http_methods(["GET"])
+def health_live(request):
+    """
+    Minimal liveness for Docker/K8s: no DB or cache checks.
+    Use /api/health/ for full readiness (database + cache).
+    """
+    return JsonResponse({"status": "ok"})
+
+
+@require_http_methods(["GET"])
 def health_check(request):
     """
     Health check endpoint for monitoring and load balancers.

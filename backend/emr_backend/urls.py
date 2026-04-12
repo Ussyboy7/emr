@@ -7,10 +7,11 @@ from django.urls import include, path, re_path
 from django.views.static import serve as static_serve
 from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, SpectacularSwaggerView
 
-from common.views import health_check
+from common.views import health_check, health_live
 
 
 api_v1_patterns = [
+    path('health/live/', health_live, name='health_live'),
     path('health/', health_check, name='health_check'),
     path('accounts/', include('accounts.urls')),
     path('organization/', include('organization.urls')),
