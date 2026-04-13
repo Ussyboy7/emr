@@ -52,6 +52,7 @@ class User(AbstractUser):
     
     # Additional metadata
     phone = models.CharField(max_length=20, blank=True)
+    middle_name = models.CharField(max_length=150, blank=True)
     bio = models.TextField(blank=True, help_text="User biography or notes")
     is_management = models.BooleanField(default=False)
     last_activity = models.DateTimeField(null=True, blank=True, help_text="Last time the user was active")
@@ -74,7 +75,10 @@ class User(AbstractUser):
     
     def get_full_name(self):
         """Return the user's full name."""
-        if self.first_name or self.last_name:
-            return f"{self.first_name} {self.last_name}".strip()
+        # Canonical display for EMR: Surname, First name, Middle name
+        parts = [self.last_name, self.first_name, self.middle_name]
+        name = " ".join([p for p in parts if p and str(p).strip()]).strip()
+        if name:
+            return name
         return self.username
 

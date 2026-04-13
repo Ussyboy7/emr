@@ -18,6 +18,7 @@ class UserSerializer(serializers.ModelSerializer):
         model = User
         fields = [
             'id', 'username', 'email', 'first_name', 'last_name', 'full_name',
+            'middle_name',
             'employee_id', 'grade_level', 'system_role', 'permissions',
             'clinic', 'clinic_name', 'department', 'department_name',
             'directorate', 'division',  # Legacy fields
@@ -199,6 +200,7 @@ class UserDirectorySerializer(serializers.ModelSerializer):
             'email',
             'first_name',
             'last_name',
+            'middle_name',
             'full_name',
             'employee_id',
             'grade_level',
@@ -224,7 +226,7 @@ class UserCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = [
-            'username', 'email', 'first_name', 'last_name', 'password', 'password_confirm',
+            'username', 'email', 'first_name', 'last_name', 'middle_name', 'password', 'password_confirm',
             'employee_id', 'grade_level', 'system_role',
             'clinic', 'department',  # New ForeignKey fields
             'directorate', 'division',  # Legacy fields
@@ -251,11 +253,12 @@ class UserUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = [
-            'first_name', 'last_name', 'email', 'phone', 'bio',
+            'first_name', 'last_name', 'middle_name', 'email', 'phone', 'bio',
             'grade_level', 'system_role',
             'clinic', 'department',  # New ForeignKey fields
             'directorate', 'division',  # Legacy fields
             'avatar',
+            'is_active',
         ]
 
 

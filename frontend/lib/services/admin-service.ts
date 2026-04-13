@@ -9,6 +9,7 @@ export interface User {
   email: string;
   first_name: string;
   last_name: string;
+  middle_name?: string;
   employee_id?: string;
   phone?: string;
   system_role?: string;
@@ -36,6 +37,14 @@ export interface Role {
   user_count?: number;
   created_at: string;
   updated_at: string;
+}
+
+export interface UserRoleAssignment {
+  id: number;
+  user: number;
+  role: number;
+  assigned_at?: string;
+  assigned_by?: number | null;
 }
 
 export interface Clinic {
@@ -95,6 +104,7 @@ export interface AuditLog {
   user?: number;
   user_name?: string;
   user_email?: string;
+  user_role?: string;
   action: string;
   object_type?: string;
   object_id?: number;
@@ -142,6 +152,7 @@ class AdminService {
       email: data.email,
       first_name: (data as any).first_name || (data as any).firstName,
       last_name: (data as any).last_name || (data as any).lastName,
+      middle_name: (data as any).middle_name || (data as any).middleName,
       password: (data as any).password || 'TempPassword123!',
       password_confirm: (data as any).password || 'TempPassword123!',
     };
@@ -168,6 +179,7 @@ class AdminService {
     if (data.username !== undefined) updateData.username = data.username;
     if (data.first_name !== undefined) updateData.first_name = data.first_name;
     if (data.last_name !== undefined) updateData.last_name = data.last_name;
+    if ((data as any).middle_name !== undefined) updateData.middle_name = (data as any).middle_name;
     if (data.email !== undefined) updateData.email = data.email;
     if (data.phone !== undefined) updateData.phone = data.phone;
     if (data.system_role !== undefined) updateData.system_role = data.system_role;
@@ -181,6 +193,32 @@ class AdminService {
       method: 'PATCH',
       body: JSON.stringify(updateData),
     });
+  }
+
+  /**
+   * Assign an access Role to a user (drives `permissions.pages` for routing).
+   */
+  async assignRoleToUser(userId: number, roleId: number): Promise<UserRoleAssignment> {
+    return apiFetch<UserRoleAssignment>('/permissions/user-roles/', {
+      method: 'POST',
+      body: JSON.stringify({ user: userId, role: roleId }),
+    });
+  }
+
+  /**
+   * Get role assignments for a user.
+   */
+  async getUserRoleAssignments(userId: number): Promise<UserRoleAssignment[]> {
+    const query = buildQueryString({ user: userId, page_size: 1000 } as any);
+    const res = await apiFetch<{ results: UserRoleAssignment[] }>(`/permissions/user-roles/${query}`);
+    return res.results || [];
+  }
+
+  /**
+   * Delete a role assignment row.
+   */
+  async deleteUserRoleAssignment(id: number): Promise<void> {
+    await apiFetch<void>(`/permissions/user-roles/${id}/`, { method: 'DELETE' });
   }
 
   /**

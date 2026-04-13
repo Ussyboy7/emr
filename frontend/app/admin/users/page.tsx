@@ -16,7 +16,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { StandardPagination } from "@/components/StandardPagination";
-import { adminService, type User as ApiUser } from "@/lib/services";
+import { adminService, type User as ApiUser, type Role as ApiRole } from "@/lib/services";
 import {
   Users, Search, Plus, Edit, Trash2, MoreVertical, Eye, UserCog, Shield,
   Stethoscope, Syringe, FlaskConical, Pill, ScanLine, ClipboardList, Building2,
@@ -29,10 +29,12 @@ interface StaffMember {
   id: string;
   staffId: string;
   firstName: string;
+  middleName?: string;
   lastName: string;
   email: string;
   phone: string;
-  role: string;
+  systemRole: string;
+  accessRoleId?: number;
   department: string;
   departmentId?: number;
   clinic: string;
@@ -62,19 +64,20 @@ interface Department {
 
 // Empty staff object for form initialization
 const emptyStaff: Partial<StaffMember> = {
-  firstName: '', lastName: '', email: '', phone: '', role: '', department: '', clinic: '',
+  firstName: '', middleName: '', lastName: '', email: '', phone: '', systemRole: '', accessRoleId: undefined, department: '', clinic: '',
   username: '', password: '',
   dateJoined: new Date().toISOString().split('T')[0], status: 'Active', permissions: [], employeeId: ''
 };
 
-// Match backend SYSTEM_ROLE_CHOICES exactly
-const roles = ['All Roles', 'Medical Doctor', 'Nursing Officer', 'Laboratory Scientist', 'Pharmacist', 'Radiologist', 'Medical Records Officer', 'System Administrator', 'Admin Staff'];
+// Match backend SYSTEM_ROLE_CHOICES exactly (professional identity)
+const systemRoles = ['All Roles', 'Medical Doctor', 'Nursing Officer', 'Laboratory Scientist', 'Pharmacist', 'Radiologist', 'Medical Records Officer', 'System Administrator', 'Admin Staff'];
 const statuses = ['All Status', 'Active', 'Inactive'];
 
 export default function UserManagementPage() {
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [clinics, setClinics] = useState<Clinic[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
+  const [accessRoles, setAccessRoles] = useState<ApiRole[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -85,17 +88,19 @@ export default function UserManagementPage() {
   
   // Pagination
   const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [itemsPerPage, setItemsPerPage] = useState(50);
   const [totalCount, setTotalCount] = useState(0);
 
   const loadClinicsAndDepartments = useCallback(async () => {
     try {
-      const [clinicsResponse, departmentsResponse] = await Promise.all([
+      const [clinicsResponse, departmentsResponse, rolesResponse] = await Promise.all([
         adminService.getClinics({ page_size: 1000 }),
         adminService.getDepartments({ page_size: 1000 }),
+        adminService.getRoles({ page_size: 1000, is_active: true }),
       ]);
       setClinics(clinicsResponse.results);
       setDepartments(departmentsResponse.results);
+      setAccessRoles((rolesResponse.results || []).filter((r) => r.is_active));
     } catch (err: any) {
       console.error('Error loading clinics/departments:', err);
     }
@@ -125,11 +130,12 @@ export default function UserManagementPage() {
         id: user.id.toString(),
         staffId: user.employee_id || `NPA-${user.id}`,
         firstName: user.first_name || '',
+        middleName: (user as any).middle_name || '',
         lastName: user.last_name || '',
         email: user.email || '',
         phone: user.phone || '',
         username: user.username || '',
-        role: user.system_role || 'Staff',
+        systemRole: user.system_role || '',
         department: user.department_name || '',
         departmentId: user.department,
         clinic: user.clinic_name || '',
@@ -289,7 +295,7 @@ export default function UserManagementPage() {
     setIsViewDialogOpen(true);
   }, []);
   
-  const openEdit = useCallback((s: StaffMember) => {
+  const openEdit = useCallback(async (s: StaffMember) => {
     setSelectedStaff(s);
     setFormData({
       ...s,
@@ -297,6 +303,19 @@ export default function UserManagementPage() {
       departmentId: s.departmentId,
     });
     setIsEditDialogOpen(true);
+
+    // Load current access role assignment so it persists in the form.
+    try {
+      const userId = parseInt(s.id);
+      const assignments = await adminService.getUserRoleAssignments(userId);
+      const firstRoleId = assignments?.[0]?.role;
+      if (firstRoleId) {
+        setFormData((prev) => ({ ...prev, accessRoleId: firstRoleId }));
+      }
+    } catch (e) {
+      // Non-blocking; user can still pick a role manually.
+      console.warn("Failed to load user role assignments", e);
+    }
   }, []);
   
   const openDelete = useCallback((s: StaffMember) => {
@@ -310,7 +329,8 @@ export default function UserManagementPage() {
   }, []);
 
   const handleCreate = async () => {
-    if (!formData.firstName || !formData.lastName || !formData.email || !(formData as any).username || !(formData as any).password) {
+    // Canonical: Surname is mandatory; first/middle are optional.
+    if (!formData.lastName || !formData.email || !(formData as any).username || !(formData as any).password) {
       toast.error('Please fill in all required fields');
       return;
     }
@@ -327,23 +347,30 @@ export default function UserManagementPage() {
       toast.error('Please select a department');
       return;
     }
+    if (!formData.accessRoleId) {
+      toast.error('Please select an access role');
+      return;
+    }
     setIsSubmitting(true);
     
     try {
       const newUser = await adminService.createUser({
         username: (formData as any).username,
         first_name: formData.firstName,
+        middle_name: (formData as any).middleName,
         last_name: formData.lastName,
         email: formData.email,
         phone: formData.phone,
-        system_role: formData.role,
+        system_role: formData.systemRole,
         clinic: formData.clinicId,
         department: formData.departmentId,
         is_active: formData.status === 'Active',
         employee_id: formData.employeeId || undefined,
       });
+
+      await adminService.assignRoleToUser(newUser.id, Number(formData.accessRoleId));
       
-      toast.success(`${formData.firstName} ${formData.lastName} has been added`);
+      toast.success(`${formData.lastName}${formData.firstName ? ` ${formData.firstName}` : ''} has been added`);
       setIsCreateDialogOpen(false);
       setFormData(emptyStaff);
       await loadStaff(); // Reload staff list
@@ -364,17 +391,33 @@ export default function UserManagementPage() {
       await adminService.updateUser(userId, {
         username: (formData as any).username,
         first_name: formData.firstName,
+        middle_name: (formData as any).middleName,
         last_name: formData.lastName,
         email: formData.email,
         phone: formData.phone,
-        system_role: formData.role,
+        system_role: formData.systemRole,
         clinic: formData.clinicId,
         department: formData.departmentId,
         is_active: formData.status === 'Active',
         employee_id: formData.employeeId || undefined,
       });
+
+      // Persist access role assignment (single-select UX).
+      if (formData.accessRoleId) {
+        const desiredRoleId = Number(formData.accessRoleId);
+        const existing = await adminService.getUserRoleAssignments(userId);
+        const hasDesired = existing.some((a) => a.role === desiredRoleId);
+        await Promise.all(
+          existing
+            .filter((a) => a.role !== desiredRoleId)
+            .map((a) => adminService.deleteUserRoleAssignment(a.id))
+        );
+        if (!hasDesired) {
+          await adminService.assignRoleToUser(userId, desiredRoleId);
+        }
+      }
       
-      toast.success(`${formData.firstName} ${formData.lastName}'s profile has been updated`);
+      toast.success(`${formData.lastName}${formData.firstName ? ` ${formData.firstName}` : ''}'s profile has been updated`);
       setIsEditDialogOpen(false);
       setSelectedStaff(null);
       setFormData(emptyStaff);
@@ -461,10 +504,18 @@ export default function UserManagementPage() {
   const toggleStatus = useCallback(async (s: StaffMember) => {
     try {
       const userId = parseInt(s.id);
-      await adminService.toggleUserStatus(userId);
-      const newStatus = s.status === 'Active' ? 'Inactive' : 'Active';
+      const updated = await adminService.toggleUserStatus(userId);
+      const newStatus: StaffMember["status"] = updated.is_active ? "Active" : "Inactive";
+
+      // Update UI immediately even if list refresh is delayed/cached.
+      setStaff((prev) =>
+        prev.map((row) => (row.id === s.id ? { ...row, status: newStatus } : row))
+      );
+
       toast.success(`${s.firstName} ${s.lastName} is now ${newStatus}`);
-      await loadStaff(); // Reload staff list
+
+      // Best-effort refresh to ensure server truth is reflected.
+      await loadStaff();
     } catch (err: any) {
       toast.error(err.message || 'Failed to toggle status');
       console.error('Error toggling status:', err);
@@ -532,7 +583,7 @@ export default function UserManagementPage() {
                 <Select value={roleFilter} onValueChange={setRoleFilter}>
                   <SelectTrigger className="w-[150px]"><SelectValue placeholder="Role" /></SelectTrigger>
                   <SelectContent>
-                    {roles.map(r => <SelectItem key={r} value={r === 'All Roles' ? 'all' : r}>{r}</SelectItem>)}
+                    {systemRoles.map(r => <SelectItem key={r} value={r === 'All Roles' ? 'all' : r}>{r}</SelectItem>)}
                   </SelectContent>
                 </Select>
                 <Select value={departmentFilter} onValueChange={setDepartmentFilter} disabled>
@@ -605,9 +656,9 @@ export default function UserManagementPage() {
                           </div>
                         </td>
                         <td className="p-4">
-                          <Badge variant="outline" className={`${getRoleBadgeColor(s.role)} flex items-center gap-1 w-fit`}>
-                            {getRoleIcon(s.role)}
-                            {s.role}
+                          <Badge variant="outline" className={`${getRoleBadgeColor(s.systemRole)} flex items-center gap-1 w-fit`}>
+                            {getRoleIcon(s.systemRole)}
+                            {s.systemRole || "—"}
                       </Badge>
                         </td>
                         <td className="p-4">
@@ -708,13 +759,17 @@ export default function UserManagementPage() {
               <TabsContent value="basic" className="space-y-4 mt-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label>First Name *</Label>
+                    <Label>First Name</Label>
                     <Input value={formData.firstName || ''} onChange={(e) => setFormData(prev => ({ ...prev, firstName: e.target.value }))} />
                 </div>
                 <div className="space-y-2">
-                    <Label>Last Name *</Label>
+                    <Label>Surname *</Label>
                     <Input value={formData.lastName || ''} onChange={(e) => setFormData(prev => ({ ...prev, lastName: e.target.value }))} />
                 </div>
+                </div>
+                <div className="space-y-2">
+                  <Label>Middle Name</Label>
+                  <Input value={(formData as any).middleName || ''} onChange={(e) => setFormData(prev => ({ ...prev, middleName: e.target.value }))} />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
@@ -722,7 +777,7 @@ export default function UserManagementPage() {
                     <Input type="email" value={formData.email || ''} onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value }))} />
                   </div>
                   <div className="space-y-2">
-                    <Label>Phone *</Label>
+                    <Label>Phone</Label>
                     <Input value={formData.phone || ''} onChange={(e) => setFormData(prev => ({ ...prev, phone: e.target.value }))} />
                   </div>
                 </div>
@@ -763,11 +818,11 @@ export default function UserManagementPage() {
 
               <TabsContent value="professional" className="space-y-4 mt-4">
                 <div className="space-y-2">
-                  <Label>Role *</Label>
-                  <Select value={formData.role || ''} onValueChange={(v) => setFormData(prev => ({ ...prev, role: v }))}>
+                  <Label>System Role</Label>
+                  <Select value={formData.systemRole || ''} onValueChange={(v) => setFormData(prev => ({ ...prev, systemRole: v }))}>
                     <SelectTrigger><SelectValue placeholder="Select role" /></SelectTrigger>
                     <SelectContent>
-                      {roles.slice(1).map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}
+                      {systemRoles.slice(1).map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
@@ -779,6 +834,25 @@ export default function UserManagementPage() {
               </TabsContent>
 
               <TabsContent value="assignment" className="space-y-4 mt-4">
+                <div className="space-y-2">
+                  <Label>Access Role *</Label>
+                  <Select
+                    value={formData.accessRoleId?.toString() || ''}
+                    onValueChange={(v) => setFormData(prev => ({ ...prev, accessRoleId: parseInt(v) }))}
+                  >
+                    <SelectTrigger><SelectValue placeholder="Select access role" /></SelectTrigger>
+                    <SelectContent>
+                      {accessRoles.map((r) => (
+                        <SelectItem key={r.id} value={r.id.toString()}>
+                          {r.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    This controls which module pages the user can access.
+                  </p>
+                </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label>Clinic *</Label>
@@ -856,8 +930,8 @@ export default function UserManagementPage() {
                   <div>
                     <h3 className="text-xl font-semibold">{selectedStaff.firstName} {selectedStaff.lastName}</h3>
                     <p className="text-muted-foreground">{selectedStaff.staffId}</p>
-                    <Badge variant="outline" className={`${getRoleBadgeColor(selectedStaff.role)} mt-1`}>
-                      {getRoleIcon(selectedStaff.role)} {selectedStaff.role}
+                    <Badge variant="outline" className={`${getRoleBadgeColor(selectedStaff.systemRole)} mt-1`}>
+                      {getRoleIcon(selectedStaff.systemRole)} {selectedStaff.systemRole || "—"}
                     </Badge>
               </div>
                 </div>
