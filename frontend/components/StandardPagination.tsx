@@ -21,7 +21,7 @@ export function StandardPagination({
   onPageChange,
   onItemsPerPageChange,
   itemName = "items",
-  pageSizeOptions = [5, 10, 25, 50],
+  pageSizeOptions = [50, 100, 250, 500],
 }: StandardPaginationProps) {
   const totalPages = Math.ceil(totalItems / itemsPerPage);
   const startItem = totalItems === 0 ? 0 : (currentPage - 1) * itemsPerPage + 1;

@@ -50,7 +50,7 @@ export default function AuditTrailPage() {
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [itemsPerPage, setItemsPerPage] = useState(50);
   const [totalCount, setTotalCount] = useState(0);
 
   // Dialog states
@@ -142,7 +142,7 @@ export default function AuditTrailPage() {
         timestamp: log.created_at,
         user: log.user_name || log.user_email || 'Unknown',
         userId: log.user?.toString() || '',
-        role: '', // Would need to get from user
+        role: log.user_role || '',
         action: log.action.toUpperCase() as AuditLog['action'],
         module: log.module 
           ? log.module.split('_').map((word: string) => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')
@@ -341,7 +341,7 @@ export default function AuditTrailPage() {
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-muted-foreground">Today</p>
+                  <p className="text-sm text-muted-foreground">Today (this page)</p>
                   <p className="text-2xl sm:text-3xl font-bold text-blue-600 dark:text-blue-400">{stats.today}</p>
                 </div>
                 <div className="p-3 rounded-full bg-blue-500/10"><Calendar className="h-5 w-5 text-blue-500" /></div>
@@ -352,7 +352,7 @@ export default function AuditTrailPage() {
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-muted-foreground">Successful</p>
+                  <p className="text-sm text-muted-foreground">Successful (this page)</p>
                   <p className="text-2xl sm:text-3xl font-bold text-emerald-600 dark:text-emerald-400">{stats.success}</p>
                 </div>
                 <div className="p-3 rounded-full bg-emerald-500/10"><CheckCircle className="h-5 w-5 text-emerald-500" /></div>
@@ -363,7 +363,7 @@ export default function AuditTrailPage() {
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-muted-foreground">Failed</p>
+                  <p className="text-sm text-muted-foreground">Failed (this page)</p>
                   <p className="text-2xl sm:text-3xl font-bold text-rose-600 dark:text-rose-400">{stats.failed}</p>
                 </div>
                 <div className="p-3 rounded-full bg-rose-500/10"><XCircle className="h-5 w-5 text-rose-500" /></div>
@@ -371,6 +371,10 @@ export default function AuditTrailPage() {
             </CardContent>
           </Card>
         </div>
+        <p className="text-xs text-muted-foreground -mt-2">
+          Total Events matches your filters across all pages. Today, Successful, and Failed counts are for the{' '}
+          <span className="font-medium text-foreground">current page only</span>.
+        </p>
 
         {/* Filters */}
         <Card>
@@ -461,7 +465,11 @@ export default function AuditTrailPage() {
                         </td>
                         <td className="p-4 max-w-[250px]">
                           <p className="text-sm text-foreground truncate">{log.details}</p>
-                          <p className="text-xs text-muted-foreground">{log.resourceId}</p>
+                          {log.resourceId ? (
+                            <p className="text-xs text-muted-foreground mt-0.5 tabular-nums">
+                              Object ID: {log.resourceId}
+                            </p>
+                          ) : null}
                         </td>
                         <td className="p-4">
                           <Badge variant="outline" className={getStatusBadge(log.status)}>

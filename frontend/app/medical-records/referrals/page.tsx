@@ -67,7 +67,7 @@ export default function MedicalRecordsReferralsPage() {
   const [authError, setAuthError] = useState<unknown | null>(null);
   useAuthRedirect(authError);
   const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [itemsPerPage, setItemsPerPage] = useState(50);
 
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [specialtyFilter, setSpecialtyFilter] = useState<string>("all");

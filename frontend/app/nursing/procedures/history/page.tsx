@@ -153,7 +153,7 @@ export default function ProceduresHistoryPage() {
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [itemsPerPage, setItemsPerPage] = useState(50);
 
   // Dialog states
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);

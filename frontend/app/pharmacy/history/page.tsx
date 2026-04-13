@@ -51,7 +51,7 @@ export default function DispenseHistoryPage() {
   const [dateFilter, setDateFilter] = useState('today');
   const [genderFilter, setGenderFilter] = useState('all');
   const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [itemsPerPage, setItemsPerPage] = useState(50);
   const [totalCount, setTotalCount] = useState(0);
   const [selectedRecord, setSelectedRecord] = useState<DispenseHistoryRecord | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);

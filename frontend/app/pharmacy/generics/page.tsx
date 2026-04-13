@@ -51,7 +51,7 @@ export default function GenericsPage() {
   const [routeFilter, setRouteFilter] = useState(ANY);
   const [formFilter, setFormFilter] = useState(ANY);
   const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [itemsPerPage, setItemsPerPage] = useState(50);
 
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);

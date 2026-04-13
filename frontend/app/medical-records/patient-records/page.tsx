@@ -50,7 +50,7 @@ export default function PatientRecordsPage() {
   // Pagination
   const [currentPage, setCurrentPage] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
-  const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [itemsPerPage, setItemsPerPage] = useState(50);
   
   useAuthRedirect(authError);
 
