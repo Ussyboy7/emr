@@ -10,6 +10,8 @@ export interface User {
   first_name: string;
   last_name: string;
   middle_name?: string;
+  custom_pages_mode?: '' | 'replace' | 'add' | 'restrict';
+  custom_pages?: string[];
   employee_id?: string;
   phone?: string;
   system_role?: string;
@@ -180,6 +182,8 @@ class AdminService {
     if (data.first_name !== undefined) updateData.first_name = data.first_name;
     if (data.last_name !== undefined) updateData.last_name = data.last_name;
     if ((data as any).middle_name !== undefined) updateData.middle_name = (data as any).middle_name;
+    if ((data as any).custom_pages_mode !== undefined) updateData.custom_pages_mode = (data as any).custom_pages_mode;
+    if ((data as any).custom_pages !== undefined) updateData.custom_pages = (data as any).custom_pages;
     if (data.email !== undefined) updateData.email = data.email;
     if (data.phone !== undefined) updateData.phone = data.phone;
     if (data.system_role !== undefined) updateData.system_role = data.system_role;

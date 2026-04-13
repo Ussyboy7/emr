@@ -19,6 +19,7 @@ class UserSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'username', 'email', 'first_name', 'last_name', 'full_name',
             'middle_name',
+            'custom_pages_mode', 'custom_pages',
             'employee_id', 'grade_level', 'system_role', 'permissions',
             'clinic', 'clinic_name', 'department', 'department_name',
             'directorate', 'division',  # Legacy fields
@@ -34,7 +35,7 @@ class UserSerializer(serializers.ModelSerializer):
         return obj.get_full_name()
 
     def get_permissions(self, obj):
-        """Get user permissions from their roles."""
+        """Get user permissions from their roles, with optional per-user page overrides."""
         allowed_pages = set()
         permission_counts = {}
 
@@ -173,9 +174,22 @@ class UserSerializer(serializers.ModelSerializer):
                             permission_counts[module].append(permission_id)
 
         return {
-            'pages': list(allowed_pages),
+            'pages': list(self._apply_page_overrides(obj, allowed_pages)),
             'actions': permission_counts
         }
+
+    def _apply_page_overrides(self, obj, role_pages: set[str]) -> set[str]:
+        mode = (getattr(obj, "custom_pages_mode", "") or "").strip()
+        custom = getattr(obj, "custom_pages", None)
+        custom_pages = set(custom) if isinstance(custom, list) else set()
+
+        if mode == "replace":
+            return set(custom_pages)
+        if mode == "add":
+            return set(role_pages) | set(custom_pages)
+        if mode == "restrict":
+            return set(role_pages) - set(custom_pages)
+        return set(role_pages)
 
 
 class UserDirectorySerializer(serializers.ModelSerializer):
@@ -231,6 +245,7 @@ class UserCreateSerializer(serializers.ModelSerializer):
             'clinic', 'department',  # New ForeignKey fields
             'directorate', 'division',  # Legacy fields
             'phone', 'bio', 'is_management', 'is_active', 'is_staff',
+            'custom_pages_mode', 'custom_pages',
         ]
     
     def validate(self, attrs):
@@ -259,6 +274,7 @@ class UserUpdateSerializer(serializers.ModelSerializer):
             'directorate', 'division',  # Legacy fields
             'avatar',
             'is_active',
+            'custom_pages_mode', 'custom_pages',
         ]
 
 

@@ -53,6 +53,15 @@ class User(AbstractUser):
     # Additional metadata
     phone = models.CharField(max_length=20, blank=True)
     middle_name = models.CharField(max_length=150, blank=True)
+    # Per-user page access overrides (applied to role-based pages during /auth/me).
+    CUSTOM_PAGES_MODE_CHOICES = [
+        ("", "Role-based only"),
+        ("replace", "Replace role pages"),
+        ("add", "Add to role pages"),
+        ("restrict", "Restrict role pages"),
+    ]
+    custom_pages_mode = models.CharField(max_length=16, blank=True, default="", choices=CUSTOM_PAGES_MODE_CHOICES)
+    custom_pages = models.JSONField(default=list, blank=True, help_text="Page paths used by custom_pages_mode")
     bio = models.TextField(blank=True, help_text="User biography or notes")
     is_management = models.BooleanField(default=False)
     last_activity = models.DateTimeField(null=True, blank=True, help_text="Last time the user was active")

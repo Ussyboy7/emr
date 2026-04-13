@@ -17,6 +17,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { StandardPagination } from "@/components/StandardPagination";
 import { adminService, type User as ApiUser, type Role as ApiRole } from "@/lib/services";
+import { ALL_PAGE_PERMISSIONS, groupPagePermissionsByModule } from "@/lib/page-permissions";
 import {
   Users, Search, Plus, Edit, Trash2, MoreVertical, Eye, UserCog, Shield,
   Stethoscope, Syringe, FlaskConical, Pill, ScanLine, ClipboardList, Building2,
@@ -35,6 +36,7 @@ interface StaffMember {
   phone: string;
   systemRole: string;
   accessRoleId?: number;
+  restrictedPages?: string[];
   department: string;
   departmentId?: number;
   clinic: string;
@@ -64,7 +66,7 @@ interface Department {
 
 // Empty staff object for form initialization
 const emptyStaff: Partial<StaffMember> = {
-  firstName: '', middleName: '', lastName: '', email: '', phone: '', systemRole: '', accessRoleId: undefined, department: '', clinic: '',
+  firstName: '', middleName: '', lastName: '', email: '', phone: '', systemRole: '', accessRoleId: undefined, restrictedPages: [], department: '', clinic: '',
   username: '', password: '',
   dateJoined: new Date().toISOString().split('T')[0], status: 'Active', permissions: [], employeeId: ''
 };
@@ -100,7 +102,9 @@ export default function UserManagementPage() {
       ]);
       setClinics(clinicsResponse.results);
       setDepartments(departmentsResponse.results);
-      setAccessRoles((rolesResponse.results || []).filter((r) => r.is_active));
+      // Include inactive roles too so a user's currently-assigned role always appears/selects correctly.
+      // (If we filter to active-only, the Select will show empty even though the assignment exists.)
+      setAccessRoles(rolesResponse.results || []);
     } catch (err: any) {
       console.error('Error loading clinics/departments:', err);
     }
@@ -136,6 +140,7 @@ export default function UserManagementPage() {
         phone: user.phone || '',
         username: user.username || '',
         systemRole: user.system_role || '',
+        restrictedPages: (user as any).custom_pages_mode === "restrict" && Array.isArray((user as any).custom_pages) ? (user as any).custom_pages : [],
         department: user.department_name || '',
         departmentId: user.department,
         clinic: user.clinic_name || '',
@@ -307,11 +312,17 @@ export default function UserManagementPage() {
     // Load current access role assignment so it persists in the form.
     try {
       const userId = parseInt(s.id);
+      const user = await adminService.getUser(userId);
       const assignments = await adminService.getUserRoleAssignments(userId);
       const firstRoleId = assignments?.[0]?.role;
       if (firstRoleId) {
         setFormData((prev) => ({ ...prev, accessRoleId: firstRoleId }));
       }
+      const restricted =
+        user?.custom_pages_mode === "restrict" && Array.isArray(user.custom_pages)
+          ? user.custom_pages
+          : [];
+      setFormData((prev) => ({ ...prev, restrictedPages: restricted }));
     } catch (e) {
       // Non-blocking; user can still pick a role manually.
       console.warn("Failed to load user role assignments", e);
@@ -400,6 +411,8 @@ export default function UserManagementPage() {
         department: formData.departmentId,
         is_active: formData.status === 'Active',
         employee_id: formData.employeeId || undefined,
+        custom_pages_mode: (formData.restrictedPages && formData.restrictedPages.length > 0) ? "restrict" : "",
+        custom_pages: formData.restrictedPages || [],
       });
 
       // Persist access role assignment (single-select UX).
@@ -844,7 +857,7 @@ export default function UserManagementPage() {
                     <SelectContent>
                       {accessRoles.map((r) => (
                         <SelectItem key={r.id} value={r.id.toString()}>
-                          {r.name}
+                          {r.name}{r.is_active ? "" : " (inactive)"}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -852,6 +865,68 @@ export default function UserManagementPage() {
                   <p className="text-xs text-muted-foreground">
                     This controls which module pages the user can access.
                   </p>
+                </div>
+                <div className="space-y-2">
+                  <Label>Restrict pages (per-user)</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Optional. These pages will be removed from the role’s allowed pages for this user only.
+                  </p>
+                  <div className="rounded-md border p-3 max-h-[360px] overflow-y-auto space-y-4">
+                    {(() => {
+                      const selectedRole = accessRoles.find((r) => r.id === formData.accessRoleId);
+                      const pages = Array.isArray((selectedRole as any)?.permissions) ? ((selectedRole as any).permissions as string[]) : [];
+                      if (!selectedRole) {
+                        return <p className="text-sm text-muted-foreground">Select an access role to see its pages.</p>;
+                      }
+                      if (pages.length === 0) {
+                        return <p className="text-sm text-muted-foreground">This role has no page permissions configured.</p>;
+                      }
+
+                      const restricted = new Set(formData.restrictedPages || []);
+                      const modules = Array.from(new Set(ALL_PAGE_PERMISSIONS.map((p) => p.module)));
+                      const grouped = groupPagePermissionsByModule(pages);
+
+                      return (
+                        <div className="space-y-4">
+                          {Object.entries(grouped)
+                            .sort(([a], [b]) => modules.indexOf(a) - modules.indexOf(b))
+                            .map(([module, perms]) => {
+                              const selectedCount = perms.filter((p) => !restricted.has(p.id)).length;
+                              return (
+                                <div key={module} className="space-y-2">
+                                  <div className="flex items-center justify-between">
+                                    <p className="font-medium text-sm">{module}</p>
+                                    <p className="text-xs text-muted-foreground tabular-nums">
+                                      {selectedCount}/{perms.length}
+                                    </p>
+                                  </div>
+                                  <div className="space-y-1">
+                                    {perms.map((p) => (
+                                      <label key={p.id} className="flex items-center gap-2 text-sm">
+                                        <input
+                                          type="checkbox"
+                                          checked={!restricted.has(p.id)}
+                                          onChange={(e) => {
+                                            setFormData((prev) => {
+                                              const cur = new Set(prev.restrictedPages || []);
+                                              // Checked means "allowed"; unchecked means "restricted"
+                                              if (e.target.checked) cur.delete(p.id);
+                                              else cur.add(p.id);
+                                              return { ...prev, restrictedPages: Array.from(cur) };
+                                            });
+                                          }}
+                                        />
+                                        <span className="text-sm">{p.name}</span>
+                                      </label>
+                                    ))}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                        </div>
+                      );
+                    })()}
+                  </div>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
