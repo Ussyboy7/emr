@@ -558,6 +558,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   const [pausedSessions, setPausedSessions] = useState<ConsultationSession[]>([]);
   const [loadingPausedSessions, setLoadingPausedSessions] = useState(false);
   const [isResumingPausedSession, setIsResumingPausedSession] = useState(false);
+  const [endingPausedSessionId, setEndingPausedSessionId] = useState<number | null>(null);
   const [showWardAdmissionDetail, setShowWardAdmissionDetail] = useState(false);
   const [selectedWardAdmission, setSelectedWardAdmission] = useState<WardAdmission | null>(null);
   const [isEnding, setIsEnding] = useState(false);
@@ -2477,7 +2478,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   };
 
   const handleResumePausedSession = async (pausedSession: ConsultationSession) => {
-    if (!pausedSession?.id || isResumingPausedSession) return;
+    if (!pausedSession?.id || isResumingPausedSession || endingPausedSessionId != null) return;
     setIsResumingPausedSession(true);
     try {
       if (sessionActive && sessionId && sessionId !== pausedSession.id) {
@@ -2493,6 +2494,35 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       toast.error(err?.message || 'Failed to resume paused session');
     } finally {
       setIsResumingPausedSession(false);
+    }
+  };
+
+  /** Mark a paused (or stuck) session completed so it disappears from the paused list. Uses existing POST .../end/ API. */
+  const handleEndPausedSession = async (pausedSession: ConsultationSession) => {
+    if (!pausedSession?.id || isResumingPausedSession || endingPausedSessionId != null) return;
+    const label = pausedSession.patient_name || `session ${pausedSession.session_id}`;
+    if (
+      !window.confirm(
+        `End consultation for ${label}?\n\nThis marks the session as completed and removes it from Paused Sessions. If a visit is linked, it may be marked completed too.`
+      )
+    ) {
+      return;
+    }
+    setEndingPausedSessionId(pausedSession.id);
+    try {
+      await consultationService.endSession(pausedSession.id);
+      if (sessionId === pausedSession.id) {
+        setSessionActive(false);
+        setSessionId(null);
+        setCurrentPatient(null);
+      }
+      await loadPausedSessions();
+      toast.success(`Ended session for ${label}`);
+    } catch (err: any) {
+      console.error('Error ending paused session:', err);
+      toast.error(err?.message || 'Failed to end session');
+    } finally {
+      setEndingPausedSessionId(null);
     }
   };
 
@@ -4905,7 +4935,11 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <Button variant="outline" onClick={openPausedSessionsDialog}>
+              <Button
+                variant="outline"
+                onClick={openPausedSessionsDialog}
+                title="Paused sessions are consultations you put on hold. They are not counted in the waiting queue."
+              >
                 <History className="mr-2 h-4 w-4" />
                 Paused Sessions ({pausedSessions.length})
               </Button>
@@ -5017,7 +5051,11 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
             </div>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" onClick={openPausedSessionsDialog}>
+            <Button
+              variant="outline"
+              onClick={openPausedSessionsDialog}
+              title="Paused sessions are consultations you put on hold. They are not counted in the waiting queue."
+            >
               <History className="mr-2 h-4 w-4" />
               Paused Sessions ({pausedSessions.length})
             </Button>
@@ -8886,8 +8924,14 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                 Paused Sessions - {room?.name || 'Consultation Room'}
               </DialogTitle>
               <DialogDescription>
-                Resume any previously paused consultation for this room.
+                Resume continues a paused consultation. Paused sessions are separate from the waiting queue, so counts
+                can differ.
               </DialogDescription>
+              <p className="text-sm text-muted-foreground">
+                If Resume shows <span className="font-medium text-foreground">Not found</span>, the server does not yet
+                have the resume API—deploy the latest backend, or use <span className="font-medium">End consultation</span>{' '}
+                below to clear a session (uses the existing end-session API).
+              </p>
             </DialogHeader>
 
             <div className="space-y-3 mt-4">
@@ -8923,23 +8967,40 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                             Started: {formatDate(ps.started_at)} {formatTime(ps.started_at)}
                           </p>
                         </div>
-                        <Button
-                          onClick={() => handleResumePausedSession(ps)}
-                          disabled={isResumingPausedSession}
-                          className="bg-emerald-600 hover:bg-emerald-700"
-                        >
-                          {isResumingPausedSession ? (
-                            <>
-                              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                              Resuming...
-                            </>
-                          ) : (
-                            <>
-                              <Stethoscope className="h-4 w-4 mr-2" />
-                              Resume
-                            </>
-                          )}
-                        </Button>
+                        <div className="flex flex-col sm:flex-row gap-2 shrink-0">
+                          <Button
+                            onClick={() => handleResumePausedSession(ps)}
+                            disabled={isResumingPausedSession || endingPausedSessionId != null}
+                            className="bg-emerald-600 hover:bg-emerald-700"
+                          >
+                            {isResumingPausedSession ? (
+                              <>
+                                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                Resuming...
+                              </>
+                            ) : (
+                              <>
+                                <Stethoscope className="h-4 w-4 mr-2" />
+                                Resume
+                              </>
+                            )}
+                          </Button>
+                          <Button
+                            variant="outline"
+                            className="border-destructive/50 text-destructive hover:bg-destructive/10"
+                            onClick={() => handleEndPausedSession(ps)}
+                            disabled={isResumingPausedSession || endingPausedSessionId != null}
+                          >
+                            {endingPausedSessionId === ps.id ? (
+                              <>
+                                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                Ending...
+                              </>
+                            ) : (
+                              <>End consultation</>
+                            )}
+                          </Button>
+                        </div>
                       </div>
                     </div>
                   );

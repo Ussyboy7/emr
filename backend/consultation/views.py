@@ -187,7 +187,94 @@ class ConsultationSessionViewSet(viewsets.ModelViewSet):
             request=self.request,
         )
         return Response(ConsultationSessionSerializer(session).data)
-    
+
+    @action(detail=True, methods=['post'])
+    def pause(self, request, pk=None):
+        """Pause an active session; accumulate active time into active_seconds."""
+        session = self.get_object()
+        if session.status != 'active':
+            return Response(
+                {'detail': 'Only active sessions can be paused.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        now = timezone.now()
+        base = int(session.active_seconds or 0)
+        anchor = session.last_resumed_at or session.started_at
+        if anchor:
+            delta = (now - anchor).total_seconds()
+            if delta > 0:
+                base += int(delta)
+
+        old_status = session.status
+        session.active_seconds = base
+        session.status = 'paused'
+        session.paused_at = now
+        session.save(update_fields=['active_seconds', 'status', 'paused_at'])
+
+        AuditService.log_activity(
+            user=self.request.user,
+            action='update',
+            object_type='consultation_session',
+            object_id=str(session.id),
+            module='consultation',
+            object_repr=f'Session {session.session_id}',
+            description=f'Paused consultation session {session.session_id}',
+            old_values={'status': old_status},
+            new_values={'status': session.status, 'paused_at': str(session.paused_at), 'active_seconds': session.active_seconds},
+            request=self.request,
+        )
+        return Response(ConsultationSessionSerializer(session).data)
+
+    @action(detail=True, methods=['post'])
+    def resume(self, request, pk=None):
+        """Resume a paused session."""
+        session = self.get_object()
+        if session.status != 'paused':
+            return Response(
+                {'detail': 'Only paused sessions can be resumed.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        blocking = (
+            ConsultationSession.objects.filter(
+                patient_id=session.patient_id,
+                room_id=session.room_id,
+                status='active',
+            )
+            .exclude(pk=session.pk)
+            .exists()
+        )
+        if blocking:
+            return Response(
+                {
+                    'detail': (
+                        'Another active consultation exists for this patient in this room. '
+                        'Pause or complete it before resuming this session.'
+                    )
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        old_status = session.status
+        session.status = 'active'
+        session.last_resumed_at = timezone.now()
+        session.save(update_fields=['status', 'last_resumed_at'])
+
+        AuditService.log_activity(
+            user=self.request.user,
+            action='update',
+            object_type='consultation_session',
+            object_id=str(session.id),
+            module='consultation',
+            object_repr=f'Session {session.session_id}',
+            description=f'Resumed consultation session {session.session_id}',
+            old_values={'status': old_status},
+            new_values={'status': session.status, 'last_resumed_at': str(session.last_resumed_at)},
+            request=self.request,
+        )
+        return Response(ConsultationSessionSerializer(session).data)
+
     @action(detail=False, methods=['get'])
     def stats(self, request):
         """Get consultation statistics for dashboard."""
