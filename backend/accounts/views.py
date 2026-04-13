@@ -20,6 +20,7 @@ from .serializers import (
     ChangePasswordSerializer,
 )
 from audit.services import AuditService
+from permissions.models import Role, UserRole
 
 
 class UserViewSet(viewsets.ModelViewSet):
@@ -128,6 +129,19 @@ class UserViewSet(viewsets.ModelViewSet):
                 serializer.validated_data["department"] = self.request.user.department
 
         user = serializer.save()
+
+        # Auto-assign a Role so the user gets page permissions.
+        # Frontend authorization relies on `permissions.pages`, which is derived from `user.user_roles`.
+        # If a user is created without roles, they will land on /no-access.
+        if not user.is_superuser and not user.user_roles.exists():
+            role = self._pick_default_role_for_user(user)
+            if role is not None:
+                UserRole.objects.get_or_create(
+                    user=user,
+                    role=role,
+                    defaults={"assigned_by": self.request.user},
+                )
+
         AuditService.log_activity(
             user=self.request.user,
             action='create',
@@ -168,6 +182,18 @@ class UserViewSet(viewsets.ModelViewSet):
             'is_active': old_instance.is_active,
         }
         user = serializer.save()
+
+        # If the user still has no roles after an update (common when only `system_role` was set),
+        # auto-assign a reasonable default role.
+        if not user.is_superuser and not user.user_roles.exists():
+            role = self._pick_default_role_for_user(user)
+            if role is not None:
+                UserRole.objects.get_or_create(
+                    user=user,
+                    role=role,
+                    defaults={"assigned_by": self.request.user},
+                )
+
         new_values = {
             'username': user.username,
             'email': user.email,
@@ -186,6 +212,23 @@ class UserViewSet(viewsets.ModelViewSet):
             new_values=new_values,
             request=self.request,
         )
+
+    def _pick_default_role_for_user(self, user: User) -> Role | None:
+        """
+        Choose a default active Role for a user based on their `system_role` and department.
+
+        This is a safety net to keep newly-created staff from landing on `/no-access`
+        when roles were not explicitly assigned via the permissions UI.
+        """
+        system_role = (getattr(user, "system_role", "") or "").strip()
+
+        # 1) Exact name match (preferred, explicit).
+        if system_role:
+            exact = Role.objects.filter(is_active=True, name__iexact=system_role).first()
+            if exact is not None:
+                return exact
+
+        return None
     
     def perform_destroy(self, instance):
         """Delete user and log audit."""
