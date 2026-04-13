@@ -169,7 +169,9 @@ services:
       - emr-network-prod
     restart: always
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000"]
+      # Use IPv4 loopback: `localhost` may resolve to ::1 (IPv6) inside the container,
+      # while Next listens on 0.0.0.0:3000, causing false "connection refused".
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:3000"]
       interval: 30s
       timeout: 10s
       retries: 3
