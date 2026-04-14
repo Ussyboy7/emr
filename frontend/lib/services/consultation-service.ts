@@ -298,9 +298,13 @@ class ConsultationService {
   async getPresentingComplaintCategories(params?: {
     active_only?: boolean;
     include_complaints?: boolean;
-  }): Promise<PresentingComplaintCategory[]> {
+    page?: number;
+    page_size?: number;
+  }): Promise<{ results: PresentingComplaintCategory[]; count: number }> {
     const query = buildQueryString(params || {});
-    return apiFetch<PresentingComplaintCategory[]>(`/consultation/presenting-complaint-categories/${query}`);
+    return apiFetch<{ results: PresentingComplaintCategory[]; count: number }>(
+      `/consultation/presenting-complaint-categories/${query}`
+    );
   }
 
   async createPresentingComplaintCategory(
@@ -373,11 +377,13 @@ class ConsultationService {
   }>> {
     // Backend exposes categories endpoint with optional nested complaints.
     // `include_inactive` maps to `active_only=false`.
-    const categories = await this.getPresentingComplaintCategories({
+    const resp = await this.getPresentingComplaintCategories({
       include_complaints: true,
       active_only: params?.include_inactive ? false : true,
+      page: 1,
+      page_size: 500,
     });
-    return (categories || []) as any;
+    return (resp.results || []) as any;
   }
 }
 
