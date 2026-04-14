@@ -341,9 +341,30 @@ export function PrescriptionOrderModal({
       const med = medications.find((m) => normalizeMedicationId(m.id) === medId);
       const cfg = medicationConfigs.get(medId);
       const displayName = med?.name || cfg?.name || "Medication";
-      if (!cfg?.frequency) missing.push(`${displayName} - frequency required`);
-      if (!cfg?.unit?.trim()) missing.push(`${displayName} - dose unit required`);
       if (!cfg) continue;
+
+      // Mirror the UI behavior: merge defaults with saved config so "displayed values"
+      // match what we validate and submit.
+      const defaultCfg = {
+        dosage: "",
+        frequency: "Once daily (OD)" as const,
+        durationDays: "" as const,
+        route: "Oral",
+        unit: normalizeDoseUnit(
+          med?.unit ||
+            parseMedicationOptions(med?.dosage_form || med?.form || (med as any)?.dosageForm)[0] ||
+            undefined
+        ),
+        strength: med ? parseMedicationOptions(med.strength)[0] || "" : cfg.strength,
+        form: med ? parseMedicationOptions(med.dosage_form || med.form || (med as any)?.dosageForm)[0] || "" : cfg.form,
+        quantity: 0,
+        instructions: "",
+      };
+      const mergedCfg = { ...defaultCfg, ...cfg };
+
+      if (!mergedCfg.frequency?.trim()) missing.push(`${displayName} - frequency required`);
+      const unitToSend = normalizeDoseUnit(mergedCfg.unit || "tablet");
+      if (!unitToSend?.trim()) missing.push(`${displayName} - dose unit required`);
 
       const genericPk = resolveGenericPk(med);
       if (!genericPk) {
@@ -352,11 +373,11 @@ export function PrescriptionOrderModal({
       }
 
       // Quantity is inferred from dosage + frequency + durationDays (like room page)
-      const dailyDoses = frequencyToDailyDoses[cfg.frequency] ?? 1;
-      const dosageValue = parseFloat(String(cfg.dosage).replace(/[^\d.]/g, "")) || 1;
-      const days = cfg.durationDays === "" ? 0 : cfg.durationDays || 0;
+      const dailyDoses = frequencyToDailyDoses[mergedCfg.frequency] ?? 1;
+      const dosageValue = parseFloat(String(mergedCfg.dosage).replace(/[^\d.]/g, "")) || 1;
+      const days = mergedCfg.durationDays === "" ? 0 : mergedCfg.durationDays || 0;
       const qty = Math.max(
-        cfg.frequency === "STAT (Single dose)"
+        mergedCfg.frequency === "STAT (Single dose)"
           ? dosageValue
           : Math.ceil(dosageValue * dailyDoses * Math.max(days || 1, 1)),
         1
@@ -364,22 +385,24 @@ export function PrescriptionOrderModal({
 
       items.push({
         medication: medId,
-        medication_name: med?.name || cfg.name || "",
+        medication_name: med?.name || mergedCfg.name || "",
         generic: genericPk,
-        unit: cfg.unit || med?.unit || "tablet",
-        dosage_form: cfg.form || med?.dosage_form || med?.form || (med as any)?.dosageForm || "",
-        strength: cfg.strength || med?.strength || "",
-        route: cfg.route || "Oral",
-        dosage: cfg.dosage || "As directed",
-        frequency: cfg.frequency || "Once daily (OD)",
+        unit: unitToSend || "tablet",
+        dosage_form: mergedCfg.form || med?.dosage_form || med?.form || (med as any)?.dosageForm || "",
+        strength: mergedCfg.strength || med?.strength || "",
+        route: mergedCfg.route || "Oral",
+        dosage: mergedCfg.dosage || "As directed",
+        frequency: mergedCfg.frequency || "Once daily (OD)",
         duration: (days ? `${days} days` : "As directed") as string,
         quantity: qty || 1,
-        instructions: (cfg.instructions?.trim() || clinicalIndication.trim()),
+        instructions: (mergedCfg.instructions?.trim() || clinicalIndication.trim()),
       });
     }
 
     if (missing.length > 0) {
-      toast.error("Please complete required fields for each medication (frequency and dose unit).");
+      toast.error(
+        `Please complete required fields for each medication: ${missing.join("; ")}`
+      );
       return null;
     }
 
@@ -391,43 +414,10 @@ export function PrescriptionOrderModal({
   };
 
   const handleConfirm = async () => {
-    if (selectedMedications.length === 0) {
-      toast.error('Please select at least one medication');
-      return;
-    }
-
     setSubmitting(true);
     try {
-      const payload: PrescriptionOrderSubmitInput = {
-        priority,
-        clinicalIndication,
-        items: selectedMedications.map((medId): PrescriptionOrderItemInput => {
-          const med = medications.find((m) => normalizeMedicationId(m.id) === medId);
-          const cfg = medicationConfigs.get(medId);
-          if (!cfg) throw new Error(`Configuration missing for medication ${medId}`);
-
-          const displayMed = med || { id: medId, name: cfg.name, generic_name: cfg.generic_name, strength: cfg.strength, form: cfg.form, dosage_form: cfg.form };
-          const genPk = resolveGenericPk(med);
-          if (!genPk) {
-            throw new Error(`Missing generic id for ${displayMed.name || medId}`);
-          }
-
-          return {
-            medication: medId,
-            medication_name: displayMed.name,
-            generic: genPk,
-            dosage: cfg.dosage,
-            frequency: cfg.frequency,
-            duration: cfg.durationDays as string,
-            quantity: cfg.quantity || 1,
-            unit: cfg.unit,
-            dosage_form: cfg.form,
-            strength: cfg.strength,
-            route: cfg.route,
-            instructions: cfg.instructions,
-          };
-        }),
-      };
+      const payload = buildSubmitPayload();
+      if (!payload) return;
 
       await onSubmit(payload);
       onOpenChange(false);
