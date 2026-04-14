@@ -371,14 +371,13 @@ class ConsultationService {
     sort_order: number;
     complaints: PresentingComplaint[];
   }>> {
-    const query = buildQueryString(params || {});
-    return apiFetch<Array<{
-      id: number;
-      name: string;
-      is_active: boolean;
-      sort_order: number;
-      complaints: PresentingComplaint[];
-    }>>(`/consultation/presenting-complaints/library/${query}`);
+    // Backend exposes categories endpoint with optional nested complaints.
+    // `include_inactive` maps to `active_only=false`.
+    const categories = await this.getPresentingComplaintCategories({
+      include_complaints: true,
+      active_only: params?.include_inactive ? false : true,
+    });
+    return (categories || []) as any;
   }
 }
 
