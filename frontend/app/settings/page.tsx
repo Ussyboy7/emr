@@ -383,10 +383,7 @@ export default function SettingsPage() {
                         <p className="text-muted-foreground">Department</p>
                         <p className="font-medium">{currentUser.department || "Not assigned"}</p>
                       </div>
-                      <div>
-                        <p className="text-muted-foreground">Division</p>
-                        <p className="font-medium">{currentUser.division || "Not assigned"}</p>
-                      </div>
+
                       <div>
                         <p className="text-muted-foreground">Employee ID</p>
                         <p className="font-medium">{currentUser.employeeId || "Not set"}</p>
