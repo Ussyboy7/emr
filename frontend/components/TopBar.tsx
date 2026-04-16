@@ -201,21 +201,30 @@ export const TopBar = () => {
                     </Link>
                   </DropdownMenuItem>
                 )}
-                 <DropdownMenuItem onClick={() => router.push('/notifications')} className="flex items-center cursor-pointer">
-                   <Bell className="h-4 w-4 mr-2" />
-                   Notifications
-                 </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                
-                {/* Settings */}
-                 <DropdownMenuItem onClick={() => router.push('/settings')} className="flex items-center cursor-pointer">
-                   <Settings className="h-4 w-4 mr-2" />
-                   Settings
-                 </DropdownMenuItem>
-                 <DropdownMenuItem onClick={() => router.push('/help')} className="flex items-center cursor-pointer">
-                   <HelpCircle className="h-4 w-4 mr-2" />
-                   Help & Support
-                 </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={(event) => {
+                    event.preventDefault();
+                    router.push('/notifications');
+                  }} className="flex items-center cursor-pointer">
+                    <Bell className="h-4 w-4 mr-2" />
+                    Notifications
+                  </DropdownMenuItem>
+                 <DropdownMenuSeparator />
+
+                 {/* Settings */}
+                  <DropdownMenuItem onSelect={(event) => {
+                    event.preventDefault();
+                    router.push('/settings');
+                  }} className="flex items-center cursor-pointer">
+                    <Settings className="h-4 w-4 mr-2" />
+                    Settings
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={(event) => {
+                    event.preventDefault();
+                    router.push('/help');
+                  }} className="flex items-center cursor-pointer">
+                    <HelpCircle className="h-4 w-4 mr-2" />
+                    Help & Support
+                  </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 
                 {/* Logout */}
