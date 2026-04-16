@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
@@ -120,6 +121,54 @@ const mapApiPrescriptionStatusToUi = (s: string | undefined, fallback: string): 
 };
 
 const isActiveDispenseLine = (m: any) => !m?.prescribing_record_only;
+
+/** Prescribed ingredient PK — API links dispensary rows (brand medications) to this generic. */
+const resolveGenericIdForBrandSelect = (med: any): number | null => {
+  const idFromUrlTail = (s: string): number | undefined => {
+    const m = String(s).trim().match(/(\d+)\/?$/);
+    if (!m) return undefined;
+    const n = parseInt(m[1], 10);
+    return Number.isFinite(n) && n > 0 ? n : undefined;
+  };
+  const candidates: unknown[] = [
+    med?.generic,
+    med?.generic_id,
+    med?.medication_details?.generic_id,
+    med?.medication_details?.generic,
+    med?.medication_details?.type === 'generic' ? med?.medication_details?.id : undefined,
+  ];
+  for (const c of candidates) {
+    if (c == null) continue;
+    if (typeof c === 'string' && (c.includes('/') || c.includes('http'))) {
+      const fromUrl = idFromUrlTail(c);
+      if (fromUrl != null) return fromUrl;
+    }
+    const raw = typeof c === 'object' && c !== null && 'id' in c ? (c as { id: unknown }).id : c;
+    const id = parseNumericId(raw);
+    if (id != null && id > 0) return id;
+  }
+  return null;
+};
+
+/** Batch is expired only if calendar expiry is strictly before today (local). */
+const isBatchExpired = (exp: string | undefined): boolean => {
+  if (!exp) return false;
+  const day = String(exp).split('T')[0];
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);
+  if (!m) return new Date(exp) < new Date(new Date().setHours(0, 0, 0, 0));
+  const expUtc = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  const now = new Date();
+  const todayUtc = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  return expUtc < todayUtc;
+};
+
+/** DRF may return `{ results }` or a raw array for inventory list. */
+const rowsFromInventoryPayload = (payload: unknown): any[] => {
+  if (payload == null) return [];
+  if (Array.isArray(payload)) return payload;
+  const r = payload as { results?: unknown };
+  return Array.isArray(r.results) ? r.results : [];
+};
 
 // Check for drug interactions using pharmacy service
 const checkInteractions = async (medications: string[]): Promise<DrugInteraction[]> => {
@@ -279,10 +328,13 @@ export default function PrescriptionsPage() {
   const brandSelectionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const substituteTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const brandSelectionGenericIdRef = useRef<number | null>(null);
+  const dispensaryBrandSearchSeqRef = useRef(0);
 
   // Print functionality
   const [printing, setPrinting] = useState(false);
   const [splittingComboItemId, setSplittingComboItemId] = useState<string | null>(null);
+  const [splitComboAlertOpen, setSplitComboAlertOpen] = useState(false);
+  const [medToSplit, setMedToSplit] = useState<any>(null);
 
   // Transform medication data with status determination
   const transformMedications = (medications: any[], prescriptionStatus: string) => {
@@ -632,82 +684,93 @@ export default function PrescriptionsPage() {
   };
 
   /**
-   * Server-side search for both modals (fast, no client-side filtering).
-   * Select Brand: getMedications({ generic, search }) - brands for the generic.
-   * Substitute: getGenerics({ search }) - generic drug names.
+   * Substitute: server-side generic search.
+   * Select Brand: dispensary inventory only; optional server `search`, then aggregate receipt lines by brand.
    */
   const performSubstituteSearch = async (query: string) => {
     setIsSearchingSubstitutes(true);
     try {
       if (substitutionForm.reason === 'brand_selection') {
-        // Select Brand: use same source as Dispensary inventory (location=Dispensary, filter by generic)
         const genericId = brandSelectionGenericIdRef.current;
         if (!genericId) {
           setSubstituteSearchResults([]);
           return;
         }
-        const inventoryResponse = await pharmacyService.getInventory({
-          location: PHARMACY_LOCATIONS.DISPENSARY,
-          medication__generic: genericId,
-          search: query.length >= 2 ? query : undefined,
-          page: 1,
-          page_size: 100,
-        });
-        // Aggregate inventory by medication (same source as Dispensary inventory page)
-        const byMed = new Map<number, { med: any; stock: number; expiryDate: string; isNearExpiry: boolean }>();
-        for (const item of inventoryResponse.results) {
-          const med = (item as any).medication;
-          const medId = typeof med === 'object' && med?.id != null ? Number(med.id) : Number((item as any).medication);
-          if (!medId) continue;
-          const qty = Number((item as any).quantity || 0);
-          const exp = (item as any).expiry_date;
-          const isExpired = exp && new Date(exp) <= new Date();
-          if (isExpired) continue;
-          const medObj = typeof med === 'object' && med ? med : { id: medId, name: (item as any).medication_name || '', strength: '' };
-          const existing = byMed.get(medId);
-          if (!existing) {
-            const daysToExpiry = exp ? Math.ceil((new Date(exp).getTime() - Date.now()) / (1000 * 60 * 60 * 24)) : 0;
-            byMed.set(medId, {
-              med: medObj,
-              stock: qty,
-              expiryDate: exp ? new Date(exp).toLocaleDateString() : '',
-              isNearExpiry: daysToExpiry <= 90,
-            });
-          } else {
-            existing.stock += qty;
-            if (exp) {
-              const existingExp = existing.expiryDate ? new Date(existing.expiryDate) : null;
-              const newExp = new Date(exp);
-              if (!existingExp || newExp.getTime() < existingExp.getTime()) {
-                existing.expiryDate = new Date(exp).toLocaleDateString();
-                const daysToExpiry = Math.ceil((newExp.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-                existing.isNearExpiry = daysToExpiry <= 90;
+        const search = query.trim().length >= 2 ? query.trim() : undefined;
+        const seq = ++dispensaryBrandSearchSeqRef.current;
+
+        const aggregateRows = (items: any[]): SubstituteOption[] => {
+          const byMed = new Map<number, { med: any; stock: number; expiryDate: string; isNearExpiry: boolean }>();
+          for (const item of items) {
+            const med = (item as any).medication;
+            const medId = typeof med === 'object' && med?.id != null ? Number(med.id) : Number((item as any).medication);
+            if (!Number.isFinite(medId) || !medId) continue;
+            const qty = Number(
+              (item as any).quantity ?? (item as any).quantity_remaining ?? 0,
+            );
+            const exp = (item as any).expiry_date;
+            if (isBatchExpired(exp)) continue;
+            const medObj = typeof med === 'object' && med ? med : { id: medId, name: (item as any).medication_name || '', strength: '' };
+            const existing = byMed.get(medId);
+            if (!existing) {
+              const daysToExpiry = exp ? Math.ceil((new Date(exp).getTime() - Date.now()) / (1000 * 60 * 60 * 24)) : 0;
+              byMed.set(medId, {
+                med: medObj,
+                stock: qty,
+                expiryDate: exp ? new Date(exp).toLocaleDateString() : '',
+                isNearExpiry: daysToExpiry <= 90,
+              });
+            } else {
+              existing.stock += qty;
+              if (exp) {
+                const existingExp = existing.expiryDate ? new Date(existing.expiryDate) : null;
+                const newExp = new Date(exp);
+                if (!existingExp || newExp.getTime() < existingExp.getTime()) {
+                  existing.expiryDate = newExp.toLocaleDateString();
+                  const daysToExpiry = Math.ceil((newExp.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+                  existing.isNearExpiry = daysToExpiry <= 90;
+                }
               }
             }
           }
+          return Array.from(byMed.values())
+            .filter(({ stock }) => stock > 0)
+            .map(({ med, stock, expiryDate, isNearExpiry }) => ({
+              id: String(med.id),
+              name: med.name,
+              strength: med.strength || med.form || '',
+              type: 'brand' as const,
+              stock,
+              expiryDate,
+              daysToExpiry: 0,
+              unitPrice: 0,
+              isNearExpiry,
+            }))
+            .sort((a, b) => (Number(b.stock) || 0) - (Number(a.stock) || 0));
+        };
+
+        const baseParams = {
+          location: PHARMACY_LOCATIONS.DISPENSARY,
+          medication__generic: genericId,
+          page: 1,
+          page_size: 1000,
+        } as const;
+
+        let res = await pharmacyService.getInventory({ ...baseParams, search });
+        let options = aggregateRows(rowsFromInventoryPayload(res));
+        if (options.length === 0 && search) {
+          res = await pharmacyService.getInventory({ ...baseParams });
+          options = aggregateRows(rowsFromInventoryPayload(res));
         }
-        const options: SubstituteOption[] = Array.from(byMed.values()).map(({ med, stock, expiryDate, isNearExpiry }) => ({
-          id: med.id.toString(),
-          name: med.name,
-          strength: med.strength || med.form || '',
-          type: 'brand' as const,
-          stock,
-          expiryDate,
-          daysToExpiry: 0,
-          unitPrice: 0,
-          isNearExpiry,
-        }));
+        if (seq !== dispensaryBrandSearchSeqRef.current) return;
         setSubstituteSearchResults(options);
       } else {
         // Substitute: server-side search for generic drug names
-        if (query.length < 2) {
-          setSubstituteSearchResults([]);
-          return;
-        }
+        const search = query.trim().length >= 2 ? query.trim() : undefined;
         const results = await pharmacyService.getGenerics({
-          search: query,
+          ...(search && { search }),
           page: 1,
-          page_size: 50,
+          page_size: search ? 50 : 20, // Show fewer results when no search (all generics)
         });
         // Generics: no stock/expiry shown (stock lives at brand level; checked on confirm)
         const options: SubstituteOption[] = results.results.map((g) => ({
@@ -2401,40 +2464,32 @@ export default function PrescriptionsPage() {
                                       setBrandSelectionTargetName('');
                                       setBrandSelectionMode('select');
                                       setShowSubstitutionModal(true);
-                                      setIsLoadingBrands(true);
+                                       setIsLoadingBrands(true);
 
-                                      toast.success('Loading brand options...', {
-                                        description: 'Please wait while we fetch available brands'
-                                      });
+                                       try {
+                                        let genericId = resolveGenericIdForBrandSelect(med);
+                                        let targetName =
+                                          (med as any).name || (med as any).medication_details?.name || '';
 
-                                      // BACKGROUND LOADING: Determine generic and load brands
-                                      try {
-                                        const isGenericSelection =
-                                          (med as any).status === 'Pending' ||
-                                          (med as any).type === 'generic' ||
-                                          !Boolean((med as any).medication);
-
-                                        let genericId: number | null = null;
-                                        let targetName = (med as any).name || '';
-
-                                        if (isGenericSelection) {
-                                          genericId = Number(med.generic || (med as any).medication_details?.generic_id || 0) || null;
-                                        } else if ((med as any).medication) {
-                                          // Use cached medication details
+                                        if (!genericId && (med as any).medication) {
                                           const medDetail = await getCachedMedication(Number((med as any).medication));
-                                          genericId = medDetail?.generic?.id ?? null;
-                                          targetName = medDetail?.generic?.name || targetName;
+                                          genericId =
+                                            parseNumericId(medDetail?.generic?.id) ??
+                                            resolveGenericIdForBrandSelect(medDetail) ??
+                                            null;
+                                          const g = medDetail?.generic as { name?: string } | undefined;
+                                          targetName =
+                                            (g && typeof g === 'object' && g.name) || targetName;
                                         }
 
                                         setBrandSelectionTargetName(targetName);
                                         brandSelectionGenericIdRef.current = genericId;
 
                                         if (genericId) {
-                                          // Load brands in background
                                           performSubstituteSearch('');
                                         } else {
                                           setSubstituteSearchResults([]);
-                                          toast.error('Generic not found for this medication');
+                                          toast.error('Prescribed ingredient not found for this line');
                                         }
                                       } catch (err) {
                                         console.error('Failed to load brand data:', err);
@@ -2452,29 +2507,52 @@ export default function PrescriptionsPage() {
                                     </Button>
 
                                     {(med as any).can_split_combo && (
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        className="h-7 text-xs border-fuchsia-300 text-fuchsia-700 hover:bg-fuchsia-50 mr-2"
-                                        disabled={Boolean(splittingComboItemId)}
-                                        onClick={async (e) => {
-                                          e.stopPropagation();
-                                          const proceed = window.confirm(
-                                            'Split this combo into separate ingredient lines? Missing component generics will be auto-created as placeholders so you can substitute during dispensing.'
-                                          );
-                                          if (!proceed) return;
-                                          await handleSplitComboMedication(med);
-                                        }}
-                                      >
-                                        {splittingComboItemId === String(med.id) ? (
-                                          <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                                        ) : (
-                                          <GitBranch className="h-3 w-3 mr-1" />
-                                        )}
-                                        Split Combo
-                                      </Button>
+                                    <AlertDialog open={splitComboAlertOpen} onOpenChange={(open) => {
+                                      setSplitComboAlertOpen(open);
+                                      if (!open) setMedToSplit(null);
+                                    }}>
+                                      <AlertDialogTrigger asChild>
+                                        <Button
+                                          variant="outline"
+                                          size="sm"
+                                          className="h-7 text-xs border-fuchsia-300 text-fuchsia-700 hover:bg-fuchsia-50 mr-2"
+                                          disabled={Boolean(splittingComboItemId)}
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setMedToSplit(med);
+                                          }}
+                                        >
+                                          {splittingComboItemId === String(med.id) ? (
+                                            <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                          ) : (
+                                            <GitBranch className="h-3 w-3 mr-1" />
+                                          )}
+                                          Split Combo
+                                        </Button>
+                                      </AlertDialogTrigger>
+                                      <AlertDialogContent>
+                                        <AlertDialogHeader>
+                                          <AlertDialogTitle>Split Combo Medication</AlertDialogTitle>
+                                          <AlertDialogDescription>
+                                            Split this combo into separate ingredient lines? Missing component generics will be auto-created as placeholders so you can substitute during dispensing.
+                                          </AlertDialogDescription>
+                                        </AlertDialogHeader>
+                                        <AlertDialogFooter>
+                                          <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                          <AlertDialogAction
+                                            onClick={async () => {
+                                              setSplitComboAlertOpen(false);
+                                              await handleSplitComboMedication(medToSplit);
+                                              setMedToSplit(null);
+                                            }}
+                                          >
+                                            Split Combo
+                                          </AlertDialogAction>
+                                        </AlertDialogFooter>
+                                      </AlertDialogContent>
+                                    </AlertDialog>
                                     )}
-                                    
+
                                     {/* Substitute Button - Always available for medication substitution */}
                                     <Button
                                       variant="outline"
@@ -2496,11 +2574,7 @@ export default function PrescriptionsPage() {
                                       });
                                       setSubstituteSearchQuery('');
                                       brandSelectionGenericIdRef.current = null;
-                                      setShowSubstitutionModal(true);
-
-                                      toast.success('Opening substitution options...', {
-                                        description: 'Loading available medication alternatives'
-                                      });
+                                       setShowSubstitutionModal(true);
 
                                       // BACKGROUND LOADING: Load initial substitute options
                                       try {
@@ -2780,7 +2854,7 @@ export default function PrescriptionsPage() {
                 {/* Search for Substitute */}
                 <div>
                   <Label className="text-sm">
-                    {substitutionForm.reason === 'brand_selection' ? 'Search Brand *' : 'Search Substitute Medication *'}
+                    {substitutionForm.reason === 'brand_selection' ? 'Search Brand *' : 'Search Substitute Generic *'}
                   </Label>
                   <div className="relative mt-1">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -2799,18 +2873,17 @@ export default function PrescriptionsPage() {
                         }
                       }}
                       placeholder={
-                        substitutionForm.reason === 'brand_selection' 
-                          ? 'Type to filter brands...' 
-                          : 'Type to search medications (min 2 characters)...'
+                        substitutionForm.reason === 'brand_selection'
+                          ? 'Type to filter brands...'
+                          : 'Type to search generics (min 2 characters)...'
                       }
                       className="pl-10"
                     />
                   </div>
                   <p className="text-xs text-muted-foreground mt-1">
-                    {substitutionForm.reason === 'brand_selection' 
-                      ? 'Find the specific brand to dispense' 
-                      : 'Find an alternative medication to substitute'
-                    }
+                    {substitutionForm.reason === 'brand_selection'
+                      ? 'Find the specific brand to dispense'
+                      : 'Find an alternative generic to substitute'}
                   </p>
                 </div>
 
@@ -2868,18 +2941,26 @@ export default function PrescriptionsPage() {
                             </div>
                           ))
                   ) : substitutionForm.reason === 'brand_selection' ? (
-                    <div className="text-center py-8 text-muted-foreground text-sm">
-                      {substituteSearchQuery.trim() 
-                        ? `No brands found for "${substituteSearchQuery}"` 
-                        : 'No brands available for this medication'}
-                    </div>
-                  ) : substituteSearchQuery.length >= 2 ? (
-                    <div className="text-center py-8 text-muted-foreground text-sm">
-                      No medications found matching "{substituteSearchQuery}"
+                    <div className="text-center py-8 text-muted-foreground text-sm space-y-2 max-w-md mx-auto">
+                      <p>
+                        Dispensary inventory returned <strong>no rows</strong> for generic{' '}
+                        <strong>#{brandSelectionGenericIdRef.current ?? '?'}</strong>. Select Brand only
+                        lists stock already received into dispensary for that ingredient.
+                      </p>
+                      <p className="text-xs">
+                        Issue or receive batches from the central store into dispensary (brand medications
+                        must be linked to this generic), then try again.
+                      </p>
+                      {substituteSearchQuery.trim() ? (
+                        <p className="text-xs">
+                          Search &quot;{substituteSearchQuery.trim()}&quot; only filters that list—it does not add
+                          stock.
+                        </p>
+                      ) : null}
                     </div>
                   ) : (
                     <div className="text-center py-8 text-muted-foreground text-sm">
-                      Type at least 2 characters to search for medications
+                      No generics found{substituteSearchQuery ? ` matching "${substituteSearchQuery}"` : ''}
                     </div>
                   )
                 })()}

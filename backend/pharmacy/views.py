@@ -272,6 +272,7 @@ class MedicationInventoryViewSet(viewsets.ModelViewSet):
         if search:
             queryset = queryset.filter(
                 Q(medication__name__icontains=search) |
+                Q(medication__generic__name__icontains=search) |
                 Q(medication__code__icontains=search) |
                 Q(batch_number__icontains=search)
             )

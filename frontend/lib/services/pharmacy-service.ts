@@ -368,6 +368,20 @@ class PharmacyService {
   }
 
   /**
+   * Get generic medications
+   */
+  async getGenericMedications(params?: {
+    search?: string;
+    page?: number;
+    page_size?: number;
+    is_active?: boolean;
+  }): Promise<{ results: GenericMedication[]; count: number }> {
+    const query = buildQueryString(params || {});
+    const res = await apiFetch<{ results: GenericMedication[]; count: number }>(`/v1/pharmacy/generics/${query}`);
+    return res;
+  }
+
+  /**
    * Get medications for prescription (from Store master list)
    * Doctor sees all available medications in the hospital
    */
@@ -464,10 +478,17 @@ class PharmacyService {
   }): Promise<{ results: MedicationInventory[]; count: number }> {
     const query = buildQueryString(params || {});
     // Use the correct inventory endpoint
-    const res = await apiFetch<{ results: MedicationInventory[]; count: number }>(`/v1/pharmacy/inventory/${query}`);
+    const res = await apiFetch<{ results: MedicationInventory[]; count: number } | MedicationInventory[]>(
+      `/v1/pharmacy/inventory/${query}`
+    );
+    const rawList = Array.isArray(res) ? res : res?.results || [];
+    const normalized = {
+      ...(Array.isArray(res) ? { count: res.length } : res),
+      results: rawList,
+    };
     return {
-      ...res,
-      results: (res.results || []).map((item: any) => {
+      ...normalized,
+      results: (normalized.results || []).map((item: any) => {
         if (item?.medication && typeof item.medication === 'object') {
           return { ...item, medication: normalizeMedication(item.medication) };
         }

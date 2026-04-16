@@ -111,20 +111,11 @@ class ConsultationSessionViewSet(viewsets.ModelViewSet):
                 data['doctor'] = doctor
 
         session = serializer.save(created_by=self.request.user, **data)
-        AuditService.log_activity(
-            user=self.request.user,
-            action='create',
-            object_type='consultation_session',
-            object_id=str(session.id),
-            module='consultation',
-            object_repr=f'Session {session.session_id}',
-            description=f'Started consultation session {session.session_id} for patient {session.patient.get_full_name()}',
-            new_values={'session_id': session.session_id, 'status': session.status, 'room': str(session.room.id) if session.room else ''},
-            request=self.request,
-        )
 
     def _find_doctor_for_session(self, data):
         """Find appropriate doctor for consultation session using multiple strategies."""
+        from accounts.models import User
+
         user = self.request.user
 
         # Strategy 1: ALWAYS use the requesting user who performed the action
@@ -138,7 +129,20 @@ class ConsultationSessionViewSet(viewsets.ModelViewSet):
             if hasattr(visit, 'doctor') and visit.doctor:
                 return visit.doctor
 
+        # Only use the requesting user who performed the consultation
+        # No fallback to other doctors - the actual performer is recorded
         return None
+        AuditService.log_activity(
+            user=self.request.user,
+            action='create',
+            object_type='consultation_session',
+            object_id=str(session.id),
+            module='consultation',
+            object_repr=f'Session {session.session_id}',
+            description=f'Started consultation session {session.session_id} for patient {session.patient.get_full_name()}',
+            new_values={'session_id': session.session_id, 'status': session.status, 'room': str(session.room.id) if session.room else ''},
+            request=self.request,
+        )
     
     @action(detail=True, methods=['post'])
     def end(self, request, pk=None):

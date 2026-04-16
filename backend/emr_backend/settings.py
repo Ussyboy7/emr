@@ -43,11 +43,6 @@ DEBUG = os.getenv("DJANGO_DEBUG", "True").lower() == "true"
 
 ALLOWED_HOSTS = [host.strip() for host in os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",") if host.strip()]
 
-# Docker Compose / in-cluster probes use localhost or the service hostname; always allow these.
-for _probe_host in ("localhost", "127.0.0.1", "backend"):
-    if _probe_host not in ALLOWED_HOSTS:
-        ALLOWED_HOSTS.append(_probe_host)
-
 CSRF_TRUSTED_ORIGINS = [origin.strip() for origin in os.getenv("CSRF_TRUSTED_ORIGINS", "http://localhost:8001,http://127.0.0.1:8001,http://localhost:3001,http://127.0.0.1:3001").split(",") if origin.strip()]
 
 
