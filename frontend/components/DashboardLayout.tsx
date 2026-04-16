@@ -60,7 +60,9 @@ export const DashboardLayout = ({ children }: DashboardLayoutProps) => {
     }
 
     const allowedPages = currentUser.permissions || [];
-    const allowed = isPathAllowedByPages(pathname, allowedPages);
+    // Always allow global user pages for authenticated users
+    const globalPages = ['/notifications', '/settings', '/help'];
+    const allowed = isPathAllowedByPages(pathname, allowedPages) || globalPages.includes(pathname);
     if (!allowed) {
       setCanRender(false);
       router.replace(homeRoute || '/no-access');
