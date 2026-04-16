@@ -367,6 +367,7 @@ export default function UserManagementPage() {
     try {
       const newUser = await adminService.createUser({
         username: (formData as any).username,
+        password: (formData as any).password,
         first_name: formData.firstName,
         middle_name: (formData as any).middleName,
         last_name: formData.lastName,
@@ -377,7 +378,7 @@ export default function UserManagementPage() {
         department: formData.departmentId,
         is_active: formData.status === 'Active',
         employee_id: formData.employeeId || undefined,
-      });
+      } as any);
 
       await adminService.assignRoleToUser(newUser.id, Number(formData.accessRoleId));
       
