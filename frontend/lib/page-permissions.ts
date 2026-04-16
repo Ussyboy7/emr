@@ -10,6 +10,11 @@ export const ALL_PAGE_PERMISSIONS: PagePermission[] = [
   // Overview (Global EMR)
   { id: "/dashboard", name: "Overview Dashboard", description: "Global EMR overview dashboard", module: "Overview" },
 
+  // Global User Features (available to all authenticated users)
+  { id: "/notifications", name: "Notifications", description: "View and manage notifications", module: "User" },
+  { id: "/settings", name: "Settings", description: "User settings and preferences", module: "User" },
+  { id: "/help", name: "Help & Support", description: "Help and support resources", module: "User" },
+
   // Medical Records
   { id: "/medical-records", name: "Dashboard", description: "Medical Records Dashboard", module: "Medical Records" },
   { id: "/medical-records/patients/new", name: "Register Patient", description: "Register new patients", module: "Medical Records" },
