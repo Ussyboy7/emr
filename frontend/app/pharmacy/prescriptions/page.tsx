@@ -687,10 +687,11 @@ export default function PrescriptionsPage() {
    * Substitute: server-side generic search.
    * Select Brand: dispensary inventory only; optional server `search`, then aggregate receipt lines by brand.
    */
-  const performSubstituteSearch = async (query: string) => {
+  const performSubstituteSearch = async (query: string, reason?: string) => {
     setIsSearchingSubstitutes(true);
     try {
-      if (substitutionForm.reason === 'brand_selection') {
+      const searchReason = reason || substitutionForm.reason;
+      if (searchReason === 'brand_selection') {
         const genericId = brandSelectionGenericIdRef.current;
         if (!genericId) {
           setSubstituteSearchResults([]);
@@ -2485,9 +2486,9 @@ export default function PrescriptionsPage() {
                                         setBrandSelectionTargetName(targetName);
                                         brandSelectionGenericIdRef.current = genericId;
 
-                                        if (genericId) {
-                                          performSubstituteSearch('');
-                                        } else {
+                                         if (genericId) {
+                                           performSubstituteSearch('', 'brand_selection');
+                                         } else {
                                           setSubstituteSearchResults([]);
                                           toast.error('Prescribed ingredient not found for this line');
                                         }
@@ -2865,9 +2866,9 @@ export default function PrescriptionsPage() {
                         setSubstituteSearchQuery(val);
                         // Both modals: server-side search
                         if (substitutionForm.reason === 'brand_selection') {
-                          performSubstituteSearch(val); // loads all brands when empty, filters when typed
+                          performSubstituteSearch(val, 'brand_selection'); // loads all brands when empty, filters when typed
                         } else if (val.length >= 2) {
-                          performSubstituteSearch(val); // generics search
+                          performSubstituteSearch(val, 'substitute'); // generics search
                         } else {
                           setSubstituteSearchResults([]);
                         }
@@ -2941,22 +2942,8 @@ export default function PrescriptionsPage() {
                             </div>
                           ))
                   ) : substitutionForm.reason === 'brand_selection' ? (
-                    <div className="text-center py-8 text-muted-foreground text-sm space-y-2 max-w-md mx-auto">
-                      <p>
-                        Dispensary inventory returned <strong>no rows</strong> for generic{' '}
-                        <strong>#{brandSelectionGenericIdRef.current ?? '?'}</strong>. Select Brand only
-                        lists stock already received into dispensary for that ingredient.
-                      </p>
-                      <p className="text-xs">
-                        Issue or receive batches from the central store into dispensary (brand medications
-                        must be linked to this generic), then try again.
-                      </p>
-                      {substituteSearchQuery.trim() ? (
-                        <p className="text-xs">
-                          Search &quot;{substituteSearchQuery.trim()}&quot; only filters that list—it does not add
-                          stock.
-                        </p>
-                      ) : null}
+                    <div className="text-center py-8 text-muted-foreground text-sm">
+                      No brands available in dispensary for this generic.
                     </div>
                   ) : (
                     <div className="text-center py-8 text-muted-foreground text-sm">
