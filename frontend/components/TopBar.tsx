@@ -201,29 +201,44 @@ export const TopBar = () => {
                     </Link>
                   </DropdownMenuItem>
                 )}
-                  <DropdownMenuItem onSelect={(event) => {
-                    event.preventDefault();
-                    router.push('/notifications');
-                  }} className="flex items-center cursor-pointer">
-                    <Bell className="h-4 w-4 mr-2" />
-                    Notifications
+                  <DropdownMenuItem asChild>
+                    <button
+                      onClick={(e) => {
+                        e.preventDefault();
+                        router.push('/notifications');
+                      }}
+                      className="flex items-center cursor-pointer w-full text-left"
+                    >
+                      <Bell className="h-4 w-4 mr-2" />
+                      Notifications
+                    </button>
                   </DropdownMenuItem>
                  <DropdownMenuSeparator />
 
                  {/* Settings */}
-                  <DropdownMenuItem onSelect={(event) => {
-                    event.preventDefault();
-                    router.push('/settings');
-                  }} className="flex items-center cursor-pointer">
-                    <Settings className="h-4 w-4 mr-2" />
-                    Settings
+                  <DropdownMenuItem asChild>
+                    <button
+                      onClick={(e) => {
+                        e.preventDefault();
+                        router.push('/settings');
+                      }}
+                      className="flex items-center cursor-pointer w-full text-left"
+                    >
+                      <Settings className="h-4 w-4 mr-2" />
+                      Settings
+                    </button>
                   </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={(event) => {
-                    event.preventDefault();
-                    router.push('/help');
-                  }} className="flex items-center cursor-pointer">
-                    <HelpCircle className="h-4 w-4 mr-2" />
-                    Help & Support
+                  <DropdownMenuItem asChild>
+                    <button
+                      onClick={(e) => {
+                        e.preventDefault();
+                        router.push('/help');
+                      }}
+                      className="flex items-center cursor-pointer w-full text-left"
+                    >
+                      <HelpCircle className="h-4 w-4 mr-2" />
+                      Help & Support
+                    </button>
                   </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 
