@@ -90,7 +90,9 @@ export function middleware(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  if (isPathAllowedByPages(pathname, allowedPages)) {
+  // Always allow global user pages for authenticated users
+  const globalPages = ['/notifications', '/settings', '/help'];
+  if (isPathAllowedByPages(pathname, allowedPages) || globalPages.includes(pathname)) {
     return NextResponse.next();
   }
 
