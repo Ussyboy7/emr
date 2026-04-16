@@ -766,45 +766,25 @@ export default function PrescriptionsPage() {
         if (seq !== dispensaryBrandSearchSeqRef.current) return;
         setSubstituteSearchResults(options);
       } else {
-        // Substitute: server-side search for generic drug names
-        if (query.length >= 2) {
-          // Search with query
-          const results = await pharmacyService.getGenerics({
-            search: query,
-            page: 1,
-            page_size: 50,
-          });
-          const options: SubstituteOption[] = results.results.map((g) => ({
-            id: g.id.toString(),
-            name: g.name,
-            strength: g.strength || '',
-            type: 'generic' as const,
-            stock: 0,
-            expiryDate: '',
-            daysToExpiry: 0,
-            unitPrice: 0,
-            isNearExpiry: false,
-          }));
-          setSubstituteSearchResults(options);
-        } else {
-          // Show popular generics when no search
-          const results = await pharmacyService.getGenerics({
-            page: 1,
-            page_size: 10, // Show first 10 generics
-          });
-          const options: SubstituteOption[] = results.results.map((g) => ({
-            id: g.id.toString(),
-            name: g.name,
-            strength: g.strength || '',
-            type: 'generic' as const,
-            stock: 0,
-            expiryDate: '',
-            daysToExpiry: 0,
-            unitPrice: 0,
-            isNearExpiry: false,
-          }));
-          setSubstituteSearchResults(options);
-        }
+        // Substitute: server-side search for generic drug names (like brand selection)
+        const search = query.trim().length >= 2 ? query.trim() : undefined;
+        const results = await pharmacyService.getGenerics({
+          ...(search && { search }),
+          page: 1,
+          page_size: search ? 50 : 20, // Show more results when no search filter
+        });
+        const options: SubstituteOption[] = results.results.map((g) => ({
+          id: g.id.toString(),
+          name: g.name,
+          strength: g.strength || '',
+          type: 'generic' as const,
+          stock: 0,
+          expiryDate: '',
+          daysToExpiry: 0,
+          unitPrice: 0,
+          isNearExpiry: false,
+        }));
+        setSubstituteSearchResults(options);
       }
     } catch (error) {
       console.error('Search failed:', error);
