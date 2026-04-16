@@ -46,10 +46,10 @@ const mapApiUserToUser = (data: any): User => {
     email: data.email ?? "",
     employeeId: data.employee_id ?? "",
     gradeLevel: data.grade_level ?? "",
-    directorate: toOptionalString(data.directorate ?? data.directorate_id),
-    division: toOptionalString(data.division ?? data.division_id),
-    department: toOptionalString(data.department ?? data.department_id),
-    systemRole: roleName, // Use role name for display
+    directorate: toOptionalString(data.directorate_name ?? data.directorate),
+    division: toOptionalString(data.division_name ?? data.division),
+    department: toOptionalString(data.department_name ?? data.department),
+    systemRole: data.system_role || roleName, // Use system_role directly, fallback to roleName
     permissions: data.permissions?.pages || [],
     permissionActions: data.permissions?.actions || {},
     avatar: undefined,
