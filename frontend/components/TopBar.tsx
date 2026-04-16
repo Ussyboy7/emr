@@ -201,27 +201,21 @@ export const TopBar = () => {
                     </Link>
                   </DropdownMenuItem>
                 )}
-                <DropdownMenuItem asChild>
-                  <Link href="/notifications" className="flex items-center cursor-pointer">
-                    <Bell className="h-4 w-4 mr-2" />
-                    Notifications
-                  </Link>
-                </DropdownMenuItem>
+                 <DropdownMenuItem onClick={() => router.push('/notifications')} className="flex items-center cursor-pointer">
+                   <Bell className="h-4 w-4 mr-2" />
+                   Notifications
+                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 
                 {/* Settings */}
-                <DropdownMenuItem asChild>
-                  <Link href="/settings" className="flex items-center cursor-pointer">
-                    <Settings className="h-4 w-4 mr-2" />
-                    Settings
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link href="/help" className="flex items-center cursor-pointer">
-                    <HelpCircle className="h-4 w-4 mr-2" />
-                    Help & Support
-                  </Link>
-                </DropdownMenuItem>
+                 <DropdownMenuItem onClick={() => router.push('/settings')} className="flex items-center cursor-pointer">
+                   <Settings className="h-4 w-4 mr-2" />
+                   Settings
+                 </DropdownMenuItem>
+                 <DropdownMenuItem onClick={() => router.push('/help')} className="flex items-center cursor-pointer">
+                   <HelpCircle className="h-4 w-4 mr-2" />
+                   Help & Support
+                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 
                 {/* Logout */}
