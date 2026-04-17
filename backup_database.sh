@@ -6,7 +6,8 @@
 set -e  # Exit on any error
 
 # Configuration
-BACKUP_ROOT="./backups"
+# Use home directory for backups to ensure write permissions
+BACKUP_ROOT="${HOME}/emr_backups"
 DATE=$(date +%Y%m%d_%H%M%S)
 BACKUP_DIR="${BACKUP_ROOT}/${DATE}"
 LOG_FILE="${BACKUP_ROOT}/backup.log"

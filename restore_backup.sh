@@ -6,7 +6,7 @@
 set -e
 
 # Configuration
-BACKUP_ROOT="/home/emrprod/emr/backups"
+BACKUP_ROOT="${HOME}/emr_backups"
 RECOVERY_LOG="${BACKUP_ROOT}/recovery.log"
 COMPOSE_FILE="docker-compose.prod.yml"
 

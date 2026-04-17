@@ -6,7 +6,7 @@
 set -e
 
 # Configuration
-BACKUP_ROOT="/home/emrprod/emr/backups"
+BACKUP_ROOT="${HOME}/emr_backups"
 TEST_DB="emrprod_test_restore"
 LOG_FILE="${BACKUP_ROOT}/restore_test.log"
 
