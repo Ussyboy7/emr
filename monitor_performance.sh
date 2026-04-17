@@ -6,8 +6,10 @@
 set -e
 
 # Configuration
-PERF_LOG="/home/emrprod/emr/logs/performance.log"
-METRICS_LOG="/home/emrprod/emr/logs/metrics.log"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LOGS_DIR="${SCRIPT_DIR}/logs"
+PERF_LOG="${LOGS_DIR}/performance.log"
+METRICS_LOG="${LOGS_DIR}/metrics.log"
 DURATION=60  # Monitor for 60 seconds
 
 # Logging function
@@ -132,8 +134,12 @@ main() {
     log "=== EMR Performance Monitoring Started ==="
     log "Monitoring duration: ${DURATION} seconds"
 
-    # Create log directories
-    mkdir -p "/home/emrprod/emr/logs"
+    # Create log directories and touch log files
+    mkdir -p "$LOGS_DIR"
+    touch "$PERF_LOG" "$METRICS_LOG" 2>/dev/null || {
+        log "ERROR: Cannot create log files in $LOGS_DIR"
+        exit 1
+    }
 
     # Run monitoring in parallel
     monitor_response_times &

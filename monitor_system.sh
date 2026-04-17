@@ -6,8 +6,9 @@
 set -e
 
 # Configuration
-LOG_FILE="/home/emrprod/emr/monitoring.log"
-BACKUP_LOG="/home/emrprod/emr_backups/cron.log"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LOG_FILE="${SCRIPT_DIR}/monitoring.log"
+BACKUP_LOG="${HOME}/emr_backups/cron.log"
 COMPOSE_FILE="docker-compose.prod.yml"
 ALERT_EMAIL="admin@medical.npa.local"  # Update with actual email
 
