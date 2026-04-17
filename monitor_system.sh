@@ -10,6 +10,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_FILE="${SCRIPT_DIR}/monitoring.log"
 BACKUP_LOG="${HOME}/emr_backups/cron.log"
 COMPOSE_FILE="docker-compose.prod.yml"
+BACKUP_DATA_LOG="${HOME}/emr_backups/backup.log"
 ALERT_EMAIL="admin@medical.npa.local"  # Update with actual email
 
 # Logging function
@@ -108,7 +109,9 @@ check_backups() {
     if [ -f "$BACKUP_LOG" ]; then
         # Check if last backup was successful
         local last_backup=$(grep -E "(Backup Started|Backup Completed)" "$BACKUP_LOG" | tail -2)
-        log "Last backup status: $last_backup"
+        if [ -n "$last_backup" ]; then
+            log "Last backup status: $last_backup"
+        fi
 
         # Check if backup ran today
         local today=$(date +%Y-%m-%d)
@@ -116,11 +119,29 @@ check_backups() {
             log "✅ Backup ran today: SUCCESS"
         else
             log "⚠️  No backup completed today"
-            alert "Daily backup may have failed"
+            # Check if cron job ran at all
+            if grep -q "$today" "$BACKUP_LOG"; then
+                log "ℹ️  Backup cron job executed today but may have failed"
+            else
+                log "⚠️  Backup cron job did not run today"
+                alert "Daily backup cron job failed to execute"
+            fi
         fi
     else
-        log "❌ Backup log not found"
+        log "❌ Backup cron log not found at $BACKUP_LOG"
         alert "Backup system not logging properly"
+    fi
+
+    # Check for actual backup files
+    local backup_count=$(find "${HOME}/emr_backups" -name "20*" -type d 2>/dev/null | wc -l)
+    if [ "$backup_count" -gt 0 ]; then
+        log "✅ Found $backup_count backup(s) in ${HOME}/emr_backups"
+        local latest_backup=$(find "${HOME}/emr_backups" -name "20*" -type d -printf '%T@ %p\n' 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2-)
+        if [ -n "$latest_backup" ]; then
+            log "📅 Latest backup: $(basename "$latest_backup")"
+        fi
+    else
+        log "⚠️  No backup directories found"
     fi
 }
 
@@ -129,22 +150,32 @@ check_logs() {
     log "Checking log files for errors..."
 
     local error_patterns=("ERROR" "CRITICAL" "FAILED" "Exception" "Traceback")
-    local log_files=("/var/log/nginx/error.log" "/home/emrprod/emr/backups/backup.log")
 
-    for log_file in "${log_files[@]}"; do
-        if [ -f "$log_file" ]; then
-            local recent_errors=$(grep -i -E "($(IFS='|'; echo "${error_patterns[*]}"))" "$log_file" | wc -l)
-            if [ "$recent_errors" -gt 0 ]; then
-                log "⚠️  Found $recent_errors error(s) in $log_file"
-                # Show last error
-                grep -i -E "($(IFS='|'; echo "${error_patterns[*]}"))" "$log_file" | tail -1 | log
-            else
-                log "✅ $log_file: No recent errors"
-            fi
+    # Check backup logs
+    if [ -f "$BACKUP_DATA_LOG" ]; then
+        local recent_errors=$(grep -i -E "($(IFS='|'; echo "${error_patterns[*]}"))" "$BACKUP_DATA_LOG" | wc -l)
+        if [ "$recent_errors" -gt 0 ]; then
+            log "⚠️  Found $recent_errors error(s) in backup log"
+            grep -i -E "($(IFS='|'; echo "${error_patterns[*]}"))" "$BACKUP_DATA_LOG" | tail -1 | log
         else
-            log "⚠️  Log file not found: $log_file"
+            log "✅ Backup log: No recent errors"
         fi
-    done
+    else
+        log "⚠️  Backup data log not found (backups may not have run yet)"
+    fi
+
+    # Check nginx logs inside container
+    if docker ps | grep -q emr-nginx-prod; then
+        local nginx_errors=$(docker logs emr-nginx-prod 2>&1 | grep -i -E "($(IFS='|'; echo "${error_patterns[*]}"))" | wc -l)
+        if [ "$nginx_errors" -gt 0 ]; then
+            log "⚠️  Found $nginx_errors error(s) in nginx logs"
+            docker logs emr-nginx-prod 2>&1 | grep -i -E "($(IFS='|'; echo "${error_patterns[*]}"))" | tail -1 | log
+        else
+            log "✅ Nginx logs: No recent errors"
+        fi
+    else
+        log "⚠️  Nginx container not running"
+    fi
 }
 
 # Generate monitoring report
