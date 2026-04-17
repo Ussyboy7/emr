@@ -3,6 +3,22 @@
 ## Overview
 This guide provides essential commands and procedures for operating the EMR production system.
 
+## Directory Structure
+
+### Root Level
+- `backend/` - Backend application code
+- `frontend/` - Frontend application code
+- `scripts/` - Operational scripts (production, security, backup, monitoring, testing)
+- `deployment/` - Docker Compose configurations for local, staging, and production
+- `logs/` - System logs and reports
+- `docs/` - Documentation and guides
+- `nginx/` - Nginx configuration
+- `ssl/` - SSL certificates
+- `status-page/` - Status page application
+- `backups/` - Backup files and configurations
+- `Makefile` - Build and development tasks
+- `README.md` - Project overview and setup instructions
+
 ## Quick Start Commands
 
 ### System Management
