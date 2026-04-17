@@ -19,10 +19,10 @@ echo "Adding correct cron jobs..."
 SCRIPT_DIR="$(pwd)"
 
 # Daily backup at 10:00 PM (correct path)
-(crontab -l 2>/dev/null; echo "0 22 * * * $SCRIPT_DIR/backup_database.sh >> ~/emr_backups/cron.log 2>&1") | crontab -
+(crontab -l 2>/dev/null; echo "0 22 * * * $SCRIPT_DIR/backup_database.sh >> /home/emrprod/emr_backups/cron.log 2>&1") | crontab -
 
 # Weekly verification on Saturdays at 10:00 AM (correct path)
-(crontab -l 2>/dev/null; echo "0 10 * * 6 $SCRIPT_DIR/verify_backup.sh >> ~/emr_backups/cron.log 2>&1") | crontab -
+(crontab -l 2>/dev/null; echo "0 10 * * 6 $SCRIPT_DIR/verify_backup.sh >> /home/emrprod/emr_backups/cron.log 2>&1") | crontab -
 
 # System monitoring every 5 minutes
 (crontab -l 2>/dev/null; echo "*/5 * * * * $SCRIPT_DIR/monitor_system.sh >> $SCRIPT_DIR/monitoring.log 2>&1") | crontab -
@@ -40,7 +40,7 @@ echo "📋 Final cron jobs:"
 crontab -l
 echo ""
 echo "🎯 Schedule Summary:"
-echo "  🕙 Daily Backup: 10:00 PM → ~/emr_backups/cron.log"
-echo "  🕐 Weekly Verification: Saturdays 10:00 AM → ~/emr_backups/cron.log"
+echo "  🕙 Daily Backup: 10:00 PM → /home/emrprod/emr_backups/cron.log"
+echo "  🕐 Weekly Verification: Saturdays 10:00 AM → /home/emrprod/emr_backups/cron.log"
 echo "  👁️  System Monitoring: Every 5 minutes → ./monitoring.log"
 echo "  🔍 Security Checks: Every 4 hours → ./logs/security.log"

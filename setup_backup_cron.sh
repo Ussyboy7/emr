@@ -11,10 +11,10 @@ LOG_FILE="${HOME}/emr_backups/cron.log"
 touch "$LOG_FILE"
 
 # Add to crontab (daily at 10 PM)
-(crontab -l 2>/dev/null; echo "0 22 * * * $BACKUP_SCRIPT >> $LOG_FILE 2>&1") | crontab -
+(crontab -l 2>/dev/null; echo "0 22 * * * $BACKUP_SCRIPT >> /home/emrprod/emr_backups/cron.log 2>&1") | crontab -
 
 # Add weekly verification (Saturdays at 10 AM)
-(crontab -l 2>/dev/null; echo "0 10 * * 6 $VERIFY_SCRIPT >> $LOG_FILE 2>&1") | crontab -
+(crontab -l 2>/dev/null; echo "0 10 * * 6 $VERIFY_SCRIPT >> /home/emrprod/emr_backups/cron.log 2>&1") | crontab -
 
 echo "Automated backup cron jobs configured:"
 echo "- Daily database/media backup at 10:00 PM"
