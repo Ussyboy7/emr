@@ -207,21 +207,17 @@ const normalizeId = (value: unknown): string | undefined => {
 
 const mapApiUserToUser = (user: any): User => {
   const fullName = `${user.first_name ?? ''} ${user.last_name ?? ''}`.trim();
-  // system_role is now a ForeignKey (UUID), but we need the name for display
-  // Backend returns system_role_name for the role name
-  // Ensure we never use the UUID as the role name - only use system_role_name
-  // system_role is now a ForeignKey (UUID), but we need the name for display
-  // Backend returns system_role_name for the role name - ALWAYS use this
-  let roleName = user.system_role_name ?? '';
-  
+  // system_role is a CharField with choices, so it's the display name directly
+  let roleName = user.system_role ?? '';
+
   // UUID pattern to detect if we accidentally got a UUID instead of a name
   const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  
-  // If system_role_name is missing or is a UUID, try to get it from system_role object
+
+  // If system_role is missing or is a UUID, try to get it from system_role object (legacy)
   if ((!roleName || uuidPattern.test(roleName)) && user.system_role && typeof user.system_role === 'object' && user.system_role.name) {
     roleName = user.system_role.name;
   }
-  
+
   // Final check: if roleName is still a UUID or empty, set to empty string
   // We should NEVER display a UUID as the role name
   if (!roleName || uuidPattern.test(roleName)) {
@@ -237,7 +233,7 @@ const mapApiUserToUser = (user: any): User => {
     systemRole: roleName, // Use role name for display, never the UUID
     directorate: normalizeId(user.directorate ?? user.directorate_id),
     division: normalizeId(user.division ?? user.division_id),
-    department: normalizeId(user.department ?? user.department_id),
+    department: user.department_name ?? normalizeId(user.department),
     avatar: undefined,
     active: user.is_active ?? true,
     isSuperuser: user.is_superuser ?? false,

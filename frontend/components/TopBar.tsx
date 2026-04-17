@@ -188,17 +188,29 @@ export const TopBar = () => {
                 
                 {/* Quick Actions */}
                 <DropdownMenuItem asChild>
-                  <Link href={homeRoute} className="flex items-center cursor-pointer">
+                  <button
+                    onClick={(e) => {
+                      e.preventDefault();
+                      router.push(homeRoute);
+                    }}
+                    className="flex items-center cursor-pointer w-full text-left"
+                  >
                     <Stethoscope className="h-4 w-4 mr-2" />
                     Home
-                  </Link>
+                  </button>
                 </DropdownMenuItem>
                 {canViewOverviewDashboard && (
                   <DropdownMenuItem asChild>
-                    <Link href="/dashboard" className="flex items-center cursor-pointer">
+                    <button
+                      onClick={(e) => {
+                        e.preventDefault();
+                        router.push('/dashboard');
+                      }}
+                      className="flex items-center cursor-pointer w-full text-left"
+                    >
                       <LayoutDashboard className="h-4 w-4 mr-2" />
                       Overview Dashboard
-                    </Link>
+                    </button>
                   </DropdownMenuItem>
                 )}
                   <DropdownMenuItem asChild>
