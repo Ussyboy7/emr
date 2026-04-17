@@ -1,0 +1,29 @@
+EMR Production Backup Manifest
+==============================
+Backup Date: Fri Apr 17 22:16:14 WAT 2026
+Backup Directory: ./backups/20260417_221614
+Server: MacBooks-MacBook-Pro.local
+Database: emrprod
+
+CONTENTS:
+total 744
+drwxr-xr-x@ 4 macbook  staff     128 Apr 17 22:16 .
+drwxr-xr-x  6 macbook  staff     192 Apr 17 22:16 ..
+-rw-r--r--@ 1 macbook  staff       0 Apr 17 22:16 BACKUP_MANIFEST.txt
+-rw-r--r--@ 1 macbook  staff  379977 Apr 17 22:16 emrprod_db_20260417_221614.sql
+
+SYSTEM INFO:
+Darwin MacBooks-MacBook-Pro.local 24.6.0 Darwin Kernel Version 24.6.0: Mon Jan 19 21:58:37 PST 2026; root:xnu-11417.140.69.708.3~1/RELEASE_ARM64_T8103 arm64
+
+BACKUP CONFIGURATION:
+- Retention: 7 days
+- Compression: Enabled
+- Verification: Enabled
+
+RECOVERY INSTRUCTIONS:
+1. Ensure PostgreSQL is running
+2. Create target database if needed
+3. Run: pg_restore -h localhost -U emradmin -d emrprod /path/to/backup.sql
+4. Restore media files: tar -xzf media_backup.tar.gz -C /app/
+5. Run migrations: python manage.py migrate
+6. Collect static files: python manage.py collectstatic --noinput

@@ -46,3 +46,6 @@ frontend/.env.*
 
 # Celery beat schedule (runtime artifact)
 backend/celerybeat-schedule*
+
+# Archived development files
+archive_development_files/
