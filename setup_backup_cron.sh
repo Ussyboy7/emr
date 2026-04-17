@@ -5,7 +5,7 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKUP_SCRIPT="${SCRIPT_DIR}/backup_database.sh"
 VERIFY_SCRIPT="${SCRIPT_DIR}/verify_backup.sh"
-LOG_FILE="${SCRIPT_DIR}/backups/cron.log"
+LOG_FILE="${HOME}/emr_backups/cron.log"
 
 # Create log file
 touch "$LOG_FILE"
@@ -17,8 +17,8 @@ touch "$LOG_FILE"
 (crontab -l 2>/dev/null; echo "0 10 * * 6 $VERIFY_SCRIPT >> $LOG_FILE 2>&1") | crontab -
 
 echo "Automated backup cron jobs configured:"
-echo "- Daily database/media backup at 2:00 AM"
-echo "- Weekly backup verification on Sundays at 3:00 AM"
-echo ""
+echo "- Daily database/media backup at 10:00 PM"
+echo "- Weekly backup verification on Saturdays at 10:00 AM"
+
 echo "View backup logs: tail -f $LOG_FILE"
 echo "View cron jobs: crontab -l"
