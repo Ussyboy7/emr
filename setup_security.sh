@@ -16,8 +16,12 @@ mkdir -p "$BACKUP_DIR"
 
 echo "=== EMR Security Hardening & Log Management Setup ==="
 
-# Configure logrotate for EMR logs
-cat > /etc/logrotate.d/emr << EOF
+# Check if running as root/sudo for system configurations
+if [ "$EUID" -eq 0 ]; then
+    echo "✅ Running with sudo - configuring system-level security"
+
+    # Configure logrotate for EMR logs
+    cat > /etc/logrotate.d/emr << EOF
 # EMR System Logs
 /home/emrprod/emr/monitoring.log
 /home/emrprod/emr_backups/backup.log
@@ -37,11 +41,11 @@ cat > /etc/logrotate.d/emr << EOF
 }
 EOF
 
-echo "✅ Log rotation configured for EMR logs"
+    echo "✅ Log rotation configured for EMR logs"
 
-# Configure Nginx log rotation (if not already configured)
-if [ ! -f /etc/logrotate.d/nginx ]; then
-    cat > /etc/logrotate.d/nginx << EOF
+    # Configure Nginx log rotation (if not already configured)
+    if [ ! -f /etc/logrotate.d/nginx ]; then
+        cat > /etc/logrotate.d/nginx << EOF
 /var/log/nginx/*.log {
     daily
     rotate 30
@@ -55,16 +59,16 @@ if [ ! -f /etc/logrotate.d/nginx ]; then
     endscript
 }
 EOF
-    echo "✅ Nginx log rotation configured"
-fi
+        echo "✅ Nginx log rotation configured"
+    fi
 
-# Set up fail2ban for SSH protection (if not installed)
-if ! command -v fail2ban-client &> /dev/null; then
-    echo "⚠️  fail2ban not installed. Consider installing for SSH protection:"
-    echo "    sudo apt update && sudo apt install fail2ban"
-else
-    # Configure fail2ban for SSH
-    cat > /etc/fail2ban/jail.d/emr.conf << EOF
+    # Set up fail2ban for SSH protection (if not installed)
+    if ! command -v fail2ban-client &> /dev/null; then
+        echo "⚠️  fail2ban not installed. Consider installing for SSH protection:"
+        echo "    sudo apt update && sudo apt install fail2ban"
+    else
+        # Configure fail2ban for SSH
+        cat > /etc/fail2ban/jail.d/emr.conf << EOF
 [sshd]
 enabled = true
 port = ssh
@@ -73,21 +77,58 @@ logpath = /var/log/auth.log
 maxretry = 3
 bantime = 3600
 EOF
-    systemctl enable fail2ban 2>/dev/null || true
-    systemctl start fail2ban 2>/dev/null || true
-    echo "✅ fail2ban configured for SSH protection"
-fi
+        systemctl enable fail2ban 2>/dev/null || true
+        systemctl start fail2ban 2>/dev/null || true
+        echo "✅ fail2ban configured for SSH protection"
+    fi
 
-# Configure UFW firewall rules (if UFW is available)
-if command -v ufw &> /dev/null; then
-    # Allow SSH
-    ufw allow ssh >/dev/null 2>&1 || true
-    # Allow HTTP and HTTPS
-    ufw allow 80 >/dev/null 2>&1 || true
-    ufw allow 443 >/dev/null 2>&1 || true
-    # Allow PostgreSQL external access (for backups)
-    ufw allow 5434 >/dev/null 2>&1 || true
-    echo "✅ UFW firewall rules configured"
+    # Configure UFW firewall rules (if UFW is available)
+    if command -v ufw &> /dev/null; then
+        # Allow SSH
+        ufw allow ssh >/dev/null 2>&1 || true
+        # Allow HTTP and HTTPS
+        ufw allow 80 >/dev/null 2>&1 || true
+        ufw allow 443 >/dev/null 2>&1 || true
+        # Allow PostgreSQL external access (for backups)
+        ufw allow 5434 >/dev/null 2>&1 || true
+        echo "✅ UFW firewall rules configured"
+    fi
+
+else
+    echo "⚠️  Not running with sudo - skipping system-level configurations"
+    echo ""
+    echo "📋 SYSTEM ADMINISTRATOR ACTION REQUIRED:"
+    echo "Run the following commands with sudo to complete security setup:"
+    echo ""
+    echo "# Configure log rotation for EMR logs"
+    echo "sudo tee /etc/logrotate.d/emr > /dev/null << 'EOF'"
+    echo "# EMR System Logs"
+    echo "/home/emrprod/emr/monitoring.log"
+    echo "/home/emrprod/emr_backups/backup.log"
+    echo "/home/emrprod/emr_backups/cron.log"
+    echo "/home/emrprod/emr/logs/*.log {"
+    echo "    daily"
+    echo "    rotate 30"
+    echo "    compress"
+    echo "    delaycompress"
+    echo "    missingok"
+    echo "    notifempty"
+    echo "    create 644 emrprod emrprod"
+    echo "    postrotate"
+    echo "        docker compose -f /home/emrprod/emr/docker-compose.prod.yml logs --tail=0 > /dev/null"
+    echo "    endscript"
+    echo "}"
+    echo "EOF"
+    echo ""
+    echo "# Configure UFW firewall (if using UFW)"
+    echo "sudo ufw allow ssh"
+    echo "sudo ufw allow 80"
+    echo "sudo ufw allow 443"
+    echo "sudo ufw allow 5434"
+    echo ""
+    echo "# Install and configure fail2ban (optional)"
+    echo "sudo apt update && sudo apt install fail2ban"
+    echo ""
 fi
 
 # Set proper permissions on EMR directories
