@@ -330,7 +330,7 @@ const resolveDoctorName = async (
   if (!resolvedName || resolvedName === 'Unknown') {
     if (doctorId) {
       try {
-        const doctor = await apiFetch<UserData>(`/accounts/users/${doctorId}/`);
+        const doctor = await apiFetch<UserData>(`/accounts/users/${doctorId}/public/`);
         resolvedName = doctor.full_name || doctor.username || 'Unknown';
       } catch (err) {
         console.warn('Could not load doctor details:', err);
