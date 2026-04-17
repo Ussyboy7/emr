@@ -1,0 +1,202 @@
+[
+  {
+    "model": "laboratory.labtemplate",
+    "pk": 1,
+    "fields": {
+      "name": "Complete Blood Count (CBC)",
+      "code": "CBC",
+      "category": "hematology",
+      "sample_type": "Blood",
+      "description": "Comprehensive blood test analyzing cellular components of blood",
+      "normal_range": {
+        "WBC": "4.0-11.0 x10^9/L",
+        "RBC": "4.5-6.0 x10^12/L",
+        "Hemoglobin": "13.0-17.0 g/dL (Male), 12.0-15.0 g/dL (Female)",
+        "Hematocrit": "40-50% (Male), 36-46% (Female)",
+        "Platelets": "150-450 x10^9/L"
+      },
+      "turnaround_time": "1 hour",
+      "is_active": true,
+      "created_at": "2026-04-17T23:00:00Z",
+      "updated_at": "2026-04-17T23:00:00Z"
+    }
+  },
+  {
+    "model": "laboratory.labtemplate",
+    "pk": 2,
+    "fields": {
+      "name": "Blood Glucose (Fasting)",
+      "code": "GLUCF",
+      "category": "chemistry",
+      "sample_type": "Blood",
+      "description": "Fasting blood glucose measurement",
+      "normal_range": {
+        "Glucose": "70-100 mg/dL"
+      },
+      "turnaround_time": "30 minutes",
+      "is_active": true,
+      "created_at": "2026-04-17T23:00:00Z",
+      "updated_at": "2026-04-17T23:00:00Z"
+    }
+  },
+  {
+    "model": "laboratory.labtemplate",
+    "pk": 3,
+    "fields": {
+      "name": "Lipid Profile",
+      "code": "LIPID",
+      "category": "chemistry",
+      "sample_type": "Blood",
+      "description": "Comprehensive cholesterol and lipid analysis",
+      "normal_range": {
+        "Total Cholesterol": "< 200 mg/dL",
+        "LDL": "< 100 mg/dL",
+        "HDL": "> 40 mg/dL (Male), > 50 mg/dL (Female)",
+        "Triglycerides": "< 150 mg/dL"
+      },
+      "turnaround_time": "2 hours",
+      "is_active": true,
+      "created_at": "2026-04-17T23:00:00Z",
+      "updated_at": "2026-04-17T23:00:00Z"
+    }
+  },
+  {
+    "model": "laboratory.labtemplate",
+    "pk": 4,
+    "fields": {
+      "name": "Liver Function Test",
+      "code": "LFT",
+      "category": "chemistry",
+      "sample_type": "Blood",
+      "description": "Assessment of liver function and damage",
+      "normal_range": {
+        "ALT": "7-56 U/L",
+        "AST": "10-40 U/L",
+        "ALP": "44-147 U/L",
+        "Total Bilirubin": "0.3-1.2 mg/dL",
+        "Albumin": "3.5-5.0 g/dL"
+      },
+      "turnaround_time": "1 hour",
+      "is_active": true,
+      "created_at": "2026-04-17T23:00:00Z",
+      "updated_at": "2026-04-17T23:00:00Z"
+    }
+  },
+  {
+    "model": "laboratory.labtemplate",
+    "pk": 5,
+    "fields": {
+      "name": "Kidney Function Test",
+      "code": "KFT",
+      "category": "chemistry",
+      "sample_type": "Blood",
+      "description": "Assessment of kidney function",
+      "normal_range": {
+        "Creatinine": "0.6-1.2 mg/dL",
+        "BUN": "7-20 mg/dL",
+        "eGFR": "> 60 mL/min/1.73m²"
+      },
+      "turnaround_time": "45 minutes",
+      "is_active": true,
+      "created_at": "2026-04-17T23:00:00Z",
+      "updated_at": "2026-04-17T23:00:00Z"
+    }
+  },
+  {
+    "model": "laboratory.labtemplate",
+    "pk": 6,
+    "fields": {
+      "name": "Thyroid Function Test",
+      "code": "TFT",
+      "category": "endocrinology",
+      "sample_type": "Blood",
+      "description": "Assessment of thyroid hormone levels",
+      "normal_range": {
+        "TSH": "0.4-4.0 mIU/L",
+        "T3": "80-200 ng/dL",
+        "T4": "4.5-11.2 µg/dL"
+      },
+      "turnaround_time": "2 hours",
+      "is_active": true,
+      "created_at": "2026-04-17T23:00:00Z",
+      "updated_at": "2026-04-17T23:00:00Z"
+    }
+  },
+  {
+    "model": "laboratory.labtemplate",
+    "pk": 7,
+    "fields": {
+      "name": "Urinalysis",
+      "code": "UA",
+      "category": "urinalysis",
+      "sample_type": "Urine",
+      "description": "Comprehensive urine analysis",
+      "normal_range": {
+        "Color": "Pale yellow to amber",
+        "Appearance": "Clear",
+        "pH": "4.5-8.0",
+        "Protein": "Negative",
+        "Glucose": "Negative",
+        "Ketones": "Negative"
+      },
+      "turnaround_time": "30 minutes",
+      "is_active": true,
+      "created_at": "2026-04-17T23:00:00Z",
+      "updated_at": "2026-04-17T23:00:00Z"
+    }
+  },
+  {
+    "model": "laboratory.labtemplate",
+    "pk": 8,
+    "fields": {
+      "name": "Blood Culture",
+      "code": "BCULT",
+      "category": "microbiology",
+      "sample_type": "Blood",
+      "description": "Bacterial culture from blood sample",
+      "normal_range": {
+        "Result": "No growth"
+      },
+      "turnaround_time": "48-72 hours",
+      "is_active": true,
+      "created_at": "2026-04-17T23:00:00Z",
+      "updated_at": "2026-04-17T23:00:00Z"
+    }
+  },
+  {
+    "model": "laboratory.labtemplate",
+    "pk": 9,
+    "fields": {
+      "name": "HIV Test",
+      "code": "HIV",
+      "category": "immunology",
+      "sample_type": "Blood",
+      "description": "HIV antibody/antigen screening test",
+      "normal_range": {
+        "Result": "Negative"
+      },
+      "turnaround_time": "30 minutes",
+      "is_active": true,
+      "created_at": "2026-04-17T23:00:00Z",
+      "updated_at": "2026-04-17T23:00:00Z"
+    }
+  },
+  {
+    "model": "laboratory.labtemplate",
+    "pk": 10,
+    "fields": {
+      "name": "Malaria Test",
+      "code": "MALARIA",
+      "category": "parasitology",
+      "sample_type": "Blood",
+      "description": "Malaria parasite detection by microscopy",
+      "normal_range": {
+        "Result": "Negative"
+      },
+      "turnaround_time": "1 hour",
+      "is_active": true,
+      "created_at": "2026-04-17T23:00:00Z",
+      "updated_at": "2026-04-17T23:00:00Z"
+    }
+  }
+]

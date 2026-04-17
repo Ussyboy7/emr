@@ -1,0 +1,172 @@
+[
+  {
+    "model": "pharmacy.genericmedication",
+    "pk": 1,
+    "fields": {
+      "name": "Paracetamol",
+      "active_ingredient": "Paracetamol",
+      "category": "Analgesics",
+      "strength": "500mg",
+      "dosage_form": "Tablet",
+      "unit": "tablet",
+      "route": "Oral",
+      "atc_code": "N02BE01",
+      "is_active": true,
+      "created_at": "2026-04-17T23:00:00Z",
+      "updated_at": "2026-04-17T23:00:00Z"
+    }
+  },
+  {
+    "model": "pharmacy.genericmedication",
+    "pk": 2,
+    "fields": {
+      "name": "Amoxicillin",
+      "active_ingredient": "Amoxicillin",
+      "category": "Antibiotics",
+      "strength": "500mg",
+      "dosage_form": "Capsule",
+      "unit": "capsule",
+      "route": "Oral",
+      "atc_code": "J01CA04",
+      "is_active": true,
+      "created_at": "2026-04-17T23:00:00Z",
+      "updated_at": "2026-04-17T23:00:00Z"
+    }
+  },
+  {
+    "model": "pharmacy.genericmedication",
+    "pk": 3,
+    "fields": {
+      "name": "Ibuprofen",
+      "active_ingredient": "Ibuprofen",
+      "category": "Analgesics",
+      "strength": "200mg",
+      "dosage_form": "Tablet",
+      "unit": "tablet",
+      "route": "Oral",
+      "atc_code": "M01AE01",
+      "is_active": true,
+      "created_at": "2026-04-17T23:00:00Z",
+      "updated_at": "2026-04-17T23:00:00Z"
+    }
+  },
+  {
+    "model": "pharmacy.genericmedication",
+    "pk": 4,
+    "fields": {
+      "name": "Omeprazole",
+      "active_ingredient": "Omeprazole",
+      "category": "Gastrointestinal",
+      "strength": "20mg",
+      "dosage_form": "Capsule",
+      "unit": "capsule",
+      "route": "Oral",
+      "atc_code": "A02BC01",
+      "is_active": true,
+      "created_at": "2026-04-17T23:00:00Z",
+      "updated_at": "2026-04-17T23:00:00Z"
+    }
+  },
+  {
+    "model": "pharmacy.genericmedication",
+    "pk": 5,
+    "fields": {
+      "name": "Amlodipine",
+      "active_ingredient": "Amlodipine",
+      "category": "Cardiovascular",
+      "strength": "5mg",
+      "dosage_form": "Tablet",
+      "unit": "tablet",
+      "route": "Oral",
+      "atc_code": "C08CA01",
+      "is_active": true,
+      "created_at": "2026-04-17T23:00:00Z",
+      "updated_at": "2026-04-17T23:00:00Z"
+    }
+  },
+  {
+    "model": "pharmacy.genericmedication",
+    "pk": 6,
+    "fields": {
+      "name": "Metformin",
+      "active_ingredient": "Metformin",
+      "category": "Antidiabetics",
+      "strength": "500mg",
+      "dosage_form": "Tablet",
+      "unit": "tablet",
+      "route": "Oral",
+      "atc_code": "A10BA02",
+      "is_active": true,
+      "created_at": "2026-04-17T23:00:00Z",
+      "updated_at": "2026-04-17T23:00:00Z"
+    }
+  },
+  {
+    "model": "pharmacy.genericmedication",
+    "pk": 7,
+    "fields": {
+      "name": "Salbutamol",
+      "active_ingredient": "Salbutamol",
+      "category": "Respiratory",
+      "strength": "100mcg/dose",
+      "dosage_form": "Inhaler",
+      "unit": "puff",
+      "route": "Inhalation",
+      "atc_code": "R03AC02",
+      "is_active": true,
+      "created_at": "2026-04-17T23:00:00Z",
+      "updated_at": "2026-04-17T23:00:00Z"
+    }
+  },
+  {
+    "model": "pharmacy.genericmedication",
+    "pk": 8,
+    "fields": {
+      "name": "Insulin Regular",
+      "active_ingredient": "Insulin Human",
+      "category": "Antidiabetics",
+      "strength": "100IU/mL",
+      "dosage_form": "Injection",
+      "unit": "IU",
+      "route": "Subcutaneous",
+      "atc_code": "A10AB01",
+      "is_active": true,
+      "created_at": "2026-04-17T23:00:00Z",
+      "updated_at": "2026-04-17T23:00:00Z"
+    }
+  },
+  {
+    "model": "pharmacy.genericmedication",
+    "pk": 9,
+    "fields": {
+      "name": "Warfarin",
+      "active_ingredient": "Warfarin",
+      "category": "Cardiovascular",
+      "strength": "5mg",
+      "dosage_form": "Tablet",
+      "unit": "tablet",
+      "route": "Oral",
+      "atc_code": "B01AA03",
+      "is_active": true,
+      "created_at": "2026-04-17T23:00:00Z",
+      "updated_at": "2026-04-17T23:00:00Z"
+    }
+  },
+  {
+    "model": "pharmacy.genericmedication",
+    "pk": 10,
+    "fields": {
+      "name": "Prednisolone",
+      "active_ingredient": "Prednisolone",
+      "category": "Corticosteroids",
+      "strength": "5mg",
+      "dosage_form": "Tablet",
+      "unit": "tablet",
+      "route": "Oral",
+      "atc_code": "H02AB06",
+      "is_active": true,
+      "created_at": "2026-04-17T23:00:00Z",
+      "updated_at": "2026-04-17T23:00:00Z"
+    }
+  }
+]

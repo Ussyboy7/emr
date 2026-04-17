@@ -1,0 +1,192 @@
+[
+  {
+    "model": "pharmacy.medication",
+    "pk": 1,
+    "fields": {
+      "name": "Panadol",
+      "generic": 1,
+      "manufacturer": "GSK",
+      "batch_number": "PND2026001",
+      "expiry_date": "2027-12-31",
+      "pack_size": "20 tablets",
+      "pack_quantity": 20,
+      "unit_cost": 0.50,
+      "selling_price": 1.00,
+      "reorder_level": 50,
+      "is_active": true,
+      "created_at": "2026-04-17T23:00:00Z",
+      "updated_at": "2026-04-17T23:00:00Z"
+    }
+  },
+  {
+    "model": "pharmacy.medication",
+    "pk": 2,
+    "fields": {
+      "name": "Amoxil",
+      "generic": 2,
+      "manufacturer": "GSK",
+      "batch_number": "AMX2026001",
+      "expiry_date": "2027-06-30",
+      "pack_size": "20 capsules",
+      "pack_quantity": 20,
+      "unit_cost": 1.20,
+      "selling_price": 2.50,
+      "reorder_level": 30,
+      "is_active": true,
+      "created_at": "2026-04-17T23:00:00Z",
+      "updated_at": "2026-04-17T23:00:00Z"
+    }
+  },
+  {
+    "model": "pharmacy.medication",
+    "pk": 3,
+    "fields": {
+      "name": "Advil",
+      "generic": 3,
+      "manufacturer": "Pfizer",
+      "batch_number": "ADV2026001",
+      "expiry_date": "2027-08-31",
+      "pack_size": "30 tablets",
+      "pack_quantity": 30,
+      "unit_cost": 0.80,
+      "selling_price": 1.50,
+      "reorder_level": 40,
+      "is_active": true,
+      "created_at": "2026-04-17T23:00:00Z",
+      "updated_at": "2026-04-17T23:00:00Z"
+    }
+  },
+  {
+    "model": "pharmacy.medication",
+    "pk": 4,
+    "fields": {
+      "name": "Losec",
+      "generic": 4,
+      "manufacturer": "AstraZeneca",
+      "batch_number": "LOS2026001",
+      "expiry_date": "2027-10-31",
+      "pack_size": "14 capsules",
+      "pack_quantity": 14,
+      "unit_cost": 2.50,
+      "selling_price": 5.00,
+      "reorder_level": 25,
+      "is_active": true,
+      "created_at": "2026-04-17T23:00:00Z",
+      "updated_at": "2026-04-17T23:00:00Z"
+    }
+  },
+  {
+    "model": "pharmacy.medication",
+    "pk": 5,
+    "fields": {
+      "name": "Norvasc",
+      "generic": 5,
+      "manufacturer": "Pfizer",
+      "batch_number": "NOR2026001",
+      "expiry_date": "2027-09-30",
+      "pack_size": "30 tablets",
+      "pack_quantity": 30,
+      "unit_cost": 1.80,
+      "selling_price": 3.50,
+      "reorder_level": 20,
+      "is_active": true,
+      "created_at": "2026-04-17T23:00:00Z",
+      "updated_at": "2026-04-17T23:00:00Z"
+    }
+  },
+  {
+    "model": "pharmacy.medication",
+    "pk": 6,
+    "fields": {
+      "name": "Glucophage",
+      "generic": 6,
+      "manufacturer": "Merck",
+      "batch_number": "GLU2026001",
+      "expiry_date": "2027-11-30",
+      "pack_size": "60 tablets",
+      "pack_quantity": 60,
+      "unit_cost": 0.90,
+      "selling_price": 1.80,
+      "reorder_level": 35,
+      "is_active": true,
+      "created_at": "2026-04-17T23:00:00Z",
+      "updated_at": "2026-04-17T23:00:00Z"
+    }
+  },
+  {
+    "model": "pharmacy.medication",
+    "pk": 7,
+    "fields": {
+      "name": "Ventolin",
+      "generic": 7,
+      "manufacturer": "GSK",
+      "batch_number": "VEN2026001",
+      "expiry_date": "2027-07-31",
+      "pack_size": "1 inhaler (200 doses)",
+      "pack_quantity": 1,
+      "unit_cost": 15.00,
+      "selling_price": 25.00,
+      "reorder_level": 10,
+      "is_active": true,
+      "created_at": "2026-04-17T23:00:00Z",
+      "updated_at": "2026-04-17T23:00:00Z"
+    }
+  },
+  {
+    "model": "pharmacy.medication",
+    "pk": 8,
+    "fields": {
+      "name": "Humulin R",
+      "generic": 8,
+      "manufacturer": "Eli Lilly",
+      "batch_number": "HUM2026001",
+      "expiry_date": "2027-03-31",
+      "pack_size": "1 vial (1000 IU)",
+      "pack_quantity": 1,
+      "unit_cost": 8.50,
+      "selling_price": 15.00,
+      "reorder_level": 15,
+      "is_active": true,
+      "created_at": "2026-04-17T23:00:00Z",
+      "updated_at": "2026-04-17T23:00:00Z"
+    }
+  },
+  {
+    "model": "pharmacy.medication",
+    "pk": 9,
+    "fields": {
+      "name": "Coumadin",
+      "generic": 9,
+      "manufacturer": "Bristol Myers Squibb",
+      "batch_number": "COU2026001",
+      "expiry_date": "2027-05-31",
+      "pack_size": "30 tablets",
+      "pack_quantity": 30,
+      "unit_cost": 1.20,
+      "selling_price": 2.40,
+      "reorder_level": 20,
+      "is_active": true,
+      "created_at": "2026-04-17T23:00:00Z",
+      "updated_at": "2026-04-17T23:00:00Z"
+    }
+  },
+  {
+    "model": "pharmacy.medication",
+    "pk": 10,
+    "fields": {
+      "name": "Prednisone",
+      "generic": 10,
+      "manufacturer": "Various",
+      "batch_number": "PRE2026001",
+      "expiry_date": "2027-12-31",
+      "pack_size": "30 tablets",
+      "pack_quantity": 30,
+      "unit_cost": 0.60,
+      "selling_price": 1.20,
+      "reorder_level": 45,
+      "is_active": true,
+      "created_at": "2026-04-17T23:00:00Z",
+      "updated_at": "2026-04-17T23:00:00Z"
+    }
+  }
+]

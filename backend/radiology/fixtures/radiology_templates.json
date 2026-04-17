@@ -1,0 +1,192 @@
+[
+  {
+    "model": "radiology.radiologytemplate",
+    "pk": 1,
+    "fields": {
+      "name": "Chest X-Ray (PA and Lateral)",
+      "code": "CXR",
+      "category": "xray",
+      "modality": "X-Ray",
+      "body_part": "Chest",
+      "indication": "Pneumonia, tuberculosis, lung abnormalities",
+      "description": "Posteroanterior and lateral chest radiographs to evaluate heart, lungs, and mediastinum",
+      "estimated_duration": "10 minutes",
+      "radiation_dose": "Low",
+      "contrast_required": false,
+      "is_active": true,
+      "created_at": "2026-04-17T23:00:00Z",
+      "updated_at": "2026-04-17T23:00:00Z"
+    }
+  },
+  {
+    "model": "radiology.radiologytemplate",
+    "pk": 2,
+    "fields": {
+      "name": "Abdominal Ultrasound",
+      "code": "ABDUS",
+      "category": "ultrasound",
+      "modality": "Ultrasound",
+      "body_part": "Abdomen",
+      "indication": "Abdominal pain, organ evaluation, gallstones",
+      "description": "Comprehensive ultrasound examination of abdominal organs including liver, gallbladder, pancreas, spleen, and kidneys",
+      "estimated_duration": "20 minutes",
+      "radiation_dose": "None",
+      "contrast_required": false,
+      "is_active": true,
+      "created_at": "2026-04-17T23:00:00Z",
+      "updated_at": "2026-04-17T23:00:00Z"
+    }
+  },
+  {
+    "model": "radiology.radiologytemplate",
+    "pk": 3,
+    "fields": {
+      "name": "CT Brain without Contrast",
+      "code": "CTBRAIN",
+      "category": "ct",
+      "modality": "CT Scan",
+      "body_part": "Brain",
+      "indication": "Headache, neurological symptoms, trauma",
+      "description": "Non-contrast computed tomography of the brain to evaluate intracranial structures",
+      "estimated_duration": "15 minutes",
+      "radiation_dose": "Moderate",
+      "contrast_required": false,
+      "is_active": true,
+      "created_at": "2026-04-17T23:00:00Z",
+      "updated_at": "2026-04-17T23:00:00Z"
+    }
+  },
+  {
+    "model": "radiology.radiologytemplate",
+    "pk": 4,
+    "fields": {
+      "name": "MRI Brain with Contrast",
+      "code": "MRIBRAIN",
+      "category": "mri",
+      "modality": "MRI",
+      "body_part": "Brain",
+      "indication": "Brain tumors, multiple sclerosis, stroke evaluation",
+      "description": "Magnetic resonance imaging of the brain with gadolinium contrast enhancement",
+      "estimated_duration": "45 minutes",
+      "radiation_dose": "None",
+      "contrast_required": true,
+      "is_active": true,
+      "created_at": "2026-04-17T23:00:00Z",
+      "updated_at": "2026-04-17T23:00:00Z"
+    }
+  },
+  {
+    "model": "radiology.radiologytemplate",
+    "pk": 5,
+    "fields": {
+      "name": "Pelvic Ultrasound",
+      "code": "PELUS",
+      "category": "ultrasound",
+      "modality": "Ultrasound",
+      "body_part": "Pelvis",
+      "indication": "Pelvic pain, gynecological evaluation, prostate assessment",
+      "description": "Transabdominal or transvaginal ultrasound examination of pelvic organs",
+      "estimated_duration": "25 minutes",
+      "radiation_dose": "None",
+      "contrast_required": false,
+      "is_active": true,
+      "created_at": "2026-04-17T23:00:00Z",
+      "updated_at": "2026-04-17T23:00:00Z"
+    }
+  },
+  {
+    "model": "radiology.radiologytemplate",
+    "pk": 6,
+    "fields": {
+      "name": "Extremity X-Ray",
+      "code": "EXTXR",
+      "category": "xray",
+      "modality": "X-Ray",
+      "body_part": "Extremities",
+      "indication": "Fractures, joint pain, orthopedic evaluation",
+      "description": "Radiographic examination of arms, legs, hands, or feet",
+      "estimated_duration": "5 minutes",
+      "radiation_dose": "Very Low",
+      "contrast_required": false,
+      "is_active": true,
+      "created_at": "2026-04-17T23:00:00Z",
+      "updated_at": "2026-04-17T23:00:00Z"
+    }
+  },
+  {
+    "model": "radiology.radiologytemplate",
+    "pk": 7,
+    "fields": {
+      "name": "Echocardiogram",
+      "code": "ECHO",
+      "category": "ultrasound",
+      "modality": "Echocardiogram",
+      "body_part": "Heart",
+      "indication": "Heart disease, valve disorders, cardiac function",
+      "description": "Ultrasound examination of the heart to evaluate cardiac structure and function",
+      "estimated_duration": "30 minutes",
+      "radiation_dose": "None",
+      "contrast_required": false,
+      "is_active": true,
+      "created_at": "2026-04-17T23:00:00Z",
+      "updated_at": "2026-04-17T23:00:00Z"
+    }
+  },
+  {
+    "model": "radiology.radiologytemplate",
+    "pk": 8,
+    "fields": {
+      "name": "CT Chest with Contrast",
+      "code": "CTCHEST",
+      "category": "ct",
+      "modality": "CT Scan",
+      "body_part": "Chest",
+      "indication": "Lung nodules, pulmonary embolism, mediastinal masses",
+      "description": "Contrast-enhanced computed tomography of the chest",
+      "estimated_duration": "20 minutes",
+      "radiation_dose": "Moderate",
+      "contrast_required": true,
+      "is_active": true,
+      "created_at": "2026-04-17T23:00:00Z",
+      "updated_at": "2026-04-17T23:00:00Z"
+    }
+  },
+  {
+    "model": "radiology.radiologytemplate",
+    "pk": 9,
+    "fields": {
+      "name": "Mammogram",
+      "code": "MAMMO",
+      "category": "mammography",
+      "modality": "Mammography",
+      "body_part": "Breast",
+      "indication": "Breast cancer screening, breast abnormalities",
+      "description": "Digital mammography for breast cancer screening and diagnosis",
+      "estimated_duration": "15 minutes",
+      "radiation_dose": "Low",
+      "contrast_required": false,
+      "is_active": true,
+      "created_at": "2026-04-17T23:00:00Z",
+      "updated_at": "2026-04-17T23:00:00Z"
+    }
+  },
+  {
+    "model": "radiology.radiologytemplate",
+    "pk": 10,
+    "fields": {
+      "name": "Spine X-Ray",
+      "code": "SPINEXR",
+      "category": "xray",
+      "modality": "X-Ray",
+      "body_part": "Spine",
+      "indication": "Back pain, scoliosis, vertebral fractures",
+      "description": "Radiographic examination of cervical, thoracic, or lumbar spine",
+      "estimated_duration": "10 minutes",
+      "radiation_dose": "Low",
+      "contrast_required": false,
+      "is_active": true,
+      "created_at": "2026-04-17T23:00:00Z",
+      "updated_at": "2026-04-17T23:00:00Z"
+    }
+  }
+]
