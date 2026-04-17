@@ -79,8 +79,8 @@ export const useNotificationWebSocket = (options: UseNotificationWebSocketOption
       baseUrl = `${window.location.protocol}//${window.location.host}`;
     }
     if (!baseUrl) {
-      console.warn('NEXT_PUBLIC_API_URL not set, websocket disabled');
-      return;
+      console.warn('NEXT_PUBLIC_API_URL not set, using localhost fallback');
+      return "ws://localhost:8001/ws/notifications/";
     }
     
     // Determine protocol - use wss for https, ws for http
@@ -132,7 +132,12 @@ export const useNotificationWebSocket = (options: UseNotificationWebSocketOption
     }
 
     try {
-      let url = getWebSocketUrl();
+      const url = getWebSocketUrl();
+      if (!url) {
+        console.warn('WebSocket URL not available, skipping connection');
+        setIsConnected(false);
+        return;
+      }
       // Add JWT token to query string for authentication
       const token = getStoredAccessToken();
       if (!token) {
@@ -140,11 +145,9 @@ export const useNotificationWebSocket = (options: UseNotificationWebSocketOption
         setIsConnected(false);
         return;
       }
-      if (token) {
-        const separator = url.includes('?') ? '&' : '?';
-        url = `${url}${separator}token=${encodeURIComponent(token)}`;
-      }
-      const ws = new WebSocket(url);
+      const separator = url.includes('?') ? '&' : '?';
+      const wsUrl = `${url}${separator}token=${encodeURIComponent(token)}`;
+      const ws = new WebSocket(wsUrl);
 
       ws.onopen = () => {
         logInfo('WebSocket connected for notifications');
