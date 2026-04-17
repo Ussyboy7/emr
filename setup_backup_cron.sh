@@ -10,11 +10,11 @@ LOG_FILE="${SCRIPT_DIR}/backups/cron.log"
 # Create log file
 touch "$LOG_FILE"
 
-# Add to crontab (daily at 2 AM)
-(crontab -l 2>/dev/null; echo "0 2 * * * $BACKUP_SCRIPT >> $LOG_FILE 2>&1") | crontab -
+# Add to crontab (daily at 10 PM)
+(crontab -l 2>/dev/null; echo "0 22 * * * $BACKUP_SCRIPT >> $LOG_FILE 2>&1") | crontab -
 
-# Add weekly verification (Sundays at 3 AM)
-(crontab -l 2>/dev/null; echo "0 3 * * 0 $VERIFY_SCRIPT >> $LOG_FILE 2>&1") | crontab -
+# Add weekly verification (Saturdays at 10 AM)
+(crontab -l 2>/dev/null; echo "0 10 * * 6 $VERIFY_SCRIPT >> $LOG_FILE 2>&1") | crontab -
 
 echo "Automated backup cron jobs configured:"
 echo "- Daily database/media backup at 2:00 AM"
