@@ -5,6 +5,8 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 COPY . .
+# Copy environment file for build process
+COPY .env.prod .env.local
 RUN npm run build
 
 FROM node:20-alpine AS runner
@@ -23,6 +25,7 @@ COPY --from=builder /app/tailwind.config.ts ./
 COPY --from=builder /app/postcss.config.js ./
 COPY --from=builder /app/eslint.config.js ./
 COPY --from=builder /app/components.json ./
+COPY --from=builder /app/.env.local ./
 
 EXPOSE 3000
 CMD ["npx", "next", "start", "-H", "0.0.0.0", "-p", "3000"]
