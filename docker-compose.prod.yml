@@ -65,9 +65,9 @@ services:
     container_name: emr-backend-prod
     command: >
       sh -c "mkdir -p /app/logs &&
-              python manage.py migrate &&
-              python manage.py collectstatic --noinput &&
-              gunicorn --bind 0.0.0.0:8000 --workers 8 --threads 4 --timeout 120 --max-requests 1000 --max-requests-jitter 50 --access-logfile /app/logs/gunicorn-access.log --error-logfile /app/logs/gunicorn-error.log --log-level warning emr_backend.wsgi:application"
+             python manage.py migrate &&
+             python manage.py collectstatic --noinput &&
+             gunicorn --bind 0.0.0.0:8000 --workers 8 --threads 4 --timeout 120 --max-requests 1000 --max-requests-jitter 50 --access-logfile /app/logs/gunicorn-access.log --error-logfile /app/logs/gunicorn-error.log --log-level warning emr_backend.wsgi:application"
     env_file:
       - ./backend/env/prod.env
     volumes:
