@@ -78,7 +78,10 @@ export const useNotificationWebSocket = (options: UseNotificationWebSocketOption
       // Fallback to current window location
       baseUrl = `${window.location.protocol}//${window.location.host}`;
     }
-    baseUrl = baseUrl || "http://localhost:8001/api";
+    if (!baseUrl) {
+      console.warn('NEXT_PUBLIC_API_URL not set, websocket disabled');
+      return;
+    }
     
     // Determine protocol - use wss for https, ws for http
     let protocol = 'ws';

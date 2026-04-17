@@ -21,43 +21,16 @@ const LEGACY_ORIGINAL_ACCESS_EXP_KEY = "npa_ecm_original_access_exp";
 
 /**
  * API root used by fetch() (must hit Django, not the Next.js dev server).
- * - Treats empty `NEXT_PUBLIC_API_URL` as unset (common `??` pitfall: "" is not nullish).
- * - Rewrites common mistake `http://localhost:3001/api` → `http://localhost:8001/api`.
- * - If the value is only `http://localhost:8001` (no `/api`), appends `/api` so paths like
- *   `/organization/...` resolve instead of returning DRF 404 "Not found.".
+ * Uses NEXT_PUBLIC_API_URL environment variable for the API base URL.
  */
 const getBaseUrl = (): string => {
-  const fallback = "http://localhost:8001/api";
-  let raw = process.env.NEXT_PUBLIC_API_URL;
-  if (raw == null || String(raw).trim() === "") {
-    raw = fallback;
+  const baseUrl = process.env.NEXT_PUBLIC_API_URL;
+  if (!baseUrl || baseUrl.trim() === "") {
+    throw new Error("NEXT_PUBLIC_API_URL environment variable is not set");
   }
-  let base = String(raw).trim();
-  if (!base) {
-    base = fallback;
-  }
-  if (base.includes("localhost:3001") || base.includes("127.0.0.1:3001")) {
-    base = base
-      .replace(/localhost:3001/g, "localhost:8001")
-      .replace(/127\.0\.0\.1:3001/g, "127.0.0.1:8001");
-  }
-  const normalized = base.endsWith("/") ? base.slice(0, -1) : base;
-  const hasApiMount = /\/api(\/v1)?$/i.test(normalized);
-  if (!hasApiMount) {
-    try {
-      const parsed = new URL(normalized);
-      const local = parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1";
-      const djangoPort =
-        parsed.port === "8001" || parsed.port === "8000" || parsed.port === "8080";
-      const pathIsRoot = parsed.pathname === "" || parsed.pathname === "/";
-      if (local && djangoPort && pathIsRoot) {
-        return `${normalized}/api`;
-      }
-    } catch {
-      /* leave normalized as-is */
-    }
-  }
-  return normalized;
+  // Ensure URL ends with /api
+  const normalized = baseUrl.trim().replace(/\/$/, "");
+  return normalized.endsWith("/api") ? normalized : `${normalized}/api`;
 };
 
 const isBrowser = () => typeof window !== "undefined";

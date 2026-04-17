@@ -47,7 +47,11 @@ const MAX_CONSECUTIVE_FAILURES = 3;
 
 const getBaseUrl = () => {
   if (!isBrowser) return '';
-  const base = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8001/api';
+  const base = process.env.NEXT_PUBLIC_API_URL;
+  if (!base) {
+    console.warn('NEXT_PUBLIC_API_URL not set, client logging disabled');
+    return '';
+  }
   return base.endsWith('/') ? base.slice(0, -1) : base;
 };
 

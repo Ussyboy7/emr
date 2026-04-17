@@ -41,9 +41,20 @@ else:
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "changeme-in-production")
 DEBUG = os.getenv("DJANGO_DEBUG", "True").lower() == "true"
 
-ALLOWED_HOSTS = [host.strip() for host in os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",") if host.strip()]
+ALLOWED_HOSTS = [
+    host.strip()
+    for host in os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
+    if host.strip()
+]
 
-CSRF_TRUSTED_ORIGINS = [origin.strip() for origin in os.getenv("CSRF_TRUSTED_ORIGINS", "http://localhost:8001,http://127.0.0.1:8001,http://localhost:3001,http://127.0.0.1:3001").split(",") if origin.strip()]
+CSRF_TRUSTED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv(
+        "CSRF_TRUSTED_ORIGINS",
+        "http://localhost:8001,http://127.0.0.1:8001,http://localhost:3001,http://127.0.0.1:3001",
+    ).split(",")
+    if origin.strip()
+]
 
 
 # ---------------------------------------------------------------------------
@@ -74,6 +85,7 @@ LOCAL_APPS = [
     "common",
     "accounts",
     "organization",
+    "support",
     "patients",
     "laboratory",
     "pharmacy",
@@ -158,7 +170,9 @@ DATABASES = {
 AUTH_USER_MODEL = "accounts.User"
 
 AUTH_PASSWORD_VALIDATORS = [
-    {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
+    {
+        "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"
+    },
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
     {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
@@ -194,7 +208,9 @@ SERVE_MEDIA = os.getenv("SERVE_MEDIA", "").lower() == "true"
 
 REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
-    "DEFAULT_AUTHENTICATION_CLASSES": ["rest_framework_simplejwt.authentication.JWTAuthentication"],
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "rest_framework_simplejwt.authentication.JWTAuthentication"
+    ],
     "DEFAULT_FILTER_BACKENDS": [
         "django_filters.rest_framework.DjangoFilterBackend",
         "rest_framework.filters.SearchFilter",
@@ -218,7 +234,13 @@ SPECTACULAR_SETTINGS = {
 # CORS & Security
 # ---------------------------------------------------------------------------
 
-CORS_ALLOWED_ORIGINS = [origin.strip() for origin in os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:3001,http://127.0.0.1:3001").split(",") if origin.strip()]
+CORS_ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv(
+        "CORS_ALLOWED_ORIGINS", "http://localhost:3001,http://127.0.0.1:3001"
+    ).split(",")
+    if origin.strip()
+]
 CORS_ALLOW_CREDENTIALS = True
 
 
@@ -227,7 +249,9 @@ CORS_ALLOW_CREDENTIALS = True
 # ---------------------------------------------------------------------------
 
 SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=int(os.getenv("JWT_ACCESS_MINUTES", "60"))),
+    "ACCESS_TOKEN_LIFETIME": timedelta(
+        minutes=int(os.getenv("JWT_ACCESS_MINUTES", "60"))
+    ),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=int(os.getenv("JWT_REFRESH_DAYS", "7"))),
     "ROTATE_REFRESH_TOKENS": True,
     "BLACKLIST_AFTER_ROTATION": True,
@@ -271,6 +295,7 @@ else:
 # Celery Configuration
 # ---------------------------------------------------------------------------
 
+
 def _default_celery_redis_url(db_index: str = "0") -> str:
     """Build a Redis URL for Celery; include password when REDIS_PASSWORD is set (staging/prod)."""
     host = os.getenv("REDIS_HOST", "localhost")
@@ -283,7 +308,9 @@ def _default_celery_redis_url(db_index: str = "0") -> str:
 
 
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", _default_celery_redis_url("0"))
-CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", _default_celery_redis_url("0"))
+CELERY_RESULT_BACKEND = os.getenv(
+    "CELERY_RESULT_BACKEND", _default_celery_redis_url("0")
+)
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"

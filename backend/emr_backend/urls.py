@@ -19,6 +19,7 @@ api_v1_patterns = [
     path("health/live/", health_live, name="health_live"),
     path("accounts/", include("accounts.urls")),
     path("organization/", include("organization.urls")),
+    path("support/", include("support.urls")),
     path("", include("patients.urls")),
     path("", include("laboratory.urls")),
     path("", include("pharmacy.urls")),

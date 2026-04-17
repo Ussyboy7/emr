@@ -667,11 +667,13 @@ export function PatientOverviewModal({ patient, isOpen, onClose, onEdit }: Patie
           }
           // Construct full URL from API base URL
           if (photoPath.startsWith('/media/')) {
-            const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001/api';
+            const apiUrl = process.env.NEXT_PUBLIC_API_URL;
+            if (!apiUrl) return photoPath;
             const baseUrl = apiUrl.replace(/\/api\/?$/, '');
             return `${baseUrl}${photoPath}`;
           }
-          const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001/api';
+          const apiUrl = process.env.NEXT_PUBLIC_API_URL;
+          if (!apiUrl) return photoPath;
           const baseUrl = apiUrl.replace(/\/api\/?$/, '');
           return `${baseUrl}/media/${photoPath.startsWith('/') ? photoPath.slice(1) : photoPath}`;
         })(),

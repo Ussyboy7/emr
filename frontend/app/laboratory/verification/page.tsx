@@ -592,17 +592,17 @@ const transformResult = (
     if (typeof fileField === 'string') {
       // If it's already a full URL, use it; otherwise construct it
       resultFileUrl = fileField.startsWith('http') 
-        ? fileField 
-        : fileField.startsWith('/') 
-          ? `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'}${fileField}`
-          : `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'}/media/${fileField}`;
+        ? fileField
+        : fileField.startsWith('/')
+          ? `${process.env.NEXT_PUBLIC_API_URL}${fileField}`
+          : `${process.env.NEXT_PUBLIC_API_URL}/media/${fileField}`;
     } else if (fileField) {
       // If it's an object, try to get URL or name
       resultFileUrl = fileField.url || fileField.name || undefined;
       if (resultFileUrl && !resultFileUrl.startsWith('http')) {
         resultFileUrl = resultFileUrl.startsWith('/')
-          ? `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'}${resultFileUrl}`
-          : `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'}/media/${resultFileUrl}`;
+          ? `${process.env.NEXT_PUBLIC_API_URL}${resultFileUrl}`
+          : `${process.env.NEXT_PUBLIC_API_URL}/media/${resultFileUrl}`;
       }
     }
   }

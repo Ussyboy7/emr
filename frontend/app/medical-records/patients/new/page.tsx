@@ -1013,7 +1013,8 @@ export default function NewPatientPage() {
         if (!token) {
           const refreshToken = getStoredRefreshToken();
           if (refreshToken) {
-            const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001/api';
+            const apiUrl = process.env.NEXT_PUBLIC_API_URL;
+            if (!apiUrl) return;
             const baseUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
             const refreshResponse = await fetch(`${baseUrl}/accounts/auth/token/refresh/`, {
               method: 'POST',
@@ -1033,7 +1034,8 @@ export default function NewPatientPage() {
           throw new Error('Authentication required. Please log in again.');
         }
         
-        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001/api';
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL;
+        if (!apiUrl) throw new Error('API URL not configured');
         const baseUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
         
         const response = await fetch(`${baseUrl}/patients/`, {

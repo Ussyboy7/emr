@@ -75,14 +75,16 @@ const getPhotoUrl = (photoPath: string | null | undefined): string => {
 
   // If it starts with /media/, construct full URL from API base URL
   if (photoPath.startsWith('/media/')) {
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001/api';
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL;
+    if (!apiUrl) return photoPath;
     // Remove /api from the end to get base URL, then append the media path
     const baseUrl = apiUrl.replace(/\/api\/?$/, '');
     return `${baseUrl}${photoPath}`;
   }
 
   // If it's a relative path without /media/, assume it's already relative to media
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001/api';
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL;
+  if (!apiUrl) return photoPath;
   const baseUrl = apiUrl.replace(/\/api\/?$/, '');
   return `${baseUrl}/media/${photoPath.startsWith('/') ? photoPath.slice(1) : photoPath}`;
 };
