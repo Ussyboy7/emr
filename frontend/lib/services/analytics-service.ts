@@ -8,6 +8,8 @@ import { patientService } from './patient-service';
 import { visitService } from './visit-service';
 import { adminService } from './admin-service';
 import labService from './lab-service';
+import { logError, logWarn } from '../client-logger';
+import type { ApiResponse } from '../types/common';
 import { pharmacyService } from './pharmacy-service';
 import { radiologyService } from './radiology-service';
 import { getVisitServiceClinicsList, normalizeClinicName } from '../utils/clinic-utils';
@@ -87,7 +89,7 @@ class AnalyticsService {
     try {
       return await apiFetch<any>('/reports/patient-demographics/');
     } catch (err) {
-      console.warn('Patient demographics endpoint not available, using fallback');
+      logWarn('Patient demographics endpoint not available, using fallback');
       return null;
     }
   }
@@ -169,7 +171,7 @@ class AnalyticsService {
   async getPatientVisitsTrend(period: number = 365): Promise<PatientVisitsData[]> {
     // Get visits grouped by month
     // Fetch more pages to get comprehensive data
-    let allVisits: any[] = [];
+    let allVisits: any[] = []; // API returns Visit objects
     let page = 1;
     let hasMore = true;
     
@@ -269,7 +271,7 @@ class AnalyticsService {
     
     // Group by day (simplified)
     const dailyData: Record<string, { patients: number; consultations: number; labs: number; prescriptions: number }> = {};
-    
+
     visits.results.forEach((visit: any) => {
       const date = new Date(visit.visit_date || visit.created_at);
       const dayKey = date.toLocaleDateString('en-US', { weekday: 'short' });
@@ -288,7 +290,7 @@ class AnalyticsService {
       }
       dailyData[dayKey].labs++;
     });
-    
+
     prescriptions.results.forEach((rx: any) => {
       const date = new Date(rx.prescribed_at);
       const dayKey = date.toLocaleDateString('en-US', { weekday: 'short' });
@@ -312,7 +314,7 @@ class AnalyticsService {
       const response = await apiFetch<any[]>(`/reports/top-diagnoses/?limit=${limit}`);
       return response || [];
     } catch (err) {
-      console.warn('Top diagnoses endpoint not available:', err);
+      logWarn('Top diagnoses endpoint not available:', err);
       return [];
     }
   }
@@ -325,7 +327,7 @@ class AnalyticsService {
     const testCounts: Record<string, number> = {};
     
     orders.results.forEach((order: any) => {
-      order.tests.forEach((test: any) => {
+      (order.tests as any[]).forEach((test: any) => {
         // Use template_name if available, otherwise name, then code
         const testName = test.template_name || test.name || test.code || 'Unknown';
         testCounts[testName] = (testCounts[testName] || 0) + 1;
@@ -392,19 +394,19 @@ class AnalyticsService {
    */
   async getMonthlyPerformance(period: number = 12): Promise<any[]> {
     const visits = await visitService.getVisits({ page: 1 });
-    const monthlyData: Record<string, any> = {};
-    
+    const monthlyData: Record<string, { month: string; patients: number; consultations: number; labs: number; prescriptions: number; satisfaction: number; efficiency: number }> = {};
+
     visits.results.forEach((visit: any) => {
       const date = new Date(visit.visit_date || visit.created_at);
       const monthKey = date.toLocaleDateString('en-US', { month: 'short' });
       if (!monthlyData[monthKey]) {
-        monthlyData[monthKey] = { month: monthKey, patients: 0, satisfaction: 0, efficiency: 0 };
+        monthlyData[monthKey] = { month: monthKey, patients: 0, consultations: 0, labs: 0, prescriptions: 0, satisfaction: 0, efficiency: 0 };
       }
       monthlyData[monthKey].patients++;
     });
     
     // Add satisfaction and efficiency (would need actual data)
-    return Object.values(monthlyData).map((data: any) => ({
+    return Object.values(monthlyData).map((data: { patients: number; consultations: number; labs: number; prescriptions: number }) => ({
       ...data,
       revenue: data.patients * 0.04, // Simplified calculation
       satisfaction: 88 + Math.random() * 4, // Would need actual satisfaction data
@@ -496,7 +498,7 @@ class AnalyticsService {
         });
       }
     } catch (err) {
-      console.error('Error loading pharmacy alerts:', err);
+      logError('Error loading pharmacy alerts:', err);
     }
     
     return alerts;

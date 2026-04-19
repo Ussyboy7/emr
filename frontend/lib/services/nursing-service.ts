@@ -3,6 +3,7 @@ import { visitService } from './visit-service';
 import { getVisitServiceClinicsDisplay } from '../utils/clinic-utils';
 import { wardService } from './ward-service';
 import { patientService } from './patient-service';
+import { logError } from '../client-logger';
 
 export interface NursingStats {
   activePatients: number;
@@ -62,7 +63,7 @@ class NursingService {
         pendingTasks
       };
     } catch (error) {
-      console.error('Error calculating nursing stats:', error);
+      logError('Error calculating nursing stats:', error);
       // Return default stats if API calls fail
       return {
         activePatients: 0,
@@ -115,7 +116,7 @@ class NursingService {
 
       return { results: alerts };
     } catch (error) {
-      console.error('Error getting critical alerts:', error);
+      logError('Error getting critical alerts:', error);
       return { results: [] };
     }
   }
@@ -142,7 +143,7 @@ class NursingService {
 
       return { results: activities };
     } catch (error) {
-      console.error('Error getting recent activities:', error);
+      logError('Error getting recent activities:', error);
       return { results: [] };
     }
   }
@@ -157,7 +158,7 @@ class NursingService {
       const poolCount = activeVisits.filter(v => v.status === 'in_nursing_pool' || v.status === 'scheduled').length;
       return { count: poolCount };
     } catch (error) {
-      console.error('Error getting pool queue count:', error);
+      logError('Error getting pool queue count:', error);
       return { count: 0 };
     }
   }
@@ -171,7 +172,7 @@ class NursingService {
       const roomCount = activeVisits.filter(v => v.status === 'waiting' || v.status === 'scheduled').length;
       return { count: roomCount };
     } catch (error) {
-      console.error('Error getting room queue count:', error);
+      logError('Error getting room queue count:', error);
       return { count: 0 };
     }
   }

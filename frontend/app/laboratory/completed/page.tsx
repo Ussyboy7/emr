@@ -1,17 +1,17 @@
 "use client";
 
 import { useState, useMemo, useEffect, useCallback } from 'react';
-import { StandardPagination } from '@/components/StandardPagination';
-import { DashboardLayout } from '@/components/DashboardLayout';
+import { StandardPagination } from '@/components/shared/StandardPagination';
+import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { labService, formatPatientGenderLabel } from '@/lib/services';
-import { PatientAvatar } from "@/components/PatientAvatar";
-import { AdvancedDateRangeDialog } from '@/components/AdvancedDateRangeDialog';
-import { CustomDateRangeButton } from '@/components/CustomDateRangeButton';
+import { PatientAvatar } from "@/components/shared/PatientAvatar";
+import { AdvancedDateRangeDialog } from '@/components/shared/AdvancedDateRangeDialog';
+import { CustomDateRangeButton } from '@/components/shared/CustomDateRangeButton';
 import { LabCompletedReportDialog } from '@/components/laboratory/LabCompletedReportDialog';
 import {
   transformApiRowToCompletedTest,
@@ -22,7 +22,7 @@ import {
   CheckCircle2, Search, Eye, Clock, AlertTriangle, Calendar,
   User, Stethoscope, RefreshCw, FlaskConical, Loader2
 } from 'lucide-react';
-import { useOutpatientClinicTypes } from '@/lib/hooks/use-outpatient-clinic-types';
+import { useOutpatientClinicTypes } from '@/hooks/use-outpatient-clinic-types';
 
 export default function CompletedTestsPage() {
   const { names: opdClinicNames } = useOutpatientClinicTypes();

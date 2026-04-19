@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useMemo, useEffect, useCallback } from 'react';
-import { StandardPagination } from '@/components/StandardPagination';
-import { DashboardLayout } from '@/components/DashboardLayout';
+import { StandardPagination } from '@/components/shared/StandardPagination';
+import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -22,8 +22,8 @@ import {
   Loader2, Save, MapPin, Stethoscope, Users, Activity, Settings
 } from 'lucide-react';
 import { normalizeClinicName } from '@/lib/utils/clinic-utils';
-import { useLocationOptions } from '@/lib/hooks/use-location-options';
-import { useOutpatientClinicTypes } from '@/lib/hooks/use-outpatient-clinic-types';
+import { useLocationOptions } from '@/hooks/use-location-options';
+import { useOutpatientClinicTypes } from '@/hooks/use-outpatient-clinic-types';
 
 interface Room {
   id: string | number;

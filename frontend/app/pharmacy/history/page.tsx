@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useMemo, useEffect } from 'react';
-import { StandardPagination } from '@/components/StandardPagination';
-import { DashboardLayout } from '@/components/DashboardLayout';
+import { StandardPagination } from '@/components/shared/StandardPagination';
+import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,7 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { pharmacyService, type Dispense as ApiDispense } from '@/lib/services';
-import { PatientAvatar } from "@/components/PatientAvatar";
+import { PatientAvatar } from "@/components/shared/PatientAvatar";
 import { 
   History, Search, Eye, Clock, CheckCircle2, Pill, Calendar, Package,
   User, TrendingUp, ArrowUpDown, Loader2, AlertTriangle

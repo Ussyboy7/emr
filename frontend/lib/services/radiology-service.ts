@@ -24,7 +24,7 @@ export interface RadiologyOrder {
   icd10_diagnoses?: Array<{ code: string; name: string; type: string; notes?: string }>;
   patient_details?: { id?: number; name?: string; age?: number; gender?: string };
   // For creating orders with studies
-  studies_data?: any[];
+  studies_data?: Record<string, unknown>[];
 }
 
 export interface RadiologyStudy {
@@ -79,7 +79,7 @@ export interface RadiologyTemplate {
   indications?: string;
   contraindications?: string;
   turnaround_time?: string;
-  report_template?: any;
+  report_template?: Record<string, unknown>;
   is_active: boolean;
   created_at: string;
   updated_at: string;
@@ -433,7 +433,7 @@ class RadiologyService {
    * Update study status (individual study processing like lab tests)
    */
   async updateStudyStatus(studyId: number, status: string, data?: { processing_method?: string; outsourced_lab?: string | null }): Promise<any> {
-    const requestData: any = { status };
+    const requestData: Record<string, unknown> = { status };
     if (data?.processing_method) {
       requestData.processing_method = data.processing_method;
     }

@@ -1,5 +1,6 @@
 import { toast } from 'sonner';
 import type { CompletedRadiologyReport } from './completedRadiologyReport';
+import { logError } from '../client-logger';
 
 export function openRadiologyReportUrl(url: string) {
   const link = document.createElement('a');
@@ -27,7 +28,7 @@ export function downloadRadiologyReportFile(report: CompletedRadiologyReport) {
     document.body.removeChild(link);
     toast.success('Report download started');
   } catch (e) {
-    console.error('Download failed:', e);
+    logError('Download failed:', e);
     toast.error('Failed to download report. Please try again.');
   }
 }

@@ -11,6 +11,11 @@ import {
   NOTIFICATION_WS_RECONNECT_DELAY_MS,
 } from '@/lib/constants';
 
+interface WebSocketMessage {
+  type: 'mark_read' | 'ping';
+  notification_id?: string;
+}
+
 interface UseNotificationWebSocketOptions {
   enabled?: boolean;
   onNotification?: (notification: Notification) => void;
@@ -79,7 +84,7 @@ export const useNotificationWebSocket = (options: UseNotificationWebSocketOption
       baseUrl = `${window.location.protocol}//${window.location.host}`;
     }
     if (!baseUrl) {
-      console.warn('NEXT_PUBLIC_API_URL not set, using localhost fallback');
+      logWarn('NEXT_PUBLIC_API_URL not set, using localhost fallback');
       return "ws://localhost:8001/ws/notifications/";
     }
     
@@ -134,7 +139,7 @@ export const useNotificationWebSocket = (options: UseNotificationWebSocketOption
     try {
       const url = getWebSocketUrl();
       if (!url) {
-        console.warn('WebSocket URL not available, skipping connection');
+        logWarn('WebSocket URL not available, skipping connection');
         setIsConnected(false);
         return;
       }
@@ -258,7 +263,7 @@ export const useNotificationWebSocket = (options: UseNotificationWebSocketOption
     setIsConnected(false);
   }, []);
 
-  const sendMessage = useCallback((message: any) => {
+  const sendMessage = useCallback((message: WebSocketMessage) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify(message));
     } else {

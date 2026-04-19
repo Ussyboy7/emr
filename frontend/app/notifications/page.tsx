@@ -1,6 +1,6 @@
 "use client";
 
-import { DashboardLayout } from '@/components/DashboardLayout';
+import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { NotificationList } from '@/components/notifications/NotificationList';
 import { Bell } from 'lucide-react';

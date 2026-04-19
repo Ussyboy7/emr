@@ -2,8 +2,8 @@
 
 import { useState, useMemo, useEffect } from 'react';
 import Link from 'next/link';
-import { StandardPagination } from '@/components/StandardPagination';
-import { DashboardLayout } from '@/components/DashboardLayout';
+import { StandardPagination } from '@/components/shared/StandardPagination';
+import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';

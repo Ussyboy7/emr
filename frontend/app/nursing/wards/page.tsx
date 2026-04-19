@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from 'react';
-import { DashboardLayout } from '@/components/DashboardLayout';
+import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -16,12 +16,12 @@ import {
   Building2, Users, UserCheck, Search, Eye, CheckCircle, AlertTriangle,
   Bed, Activity, Loader2, Thermometer, Bell
 } from 'lucide-react';
-import { CustomDateRangeButton } from '@/components/CustomDateRangeButton';
-import { AdvancedDateRangeDialog } from '@/components/AdvancedDateRangeDialog';
+import { CustomDateRangeButton } from '@/components/shared/CustomDateRangeButton';
+import { AdvancedDateRangeDialog } from '@/components/shared/AdvancedDateRangeDialog';
 import { toast } from 'sonner';
 import { wardService, type Ward, type PatientAdmission, type WardAssignment } from '@/lib/services/ward-service';
 import { useCurrentUser } from '@/hooks/use-current-user';
-import { ResetFiltersButton } from '@/components/ResetFiltersButton';
+import { ResetFiltersButton } from '@/components/shared/ResetFiltersButton';
 import { WardDoctorOrdersSection } from '@/components/ward/WardDoctorOrdersSection';
 import { ObservationChartDialog } from '@/components/ward/ObservationChartDialog';
 

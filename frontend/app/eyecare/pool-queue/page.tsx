@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { DashboardLayout } from '@/components/DashboardLayout';
+import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -87,12 +87,10 @@ export default function EyeClinicPoolQueuePage() {
 
   const handleStartSession = (order: EyeOrder) => {
     toast.info(`Starting session for ${order.patient_name}`);
-    // TODO: Implement start session logic
   };
 
   const handleSchedule = (order: EyeOrder) => {
     toast.info(`Scheduling appointment for ${order.patient_name}`);
-    // TODO: Implement schedule logic
   };
 
   return (

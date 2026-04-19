@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useMemo, useEffect, useCallback } from 'react';
-import { StandardPagination } from '@/components/StandardPagination';
-import { DashboardLayout } from '@/components/DashboardLayout';
+import { StandardPagination } from '@/components/shared/StandardPagination';
+import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -15,12 +15,12 @@ import { Progress } from "@/components/ui/progress";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "sonner";
 import { Checkbox } from "@/components/ui/checkbox";
-import { AdvancedDateRangeDialog } from '@/components/AdvancedDateRangeDialog';
-import { CustomDateRangeButton } from '@/components/CustomDateRangeButton';
+import { AdvancedDateRangeDialog } from '@/components/shared/AdvancedDateRangeDialog';
+import { CustomDateRangeButton } from '@/components/shared/CustomDateRangeButton';
 import { labService, formatPatientGenderLabel, type LabOrder as ApiLabOrder, type LabTest as ApiLabTest, type LabPartner } from '@/lib/services';
 import { Icd10DiagnosesBlock } from '@/components/medical/Icd10DiagnosesBlock';
 import { transformLabTestStatus, transformPriority, transformToBackendPriority, transformProcessingMethod, transformToBackendProcessingMethod } from '@/lib/services/transformers';
-import { PatientAvatar } from "@/components/PatientAvatar";
+import { PatientAvatar } from "@/components/shared/PatientAvatar";
 import {
   TestTube, Search, Eye, Clock, CheckCircle2, Activity, FlaskConical, Loader2,
   Beaker, AlertTriangle, User, Calendar, FileText, Play, Stethoscope,

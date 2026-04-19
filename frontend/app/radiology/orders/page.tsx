@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { StandardPagination } from '@/components/StandardPagination';
-import { DashboardLayout } from '@/components/DashboardLayout';
+import { StandardPagination } from '@/components/shared/StandardPagination';
+import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -18,10 +18,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { toast } from 'sonner';
 import { patientService, radiologyService, formatPatientGenderLabel } from '@/lib/services';
-import { PatientAvatar } from '@/components/PatientAvatar';
+import { PatientAvatar } from '@/components/shared/PatientAvatar';
 import { Icd10DiagnosesBlock } from '@/components/medical/Icd10DiagnosesBlock';
-import { AdvancedDateRangeDialog } from '@/components/AdvancedDateRangeDialog';
-import { CustomDateRangeButton } from '@/components/CustomDateRangeButton';
+import { AdvancedDateRangeDialog } from '@/components/shared/AdvancedDateRangeDialog';
+import { CustomDateRangeButton } from '@/components/shared/CustomDateRangeButton';
 import {
   ClipboardList, Search, Eye, Calendar, Clock, Activity, CheckCircle2,
   FileBarChart, AlertTriangle, ScanLine, User, ArrowRight,

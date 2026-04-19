@@ -19,6 +19,7 @@ export interface User {
   is_staff: boolean;
   date_joined: string;
   last_login?: string;
+  last_activity?: string;
   clinic?: number;
   clinic_name?: string;
   department?: number;  // Changed from string to number (ForeignKey)
@@ -34,7 +35,7 @@ export interface Role {
   name: string;
   description?: string;
   type: 'admin' | 'doctor' | 'nurse' | 'lab_tech' | 'pharmacist' | 'radiologist' | 'records' | 'custom'; // Backend format
-  permissions?: any; // Backend stores as JSON object: {module: [pages]}
+  permissions?: Record<string, string[]>; // Backend stores as JSON object: {module: [pages]}
   is_active: boolean;
   user_count?: number;
   created_at: string;
@@ -58,7 +59,7 @@ export interface Clinic {
   phone?: string;
   email?: string;
   is_active: boolean;
-  operating_hours?: any;
+  operating_hours?: Record<string, unknown>;
   services?: string[];
   staff_count?: number;
   room_count?: number;
@@ -117,8 +118,8 @@ export interface AuditLog {
   result: 'success' | 'failure' | 'warning';
   ip_address?: string;
   user_agent?: string;
-  old_values?: any;
-  new_values?: any;
+  old_values?: Record<string, unknown>;
+  new_values?: Record<string, unknown>;
   created_at: string;
 }
 
@@ -149,7 +150,7 @@ class AdminService {
    */
   async createUser(data: Partial<User>): Promise<User> {
     // Map frontend fields to backend fields
-    const createData: any = {
+    const createData: Record<string, unknown> = {
       username: (data as any).username || (data as any).email || `user_${Date.now()}`,
       email: data.email,
       first_name: (data as any).first_name || (data as any).firstName,
@@ -177,7 +178,7 @@ class AdminService {
    */
   async updateUser(userId: number, data: Partial<User>): Promise<User> {
     // Map frontend fields to backend fields
-    const updateData: any = {};
+    const updateData: Record<string, unknown> = {};
     if (data.username !== undefined) updateData.username = data.username;
     if (data.first_name !== undefined) updateData.first_name = data.first_name;
     if (data.last_name !== undefined) updateData.last_name = data.last_name;
@@ -306,7 +307,7 @@ class AdminService {
    * Get users with a specific role
    */
   async getRoleUsers(roleId: number): Promise<User[]> {
-    const response = await apiFetch<{ results: any[] }>(`/permissions/roles/${roleId}/users/`);
+    const response = await apiFetch<{ results: User[] }>(`/permissions/roles/${roleId}/users/`);
     return response.results || [];
   }
 
@@ -481,9 +482,9 @@ class AdminService {
     search?: string;
     page?: number;
     page_size?: number;
-  }): Promise<{ results: any[]; count: number }> {
+  }): Promise<{ results: Record<string, unknown>[]; count: number }> {
     const query = buildQueryString(params || {});
-    return apiFetch<{ results: any[]; count: number }>(`/organization/rooms/${query}`);
+    return apiFetch<{ results: Record<string, unknown>[]; count: number }>(`/organization/rooms/${query}`);
   }
 
   /**
@@ -537,11 +538,11 @@ class AdminService {
     availableRooms: number;
     occupiedRooms: number;
     usersByRole: Array<{ role: string; count: number; color: string }>;
-    recentAuditEvents: any[];
-    systemHealth: any[];
-    expiringLicenses: any[];
-    clinicStatus: any[];
-    pendingApprovals: any[];
+    recentAuditEvents: Record<string, unknown>[];
+    systemHealth: Record<string, unknown>[];
+    expiringLicenses: Record<string, unknown>[];
+    clinicStatus: Record<string, unknown>[];
+    pendingApprovals: Record<string, unknown>[];
   }> {
     // Load all data in parallel
     const [usersResponse, rolesResponse, clinicsResponse, roomsResponse, auditResponse] = await Promise.all([
@@ -566,7 +567,7 @@ class AdminService {
     /** Users with API activity or login within this window (see JWTAuthenticationWithActivity + last_login on login). */
     const ONLINE_WINDOW_MS = 15 * 60 * 1000;
     const nowMs = Date.now();
-    const onlineNow = users.filter((u: any) => {
+    const onlineNow = users.filter((u: User) => {
       if (!u.is_active) return false;
       const candidates: string[] = [];
       if (u.last_activity) candidates.push(u.last_activity);
@@ -580,8 +581,8 @@ class AdminService {
     const totalClinics = clinics.length;
     const activeClinics = clinics.filter(c => c.is_active).length;
     const totalRooms = rooms.length;
-    const availableRooms = rooms.filter((r: any) => r.status === 'active' && !r.assigned_doctor).length;
-    const occupiedRooms = rooms.filter((r: any) => r.status === 'active' && r.assigned_doctor).length;
+    const availableRooms = rooms.filter((r: Record<string, unknown>) => r.status === 'active' && !r.assigned_doctor).length;
+    const occupiedRooms = rooms.filter((r: Record<string, unknown>) => r.status === 'active' && r.assigned_doctor).length;
 
     // Users by role with proper role mapping
     const roleCounts: Record<string, number> = {};
@@ -612,7 +613,7 @@ class AdminService {
     }));
 
     // Recent audit events
-    const recentAuditEvents = auditLogs.slice(0, 5).map((log: any) => ({
+    const recentAuditEvents = auditLogs.slice(0, 5).map((log: AuditLog) => ({
       id: log.id.toString(),
       user: log.user_name || log.user_email || 'Unknown',
       action: log.action,
@@ -660,7 +661,7 @@ class AdminService {
     }));
 
     // Pending approvals (simplified)
-    const pendingApprovals: any[] = [];
+    const pendingApprovals: Record<string, unknown>[] = [];
 
     return {
       totalUsers,

@@ -3,6 +3,8 @@
  */
 import { apiFetch, buildQueryString } from '../api-client';
 import { PHARMACY_LOCATIONS } from '@/lib/constants/pharmacy-locations';
+import { logError, logWarn } from '../client-logger';
+import type { PartialUpdate, ApiResponse } from '../types/common';
 
 const toFiniteNumber = (value: unknown): number | undefined => {
   if (value === null || value === undefined) return undefined;
@@ -16,12 +18,12 @@ const toFiniteNumber = (value: unknown): number | undefined => {
   return undefined;
 };
 
-const normalizeMedication = (med: any): Medication => {
-  const minStock = toFiniteNumber(med?.min_stock_level);
+const normalizeMedication = (med: Record<string, unknown> | Medication): Medication => {
+  const minStock = toFiniteNumber((med as any).min_stock_level);
   return {
-    ...med,
+    ...(med as Partial<Medication>),
     min_stock_level: minStock ?? 0,
-  };
+  } as Medication;
 };
 
 export interface Prescription {
@@ -29,7 +31,7 @@ export interface Prescription {
   prescription_id: string;
   patient: number;
   patient_name?: string;
-  patient_details?: any; // Additional patient information (optional)
+  patient_details?: Record<string, unknown>; // Additional patient information (optional)
   doctor?: number;
   doctor_name?: string;
   visit?: number;
@@ -42,6 +44,7 @@ export interface Prescription {
   notes?: string;
   medications: PrescriptionItem[];
   prescribed_at: string;
+  created_at?: string;
   dispensed_at?: string;
 }
 
@@ -65,10 +68,10 @@ export interface PrescriptionItem {
   is_dispensed: boolean;
   // Frontend-calculated properties
   remaining_quantity?: number;
-  substitution?: any;
-  originalMedication?: any;
+  substitution?: Record<string, unknown>;
+  originalMedication?: Record<string, unknown>;
   stockLevel?: number;
-  medication_details?: any;
+  medication_details?: Record<string, unknown>;
   can_split_combo?: boolean;
   combo_components?: string[];
   /** Original combo line kept after split; not for dispensing */
@@ -358,7 +361,7 @@ class PharmacyService {
     const res = await apiFetch<{ results: Medication[]; count: number }>(`/v1/pharmacy/medications/${query}`);
     return {
       ...res,
-      results: (res.results || []).map((m: any) => normalizeMedication(m)),
+      results: (res.results || []).map((m) => normalizeMedication(m)),
     };
   }
 
@@ -488,13 +491,14 @@ class PharmacyService {
     };
     return {
       ...normalized,
-      results: (normalized.results || []).map((item: any) => {
-        if (item?.medication && typeof item.medication === 'object') {
-          return { ...item, medication: normalizeMedication(item.medication) };
+      results: (normalized.results || []).map((item) => {
+        const medItem = item as MedicationInventory;
+        if (medItem?.medication && typeof medItem.medication === 'object') {
+          return { ...medItem, medication: normalizeMedication(medItem.medication as Record<string, unknown>) } as any;
         }
-        return item;
+        return medItem;
       }),
-    };
+    } as typeof normalized;
   }
 
   /**
@@ -637,19 +641,19 @@ class PharmacyService {
         color: string;
       }> = [];
 
-      prescriptions.forEach((rx: any) => {
+      prescriptions.forEach((rx) => {
         // Prescription created activity
         const patientName = rx.patient_name || 'Unknown Patient';
-        const statusText = rx.status === 'pending' ? 'awaiting review' :
-                          rx.status === 'approved' ? 'ready for dispensing' :
-                          rx.status === 'dispensed' ? 'completed' : rx.status;
+        const statusText = (rx as any).status === 'pending' ? 'awaiting review' :
+                          (rx as any).status === 'approved' ? 'ready for dispensing' :
+                          (rx as any).status === 'dispensed' ? 'completed' : (rx as any).status;
 
         activities.push({
           id: `rx_created_${rx.id}`,
           type: 'prescription_created',
           title: 'New Prescription',
           description: `${patientName} - ${statusText}`,
-          timestamp: rx.prescribed_at || rx.created_at,
+          timestamp: rx.prescribed_at || rx.created_at || new Date().toISOString(),
           icon: 'clipboard-list',
           color: 'blue'
         });
@@ -674,7 +678,7 @@ class PharmacyService {
         .slice(0, limit);
 
     } catch (error) {
-      console.error('Error fetching recent pharmacy activities:', error);
+      logError('Error fetching recent pharmacy activities:', error);
       return [];
     }
   }
@@ -905,7 +909,7 @@ class PharmacyService {
    */
   async getMedicationBatches(medicationId: number): Promise<MedicationBatch[]> {
     if (!medicationId) {
-      console.warn('getMedicationBatches called with invalid ID:', medicationId);
+      logWarn('getMedicationBatches called with invalid ID:', medicationId);
       return [];
     }
     
@@ -932,7 +936,7 @@ class PharmacyService {
           return new Date(a.expiryDate).getTime() - new Date(b.expiryDate).getTime();
         });
     } catch (error) {
-      console.error('Error fetching medication batches:', error);
+      logError('Error fetching medication batches:', error);
       return [];
     }
   }
@@ -999,13 +1003,13 @@ class PharmacyService {
             });
           }
         } catch (err) {
-          console.warn(`Could not check stock for ${med.name}:`, err);
+          logWarn(`Could not check stock for ${med.name}:`, err);
         }
       }
       
       return medicationsWithStock;
     } catch (error) {
-      console.error('Error fetching available brands:', error);
+      logError('Error fetching available brands:', error);
       return [];
     }
   }
@@ -1015,7 +1019,7 @@ class PharmacyService {
     try {
       return await apiFetch<any>(`/v1/pharmacy/prescriptions/${prescriptionId}/`);
     } catch (error) {
-      console.error('Error fetching prescription with generics:', error);
+      logError('Error fetching prescription with generics:', error);
       throw error;
     }
   }
@@ -1030,7 +1034,7 @@ class PharmacyService {
       }),
       });
     } catch (error) {
-      console.error('Error selecting brand for prescription item:', error);
+      logError('Error selecting brand for prescription item:', error);
       throw error;
     }
   }
@@ -1053,7 +1057,7 @@ class PharmacyService {
       );
       return response.interactions || [];
     } catch (error) {
-      console.error('Error checking drug interactions:', error);
+      logError('Error checking drug interactions:', error);
       return [];
     }
   }

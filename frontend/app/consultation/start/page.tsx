@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { safeAsync } from '@/lib/utils/error-handling';
 import { useRouter } from "next/navigation";
-import { DashboardLayout } from "@/components/DashboardLayout";
+import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import {
   AlertTriangle,
   Loader2,

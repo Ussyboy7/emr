@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { DashboardLayout } from "@/components/DashboardLayout";
-import { StandardPagination } from "@/components/StandardPagination";
+import { DashboardLayout } from "@/components/shared/DashboardLayout";
+import { StandardPagination } from "@/components/shared/StandardPagination";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";

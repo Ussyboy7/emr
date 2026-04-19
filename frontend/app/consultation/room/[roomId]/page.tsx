@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, use } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { DashboardLayout } from "@/components/DashboardLayout";
+import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -52,10 +52,10 @@ import {
   normalizeClinicName,
   joinDisplayParts,
 } from '@/lib/utils/clinic-utils';
-import { PatientAvatar } from '@/components/PatientAvatar';
-import { VitalsDetailModal } from '@/components/VitalsDetailModal';
+import { PatientAvatar } from '@/components/shared/PatientAvatar';
+import { VitalsDetailModal } from '@/components/shared/VitalsDetailModal';
 import { useCurrentUser } from '@/hooks/use-current-user';
-import { useOutpatientClinicTypes } from '@/lib/hooks/use-outpatient-clinic-types';
+import { useOutpatientClinicTypes } from '@/hooks/use-outpatient-clinic-types';
 import { NPA_BRAND_NAME } from '@/lib/branding';
 import {
   ADMINISTRATION_ROUTES,
@@ -1674,7 +1674,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         photo: (patient as any).photo || null,
       };
       
-      const restoredPatient = sanitizePatientForRendering(patientData) as Patient;
+      const restoredPatient = sanitizePatientForRendering(patientData) as unknown as Patient;
       
       // Load vitals if available (use patient-wide vitals like other functions)
       const vitalsData = await safeAsync(

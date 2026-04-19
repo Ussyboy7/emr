@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { DashboardLayout } from "@/components/DashboardLayout";
+import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,8 +11,8 @@ import { patientService, formatPatientGenderLabel, type Patient as ApiPatient } 
 import { useAuthRedirect } from "@/hooks/use-auth-redirect";
 import { isAuthenticationError } from "@/lib/auth-errors";
 import { Search, FileBarChart, Loader2, Users, ChevronRight, Stethoscope, Activity, FlaskConical, Pill, Heart } from "lucide-react";
-import { PatientAvatar } from "@/components/PatientAvatar";
-import { StandardPagination } from "@/components/StandardPagination";
+import { PatientAvatar } from "@/components/shared/PatientAvatar";
+import { StandardPagination } from "@/components/shared/StandardPagination";
 
 const categoryMap: Record<string, string> = {
   employee: "Employee",

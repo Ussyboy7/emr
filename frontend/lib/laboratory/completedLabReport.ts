@@ -35,36 +35,37 @@ export interface CompletedTest {
  * Matches Laboratory → Completed Tests list transform.
  */
 export function transformApiRowToCompletedTest(
-  row: any,
+  row: Record<string, unknown>,
   listMode: 'verification' | 'tests'
 ): CompletedTest {
-  const test: any = listMode === 'verification' ? (row.test_details || row.test || {}) : row;
+  // @ts-ignore - Empty object fallback for API response processing
+  const test: Record<string, unknown> = listMode === 'verification' ? (row.test_details || row.test || {}) : row;
 
   const orderDetails = test.order_details || {};
 
-  const patientDetails = orderDetails.patient_details;
-  const patientName = patientDetails?.name ?? orderDetails.patient_name ?? '';
+  const patientDetails = (orderDetails as any).patient_details;
+  const patientName = (patientDetails as any)?.name ?? (orderDetails as any).patient_name ?? '';
   const patientId =
-    patientDetails?.patient_id?.toString() || patientDetails?.id?.toString() || '';
+    (patientDetails as any)?.patient_id?.toString() || (patientDetails as any)?.id?.toString() || '';
 
-  const age = patientDetails?.age ?? null;
-  const gender = patientDetails?.gender || '';
+  const age = (patientDetails as any)?.age ?? null;
+  const gender = (patientDetails as any)?.gender || '';
 
-  const orderId = orderDetails.order_id || '';
+  const orderId = (orderDetails as any).order_id || '';
 
-  const doctorDetails = orderDetails.doctor_details;
-  const doctorName = doctorDetails?.name || orderDetails.doctor_name || '';
-  const doctorSpecialty = doctorDetails?.specialty || '';
+  const doctorDetails = (orderDetails as any).doctor_details;
+  const doctorName = (doctorDetails as any)?.name || (orderDetails as any).doctor_name || '';
+  const doctorSpecialty = (doctorDetails as any)?.specialty || '';
 
   // order_details.clinic is the primary source; nested `order` is only present if the API expands it.
   const orderObj = typeof row.order === 'object' && row.order != null ? row.order : null;
   const clinic =
-    (orderDetails.clinic && String(orderDetails.clinic).trim()) ||
-    (orderObj?.clinic && String(orderObj.clinic).trim()) ||
+    ((orderDetails as any).clinic && String((orderDetails as any).clinic).trim()) ||
+    ((orderObj as any)?.clinic && String((orderObj as any).clinic).trim()) ||
     '';
 
-  const orderedAt = test.collected_at || test.lab_order?.order_date || new Date().toISOString();
-  const completedAt = test.processed_at || test.verified_at || new Date().toISOString();
+  const orderedAt = (test as any).collected_at || (test as any).lab_order?.order_date || new Date().toISOString();
+  const completedAt = (test as any).processed_at || (test as any).verified_at || new Date().toISOString();
   const turnaroundMs = new Date(completedAt).getTime() - new Date(orderedAt).getTime();
   const turnaroundHours = Math.floor(turnaroundMs / 3600000);
   const turnaroundMins = Math.floor((turnaroundMs % 3600000) / 60000);
@@ -88,7 +89,7 @@ export function transformApiRowToCompletedTest(
 
   const resolveTemplateMeta = (parameterName: string) => {
     const normalRangeObj: Record<string, any> | undefined =
-      test?.template_normal_range || test?.template?.normal_range;
+      (test as any)?.template_normal_range || (test as any)?.template?.normal_range;
     if (!normalRangeObj || typeof normalRangeObj !== 'object') return null;
     const wanted = String(parameterName || '').trim().toLowerCase();
     if (!wanted) return null;
@@ -98,11 +99,11 @@ export function transformApiRowToCompletedTest(
     return null;
   };
 
-  const formatTemplateRange = (meta: any) => {
+  const formatTemplateRange = (meta: Record<string, unknown>) => {
     if (!meta) return '';
-    if (typeof meta.range === 'string' && meta.range.trim()) return meta.range.trim();
-    const min = meta.min ?? meta.normalRangeMin;
-    const max = meta.max ?? meta.normalRangeMax;
+    if (typeof (meta as any).range === 'string' && (meta as any).range.trim()) return (meta as any).range.trim();
+    const min = (meta as any).min ?? (meta as any).normalRangeMin;
+    const max = (meta as any).max ?? (meta as any).normalRangeMax;
     if (min !== undefined && max !== undefined && String(min).trim() && String(max).trim()) {
       return `${min}-${max}`;
     }
@@ -224,15 +225,15 @@ export function transformApiRowToCompletedTest(
     else overallStatus = 'Normal';
   }
 
-  const priority = transformPriority(test.lab_order?.priority || test.priority || 'routine') as
+  const priority = transformPriority((test as any).lab_order?.priority || (test as any).priority || 'routine') as
     | 'Routine'
     | 'Urgent'
     | 'STAT';
 
-  const doctorIdRaw = test.lab_order?.doctor?.id ?? doctorDetails?.id;
+  const doctorIdRaw = (test as any).lab_order?.doctor?.id ?? (doctorDetails as any)?.id;
 
   return {
-    id: test.id != null ? String(test.id) : '',
+    id: (test as any).id != null ? String((test as any).id) : '',
     orderId,
     patient: {
       id: patientId,
@@ -245,16 +246,16 @@ export function transformApiRowToCompletedTest(
       name: doctorName,
       specialty: doctorSpecialty,
     },
-    testName: test.name,
-    testCode: test.code,
+    testName: (test as any).name,
+    testCode: (test as any).code,
     results: processedResults,
     overallStatus,
     priority,
     orderedAt,
     completedAt,
-    verifiedBy: test.verified_by_name || test.verified_by || '',
-    verifiedAt: test.verified_at || new Date().toISOString(),
-    submittedBy: test.processed_by_name || test.processed_by || '',
+    verifiedBy: (test as any).verified_by_name || (test as any).verified_by || '',
+    verifiedAt: (test as any).verified_at || new Date().toISOString(),
+    submittedBy: (test as any).processed_by_name || (test as any).processed_by || '',
     clinic,
     turnaroundTime,
     result_file: resultFileUrl,

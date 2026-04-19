@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { StandardPagination } from '@/components/StandardPagination';
-import { DashboardLayout } from '@/components/DashboardLayout';
+import { StandardPagination } from '@/components/shared/StandardPagination';
+import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -16,7 +16,7 @@ import { toast } from 'sonner';
 import { physioService, type PhysioSession } from '@/lib/services';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
-import { PatientAvatar } from "@/components/PatientAvatar";
+import { PatientAvatar } from "@/components/shared/PatientAvatar";
 import { joinDisplayParts } from '@/lib/utils/clinic-utils';
 
 import {
@@ -423,7 +423,6 @@ export default function PhysioCompletedPage() {
                   <SelectTrigger className="w-[180px]"><SelectValue placeholder="Physiotherapist" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Physiotherapists</SelectItem>
-                    {/* TODO: Load actual physiotherapists */}
                   </SelectContent>
                 </Select>
               </div>

@@ -73,15 +73,16 @@ function toAbsoluteMediaUrl(url: string): string {
 /**
  * Map a row from radiology verification / verified reports API into CompletedRadiologyReport.
  */
-export function transformApiRadiologyReportToCompleted(apiReport: any): CompletedRadiologyReport {
-  const legacyFindings = String(apiReport.study_details?.findings || '').trim();
-  const legacyImpression = String(apiReport.study_details?.impression || '').trim();
-  const reportText = String(apiReport.study_details?.report || '').trim() || legacyFindings;
+export function transformApiRadiologyReportToCompleted(apiReport: Record<string, unknown>): CompletedRadiologyReport {
+  const apiReportAny = apiReport as any;
+  const legacyFindings = String(apiReportAny.study_details?.findings || '').trim();
+  const legacyImpression = String(apiReportAny.study_details?.impression || '').trim();
+  const reportText = String(apiReportAny.study_details?.report || '').trim() || legacyFindings;
   const mergedReportText = legacyImpression
     ? `${reportText}\n\nImpression:\n${legacyImpression}`.trim()
     : reportText;
 
-  const sd = apiReport.study_details || {};
+  const sd = apiReportAny.study_details || {};
   const rawFileUrl = sd.report_file_url as string | undefined;
   const fileUrl = rawFileUrl ? toAbsoluteMediaUrl(rawFileUrl) : undefined;
   const rf = sd.report_file;
@@ -90,44 +91,44 @@ export function transformApiRadiologyReportToCompleted(apiReport: any): Complete
   const fileName = sanitizeRadiologyReportFileName(rawName);
 
   return {
-    id: apiReport.id != null ? String(apiReport.id) : '',
-    orderId: apiReport.order_id || '',
+    id: apiReportAny.id != null ? String(apiReportAny.id) : '',
+    orderId: apiReportAny.order_id || '',
     patient: {
-      id: apiReport.patient_details?.id != null ? String(apiReport.patient_details.id) : '',
-      name: apiReport.patient_name ?? '',
-      age: apiReport.patient_details?.age ?? null,
-      gender: apiReport.patient_details?.gender || 'Unknown',
+      id: apiReportAny.patient_details?.id != null ? String(apiReportAny.patient_details.id) : '',
+      name: apiReportAny.patient_name ?? '',
+      age: apiReportAny.patient_details?.age ?? null,
+      gender: apiReportAny.patient_details?.gender || 'Unknown',
     },
-    patientName: apiReport.patient_name ?? '',
+    patientName: apiReportAny.patient_name ?? '',
     patientId:
-      apiReport.patient_details?.patient_id?.toString() ||
-      (apiReport.patient_details?.id != null ? String(apiReport.patient_details.id) : ''),
-    age: apiReport.patient_details?.age || 0,
-    gender: apiReport.patient_details?.gender || 'Unknown',
+      apiReportAny.patient_details?.patient_id?.toString() ||
+      (apiReportAny.patient_details?.id != null ? String(apiReportAny.patient_details.id) : ''),
+    age: apiReportAny.patient_details?.age || 0,
+    gender: apiReportAny.patient_details?.gender || 'Unknown',
     doctor: {
       id:
-        apiReport.order_details?.doctor != null ? String(apiReport.order_details.doctor) : '',
-      name: apiReport.order_details?.doctor_name || 'Unknown',
-      specialty: apiReport.order_details?.doctor_specialty || '',
+        apiReportAny.order_details?.doctor != null ? String(apiReportAny.order_details.doctor) : '',
+      name: apiReportAny.order_details?.doctor_name || 'Unknown',
+      specialty: apiReportAny.order_details?.doctor_specialty || '',
     },
-    studyName: sd.procedure || 'Unknown Study',
-    studyType: sd.modality || 'Unknown',
-    category: sd.modality || 'X-Ray',
+    studyName: (sd as any).procedure || 'Unknown Study',
+    studyType: (sd as any).modality || 'Unknown',
+    category: (sd as any).modality || 'X-Ray',
     overallStatus:
-      apiReport.overall_status === 'critical'
+      apiReportAny.overall_status === 'critical'
         ? 'Critical'
-        : apiReport.overall_status === 'abnormal'
+        : apiReportAny.overall_status === 'abnormal'
           ? 'Abnormal'
           : 'Normal',
-    priority: apiReport.priority || 'Routine',
-    orderingDoctor: apiReport.order_details?.doctor_name || 'Unknown',
-    orderedAt: sd.created_at || '',
-    completedAt: sd.verified_at || '',
-    reportedBy: sd.reported_by_name || sd.verified_by_name || 'Unknown',
-    verifiedBy: sd.verified_by_name || 'Unknown',
-    verifiedAt: sd.verified_at || '',
-    clinic: apiReport.order_details?.clinic || '',
-    turnaroundTime: calculateRadiologyTurnaroundTime(sd.created_at, sd.verified_at),
+    priority: apiReportAny.priority || 'Routine',
+    orderingDoctor: apiReportAny.order_details?.doctor_name || 'Unknown',
+    orderedAt: (sd as any).created_at || '',
+    completedAt: (sd as any).verified_at || '',
+    reportedBy: (sd as any).reported_by_name || (sd as any).verified_by_name || 'Unknown',
+    verifiedBy: (sd as any).verified_by_name || 'Unknown',
+    verifiedAt: (sd as any).verified_at || '',
+    clinic: apiReportAny.order_details?.clinic || '',
+    turnaroundTime: calculateRadiologyTurnaroundTime((sd as any).created_at, (sd as any).verified_at),
     report: mergedReportText || undefined,
     reportFile: fileUrl
       ? {

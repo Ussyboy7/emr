@@ -1,73 +1,99 @@
-# Welcome to your Lovable project
+# NPA ECM Frontend
 
-## Project info
+A modern React-based frontend application for the NPA Electronic Content Management (ECM) system, part of the NPA EMR suite.
 
-**URL**: https://lovable.dev/projects/f8bec062-0cbd-46b2-880e-78aa5a58430a
+## 🚀 Quick Start
 
-## How can I edit this code?
+### Prerequisites
+- Node.js 18+
+- npm or yarn
 
-There are several ways of editing your application.
-
-**Use Lovable**
-
-Simply visit the [Lovable Project](https://lovable.dev/projects/f8bec062-0cbd-46b2-880e-78aa5a58430a) and start prompting.
-
-Changes made via Lovable will be committed automatically to this repo.
-
-**Use your preferred IDE**
-
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
-
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
-
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
+### Installation
+```bash
+npm install
 ```
 
-**Edit a file directly in GitHub**
+### Development
+```bash
+npm run dev
+```
+Runs the development server on http://localhost:3001
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+### Building
+```bash
+npm run build
+```
 
-**Use GitHub Codespaces**
+### Testing
+```bash
+npm run test
+```
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+### Linting
+```bash
+npm run lint
+```
 
-## What technologies are used for this project?
+### Type Checking
+```bash
+npm run type-check
+```
 
-This project is built with:
+## 📁 Project Structure
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+```
+frontend/
+├── app/                    # Next.js app router pages
+│   ├── (auth)/            # Authentication pages
+│   ├── admin/             # Admin modules
+│   ├── consultation/      # Consultation module
+│   ├── dashboard/         # Dashboard
+│   ├── laboratory/        # Laboratory module
+│   ├── medical-records/   # Medical records
+│   ├── nursing/           # Nursing module
+│   ├── pharmacy/          # Pharmacy module
+│   ├── radiology/         # Radiology module
+│   └── ...
+├── components/            # Reusable UI components
+│   ├── ui/               # shadcn/ui components
+│   └── ...
+├── contexts/             # React contexts
+├── hooks/                # Custom hooks
+├── lib/                  # Utilities and services
+│   ├── services/         # API services
+│   └── ...
+├── types/                # TypeScript type definitions
+└── ...
+```
 
-## How can I deploy this project?
+## 🛠️ Technologies
 
-Simply open [Lovable](https://lovable.dev/projects/f8bec062-0cbd-46b2-880e-78aa5a58430a) and click on Share -> Publish.
+- **Framework**: Next.js 16 with App Router
+- **Language**: TypeScript
+- **Styling**: Tailwind CSS + shadcn/ui
+- **State Management**: React Query + Context API
+- **Forms**: React Hook Form + Zod
+- **Testing**: Vitest
+- **Linting**: ESLint
+- **Build Tool**: Vite
 
-## Can I connect a custom domain to my Lovable project?
+## 🔧 Configuration
 
-Yes, you can!
+- **Port**: 3001 (development)
+- **API Base URL**: Configured via environment variables
+- **Theme**: Supports light/dark mode
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+## 📚 Documentation
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+See the main project README at `../README.md` for full system overview and `../docs/IMPLEMENTATION_STATUS.md` for backend implementation details.
+
+## 🤝 Contributing
+
+1. Follow the existing code style
+2. Run tests before committing
+3. Ensure TypeScript types are correct
+4. Update documentation as needed
+
+## 📄 License
+
+This project is part of the NPA EMR system.

@@ -104,15 +104,15 @@ export function groupPagePermissionsByModule(
   const grouped: Record<string, PagePermission[]> = {};
   for (const id of pageIds) {
     const perm = byId.get(id);
-    const module = perm?.module ?? "Other";
+    const moduleName = perm?.module ?? "Other";
     const entry: PagePermission = perm ?? {
       id,
       name: id,
       description: "",
-      module,
+      module: moduleName,
     };
-    if (!grouped[module]) grouped[module] = [];
-    grouped[module].push(entry);
+    if (!grouped[moduleName]) grouped[moduleName] = [];
+    grouped[moduleName].push(entry);
   }
   for (const m of Object.keys(grouped)) {
     grouped[m] = grouped[m].slice().sort((a, b) => a.name.localeCompare(b.name));

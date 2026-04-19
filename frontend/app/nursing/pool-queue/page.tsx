@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { StandardPagination } from '@/components/StandardPagination';
-import { DashboardLayout } from '@/components/DashboardLayout';
+import { StandardPagination } from '@/components/shared/StandardPagination';
+import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -32,12 +32,12 @@ import {
   getVisitServiceClinicsDisplay,
   joinDisplayParts,
 } from '@/lib/utils/clinic-utils';
-import { useOutpatientClinicTypes } from '@/lib/hooks/use-outpatient-clinic-types';
-import { PatientAvatar } from "@/components/PatientAvatar";
-import { VitalsDetailModal } from "@/components/VitalsDetailModal";
+import { useOutpatientClinicTypes } from '@/hooks/use-outpatient-clinic-types';
+import { PatientAvatar } from "@/components/shared/PatientAvatar";
+import { VitalsDetailModal } from "@/components/shared/VitalsDetailModal";
 import { vitalFieldToString } from "@/lib/vitals-display";
-import { AdvancedDateRangeDialog } from '@/components/AdvancedDateRangeDialog';
-import { CustomDateRangeButton } from '@/components/CustomDateRangeButton';
+import { AdvancedDateRangeDialog } from '@/components/shared/AdvancedDateRangeDialog';
+import { CustomDateRangeButton } from '@/components/shared/CustomDateRangeButton';
 
 // Format visit type for display
 const getVisitTypeLabel = (type: string) => {

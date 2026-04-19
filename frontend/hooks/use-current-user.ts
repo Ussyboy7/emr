@@ -15,6 +15,31 @@ import {
 } from "@/lib/auth-cookie-names";
 import { getHomeRouteForUser } from "@/lib/home-route";
 
+interface ApiUser {
+  id?: string | number;
+  username?: string;
+  first_name?: string;
+  last_name?: string;
+  email?: string;
+  employee_id?: string;
+  grade_level?: string;
+  directorate_name?: string;
+  directorate?: string | { name?: string };
+  division_name?: string;
+  division?: string | { name?: string };
+  department_name?: string;
+  department?: string | { name?: string };
+  system_role?: string | { name?: string };
+  system_role_name?: string;
+  permissions?: {
+    pages?: string[];
+    actions?: Record<string, unknown>;
+  };
+  is_active?: boolean;
+  is_superuser?: boolean;
+  [key: string]: unknown; // Allow additional properties
+}
+
 const CURRENT_USER_CACHE_TTL_MS = 30_000;
 let cachedRemoteUser: User | null | undefined = undefined;
 let cachedRemoteUserAt = 0;
@@ -25,10 +50,10 @@ const toOptionalString = (value: unknown): string | undefined => {
   return String(value);
 };
 
-const mapApiUserToUser = (data: any): User => {
+const mapApiUserToUser = (data: ApiUser): User => {
   const name = `${data.first_name ?? ""} ${data.last_name ?? ""}`.trim();
   // system_role is now a ForeignKey (UUID), but backend returns system_role_name for display
-  let roleName = data.system_role_name ?? (data.system_role?.name ?? "");
+  let roleName = data.system_role_name ?? (typeof data.system_role === 'object' && data.system_role?.name ? data.system_role.name : "");
   // UUID pattern to detect if we accidentally got a UUID instead of a name
   const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   // Never use UUID as role name
@@ -46,12 +71,12 @@ const mapApiUserToUser = (data: any): User => {
     email: data.email ?? "",
     employeeId: data.employee_id ?? "",
     gradeLevel: data.grade_level ?? "",
-    directorate: toOptionalString(data.directorate_name ?? data.directorate),
-    division: toOptionalString(data.division_name ?? data.division),
-    department: toOptionalString(data.department_name ?? data.department),
-    systemRole: data.system_role || roleName, // Use system_role directly, fallback to roleName
-    permissions: data.permissions?.pages || [],
-    permissionActions: data.permissions?.actions || {},
+    directorate: (data.directorate_name || (typeof data.directorate === 'string' ? data.directorate : (data.directorate as any)?.name) || '') as string,
+    division: toOptionalString(data.division_name ?? (typeof data.division === 'string' ? data.division : data.division?.name)),
+    department: toOptionalString(data.department_name ?? (typeof data.department === 'string' ? data.department : data.department?.name)),
+    systemRole: (typeof data.system_role === 'string' ? data.system_role : (data.system_role as any)?.name) || roleName,
+    permissions: (data.permissions as any)?.pages || [],
+    permissionActions: (data.permissions as any)?.actions || {},
     avatar: undefined,
     active: data.is_active ?? true,
     isSuperuser: data.is_superuser ?? false,
@@ -151,7 +176,7 @@ export const useCurrentUser = () => {
       if (!inFlightRemoteUserRequest) {
         inFlightRemoteUserRequest = (async () => {
           const response = await apiFetch("/accounts/auth/me/");
-          const mapped = mapApiUserToUser(response);
+          const mapped = mapApiUserToUser(response as ApiUser);
           writeAuthMirrorCookies(mapped);
           cacheRemoteUser(mapped);
           return mapped;

@@ -91,15 +91,15 @@ export interface PhysioSession {
 
   // Treatment & Plan
   treatment_performed: string;
-  exercises_prescribed: any[];
-  equipment_used: any[];
+  exercises_prescribed: Record<string, unknown>[];
+  equipment_used: Record<string, unknown>[];
   patient_education: string;
   next_session_plan: string;
 
   // Session & Continuity
   session_notes: string;
   progress_notes: string;
-  recommendations: any[];
+  recommendations: Record<string, unknown>[];
   follow_up_instructions: string;
 
   // Legacy fields
@@ -111,7 +111,7 @@ export interface PhysioSession {
   next_session_date?: string;
   follow_up_notes?: string;
   assessment?: string; // Legacy assessment field
-  home_exercises?: any[]; // Home exercise program
+  home_exercises?: Record<string, unknown>[]; // Home exercise program
   updated_at: string;
 }
 

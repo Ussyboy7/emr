@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect, useRef } from 'react';
-import { DashboardLayout } from '@/components/DashboardLayout';
+import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -22,7 +22,7 @@ import {
   Briefcase, MapPin, Upload, Camera, FileText, Save, Trash2, 
   CheckCircle2, Clock, Loader2, Plus, X, AlertTriangle, Search
 } from 'lucide-react';
-import { useLocationOptions } from '@/lib/hooks/use-location-options';
+import { useLocationOptions } from '@/hooks/use-location-options';
 
 // NPA Divisions
 const divisions = [

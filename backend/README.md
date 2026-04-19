@@ -65,3 +65,5 @@ Once the server is running, access:
 - ReDoc: http://localhost:8001/api/redoc/
 - Schema: http://localhost:8001/api/schema/
 
+For complete implementation details, see `../docs/IMPLEMENTATION_STATUS.md`.
+

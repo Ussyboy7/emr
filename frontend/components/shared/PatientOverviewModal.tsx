@@ -13,8 +13,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from "sonner";
 import { patientService, labService, pharmacyService, consultationService, radiologyService, physioService, wardService, medicalCertificateService, formatPatientGenderLabel, type Patient as ApiPatient } from '@/lib/services';
-import { VisitDetailModal } from '@/components/VisitDetailModal';
-import { PatientAvatar } from "@/components/PatientAvatar";
+import { VisitDetailModal } from '@/components/shared/VisitDetailModal';
+import { PatientAvatar } from "@/components/shared/PatientAvatar";
 import { MedicalHistoryTab } from '@/components/patient-overview/MedicalHistoryTab';
 import { TimelineTab } from '@/components/patient-overview/TimelineTab';
 import {

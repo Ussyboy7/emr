@@ -5,6 +5,58 @@
 import { getOrganizationHeader } from '@/lib/constants/organization';
 import { apiFetch } from '@/lib/api-client';
 import { consultationService, physioService, patientService } from '@/lib/services';
+import { logWarn } from './client-logger';
+import type { ApiResponse } from './types/common';
+
+// API Response interfaces for consultation report
+interface PrescriptionApiResponse {
+  id: number;
+  patient_name?: string;
+  medication_name?: string;
+  medication?: any;
+  medications?: any[];
+  dosage?: string;
+  frequency?: string;
+  duration?: string;
+  quantity?: number;
+  prescribed_at?: string;
+  created_at?: string;
+}
+
+interface LabOrderApiResponse {
+  id: number;
+  tests?: any[];
+  test_details?: any;
+  test_name?: string;
+  test?: any;
+  priority?: string;
+  status?: string;
+  order_id?: number;
+  doctor_details?: any;
+  doctor_name?: string;
+  clinic?: any;
+  order_date?: string;
+}
+
+interface RadiologyOrderApiResponse {
+  id: number;
+  procedure?: string;
+  procedure_name?: string;
+  priority?: string;
+  status?: string;
+  studies?: any[];
+  report?: string;
+  findings?: string;
+  impression?: string;
+}
+
+interface PhysioOrderApiResponse {
+  id: number;
+  diagnosis?: string;
+  chief_complaint?: string;
+  priority?: string;
+  status?: string;
+}
 
 // ----- Shared type (same shape as Medical Records "fullSession") -----
 export interface ConsultationReportSession {
@@ -322,15 +374,15 @@ export async function loadConsultationReportSession(sessionId: number): Promise<
       session.patient_age = patient.age ?? '';
       session.patient_gender = patient.gender ?? '';
     } catch (err) {
-      console.warn('Could not load patient for report:', err);
+      logWarn('Could not load patient for report:', err);
     }
   }
 
   const visitId = session.visit as number | undefined;
   if (visitId) {
     try {
-      const prescriptionsResult = await apiFetch<{ results: any[] }>(`/pharmacy/prescriptions/?visit=${visitId}&page_size=100`);
-      session.prescriptions = (prescriptionsResult.results || []).flatMap((p: any) => {
+      const prescriptionsResult = await apiFetch<ApiResponse<PrescriptionApiResponse>>(`/pharmacy/prescriptions/?visit=${visitId}&page_size=100`);
+      session.prescriptions = (prescriptionsResult.results || []).flatMap((p: PrescriptionApiResponse) => {
         const items = (p.medications && p.medications.length) ? p.medications : (p.medication_name || p.medication ? [p] : []);
         return items.map((m: any) => ({
           id: String(p.id) + (m.id != null ? '-' + m.id : ''),
@@ -342,7 +394,7 @@ export async function loadConsultationReportSession(sessionId: number): Promise<
         }));
       });
     } catch (err) {
-      console.warn('Could not load prescriptions:', err);
+      logWarn('Could not load prescriptions:', err);
       session.prescriptions = [];
     }
 
@@ -376,7 +428,7 @@ export async function loadConsultationReportSession(sessionId: number): Promise<
         }));
       });
     } catch (err) {
-      console.warn('Could not load lab orders:', err);
+      logWarn('Could not load lab orders:', err);
       session.labOrders = [];
     }
 
@@ -404,7 +456,7 @@ export async function loadConsultationReportSession(sessionId: number): Promise<
         }];
       });
     } catch (err) {
-      console.warn('Could not load radiology orders:', err);
+      logWarn('Could not load radiology orders:', err);
       session.radiologyOrders = [];
     }
 
@@ -426,7 +478,7 @@ export async function loadConsultationReportSession(sessionId: number): Promise<
         };
       }
     } catch (err) {
-      console.warn('Could not load vitals:', err);
+      logWarn('Could not load vitals:', err);
     }
   } else {
     session.prescriptions = [];
@@ -446,7 +498,7 @@ export async function loadConsultationReportSession(sessionId: number): Promise<
       status: o.status ?? '',
     }));
   } catch (err) {
-    console.warn('Could not load physio orders:', err);
+    logWarn('Could not load physio orders:', err);
     session.physioOrders = [];
   }
 
@@ -460,7 +512,7 @@ export async function loadConsultationReportSession(sessionId: number): Promise<
       notes: d.notes || d.diagnosis_text || '',
     }));
   } catch (err) {
-    console.warn('Could not load diagnoses:', err);
+    logWarn('Could not load diagnoses:', err);
     session.diagnoses = [];
   }
 

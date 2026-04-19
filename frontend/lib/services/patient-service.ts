@@ -19,7 +19,7 @@ export function formatPatientGenderLabel(gender: unknown): 'Male' | 'Female' | '
  * Safely validates and sanitizes patient data for rendering
  * Prevents "Objects are not valid as a React child" errors
  */
-export function sanitizePatientForRendering(patient: any): any {
+export function sanitizePatientForRendering(patient: Record<string, unknown>): Record<string, unknown> {
   if (!patient || typeof patient !== 'object') {
     console.error('Invalid patient object received:', patient);
     throw new Error('Invalid patient data received from API');
@@ -37,7 +37,7 @@ export function sanitizePatientForRendering(patient: any): any {
     mrn: String(patient.patient_id ?? ''),
     personalNumber: String(patient.personal_number || ''),
     allergies: Array.isArray(patient.allergies)
-      ? patient.allergies.map((a: any) => String(a).trim()).filter((a: string) => a)
+      ? (patient.allergies as unknown[]).map((a: unknown) => String(a).trim()).filter((a: string) => a)
       : (patient.allergies ? String(patient.allergies).split(/[,\n]/).map((a: string) => a.trim()).filter((a: string) => a) : []),
     waitTime: typeof patient.waitTime === 'number' ? patient.waitTime : 0,
     vitalsCompleted: Boolean(patient.vitalsCompleted),
@@ -254,7 +254,7 @@ class PatientService {
   /**
    * Update patient medical history
    */
-  async updatePatientHistory(patientId: number, data: any): Promise<any> {
+  async updatePatientHistory(patientId: number, data: Record<string, unknown>): Promise<Record<string, unknown>> {
     return apiFetch<any>(`/patients/${patientId}/update_history/`, {
       method: 'PATCH',
       body: JSON.stringify(data),

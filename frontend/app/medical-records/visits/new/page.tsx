@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useRef, useCallback, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { DashboardLayout } from '@/components/DashboardLayout';
+import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -25,8 +25,8 @@ import {
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { normalizeClinicName } from '@/lib/utils/clinic-utils';
-import { useLocationOptions } from '@/lib/hooks/use-location-options';
-import { useOutpatientClinicTypes } from '@/lib/hooks/use-outpatient-clinic-types';
+import { useLocationOptions } from '@/hooks/use-location-options';
+import { useOutpatientClinicTypes } from '@/hooks/use-outpatient-clinic-types';
 
 // Visit Types (matching backend choices)
 const visitTypes = [

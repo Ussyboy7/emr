@@ -2,7 +2,7 @@
 
 import { useEffect, useState, use } from "react";
 import { useRouter } from "next/navigation";
-import { DashboardLayout } from "@/components/DashboardLayout";
+import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -28,8 +28,8 @@ import {
 } from '@/components/ward/WardDoctorOrdersSection';
 import type { PatientAdmission } from '@/lib/services/ward-service';
 import { isAuthenticationError } from '@/lib/auth-errors';
-import { PatientAvatar } from '@/components/PatientAvatar';
-import { VitalsDetailModal } from '@/components/VitalsDetailModal';
+import { PatientAvatar } from '@/components/shared/PatientAvatar';
+import { VitalsDetailModal } from '@/components/shared/VitalsDetailModal';
 import { ConsultationReportModal } from '@/components/consultation/ConsultationReportModal';
 import { loadConsultationReportSession, type ConsultationReportSession } from '@/lib/consultation-report';
 import { getOrganizationLabHeader } from '@/lib/constants/organization';

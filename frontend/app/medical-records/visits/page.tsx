@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect, useCallback } from 'react';
-import { DashboardLayout } from '@/components/DashboardLayout';
+import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -21,9 +21,9 @@ import {
   Search, Plus, Calendar, Clock, CheckCircle2,
   Edit, Send, AlertTriangle, Loader2, Eye, X, FileText
 } from 'lucide-react';
-import { StandardPagination } from '@/components/StandardPagination';
-import { CustomDateRangeButton } from '@/components/CustomDateRangeButton';
-import { AdvancedDateRangeDialog } from '@/components/AdvancedDateRangeDialog';
+import { StandardPagination } from '@/components/shared/StandardPagination';
+import { CustomDateRangeButton } from '@/components/shared/CustomDateRangeButton';
+import { AdvancedDateRangeDialog } from '@/components/shared/AdvancedDateRangeDialog';
 import {
   buildVisitClinicFilterOptions,
   ALL_CLINICS_FILTER_LABEL,
@@ -32,8 +32,8 @@ import {
   normalizeClinicName,
   getVisitServiceClinicsDisplay,
 } from '@/lib/utils/clinic-utils';
-import { useLocationOptions } from '@/lib/hooks/use-location-options';
-import { useOutpatientClinicTypes } from '@/lib/hooks/use-outpatient-clinic-types';
+import { useLocationOptions } from '@/hooks/use-location-options';
+import { useOutpatientClinicTypes } from '@/hooks/use-outpatient-clinic-types';
 import { ConsultationReportModal } from '@/components/consultation/ConsultationReportModal';
 import { loadConsultationReportSession, type ConsultationReportSession } from '@/lib/consultation-report';
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { DashboardLayout } from "@/components/DashboardLayout";
+import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -94,7 +94,7 @@ export default function AdminDashboardPage() {
       };
       const systemHealthWithIcons = stats.systemHealth.map(system => ({
         ...system,
-        icon: iconMap[system.icon] || Server, // Default to Server if icon not found
+        icon: iconMap[system.icon as string] || Server, // Default to Server if icon not found
       }));
       setSystemHealth(systemHealthWithIcons);
       setClinicStatus(stats.clinicStatus);

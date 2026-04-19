@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import Link from "next/link";
-import { DashboardLayout } from "@/components/DashboardLayout";
+import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,8 +11,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
-import { CustomDateRangeButton } from "@/components/CustomDateRangeButton";
-import { AdvancedDateRangeDialog } from "@/components/AdvancedDateRangeDialog";
+import { CustomDateRangeButton } from "@/components/shared/CustomDateRangeButton";
+import { AdvancedDateRangeDialog } from "@/components/shared/AdvancedDateRangeDialog";
 import {
   CalendarDays,
   Calendar as CalendarIcon,
@@ -38,7 +38,7 @@ import {
 import { toast } from "sonner";
 import { appointmentService, type Appointment } from "@/lib/services/appointment-service";
 import { patientService, adminService, type Patient as ApiPatient } from "@/lib/services";
-import { useOutpatientClinicTypes } from "@/lib/hooks/use-outpatient-clinic-types";
+import { useOutpatientClinicTypes } from "@/hooks/use-outpatient-clinic-types";
 import { format } from "date-fns";
 
 /** Deep link to New Visit with patient + appointment date/time/type prefilled */

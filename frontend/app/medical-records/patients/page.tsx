@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect } from 'react';
-import { DashboardLayout } from '@/components/DashboardLayout';
+import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -24,12 +24,12 @@ import {
   UserPlus, Calendar, FileText, Edit, X, Loader2,
   Activity, UserCheck, AlertTriangle, Camera, Upload, Trash2, Plus
 } from 'lucide-react';
-import { StandardPagination } from '@/components/StandardPagination';
-import { PatientOverviewModal } from '@/components/PatientOverviewModal';
-import { PatientAvatar } from "@/components/PatientAvatar";
-import { useLocationOptions } from '@/lib/hooks/use-location-options';
+import { StandardPagination } from '@/components/shared/StandardPagination';
+import { PatientOverviewModal } from '@/components/shared/PatientOverviewModal';
+import { PatientAvatar } from "@/components/shared/PatientAvatar";
+import { useLocationOptions } from '@/hooks/use-location-options';
 import { joinDisplayParts } from '@/lib/utils/clinic-utils';
-import { AdvancedFiltersButton } from '@/components/AdvancedFiltersButton';
+import { AdvancedFiltersButton } from '@/components/shared/AdvancedFiltersButton';
 
 // ==========================================
 // UTILITY FUNCTIONS

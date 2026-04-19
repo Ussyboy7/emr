@@ -3,6 +3,7 @@
  */
 
 import { apiFetch, hasTokens } from './api-client';
+import { logError, logDebug, logInfo } from './client-logger';
 
 export interface Notification {
   id: string;
@@ -59,24 +60,25 @@ export interface CreateNotificationPayload {
   objectId?: string;
 }
 
-const toUiNotification = (raw: any): Notification | null => {
+const toUiNotification = (raw: Record<string, unknown>): Notification | null => {
   if (!raw || typeof raw !== 'object') return null;
-  const createdAt = raw.created_at || raw.createdAt;
-  const id = raw.id;
-  if (!id || !createdAt) return null;
+
+  const rawAny = raw as any;
+  const createdAt = rawAny.created_at ?? rawAny.createdAt ?? new Date().toISOString();
+
   return {
-    id: String(id),
-    title: String(raw.title ?? ''),
-    message: String(raw.message ?? ''),
-    notificationType: (raw.type ?? raw.notificationType ?? 'system') as Notification['notificationType'],
-    priority: (raw.priority ?? 'normal') as Notification['priority'],
-    status: (raw.status ?? 'unread') as Notification['status'],
-    actionUrl: raw.action_url ?? raw.actionUrl ?? undefined,
-    readAt: raw.read_at ?? raw.readAt ?? undefined,
+    id: String(rawAny.id ?? ''),
+    title: String(rawAny.title ?? ''),
+    message: String(rawAny.message ?? ''),
+    notificationType: (rawAny.type ?? rawAny.notificationType ?? 'system') as Notification['notificationType'],
+    priority: (rawAny.priority ?? 'normal') as Notification['priority'],
+    status: (rawAny.status ?? 'unread') as Notification['status'],
+    actionUrl: rawAny.action_url ?? rawAny.actionUrl ?? undefined,
+    readAt: rawAny.read_at ?? rawAny.readAt ?? undefined,
     createdAt: String(createdAt),
-    metadata: raw.metadata ?? undefined,
-    objectType: raw.object_type ?? undefined,
-    objectId: raw.object_id ? String(raw.object_id) : undefined,
+    metadata: rawAny.metadata ?? undefined,
+    objectType: rawAny.object_type ?? undefined,
+    objectId: rawAny.object_id ? String(rawAny.object_id) : undefined,
   };
 };
 
@@ -100,7 +102,7 @@ export const getNotifications = async (params?: {
   // So the full path is /api/notifications/notifications/
   // apiFetch adds /api/v1/ prefix, so we need /notifications/notifications/
   const url = `/notifications/notifications/${query ? `?${query}` : ''}`;
-  console.log('[notifications-storage] Fetching notifications from:', url);
+  logInfo('[notifications-storage] Fetching notifications from:', url);
   try {
     const response = await apiFetch<any>(url);
     // Security: Removed console.log to prevent notification response data exposure
@@ -113,7 +115,7 @@ export const getNotifications = async (params?: {
     // Handle direct array response (fallback)
     return Array.isArray(response) ? response.map(toUiNotification).filter((n): n is Notification => Boolean(n)) : [];
   } catch (error) {
-    console.error('[notifications-storage] Error fetching notifications:', error);
+    logError('[notifications-storage] Error fetching notifications:', error);
     throw error;
   }
 };
@@ -147,9 +149,10 @@ export const getUnreadNotificationCount = async (): Promise<number> => {
     });
     const count = await unreadCountInFlight;
     return count;
-  } catch (error: any) {
+  } catch (error: unknown) {
     if (process.env.NODE_ENV === 'development') {
-      console.debug('[notifications-storage] Error fetching unread count (silently handled):', error?.message || error);
+      const errorObj = error as any;
+      logDebug('[notifications-storage] Error fetching unread count (silently handled):', errorObj?.message || error);
     }
     return 0;
   } finally {
@@ -249,4 +252,4 @@ export const createNotification = async (
   return mapped;
 };
 
-export const normalizeNotificationFromWs = (raw: any): Notification | null => toUiNotification(raw);
+export const normalizeNotificationFromWs = (raw: Record<string, unknown>): Notification | null => toUiNotification(raw as any);

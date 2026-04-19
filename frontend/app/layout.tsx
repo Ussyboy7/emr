@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Script from "next/script";
 import "./globals.css";
-import { Providers } from "@/components/Providers";
+import { Providers } from "@/components/shared/Providers";
 
 export const metadata: Metadata = {
   title: "NPA EMR - Electronic Medical Records",

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { SAVE_SIMULATION_DELAY } from '@/lib/constants/ui';
-import { DashboardLayout } from "@/components/DashboardLayout";
+import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";

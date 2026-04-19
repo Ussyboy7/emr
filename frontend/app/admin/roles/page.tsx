@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect } from "react";
-import { DashboardLayout } from "@/components/DashboardLayout";
+import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
-import { StandardPagination } from "@/components/StandardPagination";
+import { StandardPagination } from "@/components/shared/StandardPagination";
 import { adminService, type Role as ApiRole } from "@/lib/services";
 import {
   Shield, Search, Plus, Edit, Trash2, Eye, Users, Copy, Check,
@@ -197,10 +197,12 @@ export default function RolesPermissionsPage() {
   };
 
   // Convert permissions from frontend array format to backend page-based format
-  const convertPermissionsToBackend = (frontendPerms: string[]): string[] => {
-    // For page-based permissions, frontendPerms are already the page URLs
-    // We just return them as-is since the backend expects an array of page URLs
-    return frontendPerms;
+  const convertPermissionsToBackend = (frontendPerms: string[]): Record<string, string[]> => {
+    // Backend expects: {module: [pages]}
+    // For now, group all permissions under a generic "pages" module
+    return {
+      pages: frontendPerms
+    };
   };
 
   const loadRoles = async () => {

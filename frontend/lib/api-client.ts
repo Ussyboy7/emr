@@ -1,6 +1,6 @@
 "use client";
 
-import { logError, logWarn } from '@/lib/client-logger';
+import { logError, logWarn, logInfo } from '@/lib/client-logger';
 import { AuthenticationError, AuthenticationExpiredError } from './auth-errors';
 import {
   ACCESS_TOKEN_COOKIE as ACCESS_TOKEN_KEY,
@@ -263,11 +263,12 @@ const refreshWithToken = async (refreshToken: string): Promise<LoginResponse | n
 
     const data = (await response.json()) as LoginResponse;
     return data;
-  } catch (error: any) {
+  } catch (error: unknown) {
     // Handle network errors (Failed to fetch, CORS, etc.)
     // This typically means the backend is not running or unreachable
-    if (error?.message === "Failed to fetch" || error?.name === "TypeError") {
-      logWarn("Unable to refresh token - backend may be unavailable", { error: error.message });
+    const errorObj = error as any;
+    if (errorObj?.message === "Failed to fetch" || errorObj?.name === "TypeError") {
+      logWarn("Unable to refresh token - backend may be unavailable", { error: errorObj.message });
       return null;
     }
     // Re-throw other errors
@@ -287,9 +288,10 @@ const refreshAccessToken = async (): Promise<string | null> => {
     }
     storeTokens(data.access, data.refresh ?? refreshToken, data.expires_in);
     return data.access;
-  } catch (error: any) {
+  } catch (error: unknown) {
     // Only log non-network errors (network errors are already handled in refreshWithToken)
-    if (error?.message !== "Failed to fetch" && error?.name !== "TypeError") {
+    const errorObj = error as any;
+    if (errorObj?.message !== "Failed to fetch" && errorObj?.name !== "TypeError") {
       logError("Failed to refresh access token", error);
     }
     // Clear tokens on any error to prevent retry loops
@@ -351,7 +353,7 @@ export const apiFetch = async <T = unknown>(path: string, options: FetchOptions 
         typeof window.localStorage !== 'undefined' &&
         window.localStorage.getItem('debug_api') === '1';
       if (shouldLogApi) {
-        console.log(`🔍 API Call: ${rest.method || 'GET'} ${fullUrl}`);
+        logInfo(`🔍 API Call: ${rest.method || 'GET'} ${fullUrl}`);
       }
 
       try {
@@ -384,11 +386,12 @@ export const apiFetch = async <T = unknown>(path: string, options: FetchOptions 
             credentials: "include",
           });
         }
-      } catch (networkError: any) {
+      } catch (networkError: unknown) {
         // Handle network errors (Failed to fetch, CORS, etc.)
         // This typically means the backend is not running or unreachable
         const baseUrl = getBaseUrl();
-        if (networkError?.message === "Failed to fetch" || networkError?.name === "TypeError") {
+        const networkErrorObj = networkError as any;
+        if (networkErrorObj?.message === "Failed to fetch" || networkErrorObj?.name === "TypeError") {
           const error = new Error(`Unable to connect to the API server at ${baseUrl}. Please ensure the backend is running on the correct port.`);
           error.name = "NetworkError";
           // Don't log network errors as they're expected when backend is down
@@ -562,7 +565,7 @@ export const apiFetch = async <T = unknown>(path: string, options: FetchOptions 
         // - For expected business-validation failures (4xx), callers should surface toast/messages
         //   without noisy console stack traces. Keep console.error for server-side failures only.
         if (response.status >= 500) {
-          console.error(`API request failed with status ${response.status}`, {
+          logError(`API request failed with status ${response.status}`, {
             url: response.url,
             status: response.status,
             statusText: response.statusText,
@@ -582,21 +585,23 @@ export const apiFetch = async <T = unknown>(path: string, options: FetchOptions 
 
       return await response.json() as T;
 
-    } catch (error: any) {
-      lastError = error;
+    } catch (error: unknown) {
+      lastError = error as Error;
 
       // Don't retry for certain types of errors
-      if (error.name === "NetworkError" ||
-          error.name === "AuthenticationError" ||
-          error.name === "AuthenticationExpiredError" ||
-          (error.message && error.message.includes("API request failed: 4")) ||
-          (typeof error?.status === 'number' && error.status >= 400 && error.status < 500)) {
+      const errorObj = error as any;
+      if (errorObj.name === "NetworkError" ||
+          errorObj.name === "AuthenticationError" ||
+          errorObj.name === "AuthenticationExpiredError" ||
+          (errorObj.message && errorObj.message.includes("API request failed: 4")) ||
+          (typeof errorObj?.status === 'number' && errorObj.status >= 400 && errorObj.status < 500)) {
         throw error;
       }
 
       // For other errors, retry if we haven't exceeded max attempts
       if (retryOnFailure && attempt < maxRetries) {
-        logWarn(`API request failed, retrying (${attempt + 1}/${maxRetries}): ${error.message}`);
+        const errorObj = error as any;
+        logWarn(`API request failed, retrying (${attempt + 1}/${maxRetries}): ${errorObj.message}`);
         await new Promise(resolve => setTimeout(resolve, retryDelay * (attempt + 1)));
         continue;
       }
@@ -655,9 +660,10 @@ export const login = async (username: string, password: string): Promise<LoginRe
     const data = (await response.json()) as LoginResponse;
     storeTokens(data.access, data.refresh, data.expires_in);
     return data;
-  } catch (error: any) {
+  } catch (error: unknown) {
     // Handle network errors (Failed to fetch, CORS, etc.)
-    if (error?.message === "Failed to fetch" || error?.name === "TypeError") {
+    const errorObj = error as any;
+    if (errorObj?.message === "Failed to fetch" || errorObj?.name === "TypeError") {
       const baseUrl = getBaseUrl();
       const networkError = new Error(`Unable to connect to the API server at ${baseUrl}. Please ensure the backend is running on the correct port.`);
       networkError.name = "NetworkError";

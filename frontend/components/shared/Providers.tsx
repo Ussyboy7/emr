@@ -4,7 +4,7 @@ import { ThemeProvider } from "next-themes";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { Toaster } from "@/components/ui/sonner";
-import { ClientErrorBoundary } from '@/components/ClientErrorBoundary';
+import { ClientErrorBoundary } from '@/components/shared/ClientErrorBoundary';
 import { Toaster as ToastToaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { OrganizationProvider } from "@/contexts/OrganizationContext";
