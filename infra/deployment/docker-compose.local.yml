@@ -28,12 +28,13 @@ services:
       retries: 5
 
   backend:
+    image: emr-backend:latest
     build:
-      context: ./backend
+      context: ../../backend
       dockerfile: Dockerfile
     container_name: emr-backend-local
     env_file:
-      - ./backend/env/local.env
+      - ../../backend/env/local.env
     environment:
       # Override DB_HOST for Docker networking
       DB_HOST: postgres
@@ -48,7 +49,7 @@ services:
       ALLOWED_HOSTS: localhost,127.0.0.1,backend,frontend,172.19.0.0,172.19.0.1,172.19.0.2,172.19.0.3,172.19.0.4,172.19.0.5
       CSRF_TRUSTED_ORIGINS: http://localhost:8001,http://127.0.0.1:8001,http://localhost:3001,http://127.0.0.1:3001,http://frontend:3001
     volumes:
-      - ./backend:/app
+      - ../../backend:/app
       - media-data:/app/media
       - static-data:/app/staticfiles
     command: >
@@ -63,12 +64,13 @@ services:
         condition: service_healthy
 
   celery-worker:
+    image: emr-celery-worker:latest
     build:
-      context: ./backend
+      context: ../../backend
       dockerfile: Dockerfile
     container_name: emr-celery-worker-local
     env_file:
-      - ./backend/env/local.env
+      - ../../backend/env/local.env
     environment:
       # Override DB_HOST for Docker networking
       DB_HOST: postgres
@@ -82,7 +84,7 @@ services:
       CELERY_RESULT_BACKEND: redis://redis:6379/1
     command: celery -A emr_backend worker -l info
     volumes:
-      - ./backend:/app
+      - ../../backend:/app
       - media-data:/app/media
     depends_on:
       backend:
@@ -91,12 +93,13 @@ services:
         condition: service_healthy
 
   celery-beat:
+    image: emr-celery-beat:latest
     build:
-      context: ./backend
+      context: ../../backend
       dockerfile: Dockerfile
     container_name: emr-celery-beat-local
     env_file:
-      - ./backend/env/local.env
+      - ../../backend/env/local.env
     environment:
       # Override DB_HOST for Docker networking
       DB_HOST: postgres
@@ -110,7 +113,7 @@ services:
       CELERY_RESULT_BACKEND: redis://redis:6379/1
     command: celery -A emr_backend beat -l info
     volumes:
-      - ./backend:/app
+      - ../../backend:/app
     depends_on:
       backend:
         condition: service_started
@@ -118,8 +121,9 @@ services:
         condition: service_healthy
 
   frontend:
+    image: emr-frontend:latest
     build:
-      context: ./frontend
+      context: ../../frontend
       dockerfile: Dockerfile.local
     container_name: emr-frontend-local
     environment:
@@ -129,7 +133,7 @@ services:
       NEXT_PUBLIC_CLIENT_LOGGING_DISABLED: 'true'
       NODE_ENV: development
     volumes:
-      - ./frontend:/app
+      - ../../frontend:/app
       - /app/node_modules
       # Isolated from host .next; if dev 500s / ENOENT build-manifest, remove volume next-dev-cache
       - next-dev-cache:/app/.next

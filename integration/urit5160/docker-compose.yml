@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  middleware:
+    build: .
+    container_name: urit5160-middleware
+    ports:
+      - "2575:2575"  # HL7 port
+    environment:
+      - HL7_PORT=2575
+      - EMR_API_URL=${EMR_API_URL:-http://host.docker.internal:8000/api}
+      - EMR_API_KEY=${EMR_API_KEY}
+      - ANALYZER_ID=URIT5160-001
+      - LOG_LEVEL=info
+    volumes:
+      - ./logs:/app/logs
+    restart: unless-stopped
+    networks:
+      - urit5160-network
+    healthcheck:
+      test: ["CMD", "node", "-e", "const net=require('net');const c=net.createConnection(2575,'localhost');c.on('connect',()=>c.end());c.on('error',(e)=>process.exit(1));"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  urit5160-network:
+    driver: bridge
+
+volumes:
+  logs:
+    driver: local

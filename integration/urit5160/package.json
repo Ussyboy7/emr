@@ -1,0 +1,31 @@
+{
+  "name": "urit5160-middleware",
+  "version": "1.0.0",
+  "description": "Middleware service for URIT 5160 hematology analyzer integration with EMR",
+  "main": "middleware.js",
+  "scripts": {
+    "start": "node middleware.js",
+    "dev": "nodemon middleware.js",
+    "test": "jest"
+  },
+  "dependencies": {
+    "axios": "^1.6.0"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "nodemon": "^3.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "hl7",
+    "hematology",
+    "analyzer",
+    "emr",
+    "integration",
+    "urit5160"
+  ],
+  "author": "EMR Development Team",
+  "license": "MIT"
+}
