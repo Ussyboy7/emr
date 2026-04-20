@@ -75,6 +75,17 @@ scripts/production/dashboard.sh
 scripts/production/emergency.sh diagnostics
 ```
 
+### Production vs staging (canonical — do not mix)
+
+| | **Production** | **Staging** |
+|---|-----------------|---------------|
+| **Host IP** (default sanity check) | `172.16.0.32` | `172.16.0.46` |
+| **Default checkout (`DEPLOY_PATH`)** | `/home/emrprod/emr` | `/srv/emr` |
+| **Default pre-deploy SQL backups** | `$HOME/emr-predeploy-backups` | `/srv/emr/backups` |
+| **Default health probe** | `http://172.16.0.32/api/health/live/` (nginx :80) | `http://172.16.0.46:8047/api/health/live/` (backend published port) |
+
+Unset-only defaults live in `ops/deploy.sh` and `lib/stack-utils.sh`. Override with `DEPLOY_PATH`, `BACKUP_DIR`, `SERVER_IP`, or `STACK_HEALTH_URL_OVERRIDE` when your layout differs.
+
 All of the above are equivalent to calling the generic script with the env as
 the first argument, e.g.:
 
@@ -122,17 +133,17 @@ scripts/production/emergency.sh reset      # prompts, destructive
 
 ## Deploying staging / production
 
-Run on the target server (staging or production host), from the **git checkout**
-that contains `docker-compose.*.yml` (often `~/emr` or `/srv/emr`):
+Run **on the target server** from the correct checkout (see table above). You do
+not have to `cd` into the repo first if defaults match your server:
 
 ```bash
-cd ~/emr   # or: cd /srv/emr
-scripts/<env>/deploy.sh
+/home/emrprod/emr/scripts/production/deploy.sh    # production
+/srv/emr/scripts/staging/deploy.sh                # staging
 ```
 
 `deploy.sh` does:
 
-1. Verify the host has the expected LAN IP (warns if not; production defaults to **172.16.0.32**, staging to **172.16.0.46**). Set `SERVER_IP=` to skip the check.
+1. Verify the host has the expected LAN IP (warns if not). Set `SERVER_IP=` to skip the check.
 2. Pre-deploy DB snapshot (unless `--no-backup`)
 3. `git pull` (hard reset to `origin/<current-branch>`)
 4. `docker compose down` → `docker compose up -d --build`
@@ -140,13 +151,17 @@ scripts/<env>/deploy.sh
 6. On failure: automatic rollback to the pre-deploy snapshot (unless
    `--no-rollback`)
 
-Environment-relevant overrides:
+Environment-relevant overrides (examples):
 
 ```bash
-DEPLOY_PATH=/srv/emr   # default: repo root (directory above scripts/)
-BACKUP_DIR=/var/backups/emr
-SERVER_IP=10.0.0.5     # only if your host IP differs from the env default
-SERVER_IP= ./deploy.sh # empty SERVER_IP = skip IP sanity check
+# Production with a non-standard checkout path
+DEPLOY_PATH=/opt/emr /home/emrprod/emr/scripts/production/deploy.sh
+
+# Skip host IP check entirely
+SERVER_IP= /home/emrprod/emr/scripts/production/deploy.sh
+
+# Custom backup directory (must be writable by the SSH user)
+BACKUP_DIR=/var/backups/emr /home/emrprod/emr/scripts/production/deploy.sh
 ```
 
 ## Adding a new operation

@@ -69,6 +69,8 @@ stack_init_env() {
         stag|staging)
             STACK_ENVIRONMENT="staging"
             STACK_ENVIRONMENT_TITLE="Staging"
+            # Staging host: 172.16.0.46 — backend/frontend published on host ports
+            # (8047 / 4647) per docker-compose.stag.yml; no nginx reverse proxy by default.
             STACK_COMPOSE_FILE="${PROJECT_ROOT}/docker-compose.stag.yml"
             STACK_ENV_FILE="${PROJECT_ROOT}/backend/env/stag.env"
             # Compose service names in docker-compose.stag.yml are bare (e.g. `backend`);
@@ -83,14 +85,17 @@ stack_init_env() {
         prod|production)
             STACK_ENVIRONMENT="production"
             STACK_ENVIRONMENT_TITLE="Production"
+            # Production host: 172.16.0.32 (see docker-compose.prod.yml). Nginx :80
+            # fronts the API — use the LAN IP from the host, not `localhost`, so
+            # health checks are not broken by IPv6 (::1) or odd loopback routing.
             STACK_COMPOSE_FILE="${PROJECT_ROOT}/docker-compose.prod.yml"
             STACK_ENV_FILE="${PROJECT_ROOT}/backend/env/prod.env"
             STACK_BACKEND_SERVICE="backend"
             STACK_POSTGRES_SERVICE="postgres"
             STACK_BACKEND_CONTAINER="emr-backend-prod"
             STACK_NGINX_CONTAINER="emr-nginx-prod"
-            STACK_HEALTH_URL="${STACK_HEALTH_URL_OVERRIDE:-http://localhost/api/health/live/}"
-            STACK_FRONTEND_URL="${STACK_FRONTEND_URL_OVERRIDE:-http://localhost}"
+            STACK_HEALTH_URL="${STACK_HEALTH_URL_OVERRIDE:-http://172.16.0.32/api/health/live/}"
+            STACK_FRONTEND_URL="${STACK_FRONTEND_URL_OVERRIDE:-http://172.16.0.32}"
             ;;
         *)
             echo "Unknown environment: ${requested_env} (expected local|stag|prod)" >&2

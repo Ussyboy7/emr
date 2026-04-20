@@ -28,16 +28,20 @@ Options:
   --no-rollback     Don't attempt rollback on failure
   --skip-health     Don't wait for health check after deploy
 
-Relevant env vars (override by exporting before running):
-  DEPLOY_PATH       Server-side repo root (default: this git checkout, i.e. PROJECT_ROOT)
-  DEPLOY_USER       Unix account owning DEPLOY_PATH (default: devsecops; informational only)
-  SERVER_IP         Expected server IP for sanity check (default: production 172.16.0.32,
-                    staging 172.16.0.46). Export SERVER_IP= if you want to skip the IP match.
-  BACKUP_DIR        Pre-deploy snapshot location (default: $DEPLOY_PATH/backups)
+Relevant env vars (override by exporting before running — each env has its own defaults):
+  DEPLOY_PATH       Production default: /home/emrprod/emr
+                    Staging default:    /srv/emr
+  DEPLOY_USER       Informational only (default: devsecops)
+  SERVER_IP         Host IP sanity check: prod 172.16.0.32, stag 172.16.0.46.
+                    Export SERVER_IP= (empty) to skip the check.
+  BACKUP_DIR        Production default: \$HOME/emr-predeploy-backups (writable; avoids
+                    ./backups in the repo, which is often root-owned from Postgres mounts).
+                    Staging default: \$DEPLOY_PATH/backups
 
 Examples:
-  scripts/ops/deploy.sh stag
-  DEPLOY_PATH=/srv/emr SERVER_IP=172.16.0.32 scripts/ops/deploy.sh prod
+  scripts/staging/deploy.sh
+  scripts/production/deploy.sh
+  DEPLOY_PATH=/opt/emr-clone scripts/production/deploy.sh   # non-standard prod checkout
 USAGE
 }
 
@@ -71,23 +75,27 @@ while [[ $# -gt 0 ]]; do
     shift
 done
 
-DEPLOY_PATH="${DEPLOY_PATH:-$PROJECT_ROOT}"
 DEPLOY_USER="${DEPLOY_USER:-devsecops}"
-# Production primary host per EMR deployment guide; staging host unchanged.
-# Use `SERVER_IP=` (empty) before running to skip the host-IP check entirely.
-# Default is applied only when SERVER_IP is unset (${var+x} is empty iff unset).
+
+# Canonical layout (do not cross prod vs stag). Defaults apply only when each var is *unset*.
+# Production: emrprod@emr, checkout ~/emr → /home/emrprod/emr
+# Staging:    devsecops on staging VM, checkout /srv/emr
 case "$STACK_ENVIRONMENT" in
     production)
+        if [[ -z "${DEPLOY_PATH+x}" ]]; then DEPLOY_PATH="/home/emrprod/emr"; fi
         if [[ -z "${SERVER_IP+x}" ]]; then SERVER_IP="172.16.0.32"; fi
+        if [[ -z "${BACKUP_DIR+x}" ]]; then BACKUP_DIR="${HOME}/emr-predeploy-backups"; fi
         ;;
     staging)
+        if [[ -z "${DEPLOY_PATH+x}" ]]; then DEPLOY_PATH="/srv/emr"; fi
         if [[ -z "${SERVER_IP+x}" ]]; then SERVER_IP="172.16.0.46"; fi
+        if [[ -z "${BACKUP_DIR+x}" ]]; then BACKUP_DIR="${DEPLOY_PATH}/backups"; fi
         ;;
     *)
-        if [[ -z "${SERVER_IP+x}" ]]; then SERVER_IP=""; fi
+        ui_error "deploy.sh only supports staging or production (got: ${STACK_ENVIRONMENT})"
+        exit 1
         ;;
 esac
-BACKUP_DIR="${BACKUP_DIR:-${DEPLOY_PATH}/backups}"
 
 case "$STACK_ENVIRONMENT" in
     staging)
@@ -125,13 +133,34 @@ ensure_repo() {
         exit 1
     fi
     cd "$DEPLOY_PATH"
+    PROJECT_ROOT="$(pwd)"
+    # STACK_* was first resolved from the script’s tree; deployment must always
+    # use the checkout at DEPLOY_PATH (especially when they differ).
+    case "$STACK_ENVIRONMENT" in
+        production)
+            STACK_COMPOSE_FILE="${PROJECT_ROOT}/docker-compose.prod.yml"
+            STACK_ENV_FILE="${PROJECT_ROOT}/backend/env/prod.env"
+            ;;
+        staging)
+            STACK_COMPOSE_FILE="${PROJECT_ROOT}/docker-compose.stag.yml"
+            STACK_ENV_FILE="${PROJECT_ROOT}/backend/env/stag.env"
+            ;;
+    esac
     ui_info "Working directory: $(pwd)"
 }
 
 backup_database() {
     $DO_BACKUP || { ui_warning "Skipping pre-deploy backup (--no-backup)"; return 0; }
     ui_step "Pre-deploy DB snapshot"
-    mkdir -p "$BACKUP_DIR"
+    if ! mkdir -p "$BACKUP_DIR" 2>/dev/null; then
+        ui_warning "Cannot create BACKUP_DIR=${BACKUP_DIR} — skipping snapshot (set BACKUP_DIR to a writable path)"
+        return 0
+    fi
+    if ! touch "${BACKUP_DIR}/.emr_write_test" 2>/dev/null; then
+        ui_warning "BACKUP_DIR is not writable: ${BACKUP_DIR} — skipping snapshot"
+        return 0
+    fi
+    rm -f "${BACKUP_DIR}/.emr_write_test"
     local backup_file="${BACKUP_DIR}/predeploy_${STACK_ENVIRONMENT}_$(stack_timestamp).sql"
     if docker ps --format '{{.Names}}' | grep -q "^${PG_CONTAINER}$"; then
         if docker exec "$PG_CONTAINER" pg_dump -U "$DB_USER" "$DB_NAME" > "$backup_file" 2>/dev/null; then
@@ -173,17 +202,19 @@ deploy_stack() {
 wait_healthy() {
     $DO_HEALTH || { ui_warning "Skipping health probe (--skip-health)"; return 0; }
     ui_step "Waiting for backend at ${STACK_HEALTH_URL}"
-    sleep 20
-    local attempts=30
+    # Gunicorn + nginx need a moment after `compose up`; Postgres health is not enough.
+    sleep 25
+    local attempts=36
     for ((i=1; i<=attempts; i++)); do
-        if curl -sf --max-time 5 "$STACK_HEALTH_URL" >/dev/null; then
+        # -4: prefer IPv4 (avoids broken ::1 / dual-stack on some hosts)
+        if curl -4sf --max-time 8 "$STACK_HEALTH_URL" >/dev/null; then
             ui_success "Backend is healthy"
             return 0
         fi
         echo "  attempt ${i}/${attempts}…"
         sleep 5
     done
-    ui_error "Backend did not become healthy within $((attempts*5))s"
+    ui_error "Backend did not become healthy within ~$((25 + attempts * 5))s (see ${STACK_HEALTH_URL})"
     return 1
 }
 
