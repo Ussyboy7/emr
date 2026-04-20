@@ -6,7 +6,7 @@
 set -e
 
 # Configuration
-COMPOSE_FILE="docker-compose.prod.yml"
+COMPOSE_FILE="../../docker-compose.prod.yml"
 BACKUP_DIR="$HOME/emr_backups"
 LOG_DIR="./logs"
 MONITOR_LOG="./monitoring.log"
