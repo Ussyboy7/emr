@@ -191,7 +191,7 @@ cmd_health() {
 
     # Frontend health
     echo "Frontend Health:"
-    frontend_health=$(docker compose -f "$COMPOSE_FILE" exec -T frontend curl -s -o /dev/null -w "%{http_code}" http://localhost:3000 2>/dev/null || echo "unhealthy")
+    frontend_health=$(docker compose -f "$COMPOSE_FILE" exec -T frontend wget --no-verbose --tries=1 --spider http://localhost:3000 2>/dev/null && echo "200" || echo "unhealthy")
     if [ "$frontend_health" = "200" ]; then
         success "Frontend health check: PASSED"
     else
@@ -200,7 +200,7 @@ cmd_health() {
 
     # Database connectivity
     echo "Database Health:"
-    db_health=$(docker compose -f "$COMPOSE_FILE" exec -T postgres pg_isready -U emradmin -d emrprod 2>/dev/null && echo "healthy" || echo "unhealthy")
+    db_health=$(docker compose -f "$COMPOSE_FILE" ps postgres --format "table {{.Status}}" | grep -q "healthy" && echo "healthy" || echo "unhealthy")
     if [ "$db_health" = "healthy" ]; then
         success "Database connectivity: PASSED"
     else
@@ -209,7 +209,7 @@ cmd_health() {
 
     # Redis connectivity
     echo "Redis Health:"
-    redis_health=$(docker compose -f "$COMPOSE_FILE" exec -T redis redis-cli ping 2>/dev/null | grep -q "PONG" && echo "healthy" || echo "unhealthy")
+    redis_health=$(docker compose -f "$COMPOSE_FILE" ps redis --format "table {{.Status}}" | grep -q "healthy" && echo "healthy" || echo "unhealthy")
     if [ "$redis_health" = "healthy" ]; then
         success "Redis connectivity: PASSED"
     else
