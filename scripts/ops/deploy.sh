@@ -29,14 +29,15 @@ Options:
   --skip-health     Don't wait for health check after deploy
 
 Relevant env vars (override by exporting before running):
-  DEPLOY_PATH       Server-side repo root (default: /srv/emr)
-  DEPLOY_USER       Unix account owning DEPLOY_PATH (default: devsecops)
-  SERVER_IP         Expected server IP (default: 172.16.0.46)
+  DEPLOY_PATH       Server-side repo root (default: this git checkout, i.e. PROJECT_ROOT)
+  DEPLOY_USER       Unix account owning DEPLOY_PATH (default: devsecops; informational only)
+  SERVER_IP         Expected server IP for sanity check (default: production 172.16.0.32,
+                    staging 172.16.0.46). Export SERVER_IP= if you want to skip the IP match.
   BACKUP_DIR        Pre-deploy snapshot location (default: $DEPLOY_PATH/backups)
 
 Examples:
   scripts/ops/deploy.sh stag
-  DEPLOY_PATH=/srv/emr scripts/ops/deploy.sh prod
+  DEPLOY_PATH=/srv/emr SERVER_IP=172.16.0.32 scripts/ops/deploy.sh prod
 USAGE
 }
 
@@ -70,9 +71,22 @@ while [[ $# -gt 0 ]]; do
     shift
 done
 
-DEPLOY_PATH="${DEPLOY_PATH:-/srv/emr}"
+DEPLOY_PATH="${DEPLOY_PATH:-$PROJECT_ROOT}"
 DEPLOY_USER="${DEPLOY_USER:-devsecops}"
-SERVER_IP="${SERVER_IP:-172.16.0.46}"
+# Production primary host per EMR deployment guide; staging host unchanged.
+# Use `SERVER_IP=` (empty) before running to skip the host-IP check entirely.
+# Default is applied only when SERVER_IP is unset (${var+x} is empty iff unset).
+case "$STACK_ENVIRONMENT" in
+    production)
+        if [[ -z "${SERVER_IP+x}" ]]; then SERVER_IP="172.16.0.32"; fi
+        ;;
+    staging)
+        if [[ -z "${SERVER_IP+x}" ]]; then SERVER_IP="172.16.0.46"; fi
+        ;;
+    *)
+        if [[ -z "${SERVER_IP+x}" ]]; then SERVER_IP=""; fi
+        ;;
+esac
 BACKUP_DIR="${BACKUP_DIR:-${DEPLOY_PATH}/backups}"
 
 case "$STACK_ENVIRONMENT" in
@@ -91,13 +105,18 @@ esac
 ui_header "EMR ${STACK_ENVIRONMENT_TITLE} Deployment"
 
 check_server() {
-    local current_ip
-    current_ip=$(hostname -I 2>/dev/null | grep -o "$SERVER_IP" || true)
-    if [[ -z "$current_ip" ]]; then
-        ui_warning "This script expects to run on the server (${SERVER_IP}). Current host: $(hostname)"
-        read -r -p "Continue anyway? (y/N): " reply
-        [[ "$reply" =~ ^[Yy]$ ]] || exit 1
+    # Skip IP check when SERVER_IP is empty (e.g. export SERVER_IP= before running).
+    if [[ -z "${SERVER_IP:-}" ]]; then
+        return 0
     fi
+    local ips
+    ips=$(hostname -I 2>/dev/null || true)
+    if echo " $ips " | grep -q " ${SERVER_IP} "; then
+        return 0
+    fi
+    ui_warning "This script expects a host with IP ${SERVER_IP} (from hostname -I). Current host: $(hostname); addresses: ${ips:-none}"
+    read -r -p "Continue anyway? (y/N): " reply
+    [[ "$reply" =~ ^[Yy]$ ]] || exit 1
 }
 
 ensure_repo() {

@@ -122,19 +122,19 @@ scripts/production/emergency.sh reset      # prompts, destructive
 
 ## Deploying staging / production
 
-Run on the target server (staging or production host):
+Run on the target server (staging or production host), from the **git checkout**
+that contains `docker-compose.*.yml` (often `~/emr` or `/srv/emr`):
 
 ```bash
-cd /srv/emr
-git fetch origin
+cd ~/emr   # or: cd /srv/emr
 scripts/<env>/deploy.sh
 ```
 
 `deploy.sh` does:
 
-1. Verify we're on the server (warns if not)
+1. Verify the host has the expected LAN IP (warns if not; production defaults to **172.16.0.32**, staging to **172.16.0.46**). Set `SERVER_IP=` to skip the check.
 2. Pre-deploy DB snapshot (unless `--no-backup`)
-3. `git pull --ff-only`
+3. `git pull` (hard reset to `origin/<current-branch>`)
 4. `docker compose down` → `docker compose up -d --build`
 5. Wait for `/api/health/live/` to be healthy
 6. On failure: automatic rollback to the pre-deploy snapshot (unless
@@ -143,9 +143,10 @@ scripts/<env>/deploy.sh
 Environment-relevant overrides:
 
 ```bash
-DEPLOY_PATH=/srv/emr   # defaults to /srv/emr
+DEPLOY_PATH=/srv/emr   # default: repo root (directory above scripts/)
 BACKUP_DIR=/var/backups/emr
-SERVER_IP=172.16.0.46
+SERVER_IP=10.0.0.5     # only if your host IP differs from the env default
+SERVER_IP= ./deploy.sh # empty SERVER_IP = skip IP sanity check
 ```
 
 ## Adding a new operation
