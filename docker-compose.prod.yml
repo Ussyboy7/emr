@@ -201,11 +201,11 @@ services:
       - emr-network-prod
     restart: always
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost/health"]
-      interval: 30s
-      timeout: 10s
+      test: ["CMD-SHELL", "curl -f http://localhost/health || exit 1"]
+      interval: 10s
+      timeout: 5s
       retries: 3
-      start_period: 10s
+      start_period: 5s
     logging:
       driver: "json-file"
       options:
