@@ -191,8 +191,8 @@ cmd_health() {
 
     # Frontend health
     echo "Frontend Health:"
-    frontend_health=$(docker compose -f "$COMPOSE_FILE" exec -T frontend wget --no-verbose --tries=1 --spider http://localhost:3000 2>/dev/null && echo "200" || echo "unhealthy")
-    if [ "$frontend_health" = "200" ]; then
+    frontend_health=$(docker compose -f "$COMPOSE_FILE" ps frontend --format "table {{.Status}}" | grep -q "healthy" && echo "healthy" || echo "unhealthy")
+    if [ "$frontend_health" = "healthy" ]; then
         success "Frontend health check: PASSED"
     else
         warning "Frontend health check: Not available"
