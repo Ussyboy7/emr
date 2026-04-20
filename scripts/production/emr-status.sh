@@ -3,7 +3,7 @@
 # EMR Quick Status Checker
 # Fast status check for production operations
 
-COMPOSE_FILE="docker-compose.prod.yml"
+COMPOSE_FILE="deployment/docker-compose.prod.yml"
 
 echo "=== EMR Production Status ==="
 echo "Time: $(date)"
