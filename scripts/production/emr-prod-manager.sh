@@ -148,18 +148,15 @@ cmd_restart() {
     sleep 5
     docker compose -f "$COMPOSE_FILE" up -d
 
-        # Run migrations if needed
-        info "Checking for database migrations..."
-        docker compose -f "$COMPOSE_FILE" exec -T backend python manage.py migrate
+    # Wait for services to be healthy
+    info "Waiting for services to be healthy..."
+    sleep 30
 
-        # Wait and verify
-        sleep 30
-        cmd_health
+    # Check status
+    cmd_status
 
-        success "Application update completed"
-    else
-        info "Update cancelled"
-    fi
+    success "EMR production services restarted successfully"
+    info "Access EMR at: http://172.16.0.32"
 }
 
 # Cleanup maintenance
