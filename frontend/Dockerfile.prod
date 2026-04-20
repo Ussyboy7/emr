@@ -1,31 +1,70 @@
-FROM node:20-alpine AS builder
-WORKDIR /app
+# syntax=docker/dockerfile:1.6
 
+# ---------- deps ----------
+FROM node:20-alpine AS deps
+WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 
+# ---------- builder ----------
+FROM node:20-alpine AS builder
+WORKDIR /app
+
+ENV NEXT_TELEMETRY_DISABLED=1
+
+# NEXT_PUBLIC_* values must be known at build time so Next.js can inline
+# them into the client bundle. They are passed via `build.args` from
+# docker-compose and are NOT secrets — anything a browser can read.
+# Server-only secrets (NEXTAUTH_SECRET, JWT keys, DB creds) stay as
+# runtime env vars via `env_file:` and are never baked into the image.
+ARG NEXT_PUBLIC_API_URL=/api
+ARG NEXT_PUBLIC_WS_URL=/ws/
+ARG NEXT_PUBLIC_ENVIRONMENT=production
+ARG NEXT_PUBLIC_APP_NAME="Medical NPA EMR"
+ARG NEXT_PUBLIC_APP_VERSION=1.0.0
+ARG NEXT_PUBLIC_SENTRY_DSN=
+ARG NEXT_PUBLIC_SENTRY_ENVIRONMENT=production
+ARG NEXT_PUBLIC_ENABLE_ANALYTICS=false
+ARG NEXT_PUBLIC_ENABLE_ERROR_REPORTING=false
+
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL \
+    NEXT_PUBLIC_WS_URL=$NEXT_PUBLIC_WS_URL \
+    NEXT_PUBLIC_ENVIRONMENT=$NEXT_PUBLIC_ENVIRONMENT \
+    NEXT_PUBLIC_APP_NAME=$NEXT_PUBLIC_APP_NAME \
+    NEXT_PUBLIC_APP_VERSION=$NEXT_PUBLIC_APP_VERSION \
+    NEXT_PUBLIC_SENTRY_DSN=$NEXT_PUBLIC_SENTRY_DSN \
+    NEXT_PUBLIC_SENTRY_ENVIRONMENT=$NEXT_PUBLIC_SENTRY_ENVIRONMENT \
+    NEXT_PUBLIC_ENABLE_ANALYTICS=$NEXT_PUBLIC_ENABLE_ANALYTICS \
+    NEXT_PUBLIC_ENABLE_ERROR_REPORTING=$NEXT_PUBLIC_ENABLE_ERROR_REPORTING
+
+COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-# Copy environment file for build process
-COPY .env.prod .env.local
+
 RUN npm run build
 
+# ---------- runner ----------
 FROM node:20-alpine AS runner
 WORKDIR /app
 
-ENV NODE_ENV=production
+ENV NODE_ENV=production \
+    NEXT_TELEMETRY_DISABLED=1 \
+    PORT=3000 \
+    HOSTNAME=0.0.0.0
 
-COPY --from=builder /app/package.json /app/package-lock.json ./
-RUN npm ci --omit=dev
+# Non-root runtime user.
+RUN addgroup --system --gid 1001 nextjs \
+    && adduser  --system --uid 1001 --ingroup nextjs nextjs
 
-COPY --from=builder /app/.next ./.next
-COPY --from=builder /app/public ./public
-COPY --from=builder /app/next.config.js ./
-COPY --from=builder /app/tsconfig.json ./
-COPY --from=builder /app/tailwind.config.ts ./
-COPY --from=builder /app/postcss.config.js ./
-COPY --from=builder /app/eslint.config.js ./
-COPY --from=builder /app/components.json ./
-COPY --from=builder /app/.env.local ./
+# Copy only the standalone server + static assets + public/.
+# Next.js standalone output ships the minimum node_modules it needs.
+COPY --from=builder --chown=nextjs:nextjs /app/public ./public
+COPY --from=builder --chown=nextjs:nextjs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nextjs /app/.next/static ./.next/static
+
+USER nextjs
 
 EXPOSE 3000
-CMD ["npx", "next", "start", "-H", "0.0.0.0", "-p", "3000"]
+
+# Server-only env vars (NEXTAUTH_SECRET, NEXTAUTH_URL, etc.) are
+# supplied at runtime via docker-compose `env_file:`.
+CMD ["node", "server.js"]

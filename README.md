@@ -6,42 +6,73 @@ A modern full-stack application for managing electronic medical records, built w
 
 ```
 emr/
-├── backend/              # Django REST Framework backend
-│   ├── emr_backend/      # Django project settings
-│   ├── accounts/         # User authentication
-│   ├── common/           # Shared utilities
-│   ├── organization/     # Organizational structure
-│   ├── correspondence/   # Correspondence management
-│   ├── pharmacy/         # Pharmacy module
+├── backend/                      # Django REST Framework backend
+│   ├── emr_backend/              # Django project settings (settings.py, urls.py, asgi.py, celery.py)
+│   ├── accounts/                 # User auth (JWT)
+│   ├── common/                   # Shared utilities + middleware
+│   ├── organization/             # Organizational structure
+│   ├── patients/                 # Patient records
+│   ├── consultation/             # Clinical consultations
+│   ├── laboratory/               # Lab module
+│   ├── pharmacy/                 # Pharmacy module
+│   ├── radiology/                # Radiology module
+│   ├── physiotherapy/            # Physiotherapy module
+│   ├── eyecare/                  # Eye care module
+│   ├── nursing/                  # Nursing module
+│   ├── wards/                    # Ward management
+│   ├── appointments/             # Appointments
+│   ├── audit/                    # Audit trail
+│   ├── notifications/            # Notifications
+│   ├── permissions/              # Role/page-level permissions
+│   ├── reports/                  # Report generation
+│   ├── dashboard/                # Dashboard data
+│   ├── support/                  # Support/ticketing
+│   ├── env/                      # Per-env dotenv files (local/stag/prod)
+│   ├── scripts/                  # Backend-specific dev & DB scripts
+│   ├── Dockerfile.prod           # Production backend image
 │   ├── manage.py
 │   └── requirements.txt
 │
-├── frontend/             # React + Vite frontend application
-│   ├── src/             # Source code
-│   ├── public/          # Static assets
-│   ├── package.json
-│   └── vite.config.ts
+├── frontend/                     # Next.js 16 + React 18 frontend
+│   ├── app/                      # App router pages
+│   ├── components/               # UI components (shadcn/ui, Radix)
+│   ├── lib/                      # Client utilities, API client
+│   ├── hooks/                    # React hooks
+│   ├── contexts/                 # React contexts
+│   ├── public/                   # Static assets
+│   ├── scripts/                  # Frontend-specific build utilities
+│   ├── middleware.ts             # Route-level auth guard
+│   ├── next.config.js
+│   ├── Dockerfile.prod
+│   └── package.json
 │
-├── scripts/              # Operational scripts
-│   ├── production/      # Production management scripts
-│   ├── security/        # Security scripts
-│   ├── backup/          # Backup scripts
-│   ├── monitoring/      # Monitoring scripts
-│   └── testing/         # Testing scripts
+├── scripts/                      # Operational / infrastructure scripts
+│   ├── production/               # Prod manager, emergency, dashboard
+│   ├── backup/                   # DB backup scripts (host + container)
+│   ├── monitoring/               # System / performance monitors
+│   ├── security/                 # Security & cron setup
+│   ├── testing/                  # Go-live & security test scripts
+│   └── start-*.sh / stop-*.sh    # Stack lifecycle helpers
 │
-├── deployment/           # Docker Compose configurations
-│   ├── docker-compose.local.yml
-│   ├── docker-compose.stag.yml
-│   └── docker-compose.prod.yml
+├── nginx/                        # Nginx configuration (all environments)
+│   ├── nginx.conf                # ← PROD: mounted by docker-compose.prod.yml
+│   ├── local.conf
+│   ├── stag.conf
+│   └── prod.conf.reference       # Extended prod config (HSTS, auth limits)
 │
-├── logs/                # System logs and reports
-├── docs/                # Documentation and guides
-├── backups/             # Backup files and configurations
-├── nginx/               # Nginx configuration
-├── ssl/                 # SSL certificates
-├── status-page/         # Status page application
-├── Makefile             # Build and development tasks
-└── PRODUCTION_OPERATIONS.md  # Production operations guide
+├── docker-compose.local.yml      # Docker Compose — local
+├── docker-compose.stag.yml       # Docker Compose — staging
+├── docker-compose.prod.yml       # Docker Compose — production
+│
+├── docs/                         # Documentation and guides
+├── backups/                      # Runtime backup output (git-ignored)
+├── logs/                         # Runtime logs (git-ignored)
+├── ssl/                          # SSL certs (git-ignored)
+├── integration/                  # External device integrations (URIT5160, etc.)
+├── infra/                        # Miscellaneous infra artefacts (status page, etc.)
+├── Makefile                      # Build/dev tasks
+├── PRODUCTION_OPERATIONS.md      # Production operations guide
+└── README.md
 ```
 
 ## 🚀 Quick Start
@@ -122,10 +153,11 @@ Backend will run at: http://localhost:8001
 After pushing code changes to GitHub:
 
 ```bash
-# On production server
-git pull origin main
-./scripts/production/emr-prod-manager.sh restart
+# On production server, inside the repo checkout
+./scripts/production/deploy.sh
 ```
+
+`deploy.sh` takes a pre-deploy DB snapshot, runs `git pull`, rebuilds the containers, waits for the backend health check, and rolls back automatically on failure.
 
 For detailed production operations, see `PRODUCTION_OPERATIONS.md`.
 

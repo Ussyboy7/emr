@@ -48,9 +48,12 @@ urlpatterns = [
         name="swagger-ui",
     ),
     path("api/redoc/", SpectacularRedocView.as_view(url_name="schema"), name="redoc"),
-    # Versioned application endpoints
+    # Versioned application endpoints — canonical.
     path("api/v1/", include((api_v1_patterns, "api"), namespace="api_v1")),
-    # Legacy alias
+    # Legacy un-versioned alias. Deprecated: responses are annotated with
+    # RFC 8594 `Deprecation` / `Sunset` / `Link: rel="successor-version"`
+    # headers by ``common.middleware.LegacyApiDeprecationMiddleware``.
+    # Removal target: see LEGACY_API_SUNSET_DATE in settings.py.
     path("api/", include((api_v1_patterns, "api"), namespace="api_legacy")),
 ]
 

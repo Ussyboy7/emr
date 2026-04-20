@@ -81,88 +81,131 @@ class GenericMedicationViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
 
-def check_drug_interactions(medication_ids):
+def check_drug_interactions(generic_ids=None, medication_ids=None):
     """
-    Check for drug interactions between medications.
-    This is a basic implementation - in production, integrate with a drug interaction database/API.
+    Check for drug interactions among a set of drugs.
+
+    Interactions are evaluated on the :class:`GenericMedication` level
+    (active ingredient / therapeutic category). That is the clinically correct
+    granularity — brand swaps do not change the molecule — and it matches the
+    prescribing flow, which now captures generic IDs rather than brand IDs.
+
+    Args:
+        generic_ids: iterable[int] — preferred. Direct :class:`GenericMedication`
+            primary keys.
+        medication_ids: iterable[int] — legacy. Brand-level
+            :class:`Medication` PKs; each is resolved to its parent generic via
+            ``Medication.generic_id``. Brands without a linked generic are
+            silently skipped (cannot be reasoned about at the molecule level).
+
+    At least one of the two must be supplied. If both are supplied they are
+    unioned.
+
+    Returns:
+        list[dict]: interaction records with ``drug1``, ``drug2``, ``severity``,
+        ``description``, ``recommendation`` keys.
     """
-    interactions = []
-    
-    if len(medication_ids) < 2:
-        return interactions
-    
-    # Get medication objects with generic parent
-    medications = Medication.objects.filter(id__in=medication_ids).select_related('generic')
-    med_dict = {}
-    for m in medications:
-        med_dict[m.id] = {
-            'name': m.name,
-            'generic': (m.generic.name if m.generic else None),
-            'category': m.category,
-            'strength': m.generic.strength if m.generic else m.strength,
-            'dosage_form': m.generic.dosage_form if m.generic else m.form,
-            'active_ingredient': m.generic.active_ingredient if m.generic else (m.generic_name or m.name),
+    # Normalize inputs → a dict keyed by generic_id so we de-dup callers that
+    # pass the same molecule twice (e.g. two different brands of ibuprofen).
+    resolved: dict[int, dict] = {}
+
+    def _ingest_generic(generic_obj, display_label: str | None = None):
+        if generic_obj is None or generic_obj.pk is None:
+            return
+        if generic_obj.pk in resolved:
+            return
+        resolved[generic_obj.pk] = {
+            'generic_id': generic_obj.pk,
+            'name': display_label or generic_obj.name,
+            'generic_name': generic_obj.name,
+            'category': generic_obj.category or '',
+            'active_ingredient': generic_obj.active_ingredient or generic_obj.name or '',
         }
-    
-    # Basic interaction rules (expand this with real drug interaction database)
-    # Example: ACE inhibitors + Potassium supplements = Hyperkalemia risk
-    # Example: Warfarin + Aspirin = Increased bleeding risk
-    # Example: Beta-blockers + Calcium channel blockers = Bradycardia/hypotension risk
-    
-    # Convert to list for easier iteration
-    med_list = list(medication_ids)
-    
-    # Check each pair
-    for i in range(len(med_list)):
-        for j in range(i + 1, len(med_list)):
-            med1_id = med_list[i]
-            med2_id = med_list[j]
-            
-            med1 = med_dict.get(med1_id)
-            med2 = med_dict.get(med2_id)
-            
-            if not med1 or not med2:
-                continue
-            
-            # Basic interaction checking based on categories/generic names
-            med1_name = (med1.get('active_ingredient') or med1.get('generic') or med1.get('name') or '').lower()
-            med2_name = (med2.get('active_ingredient') or med2.get('generic') or med2.get('name') or '').lower()
-            
-            # Example interactions (this should be replaced with proper drug interaction API)
-            interaction = None
-            
-            # Check for known interaction patterns
-            if any(term in med1_name for term in ['warfarin', 'aspirin', 'clopidogrel']) and \
-               any(term in med2_name for term in ['warfarin', 'aspirin', 'clopidogrel', 'ibuprofen']):
-                interaction = {
-                    'drug1': med1['name'],
-                    'drug2': med2['name'],
-                    'severity': 'Major',
-                    'description': 'Increased risk of bleeding when anticoagulants are combined',
-                    'recommendation': 'Monitor for signs of bleeding. Consider alternative medication or adjust dosages under medical supervision.'
-                }
-            elif any(term in med1_name for term in ['ace inhibitor', 'lisinopril', 'enalapril', 'captopril']) and \
-                 any(term in med2_name for term in ['potassium', 'spironolactone', 'amiloride']):
-                interaction = {
-                    'drug1': med1['name'],
-                    'drug2': med2['name'],
-                    'severity': 'Moderate',
-                    'description': 'Risk of hyperkalemia when ACE inhibitors are combined with potassium supplements or potassium-sparing diuretics',
-                    'recommendation': 'Monitor serum potassium levels regularly. Avoid potassium supplements unless prescribed.'
-                }
-            elif any(term in med1_name for term in ['beta blocker', 'propranolol', 'metoprolol', 'atenolol']) and \
-                 any(term in med2_name for term in ['calcium channel blocker', 'verapamil', 'diltiazem']):
-                interaction = {
-                    'drug1': med1['name'],
-                    'drug2': med2['name'],
-                    'severity': 'Moderate',
-                    'description': 'Combination may cause bradycardia, hypotension, or heart block',
-                    'recommendation': 'Monitor heart rate and blood pressure closely. Use with caution, especially in elderly patients.'
-                }
-            
-            if interaction:
-                interactions.append(interaction)
-    
+
+    # Preferred path: generic IDs supplied directly.
+    if generic_ids:
+        try:
+            gen_id_list = [int(x) for x in generic_ids]
+        except (TypeError, ValueError):
+            gen_id_list = []
+        if gen_id_list:
+            for g in GenericMedication.objects.filter(id__in=gen_id_list):
+                _ingest_generic(g)
+
+    # Legacy path: brand IDs → parent generics.
+    if medication_ids:
+        try:
+            med_id_list = [int(x) for x in medication_ids]
+        except (TypeError, ValueError):
+            med_id_list = []
+        if med_id_list:
+            brands = Medication.objects.filter(id__in=med_id_list).select_related('generic')
+            for brand in brands:
+                if brand.generic_id:
+                    # Pass brand name as display label so the interaction report
+                    # reads naturally in the pharmacy UI (brand-level queue).
+                    _ingest_generic(brand.generic, display_label=brand.name)
+
+    if len(resolved) < 2:
+        return []
+
+    # Therapeutic-class patterns. This is a basic rule engine; a production
+    # deployment should delegate to a curated drug-interaction database.
+    # Each rule is (severity, description, recommendation, lhs_terms, rhs_terms).
+    _RULES: list[tuple[str, str, str, tuple[str, ...], tuple[str, ...]]] = [
+        (
+            'Major',
+            'Increased risk of bleeding when anticoagulants/antiplatelets are combined',
+            'Monitor for signs of bleeding. Consider alternative medication or adjust '
+            'dosages under medical supervision.',
+            ('warfarin', 'aspirin', 'clopidogrel'),
+            ('warfarin', 'aspirin', 'clopidogrel', 'ibuprofen'),
+        ),
+        (
+            'Moderate',
+            'Risk of hyperkalemia when ACE inhibitors are combined with potassium '
+            'supplements or potassium-sparing diuretics',
+            'Monitor serum potassium levels regularly. Avoid potassium supplements '
+            'unless prescribed.',
+            ('ace inhibitor', 'lisinopril', 'enalapril', 'captopril'),
+            ('potassium', 'spironolactone', 'amiloride'),
+        ),
+        (
+            'Moderate',
+            'Combination may cause bradycardia, hypotension, or heart block',
+            'Monitor heart rate and blood pressure closely. Use with caution, '
+            'especially in elderly patients.',
+            ('beta blocker', 'propranolol', 'metoprolol', 'atenolol'),
+            ('calcium channel blocker', 'verapamil', 'diltiazem'),
+        ),
+    ]
+
+    def _match_terms(haystack: str, terms: tuple[str, ...]) -> bool:
+        return any(term in haystack for term in terms)
+
+    interactions: list[dict] = []
+    entries = list(resolved.values())
+    for i in range(len(entries)):
+        for j in range(i + 1, len(entries)):
+            a, b = entries[i], entries[j]
+            a_text = f"{a['active_ingredient']} {a['generic_name']} {a['category']}".lower()
+            b_text = f"{b['active_ingredient']} {b['generic_name']} {b['category']}".lower()
+
+            for severity, description, recommendation, lhs, rhs in _RULES:
+                hit = (
+                    (_match_terms(a_text, lhs) and _match_terms(b_text, rhs))
+                    or (_match_terms(b_text, lhs) and _match_terms(a_text, rhs))
+                )
+                if hit:
+                    interactions.append({
+                        'drug1': a['name'],
+                        'drug2': b['name'],
+                        'severity': severity,
+                        'description': description,
+                        'recommendation': recommendation,
+                    })
+                    break  # one rule per pair is enough
+
     return interactions
 
 
@@ -748,39 +791,65 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
     
     @action(detail=False, methods=['post'])
     def check_interactions(self, request):
-        """Check for drug interactions between medications."""
-        medication_ids = request.data.get('medication_ids', [])
-        
-        if not medication_ids:
+        """
+        Check for drug interactions between drugs.
+
+        Request body accepts either (or both):
+          * ``generic_ids``:   list[int]  GenericMedication PKs (preferred — this is
+                                          the clinically correct level for interaction
+                                          checking and matches the new prescribing flow).
+          * ``medication_ids``: list[int] Brand-level Medication PKs (legacy —
+                                          resolved server-side to their parent
+                                          generic).
+
+        At least one must be provided. Brands without a linked generic are silently
+        skipped (cannot be reasoned about at the molecule level).
+        """
+        generic_ids_raw = request.data.get('generic_ids') or []
+        medication_ids_raw = request.data.get('medication_ids') or []
+
+        if not generic_ids_raw and not medication_ids_raw:
             return Response(
-                {'error': 'medication_ids is required'},
-                status=status.HTTP_400_BAD_REQUEST
+                {'error': 'Provide generic_ids (preferred) or medication_ids'},
+                status=status.HTTP_400_BAD_REQUEST,
             )
-        
+
         try:
-            # Convert to integers
-            medication_ids = [int(id) for id in medication_ids]
-            interactions = check_drug_interactions(medication_ids)
-            
-            # Log audit
-            AuditService.log_activity(
-                user=self.request.user,
-                action='verify',
-                object_type='prescription',
-                object_id='',
-                module='pharmacy',
-                object_repr=f'Drug interaction check for {len(medication_ids)} medications',
-                description=f'Checked drug interactions for {len(medication_ids)} medications. Found {len(interactions)} interactions.',
-                metadata={'medication_ids': medication_ids, 'interactions_count': len(interactions)},
-                request=self.request,
-            )
-            
-            return Response({'interactions': interactions})
-        except (ValueError, TypeError) as e:
+            generic_ids = [int(x) for x in generic_ids_raw] if generic_ids_raw else []
+            medication_ids = [int(x) for x in medication_ids_raw] if medication_ids_raw else []
+        except (ValueError, TypeError):
             return Response(
-                {'error': 'Invalid medication_ids format'},
-                status=status.HTTP_400_BAD_REQUEST
+                {'error': 'Invalid id format in generic_ids or medication_ids'},
+                status=status.HTTP_400_BAD_REQUEST,
             )
+
+        interactions = check_drug_interactions(
+            generic_ids=generic_ids or None,
+            medication_ids=medication_ids or None,
+        )
+
+        total_inputs = len(generic_ids) + len(medication_ids)
+        AuditService.log_activity(
+            user=self.request.user,
+            action='verify',
+            object_type='prescription',
+            object_id='',
+            module='pharmacy',
+            object_repr=f'Drug interaction check for {total_inputs} drugs',
+            description=(
+                f'Checked drug interactions for {total_inputs} drugs '
+                f'(generic_ids={len(generic_ids)}, medication_ids={len(medication_ids)}). '
+                f'Found {len(interactions)} interactions.'
+            ),
+            metadata={
+                'generic_ids': generic_ids,
+                'medication_ids': medication_ids,
+                'interactions_count': len(interactions),
+            },
+            request=self.request,
+        )
+
+        return Response({'interactions': interactions})
     
     @action(detail=True, methods=['post'])
     def dispense(self, request, pk=None):

@@ -121,7 +121,18 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    # Annotates responses served under the legacy /api/ alias with
+    # RFC 8594 deprecation headers. See common/middleware.py.
+    "common.middleware.LegacyApiDeprecationMiddleware",
 ]
+
+# Target removal date for the un-versioned /api/ URL alias. Emitted on every
+# legacy response via the `Sunset` header so clients can programmatically
+# detect the deadline. Override in env to shift the date without a code change.
+LEGACY_API_SUNSET_DATE = os.getenv(
+    "LEGACY_API_SUNSET_DATE",
+    "Wed, 31 Dec 2025 23:59:59 GMT",
+)
 
 ROOT_URLCONF = "emr_backend.urls"
 
@@ -222,6 +233,27 @@ REST_FRAMEWORK = {
     "DEFAULT_PAGINATION_CLASS": "common.pagination.StandardPageNumberPagination",
     "PAGE_SIZE": int(os.getenv("PAGINATION_PAGE_SIZE", "100")),
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+    # --- Throttling ---------------------------------------------------------
+    # Baseline protection against brute-force and scraping. Views that need a
+    # dedicated bucket (login, token refresh, file upload, etc.) should set
+    # ``throttle_classes = [ScopedRateThrottle]`` and declare a
+    # ``throttle_scope`` matching one of the keys in DEFAULT_THROTTLE_RATES.
+    "DEFAULT_THROTTLE_CLASSES": [
+        "rest_framework.throttling.AnonRateThrottle",
+        "rest_framework.throttling.UserRateThrottle",
+        "rest_framework.throttling.ScopedRateThrottle",
+    ],
+    "DEFAULT_THROTTLE_RATES": {
+        # Global baselines.
+        "anon": os.getenv("THROTTLE_ANON", "30/min"),
+        "user": os.getenv("THROTTLE_USER", "240/min"),
+        # Scoped buckets — attach via ``throttle_scope`` on the view.
+        "auth_login": os.getenv("THROTTLE_AUTH_LOGIN", "10/min"),
+        "auth_refresh": os.getenv("THROTTLE_AUTH_REFRESH", "30/min"),
+        "auth_password_reset": os.getenv("THROTTLE_AUTH_PW_RESET", "5/hour"),
+        "file_upload": os.getenv("THROTTLE_FILE_UPLOAD", "60/hour"),
+        "reports_export": os.getenv("THROTTLE_REPORTS_EXPORT", "30/hour"),
+    },
 }
 
 SPECTACULAR_SETTINGS = {
@@ -265,6 +297,32 @@ SIMPLE_JWT = {
 
 
 # ---------------------------------------------------------------------------
+# Redis resolution
+# ---------------------------------------------------------------------------
+# Redis is shared by Channels and Celery. In ``local`` we default to
+# ``localhost`` so bare-metal dev works without containers. In every other
+# environment ``REDIS_HOST`` MUST be set explicitly — there is no useful
+# default in staging/prod and falling back to ``localhost`` historically
+# masked misconfigurations (the app appeared healthy but WebSockets and
+# Celery talked to a non-existent broker).
+
+_REDIS_HOST_ENV = os.getenv("REDIS_HOST")
+if _REDIS_HOST_ENV:
+    REDIS_HOST = _REDIS_HOST_ENV
+elif DJANGO_ENV == "local":
+    REDIS_HOST = "localhost"
+else:
+    raise RuntimeError(
+        "REDIS_HOST must be set when DJANGO_ENV is not 'local' "
+        f"(current DJANGO_ENV={DJANGO_ENV!r}). Refusing to fall back to "
+        "'localhost' in a non-local environment."
+    )
+
+REDIS_PORT = os.getenv("REDIS_PORT", "6379")
+REDIS_PASSWORD = os.getenv("REDIS_PASSWORD") or None
+
+
+# ---------------------------------------------------------------------------
 # Channels
 # ---------------------------------------------------------------------------
 
@@ -285,8 +343,8 @@ else:
             "CONFIG": {
                 "hosts": [
                     {
-                        "address": f"redis://{os.getenv('REDIS_HOST', 'localhost')}:{os.getenv('REDIS_PORT', '6379')}/0",
-                        "password": os.getenv("REDIS_PASSWORD", None),
+                        "address": f"redis://{REDIS_HOST}:{REDIS_PORT}/0",
+                        "password": REDIS_PASSWORD,
                     }
                 ]
             },
@@ -301,13 +359,11 @@ else:
 
 def _default_celery_redis_url(db_index: str = "0") -> str:
     """Build a Redis URL for Celery; include password when REDIS_PASSWORD is set (staging/prod)."""
-    host = os.getenv("REDIS_HOST", "localhost")
-    port = os.getenv("REDIS_PORT", "6379")
-    password = (os.getenv("REDIS_PASSWORD") or "").strip()
+    password = (REDIS_PASSWORD or "").strip()
     if password:
         safe_pw = quote(password, safe="")
-        return f"redis://:{safe_pw}@{host}:{port}/{db_index}"
-    return f"redis://{host}:{port}/{db_index}"
+        return f"redis://:{safe_pw}@{REDIS_HOST}:{REDIS_PORT}/{db_index}"
+    return f"redis://{REDIS_HOST}:{REDIS_PORT}/{db_index}"
 
 
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", _default_celery_redis_url("0"))

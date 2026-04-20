@@ -39,9 +39,15 @@ const frequencyToDailyDoses: Record<string, number> = {
 };
 
 export type PrescriptionOrderItemInput = {
-  medication: number;
+  // The pharmacy catalogue generic (required). The consultation modal
+  // prescribes by generic molecule/strength/form — the specific brand is
+  // chosen by the pharmacist at dispensing time.
+  generic: number;
   medication_name?: string;
-  generic?: number | null;
+  // Brand FK is intentionally absent at prescribing time. Kept in the type
+  // only for legacy consumers that still read `item.medication`. New code
+  // should rely on `generic`.
+  medication?: number | null;
   dosage: string;
   frequency: string;
   duration: string;
@@ -59,21 +65,22 @@ export type PrescriptionOrderSubmitInput = {
   items: PrescriptionOrderItemInput[];
 };
 
-type MedicationLike = {
+/**
+ * Shape of a row returned by `/v1/pharmacy/generics/for_prescription/`.
+ * The consultation prescription flow searches the pharmacy *generics*
+ * catalogue (canonical molecule + strength + form + route), not brand
+ * inventory — the pharmacist picks the brand at dispense time.
+ */
+type GenericLike = {
   id: number | string;
   name?: string;
-  generic_name?: string;
-  /** Present on some API payloads when nested `generic` is omitted. */
-  generic_id?: number;
-  generic?: {
-    id: number;
-    name: string;
-  };
+  active_ingredient?: string;
+  category?: string;
   form?: string;
-  dosageForm?: string;
   dosage_form?: string;
   strength?: string;
   unit?: string;
+  route?: string;
 };
 
 type MedicationConfig = {
@@ -126,14 +133,6 @@ function normalizeDoseUnit(unit: string | undefined): string {
   return "tablet";
 }
 
-const parseMedicationOptions = (value: unknown): string[] => {
-  if (typeof value !== "string") return [];
-  return value
-    .split(",")
-    .map((v) => v.trim())
-    .filter((v) => v.length > 0);
-};
-
 export function PrescriptionOrderModal({
   open,
   onOpenChange,
@@ -147,7 +146,7 @@ export function PrescriptionOrderModal({
   onSubmit: (payload: PrescriptionOrderSubmitInput) => Promise<void>;
   confirmLabel?: string;
 }) {
-  const [medications, setMedications] = useState<MedicationLike[]>([]);
+  const [generics, setGenerics] = useState<GenericLike[]>([]);
   const [loadingMedications, setLoadingMedications] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
@@ -167,7 +166,7 @@ export function PrescriptionOrderModal({
     setShowMedicationDropdown(false);
     setSelectedMedications([]);
     setMedicationConfigs(new Map());
-    setMedications([]);
+    setGenerics([]);
     setPriority("Routine");
     setClinicalIndication("");
     setSubmitting(false);
@@ -178,28 +177,29 @@ export function PrescriptionOrderModal({
     if (!open || !showMedicationDropdown) return;
     const searchTerm = medicationSearch.trim();
     if (!searchTerm) {
-      setMedications([]);
+      setGenerics([]);
       return;
     }
     const requestId = ++searchRequestIdRef.current;
     const timeout = setTimeout(async () => {
       try {
         setLoadingMedications(true);
-        const res = await pharmacyService.getMedications({ search: searchTerm, page_size: 50 } as any);
+        // Prescribe by generic molecule (not brand). The pharmacist picks the
+        // actual brand from dispensary inventory when filling the order.
+        const res = await pharmacyService.getGenericsForPrescription({ search: searchTerm, page_size: 50 });
         if (requestId === searchRequestIdRef.current) {
           const results = (res as any)?.results || [];
-          setMedications(results);
+          setGenerics(results);
           if (results.length === 0) {
-            console.warn(`No medications found for search term: "${searchTerm}"`);
+            console.warn(`No generics found for search term: "${searchTerm}"`);
           }
         }
       } catch (err: any) {
         if (requestId === searchRequestIdRef.current) {
-          console.error("Failed to search medications:", err);
-          // Show detailed error
-          const errorMsg = err?.message || err?.detail || "Failed to load medication search results. Check that medications are added to the pharmacy.";
+          console.error("Failed to search generics:", err);
+          const errorMsg = err?.message || err?.detail || "Failed to load medication search results. Check that generics are configured in Pharmacy → Generics.";
           toast.error(errorMsg);
-          setMedications([]);
+          setGenerics([]);
         }
       } finally {
         if (requestId === searchRequestIdRef.current) {
@@ -235,25 +235,14 @@ export function PrescriptionOrderModal({
     return Number.isFinite(n) && n > 0 ? n : null;
   };
 
-  /** Pharmacy API requires GenericMedication PK on each line — resolve from nested generic or generic_id. */
-  const resolveGenericPk = (med: MedicationLike | undefined): number | null => {
-    const nested = med?.generic?.id;
-    if (typeof nested === "number" && Number.isFinite(nested) && nested > 0) return nested;
-    const gid = (med as { generic_id?: number })?.generic_id;
-    if (typeof gid === "number" && Number.isFinite(gid) && gid > 0) return gid;
-    return null;
-  };
-
-  const toggleMedicationSelection = useCallback((med: MedicationLike) => {
+  const toggleMedicationSelection = useCallback((med: GenericLike) => {
     const medId = normalizeMedicationId(med.id);
     if (!medId) return;
 
     setSelectedMedications((prev) => {
       const isSelected = prev.includes(medId);
       if (isSelected) {
-        // Remove from array
         const next = prev.filter(id => id !== medId);
-        // remove config when deselecting
         setMedicationConfigs((prevConfigs) => {
           const nextConfigs = new Map(prevConfigs);
           nextConfigs.delete(medId);
@@ -261,30 +250,26 @@ export function PrescriptionOrderModal({
         });
         return next;
       } else {
-        // Add to beginning of array (newest first)
         const next = [medId, ...prev];
 
-        // Keep dropdown and search open so user can multi-select
-
-        // ensure config exists
         setMedicationConfigs((prevConfigs) => {
           const nextConfigs = new Map(prevConfigs);
           if (!nextConfigs.has(medId)) {
-            const formOptions = parseMedicationOptions(med.dosage_form || med.form || (med as any).dosageForm);
-            const strengthOptions = parseMedicationOptions(med.strength);
-            const form = (formOptions[0] || "").toLowerCase();
-            const defaultRoute = form.includes("injection") || form.includes("vial") ? "IV" : "Oral";
+            // GenericMedication fields are single-valued (one strength, one form,
+            // one route per row) — no comma-splitting needed.
+            const form = (med.dosage_form || med.form || "").trim();
+            const defaultRouteFromForm = form.toLowerCase().includes("injection") || form.toLowerCase().includes("vial") ? "IV" : "Oral";
             nextConfigs.set(medId, {
               dosage: "",
               frequency: "Once daily (OD)",
               durationDays: "",
-              route: defaultRoute,
-              unit: normalizeDoseUnit(med.unit || formOptions[0] || undefined),
-              strength: strengthOptions[0] || "",
-              form: formOptions[0] || "",
+              route: med.route || defaultRouteFromForm,
+              unit: normalizeDoseUnit(med.unit || form || undefined),
+              strength: (med.strength || "").trim(),
+              form,
               instructions: "",
               name: med.name,
-              generic_name: med.generic_name,
+              generic_name: med.active_ingredient,
             });
           }
           return nextConfigs;
@@ -327,7 +312,7 @@ export function PrescriptionOrderModal({
   }, []);
 
   // Results come from API search; no client-side filter needed
-  const filteredMedications = medications;
+  const filteredMedications = generics;
 
   const buildSubmitPayload = (): PrescriptionOrderSubmitInput | null => {
     if (selectedMedications.length === 0) {
@@ -338,25 +323,22 @@ export function PrescriptionOrderModal({
     const missing: string[] = [];
 
     for (const medId of selectedMedications) {
-      const med = medications.find((m) => normalizeMedicationId(m.id) === medId);
+      const med = generics.find((m) => normalizeMedicationId(m.id) === medId);
       const cfg = medicationConfigs.get(medId);
       const displayName = med?.name || cfg?.name || "Medication";
       if (!cfg) continue;
 
       // Mirror the UI behavior: merge defaults with saved config so "displayed values"
-      // match what we validate and submit.
+      // match what we validate and submit. Generic fields are single-valued.
+      const medForm = (med?.dosage_form || med?.form || "").trim();
       const defaultCfg = {
         dosage: "",
         frequency: "Once daily (OD)" as const,
         durationDays: "" as const,
-        route: "Oral",
-        unit: normalizeDoseUnit(
-          med?.unit ||
-            parseMedicationOptions(med?.dosage_form || med?.form || (med as any)?.dosageForm)[0] ||
-            undefined
-        ),
-        strength: med ? parseMedicationOptions(med.strength)[0] || "" : cfg.strength,
-        form: med ? parseMedicationOptions(med.dosage_form || med.form || (med as any)?.dosageForm)[0] || "" : cfg.form,
+        route: med?.route || "Oral",
+        unit: normalizeDoseUnit(med?.unit || medForm || undefined),
+        strength: (med?.strength || "").trim() || cfg.strength,
+        form: medForm || cfg.form,
         quantity: 0,
         instructions: "",
       };
@@ -365,12 +347,6 @@ export function PrescriptionOrderModal({
       if (!mergedCfg.frequency?.trim()) missing.push(`${displayName} - frequency required`);
       const unitToSend = normalizeDoseUnit(mergedCfg.unit || "tablet");
       if (!unitToSend?.trim()) missing.push(`${displayName} - dose unit required`);
-
-      const genericPk = resolveGenericPk(med);
-      if (!genericPk) {
-        missing.push(`${displayName} - missing generic link (re-search and select the product again)`);
-        continue;
-      }
 
       // Quantity is inferred from dosage + frequency + durationDays (like room page)
       const dailyDoses = frequencyToDailyDoses[mergedCfg.frequency] ?? 1;
@@ -384,13 +360,15 @@ export function PrescriptionOrderModal({
       );
 
       items.push({
-        medication: medId,
+        // `medId` IS the GenericMedication PK — the modal searches the
+        // generics catalogue directly, so no brand/generic resolution needed.
+        generic: medId,
+        medication: null,
         medication_name: med?.name || mergedCfg.name || "",
-        generic: genericPk,
         unit: unitToSend || "tablet",
-        dosage_form: mergedCfg.form || med?.dosage_form || med?.form || (med as any)?.dosageForm || "",
+        dosage_form: mergedCfg.form || med?.dosage_form || med?.form || "",
         strength: mergedCfg.strength || med?.strength || "",
-        route: mergedCfg.route || "Oral",
+        route: mergedCfg.route || med?.route || "Oral",
         dosage: mergedCfg.dosage || "As directed",
         frequency: mergedCfg.frequency || "Once daily (OD)",
         duration: (days ? `${days} days` : "As directed") as string,
@@ -445,7 +423,7 @@ export function PrescriptionOrderModal({
             Add Prescription
           </DialogTitle>
           <DialogDescription>
-            Search and select medications, then configure dose details for each. All medications will be sent as one prescription order to Pharmacy queue.
+            Prescribe by generic molecule — search the pharmacy generics catalogue, configure dose details for each, and send them as one prescription order. The pharmacist will pick the brand from dispensary stock when filling the order.
           </DialogDescription>
         </DialogHeader>
 
@@ -466,7 +444,7 @@ export function PrescriptionOrderModal({
             <Label>Search and Select Medications *</Label>
             <div className="relative" ref={medicationDropdownRef}>
               <Input
-                placeholder="Search medications by name, generic name, or category..."
+                placeholder="Search generics by name, active ingredient, category, strength, form, or route..."
                 value={medicationSearch}
                 onChange={(e) => {
                   const v = e.target.value;
@@ -485,8 +463,8 @@ export function PrescriptionOrderModal({
                     </div>
                   ) : filteredMedications.length === 0 ? (
                     <div className="p-4 text-center text-sm text-muted-foreground space-y-2">
-                      <div>No medications found for "{medicationSearch}"</div>
-                      <div className="text-xs text-muted-foreground/75">Try a different search term, or check that medications have been added to Pharmacy → Medications.</div>
+                      <div>No generics found for "{medicationSearch}"</div>
+                      <div className="text-xs text-muted-foreground/75">Try a different search term, or check that generics have been added to Pharmacy → Generics.</div>
                     </div>
                   ) : (
                     filteredMedications.map((med) => {
@@ -504,9 +482,15 @@ export function PrescriptionOrderModal({
                           <Checkbox checked={isSelected} onCheckedChange={() => toggleMedicationSelection(med)} />
                           <div className="flex-1 min-w-0">
                             <div className="font-medium text-sm">{formatMedicationVariantLabel(med)}</div>
-                            {(med.generic_name || "").trim() ? (
-                              <div className="text-xs text-muted-foreground mt-1">{med.generic_name}</div>
-                            ) : null}
+                            {(() => {
+                              const subline = [med.active_ingredient, med.category]
+                                .map((v) => (v || "").trim())
+                                .filter((v) => v.length > 0)
+                                .join(" • ");
+                              return subline ? (
+                                <div className="text-xs text-muted-foreground mt-1">{subline}</div>
+                              ) : null;
+                            })()}
                           </div>
                         </div>
                       );
@@ -521,7 +505,7 @@ export function PrescriptionOrderModal({
                 <div className="text-sm font-medium">Selected Medications ({selectedMedications.length}):</div>
                 <div className="flex flex-wrap gap-2">
                   {selectedMedications.map((medId) => {
-                    const med = medications.find((m) => normalizeMedicationId(m.id) === medId);
+                    const med = generics.find((m) => normalizeMedicationId(m.id) === medId);
                     const cfg = medicationConfigs.get(medId);
                     const displayName = med ? formatMedicationVariantLabel(med) : (cfg ? formatMedicationVariantLabel({ name: cfg.name, strength: cfg.strength, form: cfg.form }) : "Medication");
                     return (
@@ -564,18 +548,20 @@ export function PrescriptionOrderModal({
 
               <div className="space-y-3">
                 {selectedMedications.map((medId) => {
-                  const med = medications.find((m) => normalizeMedicationId(m.id) === medId);
+                  const med = generics.find((m) => normalizeMedicationId(m.id) === medId);
                   const cfg = medicationConfigs.get(medId);
                   if (!cfg) return null;
-                  const displayMed = med || { id: medId, name: cfg.name, generic_name: cfg.generic_name, strength: cfg.strength, form: cfg.form, dosage_form: cfg.form };
+                  const displayMed: GenericLike = med || { id: medId, name: cfg.name, active_ingredient: cfg.generic_name, strength: cfg.strength, form: cfg.form, dosage_form: cfg.form };
+                  const activeIngredient = (med?.active_ingredient || cfg.generic_name || "").trim();
+                  const renderMedForm = (med?.dosage_form || med?.form || "").trim();
                   const defaultCfg = {
                     dosage: "",
                     frequency: "Once daily (OD)" as const,
                     durationDays: "" as const,
-                    route: "Oral",
-                    unit: normalizeDoseUnit(med?.unit || parseMedicationOptions(med?.dosage_form || med?.form || (med as any)?.dosageForm)[0] || undefined),
-                    strength: med ? parseMedicationOptions(med.strength)[0] || "" : cfg.strength,
-                    form: med ? parseMedicationOptions(med.dosage_form || med.form || (med as any)?.dosageForm)[0] || "" : cfg.form,
+                    route: med?.route || "Oral",
+                    unit: normalizeDoseUnit(med?.unit || renderMedForm || undefined),
+                    strength: (med?.strength || "").trim() || cfg.strength,
+                    form: renderMedForm || cfg.form,
                     quantity: 0,
                     instructions: "",
                   };
@@ -586,9 +572,9 @@ export function PrescriptionOrderModal({
                       <div className="flex items-start justify-between mb-3">
                         <div>
                           <div className="font-medium text-sm">{formatMedicationVariantLabel(displayMed)}</div>
-                          {(displayMed.generic_name || cfg.generic_name) && (
-                            <div className="text-xs text-muted-foreground">{displayMed.generic_name || cfg.generic_name}</div>
-                          )}
+                          {activeIngredient ? (
+                            <div className="text-xs text-muted-foreground">{activeIngredient}</div>
+                          ) : null}
                         </div>
                         <Button
                           variant="ghost"

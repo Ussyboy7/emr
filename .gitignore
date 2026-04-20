@@ -49,3 +49,15 @@ backend/celerybeat-schedule*
 
 # Archived development files
 archive_development_files/
+
+# Runtime output (bind-mounted into containers) — NEVER commit
+backups/
+logs/
+
+# TLS material — private keys must NEVER be committed. Certs are usually fine
+# but we default-ignore the whole ssl/ tree to be safe. Commit certs
+# explicitly with `git add -f ssl/<name>.crt` if required.
+ssl/
+*.key
+*.pem
+!*.pub.pem

@@ -69,8 +69,23 @@ export function middleware(request: NextRequest) {
     request.cookies.get(AUTH_ALLOWED_PAGES_COOKIE)?.value ??
     request.cookies.get(LEGACY_AUTH_ALLOWED_PAGES_COOKIE)?.value;
   if (!pagesRaw) {
-    // Can't reliably authorize without pages; allow request and let client-side guard handle redirects.
-    return NextResponse.next();
+    // Authenticated session but no authorization context — treat as a broken
+    // session (cookie expired/cleared/tampered). Send the user back to /login
+    // to force a fresh handshake; clear the session-presence cookies so the
+    // top of this function won't redirect them straight back into the app.
+    // (Refresh-token cookies are httpOnly from the server and will be
+    // revalidated on the next login.)
+    const url = request.nextUrl.clone();
+    url.pathname = "/login";
+    url.searchParams.set("next", pathname);
+    url.searchParams.set("reason", "missing_permissions");
+
+    const response = NextResponse.redirect(url);
+    response.cookies.set(AUTH_SESSION_COOKIE, "", { path: "/", maxAge: 0 });
+    response.cookies.set(LEGACY_AUTH_SESSION_COOKIE, "", { path: "/", maxAge: 0 });
+    response.cookies.set(AUTH_IS_SUPERUSER_COOKIE, "", { path: "/", maxAge: 0 });
+    response.cookies.set(LEGACY_AUTH_IS_SUPERUSER_COOKIE, "", { path: "/", maxAge: 0 });
+    return response;
   }
 
   let allowedPages: string[] = [];

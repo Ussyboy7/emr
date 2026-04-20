@@ -717,34 +717,54 @@ export default function ConsultationHistoryPage() {
       return;
     }
 
-    // Debug: Log the payload being sent
-    const prescriptionPayload = {
-      patient: patientId,
-      visit: selectedConsultation.visitId,
-      consultation_session: sessionId,
-      notes: payload.clinicalIndication || undefined,
-      items: payload.items.map((i) => ({
-        medication: i.medication,
-        generic: i.generic || null, // Add generic ID
+    // Strict generic-only: PrescriptionOrderModal always emits `generic` and
+    // never a brand. We forward exactly that shape to the pharmacy API. Items
+    // without a valid generic PK are rejected up-front rather than silently
+    // dropped server-side.
+    const items: any[] = [];
+    const rejected: string[] = [];
+    payload.items.forEach((i, idx) => {
+      const generic =
+        typeof i.generic === 'number' && Number.isFinite(i.generic) && i.generic > 0
+          ? i.generic
+          : null;
+      if (!generic) {
+        rejected.push(i.medication_name || `item #${idx + 1}`);
+        return;
+      }
+      items.push({
+        generic,
+        medication: null,
         medication_name: i.medication_name,
         quantity: i.quantity,
         unit: i.unit,
-        dose: i.dosage, // Use 'dose' not 'dosage'
+        dose: i.dosage,
         frequency: i.frequency,
         duration: i.duration,
         route: i.route || 'Oral',
         instructions: i.instructions,
         dispensed_quantity: 0,
         is_dispensed: false,
-      })) as any,
+      });
+    });
+
+    if (rejected.length > 0) {
+      toast.error(
+        `Skipped ${rejected.length} item(s) without a valid generic: ${rejected.join(', ')}.`
+      );
+    }
+    if (items.length === 0) return;
+
+    const prescriptionPayload = {
+      patient: patientId,
+      visit: selectedConsultation.visitId,
+      consultation_session: sessionId,
+      notes: payload.clinicalIndication || undefined,
+      items,
     };
 
-    console.log('Sending prescription payload:', prescriptionPayload);
-
     try {
-      const result = await pharmacyService.createPrescription(prescriptionPayload as any);
-      console.log('Prescription created successfully:', result);
-
+      await pharmacyService.createPrescription(prescriptionPayload as any);
       toast.success("Prescription sent to pharmacy");
       await loadEditOrdersRefetch();
     } catch (error) {

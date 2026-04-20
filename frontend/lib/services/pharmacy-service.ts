@@ -1040,19 +1040,34 @@ class PharmacyService {
   }
 
   /**
-   * Check drug interactions
+   * Check drug interactions.
+   *
+   * Pass either `genericIds` (preferred — interactions are evaluated at the
+   * active-ingredient level) or `medicationIds` (legacy brand-level PKs,
+   * resolved server-side to their parent generic). At least one list with
+   * two or more entries is required; anything smaller short-circuits to an
+   * empty array.
    */
-  async checkInteractions(medicationIds: number[]): Promise<DrugInteraction[]> {
-    if (!medicationIds || medicationIds.length < 2) {
+  async checkInteractions(
+    input: number[] | { genericIds?: number[]; medicationIds?: number[] }
+  ): Promise<DrugInteraction[]> {
+    const genericIds = Array.isArray(input) ? [] : (input.genericIds ?? []);
+    const medicationIds = Array.isArray(input) ? input : (input.medicationIds ?? []);
+
+    if ((genericIds.length + medicationIds.length) < 2) {
       return [];
     }
-    
+
     try {
+      const body: { generic_ids?: number[]; medication_ids?: number[] } = {};
+      if (genericIds.length) body.generic_ids = genericIds;
+      if (medicationIds.length) body.medication_ids = medicationIds;
+
       const response = await apiFetch<{ interactions: DrugInteraction[] }>(
         '/v1/pharmacy/prescriptions/check_interactions/',
         {
           method: 'POST',
-          body: JSON.stringify({ medication_ids: medicationIds }),
+          body: JSON.stringify(body),
         }
       );
       return response.interactions || [];

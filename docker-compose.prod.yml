@@ -158,6 +158,19 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile.prod
+      # NEXT_PUBLIC_* vars are inlined into the client bundle at build time.
+      # Secrets (NEXTAUTH_SECRET, etc.) are provided via env_file at runtime
+      # and MUST NOT be listed here.
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/api}
+        NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-/ws/}
+        NEXT_PUBLIC_ENVIRONMENT: ${NEXT_PUBLIC_ENVIRONMENT:-production}
+        NEXT_PUBLIC_APP_NAME: ${NEXT_PUBLIC_APP_NAME:-Medical NPA EMR}
+        NEXT_PUBLIC_APP_VERSION: ${NEXT_PUBLIC_APP_VERSION:-1.0.0}
+        NEXT_PUBLIC_SENTRY_DSN: ${NEXT_PUBLIC_SENTRY_DSN:-}
+        NEXT_PUBLIC_SENTRY_ENVIRONMENT: ${NEXT_PUBLIC_SENTRY_ENVIRONMENT:-production}
+        NEXT_PUBLIC_ENABLE_ANALYTICS: ${NEXT_PUBLIC_ENABLE_ANALYTICS:-false}
+        NEXT_PUBLIC_ENABLE_ERROR_REPORTING: ${NEXT_PUBLIC_ENABLE_ERROR_REPORTING:-false}
     container_name: emr-frontend-prod
     env_file:
       - ./frontend/.env.prod
@@ -212,21 +225,32 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # Backup Service (runs daily)
+  # Backup Service (runs daily, in-container pg_dump against the postgres service).
   backup:
     image: postgres:15-alpine
     container_name: emr-backup-prod
     environment:
       PGPASSWORD: ${DB_PASSWORD:-change_this_in_production}
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: ${DB_NAME:-emrprod}
+      DB_USER: ${DB_USER:-emradmin}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-7}
     volumes:
       - ./backups:/backups
-      - ./scripts/backup.sh:/backup.sh:ro
-    command: sh -c "while true; do /backup.sh; sleep 86400; done"
+      - ./scripts/backup/docker_backup.sh:/usr/local/bin/docker_backup.sh:ro
+    command: sh -c "chmod +x /usr/local/bin/docker_backup.sh && while true; do /usr/local/bin/docker_backup.sh || echo 'backup failed'; sleep 86400; done"
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     networks:
       - emr-network-prod
     restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   postgres_data_prod:

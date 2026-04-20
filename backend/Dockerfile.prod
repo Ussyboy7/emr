@@ -2,21 +2,55 @@ FROM python:3.13-slim AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    DJANGO_ENV=prod
+    DJANGO_ENV=prod \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
 WORKDIR /app
 
+# System dependencies. `libpq5` is sufficient at runtime; build-essential
+# and libpq-dev are only needed while compiling psycopg2. We install them
+# in a single layer and purge the build toolchain after wheels are built.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential libpq-dev curl \
+    && apt-get install -y --no-install-recommends \
+        build-essential \
+        libpq-dev \
+        libpq5 \
+        curl \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install --upgrade pip \
-    && pip install --no-cache-dir -r /tmp/requirements.txt
+    && pip install --no-cache-dir -r /tmp/requirements.txt \
+    && apt-get purge -y --auto-remove build-essential libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
 
-COPY . .
+# Non-root runtime user. UID/GID 1000 aligns with common host users so
+# bind-mounted ./logs/production stays writable without chown dances.
+RUN groupadd --system --gid 1000 app \
+    && useradd  --system --uid 1000 --gid app --home-dir /app --shell /usr/sbin/nologin app
 
-RUN python manage.py collectstatic --noinput
+COPY --chown=app:app . .
 
-CMD ["gunicorn", "emr_backend.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "4", "--timeout", "120"]
+RUN mkdir -p /app/logs /app/staticfiles /app/media \
+    && chown -R app:app /app
 
+USER app
+
+# Collectstatic runs at container startup (see docker-compose.prod.yml) so
+# the image stays portable across deployments with different STATIC_ROOT
+# volumes. We intentionally do not bake collected static into the image.
+
+EXPOSE 8000
+
+# NOTE: docker-compose.prod.yml overrides this command with a full
+# gunicorn invocation (migrate + collectstatic + gunicorn). Keep this
+# CMD in sync so `docker run emr-backend` works outside compose too.
+CMD ["gunicorn", \
+     "emr_backend.wsgi:application", \
+     "--bind", "0.0.0.0:8000", \
+     "--workers", "8", \
+     "--threads", "4", \
+     "--timeout", "120", \
+     "--max-requests", "1000", \
+     "--max-requests-jitter", "50"]

@@ -227,26 +227,6 @@ const vitalLabel = (key: string): string => {
 // TYPE DEFINITIONS
 // ==========================================
 
-interface MedicationConfig {
-  id: number;
-  name: string;
-  strength: string;
-  form: string;
-  route: string;
-  dosage: string;
-  frequency: string;
-  duration: string;
-  instructions: string;
-  unit?: string;
-  durationDays?: number;
-  quantity?: number;
-  generic_name?: string;
-  genericName?: string;
-  category?: string;
-  dosageForm?: string;
-  priority?: string;
-}
-
 interface LabTemplate {
   id: number;
   name: string;
@@ -399,57 +379,6 @@ interface ConsultationRoom {
 }
 
 // Consultation room, patient, and medication data will be loaded from API
-
-// Medications are loaded from the API - no demo medications needed
-
-const frequencyToDailyDoses: Record<string, number> = {
-  'Once daily (OD)': 1,
-  'Twice daily (BD)': 2,
-  'Three times daily (TDS)': 3,
-  'Four times daily (QDS)': 4,
-  'Every 6 hours (Q6H)': 4,
-  'Every 8 hours (Q8H)': 3,
-  'Every 12 hours (Q12H)': 2,
-  'At bedtime (Nocte)': 1,
-  'As needed (PRN)': 2, // Estimate 2 doses per day
-  'Weekly': 0.14, // 1/7
-  'STAT (Single dose)': 0, // Special case
-};
-
-const parseMedicationOptions = (value: unknown): string[] => {
-  if (typeof value !== 'string') return [];
-  return value
-    .split(',')
-    .map((v) => v.trim())
-    .filter((v) => v.length > 0);
-};
-
-const formatMedicationVariantLabel = (med: any): string => {
-  const name = med?.name || '';
-  const strength = (med?.strength || '').toString().trim();
-  const form = (med?.dosage_form || med?.form || '').toString().trim();
-  if (strength && form) return `${name} (${strength}, ${form})`;
-  if (strength) return `${name} (${strength})`;
-  if (form) return `${name} (${form})`;
-  return name;
-};
-
-const inferDoseUnitFromForm = (formValue?: string, fallbackUnit?: string): string => {
-  const fallback = (fallbackUnit || '').toString().trim().toLowerCase();
-  const form = (formValue || '').toString().trim().toLowerCase();
-
-  if (fallback && ['tablet', 'capsule', 'ml', 'drop', 'puff', 'vial', 'ampoule', 'sachet', 'unit'].includes(fallback)) {
-    return fallback;
-  }
-  if (form.includes('syrup') || form.includes('suspension') || form.includes('solution')) return 'ml';
-  if (form.includes('drop') || form.includes('ophthalmic') || form.includes('otic')) return 'drop';
-  if (form.includes('inhal') || form.includes('spray')) return 'puff';
-  if (form.includes('capsule') || form.includes('softgel')) return 'capsule';
-  if (form.includes('vial') || form.includes('injection') || form.includes('injectable')) return 'vial';
-  if (form.includes('ampoule')) return 'ampoule';
-  if (form.includes('sachet') || form.includes('powder')) return 'sachet';
-  return 'tablet';
-};
 
 // Medical constants are now imported from @/lib/constants/medical-data
 const injectionRoutes = INJECTION_ROUTES;
@@ -684,30 +613,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     status: 'Draft' | 'Sent to Pharmacy' | 'Processing' | 'Dispensed';
   }[]>([]);
   const [showAddPrescription, setShowAddPrescription] = useState(false);
-  const [newPrescription, setNewPrescription] = useState({ 
-    medication: "", 
-    medicationId: undefined as number | undefined, // Store medication ID
-    genericName: "",
-    dosage: "", 
-    frequency: "", 
-    duration: "", 
-    durationDays: 0,
-    quantity: 0,
-    route: "Oral",
-    instructions: "",
-    priority: "Routine",
-    notes: ""
-  });
-  const [medicationSearch, setMedicationSearch] = useState("");
-  const [showMedicationDropdown, setShowMedicationDropdown] = useState(false);
-  const [selectedMedications, setSelectedMedications] = useState<Set<number>>(new Set()); // Track selected medication IDs for multi-select
-  const [medicationConfigs, setMedicationConfigs] = useState<Map<number, MedicationConfig>>(new Map()); // Store medication configurations
   const [prescriptionsSentToPharmacy, setPrescriptionsSentToPharmacy] = useState(false);
-  const [medications, setMedications] = useState<any[]>([]); // Store medications or generics from API
-  const [loadingMedications, setLoadingMedications] = useState(false);
-  const medicationSearchRequestRef = useRef(0);
   const diagnosisDropdownContainerRef = useRef<HTMLDivElement | null>(null);
-  const medicationDropdownContainerRef = useRef<HTMLDivElement | null>(null);
   const labTemplateDropdownContainerRef = useRef<HTMLDivElement | null>(null);
   const radiologyTemplateDropdownContainerRef = useRef<HTMLDivElement | null>(null);
   const [labOrders, setLabOrders] = useState<{ 
@@ -2074,41 +1981,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     }
   };
 
-  useEffect(() => {
-    if (!showAddPrescription || !showMedicationDropdown) return;
-
-    const searchTerm = medicationSearch.trim();
-    if (!searchTerm) {
-      setMedications([]);
-      return;
-    }
-
-    const requestId = ++medicationSearchRequestRef.current;
-    const timeout = setTimeout(async () => {
-      try {
-        setLoadingMedications(true);
-        const response = await pharmacyService.getGenericsForPrescription({
-          search: searchTerm,
-          page_size: 50,
-        });
-        if (requestId === medicationSearchRequestRef.current) {
-          setMedications((response.results || []) as any[]);
-        }
-      } catch (err) {
-        if (requestId === medicationSearchRequestRef.current) {
-          debugConsultationRoom('Failed to search generics:', err);
-          setMedications([]);
-          toast.error('Failed to load medication search results.');
-        }
-      } finally {
-        if (requestId === medicationSearchRequestRef.current) {
-          setLoadingMedications(false);
-        }
-      }
-    }, 300);
-
-    return () => clearTimeout(timeout);
-  }, [showAddPrescription, showMedicationDropdown, medicationSearch]);
+  // (Legacy in-page medication search removed — all prescribing goes through
+  // <PrescriptionOrderModal /> which does its own generics lookup.)
 
   useEffect(() => {
     if (!showAddDiagnosis) return;
@@ -2259,23 +2133,16 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         setShowRadiologyTemplateDropdown(false);
       }
 
-      if (
-        showMedicationDropdown &&
-        !isEventInside(medicationDropdownContainerRef.current)
-      ) {
-        setShowMedicationDropdown(false);
-      }
     };
 
-    if (!showDiagnosisDropdown && !showLabTemplateDropdown && !showRadiologyTemplateDropdown && !showMedicationDropdown) return;
+    if (!showDiagnosisDropdown && !showLabTemplateDropdown && !showRadiologyTemplateDropdown) return;
     document.addEventListener('pointerdown', handleClickOutside, true);
     return () => document.removeEventListener('pointerdown', handleClickOutside, true);
-  }, [showDiagnosisDropdown, showLabTemplateDropdown, showRadiologyTemplateDropdown, showMedicationDropdown]);
+  }, [showDiagnosisDropdown, showLabTemplateDropdown, showRadiologyTemplateDropdown]);
 
   // Ensure dropdowns don't persist when moving across tabs.
   useEffect(() => {
     setShowDiagnosisDropdown(false);
-    setShowMedicationDropdown(false);
     setShowLabTemplateDropdown(false);
     setShowRadiologyTemplateDropdown(false);
   }, [activeTab]);
@@ -3518,61 +3385,33 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       const skippedMedications: string[] = [];
       
       for (const rx of draftPrescriptions) {
-        // Prefer explicit generic FK (from prescription modal / brand search). Fall back to medicationId for generic-only picker flow.
-        let genericId: number | undefined =
+        // Strict generic-only: the prescribing flow always sets `genericId` from
+        // the generics catalogue. No fallback to medicationId, no fuzzy lookup
+        // by display name — either the draft is valid, or it is rejected.
+        const genericId =
           typeof rx.genericId === 'number' && Number.isFinite(rx.genericId) && rx.genericId > 0
             ? rx.genericId
-            : typeof rx.medicationId === 'number' && Number.isFinite(rx.medicationId) && rx.medicationId > 0
-              ? rx.medicationId
-              : undefined;
-
-        if (!genericId) {
-          // Fallback: try to find generic by name
-          const generic = medications.find((g: any) => g.name === rx.medication);
-          if (generic) {
-            genericId = typeof generic.id === 'string' ? parseInt(generic.id, 10) : generic.id;
-          } else {
-            skippedMedications.push(rx.medication);
-            continue; // Skip this medication
-          }
-        }
-
-        const numericGenericId = typeof genericId === 'string' ? parseInt(genericId, 10) : genericId;
-        
-        if (!numericGenericId || isNaN(numericGenericId) || numericGenericId === 0) {
-          skippedMedications.push(rx.medication);
-          continue; // Skip this medication
-        }
-        
-        // Find generic details for fallback metadata
-        const generic = medications.find((g: any) => {
-          const gId = typeof g.id === 'string' ? parseInt(g.id, 10) : g.id;
-          return gId === numericGenericId;
-        });
-        const fallbackForm = (generic as any)?.dosage_form || '';
-        const fallbackUnit = inferDoseUnitFromForm(fallbackForm, (generic as any)?.unit);
-        const fallbackStrength = (generic as any)?.strength || '';
-        const fallbackRoute = (generic as any)?.route || 'Oral';
-        
-        const qtyNum = Math.max(Number(rx.quantity) || 0, 0.01);
-        const brandId =
-          typeof rx.brandMedicationId === 'number' &&
-          Number.isFinite(rx.brandMedicationId) &&
-          rx.brandMedicationId > 0
-            ? rx.brandMedicationId
             : undefined;
 
+        if (!genericId) {
+          skippedMedications.push(rx.medication);
+          continue;
+        }
+
+        const qtyNum = Math.max(Number(rx.quantity) || 0, 0.01);
+        // The backend serializer auto-fills unit/form/strength/route from the
+        // generic when these come in blank, so we only send what the user set.
         prescriptionItems.push({
-          generic: numericGenericId,
-          medication: brandId,
+          generic: genericId,
+          medication: null,
           quantity: qtyNum,
-          unit: rx.unit || fallbackUnit,
-          dosage_form: rx.form || fallbackForm,
-          strength: rx.strength || fallbackStrength,
+          unit: rx.unit,
+          dosage_form: rx.form,
+          strength: rx.strength,
           dose: rx.dose || rx.dosage,
           frequency: rx.frequency,
           duration: rx.duration,
-          route: rx.route || fallbackRoute,
+          route: rx.route,
           instructions: rx.instructions,
         });
       }
@@ -3616,343 +3455,16 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     }
   };
 
+  // "Edit" on a draft prescription row removes the draft and reopens the
+  // Add-Prescription modal so the clinician can re-enter the item. In-place
+  // editing of an existing draft is not yet supported by <PrescriptionOrderModal />.
   const editPrescription = (index: number) => {
     const prescriptionToEdit = prescriptions[index];
     if (!prescriptionToEdit) return;
 
-    // Reset modal state first
-    setSelectedMedications(new Set());
-    setMedicationConfigs(new Map());
-    setMedicationSearch("");
-    setShowMedicationDropdown(false);
-    setNewPrescription({
-      medication: "",
-      medicationId: undefined,
-      genericName: "",
-      dosage: "",
-      frequency: "",
-      duration: "",
-      durationDays: 0,
-      quantity: 0,
-      route: "Oral",
-      instructions: "",
-      priority: "Routine",
-      notes: ""
-    });
-
-    // Pre-populate the modal with existing prescription data
-    const medicationId = prescriptionToEdit.medicationId;
-
-    if (!medicationId) {
-      toast.error('Cannot edit prescription: medication ID not found');
-      return;
-    }
-
-    // Select the medication
-    setSelectedMedications(new Set([medicationId]));
-
-    // Pre-populate the configuration
-    const config: any = {
-      dosage: (prescriptionToEdit.dose || prescriptionToEdit.dosage) === 'As directed' ? '' : (prescriptionToEdit.dose || prescriptionToEdit.dosage || ''),
-      frequency: prescriptionToEdit.frequency,
-      durationDays: prescriptionToEdit.duration.includes('days')
-        ? parseInt(prescriptionToEdit.duration.split(' ')[0]) || 0
-        : 0,
-      route: prescriptionToEdit.route,
-      instructions: prescriptionToEdit.instructions || '',
-      unit: prescriptionToEdit.unit || inferDoseUnitFromForm(prescriptionToEdit.form),
-      strength: prescriptionToEdit.strength || '',
-      form: prescriptionToEdit.form || '',
-    };
-    setMedicationConfigs(new Map([[medicationId, config]]));
-
-    // Pre-populate clinical indication (use instructions if available, otherwise empty)
-    const clinicalIndication = prescriptionToEdit.instructions && prescriptionToEdit.instructions !== prescriptionToEdit.medication ? prescriptionToEdit.instructions : '';
-    setNewPrescription(prev => ({
-      ...prev,
-      notes: clinicalIndication,
-      priority: prescriptionToEdit.priority || 'Routine'
-    }));
-
-    // Remove the old prescription and open modal
     setPrescriptions(prescriptions.filter((_, i) => i !== index));
     setShowAddPrescription(true);
-
-    toast.info(`Editing prescription for ${prescriptionToEdit.medication}`);
-  };
-
-  const toggleMedicationSelection = (med: any) => {
-    // CRITICAL: Ensure medication ID is a valid number
-    let medicationId: number | undefined;
-    if (typeof med.id === 'number') {
-      medicationId = med.id;
-    } else if (typeof med.id === 'string') {
-      const parsed = parseInt(med.id, 10);
-      if (!isNaN(parsed) && parsed > 0) {
-        medicationId = parsed;
-      } else {
-        toast.error("Please select a medication from the database. Demo medications cannot be used.");
-        return;
-      }
-    } else {
-      toast.error("Invalid medication ID. Please select a valid medication.");
-      return;
-    }
-    
-    // Check for allergies when selecting
-    const isAllergyRisk = currentPatient?.allergies.some(allergy => 
-      med.name.toLowerCase().includes(allergy.toLowerCase()) || 
-      (med.generic_name || '').toLowerCase().includes(allergy.toLowerCase())
-    );
-    
-    if (isAllergyRisk && medicationId !== undefined && !selectedMedications.has(medicationId)) {
-      const confirmed = window.confirm(`⚠️ Allergy Alert: Patient is allergic to ${currentPatient?.allergies.join(', ')}. This medication may be contraindicated. Do you want to proceed?`);
-      if (!confirmed) {
-        return;
-      }
-    }
-    
-    // Toggle selection
-    setSelectedMedications(prev => {
-      let newSet = new Set(prev);
-      if (newSet.has(medicationId!)) {
-        // Remove medication and its config
-        newSet.delete(medicationId!);
-        setMedicationConfigs(prevConfigs => {
-          const newConfigs = new Map(prevConfigs);
-          newConfigs.delete(medicationId!);
-          return newConfigs;
-        });
-      } else {
-        // Add medication at the top (most recently selected first)
-        newSet.delete(medicationId!);
-        newSet = new Set([medicationId!, ...Array.from(newSet)]);
-
-        setMedicationConfigs(prevConfigs => {
-          const newConfigs = new Map(prevConfigs);
-          const formOptions = parseMedicationOptions(med.dosage_form || med.form || med.dosageForm);
-          const strengthOptions = parseMedicationOptions(med.strength);
-          const form = formOptions[0] || '';
-          const strength = strengthOptions[0] || '';
-          const unit = inferDoseUnitFromForm(form, med.unit);
-          // Set sensible defaults based on medication form
-          const defaultDosage = form.toLowerCase().includes('tablet') || form.toLowerCase().includes('capsule') 
-            ? '1'
-            : form.toLowerCase().includes('syrup') || form.toLowerCase().includes('suspension')
-            ? '5'
-            : form.toLowerCase().includes('injection') || form.toLowerCase().includes('vial')
-            ? '1'
-            : '1';
-          
-          const defaultRoute = form.toLowerCase().includes('injection') || form.toLowerCase().includes('vial')
-            ? 'IV'
-            : 'Oral';
-          
-          newConfigs.set(medicationId!, {
-            id: med.id || 0,
-            name: med.name || '',
-            strength,
-            form,
-            route: defaultRoute,
-            dosage: defaultDosage,
-            frequency: 'Once daily (OD)',
-            duration: '',
-            durationDays: 0,
-            quantity: 0,
-            instructions: '',
-            priority: 'Routine',
-            unit,
-            generic_name: med.name, // For generics, name is the generic name
-            genericName: med.name || '',
-            category: med.category || '',
-            dosageForm: form,
-          });
-          return newConfigs;
-        });
-      }
-      return newSet;
-    });
-  };
-
-  const selectMedication = (med: any) => {
-    // For single select (backward compatibility) - toggle selection instead
-    toggleMedicationSelection(med);
-  };
-
-  const updateMedicationConfig = (medicationId: number, field: string, value: any) => {
-    setMedicationConfigs(prev => {
-      const newConfigs = new Map(prev);
-      const currentConfig = newConfigs.get(medicationId);
-      if (!currentConfig) {
-        // This shouldn't happen in an update operation
-        return newConfigs;
-      }
-      
-      const updatedConfig = { ...currentConfig, [field]: value };
-      
-      // Auto-calculate quantity when dose/frequency/duration changes
-      if (field === 'dosage' || field === 'frequency' || field === 'durationDays') {
-        const dailyDoses = frequencyToDailyDoses[updatedConfig.frequency] || 1;
-        const dosageValue = updatedConfig.dosage
-          ? parseFloat(String(updatedConfig.dosage).replace(/[^\d.]/g, '')) || 1
-          : 1;
-        updatedConfig.quantity = updatedConfig.frequency === 'STAT (Single dose)' 
-          ? dosageValue
-          : Math.ceil(dosageValue * dailyDoses * Math.max(updatedConfig.durationDays || 1, 1));
-      }
-      
-      // Auto-update duration string when durationDays changes
-      if (field === 'durationDays') {
-        updatedConfig.duration = value > 0 ? `${value} days` : '';
-      }
-      
-      newConfigs.set(medicationId, updatedConfig);
-      return newConfigs;
-    });
-  };
-
-  const getCalculatedQuantity = (config: {
-    dosage?: string;
-    frequency?: string;
-    durationDays?: number | string;
-    quantity?: number;
-  }): number => {
-    if (typeof config.quantity === 'number' && Number.isFinite(config.quantity) && config.quantity > 0) {
-      return config.quantity;
-    }
-    const dailyDoses = frequencyToDailyDoses[config.frequency || ''] || 1;
-    const dosageValue = config.dosage ? parseFloat(String(config.dosage).replace(/[^\d.]/g, '')) || 1 : 1;
-    const durationDays = Number(config.durationDays || 0) || 0;
-    if ((config.frequency || '') === 'STAT (Single dose)') {
-      return dosageValue;
-    }
-    return Math.ceil(dosageValue * dailyDoses * Math.max(durationDays || 1, 1));
-  };
-
-  const addPrescription = () => {
-    if (selectedMedications.size === 0) {
-      toast.error("Please select at least one medication");
-      return;
-    }
-
-    // Validate medication configurations
-    const missingConfigs: string[] = [];
-    for (const medId of selectedMedications) {
-      const config = medicationConfigs.get(medId);
-      const med = medications.find((m: any) => {
-        const mId = typeof m.id === 'number' ? m.id : parseInt(m.id, 10);
-        return mId === medId;
-      });
-      if (!config || !config.frequency) {
-        if (!missingConfigs.some(msg => msg.includes(med?.name || 'Unknown medication'))) {
-          missingConfigs.push(`${med?.name || 'Unknown medication'} - frequency required`);
-        }
-      }
-      if (!config || !config.unit?.trim()) {
-        if (!missingConfigs.some(msg => msg.includes(med?.name || 'Unknown medication'))) {
-          missingConfigs.push(`${med?.name || 'Unknown medication'} - dose unit required`);
-        }
-      }
-      if (config?.dosage && (Number.isNaN(parseFloat(String(config.dosage))) || parseFloat(String(config.dosage)) <= 0)) {
-        if (!missingConfigs.some(msg => msg.includes(med?.name || 'Unknown medication'))) {
-          missingConfigs.push(`${med?.name || 'Unknown medication'} - dose must be a positive number`);
-        }
-      }
-    }
-
-    if (missingConfigs.length > 0) {
-      toast.error("Please complete required fields (frequency and dose unit) and provide a valid dose.");
-      return;
-    }
-    
-    const selectedMeds = Array.from(selectedMedications)
-      .map((medId) => {
-        const foundMedication = medications.find((m: any) => {
-          const mId = typeof m.id === 'number' ? m.id : parseInt(m.id, 10);
-          return mId === medId;
-        });
-        if (foundMedication) return foundMedication;
-        const config = medicationConfigs.get(medId);
-        if (!config) return null;
-        return {
-          id: medId,
-          name: config.name || 'Medication',
-          dosage_form: config.form || '',
-          form: config.form || '',
-          strength: config.strength || '',
-          unit: config.unit || '',
-          generic_name: config.generic_name || config.genericName || config.name || '',
-        };
-      })
-      .filter((m): m is any => !!m);
-    
-    // Add all selected medications to prescriptions list with configurations
-    const newPrescriptions = selectedMeds.map((med: any) => {
-      const medicationId = typeof med.id === 'number' ? med.id : parseInt(med.id, 10);
-      const config = medicationConfigs.get(medicationId) || {
-        dosage: '',
-        frequency: 'Once daily (OD)',
-        durationDays: 0,
-        route: 'Oral',
-        instructions: '',
-        unit: inferDoseUnitFromForm(med.dosage_form || med.form, med.unit),
-        strength: med.strength || '',
-        form: med.dosage_form || med.form || '',
-      };
-
-      const dailyDoses = frequencyToDailyDoses[config.frequency] || 1;
-      // Extract numeric dosage value (e.g., "2" or "2 tablets" -> 2)
-      const dosageValue = config.dosage ? parseFloat(String(config.dosage).replace(/[^\d.]/g, '')) || 1 : 1;
-      const calculatedQty = config.frequency === 'STAT (Single dose)'
-        ? dosageValue
-        : Math.ceil(dosageValue * dailyDoses * (config.durationDays || 1));
-
-      const rxId = `RX-${Date.now()}-${medicationId}`;
-      
-      return {
-        id: rxId,
-        medication: med.name, // Generic name
-        genericId: medicationId,
-        medicationId, // same as genericId for in-room generic search
-        genericName: med.name, // Same as medication for generics
-        unit: config.unit || inferDoseUnitFromForm(med.dosage_form || med.form, med.unit),
-        strength: config.strength || med.strength || '',
-        form: config.form || med.dosage_form || med.form || '',
-        dose: `${config.dosage || '1'} ${config.unit || inferDoseUnitFromForm(med.dosage_form || med.form, med.unit)}`.trim(),
-        dosage: config.dosage ? `${config.dosage} ${config.unit || inferDoseUnitFromForm(med.dosage_form || med.form, med.unit)}`.trim() : 'As directed',
-        frequency: config.frequency,
-        duration: config.durationDays ? `${config.durationDays} days` : 'As directed',
-        quantity: calculatedQty,
-        route: config.route,
-        instructions: config.instructions || newPrescription.notes || '',
-        priority: newPrescription.priority,
-        status: 'Draft' as const
-      };
-    });
-    
-    setPrescriptions([...prescriptions, ...newPrescriptions]);
-    
-    // Reset form and selections
-    setSelectedMedications(new Set());
-    setMedicationConfigs(new Map());
-    setNewPrescription({
-      medication: "",
-      medicationId: undefined,
-      genericName: "",
-      dosage: "",
-      frequency: "",
-      duration: "",
-      durationDays: 0,
-      quantity: 0,
-      route: "Oral",
-      instructions: "",
-      priority: "Routine",
-      notes: ""
-    });
-    setMedicationSearch("");
-    setShowAddPrescription(false);
-    
-    toast.success(`${selectedMeds.length} medication(s) added to prescription order`);
+    toast.info(`Draft removed — re-enter ${prescriptionToEdit.medication} from Add Medication.`);
   };
 
   const handleAddPrescriptionToOrder = async (payload: PrescriptionOrderSubmitInput) => {
@@ -3962,21 +3474,22 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     }
 
     const createdAt = Date.now();
-    const nextPrescriptions = payload.items.map((item, index) => {
+    // Strict generic-only: every item from PrescriptionOrderModal carries a
+    // GenericMedication PK in `item.generic`. No brand is selected at prescribing
+    // time — the pharmacist chooses the brand from dispensary inventory later.
+    const nextPrescriptions: Array<ReturnType<typeof buildDraft>> = [];
+    const rejected: string[] = [];
+
+    function buildDraft(item: PrescriptionOrderSubmitInput['items'][number], index: number, genericPk: number) {
       const unit = (item.unit || 'tablet').trim();
       const doseValue = (item.dosage || '').trim();
       const normalizedDose = doseValue ? `${doseValue} ${unit}`.trim() : `1 ${unit}`.trim();
-
-      const genericPk =
-        typeof item.generic === 'number' && Number.isFinite(item.generic) && item.generic > 0
-          ? item.generic
-          : undefined;
       return {
-        id: `RX-${createdAt}-${item.medication}-${index}`,
+        id: `RX-${createdAt}-${genericPk}-${index}`,
         medication: item.medication_name || 'Medication',
         genericId: genericPk,
-        brandMedicationId: item.medication,
-        medicationId: genericPk ?? item.medication,
+        brandMedicationId: undefined as number | undefined,
+        medicationId: genericPk,
         genericName: item.medication_name || 'Medication',
         unit,
         strength: item.strength || '',
@@ -3991,7 +3504,26 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         priority: payload.priority,
         status: 'Draft' as const,
       };
+    }
+
+    payload.items.forEach((item, index) => {
+      const genericPk =
+        typeof item.generic === 'number' && Number.isFinite(item.generic) && item.generic > 0
+          ? item.generic
+          : null;
+      if (!genericPk) {
+        rejected.push(item.medication_name || `item #${index + 1}`);
+        return;
+      }
+      nextPrescriptions.push(buildDraft(item, index, genericPk));
     });
+
+    if (rejected.length > 0) {
+      toast.error(
+        `Skipped ${rejected.length} item(s) without a valid generic: ${rejected.join(', ')}. Re-select them from the generics catalogue.`
+      );
+    }
+    if (nextPrescriptions.length === 0) return;
 
     setPrescriptions((prev) => [...prev, ...nextPrescriptions]);
     toast.success(`${nextPrescriptions.length} medication(s) added to consultation`, {
@@ -3999,20 +3531,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     });
   };
 
-  const calculateQuantity = (frequency: string, durationDays: number, dosage: string | number = 1) => {
-    if (frequency === 'STAT (Single dose)') {
-      const dosageValue = typeof dosage === 'string' ? (parseFloat(dosage.replace(/[^\d.]/g, '')) || 1) : (dosage || 1);
-      return dosageValue;
-    }
-    const dailyDoses = frequencyToDailyDoses[frequency] || 1;
-    const dosageValue = typeof dosage === 'string' ? (parseFloat(dosage.replace(/[^\d.]/g, '')) || 1) : (dosage || 1);
-    return Math.ceil(dosageValue * dailyDoses * durationDays);
-  };
-
-  // CRITICAL: Only use real generics from API - do NOT use demo medications
-  // Demo medications have string IDs which cannot be used for prescriptions
-  const availableMedications = medications.length > 0 ? medications : [];
-  const filteredMedications = availableMedications;
   // Toggle lab template selection
   const toggleLabTemplateSelection = (template: any) => {
     const templateId = template.id;

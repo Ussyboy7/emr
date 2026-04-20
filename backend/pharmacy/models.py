@@ -13,7 +13,9 @@ class GenericMedication(models.Model):
     Variations in strength/form/route are distinct generics.
     """
 
-    name = models.CharField(max_length=200, db_index=True)
+    # `name` is indexed via Meta.indexes below; do not set db_index=True here
+    # as that would create a redundant second index on the same column.
+    name = models.CharField(max_length=200)
     active_ingredient = models.CharField(max_length=200, blank=True)
     category = models.CharField(max_length=100, blank=True, default="Other")
     strength = models.CharField(max_length=100, blank=True)
@@ -35,6 +37,17 @@ class GenericMedication(models.Model):
         indexes = [
             models.Index(fields=["name"]),
             models.Index(fields=["atc_code"]),
+        ]
+        constraints = [
+            # A generic row is uniquely identified by its molecule + physical
+            # presentation. Different strengths/forms/routes of the same drug
+            # (e.g. Paracetamol 500mg tablet vs Paracetamol 120mg/5ml syrup)
+            # are separate catalogue entries, but two rows with identical
+            # (name, strength, dosage_form, route) would be noise.
+            models.UniqueConstraint(
+                fields=["name", "strength", "dosage_form", "route"],
+                name="uniq_generic_name_strength_form_route",
+            ),
         ]
 
     def __str__(self):

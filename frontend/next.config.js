@@ -19,6 +19,9 @@ const contentSecurityPolicy = [
 
 const nextConfig = {
   reactStrictMode: true,
+  // Emit a self-contained server bundle so the production Docker image can
+  // drop full node_modules and run via `node server.js`.
+  output: "standalone",
   transpilePackages: [],
   /**
    * In dev, proxy same-origin `/api/*` to Django so a mis-set `NEXT_PUBLIC_API_URL`

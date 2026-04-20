@@ -410,14 +410,14 @@ EOF
 ### Step 5: Make Deployment Script Executable
 
 ```bash
-chmod +x /srv/emr/scripts/deploy-prod.sh
+chmod +x /srv/emr/scripts/production/deploy.sh
 ```
 
 ### Step 6: Run Deployment
 
 ```bash
 cd /srv/emr
-./scripts/deploy-prod.sh
+./scripts/production/deploy.sh
 ```
 
 Or manually:
@@ -547,8 +547,8 @@ git pull origin main  # or master
 # Rebuild and restart
 docker-compose -f docker-compose.prod.yml up -d --build
 
-# Or use deployment script
-./scripts/deploy-prod.sh
+# Or use deployment script (recommended — takes pre-deploy snapshot + rollback on failure)
+./scripts/production/deploy.sh
 ```
 
 ### Database Migrations
@@ -816,14 +816,14 @@ EOF
 ### Step 5: Make Deployment Script Executable
 
 ```bash
-chmod +x /srv/emr/scripts/deploy-stag.sh
+chmod +x /srv/emr/scripts/staging/deploy.sh
 ```
 
 ### Step 6: Run Staging Deployment
 
 ```bash
 cd /srv/emr
-./scripts/deploy-stag.sh
+./scripts/staging/deploy.sh
 ```
 
 Or manually:
@@ -936,8 +936,8 @@ git pull origin main  # or master
 # Rebuild and restart staging
 docker-compose -f docker-compose.stag.yml up -d --build
 
-# Or use deployment script
-./scripts/deploy-stag.sh
+# Or use deployment script (recommended — takes pre-deploy snapshot + rollback on failure)
+./scripts/staging/deploy.sh
 ```
 
 ## 🎉 Success Indicators
