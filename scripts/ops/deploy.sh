@@ -201,10 +201,9 @@ deploy_stack() {
 
 wait_healthy() {
     $DO_HEALTH || { ui_warning "Skipping health probe (--skip-health)"; return 0; }
-    # Probe **inside** the backend container (same as compose healthchecks). Curling
-    # the host IP / nginx from the shell often loops forever: firewall, wrong Host,
-    # IPv6 localhost, or ALLOWED_HOSTS edge cases — none of which mean Django is down.
-    ui_step "Waiting for backend liveness in ${STACK_BACKEND_CONTAINER} (http://127.0.0.1:8000/api/health/live/)"
+    # Prefer Docker health status. It is deterministic and already defined in
+    # compose for backend; avoids ambiguous host-level curl failures.
+    ui_step "Waiting for backend health (${STACK_BACKEND_CONTAINER})"
     ui_info "External URL for manual checks: ${STACK_HEALTH_URL}"
     local initial_sleep=8
     local attempts=24
@@ -212,18 +211,39 @@ wait_healthy() {
     sleep "$initial_sleep"
     local i
     for ((i = 1; i <= attempts; i++)); do
-        if docker exec "$STACK_BACKEND_CONTAINER" \
-            curl -sf --max-time 8 "http://127.0.0.1:8000/api/health/live/" >/dev/null 2>&1; then
-            ui_success "Backend liveness OK"
-            return 0
-        fi
         if ! docker ps --format '{{.Names}}' | grep -q "^${STACK_BACKEND_CONTAINER}$"; then
             ui_warning "Container ${STACK_BACKEND_CONTAINER} is not running yet (attempt ${i}/${attempts})"
+            echo "  attempt ${i}/${attempts}…"
+            sleep "$interval"
+            continue
         fi
+
+        local health
+        health=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$STACK_BACKEND_CONTAINER" 2>/dev/null || echo "missing")
+        case "$health" in
+            healthy)
+                ui_success "Backend health is healthy"
+                return 0
+                ;;
+            unhealthy)
+                ui_error "Backend container is unhealthy."
+                docker inspect -f '{{range .State.Health.Log}}{{println .End .ExitCode .Output}}{{end}}' "$STACK_BACKEND_CONTAINER" 2>/dev/null | tail -5 || true
+                docker logs --tail 60 "$STACK_BACKEND_CONTAINER" || true
+                return 1
+                ;;
+            none|missing)
+                # Fallback for environments without a Docker healthcheck.
+                if docker exec "$STACK_BACKEND_CONTAINER" \
+                    curl -sf --max-time 8 "http://127.0.0.1:8000/api/health/live/" >/dev/null 2>&1; then
+                    ui_success "Backend liveness OK (fallback curl)"
+                    return 0
+                fi
+                ;;
+        esac
         echo "  attempt ${i}/${attempts}…"
         sleep "$interval"
     done
-    ui_error "Backend did not respond in-container within ~$((initial_sleep + attempts * interval))s. Try: docker logs ${STACK_BACKEND_CONTAINER} — or redeploy with --skip-health if migrations are very slow."
+    ui_error "Backend did not become healthy within ~$((initial_sleep + attempts * interval))s. Try: docker inspect ${STACK_BACKEND_CONTAINER} --format '{{.State.Health.Status}}' and docker logs ${STACK_BACKEND_CONTAINER}."
     return 1
 }
 
