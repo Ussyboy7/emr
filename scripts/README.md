@@ -82,7 +82,9 @@ scripts/production/emergency.sh diagnostics
 | **Host IP** (default sanity check) | `172.16.0.32` | `172.16.0.46` |
 | **Default checkout (`DEPLOY_PATH`)** | `/home/emrprod/emr` | `/srv/emr` |
 | **Default pre-deploy SQL backups** | `$HOME/emr-predeploy-backups` | `/srv/emr/backups` |
-| **Default health probe** | `http://172.16.0.32/api/health/live/` (nginx :80) | `http://172.16.0.46:8047/api/health/live/` (backend published port) |
+| **Default health URL** (status / dashboard / docs) | `http://172.16.0.32/…` (via nginx) | `http://172.16.0.46:8047/…` (direct backend port) |
+
+`deploy.sh` does **not** rely on those URLs for its wait loop (host firewalls / `Host` / IPv6 break too easily). It runs `curl` **inside** `emr-backend-prod` / `emr-backend-stag` to `http://127.0.0.1:8000/api/health/live/` — the same idea as the compose `healthcheck`.
 
 Unset-only defaults live in `ops/deploy.sh` and `lib/stack-utils.sh`. Override with `DEPLOY_PATH`, `BACKUP_DIR`, `SERVER_IP`, or `STACK_HEALTH_URL_OVERRIDE` when your layout differs.
 
@@ -147,7 +149,7 @@ not have to `cd` into the repo first if defaults match your server:
 2. Pre-deploy DB snapshot (unless `--no-backup`)
 3. `git pull` (hard reset to `origin/<current-branch>`)
 4. `docker compose down` → `docker compose up -d --build`
-5. Wait for `/api/health/live/` to be healthy
+5. Wait for in-container `/api/health/live/` on `127.0.0.1:8000` (not host IP curl)
 6. On failure: automatic rollback to the pre-deploy snapshot (unless
    `--no-rollback`)
 

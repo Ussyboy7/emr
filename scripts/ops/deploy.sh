@@ -201,20 +201,29 @@ deploy_stack() {
 
 wait_healthy() {
     $DO_HEALTH || { ui_warning "Skipping health probe (--skip-health)"; return 0; }
-    ui_step "Waiting for backend at ${STACK_HEALTH_URL}"
-    # Gunicorn + nginx need a moment after `compose up`; Postgres health is not enough.
-    sleep 25
-    local attempts=36
-    for ((i=1; i<=attempts; i++)); do
-        # -4: prefer IPv4 (avoids broken ::1 / dual-stack on some hosts)
-        if curl -4sf --max-time 8 "$STACK_HEALTH_URL" >/dev/null; then
-            ui_success "Backend is healthy"
+    # Probe **inside** the backend container (same as compose healthchecks). Curling
+    # the host IP / nginx from the shell often loops forever: firewall, wrong Host,
+    # IPv6 localhost, or ALLOWED_HOSTS edge cases — none of which mean Django is down.
+    ui_step "Waiting for backend liveness in ${STACK_BACKEND_CONTAINER} (http://127.0.0.1:8000/api/health/live/)"
+    ui_info "External URL for manual checks: ${STACK_HEALTH_URL}"
+    local initial_sleep=8
+    local attempts=24
+    local interval=5
+    sleep "$initial_sleep"
+    local i
+    for ((i = 1; i <= attempts; i++)); do
+        if docker exec "$STACK_BACKEND_CONTAINER" \
+            curl -sf --max-time 8 "http://127.0.0.1:8000/api/health/live/" >/dev/null 2>&1; then
+            ui_success "Backend liveness OK"
             return 0
         fi
+        if ! docker ps --format '{{.Names}}' | grep -q "^${STACK_BACKEND_CONTAINER}$"; then
+            ui_warning "Container ${STACK_BACKEND_CONTAINER} is not running yet (attempt ${i}/${attempts})"
+        fi
         echo "  attempt ${i}/${attempts}…"
-        sleep 5
+        sleep "$interval"
     done
-    ui_error "Backend did not become healthy within ~$((25 + attempts * 5))s (see ${STACK_HEALTH_URL})"
+    ui_error "Backend did not respond in-container within ~$((initial_sleep + attempts * interval))s. Try: docker logs ${STACK_BACKEND_CONTAINER} — or redeploy with --skip-health if migrations are very slow."
     return 1
 }
 
