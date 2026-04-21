@@ -63,11 +63,14 @@ services:
       context: ./backend
       dockerfile: Dockerfile.prod
     container_name: emr-backend-prod
+    # Run the ASGI server (daphne) so WebSocket endpoints served by Django
+    # Channels (e.g. /ws/notifications/) work. gunicorn+wsgi was HTTP-only
+    # and caused client-side WS connects to fail with "connection failed".
     command: >
       sh -c "mkdir -p /app/logs &&
-             python manage.py migrate &&
+             python manage.py migrate --noinput &&
              python manage.py collectstatic --noinput &&
-             gunicorn --bind 0.0.0.0:8000 --workers 8 --threads 4 --timeout 120 --max-requests 1000 --max-requests-jitter 50 --access-logfile /app/logs/gunicorn-access.log --error-logfile /app/logs/gunicorn-error.log --log-level warning emr_backend.wsgi:application"
+             exec daphne -b 0.0.0.0 -p 8000 --access-log /app/logs/daphne-access.log emr_backend.asgi:application"
     env_file:
       - ./backend/env/prod.env
     volumes:
