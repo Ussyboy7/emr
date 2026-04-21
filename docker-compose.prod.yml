@@ -239,7 +239,7 @@ services:
     volumes:
       - ./backups:/backups
       - ./scripts/backup/docker_backup.sh:/usr/local/bin/docker_backup.sh:ro
-    command: sh -c "chmod +x /usr/local/bin/docker_backup.sh && while true; do /usr/local/bin/docker_backup.sh || echo 'backup failed'; sleep 86400; done"
+    command: sh -c "while true; do sh /usr/local/bin/docker_backup.sh || echo 'backup failed'; sleep 86400; done"
     depends_on:
       postgres:
         condition: service_healthy
