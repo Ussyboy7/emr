@@ -17,6 +17,7 @@ RUN apt-get update \
         libpq-dev \
         libpq5 \
         curl \
+        gosu \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt /tmp/requirements.txt
@@ -35,7 +36,12 @@ COPY --chown=app:app . .
 RUN mkdir -p /app/logs /app/staticfiles /app/media \
     && chown -R app:app /app
 
-USER app
+# Entrypoint runs as root, chowns the mount points that Docker may have
+# created root-owned (named volumes, bind mounts), then drops to `app` and
+# execs the command. See backend/docker-entrypoint.sh.
+COPY --chmod=0755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 
 # Collectstatic runs at container startup (see docker-compose.prod.yml) so
 # the image stays portable across deployments with different STATIC_ROOT

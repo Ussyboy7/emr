@@ -87,6 +87,7 @@ services:
       - static_files_stag:/app/staticfiles
       - media_files_stag:/app/media
       - ./logs/staging:/app/logs
+      - backups_stag:/backups
     ports:
       - "8047:8000"  # Matches frontend nginx port pattern (4647)
     depends_on:
