@@ -192,7 +192,7 @@ const menuSections: MenuSection[] = [
     basePath: "/physiotherapy",
     items: [
       { label: "Home", href: "/physiotherapy", icon: LayoutDashboard },
-      { label: "Pool Queue", href: "/physiotherapy/pool-queue", icon: Users },
+      { label: "Orders", href: "/physiotherapy/orders", icon: Users },
       { label: "Completed Sessions", href: "/physiotherapy/completed", icon: CheckCircle },
     ],
   },

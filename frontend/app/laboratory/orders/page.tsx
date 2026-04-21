@@ -710,7 +710,6 @@ export default function LabOrdersPage() {
     processing: 0,
     resultsReady: 0,
     reworkOrders: 0,
-    stat: 0,
   });
 
   // Dialog states
@@ -1076,7 +1075,6 @@ export default function LabOrdersPage() {
         processing: statsResponse.processing || 0,
         resultsReady: statsResponse.results_ready || 0,
         reworkOrders: statsResponse.rework_required || 0,
-        stat: statsResponse.stat || 0,
       });
     } catch (err: any) {
       let errorMessage = 'Unable to load lab orders. Please check your connection and try again.';
@@ -1656,7 +1654,7 @@ export default function LabOrdersPage() {
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-muted-foreground">Pending Orders</p>
+                  <p className="text-sm text-muted-foreground">Pending</p>
                   <p className="text-2xl sm:text-3xl font-bold text-gray-600 dark:text-gray-400">{stats.pendingSamples}</p>
                 </div>
                 <Beaker className="h-8 w-8 text-gray-400" />
@@ -1692,7 +1690,7 @@ export default function LabOrdersPage() {
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-muted-foreground">Orders with Results</p>
+                  <p className="text-sm text-muted-foreground">Results</p>
                   <p className="text-2xl sm:text-3xl font-bold text-amber-600 dark:text-amber-400">{stats.resultsReady}</p>
                 </div>
                 <FileText className="h-8 w-8 text-amber-400" />
@@ -1722,17 +1720,6 @@ export default function LabOrdersPage() {
                 <p className="text-xs">Orders with one or more rejected tests that need correction and resubmission</p>
               </TooltipContent>
             </Tooltip>
-          <Card className="border-l-4 border-l-rose-500">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">STAT Orders</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-rose-600 dark:text-rose-400">{stats.stat}</p>
-                </div>
-                <AlertTriangle className="h-8 w-8 text-rose-400" />
-              </div>
-            </CardContent>
-          </Card>
         </div>
 
         {/* Filters & Tabs */}

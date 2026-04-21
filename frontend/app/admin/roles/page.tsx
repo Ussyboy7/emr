@@ -111,7 +111,7 @@ const allPagePermissions: PagePermission[] = [
 
   // Physiotherapy
   { id: '/physiotherapy', name: 'Dashboard', description: 'Physiotherapy Dashboard', module: 'Physiotherapy' },
-  { id: '/physiotherapy/pool-queue', name: 'Pool Queue', description: 'Manage physiotherapy pool queue', module: 'Physiotherapy' },
+  { id: '/physiotherapy/orders', name: 'Orders', description: 'Manage physiotherapy orders', module: 'Physiotherapy' },
   { id: '/physiotherapy/completed', name: 'Completed Sessions', description: 'View completed sessions', module: 'Physiotherapy' },
 
   // Eye Clinic

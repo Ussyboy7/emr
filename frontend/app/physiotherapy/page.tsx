@@ -170,10 +170,10 @@ export default function PhysiotherapyPage() {
               <span className="text-xs sm:text-sm font-medium">Patient Progress</span>
               <span className="text-[10px] sm:text-xs text-muted-foreground">Track recovery progress</span>
             </Button>
-            <Button onClick={() => window.location.href = '/physiotherapy/pool-queue'} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-green-500/30 hover:bg-green-500/10 border-l-4 border-l-blue-500">
+            <Button onClick={() => window.location.href = '/physiotherapy/orders'} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-green-500/30 hover:bg-green-500/10 border-l-4 border-l-blue-500">
               <ClipboardList className="h-5 w-5 sm:h-6 sm:w-6 text-blue-500 dark:text-blue-400" />
-              <span className="text-xs sm:text-sm font-medium">Pool Queue</span>
-              <span className="text-[10px] sm:text-xs text-muted-foreground">Manage therapy pool</span>
+              <span className="text-xs sm:text-sm font-medium">Orders</span>
+              <span className="text-[10px] sm:text-xs text-muted-foreground">Manage physiotherapy orders</span>
             </Button>
             <Button onClick={() => window.location.href = '/physiotherapy/reports'} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-green-500/30 hover:bg-green-500/10 border-l-4 border-l-emerald-500">
               <Activity className="h-5 w-5 sm:h-6 sm:w-6 text-emerald-500 dark:text-emerald-400" />

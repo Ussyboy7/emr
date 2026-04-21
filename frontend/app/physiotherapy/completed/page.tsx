@@ -18,11 +18,13 @@ import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { PatientAvatar } from "@/components/shared/PatientAvatar";
 import { joinDisplayParts } from '@/lib/utils/clinic-utils';
+import { AdvancedDateRangeDialog } from '@/components/shared/AdvancedDateRangeDialog';
+import { CustomDateRangeButton } from '@/components/shared/CustomDateRangeButton';
 
 import {
   CheckCircle2, Search, Eye, Clock, Calendar, User,
-  FileText, TrendingUp, AlertTriangle, Loader2, Plus,
-  MessageSquare, Activity, Heart, Target, Lightbulb, RefreshCw,
+  FileText, TrendingUp, AlertTriangle, Loader2,
+  Activity, Heart, Target, Lightbulb, RefreshCw,
   Printer, Download, Pencil, ClipboardList
 } from 'lucide-react';
 
@@ -35,7 +37,8 @@ export default function PhysioCompletedPage() {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [dateFilter, setDateFilter] = useState('today');
-  const [physiotherapistFilter, setPhysiotherapistFilter] = useState('all');
+  const [isDateFilterDialogOpen, setIsDateFilterDialogOpen] = useState(false);
+  const [dateRange, setDateRange] = useState({ from: '', to: '' });
 
   // Pagination
   const [currentPage, setCurrentPage] = useState(1);
@@ -44,7 +47,6 @@ export default function PhysioCompletedPage() {
   // Dialogs
   const [selectedSession, setSelectedSession] = useState<PhysioSession | null>(null);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
-  const [isRecommendationDialogOpen, setIsRecommendationDialogOpen] = useState(false);
   const [isSessionReportOpen, setIsSessionReportOpen] = useState(false);
 
   // Session Report: all sessions for the same order (to switch Session 1, 2, 3...) and which one we're viewing
@@ -53,10 +55,6 @@ export default function PhysioCompletedPage() {
 
   // Hint when 0 completed: count of sessions with other statuses (in_progress, scheduled, etc.)
   const [otherStatusCount, setOtherStatusCount] = useState<number>(0);
-
-  // Recommendation form
-  const [recommendationText, setRecommendationText] = useState('');
-  const [recommendationType, setRecommendationType] = useState('general');
 
   // Edit Session
   const [isEditSessionDialogOpen, setIsEditSessionDialogOpen] = useState(false);
@@ -138,7 +136,7 @@ export default function PhysioCompletedPage() {
     } finally {
       setLoading(false);
     }
-  }, [currentPage, itemsPerPage, searchQuery, dateFilter, physiotherapistFilter]);
+  }, [currentPage, itemsPerPage, searchQuery, dateFilter]);
 
   useEffect(() => {
     loadSessions();
@@ -177,11 +175,40 @@ export default function PhysioCompletedPage() {
   }, [isSessionReportOpen, selectedSession?.id, selectedSession?.order]);
 
   const filteredSessions = useMemo(() => {
-    return sessions.filter(session => {
-      // Additional client-side filters if needed
+    return sessions.filter((session) => {
+      const completedDate = session.completed_at ? new Date(session.completed_at) : new Date(session.scheduled_at);
+      if (Number.isNaN(completedDate.getTime())) return false;
+
+      if (dateFilter !== 'all') {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        if (dateFilter === 'today' && completedDate.toDateString() !== today.toDateString()) return false;
+        if (dateFilter === 'week') {
+          const weekAgo = new Date(today);
+          weekAgo.setDate(weekAgo.getDate() - 7);
+          if (completedDate < weekAgo) return false;
+        }
+        if (dateFilter === 'month') {
+          const monthAgo = new Date(today);
+          monthAgo.setMonth(monthAgo.getMonth() - 1);
+          if (completedDate < monthAgo) return false;
+        }
+      }
+
+      if (dateRange.from || dateRange.to) {
+        if (dateRange.from) {
+          const from = new Date(`${dateRange.from}T00:00:00`);
+          if (completedDate < from) return false;
+        }
+        if (dateRange.to) {
+          const to = new Date(`${dateRange.to}T23:59:59.999`);
+          if (completedDate > to) return false;
+        }
+      }
+
       return true;
     });
-  }, [sessions]);
+  }, [sessions, dateFilter, dateRange.from, dateRange.to]);
 
   const paginatedSessions = useMemo(() => {
     const startIndex = (currentPage - 1) * itemsPerPage;
@@ -195,22 +222,6 @@ export default function PhysioCompletedPage() {
     if (improvement >= 1) return 'text-blue-600';
     if (improvement === 0) return 'text-yellow-600';
     return 'text-red-600';
-  };
-
-  const handleAddRecommendation = async () => {
-    if (!selectedSession || !recommendationText.trim()) return;
-
-    try {
-      await physioService.addRecommendation(selectedSession.id, recommendationText.trim(), recommendationType);
-      toast.success('Recommendation added successfully');
-      setIsRecommendationDialogOpen(false);
-      setSelectedSession(null);
-      setRecommendationText('');
-      setRecommendationType('general');
-      await loadSessions();
-    } catch (err: any) {
-      toast.error(err.message || 'Failed to add recommendation');
-    }
   };
 
   const openEdit = (session: PhysioSession) => {
@@ -306,23 +317,24 @@ export default function PhysioCompletedPage() {
     }
   };
 
-  const stats = useMemo(() => ({
-    total: sessions.length,
-    withRecommendations: sessions.filter(s => s.recommendations && s.recommendations.length > 0).length,
-    painReduction: sessions.filter(s => {
-      const before = s.pain_level_before;
-      const after = s.pain_level_after;
-      return before && after && before > after;
-    }).length,
-    avgImprovement: sessions.length > 0 ?
-      sessions.reduce((acc, s) => {
-        if (s.functional_improvement) {
-          // Simple heuristic: count words as improvement score
-          return acc + Math.min(s.functional_improvement.split(' ').length, 10);
-        }
-        return acc;
-      }, 0) / sessions.length : 0,
-  }), [sessions]);
+  const stats = useMemo(() => {
+    const now = new Date();
+    const weekStart = new Date(now);
+    weekStart.setDate(now.getDate() - 7);
+
+    return {
+      total: sessions.length,
+      uniquePatients: new Set(sessions.map((s) => s.patient_id).filter(Boolean)).size,
+      thisWeek: sessions.filter((s) => {
+        const at = s.completed_at ? new Date(s.completed_at) : (s.scheduled_at ? new Date(s.scheduled_at) : null);
+        return at ? at >= weekStart : false;
+      }).length,
+      thisMonth: sessions.filter((s) => {
+        const at = s.completed_at ? new Date(s.completed_at) : (s.scheduled_at ? new Date(s.scheduled_at) : null);
+        return at ? (at.getMonth() === now.getMonth() && at.getFullYear() === now.getFullYear()) : false;
+      }).length,
+    };
+  }, [sessions]);
 
   const reportSession = isSessionReportOpen ? (reportViewingSession || selectedSession) : null;
 
@@ -337,7 +349,7 @@ export default function PhysioCompletedPage() {
               <CheckCircle2 className="h-8 w-8 text-emerald-500" />
               Completed Sessions
             </h1>
-            <p className="text-muted-foreground mt-1">History of completed physiotherapy sessions</p>
+            <p className="text-muted-foreground mt-1">Completed physiotherapy session reports</p>
           </div>
           <Button variant="outline" onClick={loadSessions} disabled={loading}>
             {loading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Activity className="h-4 w-4 mr-2" />}
@@ -363,22 +375,22 @@ export default function PhysioCompletedPage() {
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-muted-foreground">With Recommendations</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-blue-600 dark:text-blue-400">{stats.withRecommendations}</p>
+                  <p className="text-sm text-muted-foreground">Unique Patients</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-blue-600 dark:text-blue-400">{stats.uniquePatients}</p>
                 </div>
-                <Lightbulb className="h-8 w-8 text-blue-500 opacity-50" />
+                <User className="h-8 w-8 text-blue-500 opacity-50" />
               </div>
             </CardContent>
           </Card>
 
-          <Card className="border-l-4 border-l-green-500">
+          <Card className="border-l-4 border-l-amber-500">
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-muted-foreground">Pain Reduction</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-green-600 dark:text-green-400">{stats.painReduction}</p>
+                  <p className="text-sm text-muted-foreground">This Week</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-amber-600 dark:text-amber-400">{stats.thisWeek}</p>
                 </div>
-                <Heart className="h-8 w-8 text-green-500 opacity-50" />
+                <Calendar className="h-8 w-8 text-amber-500 opacity-50" />
               </div>
             </CardContent>
           </Card>
@@ -387,10 +399,10 @@ export default function PhysioCompletedPage() {
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-muted-foreground">Avg Improvement</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-purple-600 dark:text-purple-400">{stats.avgImprovement.toFixed(1)}</p>
+                  <p className="text-sm text-muted-foreground">This Month</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-purple-600 dark:text-purple-400">{stats.thisMonth}</p>
                 </div>
-                <TrendingUp className="h-8 w-8 text-purple-500 opacity-50" />
+                <Calendar className="h-8 w-8 text-purple-500 opacity-50" />
               </div>
             </CardContent>
           </Card>
@@ -410,6 +422,7 @@ export default function PhysioCompletedPage() {
                 />
               </div>
               <div className="flex flex-wrap items-center gap-2">
+                  <CustomDateRangeButton onClick={() => setIsDateFilterDialogOpen(true)} />
                 <Select value={dateFilter} onValueChange={setDateFilter}>
                   <SelectTrigger className="w-[150px]"><SelectValue placeholder="Date Range" /></SelectTrigger>
                   <SelectContent>
@@ -419,16 +432,20 @@ export default function PhysioCompletedPage() {
                     <SelectItem value="month">This Month</SelectItem>
                   </SelectContent>
                 </Select>
-                <Select value={physiotherapistFilter} onValueChange={setPhysiotherapistFilter}>
-                  <SelectTrigger className="w-[180px]"><SelectValue placeholder="Physiotherapist" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Physiotherapists</SelectItem>
-                  </SelectContent>
-                </Select>
               </div>
             </div>
           </CardContent>
         </Card>
+
+          <AdvancedDateRangeDialog
+            open={isDateFilterDialogOpen}
+            onOpenChange={setIsDateFilterDialogOpen}
+            description="Apply a custom completed date range to narrow down physiotherapy sessions."
+            label="Completed Date Range"
+            value={dateRange}
+            onChange={setDateRange}
+            onClear={() => setDateRange({ from: '', to: '' })}
+          />
 
         {/* Sessions List */}
         <div className="space-y-3">
@@ -454,11 +471,11 @@ export default function PhysioCompletedPage() {
                 <p>No completed physiotherapy sessions found</p>
                 {otherStatusCount > 0 ? (
                   <p className="text-sm max-w-md mx-auto">
-                    You have <strong>{otherStatusCount}</strong> session{otherStatusCount !== 1 ? 's' : ''} that {otherStatusCount !== 1 ? 'are' : 'is'} not completed yet. To see them here: <strong>Physiotherapy → Pool Queue</strong> → open the order → green <strong>Complete Session</strong> button → fill and submit the Complete Session form. Sessions only appear here after that step.
+                    You have <strong>{otherStatusCount}</strong> session{otherStatusCount !== 1 ? 's' : ''} that {otherStatusCount !== 1 ? 'are' : 'is'} not completed yet. To see them here: <strong>Physiotherapy → Orders</strong> → open the order → green <strong>Complete Session</strong> button → fill and submit the Complete Session form. Sessions only appear here after that step.
                   </p>
                 ) : (
                   <p className="text-sm max-w-md mx-auto">
-                    Complete sessions from <strong>Physiotherapy → Pool Queue</strong>: open an order → green <strong>Complete Session</strong> button → submit the Complete Session form.
+                    Complete sessions from <strong>Physiotherapy → Orders</strong>: open an order → green <strong>Complete Session</strong> button → submit the Complete Session form.
                   </p>
                 )}
               </CardContent>
@@ -531,16 +548,6 @@ export default function PhysioCompletedPage() {
                               </TooltipTrigger>
                               <TooltipContent>
                                 <p>Edit Session</p>
-                              </TooltipContent>
-                            </Tooltip>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Button variant="ghost" size="sm" className="h-8 w-8 p-0 hover:bg-muted" onClick={() => { setSelectedSession(session); setIsRecommendationDialogOpen(true); }}>
-                                  <Plus className="h-4 w-4 text-muted-foreground hover:text-purple-600" />
-                                </Button>
-                              </TooltipTrigger>
-                              <TooltipContent>
-                                <p>Add Recommendation</p>
                               </TooltipContent>
                             </Tooltip>
                           </div>
@@ -828,39 +835,6 @@ export default function PhysioCompletedPage() {
               </DialogDescription>
             </DialogHeader>
 
-            {/* Session switcher: Session 1, 2, 3... for the same order */}
-            {orderSessionsForReport.length > 1 && (
-              <div className="flex items-center gap-2 print:hidden">
-                <Label className="text-sm font-medium">View</Label>
-                <Select
-                  value={String(reportSession?.id ?? '')}
-                  onValueChange={(v) => {
-                    const s = orderSessionsForReport.find((x) => x.id === Number(v));
-                    if (s) setReportViewingSession(s);
-                  }}
-                >
-                  <SelectTrigger className="w-[180px]">
-                    <SelectValue placeholder="Select session" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {orderSessionsForReport.map((s, idx) => (
-                      <SelectItem key={s.id ?? `s-${idx}`} value={String(s.id ?? '')}>
-                        {joinDisplayParts([
-                          s.session_number != null ? `Session ${s.session_number}` : '',
-                          s.scheduled_at
-                            ? new Date(s.scheduled_at).toLocaleString()
-                            : s.id != null
-                              ? `PHY-${String(s.id).padStart(6, '0')}`
-                              : '',
-                          s.status?.replace('_', ' '),
-                        ])}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-
             {reportSession && (
               <div className="space-y-6">
                 {/* Report Header */}
@@ -1136,59 +1110,6 @@ export default function PhysioCompletedPage() {
                 </div>
               </div>
             )}
-          </DialogContent>
-        </Dialog>
-
-        {/* Add Recommendation Dialog */}
-        <Dialog open={isRecommendationDialogOpen} onOpenChange={setIsRecommendationDialogOpen}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                <Lightbulb className="h-5 w-5 text-blue-500" />
-                Add Recommendation
-              </DialogTitle>
-              <DialogDescription>
-                Add a recommendation for {selectedSession?.patient_name}'s continued treatment
-              </DialogDescription>
-            </DialogHeader>
-
-            <div className="space-y-4">
-              <div>
-                <Label>Recommendation Type</Label>
-                <Select value={recommendationType} onValueChange={setRecommendationType}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="general">General</SelectItem>
-                    <SelectItem value="exercise">Exercise</SelectItem>
-                    <SelectItem value="lifestyle">Lifestyle</SelectItem>
-                    <SelectItem value="follow_up">Follow-up</SelectItem>
-                    <SelectItem value="referral">Referral</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div>
-                <Label>Recommendation Details</Label>
-                <Textarea
-                  value={recommendationText}
-                  onChange={(e) => setRecommendationText(e.target.value)}
-                  placeholder="Enter recommendation details..."
-                  rows={4}
-                />
-              </div>
-            </div>
-
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setIsRecommendationDialogOpen(false)}>
-                Cancel
-              </Button>
-              <Button onClick={handleAddRecommendation} disabled={!recommendationText.trim()}>
-                <Plus className="h-4 w-4 mr-2" />
-                Add Recommendation
-              </Button>
-            </DialogFooter>
           </DialogContent>
         </Dialog>
 

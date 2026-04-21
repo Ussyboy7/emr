@@ -23,11 +23,12 @@ import { apiFetch } from '@/lib/api-client';
 import { AdvancedDateRangeDialog } from '@/components/shared/AdvancedDateRangeDialog';
 import { CustomDateRangeButton } from '@/components/shared/CustomDateRangeButton';
 import { joinDisplayParts } from '@/lib/utils/clinic-utils';
+import { getOrganizationHeader } from '@/lib/constants/organization';
 
 import {
   Users, Search, Stethoscope, Calendar, Clock, CheckCircle, CheckCircle2,
   Eye, Play, AlertTriangle, Loader2, Activity, RefreshCw, XCircle,
-  FileText, Target, ClipboardList, Plus, User, Lightbulb, Heart, Pencil
+  FileText, Target, ClipboardList, Plus, User, Lightbulb, Heart, Pencil, Download, Printer
 } from 'lucide-react';
 
 // Helper function to format relative time
@@ -71,7 +72,6 @@ export default function PhysioPoolQueuePage() {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState('pending');
-  const [referralSourceFilter, setReferralSourceFilter] = useState<string>('all');
   const [dateFilter, setDateFilter] = useState('today');
   const [isDateFilterDialogOpen, setIsDateFilterDialogOpen] = useState(false);
   const [dateRange, setDateRange] = useState({ from: '', to: '' });
@@ -84,17 +84,19 @@ export default function PhysioPoolQueuePage() {
   // Dialogs
   const [selectedOrder, setSelectedOrder] = useState<PhysioOrder | null>(null);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
-  const [isScheduleDialogOpen, setIsScheduleDialogOpen] = useState(false);
   const [isStartSessionDialogOpen, setIsStartSessionDialogOpen] = useState(false);
-  const [isScheduleNextDialogOpen, setIsScheduleNextDialogOpen] = useState(false);
-  const [isExtendTreatmentDialogOpen, setIsExtendTreatmentDialogOpen] = useState(false);
-  const [isNewTreatmentDialogOpen, setIsNewTreatmentDialogOpen] = useState(false);
   const [isCompleteSessionDialogOpen, setIsCompleteSessionDialogOpen] = useState(false);
   const [isContinueSessionDialogOpen, setIsContinueSessionDialogOpen] = useState(false);
   const [currentSession, setCurrentSession] = useState<any>(null);
   const [orderSessionsList, setOrderSessionsList] = useState<PhysioSession[]>([]);
   const [isEditSessionDialogOpen, setIsEditSessionDialogOpen] = useState(false);
   const [editingSession, setEditingSession] = useState<PhysioSession | null>(null);
+  const [isSessionReportOpen, setIsSessionReportOpen] = useState(false);
+  const [reportViewingSession, setReportViewingSession] = useState<PhysioSession | null>(null);
+  const [isCancelOrderDialogOpen, setIsCancelOrderDialogOpen] = useState(false);
+  const [cancelReason, setCancelReason] = useState('');
+  const [cancelNotes, setCancelNotes] = useState('');
+  const [cancelActiveSessions, setCancelActiveSessions] = useState<'yes' | 'no'>('no');
   const [isEditSaving, setIsEditSaving] = useState(false);
   const [editSessionData, setEditSessionData] = useState({
     presenting_complaint: '', pain_level_before: null as number | null, pain_level_after: null as number | null,
@@ -104,18 +106,6 @@ export default function PhysioPoolQueuePage() {
     assessment_findings: '', diagnosis_impression: '', prognosis: '', clinical_reasoning: '',
     treatment_performed: '', exercises_prescribed: [] as string[], equipment_used: [] as any[],
     patient_education: '', next_session_plan: '', session_notes: '', progress_notes: '', recommendations: [] as any[], follow_up_instructions: '',
-  });
-
-  // Extend treatment form
-  const [additionalSessions, setAdditionalSessions] = useState(1);
-
-  // New treatment form
-  const [newTreatmentData, setNewTreatmentData] = useState({
-    diagnosis: '',
-    chiefComplaint: '',
-    treatmentGoal: '',
-    specialInstructions: '',
-    totalSessions: 3
   });
 
   // Session completion form
@@ -131,8 +121,6 @@ export default function PhysioPoolQueuePage() {
   });
 
   // Form states
-  const [scheduledAt, setScheduledAt] = useState('');
-  const [sessionNotes, setSessionNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Comprehensive session data
@@ -190,9 +178,6 @@ export default function PhysioPoolQueuePage() {
       // Note: searchQuery, dateFilter not yet implemented in backend
 
       if (searchQuery) params.search = searchQuery;
-      if (referralSourceFilter && referralSourceFilter !== 'all') {
-        (params as any).referral_source = referralSourceFilter;
-      }
 
       const response = await physioService.getOrders(params);
       setTotalCount(response.count);
@@ -210,7 +195,7 @@ export default function PhysioPoolQueuePage() {
         setLoading(false);
       }
     }
-  }, [currentPage, itemsPerPage, searchQuery, dateFilter, referralSourceFilter]);
+  }, [currentPage, itemsPerPage, searchQuery, dateFilter]);
 
   useEffect(() => {
     loadOrders();
@@ -220,22 +205,14 @@ export default function PhysioPoolQueuePage() {
     () =>
       isDateFilterDialogOpen ||
       isViewDialogOpen ||
-      isScheduleDialogOpen ||
       isStartSessionDialogOpen ||
-      isScheduleNextDialogOpen ||
-      isExtendTreatmentDialogOpen ||
-      isNewTreatmentDialogOpen ||
       isCompleteSessionDialogOpen ||
       isContinueSessionDialogOpen ||
       isEditSessionDialogOpen,
     [
       isDateFilterDialogOpen,
       isViewDialogOpen,
-      isScheduleDialogOpen,
       isStartSessionDialogOpen,
-      isScheduleNextDialogOpen,
-      isExtendTreatmentDialogOpen,
-      isNewTreatmentDialogOpen,
       isCompleteSessionDialogOpen,
       isContinueSessionDialogOpen,
       isEditSessionDialogOpen,
@@ -299,6 +276,110 @@ export default function PhysioPoolQueuePage() {
     setIsEditSessionDialogOpen(true);
   };
 
+  const openSessionReport = (session: PhysioSession) => {
+    setReportViewingSession(session);
+    setIsSessionReportOpen(true);
+  };
+
+  const handlePrintSessionReport = () => {
+    window.print();
+  };
+
+  const handleDownloadSessionReport = () => {
+    window.print();
+    toast.success('Use Save as PDF in the print dialog to download.');
+  };
+
+  const getLatestInProgressSession = (sessions: PhysioSession[]) =>
+    [...sessions]
+      .filter((s) => s.status === 'in_progress')
+      .sort((a, b) => (b.session_number ?? 0) - (a.session_number ?? 0))[0] ?? null;
+
+  const getLatestUncompletedSession = (sessions: PhysioSession[]) =>
+    [...sessions]
+      .filter((s) => s.status !== 'completed' && s.status !== 'cancelled')
+      .sort((a, b) => (b.session_number ?? 0) - (a.session_number ?? 0))[0] ?? null;
+
+  const startNextSessionForOrder = async (order: PhysioOrder) => {
+    if (!physioId) {
+      toast.error('Unable to identify physiotherapist. Please re-login and try again.');
+      return;
+    }
+    await loadPatientVitals(order.patient);
+    const existingSessions = await physioService.getSessions({ order: order.id });
+    const blockingSession = getLatestUncompletedSession(existingSessions.results || []);
+    if (blockingSession) {
+      toast.error(`Complete Session ${blockingSession.session_number ?? ''} before starting a new session.`);
+      openEditSession(blockingSession);
+      return;
+    }
+    const nextSessionNumber = (existingSessions.results?.length)
+      ? Math.max(...existingSessions.results.map((s: any) => s.session_number || 0)) + 1
+      : 1;
+
+    const sessionPayload = {
+      order: order.id,
+      physiotherapist: physioId,
+      session_number: nextSessionNumber,
+      scheduled_at: new Date().toISOString(),
+      status: 'in_progress',
+    };
+    const createdSession = await physioService.createSession(sessionPayload as any);
+    await physioService.updateOrder(order.id, { status: 'in_progress' });
+    toast.success(`Session ${nextSessionNumber} started`);
+
+    const lastCompleted = (existingSessions.results || [])
+      .filter((s: any) => s.status === 'completed')
+      .sort((a: any, b: any) => (b.id || 0) - (a.id || 0))[0];
+
+    const baseData = {
+      presenting_complaint: '',
+      pain_level_before: null,
+      medical_history: '',
+      surgical_history: '',
+      medications: '',
+      allergies: '',
+      social_history: '',
+      previous_treatments: '',
+      posture_gait: '',
+      range_of_motion: '',
+      muscle_strength: '',
+      sensation: '',
+      reflexes: '',
+      balance_coordination: '',
+      special_tests: '',
+      functional_assessment: '',
+      assistive_devices: '',
+      functional_goals: '',
+      functional_limitations: '',
+      assessment_findings: '',
+      diagnosis_impression: '',
+      prognosis: '',
+      clinical_reasoning: '',
+      treatment_performed: '',
+      exercises_prescribed: [] as string[],
+      equipment_used: [] as string[],
+      patient_education: '',
+      next_session_plan: '',
+      session_notes: '',
+      progress_notes: '',
+      recommendations: [] as any[],
+      follow_up_instructions: '',
+      home_exercises: [] as any[]
+    };
+    if (lastCompleted) {
+      baseData.presenting_complaint = lastCompleted.presenting_complaint || '';
+      baseData.medical_history = lastCompleted.medical_history || '';
+      baseData.functional_goals = lastCompleted.functional_goals || '';
+      baseData.diagnosis_impression = lastCompleted.diagnosis_impression || '';
+      baseData.clinical_reasoning = lastCompleted.clinical_reasoning || '';
+    }
+    (setSessionData as any)(baseData);
+    setCurrentSession(createdSession);
+    setIsStartSessionDialogOpen(true);
+    setIsViewDialogOpen(false);
+  };
+
   const handleEditSessionSave = async () => {
     if (!editingSession) return;
     setIsEditSaving(true);
@@ -323,6 +404,112 @@ export default function PhysioPoolQueuePage() {
       toast.error(err.message || 'Failed to update session');
     } finally {
       setIsEditSaving(false);
+    }
+  };
+
+  const handleEditSessionSaveAndEnd = async () => {
+    if (!editingSession || !selectedOrder) return;
+    setIsEditSaving(true);
+    try {
+      await physioService.updateSession(editingSession.id, {
+        presenting_complaint: editSessionData.presenting_complaint,
+        pain_level_before: editSessionData.pain_level_before ?? undefined,
+        pain_level_after: editSessionData.pain_level_after ?? undefined,
+        medical_history: editSessionData.medical_history,
+        surgical_history: editSessionData.surgical_history,
+        medications: editSessionData.medications,
+        allergies: editSessionData.allergies,
+        social_history: editSessionData.social_history,
+        previous_treatments: editSessionData.previous_treatments,
+        posture_gait: editSessionData.posture_gait,
+        range_of_motion: editSessionData.range_of_motion,
+        muscle_strength: editSessionData.muscle_strength,
+        sensation: editSessionData.sensation,
+        reflexes: editSessionData.reflexes,
+        balance_coordination: editSessionData.balance_coordination,
+        special_tests: editSessionData.special_tests,
+        functional_assessment: editSessionData.functional_assessment,
+        assistive_devices: editSessionData.assistive_devices,
+        functional_goals: editSessionData.functional_goals,
+        functional_limitations: editSessionData.functional_limitations,
+        assessment_findings: editSessionData.assessment_findings,
+        diagnosis_impression: editSessionData.diagnosis_impression,
+        prognosis: editSessionData.prognosis,
+        clinical_reasoning: editSessionData.clinical_reasoning,
+        treatment_performed: editSessionData.treatment_performed,
+        exercises_prescribed: editSessionData.exercises_prescribed.map((d) => ({ description: d })),
+        equipment_used: editSessionData.equipment_used,
+        patient_education: editSessionData.patient_education,
+        next_session_plan: editSessionData.next_session_plan,
+        session_notes: editSessionData.session_notes,
+        progress_notes: editSessionData.progress_notes,
+        recommendations: editSessionData.recommendations,
+        follow_up_instructions: editSessionData.follow_up_instructions,
+      });
+      await handleCompleteIndividualSession(editingSession.id, {
+        treatment_performed: editSessionData.treatment_performed,
+        pain_level_after: editSessionData.pain_level_after,
+        progress_notes: editSessionData.progress_notes,
+        exercises_prescribed: editSessionData.exercises_prescribed,
+        home_exercises: editSessionData.exercises_prescribed.map((description) => ({ description })),
+        next_session_plan: editSessionData.next_session_plan,
+        recommendations: editSessionData.recommendations,
+        follow_up_instructions: editSessionData.follow_up_instructions,
+      });
+      setIsEditSessionDialogOpen(false);
+      setEditingSession(null);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to save and end session');
+    } finally {
+      setIsEditSaving(false);
+    }
+  };
+
+  const handleCancelOrder = async () => {
+    if (!selectedOrder || !cancelReason) return;
+    setIsSubmitting(true);
+    try {
+      const sessionsResponse = await physioService.getSessions({ order: selectedOrder.id });
+      const openSessions = (sessionsResponse.results || []).filter(
+        (s: any) => s.status !== 'completed' && s.status !== 'cancelled'
+      );
+
+      if (openSessions.length > 0 && cancelActiveSessions !== 'yes') {
+        toast.error('This order has active/open sessions. Choose to cancel active sessions first.');
+        setIsSubmitting(false);
+        return;
+      }
+
+      if (openSessions.length > 0 && cancelActiveSessions === 'yes') {
+        for (const s of openSessions) {
+          await physioService.updateSession(s.id, {
+            status: 'cancelled',
+            session_notes: joinDisplayParts([s.session_notes || '', `Order cancelled: ${cancelReason}`, cancelNotes]).trim(),
+          });
+        }
+      }
+
+      await physioService.updateOrder(selectedOrder.id, {
+        status: 'cancelled',
+        special_instructions: joinDisplayParts([
+          selectedOrder.special_instructions || '',
+          `Cancellation reason: ${cancelReason}`,
+          cancelNotes,
+        ]).trim(),
+      } as any);
+
+      toast.success('Order cancelled successfully');
+      setIsCancelOrderDialogOpen(false);
+      setIsViewDialogOpen(false);
+      setCancelReason('');
+      setCancelNotes('');
+      setCancelActiveSessions('no');
+      setSelectedOrder(null);
+      await loadOrders();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to cancel order');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -388,7 +575,6 @@ export default function PhysioPoolQueuePage() {
       // Tab filtering
       if (activeTab === 'all') return matchesSearch;
       if (activeTab === 'pending') return matchesSearch && order.status === 'pending';
-      if (activeTab === 'scheduled') return matchesSearch && order.status === 'scheduled';
       if (activeTab === 'in_progress') return matchesSearch && order.status === 'in_progress';
       if (activeTab === 'cancelled') return matchesSearch && order.status === 'cancelled';
       if (activeTab === 'completed') return matchesSearch && order.status === 'completed';
@@ -397,32 +583,17 @@ export default function PhysioPoolQueuePage() {
   };
 
   const filteredOrders = getFilteredOrders();
+  const activeUncompletedSession = useMemo(
+    () => getLatestUncompletedSession(orderSessionsList),
+    [orderSessionsList]
+  );
 
   const stats = useMemo(() => ({
     pending: orders.filter(o => o.status === 'pending').length,
-    scheduled: orders.filter(o => o.status === 'scheduled').length,
     inProgress: orders.filter(o => o.status === 'in_progress').length,
     cancelled: orders.filter(o => o.status === 'cancelled').length,
     completed: orders.filter(o => o.status === 'completed').length,
   }), [orders]);
-
-  const handleScheduleOrder = async () => {
-    if (!selectedOrder || !scheduledAt) return;
-    setIsSubmitting(true);
-
-    try {
-      await physioService.scheduleOrder(selectedOrder.id, scheduledAt);
-      toast.success('Order scheduled successfully');
-      setIsScheduleDialogOpen(false);
-      setSelectedOrder(null);
-      setScheduledAt('');
-      await loadOrders();
-    } catch (err: any) {
-      toast.error(err.message || 'Failed to schedule order');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
 
   const handleStartSession = async () => {
     if (!selectedOrder) return;
@@ -617,7 +788,7 @@ export default function PhysioPoolQueuePage() {
     }
   };
 
-  const handleCompleteOrder = async (order: PhysioOrder) => {
+  const handleEndTreatment = async (order: PhysioOrder) => {
     setIsSubmitting(true);
     try {
       // First, get sessions for this order and complete them
@@ -636,12 +807,12 @@ export default function PhysioPoolQueuePage() {
         status: 'completed',
         completed_at: new Date().toISOString()
       });
-      toast.success('Treatment plan completed successfully');
+      toast.success('Treatment ended successfully');
       setIsViewDialogOpen(false);
       setSelectedOrder(null);
       await loadOrders();
     } catch (err: any) {
-      toast.error(err.message || 'Failed to complete treatment plan');
+      toast.error(err.message || 'Failed to end treatment');
     } finally {
       setIsSubmitting(false);
     }
@@ -683,7 +854,7 @@ export default function PhysioPoolQueuePage() {
         sessions_completed: completedCount
       });
 
-      // No longer auto-creating next session. Use "Continue Session" or "Schedule Next" when more sessions are needed.
+      // No longer auto-creating next session. Use Continue Session/Add Session when more sessions are needed.
 
       toast.success('Session completed successfully');
       setIsViewDialogOpen(false);
@@ -691,90 +862,6 @@ export default function PhysioPoolQueuePage() {
       await loadOrders();
     } catch (err: any) {
       toast.error(err.message || 'Failed to complete session');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleScheduleNextSession = async () => {
-    if (!selectedOrder || !scheduledAt) return;
-    if (!physioId) {
-      toast.error('Unable to identify physiotherapist. Please re-login and try again.');
-      return;
-    }
-    setIsSubmitting(true);
-
-    try {
-      await physioService.createNextSession(selectedOrder.id, scheduledAt, physioId, sessionNotes);
-      toast.success('Next session scheduled successfully');
-      setIsScheduleNextDialogOpen(false);
-      setSelectedOrder(null);
-      setScheduledAt('');
-      setSessionNotes('');
-      await loadOrders();
-    } catch (err: any) {
-      toast.error(err.message || 'Failed to schedule next session');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleExtendTreatment = async () => {
-    if (!selectedOrder || !additionalSessions) return;
-    setIsSubmitting(true);
-
-    try {
-      // Note: total_sessions field was removed from backend
-      // Extension functionality is now unlimited - no total limit
-      console.log(`Extending treatment by ${additionalSessions} sessions`);
-
-      // If clinical notes provided, add them as a recommendation/note
-      if (sessionNotes.trim()) {
-        // Note: This would need a new endpoint or we could store this in session notes
-        // For now, we'll just update the order
-      }
-
-      toast.success(`Treatment extended by ${additionalSessions} sessions`);
-      setIsExtendTreatmentDialogOpen(false);
-      setSelectedOrder(null);
-      setAdditionalSessions(1);
-      setSessionNotes('');
-      await loadOrders();
-    } catch (err: any) {
-      toast.error(err.message || 'Failed to extend treatment');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleCreateNewTreatment = async () => {
-    if (!selectedOrder || !newTreatmentData.diagnosis.trim()) return;
-    setIsSubmitting(true);
-
-    try {
-      await physioService.createOrder({
-        patient: selectedOrder.patient,
-        diagnosis: newTreatmentData.diagnosis,
-        chief_complaint: newTreatmentData.chiefComplaint,
-        treatment_goal: newTreatmentData.treatmentGoal,
-        special_instructions: newTreatmentData.specialInstructions,
-        priority: 'routine', // Default priority for physio-initiated treatments
-        referral_source: 'self',
-      } as any);
-
-      toast.success('New physio order created successfully');
-      setIsNewTreatmentDialogOpen(false);
-      setSelectedOrder(null);
-      setNewTreatmentData({
-        diagnosis: '',
-        chiefComplaint: '',
-        treatmentGoal: '',
-        specialInstructions: '',
-        totalSessions: 3
-      });
-      await loadOrders();
-    } catch (err: any) {
-      toast.error(err.message || 'Failed to create new treatment course');
     } finally {
       setIsSubmitting(false);
     }
@@ -865,23 +952,6 @@ export default function PhysioPoolQueuePage() {
                                 <p>Manage Order</p>
                               </TooltipContent>
                             </Tooltip>
-                            {(order.status === 'completed' || order.status === 'in_progress') && (
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-8 w-8 p-0 hover:bg-muted"
-                                    onClick={(e) => { e.stopPropagation(); setSelectedOrder(order); setIsExtendTreatmentDialogOpen(true); }}
-                                  >
-                                    <Plus className="h-4 w-4 text-muted-foreground hover:text-green-600" />
-                                  </Button>
-                                </TooltipTrigger>
-                                <TooltipContent>
-                                  <p>Extend Treatment</p>
-                                </TooltipContent>
-                              </Tooltip>
-                            )}
                           </div>
               </div>
 
@@ -915,7 +985,7 @@ export default function PhysioPoolQueuePage() {
                 <Activity className="h-8 w-8 text-blue-500" />
                 Physio Orders
               </h1>
-              <p className="text-muted-foreground mt-1">Process orders, schedule sessions, and manage treatment courses. Physiotherapists can extend treatments or start new courses as clinically indicated.</p>
+              <p className="text-muted-foreground mt-1">Process orders, document sessions, and manage ongoing physiotherapy treatment flow.</p>
             </div>
           </div>
 
@@ -927,7 +997,7 @@ export default function PhysioPoolQueuePage() {
                   <CardContent className="p-4">
                     <div className="flex items-center justify-between">
                       <div>
-                        <p className="text-sm text-muted-foreground">Pending Orders</p>
+                        <p className="text-sm text-muted-foreground">Pending</p>
                         <p className="text-2xl sm:text-3xl font-bold text-yellow-600 dark:text-yellow-400">{stats.pending}</p>
                       </div>
                       <Clock className="h-8 w-8 text-yellow-400" />
@@ -936,26 +1006,7 @@ export default function PhysioPoolQueuePage() {
                 </Card>
               </TooltipTrigger>
               <TooltipContent>
-                <p className="text-xs">Orders waiting to be scheduled</p>
-              </TooltipContent>
-            </Tooltip>
-
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Card className="border-l-4 border-l-blue-500 cursor-pointer hover:shadow-md" onClick={() => setActiveTab('scheduled')}>
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-muted-foreground">Scheduled</p>
-                        <p className="text-2xl sm:text-3xl font-bold text-blue-600 dark:text-blue-400">{stats.scheduled}</p>
-                      </div>
-                      <Calendar className="h-8 w-8 text-blue-400" />
-                    </div>
-                  </CardContent>
-                </Card>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p className="text-xs">Orders with scheduled appointments</p>
+                <p className="text-xs">New referrals awaiting first session</p>
               </TooltipContent>
             </Tooltip>
 
@@ -1024,39 +1075,31 @@ export default function PhysioPoolQueuePage() {
                 <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
                   <TabsList>
                     <TabsTrigger value="pending">Pending ({stats.pending})</TabsTrigger>
-                    <TabsTrigger value="scheduled">Scheduled ({stats.scheduled})</TabsTrigger>
                     <TabsTrigger value="in_progress">In Progress ({stats.inProgress})</TabsTrigger>
                     <TabsTrigger value="cancelled">Cancelled ({stats.cancelled})</TabsTrigger>
                     <TabsTrigger value="completed">Completed ({stats.completed})</TabsTrigger>
                     <TabsTrigger value="all">All</TabsTrigger>
                   </TabsList>
                 </Tabs>
-                <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-3">
-                  <div className="relative flex-1 min-w-[min(100%,16rem)]">
+                <div className="flex flex-col lg:flex-row lg:items-center gap-3">
+                  <div className="relative flex-1 min-w-0">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <Input
-                      placeholder="Search orders..."
+                      placeholder="Patient, order ID, Physio ID (e.g. PHY-000002)…"
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
                       className="pl-10"
                     />
                   </div>
-                  <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-2 lg:flex-none">
                     <CustomDateRangeButton onClick={() => setIsDateFilterDialogOpen(true)} />
                     <Select value={dateFilter} onValueChange={setDateFilter}>
-                      <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
+                      <SelectTrigger className="w-full sm:w-[120px]"><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="all">All Time</SelectItem>
                         <SelectItem value="today">Today</SelectItem>
                         <SelectItem value="week">This Week</SelectItem>
                         <SelectItem value="month">This Month</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <Select value={referralSourceFilter} onValueChange={setReferralSourceFilter}>
-                      <SelectTrigger className="w-[min(100%,200px)]"><SelectValue placeholder="Referral" /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">All referrals</SelectItem>
-                        <SelectItem value="nursing">Nursing referrals</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -1201,7 +1244,7 @@ export default function PhysioPoolQueuePage() {
                   </div>
 
                   {/* Active Sessions */}
-                  {selectedOrder.status === 'in_progress' && (
+                  {selectedOrder.status === 'in_progress' && activeUncompletedSession && (
                     <div className="space-y-3">
                       <Label className="text-sm text-muted-foreground flex items-center gap-1">
                         <Activity className="h-3.5 w-3.5" />
@@ -1209,11 +1252,11 @@ export default function PhysioPoolQueuePage() {
                       </Label>
                       <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-md p-3">
                         <p className="text-sm text-blue-700 dark:text-blue-300">
-                          <strong>Session {selectedOrder.sessions_completed ? selectedOrder.sessions_completed + 1 : 1}</strong> is currently active.
+                          <strong>Session {activeUncompletedSession.session_number ?? 'N/A'}</strong> is currently active.
                         </p>
                         <div className="mt-2 text-xs space-y-1">
-                          <p>• Click "Continue Session" to record treatment activities in real-time</p>
-                          <p>• Click "Complete Current Session" when treatment is finished</p>
+                          <p>• Click "Continue Session" to open the current uncompleted session</p>
+                          <p>• Click "End session" when treatment for this session is finished</p>
                         </div>
                       </div>
                     </div>
@@ -1230,7 +1273,7 @@ export default function PhysioPoolQueuePage() {
                       {selectedOrder.scheduled_at && (
                         <div className="flex items-center gap-1">
                           <div className="h-2 w-2 rounded-full bg-amber-500"></div>
-                          <span>Scheduled: {new Date(selectedOrder.scheduled_at).toLocaleString()}</span>
+                          <span>Session started: {new Date(selectedOrder.scheduled_at).toLocaleString()}</span>
                         </div>
                       )}
                       {selectedOrder.completed_at && (
@@ -1250,10 +1293,36 @@ export default function PhysioPoolQueuePage() {
                   {/* Sessions list with Edit */}
                   {orderSessionsList.length > 0 && (
                     <div className="space-y-3">
-                      <Label className="text-sm text-muted-foreground flex items-center gap-1">
-                        <FileText className="h-3.5 w-3.5" />
-                        Sessions ({orderSessionsList.length})
-                      </Label>
+                      <div className="flex items-center justify-between">
+                        <Label className="text-sm text-muted-foreground flex items-center gap-1">
+                          <FileText className="h-3.5 w-3.5" />
+                          Sessions ({orderSessionsList.length})
+                        </Label>
+                        {(selectedOrder.status === 'in_progress' || selectedOrder.status === 'pending' || selectedOrder.status === 'scheduled' || selectedOrder.status === 'completed') && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-8"
+                            onClick={async () => {
+                              try {
+                                const blockingSession = getLatestUncompletedSession(orderSessionsList);
+                                if (blockingSession) {
+                                  toast.error(`Complete Session ${blockingSession.session_number ?? ''} before adding a new session.`);
+                                  openEditSession(blockingSession);
+                                  return;
+                                }
+                                await startNextSessionForOrder(selectedOrder);
+                              } catch (error) {
+                                console.error('Error adding new session:', error);
+                                toast.error('Failed to add new session');
+                              }
+                            }}
+                          >
+                            <Plus className="h-4 w-4 mr-1" />
+                            Add Session
+                          </Button>
+                        )}
+                      </div>
                       <div className="border rounded-md divide-y max-h-48 overflow-y-auto">
                         {orderSessionsList
                           .sort((a, b) => (a.session_number ?? 0) - (b.session_number ?? 0))
@@ -1265,10 +1334,16 @@ export default function PhysioPoolQueuePage() {
                                   s.status?.replace('_', ' '),
                                 ])}
                               </span>
-                              <Button variant="ghost" size="sm" className="h-8" onClick={() => openEditSession(s)}>
-                                <Pencil className="h-4 w-4 mr-1" />
-                                Edit
-                              </Button>
+                              <div className="flex items-center gap-1">
+                                <Button variant="ghost" size="sm" className="h-8" onClick={() => openSessionReport(s)}>
+                                  <FileText className="h-4 w-4 mr-1" />
+                                  Report
+                                </Button>
+                                <Button variant="ghost" size="sm" className="h-8" onClick={() => openEditSession(s)}>
+                                  <Pencil className="h-4 w-4 mr-1" />
+                                  Edit
+                                </Button>
+                              </div>
                             </div>
                           ))}
                       </div>
@@ -1282,108 +1357,28 @@ export default function PhysioPoolQueuePage() {
                       {!selectedOrder && (
                         <div className="text-sm text-muted-foreground">Loading order details...</div>
                       )}
-                      {selectedOrder.status === 'pending' && (
-                        <Button
-                          onClick={() => {
-                            setIsScheduleDialogOpen(true);
-                            setIsViewDialogOpen(false);
-                          }}
-                          className="bg-blue-600 hover:bg-blue-700 text-white shadow-sm"
-                        >
-                          <Calendar className="h-4 w-4 mr-2" />
-                          Schedule Session
-                        </Button>
-                      )}
-                      {(selectedOrder.status === 'scheduled' || selectedOrder.status === 'pending') && (
+                      {(selectedOrder.status === 'pending' || selectedOrder.status === 'scheduled') && (
                         <Button
                           onClick={async () => {
-                            setIsStartSessionDialogOpen(true);
-                            setIsViewDialogOpen(false);
-                            // Load patient vitals for the session
-                            await loadPatientVitals(selectedOrder.patient);
+                            try {
+                              await startNextSessionForOrder(selectedOrder);
+                            } catch (error) {
+                              console.error('Error starting processing:', error);
+                              toast.error('Failed to start processing');
+                            }
                           }}
                           className="bg-teal-600 hover:bg-teal-700 text-white shadow-sm"
                         >
                           <Play className="h-4 w-4 mr-2" />
-                          Open session documentation
+                          Start Processing
                         </Button>
                       )}
-                      {selectedOrder.status === 'in_progress' && (
+                      {selectedOrder.status === 'in_progress' && activeUncompletedSession && (
                         <>
                           <Button
                             onClick={async () => {
                               try {
-                                if (!physioId) {
-                                  toast.error('Unable to identify physiotherapist. Please re-login and try again.');
-                                  return;
-                                }
-                                await loadPatientVitals(selectedOrder.patient);
-                                // Continue Session = always start a NEW session (next in sequence), never edit the last session's notes
-                                const existingSessions = await physioService.getSessions({ order: selectedOrder.id });
-                                const nextSessionNumber = (existingSessions.results?.length)
-                                  ? Math.max(...existingSessions.results.map((s: any) => s.session_number || 0)) + 1
-                                  : 1;
-
-                                const sessionPayload = {
-                                  order: selectedOrder.id,
-                                  physiotherapist: physioId,
-                                  session_number: nextSessionNumber,
-                                  scheduled_at: new Date().toISOString(),
-                                  status: 'in_progress',
-                                };
-                                const createdSession = await physioService.createSession(sessionPayload as any);
-                                toast.success(`Session ${nextSessionNumber} started`);
-
-                                // Optional: prefill from last COMPLETED session for continuity (not from in-progress)
-                                const lastCompleted = (existingSessions.results || [])
-                                  .filter((s: any) => s.status === 'completed')
-                                  .sort((a: any, b: any) => (b.id || 0) - (a.id || 0))[0];
-
-                                const baseData = {
-                                  presenting_complaint: '',
-                                  pain_level_before: null,
-                                  medical_history: '',
-                                  surgical_history: '',
-                                  medications: '',
-                                  allergies: '',
-                                  social_history: '',
-                                  previous_treatments: '',
-                                  posture_gait: '',
-                                  range_of_motion: '',
-                                  muscle_strength: '',
-                                  sensation: '',
-                                  reflexes: '',
-                                  balance_coordination: '',
-                                  special_tests: '',
-                                  functional_assessment: '',
-                                  assistive_devices: '',
-                                  functional_goals: '',
-                                  functional_limitations: '',
-                                  assessment_findings: '',
-                                  diagnosis_impression: '',
-                                  prognosis: '',
-                                  clinical_reasoning: '',
-                                  treatment_performed: '',
-                                  exercises_prescribed: [] as string[],
-                                  equipment_used: [] as string[],
-                                  patient_education: '',
-                                  next_session_plan: '',
-                                  session_notes: '',
-                                  progress_notes: '',
-                                  recommendations: [] as any[],
-                                  follow_up_instructions: '',
-                                  home_exercises: [] as any[]
-                                };
-                                if (lastCompleted) {
-                                  baseData.presenting_complaint = lastCompleted.presenting_complaint || '';
-                                  baseData.medical_history = lastCompleted.medical_history || '';
-                                  baseData.functional_goals = lastCompleted.functional_goals || '';
-                                  baseData.diagnosis_impression = lastCompleted.diagnosis_impression || '';
-                                  baseData.clinical_reasoning = lastCompleted.clinical_reasoning || '';
-                                }
-                                (setSessionData as any)(baseData);
-                                setCurrentSession(createdSession);
-                                setIsStartSessionDialogOpen(true);
+                                openEditSession(activeUncompletedSession);
                                 setIsViewDialogOpen(false);
                               } catch (error) {
                                 console.error('Error continuing session:', error);
@@ -1398,13 +1393,14 @@ export default function PhysioPoolQueuePage() {
                           <Button
                             onClick={async () => {
                               try {
-                                const sessionsResponse = await physioService.getSessions({ order: selectedOrder.id, status: 'in_progress' });
-                                if (sessionsResponse.results && sessionsResponse.results.length > 0) {
-                                  setCurrentSession(sessionsResponse.results[0]);
+                                const sessionsResponse = await physioService.getSessions({ order: selectedOrder.id });
+                                const inProgress = getLatestUncompletedSession(sessionsResponse.results || []);
+                                if (inProgress) {
+                                  setCurrentSession(inProgress);
                                   setIsCompleteSessionDialogOpen(true);
                                   setIsViewDialogOpen(false);
                                 } else {
-                                  handleCompleteOrder(selectedOrder);
+                                  handleEndTreatment(selectedOrder);
                                 }
                               } catch (error) {
                                 console.error('Error completing session:', error);
@@ -1416,51 +1412,31 @@ export default function PhysioPoolQueuePage() {
                             <CheckCircle className="h-4 w-4 mr-2" />
                             End session
                           </Button>
-                          <Button
-                            onClick={() => { handleCompleteOrder(selectedOrder); setIsViewDialogOpen(false); }}
-                            variant="outline"
-                            className="border-emerald-600 text-emerald-600 hover:bg-emerald-50"
-                          >
-                            <CheckCircle className="h-4 w-4 mr-2" />
-                            End treatment plan
-                          </Button>
                         </>
                       )}
-                      {/* Schedule next session if treatment is ongoing but current session completed */}
-                      {selectedOrder.status === 'completed' && (
+                      {selectedOrder.status === 'in_progress' && !activeUncompletedSession && (
                         <Button
-                          onClick={() => { setIsScheduleNextDialogOpen(true); setIsViewDialogOpen(false); }}
-                          className="bg-purple-600 hover:bg-purple-700 text-white shadow-sm"
+                          onClick={() => handleEndTreatment(selectedOrder)}
+                          className="bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm"
                         >
-                          <Calendar className="h-4 w-4 mr-2" />
-                          Schedule Next
+                          <CheckCircle className="h-4 w-4 mr-2" />
+                          End Treatment
                         </Button>
                       )}
                     </div>
                     {/* Secondary Actions */}
                     <div className="flex gap-2 ml-auto">
-                      {/* Extend treatment course - for any completed or ongoing orders */}
-                      {(selectedOrder.status === 'completed' || selectedOrder.status === 'in_progress') && (
+                      {(selectedOrder.status === 'pending' || selectedOrder.status === 'in_progress' || selectedOrder.status === 'scheduled') && (
                         <Button
-                          onClick={() => { setIsExtendTreatmentDialogOpen(true); setIsViewDialogOpen(false); }}
                           variant="outline"
                           size="sm"
-                          className="border-blue-500 text-blue-600 hover:bg-blue-50 hover:border-blue-600"
+                          className="border-red-500 text-red-600 hover:bg-red-50 hover:border-red-600"
+                          onClick={() => setIsCancelOrderDialogOpen(true)}
                         >
-                          <Plus className="h-4 w-4 mr-2" />
-                          Extend Treatment
+                          <XCircle className="h-4 w-4 mr-2" />
+                          Cancel Order
                         </Button>
                       )}
-                      {/* New physiotherapy order for same patient */}
-                      <Button
-                        onClick={() => { setIsNewTreatmentDialogOpen(true); setIsViewDialogOpen(false); }}
-                        variant="outline"
-                        size="sm"
-                        className="border-green-500 text-green-600 hover:bg-green-50 hover:border-green-600"
-                      >
-                        <Plus className="h-4 w-4 mr-2" />
-                        Create New Physio Order
-                      </Button>
                       <Button
                         variant="outline"
                         size="sm"
@@ -1472,309 +1448,6 @@ export default function PhysioPoolQueuePage() {
                   </div>
                 </div>
               )}
-            </DialogContent>
-          </Dialog>
-
-          {/* Schedule Order Dialog */}
-          <Dialog open={isScheduleDialogOpen} onOpenChange={setIsScheduleDialogOpen}>
-            <DialogContent className="sm:max-w-[450px] max-h-[90vh] overflow-y-auto">
-              <DialogHeader>
-                <DialogTitle className="flex items-center gap-2">
-                  <Calendar className="h-5 w-5 text-blue-500" />
-                  Schedule Session
-                </DialogTitle>
-                <DialogDescription>
-                  Set appointment date and time for physiotherapy
-                </DialogDescription>
-              </DialogHeader>
-              {selectedOrder && (
-                <div className="space-y-4 py-4">
-                  {/* Patient Summary */}
-                  <div className="p-3 rounded-lg bg-muted/50 flex items-center gap-3">
-                    <PatientAvatar name={selectedOrder.patient_name ?? ''} size="sm" />
-                    <div>
-                      <p className="font-medium">{selectedOrder.patient_name}</p>
-                      <p className="text-xs text-muted-foreground">{selectedOrder.patient_id}</p>
-                    </div>
-                  </div>
-
-                  {selectedOrder.diagnosis && (
-                    <div className="p-2 rounded bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 text-sm">
-                      <p className="text-xs text-muted-foreground">Diagnosis</p>
-                      <p className="font-medium">{selectedOrder.diagnosis}</p>
-                    </div>
-                  )}
-
-                  {/* Date/Time Picker */}
-                  <div className="space-y-2">
-                    <Label className="flex items-center gap-1">
-                      <Clock className="h-3.5 w-3.5" />
-                      Appointment Date & Time
-                    </Label>
-                    <Input
-                      type="datetime-local"
-                      value={scheduledAt}
-                      onChange={(e) => setScheduledAt(e.target.value)}
-                      className="w-full"
-                    />
-                  </div>
-                </div>
-              )}
-              <DialogFooter className="gap-2 sm:gap-0">
-                <Button variant="outline" onClick={() => setIsScheduleDialogOpen(false)}>Cancel</Button>
-                <Button onClick={handleScheduleOrder} disabled={!scheduledAt || isSubmitting} className="bg-blue-500 hover:bg-blue-600">
-                  {isSubmitting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Calendar className="h-4 w-4 mr-2" />}
-                  Schedule Order
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-
-          {/* Schedule Next Session Dialog */}
-          <Dialog open={isScheduleNextDialogOpen} onOpenChange={setIsScheduleNextDialogOpen}>
-            <DialogContent className="sm:max-w-[450px] max-h-[90vh] overflow-y-auto">
-              <DialogHeader>
-                <DialogTitle className="flex items-center gap-2">
-                  <Calendar className="h-5 w-5 text-purple-500" />
-                  Schedule Next Session
-                </DialogTitle>
-                <DialogDescription>
-                  Schedule the next physiotherapy session in this treatment plan
-                </DialogDescription>
-              </DialogHeader>
-              {selectedOrder && (
-                <div className="space-y-4 py-4">
-                  {/* Patient Summary */}
-                  <div className="p-3 rounded-lg bg-muted/50 flex items-center gap-3">
-                    <PatientAvatar name={selectedOrder.patient_name ?? ''} size="sm" />
-                    <div>
-                      <p className="font-medium">{selectedOrder.patient_name}</p>
-                      <p className="text-xs text-muted-foreground">
-                        Session {(selectedOrder.sessions_completed || 0) + 1}
-                      </p>
-                    </div>
-                  </div>
-
-                  {selectedOrder.diagnosis && (
-                    <div className="p-2 rounded bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 text-sm">
-                      <p className="text-xs text-muted-foreground">Diagnosis</p>
-                      <p className="font-medium">{selectedOrder.diagnosis}</p>
-                    </div>
-                  )}
-
-                  {/* Date/Time Picker */}
-                  <div className="space-y-2">
-                    <Label className="flex items-center gap-1">
-                      <Clock className="h-3.5 w-3.5" />
-                      Next Session Date & Time
-                    </Label>
-                    <Input
-                      type="datetime-local"
-                      value={scheduledAt}
-                      onChange={(e) => setScheduledAt(e.target.value)}
-                      className="w-full"
-                    />
-                  </div>
-
-                  {/* Notes */}
-                  <div className="space-y-2">
-                    <Label>Session Notes (Optional)</Label>
-                    <Textarea
-                      value={sessionNotes}
-                      onChange={(e) => setSessionNotes(e.target.value)}
-                      placeholder="Any specific notes for the next session..."
-                      rows={2}
-                      className="resize-none"
-                    />
-                  </div>
-                </div>
-              )}
-              <DialogFooter className="gap-2 sm:gap-0">
-                <Button variant="outline" onClick={() => setIsScheduleNextDialogOpen(false)}>Cancel</Button>
-                <Button onClick={handleScheduleNextSession} disabled={!scheduledAt || isSubmitting} className="bg-purple-500 hover:bg-purple-600">
-                  {isSubmitting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Calendar className="h-4 w-4 mr-2" />}
-                  Schedule Next Session
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-
-          {/* Extend Treatment Course Dialog */}
-          <Dialog open={isExtendTreatmentDialogOpen} onOpenChange={setIsExtendTreatmentDialogOpen}>
-            <DialogContent className="sm:max-w-[450px] max-h-[90vh] overflow-y-auto">
-              <DialogHeader>
-                <DialogTitle className="flex items-center gap-2">
-                  <Plus className="h-5 w-5 text-blue-500" />
-                  Extend Treatment Course
-                </DialogTitle>
-                <DialogDescription>
-                  Add additional sessions to this patient's treatment plan
-                </DialogDescription>
-              </DialogHeader>
-              {selectedOrder && (
-                <div className="space-y-4 py-4">
-                  {/* Current Status */}
-                  <div className="p-3 rounded-lg bg-muted/50 space-y-2">
-                    <div className="flex items-center gap-3">
-                      <PatientAvatar name={selectedOrder.patient_name ?? ''} size="sm" />
-                      <div>
-                        <p className="font-medium">{selectedOrder.patient_name}</p>
-                        <p className="text-sm text-muted-foreground">
-                          Currently: {selectedOrder.sessions_completed || 0} sessions completed
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
-                  {selectedOrder.diagnosis && (
-                    <div className="p-2 rounded bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 text-sm">
-                      <p className="text-xs text-muted-foreground">Diagnosis</p>
-                      <p className="font-medium">{selectedOrder.diagnosis}</p>
-                    </div>
-                  )}
-
-                  {/* Additional Sessions */}
-                  <div className="space-y-2">
-                    <Label>Additional Sessions</Label>
-                    <Select value={additionalSessions.toString()} onValueChange={(v) => setAdditionalSessions(parseInt(v))}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="1">1 additional session</SelectItem>
-                        <SelectItem value="2">2 additional sessions</SelectItem>
-                        <SelectItem value="3">3 additional sessions</SelectItem>
-                        <SelectItem value="5">5 additional sessions</SelectItem>
-                        <SelectItem value="7">7 additional sessions</SelectItem>
-                        <SelectItem value="10">10 additional sessions</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <p className="text-sm text-muted-foreground">
-                      New total: {additionalSessions} additional sessions
-                    </p>
-                  </div>
-
-                  {/* Clinical Reasoning */}
-                  <div className="space-y-2">
-                    <Label>Clinical Reasoning (Optional)</Label>
-                    <Textarea
-                      value={sessionNotes}
-                      onChange={(e) => setSessionNotes(e.target.value)}
-                      placeholder="Explain why additional sessions are needed..."
-                      rows={3}
-                      className="resize-none"
-                    />
-                  </div>
-                </div>
-              )}
-              <DialogFooter className="gap-2 sm:gap-0">
-                <Button variant="outline" onClick={() => setIsExtendTreatmentDialogOpen(false)}>Cancel</Button>
-                <Button onClick={handleExtendTreatment} disabled={!additionalSessions || isSubmitting} className="bg-blue-500 hover:bg-blue-600">
-                  {isSubmitting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Plus className="h-4 w-4 mr-2" />}
-                  Extend Treatment (+{additionalSessions})
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-
-          {/* New Treatment Course Dialog */}
-          <Dialog open={isNewTreatmentDialogOpen} onOpenChange={setIsNewTreatmentDialogOpen}>
-            <DialogContent className="sm:max-w-[550px] max-h-[90vh] overflow-y-auto">
-              <DialogHeader>
-                <DialogTitle className="flex items-center gap-2">
-                  <Plus className="h-5 w-5 text-green-500" />
-                  New Treatment Course
-                </DialogTitle>
-                <DialogDescription>
-                  Start a new physiotherapy treatment plan for this patient
-                </DialogDescription>
-              </DialogHeader>
-              {selectedOrder && (
-                <div className="space-y-4 py-4">
-                  {/* Patient Info */}
-                  <div className="p-3 rounded-lg bg-muted/50 space-y-2">
-                    <div className="flex items-center gap-3">
-                      <PatientAvatar name={selectedOrder.patient_name ?? ''} size="sm" />
-                      <div>
-                        <p className="font-medium">{selectedOrder.patient_name}</p>
-                        <p className="text-sm text-muted-foreground font-mono">{selectedOrder.patient_id}</p>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Treatment Details */}
-                  <div className="space-y-4">
-                    <div className="space-y-2">
-                      <Label>Diagnosis *</Label>
-                      <Input
-                        value={newTreatmentData.diagnosis}
-                        onChange={(e) => setNewTreatmentData({...newTreatmentData, diagnosis: e.target.value})}
-                        placeholder="Primary diagnosis requiring physiotherapy"
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label>Chief Complaint</Label>
-                      <Textarea
-                        value={newTreatmentData.chiefComplaint}
-                        onChange={(e) => setNewTreatmentData({...newTreatmentData, chiefComplaint: e.target.value})}
-                        placeholder="Patient's main complaint and symptoms..."
-                        rows={2}
-                        className="resize-none"
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label>Treatment Goal</Label>
-                      <Textarea
-                        value={newTreatmentData.treatmentGoal}
-                        onChange={(e) => setNewTreatmentData({...newTreatmentData, treatmentGoal: e.target.value})}
-                        placeholder="Expected outcomes and treatment objectives..."
-                        rows={2}
-                        className="resize-none"
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label>Special Instructions</Label>
-                      <Textarea
-                        value={newTreatmentData.specialInstructions}
-                        onChange={(e) => setNewTreatmentData({...newTreatmentData, specialInstructions: e.target.value})}
-                        placeholder="Any special requirements, contraindications, or notes..."
-                        rows={2}
-                        className="resize-none"
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label>Total Sessions</Label>
-                      <Select
-                        value={newTreatmentData.totalSessions.toString()}
-                        onValueChange={(v) => setNewTreatmentData({...newTreatmentData, totalSessions: parseInt(v)})}
-                      >
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="1">1 Session</SelectItem>
-                          <SelectItem value="3">3 Sessions</SelectItem>
-                          <SelectItem value="5">5 Sessions</SelectItem>
-                          <SelectItem value="7">7 Sessions</SelectItem>
-                          <SelectItem value="10">10 Sessions</SelectItem>
-                          <SelectItem value="12">12 Sessions</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                </div>
-              )}
-              <DialogFooter className="gap-2 sm:gap-0">
-                <Button variant="outline" onClick={() => setIsNewTreatmentDialogOpen(false)}>Cancel</Button>
-                <Button onClick={handleCreateNewTreatment} disabled={!newTreatmentData.diagnosis.trim() || isSubmitting} className="bg-green-500 hover:bg-green-600">
-                  {isSubmitting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Plus className="h-4 w-4 mr-2" />}
-                  Create Treatment Course
-                </Button>
-              </DialogFooter>
             </DialogContent>
           </Dialog>
 
@@ -1975,6 +1648,77 @@ export default function PhysioPoolQueuePage() {
             </DialogContent>
           </Dialog>
 
+          {/* Cancel Order Dialog */}
+          <Dialog open={isCancelOrderDialogOpen} onOpenChange={setIsCancelOrderDialogOpen}>
+            <DialogContent className="sm:max-w-[520px]">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2 text-red-600">
+                  <XCircle className="h-5 w-5" />
+                  Cancel Physio Order
+                </DialogTitle>
+                <DialogDescription>
+                  Cancellation requires a reason. If there are active sessions, choose whether to cancel them too.
+                </DialogDescription>
+              </DialogHeader>
+              {selectedOrder && (
+                <div className="space-y-4 py-2">
+                  <div className="p-3 rounded-lg bg-muted/40 border text-sm">
+                    <p><span className="font-medium">Patient:</span> {selectedOrder.patient_name}</p>
+                    <p><span className="font-medium">Order:</span> PHY-{String(selectedOrder.id).padStart(6, '0')}</p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Cancellation Reason *</Label>
+                    <Select value={cancelReason} onValueChange={setCancelReason}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select reason" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="patient_declined">Patient declined</SelectItem>
+                        <SelectItem value="duplicate_referral">Duplicate referral</SelectItem>
+                        <SelectItem value="referred_in_error">Referred in error</SelectItem>
+                        <SelectItem value="no_show">No-show / unreachable</SelectItem>
+                        <SelectItem value="clinical_contraindication">Clinical contraindication</SelectItem>
+                        <SelectItem value="other">Other</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Notes (Optional)</Label>
+                    <Textarea
+                      value={cancelNotes}
+                      onChange={(e) => setCancelNotes(e.target.value)}
+                      placeholder="Additional cancellation notes..."
+                      rows={3}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>If active sessions exist</Label>
+                    <Select value={cancelActiveSessions} onValueChange={(v: 'yes' | 'no') => setCancelActiveSessions(v)}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="no">Do not cancel active sessions (block cancellation)</SelectItem>
+                        <SelectItem value="yes">Cancel active sessions and cancel order</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              )}
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setIsCancelOrderDialogOpen(false)}>Close</Button>
+                <Button
+                  onClick={handleCancelOrder}
+                  disabled={isSubmitting || !cancelReason}
+                  className="bg-red-600 hover:bg-red-700 text-white"
+                >
+                  {isSubmitting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <XCircle className="h-4 w-4 mr-2" />}
+                  Confirm Cancel
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
           {/* Complete Session Dialog */}
           <Dialog open={isCompleteSessionDialogOpen} onOpenChange={setIsCompleteSessionDialogOpen}>
             <DialogContent className="w-[95vw] sm:max-w-[900px] max-h-[90vh] overflow-y-auto">
@@ -2156,7 +1900,134 @@ export default function PhysioPoolQueuePage() {
             </DialogContent>
           </Dialog>
 
-          {/* Edit Session Dialog (Pool Queue) */}
+          {/* Session Report Dialog */}
+          <Dialog open={isSessionReportOpen} onOpenChange={(open) => {
+            setIsSessionReportOpen(open);
+            if (!open) setReportViewingSession(null);
+          }}>
+            <DialogContent className="w-[95vw] sm:max-w-[850px] max-h-[90vh] overflow-y-auto">
+              <DialogHeader>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <DialogTitle className="flex items-center gap-2">
+                      <FileText className="h-5 w-5 text-blue-600" />
+                      Physiotherapy Session Report - {(reportViewingSession as any)?.patient_name || selectedOrder?.patient_name}
+                    </DialogTitle>
+                    <DialogDescription>
+                      {joinDisplayParts([
+                        reportViewingSession?.id != null ? `Document ${reportViewingSession.id}` : '',
+                        reportViewingSession?.completed_at
+                          ? new Date(reportViewingSession.completed_at).toLocaleString()
+                          : (reportViewingSession?.scheduled_at ? new Date(reportViewingSession.scheduled_at).toLocaleString() : ''),
+                      ])}
+                    </DialogDescription>
+                  </div>
+                  <div className="flex gap-2 print:hidden">
+                    <Button variant="outline" size="sm" onClick={handleDownloadSessionReport}>
+                      <Download className="h-4 w-4 mr-1" />
+                      Download
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={handlePrintSessionReport}>
+                      <Printer className="h-4 w-4 mr-1" />
+                      Print
+                    </Button>
+                  </div>
+                </div>
+              </DialogHeader>
+              {reportViewingSession && (
+                <div className="space-y-6">
+                  <div className="border-b pb-4">
+                    <div className="flex items-center justify-between mb-4">
+                      <div>
+                        <h2 className="text-lg font-semibold text-blue-700">PHYSIOTHERAPY SESSION REPORT</h2>
+                        <p className="text-sm text-muted-foreground">Nigerian Ports Authority Medical Services</p>
+                      </div>
+                      <div className="text-right print:hidden">
+                        <div className="flex gap-2">
+                          <Button variant="outline" size="sm" onClick={handlePrintSessionReport}>
+                            <Printer className="h-4 w-4 mr-1" />
+                            Print
+                          </Button>
+                          <Button variant="outline" size="sm" onClick={handleDownloadSessionReport}>
+                            <Download className="h-4 w-4 mr-1" />
+                            Download PDF
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-6">
+                      <div className="space-y-2">
+                        <h3 className="font-medium text-sm text-muted-foreground uppercase tracking-wide">Patient Information</h3>
+                        <div className="space-y-1">
+                          <p><span className="font-medium">Name:</span> {(reportViewingSession as any)?.patient_name || selectedOrder?.patient_name || 'N/A'}</p>
+                          <p><span className="font-medium">ID:</span> {(reportViewingSession as any)?.patient_id || selectedOrder?.patient_id || 'N/A'}</p>
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <h3 className="font-medium text-sm text-muted-foreground uppercase tracking-wide">Session Details</h3>
+                        <div className="space-y-1">
+                          <p><span className="font-medium">Session:</span> {reportViewingSession.session_number ?? 'N/A'}</p>
+                          {reportViewingSession.scheduled_at && (
+                            <p><span className="font-medium">Scheduled:</span> {new Date(reportViewingSession.scheduled_at).toLocaleString()}</p>
+                          )}
+                          {reportViewingSession.completed_at && (
+                            <p><span className="font-medium">Completed:</span> {new Date(reportViewingSession.completed_at).toLocaleString()}</p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    {(reportViewingSession as any)?.order_details?.diagnosis && (
+                      <div className="mt-4 p-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg border border-amber-200 dark:border-amber-800">
+                        <p className="text-sm font-medium text-amber-800 dark:text-amber-200">Primary Diagnosis</p>
+                        <p className="text-sm mt-1">{(reportViewingSession as any).order_details.diagnosis}</p>
+                      </div>
+                    )}
+                  </div>
+                  <div className="space-y-3">
+                    <h3 className="text-lg font-semibold text-teal-700 dark:text-teal-400 border-b pb-2">A. Patient Assessment</h3>
+                    <p className="text-sm bg-muted/50 p-3 rounded border min-h-[60px]">{(reportViewingSession as any).presenting_complaint || 'Not documented'}</p>
+                  </div>
+                  <div className="space-y-3">
+                    <h3 className="text-lg font-semibold text-blue-700 dark:text-blue-400 border-b pb-2">B. Medical & Social Background</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <p className="text-sm bg-muted/50 p-3 rounded border min-h-[60px]">{(reportViewingSession as any).medical_history || 'Not documented'}</p>
+                      <p className="text-sm bg-muted/50 p-3 rounded border min-h-[60px]">{(reportViewingSession as any).medications || 'Not documented'}</p>
+                    </div>
+                  </div>
+                  <div className="space-y-3">
+                    <h3 className="text-lg font-semibold text-orange-700 dark:text-orange-400 border-b pb-2">E. Clinical Reasoning</h3>
+                    <p className="text-sm bg-muted/50 p-3 rounded border min-h-[80px]">
+                      {(reportViewingSession as any).clinical_reasoning || (reportViewingSession as any).assessment_findings || 'Not documented'}
+                    </p>
+                  </div>
+                  <div className="space-y-3">
+                    <h3 className="text-lg font-semibold text-red-700 dark:text-red-400 border-b pb-2">F. Treatment Plan</h3>
+                    <p className="text-sm bg-muted/50 p-3 rounded border min-h-[80px]">
+                      {(reportViewingSession as any).next_session_plan || (reportViewingSession as any).treatment_performed || 'Not documented'}
+                    </p>
+                  </div>
+                  {(reportViewingSession as any).progress_notes && (
+                    <div className="space-y-3">
+                      <h3 className="text-lg font-semibold text-indigo-700 dark:text-indigo-400 border-b pb-2">Treatment Performed & Outcomes</h3>
+                      <p className="text-sm bg-muted/50 p-3 rounded border min-h-[60px]">{(reportViewingSession as any).progress_notes}</p>
+                    </div>
+                  )}
+                  <div className="border-t pt-4 text-xs text-muted-foreground">
+                    <div className="flex justify-between">
+                      <span>Generated: {new Date().toLocaleDateString()} at {new Date().toLocaleTimeString()}</span>
+                      <span>Session ID: PHY-{String(reportViewingSession.id).padStart(6, '0')}</span>
+                    </div>
+                    <div className="mt-2 text-center">{getOrganizationHeader()}</div>
+                  </div>
+                </div>
+              )}
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setIsSessionReportOpen(false)}>Close</Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          {/* Edit Session Dialog (Orders) */}
           <Dialog open={isEditSessionDialogOpen} onOpenChange={(o) => { if (!o) { setIsEditSessionDialogOpen(false); setEditingSession(null); } }}>
             <DialogContent className="w-[95vw] sm:max-w-[900px] max-h-[90vh] overflow-y-auto">
               <DialogHeader>
@@ -2222,6 +2093,12 @@ export default function PhysioPoolQueuePage() {
               )}
               <DialogFooter className="gap-2 sm:gap-0">
                 <Button variant="outline" onClick={() => { setIsEditSessionDialogOpen(false); setEditingSession(null); }}>Cancel</Button>
+                {editingSession?.status === 'in_progress' && (
+                  <Button onClick={handleEditSessionSaveAndEnd} disabled={isEditSaving || !editSessionData.treatment_performed.trim()} className="bg-green-600 hover:bg-green-700 text-white">
+                    {isEditSaving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <CheckCircle className="h-4 w-4 mr-2" />}
+                    Save & End Session
+                  </Button>
+                )}
                 <Button onClick={handleEditSessionSave} disabled={isEditSaving} className="bg-amber-500 hover:bg-amber-600 text-white">
                   {isEditSaving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Pencil className="h-4 w-4 mr-2" />}
                   Save changes
