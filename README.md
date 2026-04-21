@@ -154,10 +154,10 @@ After pushing code changes to GitHub:
 
 ```bash
 # On production server, inside the repo checkout
-./scripts/production/deploy.sh
+./scripts/production/env-manager.sh deploy
 ```
 
-`deploy.sh` takes a pre-deploy DB snapshot, runs `git pull`, rebuilds the containers, waits for the backend health check, and rolls back automatically on failure.
+The `deploy` subcommand takes a pre-deploy DB snapshot, runs `git pull`, rebuilds the containers, waits for the backend Docker healthcheck to report healthy, and rolls back automatically on failure.
 
 For detailed production operations, see `PRODUCTION_OPERATIONS.md`.
 

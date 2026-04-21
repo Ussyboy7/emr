@@ -121,9 +121,9 @@ render_backups() {
 render_footer() {
     printf '%b%s%b\n' "$UI_BLUE" "================================================================================" "$UI_NC"
     printf '%bCommands (same env):%b\n' "$UI_WHITE" "$UI_NC"
-    printf '  %bscripts/%s/manager.sh status%b\n' "$UI_CYAN" "$STACK_ENVIRONMENT" "$UI_NC"
-    printf '  %bscripts/%s/manager.sh health%b\n' "$UI_CYAN" "$STACK_ENVIRONMENT" "$UI_NC"
-    printf '  %bscripts/%s/emergency.sh <cmd>%b\n' "$UI_CYAN" "$STACK_ENVIRONMENT" "$UI_NC"
+    printf '  %bscripts/%s/env-manager.sh status%b\n' "$UI_CYAN" "$STACK_ENVIRONMENT" "$UI_NC"
+    printf '  %bscripts/%s/env-manager.sh health%b\n' "$UI_CYAN" "$STACK_ENVIRONMENT" "$UI_NC"
+    printf '  %bscripts/%s/env-manager.sh emergency <cmd>%b\n' "$UI_CYAN" "$STACK_ENVIRONMENT" "$UI_NC"
     printf '%b%s%b\n' "$UI_BLUE" "================================================================================" "$UI_NC"
 }
 

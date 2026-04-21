@@ -96,6 +96,6 @@ the `.sql` files fully purged from the git history.
   are gitignored.
 - Backups are written to a bind-mounted `backups/` directory by the
   `emr-backup-prod` sidecar. That directory is gitignored.
-- Production deploys go through `scripts/production/deploy.sh`, which
-  takes a pre-deploy DB snapshot and rolls back automatically on health
-  check failure.
+- Production deploys go through `scripts/production/env-manager.sh deploy`,
+  which takes a pre-deploy DB snapshot and rolls back automatically on
+  health check failure.
