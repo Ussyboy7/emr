@@ -10,11 +10,25 @@
 set -eu
 
 BACKUP_ROOT="${BACKUP_ROOT:-/backups}"
-DB_HOST="${DB_HOST:-postgres}"
-DB_PORT="${DB_PORT:-5432}"
-DB_NAME="${DB_NAME:-emrprod}"
-DB_USER="${DB_USER:-emradmin}"
+DB_HOST="${DB_HOST:-}"
+DB_PORT="${DB_PORT:-}"
+DB_NAME="${DB_NAME:-}"
+DB_USER="${DB_USER:-}"
 RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-7}"
+
+require_var() {
+    name="$1"
+    value="$2"
+    if [ -z "$value" ]; then
+        echo "ERROR: required env var '$name' is not set" >&2
+        exit 1
+    fi
+}
+
+require_var "DB_HOST" "$DB_HOST"
+require_var "DB_PORT" "$DB_PORT"
+require_var "DB_NAME" "$DB_NAME"
+require_var "DB_USER" "$DB_USER"
 
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 BACKUP_DIR="${BACKUP_ROOT}/${TIMESTAMP}"

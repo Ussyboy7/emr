@@ -91,9 +91,9 @@ scripts/ops/env-manager.sh prod status
 The `deploy` command does **not** rely on those URLs for its wait loop. It
 reads the Docker healthcheck status on the backend container (no fallback
 probes), so the script's window must cover compose's `start_period` + retries.
-Unset-only defaults live in `ops/env-manager.sh` (`cmd_deploy`) and
-`lib/stack-utils.sh`. Override with `DEPLOY_PATH`, `BACKUP_DIR`, `SERVER_IP`,
-or `STACK_HEALTH_URL_OVERRIDE` when your layout differs.
+Only path/IP convenience defaults remain in deploy scripts. Database identity
+is canonical per environment (`emradmin` + env-specific DB name), and
+production compose no longer provides secret fallbacks.
 
 ## `env-manager.sh` commands
 
@@ -147,6 +147,15 @@ Run **on the target server** from the correct checkout (see table above):
 5. Wait for the backend container to report `healthy` via `docker inspect`
    (window covers compose's `start_period` + retries). No fallback probes.
 6. On failure: automatic rollback to the pre-deploy snapshot (unless `--no-rollback`).
+
+Production now runs fail-fast for required variables:
+
+- Compose: `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `REDIS_PASSWORD`
+- Django settings (non-local): `DJANGO_SECRET_KEY`, `ALLOWED_HOSTS`,
+  `CSRF_TRUSTED_ORIGINS`, `CORS_ALLOWED_ORIGINS`, `DB_*`, `REDIS_HOST`,
+  `REDIS_PORT`
+- Backup sidecar: `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, plus
+  `PGPASSWORD` or `DB_PASSWORD`
 
 Common overrides:
 

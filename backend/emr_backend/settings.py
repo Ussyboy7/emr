@@ -17,33 +17,54 @@ from dotenv import load_dotenv
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 DJANGO_ENV = os.environ.get("DJANGO_ENV", "local")
+IS_LOCAL_ENV = DJANGO_ENV == "local"
+IS_STRICT_ENV = not IS_LOCAL_ENV
 # Try env/ directory first (for docker-compose setups)
 env_file = BASE_DIR / "env" / f"{DJANGO_ENV}.env"
 
 if env_file.exists():
     load_dotenv(env_file)
 else:
-    # Fallback to root .env files
-    fallback_env = BASE_DIR / f".env.{DJANGO_ENV}"
-    if fallback_env.exists():
-        load_dotenv(fallback_env)
+    # Keep local dev ergonomic, but fail fast in non-local environments.
+    if IS_LOCAL_ENV:
+        fallback_env = BASE_DIR / f".env.{DJANGO_ENV}"
+        if fallback_env.exists():
+            load_dotenv(fallback_env)
+        else:
+            final_fallback = BASE_DIR / ".env"
+            if final_fallback.exists():
+                load_dotenv(final_fallback)
     else:
-        # Final fallback to .env
-        final_fallback = BASE_DIR / ".env"
-        if final_fallback.exists():
-            load_dotenv(final_fallback)
+        raise RuntimeError(
+            f"Expected environment file not found: {env_file}. "
+            "Refusing to use implicit .env fallbacks outside local."
+        )
+
+
+def getenv_strict(name: str, default: str | None = None) -> str:
+    value = os.getenv(name)
+    if value is not None and value != "":
+        return value
+    if default is not None and not IS_STRICT_ENV:
+        return default
+    raise RuntimeError(
+        f"Missing required environment variable: {name} "
+        f"(DJANGO_ENV={DJANGO_ENV!r})."
+    )
 
 
 # ---------------------------------------------------------------------------
 # Core Settings
 # ---------------------------------------------------------------------------
 
-SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "changeme-in-production")
+SECRET_KEY = getenv_strict("DJANGO_SECRET_KEY", "changeme-in-production")
 DEBUG = os.getenv("DJANGO_DEBUG", "True").lower() == "true"
 
 ALLOWED_HOSTS = [
     host.strip()
-    for host in os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1,emr.npa.local").split(
+    for host in getenv_strict(
+        "ALLOWED_HOSTS", "localhost,127.0.0.1,emr.npa.local"
+    ).split(
         ","
     )
     if host.strip()
@@ -51,7 +72,7 @@ ALLOWED_HOSTS = [
 
 CSRF_TRUSTED_ORIGINS = [
     origin.strip()
-    for origin in os.getenv(
+    for origin in getenv_strict(
         "CSRF_TRUSTED_ORIGINS",
         "http://localhost:8001,http://127.0.0.1:8001,http://localhost:3001,http://127.0.0.1:3001",
     ).split(",")
@@ -163,11 +184,11 @@ ASGI_APPLICATION = "emr_backend.asgi.application"
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
-        "NAME": os.getenv("DB_NAME", "emr_db"),
-        "USER": os.getenv("DB_USER", "emr_user"),
-        "PASSWORD": os.getenv("DB_PASSWORD", "emr_password"),
-        "HOST": os.getenv("DB_HOST", "localhost"),
-        "PORT": os.getenv("DB_PORT", "5432"),
+        "NAME": getenv_strict("DB_NAME", "emr_db"),
+        "USER": getenv_strict("DB_USER", "emr_user"),
+        "PASSWORD": getenv_strict("DB_PASSWORD", "emr_password"),
+        "HOST": getenv_strict("DB_HOST", "localhost"),
+        "PORT": getenv_strict("DB_PORT", "5432"),
         "CONN_MAX_AGE": int(os.getenv("DB_CONN_MAX_AGE", "60")),
         "OPTIONS": {
             "connect_timeout": int(os.getenv("DB_CONNECT_TIMEOUT", "5")),
@@ -270,7 +291,7 @@ SPECTACULAR_SETTINGS = {
 
 CORS_ALLOWED_ORIGINS = [
     origin.strip()
-    for origin in os.getenv(
+    for origin in getenv_strict(
         "CORS_ALLOWED_ORIGINS",
         "http://localhost:3001,http://127.0.0.1:3001,http://emr.npa.local,https://emr.npa.local",
     ).split(",")
@@ -306,19 +327,8 @@ SIMPLE_JWT = {
 # masked misconfigurations (the app appeared healthy but WebSockets and
 # Celery talked to a non-existent broker).
 
-_REDIS_HOST_ENV = os.getenv("REDIS_HOST")
-if _REDIS_HOST_ENV:
-    REDIS_HOST = _REDIS_HOST_ENV
-elif DJANGO_ENV == "local":
-    REDIS_HOST = "localhost"
-else:
-    raise RuntimeError(
-        "REDIS_HOST must be set when DJANGO_ENV is not 'local' "
-        f"(current DJANGO_ENV={DJANGO_ENV!r}). Refusing to fall back to "
-        "'localhost' in a non-local environment."
-    )
-
-REDIS_PORT = os.getenv("REDIS_PORT", "6379")
+REDIS_HOST = getenv_strict("REDIS_HOST", "localhost")
+REDIS_PORT = getenv_strict("REDIS_PORT", "6379")
 REDIS_PASSWORD = os.getenv("REDIS_PASSWORD") or None
 
 

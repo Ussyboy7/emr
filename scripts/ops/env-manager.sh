@@ -356,16 +356,16 @@ DEPLOY_USAGE
             if [[ -z "${SERVER_IP+x}" ]];  then SERVER_IP="172.16.0.32"; fi
             $_BACKUP_DIR_EXPLICIT || BACKUP_DIR="${HOME}/emr-predeploy-backups"
             PG_CONTAINER="emr-postgres-prod"
-            DB_USER="${DB_USER:-emradmin}"
-            DB_NAME="${DB_NAME:-emrprod}"
+            DB_USER="emradmin"
+            DB_NAME="emrprod"
             ;;
         staging)
             if [[ -z "${DEPLOY_PATH+x}" ]]; then DEPLOY_PATH="/srv/emr"; fi
             if [[ -z "${SERVER_IP+x}" ]];  then SERVER_IP="172.16.0.46"; fi
             $_BACKUP_DIR_EXPLICIT || BACKUP_DIR="${DEPLOY_PATH}/backups"
             PG_CONTAINER="emr-postgres-stag"
-            DB_USER="${DB_USER:-emradmin}"
-            DB_NAME="${DB_NAME:-emr_db_stag}"
+            DB_USER="emradmin"
+            DB_NAME="emr_db_stag"
             ;;
     esac
 
