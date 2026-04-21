@@ -229,12 +229,15 @@ services:
   backup:
     image: postgres:15-alpine
     container_name: emr-backup-prod
+    # Reuse the backend's env file so DB credentials stay in sync with the
+    # live database. Previously this service relied on ${DB_PASSWORD} compose
+    # interpolation from the repo-root .env, which silently fell back to the
+    # default and caused pg_dump auth failures.
+    env_file:
+      - ./backend/env/prod.env
     environment:
-      PGPASSWORD: ${DB_PASSWORD:-change_this_in_production}
       DB_HOST: postgres
       DB_PORT: "5432"
-      DB_NAME: ${DB_NAME:-emrprod}
-      DB_USER: ${DB_USER:-emradmin}
       BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-7}
     volumes:
       - ./backups:/backups

@@ -28,9 +28,16 @@ mkdir -p "$BACKUP_DIR"
 
 log "=== EMR backup started (target: ${DB_HOST}:${DB_PORT}/${DB_NAME}) ==="
 
-# PGPASSWORD must be set in the container environment.
+# pg_dump reads PGPASSWORD from env. Accept DB_PASSWORD as well so the
+# sidecar can reuse the backend's env file (which uses DB_PASSWORD) without
+# duplicating secrets.
+if [ -z "${PGPASSWORD:-}" ] && [ -n "${DB_PASSWORD:-}" ]; then
+    PGPASSWORD="$DB_PASSWORD"
+    export PGPASSWORD
+fi
+
 if [ -z "${PGPASSWORD:-}" ]; then
-    log "ERROR: PGPASSWORD is not set; refusing to run pg_dump"
+    log "ERROR: neither PGPASSWORD nor DB_PASSWORD is set; refusing to run pg_dump"
     exit 1
 fi
 
