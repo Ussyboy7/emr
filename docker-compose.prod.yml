@@ -2,7 +2,7 @@
 # EMR PRODUCTION ENVIRONMENT
 # ================================
 # Server: 172.16.0.32 (Server B - Primary Production)
-# Domain: medical.npa.local
+# Domain: emr.npa.local
 # Ports: 80 (HTTP), 443 (HTTPS), 22 (SSH)
 
 services:

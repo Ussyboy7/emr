@@ -124,7 +124,7 @@ docker compose -f docker-compose.prod.yml build
 docker compose -f docker-compose.prod.yml up -d
 
 # 5. Create superuser account
-docker compose -f docker-compose.prod.yml exec backend python manage.py createsuperuser --username emrprod --email admin@medical.npa.local --noinput
+docker compose -f docker-compose.prod.yml exec backend python manage.py createsuperuser --username emrprod --email admin@emr.npa.local --noinput
 docker compose -f docker-compose.prod.yml exec backend python manage.py shell -c "from accounts.models import User; user = User.objects.get(username='emrprod'); user.set_password('Changeme'); user.save()"
 
 # 6. Verify deployment
@@ -232,7 +232,7 @@ DB_PASSWORD=emradmin
 # Django settings
 DJANGO_DEBUG=False
 DJANGO_ENV=prod
-ALLOWED_HOSTS=medical.npa.local,172.16.0.32,localhost
+ALLOWED_HOSTS=emr.npa.local,172.16.0.32,localhost
 
 # Security
 DJANGO_SECRET_KEY=[production-secret-key]

@@ -11,7 +11,7 @@ LOG_FILE="${SCRIPT_DIR}/monitoring.log"
 BACKUP_LOG="${HOME}/emr_backups/cron.log"
 COMPOSE_FILE="docker-compose.prod.yml"
 BACKUP_DATA_LOG="${HOME}/emr_backups/backup.log"
-ALERT_EMAIL="admin@medical.npa.local"  # Update with actual email
+ALERT_EMAIL="admin@emr.npa.local"  # Update with actual email
 
 # Logging function
 log() {
