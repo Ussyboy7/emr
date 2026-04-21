@@ -23,6 +23,7 @@ from .serializers import (
     MedicalCertificateSerializer,
 )
 from audit.services import AuditService
+from .workflow import close_visit_workflow
 
 
 class PatientPagination(PageNumberPagination):
@@ -409,6 +410,38 @@ class VisitViewSet(viewsets.ModelViewSet):
             new_values={'visit_id': visit.visit_id, 'visit_type': visit.visit_type, 'status': visit.status},
             request=self.request,
         )
+
+    @action(detail=True, methods=['post'], url_path='close-workflow')
+    def close_workflow(self, request, pk=None):
+        visit = self.get_object()
+        reason = str(request.data.get('reason') or '').strip()
+        source_stage = str(request.data.get('source_stage') or 'unknown').strip() or 'unknown'
+
+        if visit.status == 'completed':
+            return Response(
+                {'detail': 'Completed visits cannot be cancelled from workflow close.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        result = close_visit_workflow(
+            visit=visit,
+            actor=request.user,
+            reason=reason,
+            source_stage=source_stage,
+        )
+        AuditService.log_activity(
+            user=request.user,
+            action='update',
+            object_type='visit',
+            object_id=str(visit.id),
+            module='workflow',
+            object_repr=f'Visit {visit.visit_id}',
+            description=f'Closed visit workflow from {source_stage}',
+            old_values={'status': 'in_progress'},
+            new_values={'status': 'cancelled', **result},
+            request=request,
+        )
+        return Response({'detail': 'Visit workflow closed.', **result})
 
 
 class VitalReadingViewSet(viewsets.ModelViewSet):

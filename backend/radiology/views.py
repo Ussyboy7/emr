@@ -10,6 +10,7 @@ from rest_framework.exceptions import ValidationError
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django.utils import timezone
+from django.db.models import Count, Q
 
 from laboratory.pagination import FlexiblePageNumberPagination
 
@@ -155,7 +156,43 @@ class RadiologyOrderViewSet(viewsets.ModelViewSet):
         pm = self.request.query_params.get('processing_method')
         if pm in ('in_house', 'outsourced'):
             qs = qs.filter(studies__processing_method=pm).distinct()
+        study_status = self.request.query_params.get('study_status')
+        if study_status in ('pending', 'processing', 'reported', 'rejected', 'verified'):
+            qs = qs.filter(studies__status=study_status).distinct()
+        gender = self.request.query_params.get('gender')
+        if gender in ('male', 'female'):
+            qs = qs.filter(patient__gender=gender)
+        exact_date = self.request.query_params.get('date')
+        start_date = self.request.query_params.get('start_date')
+        end_date = self.request.query_params.get('end_date')
+        if exact_date:
+            qs = qs.filter(ordered_at__date=exact_date)
+        else:
+            if start_date:
+                qs = qs.filter(ordered_at__date__gte=start_date)
+            if end_date:
+                qs = qs.filter(ordered_at__date__lte=end_date)
         return qs
+
+    @action(detail=False, methods=['get'], url_path='stats')
+    def stats(self, request):
+        qs = self.filter_queryset(self.get_queryset())
+        summary = qs.aggregate(
+            total=Count('id', distinct=True),
+            pending=Count('id', filter=Q(studies__status='pending'), distinct=True),
+            processing=Count('id', filter=Q(studies__status='processing'), distinct=True),
+            results_ready=Count('id', filter=Q(studies__status='reported'), distinct=True),
+            rejected=Count('id', filter=Q(studies__status='rejected'), distinct=True),
+            stat=Count('id', filter=Q(priority='stat'), distinct=True),
+        )
+        return Response({
+            'total': summary.get('total', 0) or 0,
+            'pending': summary.get('pending', 0) or 0,
+            'processing': summary.get('processing', 0) or 0,
+            'results_ready': summary.get('results_ready', 0) or 0,
+            'rejected': summary.get('rejected', 0) or 0,
+            'stat': summary.get('stat', 0) or 0,
+        })
 
     def list(self, request, *args, **kwargs):
         logger.debug("RadiologyOrderViewSet.list() called")
@@ -674,8 +711,15 @@ class RadiologyReportViewSet(viewsets.ReadOnlyModelViewSet):
 
     permission_classes = [IsAuthenticated]
     serializer_class = RadiologyReportSerializer
-    filter_backends = [DjangoFilterBackend, OrderingFilter]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['patient', 'overall_status', 'priority']
+    search_fields = [
+        'order__order_id',
+        'study__procedure',
+        'patient__first_name',
+        'patient__surname',
+        'patient__patient_id',
+    ]
     ordering_fields = ['created_at']
     ordering = ['-created_at']
 
@@ -728,8 +772,49 @@ class RadiologyReportViewSet(viewsets.ReadOnlyModelViewSet):
             queryset = queryset.filter(study__status__in=['reported', 'verified'])
             logger.debug("After filtering for study__status in ['reported', 'verified']: %s", queryset.count())
 
+        clinic = self.request.query_params.get('clinic')
+        if clinic:
+            queryset = queryset.filter(order__clinic=clinic)
+        gender = self.request.query_params.get('gender')
+        if gender in ('male', 'female'):
+            queryset = queryset.filter(patient__gender=gender)
+        processing_method = self.request.query_params.get('processing_method')
+        if processing_method in ('in_house', 'outsourced'):
+            queryset = queryset.filter(study__processing_method=processing_method)
+        category = self.request.query_params.get('category')
+        if category:
+            queryset = queryset.filter(study__modality__iexact=category)
+
+        exact_date = self.request.query_params.get('date')
+        start_date = self.request.query_params.get('start_date')
+        end_date = self.request.query_params.get('end_date')
+        date_field = 'study__reported_at__date' if status_filter != 'verified' else 'study__verified_at__date'
+        if exact_date:
+            queryset = queryset.filter(**{date_field: exact_date})
+        else:
+            if start_date:
+                queryset = queryset.filter(**{f'{date_field}__gte': start_date})
+            if end_date:
+                queryset = queryset.filter(**{f'{date_field}__lte': end_date})
+
         logger.debug("Final queryset count: %s", queryset.count())
         return queryset
+
+    @action(detail=False, methods=['get'], url_path='stats')
+    def stats(self, request):
+        qs = self.filter_queryset(self.get_queryset())
+        summary = qs.aggregate(
+            total=Count('id'),
+            normal=Count('id', filter=Q(overall_status='normal')),
+            abnormal=Count('id', filter=Q(overall_status='abnormal')),
+            critical=Count('id', filter=Q(overall_status='critical')),
+        )
+        return Response({
+            'total': summary.get('total', 0) or 0,
+            'normal': summary.get('normal', 0) or 0,
+            'abnormal': summary.get('abnormal', 0) or 0,
+            'critical': summary.get('critical', 0) or 0,
+        })
     
     @action(detail=True, methods=['post'])
     def verify(self, request, pk=None):

@@ -166,6 +166,10 @@ export default function NursingPoolQueuePage() {
   const [authError, setAuthError] = useState<unknown | null>(null);
   useAuthRedirect(authError);
   const [sendingToPhysioVisitId, setSendingToPhysioVisitId] = useState<number | null>(null);
+  const [markingLeftVisitId, setMarkingLeftVisitId] = useState<number | null>(null);
+  const [markLeftPatient, setMarkLeftPatient] = useState<NursingPatient | null>(null);
+  const [markLeftReason, setMarkLeftReason] = useState('Patient left before consultation');
+  const [isMarkLeftDialogOpen, setIsMarkLeftDialogOpen] = useState(false);
   const [physioCheckins, setPhysioCheckins] = useState<Record<number, { orderId: number; status: string }>>({});
   const [eyeCheckins, setEyeCheckins] = useState<Record<number, { orderId: number; status: string }>>({});
   const [searchQuery, setSearchQuery] = useState('');
@@ -690,6 +694,31 @@ export default function NursingPoolQueuePage() {
       await loadData();
     } catch (err: any) {
       toast.error(err?.message || 'Failed to send to Eye Clinic');
+    }
+  };
+
+  const openMarkLeftDialog = (patient: NursingPatient) => {
+    setMarkLeftPatient(patient);
+    setMarkLeftReason('Patient left before consultation');
+    setIsMarkLeftDialogOpen(true);
+  };
+
+  const confirmMarkPatientLeft = async () => {
+    if (!markLeftPatient?.visitNumericId) return;
+    setMarkingLeftVisitId(markLeftPatient.visitNumericId);
+    try {
+      await visitService.closeWorkflow(markLeftPatient.visitNumericId, {
+        reason: markLeftReason.trim(),
+        source_stage: 'nursing_queue',
+      });
+      toast.success('Patient marked as left and removed from active workflow');
+      await loadData();
+      setIsMarkLeftDialogOpen(false);
+      setMarkLeftPatient(null);
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to mark patient as left');
+    } finally {
+      setMarkingLeftVisitId(null);
     }
   };
 
@@ -1308,6 +1337,22 @@ export default function NursingPoolQueuePage() {
                               <CheckCircle2 className="h-4 w-4" />
                             </div>
                           )}
+                          {patient.nursingStatus !== 'Sent to Physiotherapy' && patient.nursingStatus !== 'Sent to Eye Clinic' && (
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              className="h-7 px-2 text-xs"
+                              onClick={() => openMarkLeftDialog(patient)}
+                              disabled={markingLeftVisitId === patient.visitNumericId}
+                            >
+                              {markingLeftVisitId === patient.visitNumericId ? (
+                                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                              ) : (
+                                <X className="h-3 w-3 mr-1" />
+                              )}
+                              Mark Left
+                            </Button>
+                          )}
                         </div>
                       </div>
                       
@@ -1635,6 +1680,49 @@ export default function NursingPoolQueuePage() {
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setIsRoomPickerOpen(false)}>Cancel</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={isMarkLeftDialogOpen} onOpenChange={setIsMarkLeftDialogOpen}>
+          <DialogContent className="w-[95vw] sm:max-w-[520px]">
+            <DialogHeader>
+              <DialogTitle>Mark Patient as Left</DialogTitle>
+              <DialogDescription>
+                This will cancel the active visit workflow for <strong>{markLeftPatient?.name}</strong> and remove them from active queues/sessions.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-2 py-2">
+              <Label htmlFor="mark-left-reason">Reason</Label>
+              <Textarea
+                id="mark-left-reason"
+                value={markLeftReason}
+                onChange={(e) => setMarkLeftReason(e.target.value)}
+                placeholder="Enter reason for cancellation"
+                rows={3}
+              />
+            </div>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  if (markingLeftVisitId == null) {
+                    setIsMarkLeftDialogOpen(false);
+                    setMarkLeftPatient(null);
+                  }
+                }}
+                disabled={markingLeftVisitId != null}
+              >
+                Keep in Queue
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={confirmMarkPatientLeft}
+                disabled={markingLeftVisitId != null || !markLeftPatient}
+              >
+                {markingLeftVisitId != null ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <X className="h-4 w-4 mr-2" />}
+                Confirm Mark Left
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

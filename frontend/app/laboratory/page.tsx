@@ -27,41 +27,22 @@ export default function LaboratoryPage() {
   const loadStats = async () => {
     try {
       setLoading(true);
-      const orders = await labService.getOrders({ page: 1, page_size: 100 });
-      
-      let pending = 0, inProgress = 0, resultsReady = 0, verified = 0;
-      
-      orders.results.forEach((order: any) => {
-        // If no tests, count as pending
-        if (!order.tests || order.tests.length === 0) {
-          pending++;
-          return;
-        }
-        
-        // Get all test statuses
-        const statuses = order.tests.map((t: any) => t.status || 'pending');
-        
-        // Count based on statuses
-        const hasVerified = statuses.some((s: string) => s === 'verified');
-        const hasResultsReady = statuses.some((s: string) => s === 'results_ready');
-        const hasProcessing = statuses.some((s: string) => s === 'processing' || s === 'sample_collected');
-        const hasPending = statuses.some((s: string) => s === 'pending');
-        
-        // Priority: results_ready > processing > verified > pending
-        if (hasResultsReady) {
-          resultsReady++;
-        } else if (hasProcessing) {
-          inProgress++;
-        } else if (hasVerified) {
-          verified++;
-        } else if (hasPending) {
-          pending++;
-        } else {
-          pending++; // fallback
-        }
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const date = today.toISOString().split('T')[0];
+
+      const [orders, orderStats, verifiedStats] = await Promise.all([
+        labService.getOrders({ page: 1, page_size: 5 }),
+        labService.getOrderStats({ date }),
+        labService.getVerificationStats({ status: 'verified', date }),
+      ]);
+
+      setStats({
+        pending: orderStats.pending || 0,
+        inProgress: orderStats.processing || 0,
+        resultsReady: orderStats.results_ready || 0,
+        verified: verifiedStats.total || 0,
       });
-      
-      setStats({ pending, inProgress, resultsReady, verified });
       setRecentOrders(orders.results.slice(0, 5));
     } catch (error) {
       console.error('Failed to load lab stats:', error);

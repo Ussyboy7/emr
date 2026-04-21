@@ -59,6 +59,15 @@ export default function RadiologyOrdersPage() {
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(50);
+  const [totalCount, setTotalCount] = useState(0);
+  const [stats, setStats] = useState({
+    total: 0,
+    pendingSamples: 0,
+    processing: 0,
+    resultsReady: 0,
+    rejected: 0,
+    stat: 0,
+  });
 
   // Get study status badge color
   const getStudyStatusBadge = (status?: string) => {
@@ -334,58 +343,31 @@ export default function RadiologyOrdersPage() {
   const [addStudyOutsourcedFacility, setAddStudyOutsourcedFacility] = useState('');
   const [isAddingStudy, setIsAddingStudy] = useState(false);
 
-  const normalizePriority = (value: unknown): string => String(value || '').trim().toLowerCase();
-
-  const normalizeGender = (value: unknown): string => {
-    const v = String(value || '').trim().toLowerCase();
-    if (v === 'm') return 'male';
-    if (v === 'f') return 'female';
-    return v;
-  };
-
-  const matchesDateFilter = (isoDate: string | undefined, filter: string): boolean => {
-    if (filter === 'all') return true;
-    if (!isoDate) {
-      console.log('Date filter: no date, returning false');
-      return false;
-    }
-    const dt = new Date(isoDate);
-    if (Number.isNaN(dt.getTime())) {
-      console.log('Date filter: invalid date', isoDate);
-      return false;
-    }
-
-    // Use local timezone for comparison
-    const now = new Date();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const tomorrowStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-
+  const buildDateQuery = (filter: string): Record<string, string> => {
     if (filter === 'today') {
-      const result = dt >= todayStart && dt < tomorrowStart;
-      console.log('Date filter today:', { isoDate, dt: dt.toISOString(), todayStart: todayStart.toISOString(), tomorrowStart: tomorrowStart.toISOString(), result });
-      return result;
+      const today = new Date();
+      return { date: today.toISOString().split('T')[0] };
     }
-
     if (filter === 'week') {
-      const weekStart = new Date(todayStart);
-      weekStart.setDate(todayStart.getDate() - 6);
-      const result = dt >= weekStart && dt < tomorrowStart;
-      console.log('Date filter week:', { isoDate, weekStart: weekStart.toISOString(), result });
-      return result;
+      const end = new Date();
+      const start = new Date();
+      start.setDate(end.getDate() - 7);
+      return {
+        start_date: start.toISOString().split('T')[0],
+        end_date: end.toISOString().split('T')[0],
+      };
     }
-
     if (filter === 'month') {
-      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-      const result = dt >= monthStart && dt < tomorrowStart;
-      console.log('Date filter month:', { isoDate, monthStart: monthStart.toISOString(), result });
-      return result;
+      const end = new Date();
+      const start = new Date();
+      start.setMonth(end.getMonth() - 1);
+      return {
+        start_date: start.toISOString().split('T')[0],
+        end_date: end.toISOString().split('T')[0],
+      };
     }
-
-    return true;
+    return {};
   };
-
-  const orderHasStudyStatus = (order: any, status: string): boolean =>
-    (order.studies || []).some((s: any) => s.status === status);
 
   const loadOrders = useCallback(async (opts?: { silent?: boolean }) => {
     const silent = opts?.silent;
@@ -395,14 +377,51 @@ export default function RadiologyOrdersPage() {
         setError(null);
       }
 
-      const response = await radiologyService.getOrders({
-        page: 1,
-        page_size: 1000,
+      const dateQuery = buildDateQuery(dateFilter);
+      const rangeQuery = dateRange.from || dateRange.to
+        ? { start_date: dateRange.from || undefined, end_date: dateRange.to || undefined }
+        : {};
+      const studyStatusByTab: Record<string, 'pending' | 'processing' | 'reported' | 'rejected' | undefined> = {
+        pending: 'pending',
+        processing: 'processing',
+        results: 'reported',
+        rejected: 'rejected',
+        all: undefined,
+      };
+      const commonFilters = {
         ...(debouncedSearch ? { search: debouncedSearch } : {}),
         ...(processingFilter !== 'all' ? { processing_method: processingFilter } : {}),
+        ...(priorityFilter !== 'all' ? { priority: priorityFilter } : {}),
+        ...(genderFilter !== 'all' ? { gender: genderFilter as 'male' | 'female' } : {}),
+        ...(studyStatusByTab[activeTab] ? { study_status: studyStatusByTab[activeTab] } : {}),
+        ...dateQuery,
+        ...rangeQuery,
+      };
+
+      const response = await radiologyService.getOrders({
+        page: currentPage,
+        page_size: itemsPerPage,
+        ...commonFilters,
       });
+      const statsResponse: {
+        total: number;
+        pending: number;
+        processing: number;
+        results_ready: number;
+        rejected: number;
+        stat: number;
+      } = await radiologyService.getOrderStats(commonFilters);
 
       setOrders(response.results || []);
+      setTotalCount(response.count || response.results.length);
+      setStats({
+        total: statsResponse.total || 0,
+        pendingSamples: statsResponse.pending || 0,
+        processing: statsResponse.processing || 0,
+        resultsReady: statsResponse.results_ready || 0,
+        rejected: statsResponse.rejected || 0,
+        stat: statsResponse.stat || 0,
+      });
     } catch (err: any) {
       if (!silent) {
         setError(err.message || 'Failed to load radiology orders');
@@ -413,7 +432,7 @@ export default function RadiologyOrdersPage() {
         setLoading(false);
       }
     }
-  }, [debouncedSearch, processingFilter]);
+  }, [debouncedSearch, processingFilter, priorityFilter, genderFilter, dateFilter, dateRange.from, dateRange.to, activeTab, currentPage, itemsPerPage]);
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(searchQuery.trim()), 300);
@@ -562,88 +581,7 @@ export default function RadiologyOrdersPage() {
     return 'pending';
   };
 
-  // Base filtering (search/date/priority/gender)
-  const baseFilteredOrders = useMemo(() => {
-    console.log('Applying filters:', { dateFilter, priorityFilter, genderFilter, totalOrders: orders.length });
-    const matchesCustomDateRange = (orderedAt: string | undefined) => {
-      if (!dateRange.from && !dateRange.to) return true;
-      if (!orderedAt) return false;
-
-      const dt = new Date(orderedAt);
-      if (Number.isNaN(dt.getTime())) return false;
-
-      if (dateRange.from) {
-        const from = new Date(`${dateRange.from}T00:00:00`);
-        if (dt < from) return false;
-      }
-
-      if (dateRange.to) {
-        const to = new Date(`${dateRange.to}T23:59:59.999`);
-        if (dt > to) return false;
-      }
-
-      return true;
-    };
-    
-    return orders.filter(order => {
-      // Debug: log order details
-      if (dateFilter !== 'all' || priorityFilter !== 'all' || genderFilter !== 'all') {
-        console.log('Order:', {
-          id: order.id,
-          ordered_at: order.ordered_at,
-          priority: order.priority,
-          patient_gender: order.patient_gender,
-          patient_details_gender: order.patient_details?.gender
-        });
-      }
-      
-      if (!matchesDateFilter(order.ordered_at, dateFilter)) {
-        console.log('Date filter rejected:', order.ordered_at, dateFilter);
-        return false;
-      }
-
-      if (!matchesCustomDateRange(order.ordered_at)) {
-        return false;
-      }
-
-      if (priorityFilter !== 'all' && normalizePriority(order.priority) !== priorityFilter) {
-        console.log('Priority filter rejected:', order.priority, priorityFilter);
-        return false;
-      }
-
-      if (genderFilter !== 'all') {
-        const orderGender =
-          normalizeGender(order.patient_details?.gender) ||
-          normalizeGender(order.patient_gender);
-        console.log('Gender check:', orderGender, genderFilter);
-        if (orderGender !== genderFilter) {
-          console.log('Gender filter rejected:', orderGender, genderFilter);
-          return false;
-        }
-      }
-
-      // Search / processing_method are applied server-side in loadOrders when set
-
-      return true;
-    });
-  }, [orders, dateFilter, priorityFilter, genderFilter, dateRange.from, dateRange.to]);
-
-  // Tab/status filtering on top of base filters
-  const filteredOrders = useMemo(() => {
-    return baseFilteredOrders.filter((order) => {
-      if (activeTab === 'pending') return orderHasStudyStatus(order, 'pending');
-      if (activeTab === 'processing') return orderHasStudyStatus(order, 'processing');
-      if (activeTab === 'results') return orderHasStudyStatus(order, 'reported');
-      if (activeTab === 'rejected') return orderHasStudyStatus(order, 'rejected');
-      return true;
-    });
-  }, [baseFilteredOrders, activeTab]);
-
-  // Client-side pagination for filtered dataset
-  const paginatedOrders = useMemo(() => {
-    const start = (currentPage - 1) * itemsPerPage;
-    return filteredOrders.slice(start, start + itemsPerPage);
-  }, [filteredOrders, currentPage, itemsPerPage]);
+  const paginatedOrders = orders;
 
   // Reset to page 1 when filters change
   useEffect(() => {
@@ -654,20 +592,6 @@ export default function RadiologyOrdersPage() {
     setDateRange({ from: '', to: '' });
     setIsDateFilterDialogOpen(false);
   };
-
-  // Calculate stats from current control filters (excluding tab)
-  const stats = useMemo(() => {
-    const allStudies = baseFilteredOrders.flatMap(order => order.studies || []);
-
-    return {
-      total: baseFilteredOrders.length,
-      pendingSamples: allStudies.filter(s => s && s.status === 'pending').length,
-      processing: allStudies.filter(s => s && s.status === 'processing').length,
-      resultsReady: allStudies.filter(s => s && s.status === 'reported').length,
-      rejected: allStudies.filter(s => s && s.status === 'rejected').length,
-      stat: baseFilteredOrders.filter(o => normalizePriority(o.priority) === 'stat').length,
-    };
-  }, [baseFilteredOrders]);
 
   const getPriorityColor = (priority: string) => {
     switch (priority) {
@@ -748,18 +672,11 @@ export default function RadiologyOrdersPage() {
 
   const handleProcessOrder = async (order: any) => {
     try {
-      console.log('Calling updateOrderStatus for order:', order.id);
-      console.log('Order ID type:', typeof order.id);
-      console.log('Parsed order ID:', parseInt(order.id));
-      // Security: Removed debug console logs and direct API calls
-
       await radiologyService.updateOrderStatus(parseInt(order.id), 'processing');
       toast.success('Order status updated to Processing');
       loadOrders();
     } catch (error: any) {
       console.error('Error updating order status:', error);
-      console.log('Error details:', error);
-      console.log('Order object:', order);
       toast.error(error.message || 'Failed to update order status');
     }
   };
@@ -786,7 +703,7 @@ export default function RadiologyOrdersPage() {
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-muted-foreground">Pending Samples</p>
+                  <p className="text-sm text-muted-foreground">Pending Orders</p>
                   <p className="text-2xl sm:text-3xl font-bold text-gray-600 dark:text-gray-400">{stats.pendingSamples}</p>
                 </div>
                 <TestTube className="h-8 w-8 text-gray-400" />
@@ -960,7 +877,7 @@ export default function RadiologyOrdersPage() {
                 <Button variant="outline" className="mt-4" onClick={() => void loadOrders()}>Retry</Button>
               </CardContent>
             </Card>
-          ) : filteredOrders.length > 0 ? (
+          ) : paginatedOrders.length > 0 ? (
             paginatedOrders.map((order) => <OrderCard key={order.id} order={order} />)
           ) : (
             <Card>
@@ -974,11 +891,11 @@ export default function RadiologyOrdersPage() {
         </div>
 
         {/* Pagination */}
-        {filteredOrders.length > 0 && (
+        {totalCount > 0 && (
           <Card className="p-4">
             <StandardPagination
               currentPage={currentPage}
-              totalItems={filteredOrders.length}
+              totalItems={totalCount}
               itemsPerPage={itemsPerPage}
               onPageChange={setCurrentPage}
               onItemsPerPageChange={(newSize) => {
@@ -988,7 +905,7 @@ export default function RadiologyOrdersPage() {
               itemName="orders"
             />
             <p className="text-xs text-muted-foreground mt-2 text-center">
-              Showing {paginatedOrders.length} of {filteredOrders.length} order{filteredOrders.length !== 1 ? 's' : ''} (page {currentPage} of {Math.max(1, Math.ceil(filteredOrders.length / itemsPerPage))})
+              Showing {paginatedOrders.length} of {totalCount} order{totalCount !== 1 ? 's' : ''} (page {currentPage} of {Math.max(1, Math.ceil(totalCount / itemsPerPage))})
             </p>
           </Card>
         )}

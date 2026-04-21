@@ -319,6 +319,7 @@ interface RadiologyReport {
 interface Patient {
   id: string;
   visitId: string;
+  queueItemId?: number;
   patientId: string;
   name: string;
   age: number;
@@ -1267,6 +1268,10 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   const [loadingPhysioSessions, setLoadingPhysioSessions] = useState(false);
 
   const [isRefreshingQueue, setIsRefreshingQueue] = useState(false);
+  const [isMarkingLeft, setIsMarkingLeft] = useState(false);
+  const [showLeftWorkflowDialog, setShowLeftWorkflowDialog] = useState(false);
+  const [leftWorkflowReason, setLeftWorkflowReason] = useState('Patient left before being seen');
+  const [leftWorkflowTarget, setLeftWorkflowTarget] = useState<{ kind: 'queue'; patient: Patient } | { kind: 'session' } | null>(null);
   
   // Function to load wards for nursing order form
   const loadWards = async () => {
@@ -1346,6 +1351,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         return {
           id: String(item.patient),
           visitId: item.visit ? String(item.visit) : '',
+          queueItemId: Number(item.id),
           patient_id: patientDetails?.patient_id || '',
           patientId: patientDetails?.patient_id || '',
           full_name: item.patient_name || '',
@@ -1439,6 +1445,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           return {
             id: String(item.patient),
             visitId: item.visit ? String(item.visit) : '',
+            queueItemId: Number(item.id),
             patient_id: patientDetails?.patient_id || '',
             patientId: patientDetails?.patient_id || '',
             full_name: item.patient_name || '',
@@ -3317,6 +3324,57 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     }
   };
 
+  const handleMarkQueuePatientLeft = async (patient: Patient) => {
+    setLeftWorkflowTarget({ kind: 'queue', patient });
+    setLeftWorkflowReason('Patient left before being seen');
+    setShowLeftWorkflowDialog(true);
+  };
+
+  const handleEndSessionNotSeen = async () => {
+    if (!sessionId || !currentPatient) {
+      toast.error('No active session to end');
+      return;
+    }
+    setLeftWorkflowTarget({ kind: 'session' });
+    setLeftWorkflowReason('Patient left during consultation');
+    setShowLeftWorkflowDialog(true);
+  };
+
+  const confirmLeftWorkflowAction = async () => {
+    if (!leftWorkflowTarget) return;
+    setIsMarkingLeft(true);
+    try {
+      if (leftWorkflowTarget.kind === 'queue') {
+        const patient = leftWorkflowTarget.patient;
+        if (!patient.queueItemId) throw new Error('Queue row not found for this patient');
+        await consultationService.markQueuePatientLeft(patient.queueItemId, {
+          reason: leftWorkflowReason.trim(),
+        });
+        toast.success(`${patient.name} marked as left`);
+        await refreshQueueData();
+      } else {
+        if (!sessionId) throw new Error('No active session to end');
+        await consultationService.endSessionNotSeen(sessionId, {
+          reason: leftWorkflowReason.trim(),
+        });
+        toast.success('Session ended as not seen');
+        setCurrentPatient(null);
+        setSessionActive(false);
+        setSessionId(null);
+        setSessionStartTime(null);
+        setSessionBaseActiveSeconds(0);
+        setSessionDuration(0);
+        await refreshQueueData();
+      }
+      setShowLeftWorkflowDialog(false);
+      setLeftWorkflowTarget(null);
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to complete action');
+    } finally {
+      setIsMarkingLeft(false);
+    }
+  };
+
 
   const resolveCurrentVisitId = async (): Promise<number | undefined> => {
     if (!currentPatient) return undefined;
@@ -4580,6 +4638,10 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
             <Button variant="outline" onClick={() => setShowRoomQueueDialog(true)}>
               <Users className="mr-2 h-4 w-4" />
               Room Queue ({patients.length})
+            </Button>
+            <Button variant="secondary" onClick={handleEndSessionNotSeen} disabled={isMarkingLeft}>
+              {isMarkingLeft ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <UserX className="mr-2 h-4 w-4" />}
+              End as Not Seen
             </Button>
             <Button variant="destructive" onClick={() => setShowEndDialog(true)}>
               End Session
@@ -8720,15 +8782,26 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                               </div>
                             </div>
                             {!isCurrentPatient && (
-                              <Button
-                                size="sm"
-                                onClick={() => handleStartSession(patient)}
-                                disabled={isStartingSession}
-                                className="bg-emerald-500 hover:bg-emerald-600 text-white"
-                              >
-                                <Stethoscope className="h-4 w-4 mr-1" />
-                                {isStartingSession ? "Starting..." : "Start"}
-                              </Button>
+                              <div className="flex flex-col gap-2">
+                                <Button
+                                  size="sm"
+                                  onClick={() => handleStartSession(patient)}
+                                  disabled={isStartingSession}
+                                  className="bg-emerald-500 hover:bg-emerald-600 text-white"
+                                >
+                                  <Stethoscope className="h-4 w-4 mr-1" />
+                                  {isStartingSession ? "Starting..." : "Start"}
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="destructive"
+                                  onClick={() => handleMarkQueuePatientLeft(patient)}
+                                  disabled={isMarkingLeft}
+                                >
+                                  {isMarkingLeft ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <UserX className="h-4 w-4 mr-1" />}
+                                  Mark Left
+                                </Button>
+                              </div>
                             )}
                           </div>
                         </div>
@@ -8765,6 +8838,49 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
               >
                 <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshingQueue ? 'animate-spin' : ''}`} />
                 {isRefreshingQueue ? 'Refreshing...' : 'Refresh Queue'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={showLeftWorkflowDialog} onOpenChange={setShowLeftWorkflowDialog}>
+          <DialogContent className="w-[95vw] sm:max-w-[540px]">
+            <DialogHeader>
+              <DialogTitle>
+                {leftWorkflowTarget?.kind === 'session' ? 'End as Not Seen' : 'Mark Queue Patient as Left'}
+              </DialogTitle>
+              <DialogDescription>
+                {leftWorkflowTarget?.kind === 'session'
+                  ? `This will cancel the active workflow for ${currentPatient?.name || 'this patient'}.`
+                  : `This will remove ${leftWorkflowTarget?.kind === 'queue' ? leftWorkflowTarget.patient.name : 'this patient'} from active workflow.`}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-2 py-2">
+              <Label htmlFor="left-workflow-reason">Reason</Label>
+              <Textarea
+                id="left-workflow-reason"
+                value={leftWorkflowReason}
+                onChange={(e) => setLeftWorkflowReason(e.target.value)}
+                placeholder="Enter reason"
+                rows={3}
+              />
+            </div>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  if (!isMarkingLeft) {
+                    setShowLeftWorkflowDialog(false);
+                    setLeftWorkflowTarget(null);
+                  }
+                }}
+                disabled={isMarkingLeft}
+              >
+                Keep Active
+              </Button>
+              <Button variant="destructive" onClick={confirmLeftWorkflowAction} disabled={isMarkingLeft || !leftWorkflowTarget}>
+                {isMarkingLeft ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <UserX className="h-4 w-4 mr-2" />}
+                Confirm
               </Button>
             </DialogFooter>
           </DialogContent>

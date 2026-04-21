@@ -35,6 +35,7 @@ from .serializers import (
     PresentingComplaintSerializer,
 )
 from audit.services import AuditService
+from patients.workflow import close_visit_workflow
 
 
 class ConsultationRoomViewSet(viewsets.ModelViewSet):
@@ -187,6 +188,24 @@ class ConsultationSessionViewSet(viewsets.ModelViewSet):
             request=self.request,
         )
         return Response(ConsultationSessionSerializer(session).data)
+
+    @action(detail=True, methods=['post'], url_path='end-not-seen')
+    def end_not_seen(self, request, pk=None):
+        session = self.get_object()
+        visit = session.visit
+        if not visit:
+            return Response(
+                {'detail': 'No visit is attached to this session.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        reason = str(request.data.get('reason') or '').strip()
+        result = close_visit_workflow(
+            visit=visit,
+            actor=request.user,
+            reason=reason,
+            source_stage='consultation_session',
+        )
+        return Response({'detail': 'Session ended as not seen.', **result})
 
     @action(detail=True, methods=['post'])
     def pause(self, request, pk=None):
@@ -729,6 +748,25 @@ class ConsultationQueueViewSet(viewsets.ModelViewSet):
         queue_item.is_active = False
         queue_item.save()
         return Response(ConsultationQueueSerializer(queue_item).data)
+
+    @action(detail=True, methods=['post'], url_path='mark-left')
+    def mark_left(self, request, pk=None):
+        queue_item = self.get_object()
+        visit = queue_item.visit
+        if not visit:
+            queue_item.called_at = timezone.now()
+            queue_item.is_active = False
+            queue_item.save(update_fields=['called_at', 'is_active'])
+            return Response({'detail': 'Queue row deactivated (no visit linked).'})
+
+        reason = str(request.data.get('reason') or '').strip()
+        result = close_visit_workflow(
+            visit=visit,
+            actor=request.user,
+            reason=reason,
+            source_stage='consultation_queue',
+        )
+        return Response({'detail': 'Patient marked left from queue.', **result})
 
 
 class ReferralViewSet(viewsets.ModelViewSet):

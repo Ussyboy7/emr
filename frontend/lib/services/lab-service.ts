@@ -166,6 +166,9 @@ class LabService {
     search?: string;
     /** Filter orders that have at least one test with this processing method */
     processing_method?: 'in_house' | 'outsourced';
+    date?: string;
+    start_date?: string;
+    end_date?: string;
     page?: number;
     page_size?: number;
     consultation_session?: number;
@@ -174,6 +177,26 @@ class LabService {
     return apiFetch<{ results: LabOrder[]; count: number; next?: string; previous?: string }>(
       `/laboratory/orders/${query}`
     );
+  }
+
+  async getOrderStats(params?: {
+    priority?: string;
+    search?: string;
+    processing_method?: 'in_house' | 'outsourced';
+    gender?: string;
+    date?: string;
+    start_date?: string;
+    end_date?: string;
+  }): Promise<{
+    total: number;
+    pending: number;
+    processing: number;
+    results_ready: number;
+    rework_required: number;
+    stat: number;
+  }> {
+    const query = buildQueryString(params || {});
+    return apiFetch(`/laboratory/orders/stats/${query}`);
   }
 
   /**
@@ -483,6 +506,22 @@ class LabService {
       abnormal: abnormalRes.count || 0,
       critical: criticalRes.count || 0,
     };
+  }
+
+  async getVerificationStats(params?: {
+    status?: 'results_ready' | 'verified' | 'all';
+    overall_status?: string;
+    priority?: string;
+    clinic?: string;
+    gender?: string;
+    search?: string;
+    processing_method?: 'in_house' | 'outsourced';
+    date?: string;
+    start_date?: string;
+    end_date?: string;
+  }): Promise<{ total: number; normal: number; abnormal: number; critical: number }> {
+    const query = buildQueryString(params || {});
+    return apiFetch(`/laboratory/verification/stats/${query}`);
   }
 
   /**

@@ -236,6 +236,26 @@ class ConsultationService {
     });
   }
 
+  async markQueuePatientLeft(
+    queueId: number,
+    data: { reason?: string } = {}
+  ): Promise<{ detail: string }> {
+    return apiFetch(`/consultation/queue/${queueId}/mark-left/`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async endSessionNotSeen(
+    sessionId: number,
+    data: { reason?: string } = {}
+  ): Promise<{ detail: string }> {
+    return apiFetch(`/consultation/sessions/${sessionId}/end-not-seen/`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
   /**
    * Get ICD-10 codes
    */

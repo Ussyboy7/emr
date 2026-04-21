@@ -3,6 +3,7 @@ Radiology models for the EMR system.
 """
 from django.db import models
 from django.utils import timezone
+from django.db.models import Max
 
 
 class ImagingPartner(models.Model):
@@ -161,13 +162,22 @@ class RadiologyOrder(models.Model):
             self.clinic = normalize_clinic_name(self.clinic)
 
         if not self.order_id:
-            # Generate radiology order ID: RAD-YYYYMMDD-HHMMSS-XXXX
-            from datetime import datetime
-            timestamp = datetime.now().strftime('%Y%m%d-%H%M%S')
-            # Add random suffix to ensure uniqueness
-            import random
-            suffix = f"{random.randint(1000, 9999)}"
-            self.order_id = f"RAD-{timestamp}-{suffix}"
+            # Generate radiology order ID: BT-YY-NNNN
+            current_year = timezone.now().year % 100
+            prefix = f"BT-{current_year:02d}-"
+            max_order_id = RadiologyOrder.objects.filter(
+                order_id__startswith=prefix
+            ).aggregate(Max('order_id'))['order_id__max']
+
+            if max_order_id:
+                try:
+                    next_serial = int(max_order_id.split('-')[-1]) + 1
+                except (ValueError, IndexError):
+                    next_serial = 0
+            else:
+                next_serial = 0
+
+            self.order_id = f"{prefix}{next_serial:04d}"
         super().save(*args, **kwargs)
     
     def __str__(self):

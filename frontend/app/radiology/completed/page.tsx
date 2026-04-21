@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -42,6 +42,7 @@ export default function CompletedReportsPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(50);
   const [totalCount, setTotalCount] = useState(0);
+  const [stats, setStats] = useState({ total: 0, normal: 0, abnormal: 0, critical: 0 });
   const [clinics, setClinics] = useState<any[]>([]);
 
   // Dialog states
@@ -54,6 +55,32 @@ export default function CompletedReportsPage() {
       date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
       time: date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
     };
+  };
+
+  const buildDateQuery = (filter: string): Record<string, string> => {
+    if (filter === 'today') {
+      const today = new Date();
+      return { date: today.toISOString().split('T')[0] };
+    }
+    if (filter === 'week') {
+      const end = new Date();
+      const start = new Date();
+      start.setDate(end.getDate() - 7);
+      return {
+        start_date: start.toISOString().split('T')[0],
+        end_date: end.toISOString().split('T')[0],
+      };
+    }
+    if (filter === 'month') {
+      const end = new Date();
+      const start = new Date();
+      start.setMonth(end.getMonth() - 1);
+      return {
+        start_date: start.toISOString().split('T')[0],
+        end_date: end.toISOString().split('T')[0],
+      };
+    }
+    return {};
   };
 
   // Load clinics function
@@ -72,17 +99,43 @@ export default function CompletedReportsPage() {
       setLoading(true);
       setError(null);
       const params: any = {
-        status: 'verified',
         page: currentPage,
         page_size: itemsPerPage,
+        search: searchQuery.trim() || undefined,
+        clinic: clinicFilter !== 'all' ? clinicFilter : undefined,
+        gender: genderFilter !== 'all' ? genderFilter : undefined,
       };
       if (statusFilter !== 'all') {
         params.overall_status = statusFilter;
       }
-      // Note: searchQuery, dateFilter, genderFilter not yet implemented in backend
+      Object.assign(params, buildDateQuery(dateFilter));
+      if (dateRange.from || dateRange.to) {
+        delete params.date;
+        if (dateRange.from) params.start_date = dateRange.from;
+        if (dateRange.to) params.end_date = dateRange.to;
+      }
 
-      const response = await radiologyService.getPendingVerifications(params);
+      const [response, statsResponse] = await Promise.all([
+        radiologyService.getVerifiedReports(params),
+        radiologyService.getVerificationStats({
+          status: 'verified',
+          overall_status: statusFilter !== 'all' ? statusFilter : undefined,
+          search: searchQuery.trim() || undefined,
+          clinic: clinicFilter !== 'all' ? clinicFilter : undefined,
+          gender: genderFilter !== 'all' ? genderFilter : undefined,
+          ...buildDateQuery(dateFilter),
+          ...(dateRange.from || dateRange.to
+            ? { start_date: dateRange.from || undefined, end_date: dateRange.to || undefined }
+            : {}),
+        }),
+      ]);
       setTotalCount(response.count || response.results.length);
+      setStats({
+        total: statsResponse.total || 0,
+        normal: statsResponse.normal || 0,
+        abnormal: statsResponse.abnormal || 0,
+        critical: statsResponse.critical || 0,
+      });
 
       const transformedReports = response.results.map((apiReport: any) =>
         transformApiRadiologyReportToCompleted(apiReport)
@@ -96,7 +149,7 @@ export default function CompletedReportsPage() {
     } finally {
       setLoading(false);
     }
-  }, [currentPage, itemsPerPage, statusFilter, searchQuery, dateFilter, genderFilter, dateRange.from, dateRange.to]);
+  }, [currentPage, itemsPerPage, statusFilter, searchQuery, dateFilter, clinicFilter, genderFilter, dateRange.from, dateRange.to]);
 
   // Load clinics on component mount
   useEffect(() => {
@@ -118,65 +171,7 @@ export default function CompletedReportsPage() {
     setIsDateFilterDialogOpen(false);
   };
 
-  // The API handles pagination, but we still filter client-side for search
-  const filteredReports = useMemo(() => reports.filter(report => {
-    const matchesSearch = report.patient.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      report.orderId.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      report.studyName.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesStatus = statusFilter === 'all' || report.overallStatus.toLowerCase() === statusFilter;
-    const matchesGender = genderFilter === 'all' || report.patient.gender.toLowerCase() === genderFilter.toLowerCase();
-
-    // Date filtering
-    let matchesDate = true;
-    if (dateRange.from || dateRange.to) {
-      const reportDate = new Date(report.completedAt);
-      if (Number.isNaN(reportDate.getTime())) {
-        matchesDate = false;
-      } else {
-        if (dateRange.from) {
-          const from = new Date(`${dateRange.from}T00:00:00`);
-          if (reportDate < from) matchesDate = false;
-        }
-        if (dateRange.to) {
-          const to = new Date(`${dateRange.to}T23:59:59.999`);
-          if (reportDate > to) matchesDate = false;
-        }
-      }
-    } else if (dateFilter !== 'all') {
-      const reportDate = new Date(report.completedAt);
-      const today = new Date();
-
-      switch (dateFilter) {
-        case 'today':
-          matchesDate = reportDate.toDateString() === today.toDateString();
-          break;
-        case 'week':
-          const weekAgo = new Date(today);
-          weekAgo.setDate(weekAgo.getDate() - 7);
-          matchesDate = reportDate >= weekAgo;
-          break;
-        case 'month':
-          const monthAgo = new Date(today);
-          monthAgo.setMonth(monthAgo.getMonth() - 1);
-          matchesDate = reportDate >= monthAgo;
-          break;
-      }
-    }
-
-    return matchesSearch && matchesStatus && matchesGender && matchesDate;
-  }), [reports, searchQuery, statusFilter, dateFilter, genderFilter, dateRange.from, dateRange.to]);
-
-  const paginatedReports = filteredReports.slice(
-    (currentPage - 1) * itemsPerPage,
-    currentPage * itemsPerPage
-  );
-
-  const stats = {
-    total: reports.length,
-    normal: reports.filter(r => r.overallStatus === 'Normal').length,
-    abnormal: reports.filter(r => r.overallStatus === 'Abnormal').length,
-    critical: reports.filter(r => r.overallStatus === 'Critical').length,
-  };
+  const paginatedReports = reports;
 
   const openViewDialog = (report: CompletedRadiologyReport) => {
     setSelectedReport(report);
@@ -321,11 +316,11 @@ export default function CompletedReportsPage() {
               <p className="mb-4">{error}</p>
               <Button variant="outline" onClick={loadReports}>Retry</Button>
             </CardContent></Card>
-          ) : filteredReports.length === 0 ? (
+          ) : paginatedReports.length === 0 ? (
             <Card><CardContent className="p-8 text-center text-muted-foreground">
               <CheckCircle2 className="h-12 w-12 mx-auto mb-4 opacity-50" />
-              <h3 className="text-lg font-semibold mb-2">No completed reports found</h3>
-              <p>Reports will appear here after verification in Orders Queue</p>
+              <h3 className="text-lg font-semibold mb-2">No completed studies found</h3>
+              <p>Studies will appear here after verification in Study Orders</p>
             </CardContent></Card>
           ) : (
             <>
@@ -413,11 +408,11 @@ export default function CompletedReportsPage() {
               })}
 
               {/* Pagination */}
-              {filteredReports.length > 0 && (
+              {totalCount > 0 && (
                 <Card className="p-4">
                   <StandardPagination
                     currentPage={currentPage}
-                    totalItems={filteredReports.length}
+                    totalItems={totalCount}
                     itemsPerPage={itemsPerPage}
                     onPageChange={setCurrentPage}
                     onItemsPerPageChange={setItemsPerPage}

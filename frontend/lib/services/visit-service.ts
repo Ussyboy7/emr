@@ -82,6 +82,51 @@ class VisitService {
     });
   }
 
+  async closeWorkflow(
+    id: number | string,
+    data: { reason?: string; source_stage?: string } = {}
+  ): Promise<{
+    detail: string;
+    visit_cancelled: boolean;
+    queue_items_deactivated: number;
+    sessions_cancelled: number;
+    nursing_orders_cancelled: number;
+  }> {
+    try {
+      return await apiFetch(`/visits/${id}/close-workflow/`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      });
+    } catch (err: any) {
+      // Backward-compatible fallback for environments that haven't deployed
+      // the dedicated close-workflow endpoint yet.
+      if (err?.status !== 404) throw err;
+
+      await this.updateVisit(id, { status: 'cancelled' } as Partial<Visit>);
+
+      let queueItemsDeactivated = 0;
+      try {
+        const queue = await apiFetch<{ results: Array<{ id: number }> }>(
+          `/consultation/queue/?visit=${id}&is_active=true&page_size=100`
+        );
+        for (const item of queue.results || []) {
+          await apiFetch(`/consultation/queue/${item.id}/call/`, { method: 'POST' });
+          queueItemsDeactivated += 1;
+        }
+      } catch {
+        // Queue cleanup is best effort in fallback mode.
+      }
+
+      return {
+        detail: 'Visit cancelled via compatibility fallback.',
+        visit_cancelled: true,
+        queue_items_deactivated: queueItemsDeactivated,
+        sessions_cancelled: 0,
+        nursing_orders_cancelled: 0,
+      };
+    }
+  }
+
   /**
    * Delete a visit
    */

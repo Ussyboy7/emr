@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -156,6 +156,9 @@ export default function RadiologyVerificationPage() {
   const [itemsPerPage, setItemsPerPage] = useState(50);
   const [totalCount, setTotalCount] = useState(0);
   const [verifiedTotalCount, setVerifiedTotalCount] = useState(0);
+  const [pendingCount, setPendingCount] = useState(0);
+  const [verifiedCount, setVerifiedCount] = useState(0);
+  const [verifiedBreakdown, setVerifiedBreakdown] = useState({ normal: 0, abnormal: 0, critical: 0 });
 
   // Tab state
   const [activeTab, setActiveTab] = useState('pending');
@@ -176,79 +179,34 @@ export default function RadiologyVerificationPage() {
   const [verificationNotes, setVerificationNotes] = useState('');
   const [rejectionReason, setRejectionReason] = useState('');
 
-  const pendingReports = reports.filter(r => (r.study.status as any) === 'Reported' || (r.study.status as any) === 'Results Ready');
+  const buildDateQuery = (filter: string): Record<string, string> => {
+    if (filter === 'today') {
+      const today = new Date();
+      return { date: today.toISOString().split('T')[0] };
+    }
+    if (filter === 'week') {
+      const end = new Date();
+      const start = new Date();
+      start.setDate(end.getDate() - 7);
+      return {
+        start_date: start.toISOString().split('T')[0],
+        end_date: end.toISOString().split('T')[0],
+      };
+    }
+    if (filter === 'month') {
+      const end = new Date();
+      const start = new Date();
+      start.setMonth(end.getMonth() - 1);
+      return {
+        start_date: start.toISOString().split('T')[0],
+        end_date: end.toISOString().split('T')[0],
+      };
+    }
+    return {};
+  };
   
-  const filteredReports = useMemo(() => pendingReports.filter(report => {
-    const matchesSearch = report.patient.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      report.orderId.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      report.study.procedure.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesCategory = categoryFilter === 'all' || report.study.category === categoryFilter;
-    const matchesPriority = priorityFilter === 'all' || report.priority === priorityFilter;
-    const matchesGender = genderFilter === 'all' || report.patient.gender.toLowerCase() === genderFilter.toLowerCase();
-    
-    // Date filter (filter by reported date)
-    if (dateFilter !== 'all' && report.study.reportedAt) {
-      const reportedDate = new Date(report.study.reportedAt);
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      
-      if (dateFilter === 'today' && reportedDate.toDateString() !== today.toDateString()) return false;
-      if (dateFilter === 'week') {
-        const weekAgo = new Date(today);
-        weekAgo.setDate(weekAgo.getDate() - 7);
-        if (reportedDate < weekAgo) return false;
-      }
-      if (dateFilter === 'month') {
-        const monthAgo = new Date(today);
-        monthAgo.setMonth(monthAgo.getMonth() - 1);
-        if (reportedDate < monthAgo) return false;
-      }
-    }
-    
-    return matchesSearch && matchesCategory && matchesPriority && matchesGender;
-  }), [pendingReports, searchQuery, categoryFilter, priorityFilter]);
-
-  // Use filtered reports directly (server-side pagination when no client-side filters)
-  const paginatedReports = filteredReports;
-
-  const filteredVerifiedReports = useMemo(() => verifiedReports.filter(report => {
-    const matchesSearch = report.patient.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      report.orderId.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      report.study.procedure.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesCategory = categoryFilter === 'all' || report.study.category.toLowerCase().includes(categoryFilter.toLowerCase());
-    const matchesPriority = priorityFilter === 'all' || report.priority === priorityFilter;
-    const matchesGender = genderFilter === 'all' || report.patient.gender.toLowerCase() === genderFilter.toLowerCase();
-
-    // Date filtering for verified reports
-    let matchesDate = true;
-    if (dateFilter !== 'all') {
-      const reportDate = new Date(report.study.reportedAt || '');
-      const today = new Date();
-
-      switch (dateFilter) {
-        case 'today':
-          matchesDate = reportDate.toDateString() === today.toDateString();
-          break;
-        case 'week':
-          const weekAgo = new Date(today);
-          weekAgo.setDate(weekAgo.getDate() - 7);
-          matchesDate = reportDate >= weekAgo;
-          break;
-        case 'month':
-          const monthAgo = new Date(today);
-          monthAgo.setMonth(monthAgo.getMonth() - 1);
-          matchesDate = reportDate >= monthAgo;
-          break;
-      }
-    }
-
-    return matchesSearch && matchesCategory && matchesPriority && matchesGender && matchesDate;
-  }), [verifiedReports, searchQuery, categoryFilter, priorityFilter, dateFilter, genderFilter]);
-
-  const verifiedPaginatedReports = filteredVerifiedReports.slice(
-    (verifiedCurrentPage - 1) * itemsPerPage,
-    verifiedCurrentPage * itemsPerPage
-  );
+  const paginatedReports = reports;
+  const verifiedPaginatedReports = verifiedReports;
 
   // Load reports from API
   useEffect(() => {
@@ -287,11 +245,14 @@ export default function RadiologyVerificationPage() {
       const params: any = {
         page: currentPage,
         page_size: itemsPerPage,
+        search: searchQuery.trim() || undefined,
+        gender: genderFilter !== 'all' ? genderFilter : undefined,
+        category: categoryFilter !== 'all' ? categoryFilter : undefined,
+        ...buildDateQuery(dateFilter),
       };
       if (priorityFilter !== 'all') {
         params.priority = priorityFilter.toLowerCase();
       }
-      // Note: searchQuery, categoryFilter, dateFilter, genderFilter not yet implemented in backend
 
       const response = await radiologyService.getPendingVerifications(params);
       setTotalCount(response.count || response.results.length);
@@ -314,11 +275,14 @@ export default function RadiologyVerificationPage() {
         status: 'verified',
         page: verifiedCurrentPage,
         page_size: itemsPerPage,
+        search: searchQuery.trim() || undefined,
+        gender: genderFilter !== 'all' ? genderFilter : undefined,
+        category: categoryFilter !== 'all' ? categoryFilter : undefined,
+        ...buildDateQuery(dateFilter),
       };
       if (priorityFilter !== 'all') {
         params.priority = priorityFilter.toLowerCase();
       }
-      // Note: searchQuery, categoryFilter, dateFilter, genderFilter not yet implemented in backend
 
       const response = await radiologyService.getPendingVerifications(params);
       setVerifiedTotalCount(response.count || response.results.length);
@@ -333,19 +297,31 @@ export default function RadiologyVerificationPage() {
     }
   };
 
-  const stats = {
-    pending: pendingReports.length,
-    critical: pendingReports.filter(r => r.study.critical).length,
-    urgent: pendingReports.filter(r => r.priority === 'Urgent' || r.priority === 'STAT').length,
-    routine: pendingReports.filter(r => r.priority === 'Routine').length,
+  const loadVerificationCounts = async () => {
+    const base = {
+      overall_status: undefined,
+      priority: priorityFilter !== 'all' ? priorityFilter.toLowerCase() : undefined,
+      search: searchQuery.trim() || undefined,
+      gender: genderFilter !== 'all' ? genderFilter : undefined,
+      category: categoryFilter !== 'all' ? categoryFilter : undefined,
+      ...buildDateQuery(dateFilter),
+    };
+    const [pendingStats, verifiedStats] = await Promise.all([
+      radiologyService.getVerificationStats({ ...base, status: 'reported' }),
+      radiologyService.getVerificationStats({ ...base, status: 'verified' }),
+    ]);
+    setPendingCount(pendingStats.total || 0);
+    setVerifiedCount(verifiedStats.total || 0);
+    setVerifiedBreakdown({
+      normal: verifiedStats.normal || 0,
+      abnormal: verifiedStats.abnormal || 0,
+      critical: verifiedStats.critical || 0,
+    });
   };
 
-  const verifiedStats = {
-    verified: verifiedReports.length,
-    xray: verifiedReports.filter(r => r.study.category === 'X-Ray').length,
-    ctmri: verifiedReports.filter(r => ['CT Scan', 'MRI'].includes(r.study.category)).length,
-    critical: verifiedReports.filter(r => r.study.critical).length,
-  };
+  useEffect(() => {
+    void loadVerificationCounts();
+  }, [priorityFilter, searchQuery, genderFilter, dateFilter]);
 
   const getCategoryBadge = (category: string) => {
     const colors: Record<string, string> = {
@@ -494,6 +470,7 @@ export default function RadiologyVerificationPage() {
   const openViewDialog = (report: RadiologyReport) => { setSelectedReport(report); setIsViewDialogOpen(true); };
   const openVerifyDialog = (report: RadiologyReport) => { setSelectedReport(report); setVerificationNotes(''); setIsVerifyDialogOpen(true); };
   const openRejectDialog = (report: RadiologyReport) => { setSelectedReport(report); setRejectionReason(''); setIsRejectDialogOpen(true); };
+  const isSelectedReportMutable = selectedReport?.study?.status === 'Reported';
 
   return (
     <DashboardLayout>
@@ -504,7 +481,7 @@ export default function RadiologyVerificationPage() {
               <ShieldCheck className="h-8 w-8 text-amber-500" />
               Results Verification
             </h1>
-            <p className="text-muted-foreground mt-1">Senior Admin / Radiologist - Verify radiology reports before completion</p>
+            <p className="text-muted-foreground mt-1">Senior Admin / Radiologist - Verify radiology results before completion</p>
           </div>
           <Button variant="outline" onClick={loadReports} disabled={loading}>
             <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />Refresh
@@ -517,15 +494,20 @@ export default function RadiologyVerificationPage() {
             <div className="flex flex-col gap-4">
               <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
                 <TabsList>
-                  <TabsTrigger value="pending">Pending Review ({stats.pending})</TabsTrigger>
-                  <TabsTrigger value="verified">Verified ({verifiedStats.verified})</TabsTrigger>
+                  <TabsTrigger value="pending">Pending Review ({pendingCount})</TabsTrigger>
+                  <TabsTrigger value="verified">Verified ({verifiedCount})</TabsTrigger>
                   <TabsTrigger value="all">All</TabsTrigger>
                 </TabsList>
               </Tabs>
               <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-3">
                 <div className="relative flex-1 min-w-[min(100%,16rem)]">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input placeholder="Search reports..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-10" />
+                  <Input
+                    placeholder="Patient, MRN, order ID, Radiology ID (e.g. BT-26-0007), study…"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-10"
+                  />
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <Select value={dateFilter} onValueChange={setDateFilter}>
@@ -584,7 +566,7 @@ export default function RadiologyVerificationPage() {
                 <div className="flex items-center gap-3">
                   <CheckCircle2 className="h-5 w-5 text-emerald-600" />
                   <div>
-                    <p className="font-semibold text-emerald-900 dark:text-emerald-100">{selectedIds.length} report(s) selected</p>
+                    <p className="font-semibold text-emerald-900 dark:text-emerald-100">{selectedIds.length} result(s) selected</p>
                     <p className="text-sm text-emerald-700 dark:text-emerald-300">Ready for batch verification</p>
                   </div>
                 </div>
@@ -600,12 +582,12 @@ export default function RadiologyVerificationPage() {
         )}
 
 
-        {/* Reports List */}
+        {/* Pending Results List */}
         <div className="space-y-3">
           {loading ? (
             <Card><CardContent className="p-8 text-center text-muted-foreground">
               <Loader2 className="h-12 w-12 mx-auto mb-4 animate-spin opacity-50" />
-              <p>Loading reports...</p>
+              <p>Loading results...</p>
             </CardContent></Card>
           ) : error ? (
             <Card><CardContent className="p-8 text-center text-muted-foreground">
@@ -613,10 +595,10 @@ export default function RadiologyVerificationPage() {
               <p className="text-red-600 dark:text-red-400">{error}</p>
               <Button variant="outline" className="mt-4" onClick={loadReports}>Retry</Button>
             </CardContent></Card>
-          ) : filteredReports.length === 0 ? (
+          ) : paginatedReports.length === 0 ? (
             <Card><CardContent className="p-8 text-center text-muted-foreground">
               <CheckCircle2 className="h-12 w-12 mx-auto mb-4 opacity-50" />
-              <p>No reports pending verification</p>
+              <p>No results pending verification</p>
             </CardContent></Card>
           ) : (
             paginatedReports
@@ -699,20 +681,18 @@ export default function RadiologyVerificationPage() {
         </div>
 
         {/* Pagination */}
-        {filteredReports.length > 0 && (
+        {totalCount > 0 && (
           <Card className="p-4">
             <StandardPagination
               currentPage={currentPage}
-              totalItems={searchQuery || categoryFilter !== 'all' || priorityFilter !== 'all' || dateFilter !== 'all' || genderFilter !== 'all'
-                ? filteredReports.length 
-                : totalCount}
+              totalItems={totalCount}
               itemsPerPage={itemsPerPage}
               onPageChange={setCurrentPage}
               onItemsPerPageChange={(newSize) => {
                 setItemsPerPage(newSize);
                 setCurrentPage(1);
               }}
-              itemName="reports"
+              itemName="results"
             />
           </Card>
         )}
@@ -721,87 +701,24 @@ export default function RadiologyVerificationPage() {
 
           {/* Verified Tab */}
           <TabsContent value="verified" className="space-y-6">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
-              <div>
-                <h1 className="text-2xl sm:text-3xl font-bold text-foreground flex items-center gap-3">
-                  <CheckCircle2 className="h-8 w-8 text-emerald-500" />
-                  Completed Reports
-                </h1>
-                <p className="text-muted-foreground mt-1">History of verified and completed radiology reports</p>
-              </div>
-              <Button variant="outline" onClick={loadVerifiedReports} disabled={verifiedLoading}>
-                <RefreshCw className={`h-4 w-4 mr-2 ${verifiedLoading ? 'animate-spin' : ''}`} />Refresh
-              </Button>
-            </div>
-
-            {/* Stats */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <Card className="border-l-4 border-l-blue-500">
-                <CardContent className="p-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-muted-foreground">Total Completed</p>
-                      <p className="text-2xl sm:text-3xl font-bold text-blue-600 dark:text-blue-400">{verifiedStats.verified}</p>
-                    </div>
-                    <Stethoscope className="h-8 w-8 text-blue-400" />
-                  </div>
-                </CardContent>
-              </Card>
-              <Card className="border-l-4 border-l-emerald-500">
-                <CardContent className="p-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-muted-foreground">X-Ray</p>
-                      <p className="text-2xl sm:text-3xl font-bold text-emerald-600 dark:text-emerald-400">{verifiedStats.xray}</p>
-                    </div>
-                    <CheckCircle2 className="h-8 w-8 text-emerald-400" />
-                  </div>
-                </CardContent>
-              </Card>
-              <Card className="border-l-4 border-l-amber-500">
-                <CardContent className="p-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-muted-foreground">CT/MRI</p>
-                      <p className="text-2xl sm:text-3xl font-bold text-amber-600 dark:text-amber-400">{verifiedStats.ctmri}</p>
-                    </div>
-                    <AlertTriangle className="h-8 w-8 text-amber-400" />
-                  </div>
-                </CardContent>
-              </Card>
-              <Card className="border-l-4 border-l-rose-500">
-                <CardContent className="p-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-muted-foreground">Critical</p>
-                      <p className="text-2xl sm:text-3xl font-bold text-rose-600 dark:text-rose-400">{verifiedStats.critical}</p>
-                    </div>
-                    <AlertTriangle className="h-8 w-8 text-rose-400" />
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-
-
-            {/* Verified Reports List */}
+            {/* Verified Results List */}
             <div className="space-y-3">
               {verifiedLoading ? (
                 <Card><CardContent className="p-8 text-center text-muted-foreground">
                   <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" />
-                  <p>Loading completed reports...</p>
+                  <p>Loading verified results...</p>
                 </CardContent></Card>
               ) : verifiedError ? (
                 <Card><CardContent className="p-8 text-center text-muted-foreground">
                   <AlertTriangle className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                  <h3 className="text-lg font-semibold mb-2">Error Loading Reports</h3>
+                  <h3 className="text-lg font-semibold mb-2">Error Loading Results</h3>
                   <p className="mb-4">{verifiedError}</p>
                   <Button variant="outline" onClick={loadVerifiedReports}>Retry</Button>
                 </CardContent></Card>
-              ) : filteredVerifiedReports.length === 0 ? (
+              ) : verifiedPaginatedReports.length === 0 ? (
                 <Card><CardContent className="p-8 text-center text-muted-foreground">
                   <CheckCircle2 className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                  <h3 className="text-lg font-semibold mb-2">No completed reports found</h3>
-                  <p>Reports will appear here after verification in Orders Queue</p>
+                  <p>No verified results found</p>
                 </CardContent></Card>
               ) : (
                 <>
@@ -868,7 +785,10 @@ export default function RadiologyVerificationPage() {
                                 <span>•</span>
                                 <span>{verified.date} {verified.time}</span>
                                 <span>•</span>
-                                <span className="flex items-center gap-1"><Clock className="h-3 w-3" />0m</span>
+                                <span className="flex items-center gap-1">
+                                  <Clock className="h-3 w-3" />
+                                  {report.study.verifiedAt ? getTimeSince(report.study.verifiedAt) : 'N/A'}
+                                </span>
                               </div>
                             </div>
                           </div>
@@ -878,15 +798,15 @@ export default function RadiologyVerificationPage() {
                   })}
 
                   {/* Pagination for Verified */}
-                  {filteredVerifiedReports.length > 0 && (
+                  {verifiedTotalCount > 0 && (
                     <Card className="p-4">
                       <StandardPagination
                         currentPage={verifiedCurrentPage}
-                        totalItems={filteredVerifiedReports.length}
+                        totalItems={verifiedTotalCount}
                         itemsPerPage={itemsPerPage}
                         onPageChange={setVerifiedCurrentPage}
                         onItemsPerPageChange={setItemsPerPage}
-                        itemName="reports"
+                        itemName="results"
                       />
                     </Card>
                   )}
@@ -899,8 +819,8 @@ export default function RadiologyVerificationPage() {
           <TabsContent value="all" className="space-y-6">
             <div className="text-center py-12 text-muted-foreground">
               <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />
-              <p className="text-lg font-medium">All Reports</p>
-              <p className="text-sm">Combined view of pending and verified reports</p>
+              <p className="text-lg font-medium">All Results</p>
+              <p className="text-sm">Combined view of pending and verified results</p>
             </div>
           </TabsContent>
         </Tabs>
@@ -909,7 +829,7 @@ export default function RadiologyVerificationPage() {
         <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
           <DialogContent className="w-[95vw] sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle className="flex items-center gap-2"><FileText className="h-5 w-5 text-amber-500" />Report Details</DialogTitle>
+              <DialogTitle className="flex items-center gap-2"><FileText className="h-5 w-5 text-amber-500" />Result Details</DialogTitle>
               <DialogDescription>{selectedReport?.study.procedure} - {selectedReport?.patient.name}</DialogDescription>
             </DialogHeader>
             {selectedReport && (
@@ -978,12 +898,16 @@ export default function RadiologyVerificationPage() {
             )}
             <DialogFooter>
               <Button variant="outline" onClick={() => setIsViewDialogOpen(false)}>Close</Button>
-              <Button variant="outline" onClick={() => { setIsViewDialogOpen(false); if (selectedReport) openRejectDialog(selectedReport); }} className="text-rose-600">
-                <XCircle className="h-4 w-4 mr-2" />Reject
-              </Button>
-              <Button onClick={() => { setIsViewDialogOpen(false); if (selectedReport) openVerifyDialog(selectedReport); }} className="bg-emerald-500 hover:bg-emerald-600">
-                <CheckCircle2 className="h-4 w-4 mr-2" />Verify
-              </Button>
+              {isSelectedReportMutable && (
+                <>
+                  <Button variant="outline" onClick={() => { setIsViewDialogOpen(false); if (selectedReport) openRejectDialog(selectedReport); }} className="text-rose-600">
+                    <XCircle className="h-4 w-4 mr-2" />Reject
+                  </Button>
+                  <Button onClick={() => { setIsViewDialogOpen(false); if (selectedReport) openVerifyDialog(selectedReport); }} className="bg-emerald-500 hover:bg-emerald-600">
+                    <CheckCircle2 className="h-4 w-4 mr-2" />Verify
+                  </Button>
+                </>
+              )}
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -992,7 +916,7 @@ export default function RadiologyVerificationPage() {
         <Dialog open={isVerifyDialogOpen} onOpenChange={setIsVerifyDialogOpen}>
           <DialogContent className="w-[95vw] sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle className="flex items-center gap-2"><CheckCircle2 className="h-5 w-5 text-emerald-500" />Verify Report</DialogTitle>
+              <DialogTitle className="flex items-center gap-2"><CheckCircle2 className="h-5 w-5 text-emerald-500" />Verify Result</DialogTitle>
               <DialogDescription>Confirm verification for {selectedReport?.patient.name}</DialogDescription>
             </DialogHeader>
             {selectedReport && (
@@ -1022,7 +946,7 @@ export default function RadiologyVerificationPage() {
               <Button variant="outline" onClick={() => setIsVerifyDialogOpen(false)}>Cancel</Button>
               <Button onClick={handleVerify} disabled={isSubmitting} className="bg-emerald-500 hover:bg-emerald-600">
                 {isSubmitting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <CheckCircle2 className="h-4 w-4 mr-2" />}
-                Verify Report
+                Verify Result
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -1032,7 +956,7 @@ export default function RadiologyVerificationPage() {
         <Dialog open={isRejectDialogOpen} onOpenChange={setIsRejectDialogOpen}>
           <DialogContent className="w-[95vw] sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle className="flex items-center gap-2 text-rose-600"><XCircle className="h-5 w-5" />Reject Report</DialogTitle>
+              <DialogTitle className="flex items-center gap-2 text-rose-600"><XCircle className="h-5 w-5" />Reject Result</DialogTitle>
               <DialogDescription>Send back to reporting radiologist for correction</DialogDescription>
             </DialogHeader>
             {selectedReport && (

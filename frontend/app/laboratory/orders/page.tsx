@@ -20,6 +20,7 @@ import { CustomDateRangeButton } from '@/components/shared/CustomDateRangeButton
 import { labService, formatPatientGenderLabel, type LabOrder as ApiLabOrder, type LabTest as ApiLabTest, type LabPartner } from '@/lib/services';
 import { Icd10DiagnosesBlock } from '@/components/medical/Icd10DiagnosesBlock';
 import { transformLabTestStatus, transformPriority, transformToBackendPriority, transformProcessingMethod, transformToBackendProcessingMethod } from '@/lib/services/transformers';
+import { buildDateQuery, formatRejectionReason, LAB_ORDER_STATUS, LAB_TEST_STATUS } from '@/lib/laboratory/constants';
 import { PatientAvatar } from "@/components/shared/PatientAvatar";
 import {
   TestTube, Search, Eye, Clock, CheckCircle2, Activity, FlaskConical, Loader2,
@@ -678,6 +679,10 @@ const collectionMethods: Record<string, { name: string; icon: string; descriptio
   'CSF': [
     { name: 'Lumbar Puncture', icon: '🔬', description: 'Spinal tap procedure' },
   ],
+  'Other': [
+    { name: 'Standard Collection', icon: '🧪', description: 'Use the standard protocol for this sample type' },
+    { name: 'Per Clinical Notes', icon: '📝', description: 'Follow collection method specified in clinical notes' },
+  ],
 };
 
 /** Select value for "type a different lab name" (not in catalog). */
@@ -700,6 +705,13 @@ export default function LabOrdersPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(50);
   const [totalCount, setTotalCount] = useState(0);
+  const [stats, setStats] = useState({
+    pendingSamples: 0,
+    processing: 0,
+    resultsReady: 0,
+    reworkOrders: 0,
+    stat: 0,
+  });
 
   // Dialog states
   const [selectedOrder, setSelectedOrder] = useState<LabOrder | null>(null);
@@ -741,6 +753,31 @@ export default function LabOrdersPage() {
   // Templates from API for result entry (params from Test Templates / normal_range)
   const [apiTemplatesByCode, setApiTemplatesByCode] = useState<Record<string, { name: string; fields: { name: string; unit: string; normalRange: string }[] }>>({});
 
+  const normalizeSampleTypeForCollection = (sampleType: string | undefined): string => {
+    if (!sampleType) return 'Other';
+    return collectionMethods[sampleType] ? sampleType : 'Other';
+  };
+
+  const getNormalRangeText = (meta: any): string => {
+    let normalRange = meta?.range || meta?.normal_range || meta?.normalRange || meta?.normalRangeText || '';
+    if (!normalRange && meta?.min != null && meta?.max != null) normalRange = `${meta.min}-${meta.max}`;
+    if (!normalRange && meta?.normalRangeMin != null && meta?.normalRangeMax != null) normalRange = `${meta.normalRangeMin}-${meta.normalRangeMax}`;
+    return normalRange;
+  };
+
+  const getTemplateFieldsFromNormalRange = (nr: any): { name: string; unit: string; normalRange: string }[] => {
+    if (!nr || typeof nr !== 'object') return [];
+    const order = Array.isArray(nr._order) ? nr._order : null;
+    const keys = order
+      ? order.filter((k: any) => typeof k === 'string' && nr[k] != null)
+      : Object.keys(nr).filter((k) => !k.startsWith('_'));
+
+    return keys.map((name: string) => {
+      const v = nr[name];
+      return { name, unit: v?.unit || '', normalRange: getNormalRangeText(v) };
+    });
+  };
+
   const templateFromNormalRange = (code: string, nr: any) => {
     if (!nr || typeof nr !== 'object') return undefined;
     const order = Array.isArray(nr._order) ? nr._order : null;
@@ -768,10 +805,7 @@ export default function LabOrdersPage() {
 
     const fields = keys.map((name: string) => {
       const v = nr[name];
-      let normalRange = v?.range || v?.normal_range || v?.normalRange || v?.normalRangeText || '';
-      if (!normalRange && v?.min != null && v?.max != null) normalRange = `${v.min}-${v.max}`;
-      if (!normalRange && v?.normalRangeMin != null && v?.normalRangeMax != null) normalRange = `${v.normalRangeMin}-${v.normalRangeMax}`;
-      return { name, unit: v?.unit || '', normalRange };
+      return { name, unit: v?.unit || '', normalRange: getNormalRangeText(v) };
     });
     return fields.length ? { name: code, fields } : undefined;
   };
@@ -791,12 +825,13 @@ export default function LabOrdersPage() {
     if (!tests || tests.length === 0) return 0;
 
     const statusWeights: Record<string, number> = {
-      'Pending': 0,
-      'Sample Collected': 25,
-      'Processing': 50,
-      'Results Ready': 90,
-      'Verified': 100,
-      'Rejected': 100  // Rejected tests are complete
+      [LAB_TEST_STATUS.PENDING]: 0,
+      [LAB_TEST_STATUS.SAMPLE_COLLECTED]: 25,
+      [LAB_TEST_STATUS.PROCESSING]: 50,
+      [LAB_TEST_STATUS.RESULTS_READY]: 90,
+      [LAB_TEST_STATUS.VERIFIED]: 100,
+      // Rejected requires correction/resubmission, so it is not terminal completion.
+      [LAB_TEST_STATUS.REJECTED]: 70
     };
 
     const total = tests.reduce((sum, t) => {
@@ -811,16 +846,16 @@ export default function LabOrdersPage() {
   const getOrderProgressDisplay = (tests: LabTest[]) => {
     if (!tests || tests.length === 0) return { text: 'No tests', value: 0 };
 
-    const allPending = tests.every(test => test.status === 'Pending');
-    const allRejected = tests.every(test => test.status === 'Rejected');
-    const allVerified = tests.every(test => test.status === 'Verified');
+    const allPending = tests.every(test => test.status === LAB_TEST_STATUS.PENDING);
+    const allRejected = tests.every(test => test.status === LAB_TEST_STATUS.REJECTED);
+    const allVerified = tests.every(test => test.status === LAB_TEST_STATUS.VERIFIED);
 
     if (allPending) {
       return { text: 'Not Started', value: 0 };
     } else if (allRejected) {
-      return { text: 'Rejected', value: 100 };
+      return { text: LAB_ORDER_STATUS.REWORK_REQUIRED, value: getOrderProgress(tests) };
     } else if (allVerified) {
-      return { text: 'Completed', value: 100 };
+      return { text: LAB_ORDER_STATUS.COMPLETED, value: 100 };
     } else {
       const progress = getOrderProgress(tests);
       return { text: `${progress}%`, value: progress };
@@ -830,12 +865,12 @@ export default function LabOrdersPage() {
   // Get status explanations and tooltips
   const getStatusExplanation = (status: string) => {
     const explanations = {
-      'Pending': 'Test order created, waiting for sample collection',
-      'Sample Collected': 'Sample has been collected and is ready for processing',
-      'Processing': 'Test is being processed in the laboratory',
-      'Results Ready': 'Test results are available and ready for verification',
-      'Verified': 'Results have been verified by a pathologist and are final',
-      'Rejected': 'Test was rejected and cannot be completed'
+      [LAB_TEST_STATUS.PENDING]: 'Test order created, waiting for sample collection',
+      [LAB_TEST_STATUS.SAMPLE_COLLECTED]: 'Sample has been collected and is ready for processing',
+      [LAB_TEST_STATUS.PROCESSING]: 'Test is being processed in the laboratory',
+      [LAB_TEST_STATUS.RESULTS_READY]: 'Test results are available and ready for verification',
+      [LAB_TEST_STATUS.VERIFIED]: 'Results have been verified by a pathologist and are final',
+      [LAB_TEST_STATUS.REJECTED]: 'Test was rejected and requires correction and resubmission'
     };
     return explanations[status as keyof typeof explanations] || 'Unknown status';
   };
@@ -848,7 +883,14 @@ export default function LabOrdersPage() {
       return acc;
     }, {} as Record<string, number>);
 
-    const statusOrder = ['Pending', 'Sample Collected', 'Processing', 'Results Ready', 'Verified', 'Rejected'];
+    const statusOrder = [
+      LAB_TEST_STATUS.PENDING,
+      LAB_TEST_STATUS.SAMPLE_COLLECTED,
+      LAB_TEST_STATUS.PROCESSING,
+      LAB_TEST_STATUS.RESULTS_READY,
+      LAB_TEST_STATUS.VERIFIED,
+      LAB_TEST_STATUS.REJECTED,
+    ];
     const currentStatus = statusOrder.find(status => statusCounts[status]) || 'Unknown';
 
     if (tests.length === 1) {
@@ -865,11 +907,12 @@ export default function LabOrdersPage() {
   // Get overall order status
   const getOrderStatus = (tests: LabTest[]) => {
     // Completed = all tests verified (final)
-    if (tests.length > 0 && tests.every(t => t.status === 'Verified')) return 'Completed';
-    if (tests.every(t => t.status === 'Results Ready' || t.status === 'Verified')) return 'Results Ready';
-    if (tests.some(t => t.status === 'Processing')) return 'Processing';
-    if (tests.some(t => t.status === 'Sample Collected')) return 'In Progress';
-    return 'Pending';
+    if (tests.length > 0 && tests.every(t => t.status === LAB_TEST_STATUS.VERIFIED)) return LAB_ORDER_STATUS.COMPLETED;
+    if (tests.some(t => t.status === LAB_TEST_STATUS.REJECTED)) return LAB_ORDER_STATUS.REWORK_REQUIRED;
+    if (tests.every(t => t.status === LAB_TEST_STATUS.RESULTS_READY || t.status === LAB_TEST_STATUS.VERIFIED)) return LAB_ORDER_STATUS.RESULTS_READY;
+    if (tests.some(t => t.status === LAB_TEST_STATUS.PROCESSING)) return LAB_ORDER_STATUS.PROCESSING;
+    if (tests.some(t => t.status === LAB_TEST_STATUS.SAMPLE_COLLECTED)) return LAB_ORDER_STATUS.IN_PROGRESS;
+    return LAB_ORDER_STATUS.PENDING;
   };
 
   // Helper functions for filtering
@@ -928,8 +971,8 @@ export default function LabOrdersPage() {
     return true;
   };
 
-  // Client-side filtering for all filters
-  const filteredOrders = useMemo(() => {
+  // Base scope filtering (date / gender / processing), shared by stats and tab counts.
+  const scopedOrders = useMemo(() => {
     return orders.filter(order => {
       // Date filter
       if (!matchesDateFilter(order.orderedAt, dateFilter) || !matchesCustomDateRange(order.orderedAt)) {
@@ -952,15 +995,18 @@ export default function LabOrdersPage() {
         });
         if (!hasMatch) return false;
       }
-
-      // Tab filtering (client-side for UX)
-      if (activeTab === 'pending') return order.tests.some(t => t.status === 'Pending');
-      if (activeTab === 'processing') return order.tests.some(t => t.status === 'Sample Collected' || t.status === 'Processing');
-      if (activeTab === 'results') return order.tests.some(t => t.status === 'Results Ready');
-      if (activeTab === 'rejected') return order.tests.some(t => t.status === 'Rejected');
-      return true; // All tab shows everything
+      return true;
     });
-  }, [orders, activeTab, dateFilter, genderFilter, processingFilter, dateRange.from, dateRange.to]);
+  }, [orders, dateFilter, genderFilter, processingFilter, dateRange.from, dateRange.to]);
+
+  // Client-side tab filtering for scoped current page data.
+  const filteredOrders = useMemo(() => {
+    if (activeTab === 'pending') return scopedOrders.filter(order => order.tests.some(t => t.status === LAB_TEST_STATUS.PENDING));
+    if (activeTab === 'processing') return scopedOrders.filter(order => order.tests.some(t => t.status === LAB_TEST_STATUS.SAMPLE_COLLECTED || t.status === LAB_TEST_STATUS.PROCESSING));
+    if (activeTab === 'results') return scopedOrders.filter(order => order.tests.some(t => t.status === LAB_TEST_STATUS.RESULTS_READY));
+    if (activeTab === 'rejected') return scopedOrders.filter(order => order.tests.some(t => t.status === LAB_TEST_STATUS.REJECTED));
+    return scopedOrders;
+  }, [scopedOrders, activeTab]);
 
   // With server-side pagination, orders array contains only current page results
   const paginatedOrders = filteredOrders;
@@ -997,12 +1043,41 @@ export default function LabOrdersPage() {
       if (processingFilter !== 'all') {
         params.processing_method = processingFilter;
       }
-      // Note: dateFilter and genderFilter are client-side only (pagination)
+      Object.assign(params, buildDateQuery(dateFilter));
+      if (dateRange.from || dateRange.to) {
+        delete params.date;
+        if (dateRange.from) params.start_date = dateRange.from;
+        if (dateRange.to) params.end_date = dateRange.to;
+      }
 
-      const response = await labService.getOrders(params);
+      if (genderFilter !== 'all') {
+        params.gender = genderFilter;
+      }
+
+      const [response, statsResponse] = await Promise.all([
+        labService.getOrders(params),
+        labService.getOrderStats({
+          priority: priorityFilter !== 'all' ? transformToBackendPriority(priorityFilter) : undefined,
+          search: searchQuery ? searchQuery.trim() : undefined,
+          processing_method: processingFilter !== 'all' ? processingFilter : undefined,
+          gender: genderFilter !== 'all' ? genderFilter : undefined,
+          ...buildDateQuery(dateFilter),
+          ...(dateRange.from || dateRange.to
+            ? { start_date: dateRange.from || undefined, end_date: dateRange.to || undefined }
+            : {}),
+        }),
+      ]);
+
       setTotalCount(response.count || response.results.length);
       const transformedOrders = response.results.map(transformOrder);
       setOrders(transformedOrders);
+      setStats({
+        pendingSamples: statsResponse.pending || 0,
+        processing: statsResponse.processing || 0,
+        resultsReady: statsResponse.results_ready || 0,
+        reworkOrders: statsResponse.rework_required || 0,
+        stat: statsResponse.stat || 0,
+      });
     } catch (err: any) {
       let errorMessage = 'Unable to load lab orders. Please check your connection and try again.';
       let toastMessage = errorMessage;
@@ -1039,7 +1114,7 @@ export default function LabOrdersPage() {
         setLoading(false);
       }
     }
-  }, [currentPage, priorityFilter, searchQuery, processingFilter]);
+  }, [currentPage, itemsPerPage, priorityFilter, searchQuery, processingFilter, genderFilter, dateFilter, dateRange.from, dateRange.to]);
 
   // Load orders from API when page or filters change
   useEffect(() => {
@@ -1077,18 +1152,7 @@ export default function LabOrdersPage() {
       const next: Record<string, { name: string; fields: { name: string; unit: string; normalRange: string }[] }> = {};
       for (const t of results) {
         const nr = (t as any).normal_range;
-        if (!nr || typeof nr !== 'object') continue;
-        const order = Array.isArray(nr._order) ? nr._order : null;
-        const keys = order
-          ? order.filter((k: any) => typeof k === 'string' && nr[k] != null)
-          : Object.keys(nr).filter((k) => !k.startsWith('_'));
-        const fields = keys.map((name: string) => {
-          const v = nr[name];
-          let normalRange = v.range || v.normal_range || v.normalRange || v.normalRangeText || '';
-          if (!normalRange && v.min != null && v.max != null) normalRange = `${v.min}-${v.max}`;
-          if (!normalRange && v.normalRangeMin != null && v.normalRangeMax != null) normalRange = `${v.normalRangeMin}-${v.normalRangeMax}`;
-          return { name, unit: v.unit || '', normalRange };
-        });
+        const fields = getTemplateFieldsFromNormalRange(nr);
         if (fields.length) next[t.code] = { name: t.name, fields };
       }
       setApiTemplatesByCode(prev => ({ ...prev, ...next }));
@@ -1097,17 +1161,6 @@ export default function LabOrdersPage() {
     }
   }, []);
   useEffect(() => { loadTemplatesForResults(); }, [loadTemplatesForResults]);
-
-  const stats = useMemo(() => {
-    const allTests = orders.flatMap(o => o.tests);
-    return {
-      pendingSamples: allTests.filter(t => t.status === 'Pending').length,
-      processing: allTests.filter(t => t.status === 'Sample Collected' || t.status === 'Processing').length,
-      resultsReady: allTests.filter(t => t.status === 'Results Ready').length,
-      rejected: allTests.filter(t => t.status === 'Rejected').length,
-      stat: orders.filter(o => o.priority === 'STAT' && o.tests.some(t => t.status !== 'Verified')).length,
-    };
-  }, [orders]);
 
   const getPriorityBadge = (priority: string) => {
     switch (priority) {
@@ -1119,12 +1172,12 @@ export default function LabOrdersPage() {
 
   const getTestStatusBadge = (status: string) => {
     switch (status) {
-      case 'Pending': return 'bg-gray-500/10 text-gray-600 dark:text-gray-400 border-gray-500/50';
-      case 'Sample Collected': return 'bg-violet-500/10 text-violet-600 dark:text-violet-400 border-violet-500/50';
-      case 'Processing': return 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/50';
-      case 'Results Ready': return 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/50';
-      case 'Rejected': return 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/50';
-      case 'Verified': return 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/50';
+      case LAB_TEST_STATUS.PENDING: return 'bg-gray-500/10 text-gray-600 dark:text-gray-400 border-gray-500/50';
+      case LAB_TEST_STATUS.SAMPLE_COLLECTED: return 'bg-violet-500/10 text-violet-600 dark:text-violet-400 border-violet-500/50';
+      case LAB_TEST_STATUS.PROCESSING: return 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/50';
+      case LAB_TEST_STATUS.RESULTS_READY: return 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/50';
+      case LAB_TEST_STATUS.REJECTED: return 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/50';
+      case LAB_TEST_STATUS.VERIFIED: return 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/50';
       default: return 'bg-gray-500/10 text-gray-600 dark:text-gray-400 border-gray-500/50';
     }
   };
@@ -1142,11 +1195,12 @@ export default function LabOrdersPage() {
 
   const getOrderStatusBadge = (status: string) => {
     switch (status) {
-      case 'Pending': return 'bg-gray-500/10 text-gray-600 border-gray-500/50';
-      case 'In Progress': return 'bg-blue-500/10 text-blue-600 border-blue-500/50';
-      case 'Processing': return 'bg-violet-500/10 text-violet-600 border-violet-500/50';
-      case 'Results Ready': return 'bg-emerald-500/10 text-emerald-600 border-emerald-500/50';
-      case 'Completed': return 'bg-emerald-500/10 text-emerald-600 border-emerald-500/50';
+      case LAB_ORDER_STATUS.PENDING: return 'bg-gray-500/10 text-gray-600 border-gray-500/50';
+      case LAB_ORDER_STATUS.IN_PROGRESS: return 'bg-blue-500/10 text-blue-600 border-blue-500/50';
+      case LAB_ORDER_STATUS.PROCESSING: return 'bg-violet-500/10 text-violet-600 border-violet-500/50';
+      case LAB_ORDER_STATUS.RESULTS_READY: return 'bg-emerald-500/10 text-emerald-600 border-emerald-500/50';
+      case LAB_ORDER_STATUS.REWORK_REQUIRED: return 'bg-rose-500/10 text-rose-600 border-rose-500/50';
+      case LAB_ORDER_STATUS.COMPLETED: return 'bg-emerald-500/10 text-emerald-600 border-emerald-500/50';
       default: return 'bg-gray-500/10 text-gray-600 border-gray-500/50';
     }
   };
@@ -1506,7 +1560,7 @@ export default function LabOrdersPage() {
   const OrderCard = ({ order }: { order: LabOrder }) => {
     const orderProgressDisplay = getOrderProgressDisplay(order.tests);
     const orderStatus = getOrderStatus(order.tests);
-    const isCompleted = orderStatus === 'Completed';
+    const isCompleted = orderStatus === LAB_ORDER_STATUS.COMPLETED;
     
     return (
       <Card 
@@ -1602,7 +1656,7 @@ export default function LabOrdersPage() {
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-muted-foreground">Pending Samples</p>
+                  <p className="text-sm text-muted-foreground">Pending Orders</p>
                   <p className="text-2xl sm:text-3xl font-bold text-gray-600 dark:text-gray-400">{stats.pendingSamples}</p>
                 </div>
                 <Beaker className="h-8 w-8 text-gray-400" />
@@ -1638,7 +1692,7 @@ export default function LabOrdersPage() {
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-muted-foreground">Results Ready</p>
+                  <p className="text-sm text-muted-foreground">Orders with Results</p>
                   <p className="text-2xl sm:text-3xl font-bold text-amber-600 dark:text-amber-400">{stats.resultsReady}</p>
                 </div>
                 <FileText className="h-8 w-8 text-amber-400" />
@@ -1656,8 +1710,8 @@ export default function LabOrdersPage() {
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-muted-foreground">Rejected</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-rose-600 dark:text-rose-400">{stats.rejected}</p>
+                  <p className="text-sm text-muted-foreground">Rework Required</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-rose-600 dark:text-rose-400">{stats.reworkOrders}</p>
                 </div>
                 <XCircle className="h-8 w-8 text-rose-400" />
               </div>
@@ -1665,7 +1719,7 @@ export default function LabOrdersPage() {
           </Card>
               </TooltipTrigger>
               <TooltipContent>
-                <p className="text-xs">Tests that were rejected and cannot be completed</p>
+                <p className="text-xs">Orders with one or more rejected tests that need correction and resubmission</p>
               </TooltipContent>
             </Tooltip>
           <Card className="border-l-4 border-l-rose-500">
@@ -1690,7 +1744,7 @@ export default function LabOrdersPage() {
                   <TabsTrigger value="pending">Pending ({stats.pendingSamples})</TabsTrigger>
                   <TabsTrigger value="processing">Processing ({stats.processing})</TabsTrigger>
                   <TabsTrigger value="results">Results ({stats.resultsReady})</TabsTrigger>
-                  <TabsTrigger value="rejected">Rejected ({stats.rejected})</TabsTrigger>
+                  <TabsTrigger value="rejected">Rework Required ({stats.reworkOrders})</TabsTrigger>
                   <TabsTrigger value="all">All</TabsTrigger>
                 </TabsList>
               </Tabs>
@@ -1880,34 +1934,34 @@ export default function LabOrdersPage() {
                             return methodMatch ? <span className="ml-2">• {methodMatch[1]}</span> : null;
                           })()}
                           {test.outsourcedLab && <span className="ml-2">• {test.outsourcedLab}</span>}
-                          {test.status === 'Rejected' && test.rejectedBy && (
+                          {test.status === LAB_TEST_STATUS.REJECTED && test.rejectedBy && (
                             <span className="ml-2">• Rejected by {test.rejectedBy} {test.rejectedAt && `at ${formatTime(test.rejectedAt)}`}</span>
                           )}
                         </div>
                         
                         {/* Action Buttons */}
                         <div className="flex gap-2">
-                          {test.status === 'Pending' && (
+                          {test.status === LAB_TEST_STATUS.PENDING && (
                             <Button size="sm" onClick={() => openCollectDialog(test)} className="h-7 px-3 bg-violet-500 hover:bg-violet-600 text-white text-xs">
                               <Beaker className="h-3 w-3 mr-1" />Collect Sample
                             </Button>
                           )}
-                          {test.status === 'Sample Collected' && (
+                          {test.status === LAB_TEST_STATUS.SAMPLE_COLLECTED && (
                             <Button size="sm" onClick={() => openProcessDialog(test)} className="h-7 px-3 bg-blue-500 hover:bg-blue-600 text-white text-xs">
                               <Play className="h-3 w-3 mr-1" />Start Processing
                             </Button>
                           )}
-                          {test.status === 'Processing' && (
+                          {test.status === LAB_TEST_STATUS.PROCESSING && (
                             <Button size="sm" onClick={() => openResultsDialog(test)} className="h-7 px-3 bg-amber-500 hover:bg-amber-600 text-white text-xs">
                               <FileText className="h-3 w-3 mr-1" />Enter Results
                             </Button>
                           )}
-                          {test.status === 'Results Ready' && (
+                          {test.status === LAB_TEST_STATUS.RESULTS_READY && (
                             <Button variant="outline" size="sm" className="h-7 px-3 text-xs text-emerald-600">
                               <CheckCircle2 className="h-3 w-3 mr-1" />Complete
                             </Button>
                           )}
-                          {test.status === 'Rejected' && (
+                          {test.status === LAB_TEST_STATUS.REJECTED && (
                             <Button 
                               size="sm" 
                               onClick={() => openResultsDialog(test, true)} 
@@ -1920,14 +1974,14 @@ export default function LabOrdersPage() {
                       </div>
                       
                       {/* Show Rejection Reason if rejected */}
-                      {test.status === 'Rejected' && test.verificationNotes && (
+                      {test.status === LAB_TEST_STATUS.REJECTED && test.verificationNotes && (
                         <div className="mt-2 p-2 rounded bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 text-xs">
                           <p className="font-medium text-rose-700 dark:text-rose-400 mb-1 flex items-center gap-1">
                             <XCircle className="h-3 w-3" />
                             Rejection Reason:
                           </p>
                           <p className="text-rose-600 dark:text-rose-300">
-                            {test.verificationNotes.replace('REJECTED: ', '')}
+                            {formatRejectionReason(test.verificationNotes)}
                           </p>
                           {test.rejectedBy && test.rejectedAt && (
                             <p className="text-rose-500 dark:text-rose-400 mt-1 text-[10px]">
@@ -2076,10 +2130,14 @@ export default function LabOrdersPage() {
 
                 {/* Tests to Collect - Multi-select */}
                 <div className="space-y-2">
-                  <Label className="text-sm font-medium">Tests to Collect ({selectedTest.sampleType || 'Sample'})</Label>
+                  <Label className="text-sm font-medium">Tests to Collect ({selectedTest.sampleType})</Label>
                   <div className="space-y-2 p-3 rounded-lg border max-h-[150px] overflow-y-auto">
                     {selectedOrder.tests
-                      .filter(t => (!selectedTest.sampleType || t.sampleType === selectedTest.sampleType) && t.status === 'Pending')
+                      .filter(
+                        t =>
+                          normalizeSampleTypeForCollection(t.sampleType) === normalizeSampleTypeForCollection(selectedTest.sampleType) &&
+                          t.status === LAB_TEST_STATUS.PENDING
+                      )
                       .map(test => (
                         <div key={test.id} className="flex items-center gap-3 p-2 rounded hover:bg-muted/50">
                           <Checkbox
@@ -2108,14 +2166,14 @@ export default function LabOrdersPage() {
                 <div className="space-y-2">
                   <Label className="text-sm font-medium">Collection Method *</Label>
                   <div className="text-xs text-muted-foreground mb-1">
-                    Sample Type: {selectedTest?.sampleType || 'Unknown'}
+                    Sample Type: {selectedTest.sampleType}
                   </div>
                   <Select value={selectedMethod} onValueChange={setSelectedMethod}>
                     <SelectTrigger className="w-full">
                       <SelectValue placeholder="Select collection method" />
                     </SelectTrigger>
                     <SelectContent>
-                    {(collectionMethods[selectedTest?.sampleType] || collectionMethods['Blood'] || []).map((method) => (
+                    {(collectionMethods[normalizeSampleTypeForCollection(selectedTest.sampleType)] || collectionMethods['Other']).map((method) => (
                         <SelectItem key={method.name} value={method.name}>
                         <div className="flex items-center gap-2">
                             <span>{method.icon}</span>
@@ -2500,17 +2558,17 @@ export default function LabOrdersPage() {
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <FileText className="h-5 w-5 text-amber-500" />
-                {selectedTest?.status === 'Rejected' ? 'Rework & Resubmit Results' : 'Enter Results'}
+                {selectedTest?.status === LAB_TEST_STATUS.REJECTED ? 'Rework & Resubmit Results' : 'Enter Results'}
               </DialogTitle>
               <DialogDescription>
-                {selectedTest?.status === 'Rejected' 
+                {selectedTest?.status === LAB_TEST_STATUS.REJECTED
                   ? `Edit and resubmit corrected results for ${selectedTest?.name}` 
                   : `Enter results for ${selectedTest?.name}`}
               </DialogDescription>
             </DialogHeader>
             {selectedOrder && selectedTest && (
               <div className="space-y-4 py-4">
-                {selectedTest.status === 'Rejected' && (
+                {selectedTest.status === LAB_TEST_STATUS.REJECTED && (
                   <div className="p-4 rounded-lg bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800">
                     <div className="flex items-start gap-3">
                       <XCircle className="h-5 w-5 text-rose-600 dark:text-rose-400 mt-0.5 flex-shrink-0" />
@@ -2519,20 +2577,21 @@ export default function LabOrdersPage() {
                           Test Rejected - Requires Correction
                         </p>
                         <p className="text-sm text-rose-700 dark:text-rose-300 mt-1">
-                          This test result was rejected by the pathologist. Please review and correct the values below before resubmitting.
+                          The test result was rejected. Please review and correct the values below before resubmitting.
                         </p>
                       {selectedTest.verificationNotes && (
                           <div className="mt-3 p-2 rounded bg-rose-100 dark:bg-rose-900/40 border border-rose-300 dark:border-rose-700">
                             <p className="text-xs font-medium text-rose-800 dark:text-rose-200 mb-1">Rejection Reason:</p>
                             <p className="text-xs text-rose-700 dark:text-rose-300">
-                              {selectedTest.verificationNotes.replace('REJECTED: ', '').replace(/^Rejection: /i, '')}
+                              {formatRejectionReason(selectedTest.verificationNotes)}
                             </p>
                           </div>
                         )}
-                        {selectedTest.rejectedBy && selectedTest.rejectedAt && (
+                        {selectedTest.rejectedBy && (
                           <p className="text-xs text-rose-600 dark:text-rose-400 mt-2">
-                            Rejected by {selectedTest.rejectedBy} on {formatDate(selectedTest.rejectedAt)} at {formatTime(selectedTest.rejectedAt)}
-                    </p>
+                            Rejected by {selectedTest.rejectedBy}
+                            {selectedTest.rejectedAt && ` on ${formatDate(selectedTest.rejectedAt)} at ${formatTime(selectedTest.rejectedAt)}`}
+                          </p>
                         )}
                       </div>
                     </div>
@@ -2715,7 +2774,7 @@ export default function LabOrdersPage() {
               <Button variant="outline" onClick={() => setIsResultsDialogOpen(false)}>Cancel</Button>
               <Button onClick={handleSubmitResults} disabled={isSubmitting} className="bg-amber-500 hover:bg-amber-600">
                 {isSubmitting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <CheckCircle2 className="h-4 w-4 mr-2" />}
-                {selectedTest?.status === 'Rejected' ? 'Resubmit Corrected Results' : 'Submit Results'}
+                {selectedTest?.status === LAB_TEST_STATUS.REJECTED ? 'Resubmit Corrected Results' : 'Submit Results'}
               </Button>
             </DialogFooter>
           </DialogContent>

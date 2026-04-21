@@ -111,7 +111,56 @@ class LabOrderViewSet(viewsets.ModelViewSet):
         pm = self.request.query_params.get('processing_method')
         if pm in ('in_house', 'outsourced'):
             qs = qs.filter(tests__processing_method=pm).distinct()
+
+        # Date filtering on order timestamp
+        date = self.request.query_params.get('date')
+        start_date = self.request.query_params.get('start_date')
+        end_date = self.request.query_params.get('end_date')
+        if date:
+            qs = qs.filter(ordered_at__date=date)
+        elif start_date:
+            qs = qs.filter(ordered_at__date__gte=start_date)
+            if end_date:
+                qs = qs.filter(ordered_at__date__lte=end_date)
+        elif end_date:
+            qs = qs.filter(ordered_at__date__lte=end_date)
+
+        # Gender filtering (stored on Patient.gender)
+        gender = self.request.query_params.get('gender')
+        if gender:
+            qs = qs.filter(patient__gender=gender)
         return qs
+
+    @action(detail=False, methods=['get'])
+    def stats(self, request):
+        """Server-side counts for lab order dashboard cards/tabs."""
+        qs = self.filter_queryset(self.get_queryset())
+        agg = qs.aggregate(
+            total=Count('id', distinct=True),
+            pending=Count('id', filter=Q(tests__status='pending'), distinct=True),
+            processing=Count(
+                'id',
+                filter=Q(tests__status='sample_collected') | Q(tests__status='processing'),
+                distinct=True,
+            ),
+            results_ready=Count('id', filter=Q(tests__status='results_ready'), distinct=True),
+            rework_required=Count('id', filter=Q(tests__status='rejected'), distinct=True),
+            stat=Count(
+                'id',
+                filter=Q(priority='stat') & ~Q(tests__status='verified'),
+                distinct=True,
+            ),
+        )
+        return Response(
+            {
+                'total': agg.get('total', 0) or 0,
+                'pending': agg.get('pending', 0) or 0,
+                'processing': agg.get('processing', 0) or 0,
+                'results_ready': agg.get('results_ready', 0) or 0,
+                'rework_required': agg.get('rework_required', 0) or 0,
+                'stat': agg.get('stat', 0) or 0,
+            }
+        )
     
     def perform_create(self, serializer):
         # Set the doctor field using multiple fallback strategies
@@ -633,19 +682,23 @@ class LabResultViewSet(viewsets.ReadOnlyModelViewSet):
         elif status_filter == 'all':
             queryset = queryset.filter(Q(test__status='results_ready') | Q(test__status='verified'))
 
-        # Date filtering (match Manage Visits style query params)
-        # For verified history we filter by the verification date.
+        # Date filtering (match Manage Visits style query params).
+        # Pending rows use processed_at (when result became ready), while verified
+        # rows use verified_at.
         date = self.request.query_params.get('date')
         start_date = self.request.query_params.get('start_date')
         end_date = self.request.query_params.get('end_date')
+        date_field = 'test__verified_at__date'
+        if status_filter == 'results_ready':
+            date_field = 'test__processed_at__date'
         if date:
-            queryset = queryset.filter(test__verified_at__date=date)
+            queryset = queryset.filter(**{date_field: date})
         elif start_date:
-            queryset = queryset.filter(test__verified_at__date__gte=start_date)
+            queryset = queryset.filter(**{f'{date_field}__gte': start_date})
             if end_date:
-                queryset = queryset.filter(test__verified_at__date__lte=end_date)
+                queryset = queryset.filter(**{f'{date_field}__lte': end_date})
         elif end_date:
-            queryset = queryset.filter(test__verified_at__date__lte=end_date)
+            queryset = queryset.filter(**{f'{date_field}__lte': end_date})
 
         # Clinic filtering (stored on LabOrder.clinic as a string)
         clinic = self.request.query_params.get('clinic')

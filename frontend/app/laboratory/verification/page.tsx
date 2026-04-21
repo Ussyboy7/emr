@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -18,6 +18,7 @@ import { toast } from "sonner";
 import { labService, type LabResult as ApiLabResult } from '@/lib/services';
 import { PatientAvatar } from "@/components/shared/PatientAvatar";
 import { transformPriority, transformToBackendPriority } from '@/lib/services/transformers';
+import { buildDateQuery, formatRejectionReason, LAB_TEST_STATUS } from '@/lib/laboratory/constants';
 import {
   ShieldCheck, Search, Eye, Clock, CheckCircle2, AlertTriangle, XCircle,
   Loader2, User, Calendar, FileText, Stethoscope, RefreshCw, Send, Download
@@ -190,349 +191,11 @@ const transformResult = (
         }
       }
 
-      // Parameter-specific validation with normal ranges
-      // Fallback to heuristic rules only when the template doesn't provide metadata.
-      // NOTE: per requirement, we do NOT use hardcoded fallbacks anymore.
-      if (false && !templateMatch) {
-      if (!templateMatch && (key.toLowerCase().includes('glucose') || key.toLowerCase().includes('blood sugar') || key.toLowerCase().includes('fbs'))) {
-        unit = 'mg/dL';
-        normalRange = '70-140';
-        if (!isNaN(valueNum)) {
-          if (valueNum < 40 || valueNum > 600) status = 'Critical';  // Critically low/high
-          else if (valueNum < 70 || valueNum > 200) status = 'Abnormal';  // Borderline
-          else status = 'Normal';
-        }
-      } else if (!templateMatch && (key.toLowerCase().includes('hemoglobin') || key.toLowerCase().includes('hb'))) {
-        unit = 'g/dL';
-        normalRange = '12-16 (F), 14-18 (M)';
-        if (!isNaN(valueNum)) {
-          if (valueNum < 7 || valueNum > 20) status = 'Critical';
-          else if (valueNum < 11 || valueNum > 18) status = 'Abnormal';
-          else status = 'Normal';
-        }
-      } else if (!templateMatch && (key.toLowerCase().includes('wbc') || key.toLowerCase().includes('white blood cell'))) {
-        unit = '×10³/μL';
-        normalRange = '4.0-11.0';
-        if (!isNaN(valueNum)) {
-          if (valueNum < 2.0 || valueNum > 30.0) status = 'Critical';
-          else if (valueNum < 4.0 || valueNum > 11.0) status = 'Abnormal';
-          else status = 'Normal';
-        }
-      } else if (!templateMatch && key.toLowerCase().includes('platelet')) {
-        unit = '×10³/μL';
-        normalRange = '150-450';
-        if (!isNaN(valueNum)) {
-          if (valueNum < 20 || valueNum > 1000) status = 'Critical';
-          else if (valueNum < 150 || valueNum > 450) status = 'Abnormal';
-          else status = 'Normal';
-        }
-      } else if (!templateMatch && key.toLowerCase().includes('creatinine')) {
-        unit = 'mg/dL';
-        normalRange = '0.6-1.2';
-        if (!isNaN(valueNum)) {
-          if (valueNum > 10.0) status = 'Critical';
-          else if (valueNum > 1.2) status = 'Abnormal';
-          else status = 'Normal';
-        }
-      } else if (!templateMatch && (key.toLowerCase().includes('cholesterol') || key.toLowerCase().includes('total cholesterol'))) {
-        unit = 'mg/dL';
-        normalRange = '<200';
-        if (!isNaN(valueNum)) {
-          if (valueNum > 300) status = 'Critical';
-          else if (valueNum > 240) status = 'Abnormal';
-          else status = 'Normal';
-        }
-      } else if (!templateMatch && (key.toLowerCase().includes('hba1c') || key.toLowerCase().includes('glycated hemoglobin'))) {
-        unit = '%';
-        normalRange = '<5.7';
-        if (!isNaN(valueNum)) {
-          if (valueNum > 10.0) status = 'Critical';
-          else if (valueNum > 6.5) status = 'Abnormal';
-          else status = 'Normal';
-        }
-      } else if (!templateMatch && key.toLowerCase() === 'result' && testName && testName.toLowerCase().includes('24 hour') && testName.toLowerCase().includes('protein')) {
-        unit = 'mg/day';
-        normalRange = '<150';
-        if (!isNaN(valueNum)) {
-          if (valueNum > 1000) status = 'Critical';
-          else if (valueNum > 300) status = 'Abnormal';
-          else status = 'Normal';
-        }
-      } else if (!templateMatch && key.toLowerCase().includes('esr')) {
-        unit = 'mm/hr';
-        normalRange = '0-30';
-        if (!isNaN(valueNum)) {
-          if (valueNum > 100) status = 'Critical';
-          else if (valueNum > 30) status = 'Abnormal';
-          else status = 'Normal';
-        }
-      } else if (!templateMatch && key.toLowerCase().includes('reticulocyte')) {
-        if (key.toLowerCase().includes('absolute')) {
-          unit = '×10⁶/μL';
-          normalRange = '25-85';
-        } else {
-          unit = '%';
-          normalRange = '0.5-2.5';
-        }
-        if (!isNaN(valueNum)) {
-          if (key.toLowerCase().includes('absolute')) {
-            if (valueNum < 10 || valueNum > 150) status = 'Critical';
-            else if (valueNum < 25 || valueNum > 85) status = 'Abnormal';
-            else status = 'Normal';
-          } else {
-            if (valueNum < 0.1 || valueNum > 10) status = 'Critical';
-            else if (valueNum < 0.5 || valueNum > 2.5) status = 'Abnormal';
-            else status = 'Normal';
-          }
-        }
-      } else if (!templateMatch && key.toLowerCase().includes('pt')) {
-        unit = 'seconds';
-        normalRange = '11-13';
-        if (!isNaN(valueNum)) {
-          if (valueNum > 50) status = 'Critical';
-          else if (valueNum < 11 || valueNum > 13) status = 'Abnormal';
-          else status = 'Normal';
-        }
-      } else if (!templateMatch && key.toLowerCase().includes('inr')) {
-        unit = '';
-        normalRange = '0.8-1.1';
-        if (!isNaN(valueNum)) {
-          if (valueNum > 5.0) status = 'Critical';
-          else if (valueNum < 0.8 || valueNum > 1.1) status = 'Abnormal';
-          else status = 'Normal';
-        }
-      } else if (!templateMatch && (key.toLowerCase().includes('ptt') || key.toLowerCase().includes('aptt'))) {
-        unit = 'seconds';
-        normalRange = '25-35';
-        if (!isNaN(valueNum)) {
-          if (valueNum > 100) status = 'Critical';
-          else if (valueNum < 25 || valueNum > 35) status = 'Abnormal';
-          else status = 'Normal';
-        }
-      } else if (!templateMatch && key.toLowerCase().includes('fibrinogen')) {
-        unit = 'mg/dL';
-        normalRange = '200-400';
-        if (!isNaN(valueNum)) {
-          if (valueNum < 50 || valueNum > 700) status = 'Critical';
-          else if (valueNum < 200 || valueNum > 400) status = 'Abnormal';
-          else status = 'Normal';
-        }
-      } else if (!templateMatch && key.toLowerCase().includes('bleeding time')) {
-        unit = 'minutes';
-        normalRange = '2-7';
-        if (!isNaN(valueNum)) {
-          if (valueNum > 15) status = 'Critical';
-          else if (valueNum < 2 || valueNum > 7) status = 'Abnormal';
-          else status = 'Normal';
-        }
-      } else if (!templateMatch && key.toLowerCase().includes('clotting time')) {
-        unit = 'minutes';
-        normalRange = '5-15';
-        if (!isNaN(valueNum)) {
-          if (valueNum > 30) status = 'Critical';
-          else if (valueNum < 5 || valueNum > 15) status = 'Abnormal';
-          else status = 'Normal';
-        }
-      } else if (key.toLowerCase().includes('hba1c')) {
-        unit = '%';
-        normalRange = '<5.7';
-        if (!isNaN(valueNum)) {
-          if (valueNum > 10.0) status = 'Critical';
-          else if (valueNum > 6.5) status = 'Abnormal';
-          else status = 'Normal';
-        }
-      } else if (key.toLowerCase().includes('crp')) {
-        unit = 'mg/L';
-        normalRange = '<10';
-        if (!isNaN(valueNum)) {
-          if (valueNum > 100) status = 'Critical';
-          else if (valueNum > 10) status = 'Abnormal';
-          else status = 'Normal';
-        }
-      } else if (key.toLowerCase().includes('rheumatoid factor') || key.toLowerCase().includes('ra factor')) {
-        unit = 'IU/mL';
-        normalRange = '<15';
-        if (!isNaN(valueNum)) {
-          if (valueNum > 100) status = 'Critical';
-          else if (valueNum > 15) status = 'Abnormal';
-          else status = 'Normal';
-        }
-      } else if (key.toLowerCase().includes('tsh')) {
-        unit = 'μIU/mL';
-        normalRange = '0.4-4.0';
-        if (!isNaN(valueNum)) {
-          if (valueNum < 0.1 || valueNum > 10) status = 'Critical';
-          else if (valueNum < 0.4 || valueNum > 4.0) status = 'Abnormal';
-          else status = 'Normal';
-        }
-      } else if (key.toLowerCase().includes('t3') && !key.toLowerCase().includes('free')) {
-        unit = 'ng/dL';
-        normalRange = '60-181';
-        if (!isNaN(valueNum)) {
-          if (valueNum < 20 || valueNum > 300) status = 'Critical';
-          else if (valueNum < 60 || valueNum > 181) status = 'Abnormal';
-          else status = 'Normal';
-        }
-      } else if (key.toLowerCase().includes('t4') && !key.toLowerCase().includes('free')) {
-        unit = 'μg/dL';
-        normalRange = '4.5-11.2';
-        if (!isNaN(valueNum)) {
-          if (valueNum < 2 || valueNum > 20) status = 'Critical';
-          else if (valueNum < 4.5 || valueNum > 11.2) status = 'Abnormal';
-          else status = 'Normal';
-        }
-      } else if (key.toLowerCase().includes('free t3')) {
-        unit = 'pg/mL';
-        normalRange = '2.0-4.4';
-        if (!isNaN(valueNum)) {
-          if (valueNum < 0.5 || valueNum > 10) status = 'Critical';
-          else if (valueNum < 2.0 || valueNum > 4.4) status = 'Abnormal';
-          else status = 'Normal';
-        }
-      } else if (key.toLowerCase().includes('free t4')) {
-        unit = 'ng/dL';
-        normalRange = '0.93-1.7';
-        if (!isNaN(valueNum)) {
-          if (valueNum < 0.3 || valueNum > 3.0) status = 'Critical';
-          else if (valueNum < 0.93 || valueNum > 1.7) status = 'Abnormal';
-          else status = 'Normal';
-        }
-      } else if (key.toLowerCase().includes('psa')) {
-        unit = 'ng/mL';
-        normalRange = '<4.0';
-        if (!isNaN(valueNum)) {
-          if (valueNum > 100) status = 'Critical';
-          else if (valueNum > 4.0) status = 'Abnormal';
-          else status = 'Normal';
-        }
-      } else if (key.toLowerCase().includes('ca-125') || key.toLowerCase().includes('ca125')) {
-        unit = 'U/mL';
-        normalRange = '<35';
-        if (!isNaN(valueNum)) {
-          if (valueNum > 500) status = 'Critical';
-          else if (valueNum > 35) status = 'Abnormal';
-          else status = 'Normal';
-        }
-      } else if (key.toLowerCase().includes('cea')) {
-        unit = 'ng/mL';
-        normalRange = '<2.5';
-        if (!isNaN(valueNum)) {
-          if (valueNum > 100) status = 'Critical';
-          else if (valueNum > 2.5) status = 'Abnormal';
-          else status = 'Normal';
-        }
-      } else if (key.toLowerCase().includes('afp')) {
-        unit = 'ng/mL';
-        normalRange = '<10';
-        if (!isNaN(valueNum)) {
-          if (valueNum > 500) status = 'Critical';
-          else if (valueNum > 10) status = 'Abnormal';
-          else status = 'Normal';
-        }
-      } else if (key.toLowerCase().includes('vitamin d') || key.toLowerCase().includes('25-oh')) {
-        unit = 'ng/mL';
-        normalRange = '30-100';
-        if (!isNaN(valueNum)) {
-          if (valueNum < 10) status = 'Critical';
-          else if (valueNum < 20) status = 'Abnormal';
-          else status = 'Normal';
-        }
-      } else if (key.toLowerCase().includes('vitamin b12') || key.toLowerCase().includes('b12')) {
-        unit = 'pg/mL';
-        normalRange = '200-900';
-        if (!isNaN(valueNum)) {
-          if (valueNum < 100) status = 'Critical';
-          else if (valueNum < 200) status = 'Abnormal';
-          else status = 'Normal';
-        }
-      } else if (key.toLowerCase().includes('folic acid') || key.toLowerCase().includes('folate')) {
-        unit = 'ng/mL';
-        normalRange = '>4.0';
-        if (!isNaN(valueNum)) {
-          if (valueNum < 2.0) status = 'Critical';
-          else if (valueNum < 4.0) status = 'Abnormal';
-          else status = 'Normal';
-        }
-      } else if (key.toLowerCase().includes('ferritin')) {
-        unit = 'ng/mL';
-        normalRange = '30-300';
-        if (!isNaN(valueNum)) {
-          if (valueNum < 10) status = 'Critical';
-          else if (valueNum < 30 || valueNum > 300) status = 'Abnormal';
-          else status = 'Normal';
-        }
-      } else if (key.toLowerCase().includes('calcium')) {
-        unit = 'mg/dL';
-        normalRange = '8.5-10.5';
-        if (!isNaN(valueNum)) {
-          if (valueNum < 6.0 || valueNum > 12.0) status = 'Critical';
-          else if (valueNum < 8.5 || valueNum > 10.5) status = 'Abnormal';
-          else status = 'Normal';
-        }
-      } else if (key.toLowerCase().includes('magnesium')) {
-        unit = 'mg/dL';
-        normalRange = '1.7-2.2';
-        if (!isNaN(valueNum)) {
-          if (valueNum < 1.0 || valueNum > 3.0) status = 'Critical';
-          else if (valueNum < 1.7 || valueNum > 2.2) status = 'Abnormal';
-          else status = 'Normal';
-        }
-      } else if (key.toLowerCase().includes('phosphorus')) {
-        unit = 'mg/dL';
-        normalRange = '2.5-4.5';
-        if (!isNaN(valueNum)) {
-          if (valueNum < 1.0 || valueNum > 6.0) status = 'Critical';
-          else if (valueNum < 2.5 || valueNum > 4.5) status = 'Abnormal';
-          else status = 'Normal';
-        }
-      } else if (key.toLowerCase().includes('bilirubin') && key.toLowerCase().includes('total')) {
-        unit = 'mg/dL';
-        normalRange = '0.1-1.2';
-        if (!isNaN(valueNum)) {
-          if (valueNum > 5.0) status = 'Critical';
-          else if (valueNum > 1.2) status = 'Abnormal';
-          else status = 'Normal';
-        }
-      } else if (key.toLowerCase().includes('alt') || key.toLowerCase().includes('sgpt')) {
-        unit = 'U/L';
-        normalRange = '7-56';
-        if (!isNaN(valueNum)) {
-          if (valueNum > 1000) status = 'Critical';
-          else if (valueNum < 7 || valueNum > 56) status = 'Abnormal';
-          else status = 'Normal';
-        }
-      } else if (key.toLowerCase().includes('ast') || key.toLowerCase().includes('sgot')) {
-        unit = 'U/L';
-        normalRange = '10-40';
-        if (!isNaN(valueNum)) {
-          if (valueNum > 1000) status = 'Critical';
-          else if (valueNum < 10 || valueNum > 40) status = 'Abnormal';
-          else status = 'Normal';
-        }
-      } else if (key.toLowerCase().includes('alp') || key.toLowerCase().includes('alkaline phosphatase')) {
-        unit = 'U/L';
-        normalRange = '44-147';
-        if (!isNaN(valueNum)) {
-          if (valueNum > 1000) status = 'Critical';
-          else if (valueNum < 44 || valueNum > 147) status = 'Abnormal';
-          else status = 'Normal';
-        }
-      } else if (key.toLowerCase().includes('albumin')) {
-        unit = 'g/dL';
-        normalRange = '3.5-5.0';
-        if (!isNaN(valueNum)) {
-          if (valueNum < 2.0 || valueNum > 6.0) status = 'Critical';
-          else if (valueNum < 3.5 || valueNum > 5.0) status = 'Abnormal';
-          else status = 'Normal';
-        }
-      } else {
-        // For unknown parameters, try to detect from value string first
-      if (valueStr.includes('Critical') || valueStr.includes('critical')) {
-        status = 'Critical';
-      } else if (valueStr.includes('Abnormal') || valueStr.includes('abnormal')) {
-        status = 'Abnormal';
-        }
-      }
+      // Canonical fallback for text-only result values.
+      if (!templateMatch && valueStr.trim()) {
+        const normalizedValue = valueStr.toLowerCase();
+        if (normalizedValue.includes('critical')) status = 'Critical';
+        else if (normalizedValue.includes('abnormal')) status = 'Abnormal';
       }
       
       results.push({
@@ -629,7 +292,12 @@ const transformResult = (
     resultFileExists,
     overallStatus,
     priority: transformPriority(apiResult.priority || order?.priority || 'routine') as 'Routine' | 'Urgent' | 'STAT',
-    status: 'Results Ready',
+    status: (() => {
+      const rawStatus = String(testDetails?.status || (test as any)?.status || '').toLowerCase();
+      if (rawStatus === 'verified') return LAB_TEST_STATUS.VERIFIED;
+      if (rawStatus === 'completed') return 'Completed';
+      return LAB_TEST_STATUS.RESULTS_READY;
+    })(),
     submittedBy: testDetails?.processed_by_name || testDetails?.processed_by || test?.processed_by_name || test?.processed_by || 'Lab Tech',
     submittedAt: testDetails?.processed_at || testDetails?.created_at || test?.processed_at || test?.created_at || new Date().toISOString(),
     clinic: order?.clinic || '',
@@ -671,6 +339,7 @@ export default function ResultsVerificationPage() {
   const [itemsPerPage, setItemsPerPage] = useState(50);
   const [totalCount, setTotalCount] = useState(0);
   const [verifiedTotalCount, setVerifiedTotalCount] = useState(0);
+  const [pendingTotalCount, setPendingTotalCount] = useState(0);
 
   // Tab state
   const [activeTab, setActiveTab] = useState('pending');
@@ -690,36 +359,15 @@ export default function ResultsVerificationPage() {
   const [verificationNotes, setVerificationNotes] = useState('');
   const [rejectionReason, setRejectionReason] = useState('');
 
-  const pendingResults = results.filter(r => r.status === 'Results Ready');
+  const pendingResults = results.filter(r => r.status === LAB_TEST_STATUS.RESULTS_READY);
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(searchQuery.trim()), 300);
     return () => clearTimeout(t);
   }, [searchQuery]);
 
-  // Search / status / priority / gender / processing come from API; date for pending uses submittedAt client-side
-  const filteredResults = useMemo(() => pendingResults.filter((result) => {
-    if (dateFilter === 'all' || !result.submittedAt) return true;
-    const submittedDate = new Date(result.submittedAt);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    if (dateFilter === 'today' && submittedDate.toDateString() !== today.toDateString()) return false;
-    if (dateFilter === 'week') {
-      const weekAgo = new Date(today);
-      weekAgo.setDate(weekAgo.getDate() - 7);
-      if (submittedDate < weekAgo) return false;
-    }
-    if (dateFilter === 'month') {
-      const monthAgo = new Date(today);
-      monthAgo.setMonth(monthAgo.getMonth() - 1);
-      if (submittedDate < monthAgo) return false;
-    }
-    return true;
-  }), [pendingResults, dateFilter]);
-
-  // Note: Since we're using server-side pagination, we display all filtered results
-  // The API handles pagination, but we still filter client-side for search
-  const paginatedResults = filteredResults;
+  // Server-side pagination and filters are canonical.
+  const paginatedResults = pendingResults;
 
   // Verified tab: filters applied server-side in loadVerifiedResults
   const verifiedPaginatedResults = verifiedResults;
@@ -734,28 +382,29 @@ export default function ResultsVerificationPage() {
     setVerifiedCurrentPage(1);
   }, [debouncedSearch, statusFilter, priorityFilter, dateFilter, genderFilter, processingFilter, itemsPerPage]);
 
+  const ensureTemplateRangesMap = useCallback(async (): Promise<Record<string, any>> => {
+    if (Object.keys(templateNormalRangesByCode).length > 0) return templateNormalRangesByCode;
+    try {
+      const templatesRes = await labService.getTemplates({ page_size: 500 });
+      const map: Record<string, any> = {};
+      for (const t of templatesRes.results || []) {
+        const code = (t as any)?.code;
+        if (code) map[String(code)] = (t as any)?.normal_range || {};
+      }
+      setTemplateNormalRangesByCode(map);
+      return map;
+    } catch {
+      return {};
+    }
+  }, [templateNormalRangesByCode]);
+
   // Load results function - memoized to prevent infinite loops
   const loadResults = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
 
-      // Ensure we have template normal ranges available for unit/range display.
-      let templatesMap = templateNormalRangesByCode;
-      if (!templatesMap || Object.keys(templatesMap).length === 0) {
-        try {
-          const templatesRes = await labService.getTemplates({ page_size: 500 });
-          const map: Record<string, any> = {};
-          for (const t of templatesRes.results || []) {
-            const code = (t as any)?.code;
-            if (code) map[String(code)] = (t as any)?.normal_range || {};
-          }
-          templatesMap = map;
-          setTemplateNormalRangesByCode(map);
-        } catch {
-          // Ignore template loading errors; the UI will fall back to heuristic rules.
-        }
-      }
+      const templatesMap = await ensureTemplateRangesMap();
 
       const params: any = {
         page: currentPage,
@@ -770,6 +419,7 @@ export default function ResultsVerificationPage() {
       if (debouncedSearch) params.search = debouncedSearch;
       if (genderFilter !== 'all') params.gender = genderFilter;
       if (processingFilter !== 'all') params.processing_method = processingFilter;
+      Object.assign(params, buildDateQuery(dateFilter));
 
       const response = await labService.getPendingVerifications(params);
       setTotalCount(response.count || response.results.length);
@@ -782,29 +432,14 @@ export default function ResultsVerificationPage() {
     } finally {
       setLoading(false);
     }
-  }, [currentPage, itemsPerPage, statusFilter, priorityFilter, debouncedSearch, genderFilter, processingFilter]);
+  }, [currentPage, itemsPerPage, statusFilter, priorityFilter, debouncedSearch, genderFilter, processingFilter, dateFilter, ensureTemplateRangesMap]);
 
   const loadVerifiedResults = useCallback(async () => {
     try {
       setVerifiedLoading(true);
       setVerifiedError(null);
 
-      // Ensure we have template normal ranges available for unit/range display.
-      let templatesMap = templateNormalRangesByCode;
-      if (!templatesMap || Object.keys(templatesMap).length === 0) {
-        try {
-          const templatesRes = await labService.getTemplates({ page_size: 500 });
-          const map: Record<string, any> = {};
-          for (const t of templatesRes.results || []) {
-            const code = (t as any)?.code;
-            if (code) map[String(code)] = (t as any)?.normal_range || {};
-          }
-          templatesMap = map;
-          setTemplateNormalRangesByCode(map);
-        } catch {
-          // Ignore template loading errors; the UI will fall back to heuristic rules.
-        }
-      }
+      const templatesMap = await ensureTemplateRangesMap();
 
       const params: any = {
         page: verifiedCurrentPage,
@@ -821,22 +456,7 @@ export default function ResultsVerificationPage() {
       if (genderFilter !== 'all') params.gender = genderFilter;
       if (processingFilter !== 'all') params.processing_method = processingFilter;
 
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const yyyyMmDd = (d: Date) => d.toISOString().split('T')[0];
-      if (dateFilter === 'today') {
-        params.date = yyyyMmDd(today);
-      } else if (dateFilter === 'week') {
-        const weekAgo = new Date(today);
-        weekAgo.setDate(weekAgo.getDate() - 7);
-        params.start_date = yyyyMmDd(weekAgo);
-        params.end_date = yyyyMmDd(today);
-      } else if (dateFilter === 'month') {
-        const monthAgo = new Date(today);
-        monthAgo.setMonth(monthAgo.getMonth() - 1);
-        params.start_date = yyyyMmDd(monthAgo);
-        params.end_date = yyyyMmDd(today);
-      }
+      Object.assign(params, buildDateQuery(dateFilter));
 
       const response = await labService.getVerifiedResults(params);
       setVerifiedTotalCount(response.count || response.results.length);
@@ -848,12 +468,35 @@ export default function ResultsVerificationPage() {
     } finally {
       setVerifiedLoading(false);
     }
-  }, [verifiedCurrentPage, itemsPerPage, statusFilter, priorityFilter, debouncedSearch, dateFilter, genderFilter, processingFilter]);
+  }, [verifiedCurrentPage, itemsPerPage, statusFilter, priorityFilter, debouncedSearch, dateFilter, genderFilter, processingFilter, ensureTemplateRangesMap]);
+
+  const loadVerificationCounts = useCallback(async () => {
+    const base = {
+      overall_status: statusFilter !== 'all' ? statusFilter : undefined,
+      priority: priorityFilter !== 'all' ? transformToBackendPriority(priorityFilter) : undefined,
+      search: debouncedSearch || undefined,
+      gender: genderFilter !== 'all' ? genderFilter : undefined,
+      processing_method: processingFilter !== 'all' ? processingFilter : undefined,
+      ...buildDateQuery(dateFilter),
+    } as const;
+
+    const [pendingStats, verifiedStats] = await Promise.all([
+      labService.getVerificationStats({ ...base, status: 'results_ready' }),
+      labService.getVerificationStats({ ...base, status: 'verified' }),
+    ]);
+
+    setPendingTotalCount(pendingStats.total || 0);
+    setVerifiedTotalCount(verifiedStats.total || 0);
+  }, [statusFilter, priorityFilter, debouncedSearch, dateFilter, genderFilter, processingFilter]);
 
   // Load results from API when page or filters change
   useEffect(() => {
     loadResults();
   }, [loadResults]);
+
+  useEffect(() => {
+    loadVerificationCounts();
+  }, [loadVerificationCounts]);
 
   // Load verified results when tab changes or filters change
   useEffect(() => {
@@ -861,20 +504,6 @@ export default function ResultsVerificationPage() {
       loadVerifiedResults();
     }
   }, [activeTab, loadVerifiedResults]);
-
-  const pendingStats = {
-    pending: pendingResults.length,
-    critical: pendingResults.filter(r => r.overallStatus === 'Critical').length,
-    abnormal: pendingResults.filter(r => r.overallStatus === 'Abnormal').length,
-    normal: pendingResults.filter(r => r.overallStatus === 'Normal').length,
-  };
-
-  const verifiedStats = {
-    verified: verifiedResults.length,
-    critical: verifiedResults.filter(r => r.overallStatus === 'Critical').length,
-    abnormal: verifiedResults.filter(r => r.overallStatus === 'Abnormal').length,
-    normal: verifiedResults.filter(r => r.overallStatus === 'Normal').length,
-  };
 
   const getOverallStatusBadge = (status: string) => {
     switch (status) {
@@ -925,6 +554,7 @@ export default function ResultsVerificationPage() {
       
       // Reload results to get updated data
       await loadResults();
+      await loadVerificationCounts();
       
       setIsVerifyDialogOpen(false);
       setVerificationNotes('');
@@ -937,7 +567,8 @@ export default function ResultsVerificationPage() {
   };
 
   const handleReject = async () => {
-    if (!selectedResult || !rejectionReason) {
+    const canonicalRejectionReason = formatRejectionReason(rejectionReason);
+    if (!selectedResult || !canonicalRejectionReason) {
       toast.error('Please provide a rejection reason');
       return;
     }
@@ -951,12 +582,13 @@ export default function ResultsVerificationPage() {
         return;
       }
 
-      await labService.rejectResult(testId, rejectionReason);
+      await labService.rejectResult(testId, canonicalRejectionReason);
       
       toast.success(`Result rejected and sent back to ${selectedResult.submittedBy}`);
       
       // Reload results to get updated data
       await loadResults();
+      await loadVerificationCounts();
       
       setIsRejectDialogOpen(false);
       setRejectionReason('');
@@ -996,6 +628,7 @@ export default function ResultsVerificationPage() {
       
       // Reload results
       await loadResults();
+      await loadVerificationCounts();
       
       setIsBatchVerifyOpen(false);
       setSelectedIds([]);
@@ -1019,14 +652,10 @@ export default function ResultsVerificationPage() {
     setSelectedIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
   };
 
-  const selectAllNormal = () => {
-    const normalIds = filteredResults.filter(r => r.overallStatus === 'Normal').map(r => r.id);
-    setSelectedIds(normalIds);
-  };
-
   const openViewDialog = (result: LabResult) => { setSelectedResult(result); setIsViewDialogOpen(true); };
   const openVerifyDialog = (result: LabResult) => { setSelectedResult(result); setVerificationNotes(''); setIsVerifyDialogOpen(true); };
   const openRejectDialog = (result: LabResult) => { setSelectedResult(result); setRejectionReason(''); setIsRejectDialogOpen(true); };
+  const isSelectedResultMutable = selectedResult?.status === LAB_TEST_STATUS.RESULTS_READY;
   const canVerifySelectedResult = Boolean(
     selectedResult &&
       ((selectedResult.results?.length || 0) > 0 ||
@@ -1055,8 +684,8 @@ export default function ResultsVerificationPage() {
             <div className="flex flex-col gap-4">
               <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
                 <TabsList>
-                  <TabsTrigger value="pending">Pending Review ({pendingStats.pending})</TabsTrigger>
-                  <TabsTrigger value="verified">Verified ({verifiedStats.verified})</TabsTrigger>
+                  <TabsTrigger value="pending">Pending Review ({pendingTotalCount})</TabsTrigger>
+                  <TabsTrigger value="verified">Verified ({verifiedTotalCount})</TabsTrigger>
                   <TabsTrigger value="all">All</TabsTrigger>
                 </TabsList>
               </Tabs>
@@ -1164,7 +793,7 @@ export default function ResultsVerificationPage() {
               <p className="text-red-600 dark:text-red-400">{error}</p>
               <Button variant="outline" className="mt-4" onClick={loadResults}>Retry</Button>
             </CardContent></Card>
-          ) : filteredResults.length === 0 ? (
+          ) : paginatedResults.length === 0 ? (
             <Card><CardContent className="p-8 text-center text-muted-foreground">
               <CheckCircle2 className="h-12 w-12 mx-auto mb-4 opacity-50" />
               <p>No results pending verification</p>
@@ -1464,16 +1093,20 @@ export default function ResultsVerificationPage() {
             )}
             <DialogFooter>
               <Button variant="outline" onClick={() => setIsViewDialogOpen(false)}>Close</Button>
-              <Button variant="outline" onClick={() => { setIsViewDialogOpen(false); if (selectedResult) openRejectDialog(selectedResult); }} className="text-rose-600">
-                <XCircle className="h-4 w-4 mr-2" />Reject
-              </Button>
-              <Button
-                onClick={() => { setIsViewDialogOpen(false); if (selectedResult) openVerifyDialog(selectedResult); }}
-                className="bg-emerald-500 hover:bg-emerald-600"
-                disabled={!canVerifySelectedResult}
-              >
-                <CheckCircle2 className="h-4 w-4 mr-2" />Verify
-              </Button>
+              {isSelectedResultMutable && (
+                <>
+                  <Button variant="outline" onClick={() => { setIsViewDialogOpen(false); if (selectedResult) openRejectDialog(selectedResult); }} className="text-rose-600">
+                    <XCircle className="h-4 w-4 mr-2" />Reject
+                  </Button>
+                  <Button
+                    onClick={() => { setIsViewDialogOpen(false); if (selectedResult) openVerifyDialog(selectedResult); }}
+                    className="bg-emerald-500 hover:bg-emerald-600"
+                    disabled={!canVerifySelectedResult}
+                  >
+                    <CheckCircle2 className="h-4 w-4 mr-2" />Verify
+                  </Button>
+                </>
+              )}
             </DialogFooter>
           </DialogContent>
         </Dialog>

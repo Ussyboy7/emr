@@ -146,6 +146,12 @@ class RadiologyService {
     search?: string;
     /** Orders that have at least one study with this processing method */
     processing_method?: 'in_house' | 'outsourced';
+    /** Orders that have at least one study in this workflow status */
+    study_status?: 'pending' | 'processing' | 'reported' | 'rejected' | 'verified';
+    gender?: 'male' | 'female';
+    date?: string;
+    start_date?: string;
+    end_date?: string;
     page?: number;
     page_size?: number;
     consultation_session?: number;
@@ -249,6 +255,14 @@ class RadiologyService {
     patient?: string;
     overall_status?: string;
     priority?: string;
+    clinic?: string;
+    gender?: string;
+    processing_method?: 'in_house' | 'outsourced';
+    category?: string;
+    search?: string;
+    date?: string;
+    start_date?: string;
+    end_date?: string;
     page?: number;
     page_size?: number;
   }): Promise<{ results: RadiologyReport[]; count: number }> {
@@ -265,6 +279,14 @@ class RadiologyService {
     patient?: string;
     overall_status?: string;
     priority?: string;
+    clinic?: string;
+    gender?: string;
+    processing_method?: 'in_house' | 'outsourced';
+    category?: string;
+    search?: string;
+    date?: string;
+    start_date?: string;
+    end_date?: string;
     page?: number;
     page_size?: number;
   }): Promise<{ results: RadiologyReport[]; count: number }> {
@@ -393,6 +415,48 @@ class RadiologyService {
       awaitingReport,
       criticalFindings,
     };
+  }
+
+  async getOrderStats(params?: {
+    priority?: string;
+    search?: string;
+    processing_method?: 'in_house' | 'outsourced';
+    gender?: 'male' | 'female';
+    date?: string;
+    start_date?: string;
+    end_date?: string;
+  }): Promise<{
+    total: number;
+    pending: number;
+    processing: number;
+    results_ready: number;
+    rejected: number;
+    stat: number;
+  }> {
+    const query = buildQueryString(params || {});
+    return apiFetch(`/radiology/orders/stats/${query}`);
+  }
+
+  async getVerificationStats(params?: {
+    status?: 'reported' | 'verified' | 'all';
+    overall_status?: string;
+    priority?: string;
+    clinic?: string;
+    gender?: string;
+    processing_method?: 'in_house' | 'outsourced';
+    category?: string;
+    search?: string;
+    date?: string;
+    start_date?: string;
+    end_date?: string;
+  }): Promise<{
+    total: number;
+    normal: number;
+    abnormal: number;
+    critical: number;
+  }> {
+    const query = buildQueryString(params || {});
+    return apiFetch(`/radiology/verification/stats/${query}`);
   }
 
   /**

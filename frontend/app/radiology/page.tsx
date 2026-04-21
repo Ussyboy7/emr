@@ -39,7 +39,7 @@ export default function RadiologyPage() {
                   onClick={() => window.location.href = '/radiology/orders'}
                 >
                   <ClipboardList className="h-4 w-4 mr-2" />
-                  Orders Queue
+                  Study Orders
                 </Button>
                 <Button
                   variant="outline"
@@ -162,12 +162,12 @@ export default function RadiologyPage() {
               <div className="flex items-center gap-2">
                 <ClipboardList className="h-5 w-5 sm:h-6 sm:w-6" />
               </div>
-              <span className="text-xs sm:text-sm font-medium">Orders Queue</span>
+              <span className="text-xs sm:text-sm font-medium">Study Orders</span>
               <span className="text-[10px] sm:text-xs opacity-90">Process incoming orders</span>
             </Button>
             <Button onClick={() => window.location.href = '/radiology/verification'} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-cyan-500/30 hover:bg-cyan-500/10 border-l-4 border-l-cyan-500">
               <FileSearch className="h-5 w-5 sm:h-6 sm:w-6 text-cyan-500 dark:text-cyan-400" />
-              <span className="text-xs sm:text-sm font-medium">Verification</span>
+              <span className="text-xs sm:text-sm font-medium">Results Verification</span>
               <span className="text-[10px] sm:text-xs text-muted-foreground">Verify radiology reports</span>
             </Button>
             <Button onClick={() => window.location.href = '/radiology/analytics'} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-cyan-500/30 hover:bg-cyan-500/10 border-l-4 border-l-blue-500">

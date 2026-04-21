@@ -100,86 +100,35 @@ export default function CompletedTestsPage() {
         end_date,
       } as const;
 
-      // Primary data source: verification history endpoint (LabResultViewSet).
-      // Some deployments don't expose it; if it 404s we fall back to /laboratory/tests/?status=verified
-      // to keep the Completed Tests page working.
-      let listMode: 'verification' | 'tests' = 'verification';
-      let listResult:
-        | { results: any[]; count: number }
-        | { results: any[]; count: number; next?: string; previous?: string };
-
-      try {
-        listResult = await labService.getVerifiedResults({
-          ...baseParams,
-          page: currentPage,
-          page_size: itemsPerPage,
-        });
-      } catch (e: any) {
-        if (typeof e?.status === 'number' && e.status === 404) {
-          listMode = 'tests';
-          listResult = await labService.getCompletedTests({
-            page: currentPage,
-            page_size: itemsPerPage,
-            status: 'verified',
-          });
-        } else {
-          throw e;
-        }
-      }
+      const listResult = await labService.getVerifiedResults({
+        ...baseParams,
+        page: currentPage,
+        page_size: itemsPerPage,
+      });
 
       setTotalCount(listResult.count || (listResult.results || []).length);
 
-      // Stats: avoid calling a dedicated stats endpoint because some deployments don't expose it,
-      // and apiFetch logs 404s to console even if caught. Instead, derive counts via lightweight
-      // filtered requests (page_size=1) to read `count`.
-      if (listMode === 'verification') {
-        try {
-          // If user picked a specific status, don't do 3 extra count calls.
-          if (statusFilter !== 'all') {
-            setStats({
-              total: listResult.count || 0,
-              normal: statusFilter === 'normal' ? (listResult.count || 0) : 0,
-              abnormal: statusFilter === 'abnormal' ? (listResult.count || 0) : 0,
-              critical: statusFilter === 'critical' ? (listResult.count || 0) : 0,
-            });
-          } else {
-            const [normalRes, abnormalRes, criticalRes] = await Promise.all([
-              labService.getVerifiedResults({ ...baseParams, overall_status: 'normal', page: 1, page_size: 1 }),
-              labService.getVerifiedResults({ ...baseParams, overall_status: 'abnormal', page: 1, page_size: 1 }),
-              labService.getVerifiedResults({ ...baseParams, overall_status: 'critical', page: 1, page_size: 1 }),
-            ]);
-
-            const normal = normalRes.count || 0;
-            const abnormal = abnormalRes.count || 0;
-            const critical = criticalRes.count || 0;
-            setStats({
-              total: (normal + abnormal + critical),
-              normal,
-              abnormal,
-              critical,
-            });
-          }
-        } catch {
-          setStats({ total: listResult.count || 0, normal: 0, abnormal: 0, critical: 0 });
-        }
-      } else {
-        // Fallback mode: we only know accurate total (count). Breakdown is best-effort from current page.
-        const pageStats = (listResult.results || []).reduce(
-          (acc: { total: number; normal: number; abnormal: number; critical: number }, test: any) => {
-            const overall = String(test?.overall_status || '').toLowerCase();
-            if (overall === 'abnormal') acc.abnormal += 1;
-            else if (overall === 'critical') acc.critical += 1;
-            else acc.normal += 1;
-            return acc;
-          },
-          { total: listResult.count || 0, normal: 0, abnormal: 0, critical: 0 }
-        );
-        setStats(pageStats);
-      }
+      const statsResult = await labService.getVerificationStats({
+        status: 'verified',
+        overall_status: statusFilter !== 'all' ? statusFilter : undefined,
+        clinic: clinicFilter !== 'all' ? clinicFilter : undefined,
+        gender: genderFilter !== 'all' ? genderFilter : undefined,
+        search: debouncedSearchQuery || undefined,
+        processing_method: processingFilter !== 'all' ? processingFilter : undefined,
+        date,
+        start_date,
+        end_date,
+      });
+      setStats({
+        total: statsResult.total || 0,
+        normal: statsResult.normal || 0,
+        abnormal: statsResult.abnormal || 0,
+        critical: statsResult.critical || 0,
+      });
 
       // Transform API data to frontend format (shared with consultation room lab viewer)
       const transformed = (listResult.results || []).map((row: any) =>
-        transformApiRowToCompletedTest(row, listMode)
+        transformApiRowToCompletedTest(row, 'verification')
       );
       setTests(transformed);
     } catch (err: any) {
