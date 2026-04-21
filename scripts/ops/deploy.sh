@@ -201,8 +201,9 @@ deploy_stack() {
 
 wait_healthy() {
     $DO_HEALTH || { ui_warning "Skipping health probe (--skip-health)"; return 0; }
-    # Prefer Docker health status. It is deterministic and already defined in
-    # compose for backend; avoids ambiguous host-level curl failures.
+    # Single source of truth: Docker healthcheck on the backend container.
+    # Both docker-compose.prod.yml and docker-compose.stag.yml define a
+    # healthcheck on `backend`, so we expect a health status. No fallbacks.
     ui_step "Waiting for backend health (${STACK_BACKEND_CONTAINER})"
     ui_info "External URL for manual checks: ${STACK_HEALTH_URL}"
     local initial_sleep=8
@@ -212,7 +213,7 @@ wait_healthy() {
     local i
     for ((i = 1; i <= attempts; i++)); do
         if ! docker ps --format '{{.Names}}' | grep -q "^${STACK_BACKEND_CONTAINER}$"; then
-            ui_warning "Container ${STACK_BACKEND_CONTAINER} is not running yet (attempt ${i}/${attempts})"
+            ui_warning "Container ${STACK_BACKEND_CONTAINER} is not running (attempt ${i}/${attempts})"
             echo "  attempt ${i}/${attempts}…"
             sleep "$interval"
             continue
@@ -232,18 +233,14 @@ wait_healthy() {
                 return 1
                 ;;
             none|missing)
-                # Fallback for environments without a Docker healthcheck.
-                if docker exec "$STACK_BACKEND_CONTAINER" \
-                    curl -sf --max-time 8 "http://127.0.0.1:8000/api/health/live/" >/dev/null 2>&1; then
-                    ui_success "Backend liveness OK (fallback curl)"
-                    return 0
-                fi
+                ui_error "No Docker healthcheck on ${STACK_BACKEND_CONTAINER}. Define one in compose (backend.healthcheck) and redeploy — this script no longer probes endpoints directly."
+                return 1
                 ;;
         esac
-        echo "  attempt ${i}/${attempts}…"
+        echo "  attempt ${i}/${attempts}… (status: ${health})"
         sleep "$interval"
     done
-    ui_error "Backend did not become healthy within ~$((initial_sleep + attempts * interval))s. Try: docker inspect ${STACK_BACKEND_CONTAINER} --format '{{.State.Health.Status}}' and docker logs ${STACK_BACKEND_CONTAINER}."
+    ui_error "Backend did not become healthy within ~$((initial_sleep + attempts * interval))s. Inspect with: docker inspect ${STACK_BACKEND_CONTAINER} --format '{{.State.Health.Status}}' and docker logs ${STACK_BACKEND_CONTAINER}."
     return 1
 }
 
