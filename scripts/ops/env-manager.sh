@@ -87,6 +87,9 @@ if [[ $# -lt 2 ]]; then
 fi
 
 stack_init_env "$1"
+# Ensure docker-compose interpolation gets canonical env values from STACK_ENV_FILE.
+# Compose variable expansion happens before service-level `env_file:` is applied.
+stack_load_env_vars
 shift
 CMD="$1"
 shift || true
@@ -418,6 +421,8 @@ _deploy_ensure_repo() {
             STACK_ENV_FILE="${PROJECT_ROOT}/backend/env/stag.env"
             ;;
     esac
+    # Reload after re-anchoring paths to the deploy checkout.
+    stack_load_env_vars
     ui_info "Working directory: $(pwd)"
 }
 
