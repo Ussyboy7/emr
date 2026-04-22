@@ -82,14 +82,14 @@ class Command(BaseCommand):
 
         self.stdout.write(self.style.SUCCESS("\n✅ Demo data seeding complete!"))
         self.stdout.write(self.style.SUCCESS("\nLogin credentials:"))
-        self.stdout.write("  Admin: admin / ChangeMe123!")
-        self.stdout.write("  Doctor: doctor / ChangeMe123!")
-        self.stdout.write("  Nurse: nurse / ChangeMe123!")
-        self.stdout.write("  Lab Tech: labtech / ChangeMe123!")
-        self.stdout.write("  Pharmacist: pharmacist / ChangeMe123!")
-        self.stdout.write("  Radiologist: radiologist / ChangeMe123!")
-        self.stdout.write("  Records: records / ChangeMe123!")
-        self.stdout.write("  Physiotherapist: physio / ChangeMe123!")
+        self.stdout.write("  Admin: admin / Changeme")
+        self.stdout.write("  Doctor: doctor / Changeme")
+        self.stdout.write("  Nurse: nurse / Changeme")
+        self.stdout.write("  Lab Tech: labtech / Changeme")
+        self.stdout.write("  Pharmacist: pharmacist / Changeme")
+        self.stdout.write("  Radiologist: radiologist / Changeme")
+        self.stdout.write("  Records: records / Changeme")
+        self.stdout.write("  Physiotherapist: physio / Changeme")
 
     def _reset_data(self, preserve_users: bool = False):
         """Delete existing demo data."""
@@ -813,8 +813,8 @@ class Command(BaseCommand):
                 username=username,
                 defaults=data
             )
-            if created or not user.check_password('ChangeMe123!'):
-                user.set_password('ChangeMe123!')
+            if created or not user.check_password('Changeme'):
+                user.set_password('Changeme')
                 # Update clinic and department if they weren't set during creation
                 if not user.clinic:
                     user.clinic = clinic
