@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { groupPagePermissionsByModule } from './page-permissions';
+import { groupPagePermissionsByModule, normalizeRolePagePath, normalizeRolePagePaths } from './page-permissions';
 
 describe('groupPagePermissionsByModule', () => {
   it('groups permissions by module', () => {
@@ -13,5 +13,19 @@ describe('groupPagePermissionsByModule', () => {
   it('handles empty array', () => {
     const result = groupPagePermissionsByModule([]);
     expect(result).toEqual({});
+  });
+});
+
+describe('normalizeRolePagePath', () => {
+  it('maps legacy physiotherapy pool-queue to orders', () => {
+    expect(normalizeRolePagePath('/physiotherapy/pool-queue')).toBe('/physiotherapy/orders');
+  });
+});
+
+describe('normalizeRolePagePaths', () => {
+  it('deduplicates and maps legacy paths', () => {
+    expect(
+      normalizeRolePagePaths(['/physiotherapy/pool-queue', '/physiotherapy/orders'])
+    ).toEqual(['/physiotherapy/orders']);
   });
 });

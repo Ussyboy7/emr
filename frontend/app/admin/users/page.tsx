@@ -98,7 +98,7 @@ export default function UserManagementPage() {
       const [clinicsResponse, departmentsResponse, rolesResponse] = await Promise.all([
         adminService.getClinics({ page_size: 1000 }),
         adminService.getDepartments({ page_size: 1000 }),
-        adminService.getRoles({ page_size: 1000, is_active: true }),
+        adminService.getRoles({ page_size: 1000 }),
       ]);
       setClinics(clinicsResponse.results);
       setDepartments(departmentsResponse.results);
@@ -264,42 +264,6 @@ export default function UserManagementPage() {
     setIsCreateDialogOpen(true);
   }, []);
 
-  // Consolidated handler for all staff actions - React will batch these updates automatically
-  const handleStaffAction = useCallback((action: 'view' | 'edit' | 'delete' | 'resetPassword', staff: StaffMember) => {
-    // Update ref immediately
-    selectedStaffRef.current = staff;
-    
-    // Use requestAnimationFrame to ensure dropdown closes before opening modal
-    requestAnimationFrame(() => {
-      setSelectedStaff(staff);
-      switch (action) {
-        case 'view':
-          setIsViewDialogOpen(true);
-          break;
-        case 'edit':
-          setFormData({
-            ...staff,
-            clinicId: staff.clinicId,
-            departmentId: staff.departmentId,
-          });
-          setIsEditDialogOpen(true);
-          break;
-        case 'delete':
-          setIsDeleteDialogOpen(true);
-          break;
-        case 'resetPassword':
-          setIsResetPasswordDialogOpen(true);
-          break;
-      }
-    });
-  }, []);
-  
-  // Individual handlers for backward compatibility with other parts of code
-  const openView = useCallback((s: StaffMember) => {
-    setSelectedStaff(s);
-    setIsViewDialogOpen(true);
-  }, []);
-  
   const openEdit = useCallback(async (s: StaffMember) => {
     setSelectedStaff(s);
     setFormData({
@@ -309,14 +273,15 @@ export default function UserManagementPage() {
     });
     setIsEditDialogOpen(true);
 
-    // Load current access role assignment so it persists in the form.
     try {
-      const userId = parseInt(s.id);
+      const userId = parseInt(s.id, 10);
       const user = await adminService.getUser(userId);
       const assignments = await adminService.getUserRoleAssignments(userId);
       const firstRoleId = assignments?.[0]?.role;
-      if (firstRoleId) {
-        setFormData((prev) => ({ ...prev, accessRoleId: firstRoleId }));
+      if (firstRoleId != null) {
+        setFormData((prev) => ({ ...prev, accessRoleId: Number(firstRoleId) }));
+      } else {
+        setFormData((prev) => ({ ...prev, accessRoleId: undefined }));
       }
       const restricted =
         user?.custom_pages_mode === "restrict" && Array.isArray(user.custom_pages)
@@ -324,9 +289,36 @@ export default function UserManagementPage() {
           : [];
       setFormData((prev) => ({ ...prev, restrictedPages: restricted }));
     } catch (e) {
-      // Non-blocking; user can still pick a role manually.
       console.warn("Failed to load user role assignments", e);
     }
+  }, []);
+
+  // Consolidated handler for all staff actions - React will batch these updates automatically
+  const handleStaffAction = useCallback((action: 'view' | 'edit' | 'delete' | 'resetPassword', staff: StaffMember) => {
+    selectedStaffRef.current = staff;
+
+    requestAnimationFrame(() => {
+      setSelectedStaff(staff);
+      switch (action) {
+        case 'view':
+          setIsViewDialogOpen(true);
+          break;
+        case 'edit':
+          void openEdit(staff);
+          break;
+        case 'delete':
+          setIsDeleteDialogOpen(true);
+          break;
+        case 'resetPassword':
+          setIsResetPasswordDialogOpen(true);
+          break;
+      }
+    });
+  }, [openEdit]);
+
+  const openView = useCallback((s: StaffMember) => {
+    setSelectedStaff(s);
+    setIsViewDialogOpen(true);
   }, []);
   
   const openDelete = useCallback((s: StaffMember) => {

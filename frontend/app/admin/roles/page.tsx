@@ -15,17 +15,15 @@ import { toast } from "sonner";
 import { StandardPagination } from "@/components/shared/StandardPagination";
 import { adminService, type Role as ApiRole } from "@/lib/services";
 import {
+  ALL_PAGE_PERMISSIONS,
+  normalizeRolePagePaths,
+  type PagePermission,
+} from "@/lib/page-permissions";
+import {
   Shield, Search, Plus, Edit, Trash2, Eye, Users, Copy, Check,
   Stethoscope, Syringe, FlaskConical, Pill, ScanLine, ClipboardList, UserCog,
   Building2, Settings, Lock, Key, AlertTriangle, CheckCircle2, Loader2
 } from "lucide-react";
-
-interface Permission {
-  id: string;
-  name: string;
-  description: string;
-  module: string;
-}
 
 interface Role {
   id: string;
@@ -39,108 +37,7 @@ interface Role {
   updatedAt: string;
 }
 
-// Page-based permissions instead of action-based
-interface PagePermission {
-  id: string; // Page URL
-  name: string;
-  description: string;
-  module: string;
-}
-
-const allPagePermissions: PagePermission[] = [
-  // Overview (Global EMR)
-  { id: '/dashboard', name: 'Overview Dashboard', description: 'Global EMR overview dashboard', module: 'Overview' },
-
-  // Medical Records
-  { id: '/medical-records', name: 'Dashboard', description: 'Medical Records Dashboard', module: 'Medical Records' },
-  { id: '/medical-records/patients/new', name: 'Register Patient', description: 'Register new patients', module: 'Medical Records' },
-  { id: '/medical-records/patients', name: 'Manage Patients', description: 'View and manage patient records', module: 'Medical Records' },
-  { id: '/medical-records/patient-records', name: 'Patient Records', description: 'Look up and view patient medical records', module: 'Medical Records' },
-  { id: '/medical-records/visits/new', name: 'Create Visit', description: 'Create new patient visits', module: 'Medical Records' },
-  { id: '/medical-records/visits', name: 'Manage Visits', description: 'View and manage patient visits', module: 'Medical Records' },
-  { id: '/medical-records/appointments', name: 'Appointments', description: 'Manage patient appointments', module: 'Medical Records' },
-  { id: '/medical-records/dependents', name: 'Manage Dependents', description: 'Manage patient dependents', module: 'Medical Records' },
-  { id: '/medical-records/reports', name: 'Reports', description: 'View and generate reports', module: 'Medical Records' },
-  { id: '/medical-records/referrals', name: 'Referral queue (records)', description: 'Review referrals for stamping and records workflow (same data as consultation referrals)', module: 'Medical Records' },
-
-  // Nursing
-  { id: '/nursing', name: 'Dashboard', description: 'Nursing Dashboard', module: 'Nursing' },
-  { id: '/nursing/pool-queue', name: 'Pool Queue', description: 'Manage nursing pool queue', module: 'Nursing' },
-  { id: '/nursing/room-queue', name: 'Room Queue', description: 'Manage nursing room queue', module: 'Nursing' },
-  { id: '/nursing/patient-vitals', name: 'Patient Vitals', description: 'Record patient vital signs', module: 'Nursing' },
-  { id: '/nursing/procedures', name: 'Procedures', description: 'Perform nursing procedures', module: 'Nursing' },
-  { id: '/nursing/procedures/history', name: 'Procedures History', description: 'View procedures history', module: 'Nursing' },
-  { id: '/nursing/wards', name: 'Ward Management', description: 'Manage ward operations', module: 'Nursing' },
-  { id: '/nursing/inventory', name: 'Ward Stock', description: 'View and manage ward stock inventory', module: 'Nursing' },
-  { id: '/nursing/requests', name: 'Drug Requests', description: 'Request drugs from Central Store to Ward Care', module: 'Nursing' },
-
-  // Consultation
-  { id: '/consultation', name: 'My Dashboard', description: 'Consultation Dashboard', module: 'Consultation' },
-  { id: '/consultation/start', name: 'Start Consultation', description: 'Start consultation sessions', module: 'Consultation' },
-  { id: '/consultation/history', name: 'Consultation History', description: 'View consultation history', module: 'Consultation' },
-  { id: '/consultation/wards', name: 'Ward Overview', description: 'View ward overview', module: 'Consultation' },
-  { id: '/consultation/referrals', name: 'Referrals & forms', description: 'Referral letters, responsibility forms, and referral tracking (primary doctor workflow)', module: 'Consultation' },
-
-  // Laboratory
-  { id: '/laboratory', name: 'Dashboard', description: 'Laboratory Dashboard', module: 'Laboratory' },
-  { id: '/laboratory/orders', name: 'Lab Orders', description: 'View laboratory orders', module: 'Laboratory' },
-  { id: '/laboratory/verification', name: 'Results Verification', description: 'Verify lab results', module: 'Laboratory' },
-  { id: '/laboratory/completed', name: 'Completed Tests', description: 'View completed tests', module: 'Laboratory' },
-  { id: '/laboratory/templates', name: 'Test Templates', description: 'Manage test templates', module: 'Laboratory' },
-  { id: '/laboratory/analytics', name: 'Lab Analytics', description: 'Laboratory volume and patient-mix reports', module: 'Laboratory' },
-
-  // Pharmacy
-  { id: '/pharmacy', name: 'Dashboard', description: 'Pharmacy Dashboard', module: 'Pharmacy' },
-  { id: '/pharmacy/prescriptions', name: 'Prescriptions', description: 'View and manage prescriptions', module: 'Pharmacy' },
-  { id: '/pharmacy/history', name: 'Dispense History', description: 'View dispense history', module: 'Pharmacy' },
-  { id: '/pharmacy/inventory', name: 'Inventory', description: 'Manage drug inventory', module: 'Pharmacy' },
-  { id: '/pharmacy/requests', name: 'Requests', description: 'Request stock from Central Store', module: 'Pharmacy' },
-  { id: '/pharmacy/generics', name: 'Generics', description: 'Manage generic medication catalog', module: 'Pharmacy' },
-  { id: '/pharmacy/drugs', name: 'Drug Master', description: 'Manage branded drugs and mappings', module: 'Pharmacy' },
-  { id: '/pharmacy/store', name: 'Central Store', description: 'Manage central store receipts and fulfillments', module: 'Pharmacy' },
-  { id: '/pharmacy/store/requests', name: 'Store Requests', description: 'Review and issue store requests', module: 'Pharmacy' },
-  { id: '/pharmacy/analytics', name: 'Pharmacy Analytics', description: 'Dispensing and prescription analytics', module: 'Pharmacy' },
-
-  // Radiology
-  { id: '/radiology', name: 'Dashboard', description: 'Radiology Dashboard', module: 'Radiology' },
-  { id: '/radiology/orders', name: 'Study Orders', description: 'View radiology orders', module: 'Radiology' },
-  { id: '/radiology/verification', name: 'Results Verification', description: 'Verify radiology results', module: 'Radiology' },
-  { id: '/radiology/completed', name: 'Completed Studies', description: 'View completed studies', module: 'Radiology' },
-  { id: '/radiology/templates', name: 'Study Templates', description: 'Manage study templates', module: 'Radiology' },
-  { id: '/radiology/analytics', name: 'Radiology Analytics', description: 'Imaging volume and patient-mix reports', module: 'Radiology' },
-
-  // Physiotherapy
-  { id: '/physiotherapy', name: 'Dashboard', description: 'Physiotherapy Dashboard', module: 'Physiotherapy' },
-  { id: '/physiotherapy/orders', name: 'Orders', description: 'Manage physiotherapy orders', module: 'Physiotherapy' },
-  { id: '/physiotherapy/completed', name: 'Completed Sessions', description: 'View completed sessions', module: 'Physiotherapy' },
-
-  // Eye Clinic
-  { id: '/eyecare', name: 'Dashboard', description: 'Eye Clinic Dashboard', module: 'Eye Clinic' },
-  { id: '/eyecare/orders', name: 'Orders', description: 'Manage eye clinic orders', module: 'Eye Clinic' },
-  { id: '/eyecare/completed', name: 'Completed Sessions', description: 'View completed eye clinic sessions', module: 'Eye Clinic' },
-
-  // Analytics
-  { id: '/analytics', name: 'Clinical Reports', description: 'View clinical reports', module: 'Analytics' },
-
-  // Administration
-  { id: '/admin', name: 'Dashboard', description: 'Administration Dashboard', module: 'Administration' },
-  { id: '/admin/users', name: 'User Management', description: 'Manage user accounts', module: 'Administration' },
-  { id: '/admin/roles', name: 'Roles & Permissions', description: 'Manage roles and permissions', module: 'Administration' },
-  { id: '/admin/clinics', name: 'Facilities & Departments', description: 'Facilities (sites), departments, and OPD visit clinics', module: 'Administration' },
-  { id: '/admin/rooms', name: 'Room Management', description: 'Manage consultation rooms', module: 'Administration' },
-  { id: '/admin/settings', name: 'System Settings', description: 'Access system settings', module: 'Administration' },
-  { id: '/admin/audit', name: 'Audit Trail', description: 'View audit logs', module: 'Administration' },
-];
-
-// Legacy permission mapping for backward compatibility
-const allPermissions: Permission[] = allPagePermissions.map(page => ({
-  id: page.id,
-  name: page.name,
-  description: page.description,
-  module: page.module,
-}));
-
-const pageModules = [...new Set(allPagePermissions.map(p => p.module))];
+const pageModules = [...new Set(ALL_PAGE_PERMISSIONS.map((p) => p.module))];
 const roleTypes = ['All Types', 'System', 'Clinical', 'Administrative', 'Custom'];
 
 export default function RolesPermissionsPage() {
@@ -179,20 +76,14 @@ export default function RolesPermissionsPage() {
     return typeMap[frontendType] || 'custom';
   };
 
-  // Convert permissions from backend JSON format to frontend array format
+  // Convert permissions from backend JSON format to frontend array of path strings
   const convertPermissionsFromBackend = (backendPerms: any): string[] => {
-    // Backend now sends permissions as {pages: [...], actions: {...}}
-    if (backendPerms && typeof backendPerms === 'object' && backendPerms.pages) {
-      // New format: return the pages array directly
-      return Array.isArray(backendPerms.pages) ? backendPerms.pages : [];
-    }
-
-    // Fallback: if it's an array, return it directly (old format compatibility)
     if (Array.isArray(backendPerms)) {
-      return backendPerms;
+      return backendPerms.filter((p): p is string => typeof p === "string");
     }
-
-    // Fallback: empty array for any other format
+    if (backendPerms && typeof backendPerms === "object" && Array.isArray(backendPerms.pages)) {
+      return backendPerms.pages.filter((p: unknown): p is string => typeof p === "string");
+    }
     return [];
   };
 
@@ -224,7 +115,7 @@ export default function RolesPermissionsPage() {
         name: role.name,
         description: role.description || '',
         type: mapRoleType(role.type),
-        permissions: convertPermissionsFromBackend(role.permissions),
+        permissions: normalizeRolePagePaths(convertPermissionsFromBackend(role.permissions)),
         userCount: role.user_count || 0,
         isActive: role.is_active,
         createdAt: role.created_at?.split('T')[0] || '',
@@ -294,8 +185,8 @@ export default function RolesPermissionsPage() {
 
   const getPermissionsByModule = (pageIds: string[]) => {
     const grouped: Record<string, PagePermission[]> = {};
-    pageIds.forEach(id => {
-      const page = allPagePermissions.find(p => p.id === id);
+    pageIds.forEach((id) => {
+      const page = ALL_PAGE_PERMISSIONS.find((p) => p.id === id);
       if (page) {
         if (!grouped[page.module]) grouped[page.module] = [];
         grouped[page.module].push(page);
@@ -309,7 +200,7 @@ export default function RolesPermissionsPage() {
   };
 
   const toggleModulePermissions = (module: string) => {
-    const modulePageIds = allPagePermissions.filter(p => p.module === module).map(p => p.id);
+    const modulePageIds = ALL_PAGE_PERMISSIONS.filter((p) => p.module === module).map((p) => p.id);
     const allSelected = modulePageIds.every(id => formData.permissions.includes(id));
     setFormData(prev => ({
       ...prev,
@@ -542,7 +433,7 @@ export default function RolesPermissionsPage() {
               <TabsContent value="permissions" className="mt-4">
                 <div className="space-y-4 max-h-[500px] overflow-y-auto pr-2">
                   {pageModules.map(module => {
-                    const modulePages = allPagePermissions.filter(p => p.module === module);
+                    const modulePages = ALL_PAGE_PERMISSIONS.filter((p) => p.module === module);
                     const allChecked = modulePages.every(p => formData.permissions.includes(p.id));
                     return (
                       <Card key={module}>

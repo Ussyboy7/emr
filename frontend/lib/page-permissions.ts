@@ -97,6 +97,39 @@ export const ALL_PAGE_PERMISSIONS: PagePermission[] = [
   { id: "/admin/audit", name: "Audit Trail", description: "View audit logs", module: "Administration" },
 ];
 
+/** DB / seed paths that no longer match a route id — map to the canonical path used in the UI. */
+const LEGACY_PAGE_PATH_ALIASES: Record<string, string> = {
+  "/physiotherapy/pool-queue": "/physiotherapy/orders",
+  "/consultation/dashboard": "/consultation",
+};
+
+/**
+ * Map a single stored path to the canonical `ALL_PAGE_PERMISSIONS` id (trim, strip trailing slash, apply aliases).
+ */
+export function normalizeRolePagePath(path: string): string {
+  const raw = (path || "").trim();
+  if (!raw) return raw;
+  const noTrailing = raw.replace(/\/+$/, "") || "/";
+  return LEGACY_PAGE_PATH_ALIASES[noTrailing] ?? LEGACY_PAGE_PATH_ALIASES[raw] ?? noTrailing;
+}
+
+/**
+ * De-duplicate and normalize role page paths for forms and access lists.
+ * Unknown paths (typos, future routes) are kept so saving does not drop data.
+ */
+export function normalizeRolePagePaths(paths: string[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const p of paths) {
+    if (typeof p !== "string") continue;
+    const c = normalizeRolePagePath(p);
+    if (!c || seen.has(c)) continue;
+    seen.add(c);
+    out.push(c);
+  }
+  return out;
+}
+
 export function groupPagePermissionsByModule(
   pageIds: string[]
 ): Record<string, PagePermission[]> {

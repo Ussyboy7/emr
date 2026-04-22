@@ -19,6 +19,9 @@ const LEGACY_ORIGINAL_ACCESS_TOKEN_KEY = "npa_ecm_original_access";
 const LEGACY_ORIGINAL_REFRESH_TOKEN_KEY = "npa_ecm_original_refresh";
 const LEGACY_ORIGINAL_ACCESS_EXP_KEY = "npa_ecm_original_access_exp";
 
+/** Max-Age (seconds) for refresh + session cookies; align with server `REFRESH_TOKEN_LIFETIME` (default 1 day). */
+export const AUTH_REFRESH_SESSION_MAX_AGE_SECONDS = 60 * 60 * 24;
+
 /**
  * API root used by fetch() (must hit Django, not the Next.js dev server).
  * Uses NEXT_PUBLIC_API_URL environment variable for the API base URL.
@@ -84,11 +87,11 @@ const migrateLegacyStorageKeysIfNeeded = () => {
     }
 
     setCookie(ACCESS_TOKEN_KEY, legacyAccess, remainingSeconds);
-    setCookie(REFRESH_TOKEN_KEY, legacyRefresh, 60 * 60 * 24 * 7);
+    setCookie(REFRESH_TOKEN_KEY, legacyRefresh, AUTH_REFRESH_SESSION_MAX_AGE_SECONDS);
     if (typeof expiresAt === "number" && Number.isFinite(expiresAt)) {
       setCookie(ACCESS_TOKEN_EXP_KEY, `${expiresAt}`, remainingSeconds);
     }
-    setCookie(AUTH_SESSION_COOKIE, "1", 60 * 60 * 24 * 7);
+    setCookie(AUTH_SESSION_COOKIE, "1", AUTH_REFRESH_SESSION_MAX_AGE_SECONDS);
 
     // Cleanup legacy keys
     localStorage.removeItem(LEGACY_ACCESS_TOKEN_COOKIE);
@@ -156,12 +159,12 @@ export const storeTokens = (accessToken: string, refreshToken: string, expiresIn
 
   // Mirror tokens into cookies so middleware can enforce auth on first request.
   setCookie(ACCESS_TOKEN_KEY, accessToken, effectiveExpires);
-  // Refresh tokens are typically longer-lived; keep it for a week by default.
-  setCookie(REFRESH_TOKEN_KEY, refreshToken, 60 * 60 * 24 * 7);
+  // Align refresh cookie max-age with server refresh token lifetime.
+  setCookie(REFRESH_TOKEN_KEY, refreshToken, AUTH_REFRESH_SESSION_MAX_AGE_SECONDS);
   // Store expiry as epoch ms so client can validate even when reading from cookies.
   setCookie(ACCESS_TOKEN_EXP_KEY, `${expiresAt}`, effectiveExpires);
   // Lightweight auth flag for middleware.
-  setCookie(AUTH_SESSION_COOKIE, "1", 60 * 60 * 24 * 7);
+  setCookie(AUTH_SESSION_COOKIE, "1", AUTH_REFRESH_SESSION_MAX_AGE_SECONDS);
 
   // Cleanup legacy token keys so we don't keep duplicates around.
   localStorage.removeItem(LEGACY_ACCESS_TOKEN_COOKIE);

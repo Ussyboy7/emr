@@ -4,6 +4,8 @@ Permissions and Roles models for the EMR system.
 from django.db import models
 from django.conf import settings
 
+from .role_permissions import normalize_role_permissions_list
+
 
 class Role(models.Model):
     """
@@ -40,6 +42,13 @@ class Role(models.Model):
     def __str__(self):
         return self.name
     
+    def save(self, *args, **kwargs):
+        """Always persist permissions as a plain list of path strings (when permissions are written)."""
+        update_fields = kwargs.get("update_fields")
+        if update_fields is None or "permissions" in update_fields:
+            self.permissions = normalize_role_permissions_list(self.permissions)
+        super().save(*args, **kwargs)
+
     def has_permission(self, module: str, page: str = None) -> bool:
         """Check if role has permission for a page."""
         if not self.is_active:
@@ -49,16 +58,12 @@ class Role(models.Model):
         if self.type == 'admin':
             return True
 
-        # Check if the specific page URL is in the allowed pages list
-        allowed_pages = self.permissions or []
-        if isinstance(allowed_pages, list):
-            # Check exact page match
-            if page and page in allowed_pages:
-                return True
-            # Check if module dashboard is allowed (for module-level access)
-            module_dashboard = f"/{module.lower().replace(' ', '-')}"
-            if module_dashboard in allowed_pages:
-                return True
+        allowed_pages = normalize_role_permissions_list(self.permissions)
+        if page and page in allowed_pages:
+            return True
+        module_dashboard = f"/{module.lower().replace(' ', '-')}"
+        if module_dashboard in allowed_pages:
+            return True
 
         return False
 
@@ -67,15 +72,11 @@ class Role(models.Model):
         if not self.is_active:
             return False
 
-        # Admin type has all permissions
         if self.type == 'admin':
             return True
 
-        allowed_pages = self.permissions or []
-        if isinstance(allowed_pages, list):
-            return page_url in allowed_pages
-
-        return False
+        allowed_pages = normalize_role_permissions_list(self.permissions)
+        return page_url in allowed_pages
 
 
 class UserRole(models.Model):

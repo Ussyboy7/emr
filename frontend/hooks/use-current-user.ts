@@ -4,7 +4,12 @@ import { logWarn } from '@/lib/client-logger';
 import { useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { User } from "@/lib/npa-structure";
 import { OrganizationContext } from "@/contexts/OrganizationContext";
-import { apiFetch, hasOriginalTokens, hasTokens } from "@/lib/api-client";
+import {
+  apiFetch,
+  hasOriginalTokens,
+  hasTokens,
+  AUTH_REFRESH_SESSION_MAX_AGE_SECONDS,
+} from "@/lib/api-client";
 import {
   AUTH_ALLOWED_PAGES_COOKIE,
   AUTH_HOME_ROUTE_COOKIE,
@@ -106,10 +111,10 @@ const shouldUseCachedRemoteUser = (): boolean => {
 
 const writeAuthMirrorCookies = (mapped: User) => {
   try {
-    setCookie(AUTH_ALLOWED_PAGES_COOKIE, JSON.stringify(mapped.permissions || []), 60 * 60 * 24 * 7);
-    setCookie(AUTH_IS_SUPERUSER_COOKIE, mapped.isSuperuser ? "1" : "0", 60 * 60 * 24 * 7);
+    setCookie(AUTH_ALLOWED_PAGES_COOKIE, JSON.stringify(mapped.permissions || []), AUTH_REFRESH_SESSION_MAX_AGE_SECONDS);
+    setCookie(AUTH_IS_SUPERUSER_COOKIE, mapped.isSuperuser ? "1" : "0", AUTH_REFRESH_SESSION_MAX_AGE_SECONDS);
     const home = getHomeRouteForUser(mapped);
-    if (home) setCookie(AUTH_HOME_ROUTE_COOKIE, home, 60 * 60 * 24 * 7);
+    if (home) setCookie(AUTH_HOME_ROUTE_COOKIE, home, AUTH_REFRESH_SESSION_MAX_AGE_SECONDS);
 
     // Cleanup legacy cookie names to avoid confusion / stale state.
     clearCookie(LEGACY_AUTH_ALLOWED_PAGES_COOKIE);

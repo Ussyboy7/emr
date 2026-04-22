@@ -2489,7 +2489,7 @@ export default function LabOrdersPage() {
 
         {/* Enter Results Dialog */}
         <Dialog open={isResultsDialogOpen} onOpenChange={setIsResultsDialogOpen}>
-          <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className="w-[95vw] sm:max-w-3xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <FileText className="h-5 w-5 text-amber-500" />

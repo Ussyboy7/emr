@@ -1,3 +1,5 @@
+"use client";
+
 /**
  * Appointment API service
  */
@@ -146,4 +148,5 @@ class AppointmentService {
 }
 
 export const appointmentService = new AppointmentService();
+export default appointmentService;
 

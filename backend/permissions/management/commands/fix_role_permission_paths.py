@@ -1,8 +1,10 @@
 """
-Fix legacy/incorrect role permission page paths in the database.
+Fix legacy role.permissions shape and page paths in the database.
 
-Currently fixes:
-- /consultation/dashboard  -> /consultation
+- Unwraps {"pages": [...]} into a plain list (same canonical shape as the API and Role.save).
+- Path rewrites (extend as needed):
+  - /consultation/dashboard  -> /consultation
+  - /physiotherapy/pool-queue -> /physiotherapy/orders
 
 Usage:
   python manage.py fix_role_permission_paths          # dry run
@@ -12,6 +14,7 @@ Usage:
 from django.core.management.base import BaseCommand
 
 from permissions.models import Role
+from permissions.role_permissions import normalize_role_permissions_list
 
 
 class Command(BaseCommand):
@@ -29,26 +32,22 @@ class Command(BaseCommand):
 
         replacements = {
             "/consultation/dashboard": "/consultation",
+            "/physiotherapy/pool-queue": "/physiotherapy/orders",
         }
 
         changed_roles = 0
-        changed_total = 0
 
         for role in Role.objects.all().order_by("name"):
-            perms = role.permissions or []
-            if not isinstance(perms, list):
-                continue
-
-            original = list(perms)
+            raw = role.permissions
+            pages = normalize_role_permissions_list(raw)
 
             updated = []
-            for p in original:
+            for p in pages:
                 if not isinstance(p, str):
                     updated.append(p)
                     continue
                 updated.append(replacements.get(p, p))
 
-            # De-duplicate while preserving order
             deduped = []
             seen = set()
             for p in updated:
@@ -58,19 +57,23 @@ class Command(BaseCommand):
                 seen.add(key)
                 deduped.append(p)
 
-            if deduped != original:
-                changed_roles += 1
-                changed_total += sum(1 for a, b in zip(original, deduped) if a != b) + abs(len(original) - len(deduped))
-                self.stdout.write(
-                    f"- {role.name}: {len(original)} -> {len(deduped)} page(s) ({'APPLY' if apply else 'DRY RUN'})"
-                )
-                if apply:
-                    role.permissions = deduped
-                    role.save(update_fields=["permissions"])
+            shape_mismatch = not isinstance(raw, list)
+            path_changed = deduped != pages
+
+            if not shape_mismatch and not path_changed:
+                continue
+
+            changed_roles += 1
+            self.stdout.write(
+                f"- {role.name}: shape={'dict/legacy' if shape_mismatch else 'list'} "
+                f"{len(pages)} -> {len(deduped)} page(s) ({'APPLY' if apply else 'DRY RUN'})"
+            )
+            if apply:
+                role.permissions = deduped
+                role.save(update_fields=["permissions"])
 
         self.stdout.write("")
-        self.stdout.write(self.style.SUCCESS(f"Roles changed: {changed_roles}"))
-        self.stdout.write(self.style.SUCCESS(f"Total edits (approx): {changed_total}"))
+        self.stdout.write(self.style.SUCCESS(f"Roles updated: {changed_roles}"))
         if not apply:
             self.stdout.write(self.style.WARNING("Dry run only. Re-run with --apply to persist changes."))
 
