@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { MODAL_SIZES, modalNoOverflow } from "@/components/ui/modal-sizes";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import { pharmacyService, type GenericMedication } from "@/lib/services";
@@ -224,7 +225,7 @@ export function GenericMedicationsModal({ open, onOpenChange }: GenericMedicatio
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="w-[95vw] sm:max-w-[1000px] max-h-[90vh] overflow-hidden flex flex-col">
+        <DialogContent className={`${modalNoOverflow('xl')} flex flex-col`}>
           <DialogHeader>
             <DialogTitle>Generic Medications Management</DialogTitle>
             <DialogDescription>Manage parent generic medications (strength/form/route variants)</DialogDescription>
@@ -375,7 +376,7 @@ export function GenericMedicationsModal({ open, onOpenChange }: GenericMedicatio
 
       {/* Create Modal */}
       <Dialog open={showCreateModal} onOpenChange={setShowCreateModal}>
-        <DialogContent className="w-[95vw] sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
+        <DialogContent className={MODAL_SIZES.ml}>
           <DialogHeader>
             <DialogTitle>Add Generic</DialogTitle>
             <DialogDescription>Create a parent generic medication record</DialogDescription>
@@ -474,7 +475,7 @@ export function GenericMedicationsModal({ open, onOpenChange }: GenericMedicatio
 
       {/* Edit Modal */}
       <Dialog open={showEditModal} onOpenChange={setShowEditModal}>
-        <DialogContent className="w-[95vw] sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
+        <DialogContent className={MODAL_SIZES.ml}>
           <DialogHeader>
             <DialogTitle>Edit Generic</DialogTitle>
             <DialogDescription>Update a parent generic medication record</DialogDescription>
@@ -573,7 +574,7 @@ export function GenericMedicationsModal({ open, onOpenChange }: GenericMedicatio
 
       {/* View Modal */}
       <Dialog open={showViewModal} onOpenChange={setShowViewModal}>
-        <DialogContent className="w-[95vw] sm:max-w-[600px]">
+        <DialogContent className={MODAL_SIZES.md}>
           <DialogHeader>
             <DialogTitle>{selectedGeneric?.name}</DialogTitle>
             <DialogDescription>Generic details</DialogDescription>

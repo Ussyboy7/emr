@@ -21,6 +21,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { MODAL_SIZES } from '@/components/ui/modal-sizes';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -453,7 +454,7 @@ export function WardDoctorOrdersSection({
       </Tabs>
 
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
-        <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
+        <DialogContent className={MODAL_SIZES.sm2}>
           <DialogHeader>
             <DialogTitle>Add doctor order</DialogTitle>
             <DialogDescription>
@@ -564,7 +565,7 @@ export function WardDoctorOrdersSection({
       </Dialog>
 
       <Dialog open={!!editingOrder} onOpenChange={(open) => !open && setEditingOrder(null)}>
-        <DialogContent className="sm:max-w-[480px]">
+        <DialogContent className={MODAL_SIZES.xs}>
           <DialogHeader>
             <DialogTitle>Edit order</DialogTitle>
             <DialogDescription>{editingOrder?.order_id}</DialogDescription>

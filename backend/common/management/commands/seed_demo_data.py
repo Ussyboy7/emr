@@ -1389,7 +1389,7 @@ class Command(BaseCommand):
             self.stdout.write(f"  ✓ Normalized {normalized_generics} generic records to single strength/form/route values")
 
         meds = Medication.objects.filter(is_active=True)
-        default_quantity = Decimal("10000")
+        default_quantity = Decimal("1000")
         default_min_stock = Decimal("100")
         expiry_date = (timezone.now() + timedelta(days=730)).date()
 
@@ -1431,7 +1431,7 @@ class Command(BaseCommand):
                     created_store += 1
 
         today = timezone.now().date()
-        dispensary_quantity = Decimal("10000")
+        dispensary_quantity = Decimal("1000")
         dispensary_has_any = DispensaryReceiptLine.objects.filter(quantity_remaining__gt=0).exists()
         should_seed_dispensary = self._force_pharmacy_inventory or not dispensary_has_any
         created_disp = 0

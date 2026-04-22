@@ -14,33 +14,54 @@
 
 export const MODAL_SIZES = {
   /**
+   * Extra Small Modal (480px)
+   * Use for: Compact confirmations, small alerts, minimal forms
+   * Mobile: Full width with padding
+   */
+  xs: "w-[95vw] sm:max-w-[480px] max-h-[90vh] overflow-y-auto",
+
+  /**
    * Small Modal (400px)
    * Use for: Simple confirmations, alerts, small forms
    * Mobile: Full width with padding
    */
   sm: "w-[95vw] sm:max-w-[400px] max-h-[90vh] overflow-y-auto",
-  
+
+  /**
+   * Small Medium Modal (500px)
+   * Use for: Slightly larger small forms, compact dialogs
+   * Mobile: Full width with padding
+   */
+  sm2: "w-[95vw] sm:max-w-[500px] max-h-[90vh] overflow-y-auto",
+
   /**
    * Medium Modal (600px)
    * Use for: Standard forms, detail views, single-item displays
    * Mobile: Full width with padding
    */
   md: "w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto",
-  
+
+  /**
+   * Medium-Large Modal (700px)
+   * Use for: Slightly larger forms, reports, order modals
+   * Mobile: Full width with padding
+   */
+  ml: "w-[95vw] sm:max-w-[700px] max-h-[90vh] overflow-y-auto",
+
   /**
    * Large Modal (800px)
    * Use for: Complex forms, multi-section views, tables with data
    * Mobile: Full width with padding
    */
   lg: "w-[95vw] sm:max-w-[800px] max-h-[90vh] overflow-y-auto",
-  
+
   /**
    * Extra Large Modal (1000px)
    * Use for: Very complex forms, large data tables, multi-column layouts
    * Mobile: Full width with padding
    */
   xl: "w-[95vw] sm:max-w-[1000px] max-h-[90vh] overflow-y-auto",
-  
+
   /**
    * Full Width Modal (95vw)
    * Use for: Patient overview, visit details, comprehensive dashboards

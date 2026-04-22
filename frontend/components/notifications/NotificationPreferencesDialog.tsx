@@ -10,6 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { MODAL_SIZES } from '@/components/ui/modal-sizes';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
@@ -119,7 +120,7 @@ export const NotificationPreferencesDialog = ({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[95vw] sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
+      <DialogContent className={MODAL_SIZES.lg}>
         <DialogHeader>
           <DialogTitle>Notification Preferences</DialogTitle>
           <DialogDescription>
