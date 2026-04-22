@@ -32,6 +32,13 @@ import { PatientAvatar } from '@/components/shared/PatientAvatar';
 import { VitalsDetailModal } from '@/components/shared/VitalsDetailModal';
 import { ConsultationReportModal } from '@/components/consultation/ConsultationReportModal';
 import { loadConsultationReportSession, type ConsultationReportSession } from '@/lib/consultation-report';
+import {
+  classifyValue,
+  deriveOverallStatus,
+  fieldForParameter,
+  orderResultRows,
+  type ResultStatus,
+} from '@/lib/laboratory/template-utils';
 import { getOrganizationLabHeader } from '@/lib/constants/organization';
 import { getOrganizationServicesHeader } from '@/lib/constants/organization';
 import { joinDisplayParts } from '@/lib/utils/clinic-utils';
@@ -813,55 +820,24 @@ export default function PatientMedicalRecordsPage({ params }: { params: Promise<
               const orderDetails = selectedLab.order_details || {};
               const patientDetails = orderDetails.patient_details || {};
               const doctorDetails = orderDetails.doctor_details || {};
-              const resolveTemplateMeta = (parameterName: string) => {
-                const normalRangeObj: Record<string, any> | undefined = selectedLab?.template_normal_range;
-                if (!normalRangeObj || typeof normalRangeObj !== 'object') return null;
-                const wanted = String(parameterName || '').trim().toLowerCase();
-                if (!wanted) return null;
-                for (const [k, v] of Object.entries(normalRangeObj)) {
-                  if (String(k).trim().toLowerCase() === wanted) return { key: k, meta: v as any };
-                }
-                return null;
-              };
+              const normalRangeObj: Record<string, any> | undefined = selectedLab?.template_normal_range;
 
-              const formatTemplateRange = (meta: any) => {
-                if (!meta) return '';
-                if (typeof meta.range === 'string' && meta.range.trim()) return meta.range.trim();
-                const min = meta.min ?? meta.normalRangeMin;
-                const max = meta.max ?? meta.normalRangeMax;
-                if (min !== undefined && max !== undefined && String(min).trim() && String(max).trim()) {
-                  return `${min}-${max}`;
-                }
-                return '';
-              };
-
-              const processedResults = Object.entries(selectedLab.results || {}).map(([key, value]) => {
+              const rawResults = Object.entries(selectedLab.results || {}).map(([key, value]) => {
                 const valueStr = String(value ?? '');
-                const valueNum = parseFloat(valueStr);
+                const field = fieldForParameter(key, normalRangeObj);
                 let unit = '';
                 let normalRange = '';
-                let status: 'Normal' | 'Abnormal' | 'Critical' = 'Normal';
-
-                const templateMatch = resolveTemplateMeta(key);
-                if (templateMatch) {
-                  unit = String((templateMatch.meta?.unit ?? '') || '');
-                  normalRange = formatTemplateRange(templateMatch.meta);
-
-                  const minRaw = templateMatch.meta?.min ?? templateMatch.meta?.normalRangeMin;
-                  const maxRaw = templateMatch.meta?.max ?? templateMatch.meta?.normalRangeMax;
-                  const min = minRaw !== undefined && String(minRaw).trim() !== '' ? Number(minRaw) : undefined;
-                  const max = maxRaw !== undefined && String(maxRaw).trim() !== '' ? Number(maxRaw) : undefined;
-                  if (!isNaN(valueNum) && valueStr.trim() !== '' && (min !== undefined || max !== undefined)) {
-                    if (min !== undefined && !isNaN(min) && valueNum < min) status = 'Abnormal';
-                    if (max !== undefined && !isNaN(max) && valueNum > max) status = 'Abnormal';
-                  }
+                let status: ResultStatus = 'Normal';
+                if (field) {
+                  unit = field.unit;
+                  normalRange = field.normalRange;
+                  status = classifyValue(valueStr, field);
                 }
-
                 return { parameter: key, value: valueStr, unit, normalRange, status };
               });
 
-              const overallStatus: 'Normal' | 'Abnormal' | 'Critical' =
-                processedResults.some((r) => r.status === 'Abnormal') ? 'Abnormal' : 'Normal';
+              const processedResults = orderResultRows(rawResults, normalRangeObj);
+              const overallStatus: ResultStatus = deriveOverallStatus(processedResults);
 
               const orderedAt = selectedLab.created_at || selectedLab.collected_at || '';
               const completedAt = selectedLab.processed_at || selectedLab.verified_at || '';

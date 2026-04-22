@@ -112,18 +112,27 @@ class LabOrderViewSet(viewsets.ModelViewSet):
         if pm in ('in_house', 'outsourced'):
             qs = qs.filter(tests__processing_method=pm).distinct()
 
-        # Date filtering on order timestamp
+        # Date filtering — defaults to the order timestamp, but callers can
+        # ask for filtering on the test rejection timestamp instead
+        # (e.g. the "Rework Required" tab, which wants "today's rejections"
+        # regardless of when the order was originally placed).
         date = self.request.query_params.get('date')
         start_date = self.request.query_params.get('start_date')
         end_date = self.request.query_params.get('end_date')
+        date_field = self.request.query_params.get('date_field')
+        if date_field == 'rejected_at':
+            date_lookup = 'tests__rejected_at__date'
+        else:
+            date_lookup = 'ordered_at__date'
         if date:
-            qs = qs.filter(ordered_at__date=date)
+            qs = qs.filter(**{date_lookup: date}).distinct()
         elif start_date:
-            qs = qs.filter(ordered_at__date__gte=start_date)
+            qs = qs.filter(**{f'{date_lookup}__gte': start_date})
             if end_date:
-                qs = qs.filter(ordered_at__date__lte=end_date)
+                qs = qs.filter(**{f'{date_lookup}__lte': end_date})
+            qs = qs.distinct()
         elif end_date:
-            qs = qs.filter(ordered_at__date__lte=end_date)
+            qs = qs.filter(**{f'{date_lookup}__lte': end_date}).distinct()
 
         # Gender filtering (stored on Patient.gender)
         gender = self.request.query_params.get('gender')
@@ -133,9 +142,52 @@ class LabOrderViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'])
     def stats(self, request):
-        """Server-side counts for lab order dashboard cards/tabs."""
-        qs = self.filter_queryset(self.get_queryset())
-        agg = qs.aggregate(
+        """
+        Server-side counts for lab order dashboard cards/tabs.
+
+        Date semantics:
+          - All counts except ``rework_required`` are scoped by ``ordered_at``
+            (when the caller supplied a date / range).
+          - ``rework_required`` is scoped by ``tests__rejected_at`` so that
+            "Today" on the Rework Required card reflects today's rejections
+            regardless of when the underlying orders were originally placed.
+          - We deliberately ignore any ``date_field=rejected_at`` the list
+            endpoint uses, so cards stay semantically consistent across tabs.
+        """
+        date = request.query_params.get('date')
+        start_date = request.query_params.get('start_date')
+        end_date = request.query_params.get('end_date')
+
+        # Build a base queryset with the non-date filters applied but neither
+        # date field applied, so we can fan it out into two scopes below.
+        base_qs = (
+            LabOrder.objects.all()
+            .select_related('patient', 'doctor', 'visit', 'consultation_session', 'created_by')
+            .prefetch_related('tests')
+        )
+        pm = request.query_params.get('processing_method')
+        if pm in ('in_house', 'outsourced'):
+            base_qs = base_qs.filter(tests__processing_method=pm).distinct()
+        gender = request.query_params.get('gender')
+        if gender:
+            base_qs = base_qs.filter(patient__gender=gender)
+        # Apply DRF's generic filters (search, filterset_fields, ordering).
+        base_qs = self.filter_queryset(base_qs)
+
+        def with_date(qs, field):
+            if date:
+                return qs.filter(**{f'{field}__date': date})
+            narrowed = qs
+            if start_date:
+                narrowed = narrowed.filter(**{f'{field}__date__gte': start_date})
+            if end_date:
+                narrowed = narrowed.filter(**{f'{field}__date__lte': end_date})
+            return narrowed
+
+        ordered_scoped = with_date(base_qs, 'ordered_at')
+        rejected_scoped = with_date(base_qs, 'tests__rejected_at')
+
+        agg = ordered_scoped.aggregate(
             total=Count('id', distinct=True),
             pending=Count('id', filter=Q(tests__status='pending'), distinct=True),
             processing=Count(
@@ -144,20 +196,23 @@ class LabOrderViewSet(viewsets.ModelViewSet):
                 distinct=True,
             ),
             results_ready=Count('id', filter=Q(tests__status='results_ready'), distinct=True),
-            rework_required=Count('id', filter=Q(tests__status='rejected'), distinct=True),
             stat=Count(
                 'id',
                 filter=Q(priority='stat') & ~Q(tests__status='verified'),
                 distinct=True,
             ),
         )
+        rework_required = (
+            rejected_scoped.filter(tests__status='rejected').distinct().count()
+        )
+
         return Response(
             {
                 'total': agg.get('total', 0) or 0,
                 'pending': agg.get('pending', 0) or 0,
                 'processing': agg.get('processing', 0) or 0,
                 'results_ready': agg.get('results_ready', 0) or 0,
-                'rework_required': agg.get('rework_required', 0) or 0,
+                'rework_required': rework_required,
                 'stat': agg.get('stat', 0) or 0,
             }
         )

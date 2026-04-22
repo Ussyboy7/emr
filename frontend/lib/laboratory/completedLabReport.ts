@@ -1,4 +1,11 @@
 import { transformPriority } from '@/lib/services/transformers';
+import {
+  classifyValue,
+  deriveOverallStatus,
+  fieldForParameter,
+  orderResultRows,
+  type ResultStatus,
+} from '@/lib/laboratory/template-utils';
 
 export interface CompletedTestResultRow {
   parameter: string;
@@ -87,105 +94,21 @@ export function transformApiRowToCompletedTest(
           : rf
       : null;
 
-  const resolveTemplateMeta = (parameterName: string) => {
-    const normalRangeObj: Record<string, any> | undefined =
-      (test as any)?.template_normal_range || (test as any)?.template?.normal_range;
-    if (!normalRangeObj || typeof normalRangeObj !== 'object') return null;
-    const wanted = String(parameterName || '').trim().toLowerCase();
-    if (!wanted) return null;
-    for (const [k, v] of Object.entries(normalRangeObj)) {
-      if (String(k).trim().toLowerCase() === wanted) return { key: k, meta: v as any };
-    }
-    return null;
-  };
-
-  const formatTemplateRange = (meta: Record<string, unknown>) => {
-    if (!meta) return '';
-    if (typeof (meta as any).range === 'string' && (meta as any).range.trim()) return (meta as any).range.trim();
-    const min = (meta as any).min ?? (meta as any).normalRangeMin;
-    const max = (meta as any).max ?? (meta as any).normalRangeMax;
-    if (min !== undefined && max !== undefined && String(min).trim() && String(max).trim()) {
-      return `${min}-${max}`;
-    }
-    return '';
-  };
+  const normalRangeObj: Record<string, any> | undefined =
+    (test as any)?.template_normal_range || (test as any)?.template?.normal_range;
 
   const processedResultsRaw = Object.entries(test.results || {}).map(([key, value]) => {
     const valueStr = String(value);
-    const valueNum = parseFloat(valueStr);
+    const field = fieldForParameter(key, normalRangeObj);
 
     let unit = '';
     let normalRange = '';
-    let status: 'Normal' | 'Abnormal' | 'Critical' = 'Normal';
+    let status: ResultStatus = 'Normal';
 
-    const templateMatch = resolveTemplateMeta(key);
-    if (templateMatch) {
-      unit = String((templateMatch.meta?.unit ?? '') || '');
-      normalRange = formatTemplateRange(templateMatch.meta);
-
-      const minRaw = templateMatch.meta?.min ?? templateMatch.meta?.normalRangeMin;
-      const maxRaw = templateMatch.meta?.max ?? templateMatch.meta?.normalRangeMax;
-      const min = minRaw !== undefined && String(minRaw).trim() !== '' ? Number(minRaw) : undefined;
-      const max = maxRaw !== undefined && String(maxRaw).trim() !== '' ? Number(maxRaw) : undefined;
-      if (!isNaN(valueNum) && valueStr.trim() !== '' && (min !== undefined || max !== undefined)) {
-        if (min !== undefined && !isNaN(min) && valueNum < min) status = 'Abnormal';
-        if (max !== undefined && !isNaN(max) && valueNum > max) status = 'Abnormal';
-      }
-    }
-
-    // Hardcoded validation logic disabled (template metadata is source of truth).
-    if (false && !templateMatch && !isNaN(valueNum) && valueStr.trim() !== '') {
-      if (test.code === 'LFT') {
-        if (key.toLowerCase().includes('alt') || key.toLowerCase().includes('sgpt')) {
-          unit = 'U/L';
-          normalRange = '7-56';
-          if (valueNum > 1000) status = 'Critical';
-          else if (valueNum < 7 || valueNum > 56) status = 'Abnormal';
-          else status = 'Normal';
-        } else if (key.toLowerCase().includes('ast') || key.toLowerCase().includes('sgot')) {
-          unit = 'U/L';
-          normalRange = '10-40';
-          if (valueNum > 1000) status = 'Critical';
-          else if (valueNum < 10 || valueNum > 40) status = 'Abnormal';
-          else status = 'Normal';
-        } else if (key.toLowerCase().includes('alp') || key.toLowerCase().includes('alkaline phosphatase')) {
-          unit = 'U/L';
-          normalRange = '44-147';
-          if (valueNum > 1000) status = 'Critical';
-          else if (valueNum < 44 || valueNum > 147) status = 'Abnormal';
-          else status = 'Normal';
-        } else if (key.toLowerCase().includes('albumin')) {
-          unit = 'g/dL';
-          normalRange = '3.5-5.0';
-          if (valueNum < 2.0 || valueNum > 6.0) status = 'Critical';
-          else if (valueNum < 3.5 || valueNum > 5.0) status = 'Abnormal';
-          else status = 'Normal';
-        } else if (key.toLowerCase().includes('bilirubin') && key.toLowerCase().includes('total')) {
-          unit = 'mg/dL';
-          normalRange = '0.1-1.2';
-          if (valueNum > 5.0) status = 'Critical';
-          else if (valueNum > 1.2) status = 'Abnormal';
-          else status = 'Normal';
-        }
-      } else if (test.code === 'FBS') {
-        if (key.toLowerCase().includes('glucose')) {
-          unit = 'mg/dL';
-          normalRange = '70-140';
-          if (valueNum < 40 || valueNum > 600) status = 'Critical';
-          else if (valueNum < 70 || valueNum > 140) status = 'Abnormal';
-          else status = 'Normal';
-        }
-      } else if (test.code === '24HR_PROTEIN') {
-        if (key.toLowerCase() === 'result') {
-          unit = 'mg/day';
-          normalRange = '<150';
-          if (!isNaN(valueNum)) {
-            if (valueNum > 1000) status = 'Critical';
-            else if (valueNum > 300) status = 'Abnormal';
-            else status = 'Normal';
-          }
-        }
-      }
+    if (field) {
+      unit = field.unit;
+      normalRange = field.normalRange;
+      status = classifyValue(valueStr, field);
     }
 
     return {
@@ -198,7 +121,7 @@ export function transformApiRowToCompletedTest(
   });
 
   // De-duplicate generic "Result" alias when a specific analyte row has the same value/range/unit.
-  const processedResults = (() => {
+  const dedupedResults = (() => {
     const generic = processedResultsRaw.find((r) => String(r.parameter).trim().toLowerCase() === 'result');
     if (!generic) return processedResultsRaw;
     const hasEquivalentSpecific = processedResultsRaw.some(
@@ -212,17 +135,20 @@ export function transformApiRowToCompletedTest(
     return processedResultsRaw.filter((r) => String(r.parameter).trim().toLowerCase() !== 'result');
   })();
 
-  let overallStatus: 'Normal' | 'Abnormal' | 'Critical' = 'Normal';
+  // Render rows in the template's canonical clinical order so completed reports match
+  // the order seen on Enter Results and Result Details.
+  const processedResults = orderResultRows(dedupedResults, normalRangeObj);
+
+  let overallStatus: ResultStatus;
   if (test.overall_status) {
-    const statusMap: Record<string, 'Normal' | 'Abnormal' | 'Critical'> = {
+    const statusMap: Record<string, ResultStatus> = {
       normal: 'Normal',
       abnormal: 'Abnormal',
       critical: 'Critical',
     };
-    overallStatus = statusMap[String(test.overall_status).toLowerCase()] || 'Normal';
+    overallStatus = statusMap[String(test.overall_status).toLowerCase()] || deriveOverallStatus(processedResults);
   } else {
-    if (processedResults.some((r) => r.status === 'Abnormal')) overallStatus = 'Abnormal';
-    else overallStatus = 'Normal';
+    overallStatus = deriveOverallStatus(processedResults);
   }
 
   const priority = transformPriority((test as any).lab_order?.priority || (test as any).priority || 'routine') as

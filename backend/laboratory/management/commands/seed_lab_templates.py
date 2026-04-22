@@ -62,28 +62,31 @@ class Command(BaseCommand):
                 'description': 'Full blood count - comprehensive blood analysis',
                 'turnaround_time': '1 hour',
                 'normal_range': {
-                    '_order': ['RBC', 'Hb (Male)', 'Hb (Female)', 'PCV (Male)', 'PCV (Female)', 'MCV', 'MCH', 'MCHC', 'RDW-CV', 'Platelets', 'WBC', 'Neutrophils', 'Neutrophils (Absolute)', 'Lymphocytes', 'Lymphocytes (Absolute)', 'Monocytes', 'Monocytes (Absolute)', 'Eosinophils', 'Eosinophils (Absolute)', 'Basophils', 'Basophils (Absolute)'],
+                    '_order': ['RBC', 'Hb (Male)', 'Hb (Female)', 'PCV (Male)', 'PCV (Female)', 'MCV', 'MCH', 'MCHC', 'RDW', 'Platelets', 'WBC', 'Neutrophils (Absolute)', 'Lymphocytes (Absolute)', 'Monocytes (Absolute)', 'Eosinophils (Absolute)', 'Basophils (Absolute)', 'Neutrophils', 'Lymphocytes', 'Monocytes', 'Eosinophils', 'Basophils'],
                     'RBC': {'unit': '10^6/µL', 'min': '3.50', 'max': '5.50', 'dataType': 'numeric', 'required': True},
-                    'Hb (Male)': {'unit': 'g/dL', 'min': '11.0', 'max': '18.0', 'dataType': 'numeric', 'required': True},
-                    'Hb (Female)': {'unit': 'g/dL', 'min': '11.0', 'max': '16.0', 'dataType': 'numeric', 'required': True},
+                    'Hb (Male)': {'unit': 'g/dL', 'min': '11.0', 'max': '18.0', 'critical_min': '7.0', 'critical_max': '20.0', 'dataType': 'numeric', 'required': True},
+                    'Hb (Female)': {'unit': 'g/dL', 'min': '11.0', 'max': '16.0', 'critical_min': '7.0', 'critical_max': '20.0', 'dataType': 'numeric', 'required': True},
                     'PCV (Male)': {'unit': '%', 'min': '40.0', 'max': '54.0', 'dataType': 'numeric', 'required': True},
                     'PCV (Female)': {'unit': '%', 'min': '35.0', 'max': '47.0', 'dataType': 'numeric', 'required': True},
                     'MCV': {'unit': 'fL', 'min': '76.0', 'max': '100.0', 'dataType': 'numeric', 'required': True},
                     'MCH': {'unit': 'pg', 'min': '26.0', 'max': '34.0', 'dataType': 'numeric', 'required': True},
                     'MCHC': {'unit': 'g/dL', 'min': '30.0', 'max': '37.0', 'dataType': 'numeric', 'required': True},
-                    'RDW-CV': {'unit': '%', 'min': '11.0', 'max': '16.0', 'dataType': 'numeric', 'required': True},
-                    'Platelets': {'unit': '10^3/µL', 'min': '150', 'max': '400', 'dataType': 'numeric', 'required': True},
-                    'WBC': {'unit': '10^3/µL', 'min': '4.00', 'max': '11.00', 'dataType': 'numeric', 'required': True},
-                    'Neutrophils': {'unit': '%', 'min': '40', 'max': '75', 'dataType': 'numeric', 'required': True},
+                    'RDW': {'unit': '%', 'min': '11.0', 'max': '16.0', 'dataType': 'numeric', 'required': True},
+                    'Platelets': {'unit': '10^3/µL', 'min': '150', 'max': '400', 'critical_min': '50', 'critical_max': '1000', 'dataType': 'numeric', 'required': True},
+
+                    'WBC': {'unit': '10^3/µL', 'min': '4.00', 'max': '11.00', 'critical_min': '2.00', 'critical_max': '30.00', 'dataType': 'numeric', 'required': True},
+
                     'Neutrophils (Absolute)': {'unit': '10^3/µL', 'min': '2.00', 'max': '7.00', 'dataType': 'numeric', 'required': True},
-                    'Lymphocytes': {'unit': '%', 'min': '20', 'max': '45', 'dataType': 'numeric', 'required': True},
                     'Lymphocytes (Absolute)': {'unit': '10^3/µL', 'min': '0.80', 'max': '4.00', 'dataType': 'numeric', 'required': True},
-                    'Monocytes': {'unit': '%', 'min': '2', 'max': '10', 'dataType': 'numeric', 'required': True},
                     'Monocytes (Absolute)': {'unit': '10^3/µL', 'min': '0.12', 'max': '1.20', 'dataType': 'numeric', 'required': True},
-                    'Eosinophils': {'unit': '%', 'min': '1', 'max': '6', 'dataType': 'numeric', 'required': True},
                     'Eosinophils (Absolute)': {'unit': '10^3/µL', 'min': '0.02', 'max': '0.50', 'dataType': 'numeric', 'required': True},
-                    'Basophils': {'unit': '%', 'min': '0', 'max': '1', 'dataType': 'numeric', 'required': True},
                     'Basophils (Absolute)': {'unit': '10^3/µL', 'min': '0.00', 'max': '0.10', 'dataType': 'numeric', 'required': True},
+
+                    'Neutrophils': {'unit': '%', 'min': '40', 'max': '75', 'dataType': 'numeric', 'required': True},
+                    'Lymphocytes': {'unit': '%', 'min': '20', 'max': '45', 'dataType': 'numeric', 'required': True},
+                    'Monocytes': {'unit': '%', 'min': '2', 'max': '10', 'dataType': 'numeric', 'required': True},
+                    'Eosinophils': {'unit': '%', 'min': '1', 'max': '6', 'dataType': 'numeric', 'required': True},
+                    'Basophils': {'unit': '%', 'min': '0', 'max': '1', 'dataType': 'numeric', 'required': True},
                 }
             },
             {
@@ -156,7 +159,7 @@ class Command(BaseCommand):
                 'description': 'Blood glucose level after at least 8 hours of fasting',
                 'turnaround_time': '30 minutes',
                 'normal_range': {
-                    'Glucose (Fasting)': {'unit': 'mmol/L', 'min': '3.4', 'max': '5.8', 'dataType': 'numeric', 'required': True},
+                    'Glucose (Fasting)': {'unit': 'mmol/L', 'min': '3.4', 'max': '5.8', 'critical_min': '2.2', 'critical_max': '22.2', 'dataType': 'numeric', 'required': True},
                 }
             },
             {
@@ -167,7 +170,7 @@ class Command(BaseCommand):
                 'description': 'Blood glucose level 2 hours after a meal',
                 'turnaround_time': '30 minutes',
                 'normal_range': {
-                    'Glucose (2-hour PP)': {'unit': 'mmol/L', 'min': '3.9', 'max': '7.8', 'dataType': 'numeric', 'required': True},
+                    'Glucose (2-hour PP)': {'unit': 'mmol/L', 'min': '3.9', 'max': '7.8', 'critical_min': '2.2', 'critical_max': '22.2', 'dataType': 'numeric', 'required': True},
                 }
             },
             {
@@ -178,7 +181,7 @@ class Command(BaseCommand):
                 'description': 'Blood glucose level at any random time',
                 'turnaround_time': '30 minutes',
                 'normal_range': {
-                    'Glucose (Random)': {'unit': 'mmol/L', 'min': '3.9', 'max': '7.8', 'dataType': 'numeric', 'required': True},
+                    'Glucose (Random)': {'unit': 'mmol/L', 'min': '3.9', 'max': '7.8', 'critical_min': '2.2', 'critical_max': '22.2', 'dataType': 'numeric', 'required': True},
                 }
             },
             {
@@ -190,14 +193,14 @@ class Command(BaseCommand):
                 'turnaround_time': '2 hours',
                 'normal_range': {
                     '_order': ['Bilirubin (Total)', 'Bilirubin (Direct)', 'Total Protein', 'Albumin', 'ALP', 'gGT', 'ALT (GPT)', 'AST (GOT)'],
-                    'Bilirubin (Total)': {'unit': 'umol/L', 'min': '3', 'max': '26', 'dataType': 'numeric', 'required': True},
+                    'Bilirubin (Total)': {'unit': 'umol/L', 'min': '3', 'max': '26', 'critical_max': '85', 'dataType': 'numeric', 'required': True},
                     'Bilirubin (Direct)': {'unit': 'umol/L', 'min': '2', 'max': '7', 'dataType': 'numeric', 'required': True},
                     'Total Protein': {'unit': 'g/L', 'min': '60', 'max': '80', 'dataType': 'numeric', 'required': True},
-                    'Albumin': {'unit': 'g/L', 'min': '35', 'max': '50', 'dataType': 'numeric', 'required': True},
+                    'Albumin': {'unit': 'g/L', 'min': '35', 'max': '50', 'critical_min': '20', 'dataType': 'numeric', 'required': True},
                     'ALP': {'unit': 'U/L', 'min': '51', 'max': '128', 'dataType': 'numeric', 'required': True},
                     'gGT': {'unit': 'U/L', 'min': '0', 'max': '64', 'dataType': 'numeric', 'required': True},
-                    'ALT (GPT)': {'unit': 'U/L', 'min': '0', 'max': '40', 'dataType': 'numeric', 'required': True},
-                    'AST (GOT)': {'unit': 'U/L', 'min': '13', 'max': '40', 'dataType': 'numeric', 'required': True},
+                    'ALT (GPT)': {'unit': 'U/L', 'min': '0', 'max': '40', 'critical_max': '1000', 'dataType': 'numeric', 'required': True},
+                    'AST (GOT)': {'unit': 'U/L', 'min': '13', 'max': '40', 'critical_max': '1000', 'dataType': 'numeric', 'required': True},
                 }
             },
             {
@@ -209,13 +212,13 @@ class Command(BaseCommand):
                 'turnaround_time': '2 hours',
                 'normal_range': {
                     '_order': ['Sodium', 'Potassium', 'Chloride', 'Bicarbonate', 'Urea', 'Creatinine (Male)', 'Creatinine (Female)', 'eGFR (CKD-EPI)'],
-                    'Sodium': {'unit': 'mmol/L', 'min': '135', 'max': '150', 'dataType': 'numeric', 'required': True},
-                    'Potassium': {'unit': 'mmol/L', 'min': '3.5', 'max': '5.1', 'dataType': 'numeric', 'required': True},
+                    'Sodium': {'unit': 'mmol/L', 'min': '135', 'max': '150', 'critical_min': '120', 'critical_max': '160', 'dataType': 'numeric', 'required': True},
+                    'Potassium': {'unit': 'mmol/L', 'min': '3.5', 'max': '5.1', 'critical_min': '2.8', 'critical_max': '6.2', 'dataType': 'numeric', 'required': True},
                     'Chloride': {'unit': 'mmol/L', 'min': '98', 'max': '107', 'dataType': 'numeric', 'required': True},
-                    'Bicarbonate': {'unit': 'mmol/L', 'min': '21', 'max': '29', 'dataType': 'numeric', 'required': True},
-                    'Urea': {'unit': 'mmol/L', 'min': '2.1', 'max': '7.1', 'dataType': 'numeric', 'required': True},
-                    'Creatinine (Male)': {'unit': 'umol/L', 'min': '80', 'max': '115', 'dataType': 'numeric', 'required': True},
-                    'Creatinine (Female)': {'unit': 'umol/L', 'min': '53', 'max': '97', 'dataType': 'numeric', 'required': True},
+                    'Bicarbonate': {'unit': 'mmol/L', 'min': '21', 'max': '29', 'critical_min': '10', 'critical_max': '40', 'dataType': 'numeric', 'required': True},
+                    'Urea': {'unit': 'mmol/L', 'min': '2.1', 'max': '7.1', 'critical_max': '35', 'dataType': 'numeric', 'required': True},
+                    'Creatinine (Male)': {'unit': 'umol/L', 'min': '80', 'max': '115', 'critical_max': '530', 'dataType': 'numeric', 'required': True},
+                    'Creatinine (Female)': {'unit': 'umol/L', 'min': '53', 'max': '97', 'critical_max': '530', 'dataType': 'numeric', 'required': True},
                     'eGFR (CKD-EPI)': {'unit': 'mL/min/1.73m2', 'min': '90', 'max': '', 'dataType': 'numeric', 'required': True},
                 }
             },

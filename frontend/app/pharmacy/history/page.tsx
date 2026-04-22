@@ -12,6 +12,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { pharmacyService, type Dispense as ApiDispense } from '@/lib/services';
 import { PatientAvatar } from "@/components/shared/PatientAvatar";
+import { useServerToday } from '@/hooks/use-server-today';
+import { formatLocalYmd } from '@/lib/laboratory/constants';
 import { 
   History, Search, Eye, Clock, CheckCircle2, Pill, Calendar, Package,
   User, TrendingUp, ArrowUpDown, Loader2, AlertTriangle
@@ -43,6 +45,7 @@ interface DispenseHistoryRecord {
 // Dispense history data will be loaded from API
 
 export default function DispenseHistoryPage() {
+  const serverToday = useServerToday();
   const [history, setHistory] = useState<DispenseHistoryRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -154,12 +157,12 @@ export default function DispenseHistoryPage() {
       const matchesStatus = statusFilter === 'all' || record.status.toLowerCase().replace(' ', '-') === statusFilter;
       const matchesGender = genderFilter === 'all' || record.patient.gender.toLowerCase() === genderFilter.toLowerCase();
       
-      // Date filter
+      // Date filter — anchor on the server's calendar when available.
       if (dateFilter !== 'all') {
         const dispensedDate = new Date(record.date);
-        const today = new Date();
+        const today = serverToday ? new Date(`${serverToday}T00:00:00`) : new Date();
         today.setHours(0, 0, 0, 0);
-        
+
         if (dateFilter === 'today' && dispensedDate.toDateString() !== today.toDateString()) return false;
         if (dateFilter === 'week') {
           const weekAgo = new Date(today);
@@ -175,7 +178,7 @@ export default function DispenseHistoryPage() {
       
       return matchesSearch && matchesStatus && matchesGender;
     });
-  }, [history, searchQuery, statusFilter, dateFilter]);
+  }, [history, searchQuery, statusFilter, dateFilter, serverToday, genderFilter]);
 
   // Use filtered history directly (server-side pagination when no client-side filters)
   const paginatedHistory = filteredHistory;
@@ -185,13 +188,17 @@ export default function DispenseHistoryPage() {
     setCurrentPage(1);
   }, [searchQuery, statusFilter, dateFilter, genderFilter]);
 
-  // Stats
-  const stats = useMemo(() => ({
-    total: history.length,
-    today: history.filter(r => r.date === new Date().toISOString().split('T')[0]).length,
-    withSubstitutions: history.filter(r => r.substitutions > 0).length,
-    avgWaitTime: Math.round(history.reduce((sum, r) => sum + parseInt(r.waitTime), 0) / history.length) || 0
-  }), [history]);
+  // Stats — anchor "today" on the server's calendar so counts match the rest
+  // of the app regardless of the user's timezone.
+  const stats = useMemo(() => {
+    const todayYmd = serverToday || formatLocalYmd(new Date());
+    return {
+      total: history.length,
+      today: history.filter(r => r.date === todayYmd).length,
+      withSubstitutions: history.filter(r => r.substitutions > 0).length,
+      avgWaitTime: Math.round(history.reduce((sum, r) => sum + parseInt(r.waitTime), 0) / history.length) || 0,
+    };
+  }, [history, serverToday]);
 
   const getStatusColor = (status: string) => {
     switch (status) {

@@ -14,6 +14,8 @@ import {
   getVisitServiceClinicsDisplay,
   joinDisplayParts,
 } from '@/lib/utils/clinic-utils';
+import { getServerToday } from '@/lib/utils/serverTime';
+import { formatLocalYmd } from '@/lib/laboratory/constants';
 
 interface PatientData {
   id: number;
@@ -45,8 +47,14 @@ export default function MedicalRecordsPage() {
         setLoading(true);
         setError(null);
         
-        // Get today's date
-        const today = new Date().toISOString().split('T')[0];
+        // Get today's date from the server so stats align with the server
+        // calendar (falls back to the client's local date on failure).
+        let today: string;
+        try {
+          today = await getServerToday();
+        } catch {
+          today = formatLocalYmd(new Date());
+        }
 
         // Fetch total patients count
         try {

@@ -80,8 +80,8 @@ export const ALL_PAGE_PERMISSIONS: PagePermission[] = [
 
   // Eye Clinic
   { id: "/eyecare", name: "Dashboard", description: "Eye Clinic Dashboard", module: "Eye Clinic" },
-  { id: "/eyecare/pool-queue", name: "Pool Queue", description: "Eye clinic pool queue", module: "Eye Clinic" },
-  { id: "/eyecare/completed", name: "Completed Orders", description: "Completed eye clinic orders", module: "Eye Clinic" },
+  { id: "/eyecare/orders", name: "Orders", description: "Manage eye clinic orders", module: "Eye Clinic" },
+  { id: "/eyecare/completed", name: "Completed Sessions", description: "Completed eye clinic sessions", module: "Eye Clinic" },
 
   // Analytics
   { id: "/analytics", name: "Clinical Reports", description: "Clinical reports & analytics", module: "Analytics" },

@@ -33,6 +33,8 @@ import {
   joinDisplayParts,
 } from '@/lib/utils/clinic-utils';
 import { useOutpatientClinicTypes } from '@/hooks/use-outpatient-clinic-types';
+import { useServerToday } from '@/hooks/use-server-today';
+import { formatLocalYmd } from '@/lib/laboratory/constants';
 import { PatientAvatar } from "@/components/shared/PatientAvatar";
 import { VitalsDetailModal } from "@/components/shared/VitalsDetailModal";
 import { vitalFieldToString } from "@/lib/vitals-display";
@@ -123,6 +125,7 @@ function parseOptionalFloat(raw: string | undefined): number | null {
 
 export default function NursingPoolQueuePage() {
   const { names: opdClinicNames } = useOutpatientClinicTypes();
+  const serverToday = useServerToday();
   const clinicFilterOptions = useMemo(
     () => buildVisitClinicFilterOptions(opdClinicNames),
     [opdClinicNames]
@@ -191,6 +194,9 @@ export default function NursingPoolQueuePage() {
           setError(null);
         }
 
+        // Anchor on server "today" so filters match the server calendar.
+        const anchor = serverToday ? new Date(`${serverToday}T00:00:00`) : new Date();
+        const anchorYmd = serverToday || formatLocalYmd(anchor);
         let dateParam: string | undefined = undefined;
         let startDate: string | undefined = undefined;
         let endDate: string | undefined = undefined;
@@ -199,18 +205,16 @@ export default function NursingPoolQueuePage() {
           startDate = dateRange.from || undefined;
           endDate = dateRange.to || undefined;
         } else if (dateFilter === 'today') {
-          dateParam = new Date().toISOString().split('T')[0];
+          dateParam = anchorYmd;
         } else if (dateFilter === 'week') {
-          const today = new Date();
-          const weekStart = new Date(today);
-          weekStart.setDate(today.getDate() - today.getDay());
-          startDate = weekStart.toISOString().split('T')[0];
-          endDate = today.toISOString().split('T')[0];
+          const weekStart = new Date(anchor);
+          weekStart.setDate(anchor.getDate() - anchor.getDay());
+          startDate = formatLocalYmd(weekStart);
+          endDate = anchorYmd;
         } else if (dateFilter === 'month') {
-          const today = new Date();
-          const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
-          startDate = monthStart.toISOString().split('T')[0];
-          endDate = today.toISOString().split('T')[0];
+          const monthStart = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
+          startDate = formatLocalYmd(monthStart);
+          endDate = anchorYmd;
         }
 
         const metricsParams = {
@@ -481,6 +485,7 @@ export default function NursingPoolQueuePage() {
     clinicFilter,
     currentPage,
     itemsPerPage,
+    serverToday,
   ]);
 
   useEffect(() => {
@@ -501,6 +506,7 @@ export default function NursingPoolQueuePage() {
     clinicFilter,
     currentPage,
     itemsPerPage,
+    serverToday,
   ]);
 
   // Dialog states

@@ -17,6 +17,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { radiologyService, type RadiologyReport as ApiRadiologyReport } from '@/lib/services';
 import { RADIOLOGY_VERIFICATION_POLL_INTERVAL } from '@/lib/constants/ui';
+import { formatLocalYmd } from '@/lib/laboratory/constants';
+import { useServerToday } from '@/hooks/use-server-today';
 import { PatientAvatar } from "@/components/shared/PatientAvatar";
 import { transformPriority } from '@/lib/services/transformers';
 import {
@@ -138,6 +140,7 @@ const transformReport = (apiReport: any): RadiologyReport => {
 };
 
 export default function RadiologyVerificationPage() {
+  const serverToday = useServerToday();
   const [reports, setReports] = useState<RadiologyReport[]>([]);
   const [verifiedReports, setVerifiedReports] = useState<RadiologyReport[]>([]);
   const [loading, setLoading] = useState(true);
@@ -180,27 +183,20 @@ export default function RadiologyVerificationPage() {
   const [rejectionReason, setRejectionReason] = useState('');
 
   const buildDateQuery = (filter: string): Record<string, string> => {
-    if (filter === 'today') {
-      const today = new Date();
-      return { date: today.toISOString().split('T')[0] };
-    }
+    // Anchor on server "today" so filters line up with the server calendar,
+    // not the client device clock.
+    const anchor = serverToday ? new Date(`${serverToday}T00:00:00`) : new Date();
+    const anchorYmd = serverToday || formatLocalYmd(anchor);
+    if (filter === 'today') return { date: anchorYmd };
     if (filter === 'week') {
-      const end = new Date();
-      const start = new Date();
-      start.setDate(end.getDate() - 7);
-      return {
-        start_date: start.toISOString().split('T')[0],
-        end_date: end.toISOString().split('T')[0],
-      };
+      const start = new Date(anchor);
+      start.setDate(anchor.getDate() - 7);
+      return { start_date: formatLocalYmd(start), end_date: anchorYmd };
     }
     if (filter === 'month') {
-      const end = new Date();
-      const start = new Date();
-      start.setMonth(end.getMonth() - 1);
-      return {
-        start_date: start.toISOString().split('T')[0],
-        end_date: end.toISOString().split('T')[0],
-      };
+      const start = new Date(anchor);
+      start.setMonth(anchor.getMonth() - 1);
+      return { start_date: formatLocalYmd(start), end_date: anchorYmd };
     }
     return {};
   };
@@ -211,14 +207,16 @@ export default function RadiologyVerificationPage() {
   // Load reports from API
   useEffect(() => {
     loadReports();
-  }, [currentPage, itemsPerPage]);
+    // Re-run when the server anchor date resolves so filters use the correct
+    // calendar day.
+  }, [currentPage, itemsPerPage, serverToday]);
 
   // Load verified reports when verified tab is active
   useEffect(() => {
     if (activeTab === 'verified') {
       loadVerifiedReports();
     }
-  }, [activeTab, verifiedCurrentPage, itemsPerPage]);
+  }, [activeTab, verifiedCurrentPage, itemsPerPage, serverToday]);
 
   // Auto-refresh every 45 seconds to show new reports for verification
   useEffect(() => {
@@ -321,7 +319,7 @@ export default function RadiologyVerificationPage() {
 
   useEffect(() => {
     void loadVerificationCounts();
-  }, [priorityFilter, searchQuery, genderFilter, dateFilter]);
+  }, [priorityFilter, searchQuery, genderFilter, dateFilter, serverToday]);
 
   const getCategoryBadge = (category: string) => {
     const colors: Record<string, string> = {

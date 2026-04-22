@@ -204,8 +204,8 @@ const menuSections: MenuSection[] = [
     basePath: "/eyecare",
     items: [
       { label: "Home", href: "/eyecare", icon: LayoutDashboard },
-      { label: "Pool Queue", href: "/eyecare/pool-queue", icon: Users },
-      { label: "Completed Orders", href: "/eyecare/completed", icon: CheckCircle },
+      { label: "Orders", href: "/eyecare/orders", icon: Users },
+      { label: "Completed Sessions", href: "/eyecare/completed", icon: CheckCircle },
     ],
   },
   {

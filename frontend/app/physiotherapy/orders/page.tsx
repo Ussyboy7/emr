@@ -1334,7 +1334,7 @@ export default function PhysioPoolQueuePage() {
                                   s.status?.replace('_', ' '),
                                 ])}
                               </span>
-                              <div className="flex items-center gap-1">
+                              <div className="flex items-center gap-2">
                                 <Button variant="ghost" size="sm" className="h-8" onClick={() => openSessionReport(s)}>
                                   <FileText className="h-4 w-4 mr-1" />
                                   Report
@@ -1343,6 +1343,11 @@ export default function PhysioPoolQueuePage() {
                                   <Pencil className="h-4 w-4 mr-1" />
                                   Edit
                                 </Button>
+                                <span className="text-xs text-muted-foreground">
+                                  {s.completed_at
+                                    ? new Date(s.completed_at).toLocaleString()
+                                    : (s.scheduled_at ? new Date(s.scheduled_at).toLocaleString() : 'N/A')}
+                                </span>
                               </div>
                             </div>
                           ))}

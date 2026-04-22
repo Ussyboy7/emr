@@ -1,9 +1,11 @@
 """
 Common utility views.
 """
+from django.conf import settings
 from django.db import connection
 from django.core.cache import cache
 from django.http import JsonResponse
+from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 from rest_framework import views
 from rest_framework.response import Response
@@ -12,6 +14,27 @@ from rest_framework.parsers import MultiPartParser, FormParser
 import json
 
 from .services import FileUploadService, EmailService, SMSService, BackupService
+
+
+@require_http_methods(["GET"])
+def server_time(request):
+    """
+    Return the server's current date and time in the configured timezone.
+
+    Used by the frontend to anchor "today" / "this week" / "this month"
+    filters off the server's calendar rather than the client's local clock —
+    which may be wrong, in a different timezone, or skewed — so that, for
+    example, a lab result created "just now" reliably shows up under the
+    "Today" tab regardless of the user's device clock.
+    """
+    now = timezone.localtime()
+    return JsonResponse(
+        {
+            "date": now.date().isoformat(),
+            "datetime": now.isoformat(),
+            "timezone": settings.TIME_ZONE,
+        }
+    )
 
 
 @require_http_methods(["GET"])

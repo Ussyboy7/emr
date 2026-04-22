@@ -24,9 +24,12 @@ import { useCurrentUser } from '@/hooks/use-current-user';
 import { ResetFiltersButton } from '@/components/shared/ResetFiltersButton';
 import { WardDoctorOrdersSection } from '@/components/ward/WardDoctorOrdersSection';
 import { ObservationChartDialog } from '@/components/ward/ObservationChartDialog';
+import { useServerToday } from '@/hooks/use-server-today';
+import { formatLocalYmd } from '@/lib/laboratory/constants';
 
 export default function WardCarePage() {
   const { currentUser } = useCurrentUser();
+  const serverToday = useServerToday();
   const [wards, setWards] = useState<Ward[]>([]);
   const [admissions, setAdmissions] = useState<PatientAdmission[]>([]);
   const [assignments, setAssignments] = useState<WardAssignment[]>([]);
@@ -70,26 +73,27 @@ export default function WardCarePage() {
     allAssignments.filter(a => a.admission === admissionId && a.is_active);
 
   const buildDateParams = useCallback(() => {
-    const today = new Date();
-    const fmt = (d: Date) => d.toISOString().split('T')[0];
+    // Anchor on the server's "today" so filters align with the server calendar.
+    const today = serverToday ? new Date(`${serverToday}T00:00:00`) : new Date();
+    const todayYmd = serverToday || formatLocalYmd(today);
     if (dateRange.from || dateRange.to) {
       return {
         admission_date_after: dateRange.from || undefined,
         admission_date_before: dateRange.to || undefined,
       };
     }
-    if (dateFilter === 'today') return { admission_date: fmt(today) };
+    if (dateFilter === 'today') return { admission_date: todayYmd };
     if (dateFilter === 'week') {
       const start = new Date(today);
       start.setDate(today.getDate() - today.getDay());
-      return { admission_date_after: fmt(start), admission_date_before: fmt(today) };
+      return { admission_date_after: formatLocalYmd(start), admission_date_before: todayYmd };
     }
     if (dateFilter === 'month') {
       const start = new Date(today.getFullYear(), today.getMonth(), 1);
-      return { admission_date_after: fmt(start), admission_date_before: fmt(today) };
+      return { admission_date_after: formatLocalYmd(start), admission_date_before: todayYmd };
     }
     return {};
-  }, [dateFilter, dateRange.from, dateRange.to]);
+  }, [dateFilter, dateRange.from, dateRange.to, serverToday]);
 
   const fetchData = useCallback(async () => {
     setIsLoading(true);

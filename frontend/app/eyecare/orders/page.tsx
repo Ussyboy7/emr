@@ -1,0 +1,1296 @@
+'use client';
+
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { StandardPagination } from '@/components/shared/StandardPagination';
+import { DashboardLayout } from '@/components/shared/DashboardLayout';
+import { Card, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Textarea } from '@/components/ui/textarea';
+import { toast } from 'sonner';
+import { useAuthRedirect } from '@/hooks/use-auth-redirect';
+import { isAuthenticationError } from '@/lib/auth-errors';
+import { apiFetch } from '@/lib/api-client';
+import { PatientAvatar } from '@/components/shared/PatientAvatar';
+import { AdvancedDateRangeDialog } from '@/components/shared/AdvancedDateRangeDialog';
+import { CustomDateRangeButton } from '@/components/shared/CustomDateRangeButton';
+import { eyeCareService, type EyeOrder, type EyeSession } from '@/lib/services/eye-care-service';
+
+import {
+  Search, Clock, CheckCircle, CheckCircle2, Eye, Play, AlertTriangle, Loader2, Activity, RefreshCw, XCircle, FileText, Stethoscope,
+} from 'lucide-react';
+
+const formatRelativeTime = (dateString: string | null | undefined) => {
+  if (!dateString) return '';
+  try {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+
+    if (diffMins < 1) return 'just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return date.toLocaleDateString();
+  } catch {
+    return '';
+  }
+};
+
+const getStatusColor = (status: string) => {
+  switch (status) {
+    case 'pending':
+    case 'scheduled':
+      return 'bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 border-yellow-500/30';
+    case 'in_progress':
+      return 'bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/30';
+    case 'completed':
+      return 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30';
+    case 'cancelled':
+      return 'bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/30';
+    default:
+      return 'bg-gray-500/10 text-gray-600 dark:text-gray-400 border-gray-500/30';
+  }
+};
+
+const getQueueStatusLabel = (status: string) => {
+  if (status === 'scheduled') return 'pending';
+  return status.replace('_', ' ');
+};
+
+export default function EyeClinicOrdersPage() {
+  const [authError, setAuthError] = useState<unknown | null>(null);
+  useAuthRedirect(authError);
+
+  const [orders, setOrders] = useState<EyeOrder[]>([]);
+  const [allSessions, setAllSessions] = useState<EyeSession[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [activeTab, setActiveTab] = useState('pending');
+  const [dateFilter, setDateFilter] = useState('today');
+  const [isDateFilterDialogOpen, setIsDateFilterDialogOpen] = useState(false);
+  const [dateRange, setDateRange] = useState({ from: '', to: '' });
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(10);
+
+  const [selectedOrder, setSelectedOrder] = useState<EyeOrder | null>(null);
+  const [selectedOrderSessions, setSelectedOrderSessions] = useState<EyeSession[]>([]);
+  const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
+  const [isSessionDialogOpen, setIsSessionDialogOpen] = useState(false);
+  const [isSessionReportOpen, setIsSessionReportOpen] = useState(false);
+  const [currentSession, setCurrentSession] = useState<EyeSession | null>(null);
+  const [reportSession, setReportSession] = useState<EyeSession | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [patientVitals, setPatientVitals] = useState<Record<string, string> | null>(null);
+  const [sessionForm, setSessionForm] = useState({
+    chief_complaint: '',
+    visual_acuity_od: '',
+    visual_acuity_os: '',
+    visual_acuity_ou: '',
+    refraction_od: '',
+    refraction_os: '',
+    iop_od: '',
+    iop_os: '',
+    diagnosis: '',
+    treatment_plan: '',
+    special_instructions: '',
+    notes: '',
+    procedures_performed: '',
+    findings: '',
+  });
+
+  const loadOrders = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent;
+    try {
+      if (!silent) {
+        setLoading(true);
+        setError(null);
+      }
+      const [ordersResponse, sessionsResponse] = await Promise.all([
+        eyeCareService.getOrders({ page_size: 100 }),
+        eyeCareService.getSessions({ page_size: 500 }),
+      ]);
+      setOrders(ordersResponse.results || []);
+      setAllSessions(sessionsResponse.results || []);
+    } catch (err) {
+      console.error('Error loading eye clinic orders:', err);
+      if (isAuthenticationError(err)) {
+        setAuthError(err);
+      } else if (!silent) {
+        setError(err instanceof Error ? err.message : 'Failed to load eye clinic orders');
+        toast.error('Failed to load eye clinic orders');
+      }
+    } finally {
+      if (!silent) setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadOrders();
+  }, [loadOrders]);
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      void loadOrders({ silent: true });
+    }, 15000);
+    return () => clearInterval(id);
+  }, [loadOrders]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, activeTab, dateFilter, itemsPerPage, dateRange.from, dateRange.to]);
+
+  useEffect(() => {
+    if ((!isViewDialogOpen && !isSessionDialogOpen) || !selectedOrder?.id) {
+      setSelectedOrderSessions([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await eyeCareService.getSessions({ order: selectedOrder.id, page_size: 100 });
+        if (!cancelled) {
+          setSelectedOrderSessions(response.results || []);
+        }
+      } catch {
+        if (!cancelled) setSelectedOrderSessions([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isViewDialogOpen, isSessionDialogOpen, selectedOrder?.id]);
+
+  const stats = useMemo(() => ({
+    pending: orders.filter((order) => order.status === 'pending' || order.status === 'scheduled').length,
+    inProgress: orders.filter((order) => order.status === 'in_progress').length,
+    cancelled: orders.filter((order) => order.status === 'cancelled').length,
+    completed: orders.filter((order) => order.status === 'completed').length,
+  }), [orders]);
+
+  const filteredOrders = useMemo(() => {
+    return orders.filter((order) => {
+      const matchesSearch =
+        order.patient_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        order.patient_id?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        order.diagnosis?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        String(order.id).includes(searchQuery.toLowerCase());
+
+      const orderedDate = new Date(order.ordered_at);
+      if (Number.isNaN(orderedDate.getTime())) return false;
+
+      if (dateFilter !== 'all') {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        if (dateFilter === 'today' && orderedDate.toDateString() !== today.toDateString()) return false;
+        if (dateFilter === 'week') {
+          const weekAgo = new Date(today);
+          weekAgo.setDate(weekAgo.getDate() - 7);
+          if (orderedDate < weekAgo) return false;
+        }
+        if (dateFilter === 'month') {
+          const monthAgo = new Date(today);
+          monthAgo.setMonth(monthAgo.getMonth() - 1);
+          if (orderedDate < monthAgo) return false;
+        }
+      }
+
+      if (dateRange.from || dateRange.to) {
+        if (dateRange.from) {
+          const from = new Date(`${dateRange.from}T00:00:00`);
+          if (orderedDate < from) return false;
+        }
+        if (dateRange.to) {
+          const to = new Date(`${dateRange.to}T23:59:59.999`);
+          if (orderedDate > to) return false;
+        }
+      }
+
+      if (activeTab === 'all') return matchesSearch;
+      if (activeTab === 'pending') return matchesSearch && (order.status === 'pending' || order.status === 'scheduled');
+      if (activeTab === 'in_progress') return matchesSearch && order.status === 'in_progress';
+      if (activeTab === 'cancelled') return matchesSearch && order.status === 'cancelled';
+      if (activeTab === 'completed') return matchesSearch && order.status === 'completed';
+      return matchesSearch;
+    });
+  }, [orders, searchQuery, activeTab, dateFilter, dateRange.from, dateRange.to]);
+
+  const paginatedOrders = useMemo(() => {
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    return filteredOrders.slice(startIndex, startIndex + itemsPerPage);
+  }, [filteredOrders, currentPage, itemsPerPage]);
+
+  const openViewDialog = (order: EyeOrder) => {
+    setSelectedOrder(order);
+    setIsViewDialogOpen(true);
+  };
+
+  const openSessionDialog = (session: EyeSession, order: EyeOrder) => {
+    setCurrentSession(session);
+    setSelectedOrder(order);
+    setSessionForm({
+      chief_complaint: order.chief_complaint || '',
+      visual_acuity_od: order.visual_acuity_od || '',
+      visual_acuity_os: order.visual_acuity_os || '',
+      visual_acuity_ou: order.visual_acuity_ou || '',
+      refraction_od: order.refraction_od || '',
+      refraction_os: order.refraction_os || '',
+      iop_od: order.iop_od != null ? String(order.iop_od) : '',
+      iop_os: order.iop_os != null ? String(order.iop_os) : '',
+      diagnosis: order.diagnosis || '',
+      treatment_plan: order.treatment_plan || '',
+      special_instructions: order.special_instructions || '',
+      notes: session.notes || '',
+      procedures_performed: session.procedures_performed || '',
+      findings: session.findings || '',
+    });
+    setIsSessionDialogOpen(true);
+    setIsViewDialogOpen(false);
+    void loadPatientVitals(order.patient);
+  };
+
+  const openSessionReport = (session: EyeSession) => {
+    setReportSession(session);
+    setIsSessionReportOpen(true);
+  };
+
+  const loadPatientVitals = async (patientId: number) => {
+    try {
+      const vitalsResult = await apiFetch<{ results: any[] }>(`/vitals/?patient=${patientId}&page_size=1`);
+      if (vitalsResult.results && vitalsResult.results.length > 0) {
+        const latestVitals = vitalsResult.results[0];
+        setPatientVitals({
+          Temperature: latestVitals.temperature ? `${latestVitals.temperature}°C` : '—',
+          'Blood Pressure': latestVitals.blood_pressure_systolic && latestVitals.blood_pressure_diastolic
+            ? `${latestVitals.blood_pressure_systolic}/${latestVitals.blood_pressure_diastolic}`
+            : '—',
+          'Heart Rate': latestVitals.heart_rate ? `${latestVitals.heart_rate} bpm` : '—',
+          'Resp. Rate': latestVitals.respiratory_rate ? `${latestVitals.respiratory_rate}/min` : '—',
+          SpO2: latestVitals.oxygen_saturation ? `${latestVitals.oxygen_saturation}%` : '—',
+          Weight: latestVitals.weight ? `${latestVitals.weight} kg` : '—',
+          Height: latestVitals.height ? `${latestVitals.height} cm` : '—',
+        });
+      } else {
+        setPatientVitals(null);
+      }
+    } catch {
+      setPatientVitals(null);
+    }
+  };
+
+  const resolveCreatedSession = async (orderId: number, sessionNumber: number) => {
+    const response = await eyeCareService.getSessions({ order: orderId, page_size: 100 });
+    const sessions = response.results || [];
+    return sessions.find((session) => session.session_number === sessionNumber) || null;
+  };
+
+  const startProcessing = async (order: EyeOrder) => {
+    setIsSubmitting(true);
+    try {
+      const sessionsResponse = await eyeCareService.getSessions({ order: order.id, page_size: 100 });
+      const existingSessions = sessionsResponse.results || [];
+      let activeSession =
+        existingSessions.find((session) => session.status === 'in_progress') ||
+        existingSessions.find((session) => session.status === 'scheduled') ||
+        null;
+
+      if (!activeSession) {
+        const nextSessionNumber = existingSessions.length > 0
+          ? Math.max(...existingSessions.map((session) => session.session_number || 0)) + 1
+          : 1;
+
+        const createdSession = await eyeCareService.createSession({
+          order: order.id,
+          session_number: nextSessionNumber,
+          scheduled_at: new Date().toISOString(),
+          started_at: new Date().toISOString(),
+          findings: order.diagnosis || order.chief_complaint || '',
+          procedures_performed: order.treatment_plan || '',
+        });
+
+        const sessionToActivate = createdSession?.id
+          ? createdSession
+          : await resolveCreatedSession(order.id, nextSessionNumber);
+
+        if (!sessionToActivate?.id) {
+          throw new Error('Created eye session could not be found');
+        }
+
+        activeSession = await eyeCareService.updateSession(sessionToActivate.id, {
+          status: 'in_progress',
+          started_at: sessionToActivate.started_at || new Date().toISOString(),
+        });
+      } else if (activeSession.status === 'scheduled') {
+        activeSession = await eyeCareService.updateSession(activeSession.id, {
+          status: 'in_progress',
+          started_at: activeSession.started_at || new Date().toISOString(),
+        });
+      }
+
+      await eyeCareService.updateOrder(order.id, {
+        status: 'in_progress',
+        scheduled_at: order.scheduled_at || new Date().toISOString(),
+      });
+
+      toast.success('Processing started successfully');
+      await loadOrders();
+      const refreshedOrder = { ...order, status: 'in_progress' as const, scheduled_at: order.scheduled_at || new Date().toISOString() };
+      openSessionDialog(activeSession, refreshedOrder);
+    } catch (err) {
+      console.error('Error starting eye clinic processing:', err);
+      toast.error('Failed to start processing');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const endTreatment = async (order: EyeOrder) => {
+    setIsSubmitting(true);
+    try {
+      const sessionsResponse = await eyeCareService.getSessions({ order: order.id, page_size: 100 });
+      const sessions = sessionsResponse.results || [];
+
+      for (const session of sessions) {
+        if (session.status !== 'completed' && session.status !== 'cancelled') {
+          await eyeCareService.updateSession(session.id, {
+            status: 'completed',
+            completed_at: new Date().toISOString(),
+          });
+        }
+      }
+
+      if (sessions.length === 0) {
+        await eyeCareService.createSession({
+          order: order.id,
+          session_number: 1,
+          scheduled_at: order.scheduled_at || order.ordered_at,
+          started_at: order.scheduled_at || order.ordered_at,
+          completed_at: new Date().toISOString(),
+          status: 'completed',
+          findings: order.diagnosis || order.chief_complaint || '',
+          procedures_performed: order.treatment_plan || '',
+        });
+      }
+
+      await eyeCareService.completeOrder(order.id);
+      toast.success('Treatment ended successfully');
+      setIsViewDialogOpen(false);
+      setSelectedOrder(null);
+      await loadOrders();
+    } catch (err) {
+      console.error('Error ending eye clinic treatment:', err);
+      toast.error('Failed to end treatment');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const addSessionForOrder = async (order: EyeOrder) => {
+    setIsSubmitting(true);
+    try {
+      const sessionsResponse = await eyeCareService.getSessions({ order: order.id, page_size: 100 });
+      const sessions = sessionsResponse.results || [];
+      const nextSessionNumber = sessions.length > 0
+        ? Math.max(...sessions.map((session) => session.session_number || 0)) + 1
+        : 1;
+
+      const createdSession = await eyeCareService.createSession({
+        order: order.id,
+        session_number: nextSessionNumber,
+        scheduled_at: new Date().toISOString(),
+        started_at: new Date().toISOString(),
+        findings: order.diagnosis || order.chief_complaint || '',
+        procedures_performed: order.treatment_plan || '',
+      });
+
+      const sessionToActivate = createdSession?.id
+        ? createdSession
+        : await resolveCreatedSession(order.id, nextSessionNumber);
+
+      if (!sessionToActivate?.id) {
+        throw new Error('Created eye session could not be found');
+      }
+
+      const activeSession = await eyeCareService.updateSession(sessionToActivate.id, {
+        status: 'in_progress',
+        started_at: sessionToActivate.started_at || new Date().toISOString(),
+      });
+
+      await eyeCareService.updateOrder(order.id, {
+        status: 'in_progress',
+        scheduled_at: new Date().toISOString(),
+      });
+
+      await loadOrders();
+      const refreshedOrder = { ...order, status: 'in_progress' as const, scheduled_at: new Date().toISOString() };
+      openSessionDialog(activeSession, refreshedOrder);
+      toast.success(`Session ${nextSessionNumber} started`);
+    } catch (err) {
+      console.error('Error adding eye session:', err);
+      toast.error('Failed to add session');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const saveSessionDocumentation = async (opts?: { complete?: boolean }) => {
+    if (!currentSession || !selectedOrder) return;
+
+    setIsSubmitting(true);
+    try {
+      const now = new Date().toISOString();
+      await eyeCareService.updateOrder(selectedOrder.id, {
+        chief_complaint: sessionForm.chief_complaint,
+        visual_acuity_od: sessionForm.visual_acuity_od,
+        visual_acuity_os: sessionForm.visual_acuity_os,
+        visual_acuity_ou: sessionForm.visual_acuity_ou,
+        refraction_od: sessionForm.refraction_od,
+        refraction_os: sessionForm.refraction_os,
+        iop_od: sessionForm.iop_od ? Number(sessionForm.iop_od) : null,
+        iop_os: sessionForm.iop_os ? Number(sessionForm.iop_os) : null,
+        diagnosis: sessionForm.diagnosis,
+        treatment_plan: sessionForm.treatment_plan,
+        special_instructions: sessionForm.special_instructions,
+      });
+      await eyeCareService.updateSession(currentSession.id, {
+        notes: sessionForm.notes,
+        procedures_performed: sessionForm.procedures_performed,
+        findings: sessionForm.findings,
+        status: opts?.complete ? 'completed' : (currentSession.status === 'completed' ? 'completed' : 'in_progress'),
+        started_at: currentSession.started_at || now,
+        completed_at: opts?.complete ? now : currentSession.completed_at,
+      });
+
+      if (opts?.complete) {
+        await eyeCareService.completeOrder(selectedOrder.id);
+        toast.success('Eye session completed successfully');
+        setIsSessionDialogOpen(false);
+        setCurrentSession(null);
+        setSelectedOrder(null);
+      } else {
+        toast.success(currentSession.status === 'completed' ? 'Session updated' : 'Eye notes saved');
+      }
+
+      await loadOrders();
+    } catch (err) {
+      console.error('Error saving eye session documentation:', err);
+      toast.error(opts?.complete ? 'Failed to complete eye session' : 'Failed to save eye notes');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const sessionsMap = useMemo(() => {
+    const map = new Map<number, EyeSession[]>();
+    allSessions.forEach((session) => {
+      const orderId =
+        typeof session.order === 'number'
+          ? session.order
+          : (session.order_details as EyeOrder | undefined)?.id;
+      if (!orderId) return;
+      const list = map.get(orderId) || [];
+      list.push(session);
+      map.set(orderId, list);
+    });
+    if (selectedOrder?.id && selectedOrderSessions.length > 0) {
+      map.set(selectedOrder.id, selectedOrderSessions);
+    }
+    return map;
+  }, [allSessions, selectedOrder?.id, selectedOrderSessions]);
+
+  const OrderCard = ({ order }: { order: EyeOrder }) => {
+    const orderSessions = sessionsMap.get(order.id) || [];
+    const completedSessions = orderSessions.filter((session) => session.status === 'completed').length;
+
+    return (
+      <Card
+        className={`border-l-4 hover:shadow-md transition-shadow cursor-pointer ${
+          order.status === 'in_progress' ? 'border-l-orange-500' :
+          order.status === 'cancelled' ? 'border-l-red-500' :
+          order.status === 'completed' ? 'border-l-emerald-500' :
+          'border-l-yellow-500'
+        }`}
+        onClick={() => openViewDialog(order)}
+      >
+        <CardContent className="py-3 px-4">
+          <div className="flex items-center gap-3">
+            <PatientAvatar name={order.patient_name ?? ''} size="sm" />
+
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 flex-wrap min-w-0">
+                  <span className="font-semibold text-foreground truncate">{order.patient_name ?? ''}</span>
+                  <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${getStatusColor(order.status)}`}>
+                    {order.status === 'in_progress' && <Activity className="h-2 w-2 mr-0.5" />}
+                    {getQueueStatusLabel(order.status)}
+                  </Badge>
+                  <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-blue-500/10 text-blue-600 border-blue-500/30">
+                    {completedSessions} sessions completed
+                  </Badge>
+                  {order.diagnosis && (
+                    <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{order.diagnosis}</Badge>
+                  )}
+                </div>
+                <div className="flex items-center gap-1 flex-shrink-0">
+                  {order.status === 'completed' && (
+                    <div className="h-8 w-8 flex items-center justify-center rounded border border-emerald-500/50 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10">
+                      <CheckCircle2 className="h-4 w-4" />
+                    </div>
+                  )}
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button variant="ghost" size="sm" className="h-8 w-8 p-0 hover:bg-muted" onClick={(e) => { e.stopPropagation(); openViewDialog(order); }}>
+                        <Eye className="h-4 w-4 text-muted-foreground hover:text-blue-600" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>Manage Order</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-wrap">
+                <span>{order.patient_id}</span>
+                {order.ordered_by_name && (
+                  <>
+                    <span>•</span>
+                    <span className="flex items-center gap-1"><Stethoscope className="h-3 w-3" />{order.ordered_by_name}</span>
+                  </>
+                )}
+                <span>•</span>
+                <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{formatRelativeTime(order.ordered_at)}</span>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  };
+
+  return (
+    <TooltipProvider>
+      <DashboardLayout>
+        <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <h1 className="text-2xl sm:text-3xl font-bold text-foreground flex items-center gap-3">
+                <Activity className="h-8 w-8 text-blue-500" />
+                Eye Orders
+              </h1>
+              <p className="text-muted-foreground mt-1">Process orders, document sessions, and manage ongoing eye clinic treatment flow.</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Card className="border-l-4 border-l-yellow-500 cursor-pointer hover:shadow-md" onClick={() => setActiveTab('pending')}>
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-muted-foreground">Pending</p>
+                        <p className="text-2xl sm:text-3xl font-bold text-yellow-600 dark:text-yellow-400">{stats.pending}</p>
+                      </div>
+                      <Clock className="h-8 w-8 text-yellow-400" />
+                    </div>
+                  </CardContent>
+                </Card>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p className="text-xs">New eye clinic referrals awaiting processing</p>
+              </TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Card className="border-l-4 border-l-orange-500 cursor-pointer hover:shadow-md" onClick={() => setActiveTab('in_progress')}>
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-muted-foreground">In Progress</p>
+                        <p className="text-2xl sm:text-3xl font-bold text-orange-600 dark:text-orange-400">{stats.inProgress}</p>
+                      </div>
+                      <Activity className="h-8 w-8 text-orange-400" />
+                    </div>
+                  </CardContent>
+                </Card>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p className="text-xs">Active eye clinic treatment sessions</p>
+              </TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Card className="border-l-4 border-l-red-500 cursor-pointer hover:shadow-md" onClick={() => setActiveTab('cancelled')}>
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-muted-foreground">Cancelled</p>
+                        <p className="text-2xl sm:text-3xl font-bold text-red-600 dark:text-red-400">{stats.cancelled}</p>
+                      </div>
+                      <XCircle className="h-8 w-8 text-red-400" />
+                    </div>
+                  </CardContent>
+                </Card>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p className="text-xs">Cancelled eye clinic orders</p>
+              </TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Card className="border-l-4 border-l-emerald-500 cursor-pointer hover:shadow-md" onClick={() => setActiveTab('completed')}>
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-muted-foreground">Completed</p>
+                        <p className="text-2xl sm:text-3xl font-bold text-emerald-600 dark:text-emerald-400">{stats.completed}</p>
+                      </div>
+                      <CheckCircle className="h-8 w-8 text-emerald-400" />
+                    </div>
+                  </CardContent>
+                </Card>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p className="text-xs">Finished eye clinic treatment plans</p>
+              </TooltipContent>
+            </Tooltip>
+          </div>
+
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex flex-col gap-4">
+                <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+                  <TabsList>
+                    <TabsTrigger value="pending">Pending ({stats.pending})</TabsTrigger>
+                    <TabsTrigger value="in_progress">In Progress ({stats.inProgress})</TabsTrigger>
+                    <TabsTrigger value="cancelled">Cancelled ({stats.cancelled})</TabsTrigger>
+                    <TabsTrigger value="completed">Completed ({stats.completed})</TabsTrigger>
+                    <TabsTrigger value="all">All</TabsTrigger>
+                  </TabsList>
+                </Tabs>
+                <div className="flex flex-col lg:flex-row lg:items-center gap-3">
+                  <div className="relative flex-1 min-w-0">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Patient, order ID, Eye ID (e.g. EYE-000002)..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="pl-10"
+                    />
+                  </div>
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-2 lg:flex-none">
+                    <CustomDateRangeButton onClick={() => setIsDateFilterDialogOpen(true)} />
+                    <Select value={dateFilter} onValueChange={setDateFilter}>
+                      <SelectTrigger className="w-full sm:w-[120px]"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Time</SelectItem>
+                        <SelectItem value="today">Today</SelectItem>
+                        <SelectItem value="week">This Week</SelectItem>
+                        <SelectItem value="month">This Month</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <AdvancedDateRangeDialog
+            open={isDateFilterDialogOpen}
+            onOpenChange={setIsDateFilterDialogOpen}
+            description="Apply a custom order date range to narrow down eye clinic orders."
+            label="Order Date Range"
+            value={dateRange}
+            onChange={setDateRange}
+            onClear={() => setDateRange({ from: '', to: '' })}
+          />
+
+          <div className="space-y-3">
+            {loading ? (
+              <Card><CardContent className="p-8 text-center text-muted-foreground">
+                <Loader2 className="h-12 w-12 mx-auto mb-4 animate-spin opacity-50" />
+                <p>Loading orders...</p>
+              </CardContent></Card>
+            ) : error ? (
+              <Card><CardContent className="p-8 text-center text-muted-foreground">
+                <AlertTriangle className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p className="text-red-600 dark:text-red-400">{error}</p>
+                <Button variant="outline" className="mt-4" onClick={() => void loadOrders()}>Retry</Button>
+              </CardContent></Card>
+            ) : paginatedOrders.length === 0 ? (
+              <Card><CardContent className="p-8 text-center text-muted-foreground">
+                <Activity className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p>No orders found</p>
+              </CardContent></Card>
+            ) : (
+              paginatedOrders.map((order) => <OrderCard key={order.id} order={order} />)
+            )}
+          </div>
+
+          {filteredOrders.length > 0 && (
+            <Card className="p-4">
+              <StandardPagination
+                currentPage={currentPage}
+                totalItems={filteredOrders.length}
+                itemsPerPage={itemsPerPage}
+                onPageChange={setCurrentPage}
+                onItemsPerPageChange={(newSize) => {
+                  setItemsPerPage(newSize);
+                  setCurrentPage(1);
+                }}
+                itemName="orders"
+              />
+            </Card>
+          )}
+
+          <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
+            <DialogContent className="w-[95vw] sm:max-w-[900px] max-h-[90vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <Activity className="h-5 w-5 text-teal-500" />
+                  Manage Eye Order
+                </DialogTitle>
+                <DialogDescription>
+                  EYE-{selectedOrder?.id?.toString().padStart(6, '0')} • {selectedOrder?.ordered_at ? new Date(selectedOrder.ordered_at).toLocaleString() : 'N/A'}
+                </DialogDescription>
+              </DialogHeader>
+              {selectedOrder && (
+                <div className="space-y-4 py-4">
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <Badge variant="outline" className={getStatusColor(selectedOrder.status)}>
+                      {getQueueStatusLabel(selectedOrder.status).toUpperCase()}
+                    </Badge>
+                    {(() => {
+                      const rel = formatRelativeTime(selectedOrder.ordered_at);
+                      return rel ? (
+                        <span className="text-sm text-muted-foreground">Ordered {rel}</span>
+                      ) : null;
+                    })()}
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4 p-4 rounded-lg bg-muted/50">
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">Patient</p>
+                      <p className="font-medium text-base">{selectedOrder.patient_name ?? ''}</p>
+                      <p className="text-sm text-muted-foreground font-mono">{selectedOrder.patient_id}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">Ordering Doctor</p>
+                      {selectedOrder.ordered_by_name?.trim() && (
+                        <p className="font-medium text-base">{selectedOrder.ordered_by_name}</p>
+                      )}
+                      <p className="text-sm text-muted-foreground">Eye Clinic Referral</p>
+                    </div>
+                  </div>
+
+                  {selectedOrder.diagnosis && (
+                    <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
+                      <p className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
+                        <FileText className="h-3 w-3" /> Diagnosis
+                      </p>
+                      <p className="text-sm font-medium">{selectedOrder.diagnosis}</p>
+                    </div>
+                  )}
+
+                  {selectedOrder.chief_complaint && (
+                    <div className="p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
+                      <p className="text-xs text-muted-foreground mb-1">Chief Complaint</p>
+                      <p className="text-sm">{selectedOrder.chief_complaint}</p>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="p-3 rounded-lg border bg-card">
+                      <p className="text-xs text-muted-foreground mb-1">Visual Acuity</p>
+                      <p className="text-sm">OD: {selectedOrder.visual_acuity_od || '—'} | OS: {selectedOrder.visual_acuity_os || '—'} | OU: {selectedOrder.visual_acuity_ou || '—'}</p>
+                    </div>
+
+                    <div className="p-3 rounded-lg border bg-card">
+                      <p className="text-xs text-muted-foreground mb-1">IOP</p>
+                      <p className="text-sm">OD: {selectedOrder.iop_od ?? '—'} | OS: {selectedOrder.iop_os ?? '—'}</p>
+                    </div>
+
+                    {selectedOrder.treatment_plan && (
+                      <div className="p-3 rounded-lg border bg-card">
+                        <p className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
+                          <FileText className="h-3 w-3" /> Treatment Plan
+                        </p>
+                        <p className="text-sm">{selectedOrder.treatment_plan}</p>
+                      </div>
+                    )}
+
+                    {selectedOrder.special_instructions && (
+                      <div className="p-3 rounded-lg border bg-card">
+                        <p className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
+                          <Eye className="h-3 w-3" /> Special Instructions
+                        </p>
+                        <p className="text-sm">{selectedOrder.special_instructions}</p>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="p-3 rounded-lg border bg-card">
+                    <p className="text-xs text-muted-foreground mb-2">Order Timeline</p>
+                    <div className="flex items-center gap-4 text-xs flex-wrap">
+                      <div className="flex items-center gap-1">
+                        <div className="h-2 w-2 rounded-full bg-blue-500"></div>
+                        <span>Ordered: {selectedOrder.ordered_at ? new Date(selectedOrder.ordered_at).toLocaleString() : 'N/A'}</span>
+                      </div>
+                      {selectedOrder.scheduled_at && (
+                        <div className="flex items-center gap-1">
+                          <div className="h-2 w-2 rounded-full bg-amber-500"></div>
+                          <span>Started: {new Date(selectedOrder.scheduled_at).toLocaleString()}</span>
+                        </div>
+                      )}
+                      {selectedOrder.completed_at && (
+                        <div className="flex items-center gap-1">
+                          <div className="h-2 w-2 rounded-full bg-green-500"></div>
+                          <span>Completed: {new Date(selectedOrder.completed_at).toLocaleString()}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {selectedOrderSessions.length > 0 && (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-sm text-muted-foreground flex items-center gap-1">
+                          <FileText className="h-3.5 w-3.5" />
+                          Sessions ({selectedOrderSessions.length})
+                        </Label>
+                        {selectedOrder.status !== 'cancelled' && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-8"
+                            onClick={() => void addSessionForOrder(selectedOrder)}
+                            disabled={isSubmitting}
+                          >
+                            <Play className="h-4 w-4 mr-1" />
+                            Add Session
+                          </Button>
+                        )}
+                      </div>
+                      <div className="border rounded-md divide-y max-h-48 overflow-y-auto">
+                        {[...selectedOrderSessions]
+                          .sort((a, b) => (a.session_number ?? 0) - (b.session_number ?? 0))
+                          .map((session) => (
+                            <div key={session.id} className="flex items-center justify-between px-3 py-2 text-sm">
+                              <span>
+                                Session {session.session_number} • {session.status.replace('_', ' ')}
+                              </span>
+                              <div className="flex items-center gap-2">
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-8"
+                                  onClick={() => openSessionReport(session)}
+                                >
+                                  <FileText className="h-4 w-4 mr-1" />
+                                  Report
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-8"
+                                  onClick={() => openSessionDialog(session, selectedOrder)}
+                                >
+                                  <Eye className="h-4 w-4 mr-1" />
+                                  Edit
+                                </Button>
+                                <span className="text-xs text-muted-foreground">
+                                  {session.completed_at ? new Date(session.completed_at).toLocaleString() : formatRelativeTime(session.started_at || session.scheduled_at)}
+                                </span>
+                              </div>
+                            </div>
+                          ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex flex-wrap gap-2 pt-4 border-t">
+                    <div className="flex gap-2">
+                      {(selectedOrder.status === 'pending' || selectedOrder.status === 'scheduled') && (
+                        <Button
+                          onClick={() => void startProcessing(selectedOrder)}
+                          className="bg-teal-600 hover:bg-teal-700 text-white shadow-sm"
+                          disabled={isSubmitting}
+                        >
+                          {isSubmitting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Play className="h-4 w-4 mr-2" />}
+                          Start Processing
+                        </Button>
+                      )}
+                      {selectedOrder.status === 'in_progress' && (
+                        <>
+                          <Button
+                            onClick={() => {
+                              const activeSession = [...selectedOrderSessions]
+                                .filter((session) => session.status === 'in_progress' || session.status === 'scheduled')
+                                .sort((a, b) => (b.session_number ?? 0) - (a.session_number ?? 0))[0];
+                              if (!activeSession) {
+                                toast.error('No active eye session found');
+                                return;
+                              }
+                              openSessionDialog(activeSession, selectedOrder);
+                            }}
+                            className="bg-blue-600 hover:bg-blue-700 text-white shadow-sm"
+                            disabled={isSubmitting}
+                          >
+                            <Play className="h-4 w-4 mr-2" />
+                            Edit Session
+                          </Button>
+                          <Button
+                            onClick={() => void endTreatment(selectedOrder)}
+                            className="bg-green-600 hover:bg-green-700 text-white shadow-sm"
+                            disabled={isSubmitting}
+                          >
+                            {isSubmitting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <CheckCircle className="h-4 w-4 mr-2" />}
+                            End Treatment
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                    <div className="flex gap-2 ml-auto">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setIsViewDialogOpen(false)}
+                      >
+                        Close
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </DialogContent>
+          </Dialog>
+
+          <Dialog open={isSessionDialogOpen} onOpenChange={setIsSessionDialogOpen}>
+            <DialogContent className="w-[95vw] sm:max-w-[900px] max-h-[90vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <Activity className="h-5 w-5 text-blue-500" />
+                  Continue Comprehensive Eye Session
+                </DialogTitle>
+                <DialogDescription>
+                  Continue assessment and treatment documentation
+                </DialogDescription>
+              </DialogHeader>
+              {selectedOrder && currentSession ? (
+                <div className="space-y-6 py-4">
+                  {patientVitals ? (
+                    <div className="space-y-3">
+                      <h3 className="text-lg font-semibold text-blue-700 dark:text-blue-400 flex items-center gap-2">
+                        <Activity className="h-5 w-5" />
+                        Current Vitals
+                      </h3>
+                      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
+                        {Object.entries(patientVitals).map(([label, value]) => {
+                          const toneClass =
+                            label === 'Temperature' ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600' :
+                            label === 'Blood Pressure' ? 'bg-red-50 dark:bg-red-900/20 text-red-600' :
+                            label === 'Heart Rate' ? 'bg-pink-50 dark:bg-pink-900/20 text-pink-600' :
+                            label === 'Resp. Rate' ? 'bg-cyan-50 dark:bg-cyan-900/20 text-cyan-600' :
+                            label === 'SpO2' ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600' :
+                            label === 'Weight' ? 'bg-purple-50 dark:bg-purple-900/20 text-purple-600' :
+                            'bg-orange-50 dark:bg-orange-900/20 text-orange-600';
+
+                          return (
+                            <div key={label} className={`text-center p-3 rounded-lg ${toneClass}`}>
+                              <div className="text-xs text-muted-foreground">{label}</div>
+                              <div className="text-lg font-bold">{value}</div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  <div className="grid grid-cols-2 gap-4 p-4 rounded-lg bg-muted/50">
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">Patient</p>
+                      <div className="flex items-center gap-2">
+                        <PatientAvatar name={selectedOrder.patient_name ?? ''} size="sm" />
+                        <div>
+                          <p className="font-medium">{selectedOrder.patient_name}</p>
+                          <p className="text-sm text-muted-foreground font-mono">{selectedOrder.patient_id}</p>
+                        </div>
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">Session</p>
+                      <p className="font-medium">Session {currentSession.session_number}</p>
+                      <p className="text-sm text-muted-foreground">Follow-up Treatment Session</p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <h3 className="text-lg font-semibold text-teal-700 dark:text-teal-400 flex items-center gap-2">
+                      <Eye className="h-5 w-5" />
+                      A. Patient Assessment
+                    </h3>
+                    <div className="space-y-2">
+                      <Label>Presenting Complaint *</Label>
+                      <Textarea
+                        value={sessionForm.chief_complaint}
+                        onChange={(e) => setSessionForm((prev) => ({ ...prev, chief_complaint: e.target.value }))}
+                        placeholder="Presenting complaint..."
+                        rows={3}
+                        className="resize-none"
+                      />
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <div className="space-y-2">
+                        <Label>VA OD</Label>
+                        <Input value={sessionForm.visual_acuity_od} onChange={(e) => setSessionForm((prev) => ({ ...prev, visual_acuity_od: e.target.value }))} placeholder="e.g. 6/6" />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>VA OS</Label>
+                        <Input value={sessionForm.visual_acuity_os} onChange={(e) => setSessionForm((prev) => ({ ...prev, visual_acuity_os: e.target.value }))} placeholder="e.g. 6/9" />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>VA OU</Label>
+                        <Input value={sessionForm.visual_acuity_ou} onChange={(e) => setSessionForm((prev) => ({ ...prev, visual_acuity_ou: e.target.value }))} placeholder="e.g. 6/6" />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <h3 className="text-lg font-semibold text-blue-700 dark:text-blue-400 flex items-center gap-2">
+                      <FileText className="h-5 w-5" />
+                      B. Eye Measurements & Background
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div className="space-y-2">
+                        <Label>Refraction OD</Label>
+                        <Input value={sessionForm.refraction_od} onChange={(e) => setSessionForm((prev) => ({ ...prev, refraction_od: e.target.value }))} placeholder="Right eye refraction..." />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Refraction OS</Label>
+                        <Input value={sessionForm.refraction_os} onChange={(e) => setSessionForm((prev) => ({ ...prev, refraction_os: e.target.value }))} placeholder="Left eye refraction..." />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>IOP OD</Label>
+                        <Input value={sessionForm.iop_od} onChange={(e) => setSessionForm((prev) => ({ ...prev, iop_od: e.target.value }))} placeholder="mmHg" />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>IOP OS</Label>
+                        <Input value={sessionForm.iop_os} onChange={(e) => setSessionForm((prev) => ({ ...prev, iop_os: e.target.value }))} placeholder="mmHg" />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Special Instructions</Label>
+                      <Textarea
+                        value={sessionForm.special_instructions}
+                        onChange={(e) => setSessionForm((prev) => ({ ...prev, special_instructions: e.target.value }))}
+                        placeholder="Clinical background, medications, social context, or instructions..."
+                        rows={3}
+                        className="resize-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <h3 className="text-lg font-semibold text-green-700 dark:text-green-400 flex items-center gap-2">
+                      <Activity className="h-5 w-5" />
+                      C. Examination Findings
+                    </h3>
+                    <div className="space-y-2">
+                      <Label>Assessment Findings & Clinical Impression</Label>
+                      <Textarea
+                        value={sessionForm.findings}
+                        onChange={(e) => setSessionForm((prev) => ({ ...prev, findings: e.target.value }))}
+                        placeholder="Key eye assessment findings, clinical impression, prognosis, and rationale..."
+                        rows={5}
+                        className="resize-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <h3 className="text-lg font-semibold text-purple-700 dark:text-purple-400 flex items-center gap-2">
+                      <CheckCircle2 className="h-5 w-5" />
+                      D. Diagnosis
+                    </h3>
+                    <div className="space-y-2">
+                      <Label>Diagnosis</Label>
+                      <Input
+                        value={sessionForm.diagnosis}
+                        onChange={(e) => setSessionForm((prev) => ({ ...prev, diagnosis: e.target.value }))}
+                        placeholder="Working diagnosis..."
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <h3 className="text-lg font-semibold text-orange-700 dark:text-orange-400 flex items-center gap-2">
+                      <FileText className="h-5 w-5" />
+                      E. Treatment Plan
+                    </h3>
+                    <div className="space-y-2">
+                      <Label>Planned Treatment Approach</Label>
+                      <Textarea
+                        value={sessionForm.treatment_plan}
+                        onChange={(e) => setSessionForm((prev) => ({ ...prev, treatment_plan: e.target.value }))}
+                        placeholder="Treatment modalities, follow-up plan, frequency, goals..."
+                        rows={4}
+                        className="resize-none"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Procedures Performed</Label>
+                      <Textarea
+                        value={sessionForm.procedures_performed}
+                        onChange={(e) => setSessionForm((prev) => ({ ...prev, procedures_performed: e.target.value }))}
+                        placeholder="Record tests, procedures, medications, or treatment actions..."
+                        rows={5}
+                        className="resize-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <h3 className="text-lg font-semibold text-red-700 dark:text-red-400 flex items-center gap-2">
+                      <FileText className="h-5 w-5" />
+                      F. Session Notes
+                    </h3>
+                    <div className="space-y-2">
+                      <Label>Session Notes</Label>
+                      <Textarea
+                        value={sessionForm.notes}
+                        onChange={(e) => setSessionForm((prev) => ({ ...prev, notes: e.target.value }))}
+                        placeholder="Patient response, follow-up plan, and any additional eye notes..."
+                        rows={5}
+                        className="resize-none"
+                      />
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+              <DialogFooter className="gap-2 sm:gap-0">
+                <Button variant="outline" onClick={() => setIsSessionDialogOpen(false)} disabled={isSubmitting}>
+                  Cancel
+                </Button>
+                <Button onClick={() => void saveSessionDocumentation()} disabled={isSubmitting} className="bg-blue-600 hover:bg-blue-700 text-white">
+                  {isSubmitting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+                  {currentSession?.status === 'completed' ? 'Save changes' : 'Save session'}
+                </Button>
+                {currentSession?.status !== 'completed' && (
+                  <Button onClick={() => void saveSessionDocumentation({ complete: true })} disabled={isSubmitting} className="bg-green-500 hover:bg-green-600 text-white">
+                    {isSubmitting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <CheckCircle className="h-4 w-4 mr-2" />}
+                    End Session
+                  </Button>
+                )}
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          <Dialog open={isSessionReportOpen} onOpenChange={setIsSessionReportOpen}>
+            <DialogContent className="w-[95vw] sm:max-w-[850px] max-h-[90vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <FileText className="h-5 w-5 text-blue-600" />
+                  Eye Session Report - {reportSession?.order_details?.patient_name || selectedOrder?.patient_name}
+                </DialogTitle>
+                <DialogDescription>
+                  {reportSession?.completed_at
+                    ? new Date(reportSession.completed_at).toLocaleString()
+                    : (reportSession?.scheduled_at ? new Date(reportSession.scheduled_at).toLocaleString() : '')}
+                </DialogDescription>
+              </DialogHeader>
+              {reportSession && (
+                <div className="space-y-6">
+                  <div className="border-b pb-4">
+                    <div className="grid grid-cols-2 gap-6">
+                      <div className="space-y-2">
+                        <h3 className="font-medium text-sm text-muted-foreground uppercase tracking-wide">Patient Information</h3>
+                        <div className="space-y-1">
+                          <p><span className="font-medium">Name:</span> {reportSession.order_details?.patient_name || selectedOrder?.patient_name || 'N/A'}</p>
+                          <p><span className="font-medium">ID:</span> {reportSession.order_details?.patient_id || selectedOrder?.patient_id || 'N/A'}</p>
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <h3 className="font-medium text-sm text-muted-foreground uppercase tracking-wide">Session Details</h3>
+                        <div className="space-y-1">
+                          <p><span className="font-medium">Session:</span> {reportSession.session_number ?? 'N/A'}</p>
+                          {reportSession.scheduled_at && (
+                            <p><span className="font-medium">Scheduled:</span> {new Date(reportSession.scheduled_at).toLocaleString()}</p>
+                          )}
+                          {reportSession.completed_at && (
+                            <p><span className="font-medium">Completed:</span> {new Date(reportSession.completed_at).toLocaleString()}</p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    {reportSession.order_details?.diagnosis && (
+                      <div className="mt-4 p-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg border border-amber-200 dark:border-amber-800">
+                        <p className="text-sm font-medium text-amber-800 dark:text-amber-200">Diagnosis</p>
+                        <p className="text-sm mt-1">{reportSession.order_details.diagnosis}</p>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="space-y-3">
+                    <h3 className="text-lg font-semibold text-teal-700 dark:text-teal-400 border-b pb-2">A. Patient Assessment</h3>
+                    <p className="text-sm bg-muted/50 p-3 rounded border min-h-[60px]">{reportSession.order_details?.chief_complaint || 'Not documented'}</p>
+                  </div>
+
+                  <div className="space-y-3">
+                    <h3 className="text-lg font-semibold text-blue-700 dark:text-blue-400 border-b pb-2">B. Eye Measurements & Background</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <p className="text-sm bg-muted/50 p-3 rounded border min-h-[60px]">
+                        VA: OD {reportSession.order_details?.visual_acuity_od || '—'} | OS {reportSession.order_details?.visual_acuity_os || '—'} | OU {reportSession.order_details?.visual_acuity_ou || '—'}
+                      </p>
+                      <p className="text-sm bg-muted/50 p-3 rounded border min-h-[60px]">
+                        Refraction: OD {reportSession.order_details?.refraction_od || '—'} | OS {reportSession.order_details?.refraction_os || '—'}{'\n'}
+                        IOP: OD {reportSession.order_details?.iop_od ?? '—'} | OS {reportSession.order_details?.iop_os ?? '—'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <h3 className="text-lg font-semibold text-green-700 dark:text-green-400 border-b pb-2">C. Examination Findings</h3>
+                    <p className="text-sm bg-muted/50 p-3 rounded border min-h-[80px]">{reportSession.findings || 'Not documented'}</p>
+                  </div>
+
+                  <div className="space-y-3">
+                    <h3 className="text-lg font-semibold text-purple-700 dark:text-purple-400 border-b pb-2">D. Diagnosis</h3>
+                    <p className="text-sm bg-muted/50 p-3 rounded border min-h-[60px]">{reportSession.order_details?.diagnosis || 'Not documented'}</p>
+                  </div>
+
+                  <div className="space-y-3">
+                    <h3 className="text-lg font-semibold text-orange-700 dark:text-orange-400 border-b pb-2">E. Treatment Plan</h3>
+                    <p className="text-sm bg-muted/50 p-3 rounded border min-h-[80px]">{reportSession.order_details?.treatment_plan || reportSession.procedures_performed || 'Not documented'}</p>
+                  </div>
+
+                  <div className="space-y-3">
+                    <h3 className="text-lg font-semibold text-red-700 dark:text-red-400 border-b pb-2">F. Session Notes</h3>
+                    <p className="text-sm bg-muted/50 p-3 rounded border min-h-[80px]">{reportSession.notes || 'Not documented'}</p>
+                  </div>
+                </div>
+              )}
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setIsSessionReportOpen(false)}>Close</Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </div>
+      </DashboardLayout>
+    </TooltipProvider>
+  );
+}

@@ -19,6 +19,8 @@ import { PatientAvatar } from "@/components/shared/PatientAvatar";
 import { VitalsDetailModal } from "@/components/shared/VitalsDetailModal";
 import { AdvancedDateRangeDialog } from '@/components/shared/AdvancedDateRangeDialog';
 import { CustomDateRangeButton } from '@/components/shared/CustomDateRangeButton';
+import { useServerToday } from '@/hooks/use-server-today';
+import { formatLocalYmd } from '@/lib/laboratory/constants';
 import {
   Activity, Search, Eye, TrendingUp, TrendingDown, AlertTriangle,
   CheckCircle2, Heart, Thermometer, Wind, Droplets, Scale, Calendar,
@@ -62,6 +64,7 @@ interface PatientVitals {
 // Patient vitals data will be loaded from API
 
 export default function PatientVitalsPage() {
+  const serverToday = useServerToday();
   const [patients, setPatients] = useState<PatientVitals[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -85,6 +88,9 @@ export default function PatientVitalsPage() {
         // NOTE: `patientService.getPatientVisits(id)` fetches visits for a single patient.
         // Passing `0` causes a 404 on backends that don't have a patient with ID 0.
         // Use the visits endpoint instead.
+        // Anchor on server "today" so filters match the server calendar.
+        const anchor = serverToday ? new Date(`${serverToday}T00:00:00`) : new Date();
+        const anchorYmd = serverToday || formatLocalYmd(anchor);
         let dateParam: string | undefined = undefined;
         let startDate: string | undefined = undefined;
         let endDate: string | undefined = undefined;
@@ -92,18 +98,16 @@ export default function PatientVitalsPage() {
           startDate = dateRange.from || undefined;
           endDate = dateRange.to || undefined;
         } else if (dateFilter === 'today') {
-          dateParam = new Date().toISOString().split('T')[0];
+          dateParam = anchorYmd;
         } else if (dateFilter === 'week') {
-          const today = new Date();
-          const weekStart = new Date(today);
-          weekStart.setDate(today.getDate() - today.getDay());
-          startDate = weekStart.toISOString().split('T')[0];
-          endDate = today.toISOString().split('T')[0];
+          const weekStart = new Date(anchor);
+          weekStart.setDate(anchor.getDate() - anchor.getDay());
+          startDate = formatLocalYmd(weekStart);
+          endDate = anchorYmd;
         } else if (dateFilter === 'month') {
-          const today = new Date();
-          const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
-          startDate = monthStart.toISOString().split('T')[0];
-          endDate = today.toISOString().split('T')[0];
+          const monthStart = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
+          startDate = formatLocalYmd(monthStart);
+          endDate = anchorYmd;
         }
 
         const visitsResponse = await visitService.getVisits({
@@ -303,7 +307,7 @@ export default function PatientVitalsPage() {
     };
     
     loadPatients();
-  }, [dateFilter, dateRange.from, dateRange.to]);
+  }, [dateFilter, dateRange.from, dateRange.to, serverToday]);
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);

@@ -169,6 +169,13 @@ class LabService {
     date?: string;
     start_date?: string;
     end_date?: string;
+    /**
+     * Which timestamp the date / start_date / end_date params apply to.
+     * Defaults to ``ordered_at`` on the backend; pass ``rejected_at`` when
+     * you want to show today's test rejections regardless of the original
+     * order date (e.g. on the "Rework Required" tab).
+     */
+    date_field?: 'ordered_at' | 'rejected_at';
     page?: number;
     page_size?: number;
     consultation_session?: number;

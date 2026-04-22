@@ -27,6 +27,8 @@ import { useRouter } from 'next/navigation';
 import { useCurrentUser } from '@/hooks/use-current-user';
 import { getHomeRouteForUser } from '@/lib/home-route';
 import { getVisitServiceClinicsDisplay, joinDisplayParts } from '@/lib/utils/clinic-utils';
+import { getServerToday } from '@/lib/utils/serverTime';
+import { formatLocalYmd } from '@/lib/laboratory/constants';
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -89,17 +91,25 @@ export default function DashboardPage() {
         appointmentService.getUpcomingAppointments().catch(() => []),
       ]);
 
-      // Calculate today's patients (visits created today)
-      const today = new Date().toISOString().split('T')[0];
+      // Calculate today's patients — anchor on the server's calendar so the
+      // dashboard's "today" matches the rest of the app regardless of the
+      // user's local timezone.
+      let today: string;
+      try {
+        today = await getServerToday();
+      } catch {
+        today = formatLocalYmd(new Date());
+      }
       const patientsToday = todayVisits.results.filter((v: any) => {
         const visitDate = v.created_at?.split('T')[0] || v.visit_date;
         return visitDate === today;
       }).length;
 
       // Get yesterday's count for comparison (simplified - would need actual API)
-      const yesterday = new Date();
-      yesterday.setDate(yesterday.getDate() - 1);
-      const yesterdayDate = yesterday.toISOString().split('T')[0];
+      const todayAnchor = new Date(`${today}T00:00:00`);
+      const yesterday = new Date(todayAnchor);
+      yesterday.setDate(todayAnchor.getDate() - 1);
+      const yesterdayDate = formatLocalYmd(yesterday);
       const patientsYesterday = todayVisits.results.filter((v: any) => {
         const visitDate = v.created_at?.split('T')[0] || v.visit_date;
         return visitDate === yesterdayDate;

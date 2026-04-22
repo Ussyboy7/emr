@@ -33,12 +33,15 @@ import {
   getVisitServiceClinicsDisplay,
 } from '@/lib/utils/clinic-utils';
 import { useLocationOptions } from '@/hooks/use-location-options';
+import { useServerToday } from '@/hooks/use-server-today';
+import { formatLocalYmd } from '@/lib/laboratory/constants';
 import { useOutpatientClinicTypes } from '@/hooks/use-outpatient-clinic-types';
 import { ConsultationReportModal } from '@/components/consultation/ConsultationReportModal';
 import { loadConsultationReportSession, type ConsultationReportSession } from '@/lib/consultation-report';
 
 export default function VisitsPage() {
   const router = useRouter();
+  const serverToday = useServerToday();
   const { locations: locationOptions } = useLocationOptions();
   const { names: opdClinicNames } = useOutpatientClinicTypes();
   const clinicFilterOptions = useMemo(
@@ -122,32 +125,32 @@ export default function VisitsPage() {
 
   // Helper function to build date filter parameters
   const buildDateParams = useCallback(() => {
+    // Anchor on the server's "today" so filters match the server calendar.
+    const anchor = serverToday ? new Date(`${serverToday}T00:00:00`) : new Date();
+    const anchorYmd = serverToday || formatLocalYmd(anchor);
     let dateParam: string | undefined = undefined;
     let startDate: string | undefined = undefined;
     let endDate: string | undefined = undefined;
-    
+
     if (dateRange.from || dateRange.to) {
       startDate = dateRange.from || undefined;
       endDate = dateRange.to || undefined;
     } else if (dateFilter === 'today') {
-      const today = new Date().toISOString().split('T')[0];
-      dateParam = today;
+      dateParam = anchorYmd;
     } else if (dateFilter === 'week') {
-      const today = new Date();
-      const weekStart = new Date(today);
-      weekStart.setDate(today.getDate() - today.getDay()); // Start of week (Sunday)
-      startDate = weekStart.toISOString().split('T')[0];
-      endDate = today.toISOString().split('T')[0];
+      const weekStart = new Date(anchor);
+      weekStart.setDate(anchor.getDate() - anchor.getDay()); // Start of week (Sunday)
+      startDate = formatLocalYmd(weekStart);
+      endDate = anchorYmd;
     } else if (dateFilter === 'month') {
-      const today = new Date();
-      const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
-      startDate = monthStart.toISOString().split('T')[0];
-      endDate = today.toISOString().split('T')[0];
+      const monthStart = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
+      startDate = formatLocalYmd(monthStart);
+      endDate = anchorYmd;
     }
     // 'all' means no date filter
 
     return { dateParam, startDate, endDate };
-  }, [dateFilter, dateRange.from, dateRange.to]);
+  }, [dateFilter, dateRange.from, dateRange.to, serverToday]);
 
   // Load stats - separate from pagination to get accurate counts
   const loadStats = useCallback(async () => {

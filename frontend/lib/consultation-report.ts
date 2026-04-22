@@ -137,7 +137,23 @@ const formatLabResult = (value: unknown, normalRange?: Record<string, any>): str
   const entries = Object.entries(value as Record<string, unknown>).filter(([, v]) => v != null && v !== '');
   if (entries.length === 0) return '';
 
-  return entries
+  // Honour template _order so consultation reports match Enter Results / Result Details.
+  const explicitOrder: string[] = Array.isArray(normalRange?._order)
+    ? ((normalRange as any)._order as any[]).filter((k): k is string => typeof k === 'string')
+    : [];
+  const norm = (s: string) => s.replace(/\s+/g, ' ').trim().toLowerCase();
+  const orderIndex = new Map<string, number>();
+  explicitOrder.forEach((k, i) => orderIndex.set(norm(k), i));
+  const ordered = [...entries].sort((a, b) => {
+    const ai = orderIndex.get(norm(a[0]));
+    const bi = orderIndex.get(norm(b[0]));
+    if (ai !== undefined && bi !== undefined) return ai - bi;
+    if (ai !== undefined) return -1;
+    if (bi !== undefined) return 1;
+    return a[0].localeCompare(b[0]);
+  });
+
+  return ordered
     .map(([key, v]) => {
       const fieldMeta = normalRange?.[key] ?? {};
       const unit = fieldMeta.unit ? ` ${fieldMeta.unit}` : '';

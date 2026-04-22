@@ -22,6 +22,8 @@ import { PatientAvatar } from '@/components/shared/PatientAvatar';
 import { Icd10DiagnosesBlock } from '@/components/medical/Icd10DiagnosesBlock';
 import { AdvancedDateRangeDialog } from '@/components/shared/AdvancedDateRangeDialog';
 import { CustomDateRangeButton } from '@/components/shared/CustomDateRangeButton';
+import { formatLocalYmd } from '@/lib/laboratory/constants';
+import { useServerToday } from '@/hooks/use-server-today';
 import {
   ClipboardList, Search, Eye, Calendar, Clock, Activity, CheckCircle2,
   FileBarChart, AlertTriangle, ScanLine, User, ArrowRight,
@@ -43,6 +45,7 @@ const formatOrderedAtDisplay = (isoString: string | undefined): string => {
 };
 
 export default function RadiologyOrdersPage() {
+  const serverToday = useServerToday();
   const [orders, setOrders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -343,31 +346,27 @@ export default function RadiologyOrdersPage() {
   const [addStudyOutsourcedFacility, setAddStudyOutsourcedFacility] = useState('');
   const [isAddingStudy, setIsAddingStudy] = useState(false);
 
-  const buildDateQuery = (filter: string): Record<string, string> => {
-    if (filter === 'today') {
-      const today = new Date();
-      return { date: today.toISOString().split('T')[0] };
-    }
-    if (filter === 'week') {
-      const end = new Date();
-      const start = new Date();
-      start.setDate(end.getDate() - 7);
-      return {
-        start_date: start.toISOString().split('T')[0],
-        end_date: end.toISOString().split('T')[0],
-      };
-    }
-    if (filter === 'month') {
-      const end = new Date();
-      const start = new Date();
-      start.setMonth(end.getMonth() - 1);
-      return {
-        start_date: start.toISOString().split('T')[0],
-        end_date: end.toISOString().split('T')[0],
-      };
-    }
-    return {};
-  };
+  const buildDateQuery = useCallback(
+    (filter: string): Record<string, string> => {
+      // Anchor on the server's "today" so filters reflect the server calendar,
+      // not the client device clock. `serverToday` is populated once on mount.
+      const anchor = serverToday ? new Date(`${serverToday}T00:00:00`) : new Date();
+      const anchorYmd = serverToday || formatLocalYmd(anchor);
+      if (filter === 'today') return { date: anchorYmd };
+      if (filter === 'week') {
+        const start = new Date(anchor);
+        start.setDate(anchor.getDate() - 7);
+        return { start_date: formatLocalYmd(start), end_date: anchorYmd };
+      }
+      if (filter === 'month') {
+        const start = new Date(anchor);
+        start.setMonth(anchor.getMonth() - 1);
+        return { start_date: formatLocalYmd(start), end_date: anchorYmd };
+      }
+      return {};
+    },
+    [serverToday],
+  );
 
   const loadOrders = useCallback(async (opts?: { silent?: boolean }) => {
     const silent = opts?.silent;
@@ -398,10 +397,19 @@ export default function RadiologyOrdersPage() {
         ...rangeQuery,
       };
 
+      // On the Rejected tab, filter the list by rejection date rather than
+      // order date so "Today" reflects today's rejections.
+      const listFilters = {
+        ...commonFilters,
+        ...(activeTab === 'rejected'
+          ? { date_field: 'rejected_at' as const }
+          : {}),
+      };
+
       const response = await radiologyService.getOrders({
         page: currentPage,
         page_size: itemsPerPage,
-        ...commonFilters,
+        ...listFilters,
       });
       const statsResponse: {
         total: number;
@@ -432,7 +440,7 @@ export default function RadiologyOrdersPage() {
         setLoading(false);
       }
     }
-  }, [debouncedSearch, processingFilter, priorityFilter, genderFilter, dateFilter, dateRange.from, dateRange.to, activeTab, currentPage, itemsPerPage]);
+  }, [debouncedSearch, processingFilter, priorityFilter, genderFilter, dateFilter, dateRange.from, dateRange.to, activeTab, currentPage, itemsPerPage, buildDateQuery]);
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(searchQuery.trim()), 300);

@@ -17,6 +17,8 @@ import {
   transformApiRowToCompletedTest,
   type CompletedTest,
 } from '@/lib/laboratory/completedLabReport';
+import { formatLocalYmd } from '@/lib/laboratory/constants';
+import { useServerToday } from '@/hooks/use-server-today';
 
 import {
   CheckCircle2, Search, Eye, Clock, AlertTriangle, Calendar,
@@ -26,6 +28,7 @@ import { useOutpatientClinicTypes } from '@/hooks/use-outpatient-clinic-types';
 
 export default function CompletedTestsPage() {
   const { names: opdClinicNames } = useOutpatientClinicTypes();
+  const serverToday = useServerToday();
   const [tests, setTests] = useState<CompletedTest[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -65,9 +68,15 @@ export default function CompletedTestsPage() {
     try {
       setLoading(true);
       setError(null);
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const yyyyMmDd = (d: Date) => d.toISOString().split('T')[0];
+      // Anchor Today/Week/Month on the server's calendar, not the client clock.
+      const anchor = serverToday
+        ? new Date(`${serverToday}T00:00:00`)
+        : (() => {
+            const d = new Date();
+            d.setHours(0, 0, 0, 0);
+            return d;
+          })();
+      const anchorYmd = serverToday || formatLocalYmd(anchor);
       let date: string | undefined;
       let start_date: string | undefined;
       let end_date: string | undefined;
@@ -76,17 +85,17 @@ export default function CompletedTestsPage() {
         start_date = dateRange.from || undefined;
         end_date = dateRange.to || undefined;
       } else if (dateFilter === 'today') {
-        date = yyyyMmDd(today);
+        date = anchorYmd;
       } else if (dateFilter === 'week') {
-        const weekAgo = new Date(today);
+        const weekAgo = new Date(anchor);
         weekAgo.setDate(weekAgo.getDate() - 7);
-        start_date = yyyyMmDd(weekAgo);
-        end_date = yyyyMmDd(today);
+        start_date = formatLocalYmd(weekAgo);
+        end_date = anchorYmd;
       } else if (dateFilter === 'month') {
-        const monthAgo = new Date(today);
+        const monthAgo = new Date(anchor);
         monthAgo.setMonth(monthAgo.getMonth() - 1);
-        start_date = yyyyMmDd(monthAgo);
-        end_date = yyyyMmDd(today);
+        start_date = formatLocalYmd(monthAgo);
+        end_date = anchorYmd;
       }
 
       const baseParams = {
@@ -137,7 +146,7 @@ export default function CompletedTestsPage() {
     } finally {
       setLoading(false);
     }
-  }, [currentPage, itemsPerPage, debouncedSearchQuery, statusFilter, clinicFilter, genderFilter, processingFilter, dateFilter, dateRange.from, dateRange.to]);
+  }, [currentPage, itemsPerPage, debouncedSearchQuery, statusFilter, clinicFilter, genderFilter, processingFilter, dateFilter, dateRange.from, dateRange.to, serverToday]);
 
   // Load completed tests from API when page changes
   useEffect(() => {

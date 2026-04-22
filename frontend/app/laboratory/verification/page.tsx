@@ -19,6 +19,14 @@ import { labService, type LabResult as ApiLabResult } from '@/lib/services';
 import { PatientAvatar } from "@/components/shared/PatientAvatar";
 import { transformPriority, transformToBackendPriority } from '@/lib/services/transformers';
 import { buildDateQuery, formatRejectionReason, LAB_TEST_STATUS } from '@/lib/laboratory/constants';
+import { useServerToday } from '@/hooks/use-server-today';
+import {
+  classifyValue,
+  deriveOverallStatus,
+  fieldForParameter,
+  orderResultRows,
+  type ResultStatus,
+} from '@/lib/laboratory/template-utils';
 import {
   ShieldCheck, Search, Eye, Clock, CheckCircle2, AlertTriangle, XCircle,
   Loader2, User, Calendar, FileText, Stethoscope, RefreshCw, Send, Download
@@ -82,41 +90,12 @@ const transformResult = (
 
   const testCodeForTemplate = (testDetails as any)?.code || (test as any)?.code || '';
 
-  const resolveTemplateMeta = (parameterName: string) => {
-    const normalRangeObj: Record<string, any> | undefined =
-      (testDetails as any)?.template_normal_range ||
-      (testDetails as any)?.template?.normal_range ||
-      (testCodeForTemplate ? templateNormalRangesByCode?.[testCodeForTemplate] : undefined);
-    if (!normalRangeObj || typeof normalRangeObj !== 'object') return null;
-
-    const normalizeKey = (s: string) =>
-      s
-        .replace(/[\s\u00A0]+/g, ' ')
-        .trim()
-        .toLowerCase();
-
-    const wanted = normalizeKey(String(parameterName || ''));
-    if (!wanted) return null;
-
-    // Match template keys case-insensitively.
-    for (const [k, v] of Object.entries(normalRangeObj)) {
-      if (normalizeKey(String(k)) === wanted) {
-        return { key: k, meta: v as any };
-      }
-    }
-    return null;
-  };
-
-  const formatTemplateRange = (meta: any) => {
-    if (!meta) return '';
-    if (typeof meta.range === 'string' && meta.range.trim()) return meta.range.trim();
-    const min = meta.min ?? meta.normalRangeMin;
-    const max = meta.max ?? meta.normalRangeMax;
-    if (min !== undefined && max !== undefined && String(min).trim() && String(max).trim()) {
-      return `${min}-${max}`;
-    }
-    return '';
-  };
+  // Canonical template source: test-specific range first, then template object, then
+  // a cached per-code map (fallback for legacy rows missing `template_normal_range`).
+  const normalRangeObj: Record<string, any> | undefined =
+    (testDetails as any)?.template_normal_range ||
+    (testDetails as any)?.template?.normal_range ||
+    (testCodeForTemplate ? templateNormalRangesByCode?.[testCodeForTemplate] : undefined);
   
   // Debug: Log the structure to help identify issues
   if (process.env.NODE_ENV === 'development') {
@@ -165,39 +144,25 @@ const transformResult = (
       if (value === null || value === undefined || value === '') {
         return;
       }
-      
+
       const valueStr = String(value);
-      const valueNum = parseFloat(valueStr);
+      const field = fieldForParameter(key, normalRangeObj);
 
-      // Determine status based on parameter-specific normal ranges
-      let status: 'Normal' | 'Abnormal' | 'Critical' = 'Normal';
-      let normalRange = '';
+      let status: ResultStatus = 'Normal';
       let unit = '';
+      let normalRange = '';
 
-      // Prefer template-defined unit/range (source of truth).
-      const templateMatch = resolveTemplateMeta(key);
-      if (templateMatch) {
-        unit = String((templateMatch.meta?.unit ?? '') || '');
-        normalRange = formatTemplateRange(templateMatch.meta);
-
-        // If numeric and we have min/max, classify status from template ranges.
-        const minRaw = templateMatch.meta?.min ?? templateMatch.meta?.normalRangeMin;
-        const maxRaw = templateMatch.meta?.max ?? templateMatch.meta?.normalRangeMax;
-        const min = minRaw !== undefined && String(minRaw).trim() !== '' ? Number(minRaw) : undefined;
-        const max = maxRaw !== undefined && String(maxRaw).trim() !== '' ? Number(maxRaw) : undefined;
-        if (!isNaN(valueNum) && valueStr.trim() !== '' && (min !== undefined || max !== undefined)) {
-          if (min !== undefined && !isNaN(min) && valueNum < min) status = 'Abnormal';
-          if (max !== undefined && !isNaN(max) && valueNum > max) status = 'Abnormal';
-        }
+      if (field) {
+        unit = field.unit;
+        normalRange = field.normalRange;
+        status = classifyValue(valueStr, field);
+      } else if (valueStr.trim()) {
+        // Text-only legacy values: honour explicit markers if the template is unknown.
+        const normalized = valueStr.toLowerCase();
+        if (normalized.includes('critical')) status = 'Critical';
+        else if (normalized.includes('abnormal')) status = 'Abnormal';
       }
 
-      // Canonical fallback for text-only result values.
-      if (!templateMatch && valueStr.trim()) {
-        const normalizedValue = valueStr.toLowerCase();
-        if (normalizedValue.includes('critical')) status = 'Critical';
-        else if (normalizedValue.includes('abnormal')) status = 'Abnormal';
-      }
-      
       results.push({
         parameter: key,
         value: valueStr,
@@ -224,20 +189,24 @@ const transformResult = (
       }
     }
   }
-  
+
+  // Render rows in the template's canonical clinical order (same sequence as
+  // the Enter Results form). Unknown keys are appended alphabetically.
+  const orderedResults = orderResultRows(results, normalRangeObj);
+  results.length = 0;
+  results.push(...orderedResults);
+
   // Determine overall status from individual results or use API value
-  let overallStatus: 'Normal' | 'Abnormal' | 'Critical' = 'Normal';
+  let overallStatus: ResultStatus = 'Normal';
   if (apiResult.overall_status) {
-    const statusMap: Record<string, 'Normal' | 'Abnormal' | 'Critical'> = {
-      'normal': 'Normal',
-      'abnormal': 'Abnormal',
-      'critical': 'Critical',
+    const statusMap: Record<string, ResultStatus> = {
+      normal: 'Normal',
+      abnormal: 'Abnormal',
+      critical: 'Critical',
     };
-    overallStatus = statusMap[apiResult.overall_status] || 'Normal';
+    overallStatus = statusMap[apiResult.overall_status] || deriveOverallStatus(results);
   } else if (results.length > 0) {
-    // Determine from results
-    if (results.some(r => r.status === 'Critical')) overallStatus = 'Critical';
-    else if (results.some(r => r.status === 'Abnormal')) overallStatus = 'Abnormal';
+    overallStatus = deriveOverallStatus(results);
   }
 
   const order = (apiResult as any).order || (test as any).order;
@@ -318,6 +287,7 @@ const transformResult = (
 };
 
 export default function ResultsVerificationPage() {
+  const serverToday = useServerToday();
   const [results, setResults] = useState<LabResult[]>([]);
   const [verifiedResults, setVerifiedResults] = useState<LabResult[]>([]);
   const [templateNormalRangesByCode, setTemplateNormalRangesByCode] = useState<Record<string, any>>({});
@@ -419,7 +389,7 @@ export default function ResultsVerificationPage() {
       if (debouncedSearch) params.search = debouncedSearch;
       if (genderFilter !== 'all') params.gender = genderFilter;
       if (processingFilter !== 'all') params.processing_method = processingFilter;
-      Object.assign(params, buildDateQuery(dateFilter));
+      Object.assign(params, buildDateQuery(dateFilter, serverToday));
 
       const response = await labService.getPendingVerifications(params);
       setTotalCount(response.count || response.results.length);
@@ -432,7 +402,7 @@ export default function ResultsVerificationPage() {
     } finally {
       setLoading(false);
     }
-  }, [currentPage, itemsPerPage, statusFilter, priorityFilter, debouncedSearch, genderFilter, processingFilter, dateFilter, ensureTemplateRangesMap]);
+  }, [currentPage, itemsPerPage, statusFilter, priorityFilter, debouncedSearch, genderFilter, processingFilter, dateFilter, serverToday, ensureTemplateRangesMap]);
 
   const loadVerifiedResults = useCallback(async () => {
     try {
@@ -456,7 +426,7 @@ export default function ResultsVerificationPage() {
       if (genderFilter !== 'all') params.gender = genderFilter;
       if (processingFilter !== 'all') params.processing_method = processingFilter;
 
-      Object.assign(params, buildDateQuery(dateFilter));
+      Object.assign(params, buildDateQuery(dateFilter, serverToday));
 
       const response = await labService.getVerifiedResults(params);
       setVerifiedTotalCount(response.count || response.results.length);
@@ -468,7 +438,7 @@ export default function ResultsVerificationPage() {
     } finally {
       setVerifiedLoading(false);
     }
-  }, [verifiedCurrentPage, itemsPerPage, statusFilter, priorityFilter, debouncedSearch, dateFilter, genderFilter, processingFilter, ensureTemplateRangesMap]);
+  }, [verifiedCurrentPage, itemsPerPage, statusFilter, priorityFilter, debouncedSearch, dateFilter, serverToday, genderFilter, processingFilter, ensureTemplateRangesMap]);
 
   const loadVerificationCounts = useCallback(async () => {
     const base = {
@@ -477,7 +447,7 @@ export default function ResultsVerificationPage() {
       search: debouncedSearch || undefined,
       gender: genderFilter !== 'all' ? genderFilter : undefined,
       processing_method: processingFilter !== 'all' ? processingFilter : undefined,
-      ...buildDateQuery(dateFilter),
+      ...buildDateQuery(dateFilter, serverToday),
     } as const;
 
     const [pendingStats, verifiedStats] = await Promise.all([
@@ -487,7 +457,7 @@ export default function ResultsVerificationPage() {
 
     setPendingTotalCount(pendingStats.total || 0);
     setVerifiedTotalCount(verifiedStats.total || 0);
-  }, [statusFilter, priorityFilter, debouncedSearch, dateFilter, genderFilter, processingFilter]);
+  }, [statusFilter, priorityFilter, debouncedSearch, dateFilter, serverToday, genderFilter, processingFilter]);
 
   // Load results from API when page or filters change
   useEffect(() => {
@@ -1154,7 +1124,7 @@ export default function ResultsVerificationPage() {
           <DialogContent className="w-[95vw] sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2 text-rose-600"><XCircle className="h-5 w-5" />Reject Result</DialogTitle>
-              <DialogDescription>Send back to lab technician for correction</DialogDescription>
+              <DialogDescription>Send back for correction</DialogDescription>
             </DialogHeader>
             {selectedResult && (
               <div className="space-y-4 py-4">

@@ -15,6 +15,8 @@ import { apiFetch } from '@/lib/api-client';
 import { roomService, patientService } from '@/lib/services';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
+import { getServerToday } from '@/lib/utils/serverTime';
+import { formatLocalYmd } from '@/lib/laboratory/constants';
 import { 
   DoorOpen, Search, Users, Clock, CheckCircle2, AlertTriangle,
   ArrowRight, Stethoscope, Activity, Loader2, Eye,
@@ -85,10 +87,16 @@ export default function RoomQueuePage() {
           console.warn('Could not load active sessions:', sessionErr);
         }
         
-        // Count consultations today per room
+        // Count consultations today per room — anchor "today" on the server's
+        // calendar so the count matches the rest of the app.
         let todaySessions: any[] = [];
         try {
-          const today = new Date().toISOString().split('T')[0];
+          let today: string;
+          try {
+            today = await getServerToday();
+          } catch {
+            today = formatLocalYmd(new Date());
+          }
           const todaySessionsResult = await apiFetch<{ results: any[] }>(`/consultation/sessions/?started_at__date=${today}&page_size=1000`);
           todaySessions = todaySessionsResult.results || [];
         } catch (todayErr) {

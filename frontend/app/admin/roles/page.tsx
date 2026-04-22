@@ -116,8 +116,8 @@ const allPagePermissions: PagePermission[] = [
 
   // Eye Clinic
   { id: '/eyecare', name: 'Dashboard', description: 'Eye Clinic Dashboard', module: 'Eye Clinic' },
-  { id: '/eyecare/pool-queue', name: 'Pool Queue', description: 'Manage Eye Clinic pool queue', module: 'Eye Clinic' },
-  { id: '/eyecare/completed', name: 'Completed Orders', description: 'View completed Eye Clinic orders', module: 'Eye Clinic' },
+  { id: '/eyecare/orders', name: 'Orders', description: 'Manage eye clinic orders', module: 'Eye Clinic' },
+  { id: '/eyecare/completed', name: 'Completed Sessions', description: 'View completed eye clinic sessions', module: 'Eye Clinic' },
 
   // Analytics
   { id: '/analytics', name: 'Clinical Reports', description: 'View clinical reports', module: 'Analytics' },

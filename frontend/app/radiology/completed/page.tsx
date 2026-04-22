@@ -19,6 +19,8 @@ import {
   type CompletedRadiologyReport,
 } from '@/lib/radiology/completedRadiologyReport';
 import { downloadRadiologyReportFile, printRadiologyReport } from '@/lib/radiology/radiologyReportActions';
+import { formatLocalYmd } from '@/lib/laboratory/constants';
+import { useServerToday } from '@/hooks/use-server-today';
 
 import {
   CheckCircle2, Search, Eye, Clock, AlertTriangle,
@@ -27,6 +29,7 @@ import {
 import { joinDisplayParts } from '@/lib/utils/clinic-utils';
 
 export default function CompletedReportsPage() {
+  const serverToday = useServerToday();
   const [reports, setReports] = useState<CompletedRadiologyReport[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -57,31 +60,26 @@ export default function CompletedReportsPage() {
     };
   };
 
-  const buildDateQuery = (filter: string): Record<string, string> => {
-    if (filter === 'today') {
-      const today = new Date();
-      return { date: today.toISOString().split('T')[0] };
-    }
-    if (filter === 'week') {
-      const end = new Date();
-      const start = new Date();
-      start.setDate(end.getDate() - 7);
-      return {
-        start_date: start.toISOString().split('T')[0],
-        end_date: end.toISOString().split('T')[0],
-      };
-    }
-    if (filter === 'month') {
-      const end = new Date();
-      const start = new Date();
-      start.setMonth(end.getMonth() - 1);
-      return {
-        start_date: start.toISOString().split('T')[0],
-        end_date: end.toISOString().split('T')[0],
-      };
-    }
-    return {};
-  };
+  const buildDateQuery = useCallback(
+    (filter: string): Record<string, string> => {
+      // Anchor on server "today" so filters match the server calendar.
+      const anchor = serverToday ? new Date(`${serverToday}T00:00:00`) : new Date();
+      const anchorYmd = serverToday || formatLocalYmd(anchor);
+      if (filter === 'today') return { date: anchorYmd };
+      if (filter === 'week') {
+        const start = new Date(anchor);
+        start.setDate(anchor.getDate() - 7);
+        return { start_date: formatLocalYmd(start), end_date: anchorYmd };
+      }
+      if (filter === 'month') {
+        const start = new Date(anchor);
+        start.setMonth(anchor.getMonth() - 1);
+        return { start_date: formatLocalYmd(start), end_date: anchorYmd };
+      }
+      return {};
+    },
+    [serverToday],
+  );
 
   // Load clinics function
   const loadClinics = useCallback(async () => {
@@ -149,7 +147,7 @@ export default function CompletedReportsPage() {
     } finally {
       setLoading(false);
     }
-  }, [currentPage, itemsPerPage, statusFilter, searchQuery, dateFilter, clinicFilter, genderFilter, dateRange.from, dateRange.to]);
+  }, [currentPage, itemsPerPage, statusFilter, searchQuery, dateFilter, clinicFilter, genderFilter, dateRange.from, dateRange.to, buildDateQuery]);
 
   // Load clinics on component mount
   useEffect(() => {

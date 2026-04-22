@@ -32,6 +32,10 @@ export interface EyeOrder {
 export interface EyeSession {
   id: number;
   order: number;
+  /** Nested order payload from list/detail serializers */
+  order_details?: EyeOrder;
+  patient_name?: string;
+  patient_id?: string;
   session_number: number;
   status: 'scheduled' | 'in_progress' | 'completed' | 'cancelled';
   scheduled_at: string;
@@ -41,6 +45,7 @@ export interface EyeSession {
   notes: string;
   procedures_performed: string;
   findings: string;
+  created_at?: string;
 }
 
 export const eyeCareService = {
@@ -110,11 +115,12 @@ export const eyeCareService = {
   async getSessions(params?: {
     order?: number;
     status?: string;
+    page?: number;
     page_size?: number;
   }) {
     const queryString = new URLSearchParams(params as Record<string, string>).toString();
     const url = `/eyecare/sessions/${queryString ? `?${queryString}` : ''}`;
-    return apiFetch<{ results: EyeSession[] }>(url);
+    return apiFetch<{ results: EyeSession[]; count?: number }>(url);
   },
 
   /**

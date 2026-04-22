@@ -162,35 +162,86 @@ class RadiologyOrderViewSet(viewsets.ModelViewSet):
         gender = self.request.query_params.get('gender')
         if gender in ('male', 'female'):
             qs = qs.filter(patient__gender=gender)
+        # Date filtering — defaults to the order timestamp, but callers can
+        # ask for filtering on the study rejection timestamp instead
+        # (e.g. the "Rejected" tab, which wants "today's rejections" regardless
+        # of when the order was originally placed).
         exact_date = self.request.query_params.get('date')
         start_date = self.request.query_params.get('start_date')
         end_date = self.request.query_params.get('end_date')
+        date_field = self.request.query_params.get('date_field')
+        if date_field == 'rejected_at':
+            date_lookup = 'studies__rejected_at__date'
+        else:
+            date_lookup = 'ordered_at__date'
         if exact_date:
-            qs = qs.filter(ordered_at__date=exact_date)
+            qs = qs.filter(**{date_lookup: exact_date}).distinct()
         else:
             if start_date:
-                qs = qs.filter(ordered_at__date__gte=start_date)
+                qs = qs.filter(**{f'{date_lookup}__gte': start_date})
             if end_date:
-                qs = qs.filter(ordered_at__date__lte=end_date)
+                qs = qs.filter(**{f'{date_lookup}__lte': end_date})
+            if start_date or end_date:
+                qs = qs.distinct()
         return qs
 
     @action(detail=False, methods=['get'], url_path='stats')
     def stats(self, request):
-        qs = self.filter_queryset(self.get_queryset())
-        summary = qs.aggregate(
+        """
+        Server-side counts for radiology order dashboard cards/tabs.
+
+        Date semantics:
+          - All counts except ``rejected`` are scoped by ``ordered_at``.
+          - ``rejected`` is scoped by ``studies__rejected_at`` so "Today" on
+            the Rejected card reflects today's rejections regardless of when
+            the underlying orders were placed.
+        """
+        date = request.query_params.get('date')
+        start_date = request.query_params.get('start_date')
+        end_date = request.query_params.get('end_date')
+
+        base_qs = (
+            RadiologyOrder.objects.all()
+            .select_related('patient', 'doctor', 'visit', 'consultation_session', 'created_by')
+            .prefetch_related('studies')
+        )
+        pm = request.query_params.get('processing_method')
+        if pm in ('in_house', 'outsourced'):
+            base_qs = base_qs.filter(studies__processing_method=pm).distinct()
+        gender = request.query_params.get('gender')
+        if gender in ('male', 'female'):
+            base_qs = base_qs.filter(patient__gender=gender)
+        base_qs = self.filter_queryset(base_qs)
+
+        def with_date(qs, field):
+            if date:
+                return qs.filter(**{f'{field}__date': date})
+            narrowed = qs
+            if start_date:
+                narrowed = narrowed.filter(**{f'{field}__date__gte': start_date})
+            if end_date:
+                narrowed = narrowed.filter(**{f'{field}__date__lte': end_date})
+            return narrowed
+
+        ordered_scoped = with_date(base_qs, 'ordered_at')
+        rejected_scoped = with_date(base_qs, 'studies__rejected_at')
+
+        summary = ordered_scoped.aggregate(
             total=Count('id', distinct=True),
             pending=Count('id', filter=Q(studies__status='pending'), distinct=True),
             processing=Count('id', filter=Q(studies__status='processing'), distinct=True),
             results_ready=Count('id', filter=Q(studies__status='reported'), distinct=True),
-            rejected=Count('id', filter=Q(studies__status='rejected'), distinct=True),
             stat=Count('id', filter=Q(priority='stat'), distinct=True),
+        )
+        rejected_count = (
+            rejected_scoped.filter(studies__status='rejected').distinct().count()
         )
         return Response({
             'total': summary.get('total', 0) or 0,
             'pending': summary.get('pending', 0) or 0,
             'processing': summary.get('processing', 0) or 0,
             'results_ready': summary.get('results_ready', 0) or 0,
-            'rejected': summary.get('rejected', 0) or 0,
+            'rejected': rejected_count,
             'stat': summary.get('stat', 0) or 0,
         })
 

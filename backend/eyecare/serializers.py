@@ -61,6 +61,8 @@ class EyeSessionCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = EyeSession
         fields = [
-            'order', 'session_number', 'scheduled_at',
-            'notes', 'procedures_performed', 'findings',
+            'id', 'order', 'session_number', 'status', 'scheduled_at',
+            'started_at', 'completed_at', 'duration_minutes',
+            'notes', 'procedures_performed', 'findings', 'created_at',
         ]
+        read_only_fields = ['id', 'created_at']

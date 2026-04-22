@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect, useCallback } from 'react';
+import { Fragment, useState, useMemo, useEffect, useCallback } from 'react';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -21,6 +21,8 @@ import { labService, formatPatientGenderLabel, type LabOrder as ApiLabOrder, typ
 import { Icd10DiagnosesBlock } from '@/components/medical/Icd10DiagnosesBlock';
 import { transformLabTestStatus, transformPriority, transformToBackendPriority, transformProcessingMethod, transformToBackendProcessingMethod } from '@/lib/services/transformers';
 import { buildDateQuery, formatRejectionReason, LAB_ORDER_STATUS, LAB_TEST_STATUS } from '@/lib/laboratory/constants';
+import { useServerToday } from '@/hooks/use-server-today';
+import { buildEntryTemplate, classifyValue, type TemplateField } from '@/lib/laboratory/template-utils';
 import { PatientAvatar } from "@/components/shared/PatientAvatar";
 import {
   TestTube, Search, Eye, Clock, CheckCircle2, Activity, FlaskConical, Loader2,
@@ -689,6 +691,7 @@ const collectionMethods: Record<string, { name: string; icon: string; descriptio
 const OUTSOURCED_LAB_OTHER = '__other__';
 
 export default function LabOrdersPage() {
+  const serverToday = useServerToday();
   const [orders, setOrders] = useState<LabOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -750,71 +753,19 @@ export default function LabOrdersPage() {
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
 
   // Templates from API for result entry (params from Test Templates / normal_range)
-  const [apiTemplatesByCode, setApiTemplatesByCode] = useState<Record<string, { name: string; fields: { name: string; unit: string; normalRange: string }[] }>>({});
+  const [apiTemplatesByCode, setApiTemplatesByCode] = useState<Record<string, { name: string; fields: TemplateField[] }>>({});
 
   const normalizeSampleTypeForCollection = (sampleType: string | undefined): string => {
     if (!sampleType) return 'Other';
     return collectionMethods[sampleType] ? sampleType : 'Other';
   };
 
-  const getNormalRangeText = (meta: any): string => {
-    let normalRange = meta?.range || meta?.normal_range || meta?.normalRange || meta?.normalRangeText || '';
-    if (!normalRange && meta?.min != null && meta?.max != null) normalRange = `${meta.min}-${meta.max}`;
-    if (!normalRange && meta?.normalRangeMin != null && meta?.normalRangeMax != null) normalRange = `${meta.normalRangeMin}-${meta.normalRangeMax}`;
-    return normalRange;
-  };
-
-  const getTemplateFieldsFromNormalRange = (nr: any): { name: string; unit: string; normalRange: string }[] => {
-    if (!nr || typeof nr !== 'object') return [];
-    const order = Array.isArray(nr._order) ? nr._order : null;
-    const keys = order
-      ? order.filter((k: any) => typeof k === 'string' && nr[k] != null)
-      : Object.keys(nr).filter((k) => !k.startsWith('_'));
-
-    return keys.map((name: string) => {
-      const v = nr[name];
-      return { name, unit: v?.unit || '', normalRange: getNormalRangeText(v) };
-    });
-  };
-
-  const templateFromNormalRange = (code: string, nr: any) => {
-    if (!nr || typeof nr !== 'object') return undefined;
-    const order = Array.isArray(nr._order) ? nr._order : null;
-    const baseKeys = order
-      ? order.filter((k: any) => typeof k === 'string' && nr[k] != null)
-      : Object.keys(nr).filter((k) => !k.startsWith('_'));
-
-    const normalizeMeta = (meta: any) => ({
-      unit: String(meta?.unit ?? '').trim().toLowerCase(),
-      range: String(meta?.range ?? meta?.normal_range ?? meta?.normalRange ?? meta?.normalRangeText ?? '').trim().toLowerCase(),
-      min: String(meta?.min ?? meta?.normalRangeMin ?? '').trim().toLowerCase(),
-      max: String(meta?.max ?? meta?.normalRangeMax ?? '').trim().toLowerCase(),
-    });
-
-    // Single-analyte templates may expose "Result" as an alias for the real parameter.
-    // Avoid showing both fields in result entry UI.
-    let keys = [...baseKeys];
-    if (keys.includes('Result') && keys.length > 1) {
-      const resultMeta = normalizeMeta(nr['Result']);
-      const aliasTarget = keys.find((k) => k !== 'Result' && JSON.stringify(normalizeMeta(nr[k])) === JSON.stringify(resultMeta));
-      if (aliasTarget) {
-        keys = keys.filter((k) => k !== 'Result');
-      }
-    }
-
-    const fields = keys.map((name: string) => {
-      const v = nr[name];
-      return { name, unit: v?.unit || '', normalRange: getNormalRangeText(v) };
-    });
-    return fields.length ? { name: code, fields } : undefined;
-  };
-
   // Resolve template for result entry:
-  // 1) test-specific `template_normal_range` (best: always matches backend)
-  // 2) templates list from API
-  // 3) hardcoded fallback
-  const getTemplateForTest = (test: LabTest): { name: string; fields: { name: string; unit: string; normalRange: string }[] } | undefined => {
-    const fromTest = templateFromNormalRange(test.code, test.templateNormalRange);
+  //   1) test-specific `template_normal_range` (best: always matches backend)
+  //   2) templates list from API (/laboratory/templates)
+  //   3) legacy hardcoded fallback (no min/max, so no classification)
+  const getTemplateForTest = (test: LabTest): { name: string; fields: TemplateField[] } | undefined => {
+    const fromTest = buildEntryTemplate(test.code, test.templateNormalRange);
     if (fromTest) return fromTest;
     return apiTemplatesByCode[test.code] || testTemplates[test.code];
   };
@@ -1042,11 +993,18 @@ export default function LabOrdersPage() {
       if (processingFilter !== 'all') {
         params.processing_method = processingFilter;
       }
-      Object.assign(params, buildDateQuery(dateFilter));
+      Object.assign(params, buildDateQuery(dateFilter, serverToday));
       if (dateRange.from || dateRange.to) {
         delete params.date;
         if (dateRange.from) params.start_date = dateRange.from;
         if (dateRange.to) params.end_date = dateRange.to;
+      }
+
+      // On the Rework Required tab, filter the list by rejection date rather
+      // than order date — users expect "Today" on this tab to mean items
+      // rejected today, not items originally ordered today.
+      if (activeTab === 'rejected') {
+        params.date_field = 'rejected_at';
       }
 
       if (genderFilter !== 'all') {
@@ -1060,7 +1018,7 @@ export default function LabOrdersPage() {
           search: searchQuery ? searchQuery.trim() : undefined,
           processing_method: processingFilter !== 'all' ? processingFilter : undefined,
           gender: genderFilter !== 'all' ? genderFilter : undefined,
-          ...buildDateQuery(dateFilter),
+          ...buildDateQuery(dateFilter, serverToday),
           ...(dateRange.from || dateRange.to
             ? { start_date: dateRange.from || undefined, end_date: dateRange.to || undefined }
             : {}),
@@ -1112,7 +1070,7 @@ export default function LabOrdersPage() {
         setLoading(false);
       }
     }
-  }, [currentPage, itemsPerPage, priorityFilter, searchQuery, processingFilter, genderFilter, dateFilter, dateRange.from, dateRange.to]);
+  }, [currentPage, itemsPerPage, priorityFilter, searchQuery, processingFilter, genderFilter, dateFilter, dateRange.from, dateRange.to, serverToday, activeTab]);
 
   // Load orders from API when page or filters change
   useEffect(() => {
@@ -1147,11 +1105,10 @@ export default function LabOrdersPage() {
   const loadTemplatesForResults = useCallback(async () => {
     try {
       const { results } = await labService.getTemplates({ page_size: 1000 });
-      const next: Record<string, { name: string; fields: { name: string; unit: string; normalRange: string }[] }> = {};
+      const next: Record<string, { name: string; fields: TemplateField[] }> = {};
       for (const t of results) {
-        const nr = (t as any).normal_range;
-        const fields = getTemplateFieldsFromNormalRange(nr);
-        if (fields.length) next[t.code] = { name: t.name, fields };
+        const tpl = buildEntryTemplate(t.code, (t as any).normal_range);
+        if (tpl) next[t.code] = { name: t.name, fields: tpl.fields };
       }
       setApiTemplatesByCode(prev => ({ ...prev, ...next }));
     } catch (e) {
@@ -1332,21 +1289,12 @@ export default function LabOrdersPage() {
           return;
         }
 
-        // Check for critical values that require confirmation
-        const criticalValues = template.fields.filter(field => {
-          const value = resultValues[field.name];
-          const numValue = parseFloat(value);
-          if (isNaN(numValue)) return false;
-
-          if (field.name.toLowerCase().includes('glucose') && selectedTest.code === 'FBS') {
-            return numValue < 40 || numValue > 600;
-          } else if (field.name.toLowerCase().includes('glucose') && selectedTest.code === 'RBS') {
-            return numValue < 40 || numValue > 600;
-          } else if (field.name.toLowerCase().includes('hemoglobin') || field.name.toLowerCase().includes('hb')) {
-            return numValue < 7 || numValue > 20;
-          }
-          return false;
-        });
+        // Critical values come from the template (critical_min/critical_max seeded in
+        // seed_lab_templates.py). Any analyte whose typed value trips that tier warrants
+        // an explicit confirmation before submission.
+        const criticalValues = template.fields.filter(
+          (field) => classifyValue(resultValues[field.name], field) === 'Critical'
+        );
 
         if (criticalValues.length > 0) {
           const confirmed = window.confirm(
@@ -2654,74 +2602,76 @@ export default function LabOrdersPage() {
                         {selectedTest.name} ({selectedTest.code})
                       </CardTitle>
                     </CardHeader>
-                    <CardContent className="space-y-3">
+                    <CardContent>
                       {(() => {
                         const tpl = getTemplateForTest(selectedTest);
-                        return tpl ? tpl.fields.map(field => {
-                          const value = resultValues[field.name] || '';
-                          const numValue = parseFloat(value);
-                          let validationStatus: 'normal' | 'warning' | 'critical' = 'normal';
-
-                          // Basic critical value validation
-                          if (!isNaN(numValue) && value.trim() !== '') {
-                            if (field.name.toLowerCase().includes('glucose') && selectedTest.code === 'FBS') {
-                              if (numValue < 40 || numValue > 600) validationStatus = 'critical';
-                              else if (numValue < 70 || numValue > 140) validationStatus = 'warning';
-                            } else if (field.name.toLowerCase().includes('glucose') && selectedTest.code === 'RBS') {
-                              if (numValue < 40 || numValue > 600) validationStatus = 'critical';
-                              else if (numValue < 70 || numValue > 200) validationStatus = 'warning';
-                            } else if (field.name.toLowerCase().includes('hemoglobin') || field.name.toLowerCase().includes('hb')) {
-                              if (numValue < 7 || numValue > 20) validationStatus = 'critical';
-                              else if (numValue < 12 || numValue > 16) validationStatus = 'warning';
-                            }
-                          }
-
+                        if (!tpl) {
                           return (
-                            <div key={field.name} className="space-y-1">
-                              <div className="flex items-center gap-4">
-                            <Label className="text-sm min-w-0 flex-shrink-0">{field.name}</Label>
-                            <div className="flex items-center gap-2 flex-1">
+                            <div className="space-y-2">
+                              <Label>Result Value</Label>
                               <Input
-                                    value={value}
-                                onChange={(e) => setResultValues(prev => ({
-                                  ...prev,
-                                  [field.name]: e.target.value
-                                }))}
-                                placeholder="Value"
-                                    className={`w-24 flex-shrink-0 ${
-                                      validationStatus === 'critical' ? 'border-red-500 focus:border-red-500' :
-                                      validationStatus === 'warning' ? 'border-amber-500 focus:border-amber-500' : ''
-                                    }`}
+                                value={resultValues['Result'] || ''}
+                                onChange={(e) => setResultValues({ Result: e.target.value })}
+                                placeholder="Enter result..."
                               />
-                              {field.unit && <span className="text-sm text-muted-foreground">{field.unit}</span>}
-                            </div>
-                            {field.normalRange && <span className="text-xs text-muted-foreground flex-shrink-0">Normal: {field.normalRange}</span>}
-                          </div>
-                              {validationStatus === 'critical' && (
-                                <div className="text-xs text-red-600 dark:text-red-400 flex items-center gap-1 ml-32">
-                                  <AlertTriangle className="h-3 w-3" />
-                                  Critical value! Please verify and confirm.
-                                </div>
-                              )}
-                              {validationStatus === 'warning' && (
-                                <div className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1 ml-32">
-                                  <AlertTriangle className="h-3 w-3" />
-                                  Abnormal value - outside normal range.
-                                </div>
-                              )}
                             </div>
                           );
-                        }) : (
-                        <div className="space-y-2">
-                          <Label>Result Value</Label>
-                          <Input
-                            value={resultValues['Result'] || ''}
-                            onChange={(e) => setResultValues({ Result: e.target.value })}
-                            placeholder="Enter result..."
-                          />
-                        </div>
-                      );
-                    })()}
+                        }
+
+                        // Stable 4-column grid (parameter | value | unit | normal range).
+                        // The warning row spans all 4 columns so neighbouring rows don't shift
+                        // when a value trips Abnormal/Critical.
+                        return (
+                          <div className="grid grid-cols-[minmax(10rem,14rem)_7rem_5rem_1fr] gap-x-3 gap-y-2 items-center">
+                            {tpl.fields.map((field) => {
+                              const value = resultValues[field.name] || '';
+                              const status = classifyValue(value, field);
+                              return (
+                                <Fragment key={field.name}>
+                                  <Label className="text-sm">{field.name}</Label>
+                                  <Input
+                                    value={value}
+                                    onChange={(e) =>
+                                      setResultValues((prev) => ({
+                                        ...prev,
+                                        [field.name]: e.target.value,
+                                      }))
+                                    }
+                                    placeholder="Value"
+                                    className={
+                                      status === 'Critical'
+                                        ? 'border-red-500 focus:border-red-500'
+                                        : status === 'Abnormal'
+                                          ? 'border-amber-500 focus:border-amber-500'
+                                          : ''
+                                    }
+                                  />
+                                  <span className="text-sm text-muted-foreground truncate">
+                                    {field.unit}
+                                  </span>
+                                  <span className="text-xs text-muted-foreground truncate">
+                                    {field.normalRange ? `Normal: ${field.normalRange}` : ''}
+                                  </span>
+                                  {status !== 'Normal' && (
+                                    <div
+                                      className={`col-span-4 text-xs flex items-center gap-1 -mt-1 ${
+                                        status === 'Critical'
+                                          ? 'text-red-600 dark:text-red-400'
+                                          : 'text-amber-600 dark:text-amber-400'
+                                      }`}
+                                    >
+                                      <AlertTriangle className="h-3 w-3" />
+                                      {status === 'Critical'
+                                        ? 'Critical value! Please verify and confirm.'
+                                        : 'Abnormal value — outside normal range.'}
+                                    </div>
+                                  )}
+                                </Fragment>
+                              );
+                            })}
+                          </div>
+                        );
+                      })()}
                     </CardContent>
                   </Card>
                 ) : (

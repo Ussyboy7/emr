@@ -9,6 +9,8 @@ import { Loader2, FlaskConical, TestTube, FileSearch, Clock, CheckCircle2, Alert
 import Link from 'next/link';
 import { labService } from '@/lib/services';
 import { joinDisplayParts } from '@/lib/utils/clinic-utils';
+import { getServerToday } from '@/lib/utils/serverTime';
+import { formatLocalYmd } from '@/lib/laboratory/constants';
 
 export default function LaboratoryPage() {
   const [loading, setLoading] = useState(true);
@@ -27,9 +29,17 @@ export default function LaboratoryPage() {
   const loadStats = async () => {
     try {
       setLoading(true);
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const date = today.toISOString().split('T')[0];
+      // Anchor on the server's calendar so "today" stats line up with what
+      // the rest of the app shows. Falls back to client-local if the
+      // server-time endpoint is unreachable.
+      let date: string;
+      try {
+        date = await getServerToday();
+      } catch {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        date = formatLocalYmd(today);
+      }
 
       const [orders, orderStats, verifiedStats] = await Promise.all([
         labService.getOrders({ page: 1, page_size: 5 }),
