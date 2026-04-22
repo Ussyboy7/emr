@@ -108,6 +108,12 @@ class Command(BaseCommand):
         RadiologyOrder.objects.all().delete()
         PrescriptionItem.objects.all().delete()
         Prescription.objects.all().delete()
+        # Delete stock-related records first (they have protected FKs to MedicationInventory)
+        StockIssueLine.objects.all().delete()
+        StockIssue.objects.all().delete()
+        StockRequestItem.objects.all().delete()
+        StockRequest.objects.all().delete()
+        DispensaryReceiptLine.objects.all().delete()
         MedicationInventory.objects.all().delete()
         Medication.objects.all().delete()
         GenericMedication.objects.all().delete()
@@ -440,7 +446,7 @@ class Command(BaseCommand):
         user_data = [
             {
                 'username': 'admin',
-                'email': 'admin@npa.gov.ng',
+                'email': 'admin@nigerianports.gov.ng',
                 'first_name': '',
                 'last_name': '',
                 'system_role': 'System Administrator',
@@ -450,7 +456,7 @@ class Command(BaseCommand):
             },
             {
                 'username': 'doctor',
-                'email': 'doctor@npa.gov.ng',
+                'email': 'doctor@nigerianports.gov.ng',
                 'first_name': 'John',
                 'last_name': 'Okafor',
                 'system_role': 'Medical Doctor',
@@ -458,7 +464,7 @@ class Command(BaseCommand):
             },
             {
                 'username': 'nurse',
-                'email': 'nurse@npa.gov.ng',
+                'email': 'nurse@nigerianports.gov.ng',
                 'first_name': 'Mary',
                 'last_name': 'Adebayo',
                 'system_role': 'Nursing Officer',
@@ -466,7 +472,7 @@ class Command(BaseCommand):
             },
             {
                 'username': 'labtech',
-                'email': 'labtech@npa.gov.ng',
+                'email': 'labtech@nigerianports.gov.ng',
                 'first_name': 'Ibrahim',
                 'last_name': 'Musa',
                 'system_role': 'Laboratory Scientist',
@@ -474,7 +480,7 @@ class Command(BaseCommand):
             },
             {
                 'username': 'pharmacist',
-                'email': 'pharmacist@npa.gov.ng',
+                'email': 'pharmacist@nigerianports.gov.ng',
                 'first_name': 'Chika',
                 'last_name': 'Nwosu',
                 'system_role': 'Pharmacist',
@@ -482,7 +488,7 @@ class Command(BaseCommand):
             },
             {
                 'username': 'radiologist',
-                'email': 'radiologist@npa.gov.ng',
+                'email': 'radiologist@nigerianports.gov.ng',
                 'first_name': 'Fatima',
                 'last_name': 'Bello',
                 'system_role': 'Radiologist',
@@ -490,7 +496,7 @@ class Command(BaseCommand):
             },
             {
                 'username': 'physio',
-                'email': 'physio@npa.gov.ng',
+                'email': 'physio@nigerianports.gov.ng',
                 'first_name': 'Ahmed',
                 'last_name': 'Yusuf',
                 'system_role': 'Physiotherapist',
@@ -498,11 +504,298 @@ class Command(BaseCommand):
             },
             {
                 'username': 'records',
-                'email': 'records@npa.gov.ng',
+                'email': 'records@nigerianports.gov.ng',
                 'first_name': 'Tunde',
                 'last_name': 'Lawal',
                 'system_role': 'Medical Records Officer',
                 'employee_id': 'NPA-REC-001',
+            },
+            # New Lab Users
+            {
+                'username': 'b.muhamma',
+                'email': 'b.muhamma@nigerianports.gov.ng',
+                'first_name': 'Bashir',
+                'last_name': 'Usman Muhamma',
+                'system_role': 'Laboratory Scientist',
+            },
+            {
+                'username': 'a.jamtari',
+                'email': 'a.jamtari@nigerianports.gov.ng',
+                'first_name': 'Abubakar',
+                'last_name': 'Adam Jamtari',
+                'system_role': 'Laboratory Scientist',
+            },
+            {
+                'username': 'deborah',
+                'email': 'deborah@nigerianports.gov.ng',
+                'first_name': 'Deborah',
+                'last_name': '',
+                'system_role': 'Laboratory Scientist',
+            },
+            {
+                'username': 'eme',
+                'email': 'eme@nigerianports.gov.ng',
+                'first_name': 'Eme',
+                'last_name': '',
+                'system_role': 'Laboratory Scientist',
+            },
+            {
+                'username': 'simi',
+                'email': 'simi@nigerianports.gov.ng',
+                'first_name': 'Simi',
+                'last_name': '',
+                'system_role': 'Laboratory Scientist',
+            },
+            {
+                'username': 'daniel',
+                'email': 'daniel@nigerianports.gov.ng',
+                'first_name': 'Daniel',
+                'last_name': '',
+                'system_role': 'Laboratory Scientist',
+            },
+            {
+                'username': 'gemma',
+                'email': 'gemma@nigerianports.gov.ng',
+                'first_name': 'Gemma',
+                'last_name': '',
+                'system_role': 'Laboratory Scientist',
+            },
+            {
+                'username': 'ifunaya',
+                'email': 'ifunaya@nigerianports.gov.ng',
+                'first_name': 'Ifunaya',
+                'last_name': '',
+                'system_role': 'Laboratory Scientist',
+            },
+            # New Medical Records Users
+            {
+                'username': 'n.chiedo',
+                'email': 'n.chiedo@nigerianports.gov.ng',
+                'first_name': 'Nonyerem',
+                'last_name': 'Chiedo',
+                'system_role': 'Medical Records Officer',
+            },
+            {
+                'username': 'o.janet',
+                'email': 'o.janet@nigerianports.gov.ng',
+                'first_name': 'Adaramola',
+                'last_name': 'Janet Oluwaseun',
+                'system_role': 'Medical Records Officer',
+            },
+            {
+                'username': 'zaynaboyegunle',
+                'email': 'zaynaboyegunle@nigerianports.gov.ng',
+                'first_name': 'Oyegunle',
+                'last_name': 'Zaynab',
+                'system_role': 'Medical Records Officer',
+            },
+            {
+                'username': 'shoyemimary3',
+                'email': 'shoyemimary3@nigerianports.gov.ng',
+                'first_name': 'Shoyemi',
+                'last_name': 'Mary',
+                'system_role': 'Medical Records Officer',
+            },
+            {
+                'username': 'ifeoluwaonab19',
+                'email': 'ifeoluwaonab19@nigerianports.gov.ng',
+                'first_name': 'Onabanjo',
+                'last_name': 'Ifeoluwa Hannah',
+                'system_role': 'Medical Records Officer',
+            },
+            {
+                'username': 'ibukuntoyin262',
+                'email': 'ibukuntoyin262@nigerianports.gov.ng',
+                'first_name': 'Omowunmi',
+                'last_name': 'Ibukunoluwa Oluwatoyin',
+                'system_role': 'Medical Records Officer',
+            },
+            {
+                'username': 'samuelhelen0329',
+                'email': 'samuelhelen0329@nigerianports.gov.ng',
+                'first_name': 'Samuel',
+                'last_name': 'Helen',
+                'system_role': 'Medical Records Officer',
+            },
+            {
+                'username': 'b.lois',
+                'email': 'b.lois@nigerianports.gov.ng',
+                'first_name': 'Ogunleye',
+                'last_name': 'Lois',
+                'system_role': 'Medical Records Officer',
+            },
+            {
+                'username': 'm.maigana',
+                'email': 'm.maigana@nigerianports.gov.ng',
+                'first_name': 'Musa',
+                'last_name': 'Maigana',
+                'system_role': 'Medical Records Officer',
+            },
+            {
+                'username': 'b.bashir',
+                'email': 'b.bashir@nigerianports.gov.ng',
+                'first_name': 'Bala',
+                'last_name': 'Bashir Muri',
+                'system_role': 'Medical Records Officer',
+            },
+            {
+                'username': 'm.oyekanmi',
+                'email': 'm.oyekanmi@nigerianports.gov.ng',
+                'first_name': 'Oyekanmi',
+                'last_name': 'Motunrayo Aminat',
+                'system_role': 'Medical Records Officer',
+            },
+            {
+                'username': 'd.adesanya',
+                'email': 'd.adesanya@nigerianports.gov.ng',
+                'first_name': 'Adesanya',
+                'last_name': 'Deborah Adepeju',
+                'system_role': 'Medical Records Officer',
+            },
+            {
+                'username': 'o.kolawole',
+                'email': 'o.kolawole@nigerianports.gov.ng',
+                'first_name': 'Kolawole',
+                'last_name': 'Oluwanifesimi Esther',
+                'system_role': 'Medical Records Officer',
+            },
+            # New Pharmacy Users
+            {
+                'username': 'a.bashir',
+                'email': 'a.bashir@nigerianports.gov.ng',
+                'first_name': 'Abbas',
+                'last_name': 'Bashir',
+                'system_role': 'Pharmacist',
+            },
+            {
+                'username': 'f.usman',
+                'email': 'f.usman@nigerianports.gov.ng',
+                'first_name': 'Fadila',
+                'last_name': 'Usman',
+                'system_role': 'Pharmacist',
+            },
+            {
+                'username': 'saadatu',
+                'email': 'saadatu@nigerianports.gov.ng',
+                'first_name': 'Saadatu',
+                'last_name': '',
+                'system_role': 'Pharmacist',
+            },
+            {
+                'username': 'a.aliyu',
+                'email': 'a.aliyu@nigerianports.gov.ng',
+                'first_name': 'Aliyu',
+                'last_name': 'Alfa',
+                'system_role': 'Pharmacist',
+            },
+            {
+                'username': 'a.lawal',
+                'email': 'a.lawal@nigerianports.gov.ng',
+                'first_name': 'Abdulrasheed',
+                'last_name': 'Lawal',
+                'system_role': 'Pharmacist',
+            },
+            {
+                'username': 'nwoyi',
+                'email': 'nwoyi@nigerianports.gov.ng',
+                'first_name': 'Nwoyi',
+                'last_name': '',
+                'system_role': 'Pharmacist',
+            },
+            # New Radiology Users
+            {
+                'username': 'd.kotti-lawal',
+                'email': 'd.kotti-lawal@nigerianports.gov.ng',
+                'first_name': 'Dr. Kotti-Lawal',
+                'last_name': '',
+                'system_role': 'Radiologist',
+            },
+            {
+                'username': 'g.ademuyiwa',
+                'email': 'g.ademuyiwa@nigerianports.gov.ng',
+                'first_name': 'Mrs',
+                'last_name': 'Ademuyiwa Gertrude',
+                'system_role': 'Radiologist',
+            },
+            {
+                'username': 'j.chima',
+                'email': 'j.chima@nigerianports.gov.ng',
+                'first_name': 'Mrs',
+                'last_name': 'Chima Joy',
+                'system_role': 'Radiologist',
+            },
+            {
+                'username': 'n.dashe',
+                'email': 'n.dashe@nigerianports.gov.ng',
+                'first_name': 'Dashe',
+                'last_name': 'Nansik',
+                'system_role': 'Radiologist',
+            },
+            # New Doctors
+            {
+                'username': 'u.dabo',
+                'email': 'u.dabo@nigerianports.gov.ng',
+                'first_name': 'Dabo',
+                'last_name': 'Usman',
+                'system_role': 'Medical Doctor',
+            },
+            {
+                'username': 'i.abubakar',
+                'email': 'i.abubakar@nigerianports.gov.ng',
+                'first_name': 'Abubakar',
+                'last_name': 'Isa',
+                'system_role': 'Medical Doctor',
+            },
+            {
+                'username': 'n.ali',
+                'email': 'n.ali@nigerianports.gov.ng',
+                'first_name': 'Ali',
+                'last_name': 'Ngozi',
+                'system_role': 'Medical Doctor',
+            },
+            {
+                'username': 'h.muhammad',
+                'email': 'h.muhammad@nigerianports.gov.ng',
+                'first_name': 'Muhammad',
+                'last_name': 'Hauwau',
+                'system_role': 'Medical Doctor',
+            },
+            {
+                'username': 's.abubakar',
+                'email': 's.abubakar@nigerianports.gov.ng',
+                'first_name': 'Abubakar',
+                'last_name': 'Sadeeq',
+                'system_role': 'Medical Doctor',
+            },
+            # New Nursing Users
+            {
+                'username': 'd.akhabue',
+                'email': 'd.akhabue@nigerianports.gov.ng',
+                'first_name': 'Mrs',
+                'last_name': 'Deborah Akhabue',
+                'system_role': 'Nursing Officer',
+            },
+            {
+                'username': 'a.abubakar',
+                'email': 'a.abubakar@nigerianports.gov.ng',
+                'first_name': 'Mr',
+                'last_name': 'Aminu Halliru Abubakar',
+                'system_role': 'Nursing Officer',
+            },
+            {
+                'username': 's.suleiman',
+                'email': 's.suleiman@nigerianports.gov.ng',
+                'first_name': 'Safinah',
+                'last_name': 'Suleiman',
+                'system_role': 'Nursing Officer',
+            },
+            # New Physio Users
+            {
+                'username': 'e.freeman',
+                'email': 'e.freeman@nigerianports.gov.ng',
+                'first_name': 'Mrs',
+                'last_name': 'Freeman Elsie',
+                'system_role': 'Physiotherapist',
             },
         ]
 
