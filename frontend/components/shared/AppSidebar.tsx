@@ -149,6 +149,7 @@ const menuSections: MenuSection[] = [
       { label: "Results Verification", href: "/laboratory/verification", icon: ShieldCheck },
       { label: "Completed Tests", href: "/laboratory/completed", icon: CheckCircle },
       { label: "Test Templates", href: "/laboratory/templates", icon: FileText },
+      { label: "Analysis", href: "/laboratory/analytics", icon: TrendingUp },
     ],
   },
   {
@@ -167,6 +168,7 @@ const menuSections: MenuSection[] = [
       { label: "Drug master", href: "/pharmacy/drugs", icon: Pill },
       { label: "Central store", href: "/pharmacy/store", icon: Package },
       { label: "Store Requests", href: "/pharmacy/store/requests", icon: Send },
+      { label: "Inventory Analytics", href: "/pharmacy/analytics", icon: BarChart3 },
     ],
   },
   {
@@ -181,7 +183,7 @@ const menuSections: MenuSection[] = [
       { label: "Results Verification", href: "/radiology/verification", icon: ShieldCheck },
       { label: "Completed Studies", href: "/radiology/completed", icon: FileBarChart },
       { label: "Study Templates", href: "/radiology/templates", icon: FileText },
-
+      { label: "Analysis", href: "/radiology/analytics", icon: TrendingUp },
     ],
   },
   {
@@ -194,6 +196,7 @@ const menuSections: MenuSection[] = [
       { label: "Home", href: "/physiotherapy", icon: LayoutDashboard },
       { label: "Orders", href: "/physiotherapy/orders", icon: Users },
       { label: "Completed Sessions", href: "/physiotherapy/completed", icon: CheckCircle },
+      { label: "Analysis", href: "/physiotherapy/analytics", icon: TrendingUp },
     ],
   },
   {
@@ -206,6 +209,7 @@ const menuSections: MenuSection[] = [
       { label: "Home", href: "/eyecare", icon: LayoutDashboard },
       { label: "Orders", href: "/eyecare/orders", icon: Users },
       { label: "Completed Sessions", href: "/eyecare/completed", icon: CheckCircle },
+      { label: "Analysis", href: "/eyecare/analytics", icon: TrendingUp },
     ],
   },
   {
