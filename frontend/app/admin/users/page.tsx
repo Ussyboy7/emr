@@ -343,6 +343,10 @@ export default function UserManagementPage() {
         employee_id: formData.employeeId || undefined,
       } as any);
 
+      console.log('Created user:', newUser, 'id:', newUser.id);
+      if (!newUser.id) {
+        throw new Error('User created but no ID returned from server');
+      }
       await adminService.assignRoleToUser(newUser.id, Number(formData.accessRoleId));
       
       toast.success(`${formData.lastName}${formData.firstName ? ` ${formData.firstName}` : ''} has been added`);
