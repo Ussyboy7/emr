@@ -416,9 +416,45 @@ export default function ClinicDepartmentPage() {
   const loadDepartmentDetails = async (deptId: number) => {
     setLoadingDetails(true);
     try {
-      // Note: API doesn't support department filtering for users
-      const usersResponse = await adminService.getUsers({ page_size: 1000 }); // Get all users, filter client-side if needed
-      setDeptUsers(usersResponse.results || []);
+      // Find the department to get its code/name for role matching
+      const department = departments.find(d => parseInt(d.id) === deptId);
+      if (!department) {
+        console.error('Department not found:', deptId);
+        setDeptUsers([]);
+        return;
+      }
+
+      // Get all users
+      const usersResponse = await adminService.getUsers({ page_size: 1000 });
+      const allUsers = usersResponse.results || [];
+
+      // Filter users based on department's matching roles
+      const roleMappings: Record<string, string[]> = {
+        'CONSULT': ['Medical Doctor'],
+        'LAB': ['Laboratory Scientist'],
+        'MED-REC': ['Medical Records Officer'],
+        'NURSING': ['Nursing Officer'],
+        'PHARM': ['Pharmacist'],
+        'PHYSIO': ['Physiotherapist'],
+        'RAD': ['Radiologist'],
+        // Also check by name for flexibility
+        'Consultation': ['Medical Doctor'],
+        'Laboratory': ['Laboratory Scientist'],
+        'Medical Records': ['Medical Records Officer'],
+        'Nursing': ['Nursing Officer'],
+        'Pharmacy': ['Pharmacist'],
+        'Physiotherapy': ['Physiotherapist'],
+        'Radiology': ['Radiologist'],
+      };
+
+      const deptCode = String(department.code || '');
+      const deptName = String(department.name || '');
+      const matchingRoles = (roleMappings[deptCode] || roleMappings[deptName] || []) as string[];
+      const filteredUsers = allUsers.filter(user =>
+        user.is_active && user.system_role && matchingRoles.includes(user.system_role)
+      );
+
+      setDeptUsers(filteredUsers);
     } catch (err: any) {
       console.error('Error loading department details:', err);
       toast.error('Failed to load department details');
