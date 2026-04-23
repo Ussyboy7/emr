@@ -146,6 +146,33 @@ export default function ClinicDepartmentPage() {
         createdAt: clinic.created_at?.split('T')[0] || '',
       }));
       
+      // Calculate staff counts based on user roles
+      const calculateStaffCountForDepartment = (deptCode: string, deptName: string): number => {
+        // Map department codes/names to corresponding user roles
+        const roleMappings: Record<string, string[]> = {
+          'CONSULT': ['Medical Doctor'],
+          'LAB': ['Laboratory Scientist'],
+          'MED-REC': ['Medical Records Officer'],
+          'NURSING': ['Nursing Officer'],
+          'PHARM': ['Pharmacist'],
+          'PHYSIO': ['Physiotherapist'],
+          'RAD': ['Radiologist'],
+          // Also check by name for flexibility
+          'Consultation': ['Medical Doctor'],
+          'Laboratory': ['Laboratory Scientist'],
+          'Medical Records': ['Medical Records Officer'],
+          'Nursing': ['Nursing Officer'],
+          'Pharmacy': ['Pharmacist'],
+          'Physiotherapy': ['Physiotherapist'],
+          'Radiology': ['Radiologist'],
+        };
+
+        const matchingRoles = roleMappings[deptCode] || roleMappings[deptName] || [];
+        return availableUsers.filter(user =>
+          user.is_active && matchingRoles.includes(user.system_role)
+        ).length;
+      };
+
       // Transform departments
       const transformedDepts: Department[] = deptsResponse.results.map((dept: ApiDepartment) => ({
         id: dept.id.toString(),
@@ -153,7 +180,7 @@ export default function ClinicDepartmentPage() {
         name: dept.name,
         description: dept.description || '',
         head: dept.head_name || '',
-        staffCount: dept.staff_count || 0,
+        staffCount: calculateStaffCountForDepartment(dept.code, dept.name),
         clinics: dept.clinic_name ? [dept.clinic_name] : [],
         clinic: dept.clinic?.toString() || '',
         isActive: dept.is_active,
@@ -236,14 +263,18 @@ export default function ClinicDepartmentPage() {
         totalRooms: 0,
       };
     }
+
+    // Calculate total staff as sum of all department staff counts
+    const totalStaffCalculated = departments.reduce((sum, dept) => sum + dept.staffCount, 0);
+
     return {
       totalClinics: kpiStats.total_clinics,
       activeClinics: kpiStats.active_clinics,
       totalDepartments: kpiStats.total_departments,
-      totalStaff: kpiStats.total_staff_links,
+      totalStaff: totalStaffCalculated,
       totalRooms: kpiStats.total_rooms,
     };
-  }, [kpiStats]);
+  }, [kpiStats, departments]);
 
   const resetClinicForm = () => {
     setClinicForm({ code: '', name: '', description: '', location: '', phone: '', email: '', isActive: true });
@@ -671,13 +702,13 @@ export default function ClinicDepartmentPage() {
           <Card className="border-l-4 border-l-teal-500"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">Total facilities</p><p className="text-2xl sm:text-3xl font-bold text-teal-600 dark:text-teal-400">{stats.totalClinics}</p></div><Building2 className="h-8 w-8 text-teal-500 opacity-50" /></div></CardContent></Card>
           <Card className="border-l-4 border-l-emerald-500"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">Active facilities</p><p className="text-2xl sm:text-3xl font-bold text-emerald-600 dark:text-emerald-400">{stats.activeClinics}</p></div><CheckCircle2 className="h-8 w-8 text-emerald-500 opacity-50" /></div></CardContent></Card>
           <Card className="border-l-4 border-l-blue-500"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">Departments</p><p className="text-2xl sm:text-3xl font-bold text-blue-600 dark:text-blue-400">{stats.totalDepartments}</p></div><Activity className="h-8 w-8 text-blue-500 opacity-50" /></div></CardContent></Card>
-          <Card className="border-l-4 border-l-purple-500" title="Sum of staff_count on all loaded facilities and departments. One person may be counted twice if linked to both.">
+          <Card className="border-l-4 border-l-purple-500" title="Total staff count calculated by role assignments across all departments.">
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Staff (sum)</p>
                   <p className="text-2xl sm:text-3xl font-bold text-purple-600 dark:text-purple-400">{stats.totalStaff}</p>
-                  <p className="text-[10px] text-muted-foreground mt-0.5 leading-tight max-w-[10rem]">Facilities + departments; overlap possible</p>
+                  <p className="text-[10px] text-muted-foreground mt-0.5 leading-tight max-w-[10rem]">Calculated by user roles</p>
                 </div>
                 <Users className="h-8 w-8 text-purple-500 opacity-50 flex-shrink-0" />
               </div>
