@@ -241,12 +241,45 @@ export default function ClinicDepartmentPage() {
   }, [clinics, searchQuery, statusFilter]);
 
   const filteredDepartments = useMemo(() => {
-    return departments.filter(d => {
+    // Recalculate staff counts for departments using current user data
+    const calculateStaffCountForDepartment = (deptCode: string, deptName: string): number => {
+      // Map department codes/names to corresponding user roles
+      const roleMappings: Record<string, string[]> = {
+        'CONSULT': ['Medical Doctor'],
+        'LAB': ['Laboratory Scientist'],
+        'MED-REC': ['Medical Records Officer'],
+        'NURSING': ['Nursing Officer'],
+        'PHARM': ['Pharmacist'],
+        'PHYSIO': ['Physiotherapist'],
+        'RAD': ['Radiologist'],
+        // Also check by name for flexibility
+        'Consultation': ['Medical Doctor'],
+        'Laboratory': ['Laboratory Scientist'],
+        'Medical Records': ['Medical Records Officer'],
+        'Nursing': ['Nursing Officer'],
+        'Pharmacy': ['Pharmacist'],
+        'Physiotherapy': ['Physiotherapist'],
+        'Radiology': ['Radiologist'],
+      };
+
+      const matchingRoles = roleMappings[deptCode] || roleMappings[deptName] || [];
+      return availableUsers.filter(user =>
+        user.is_active && matchingRoles.includes(user.system_role)
+      ).length;
+    };
+
+    // Update departments with current staff counts
+    const updatedDepartments = departments.map(dept => ({
+      ...dept,
+      staffCount: calculateStaffCountForDepartment(dept.code, dept.name)
+    }));
+
+    return updatedDepartments.filter(d => {
       const matchesSearch = d.name.toLowerCase().includes(searchQuery.toLowerCase()) || d.code.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesStatus = statusFilter === 'all' || (statusFilter === 'Active' ? d.isActive : !d.isActive);
       return matchesSearch && matchesStatus;
     });
-  }, [departments, searchQuery, statusFilter]);
+  }, [departments, availableUsers, searchQuery, statusFilter]);
 
   const filteredVisitTypes = useMemo(() => {
     let list = visitTypesList;
