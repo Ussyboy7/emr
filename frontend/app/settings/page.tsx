@@ -202,9 +202,9 @@ export default function SettingsPage() {
       await apiFetch("/accounts/auth/change-password/", {
         method: "POST",
         body: JSON.stringify({
-          current_password: passwordData.currentPassword,
+          old_password: passwordData.currentPassword,
           new_password: passwordData.newPassword,
-          confirm_password: passwordData.confirmPassword,
+          new_password_confirm: passwordData.confirmPassword,
         }),
       });
 
