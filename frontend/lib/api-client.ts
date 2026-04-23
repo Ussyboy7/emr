@@ -49,7 +49,9 @@ const getCookie = (name: string): string | null => {
 const setCookie = (name: string, value: string, maxAgeSeconds?: number) => {
   if (!isBrowser()) return;
   const maxAge = typeof maxAgeSeconds === "number" ? `; Max-Age=${Math.max(0, Math.floor(maxAgeSeconds))}` : "";
-  document.cookie = `${name}=${encodeURIComponent(value)}; Path=/; SameSite=Lax${maxAge}`;
+  // Use domain=.npa.local so cookies work across both emr.npa.local and 172.16.0.32 (localhost)
+  const domain = typeof window !== 'undefined' && window.location.hostname.includes('npa.local') ? '; Domain=.npa.local' : '';
+  document.cookie = `${name}=${encodeURIComponent(value)}; Path=/${domain}; SameSite=Lax${maxAge}`;
 };
 
 const clearCookie = (name: string) => {
