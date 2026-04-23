@@ -213,8 +213,11 @@ export default function ClinicDepartmentPage() {
   }, []);
 
   useEffect(() => {
-    loadData();
-    loadUsers();
+    const loadAllData = async () => {
+      await loadUsers(); // Load users first
+      await loadData();  // Then load departments (which need users for staff counts)
+    };
+    loadAllData();
   }, [currentPage, itemsPerPage]);
 
   useEffect(() => {
