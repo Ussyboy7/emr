@@ -241,6 +241,15 @@ export default function ClinicDepartmentPage() {
   }, [clinics, searchQuery, statusFilter]);
 
   const filteredDepartments = useMemo(() => {
+    // Only calculate if we have user data
+    if (!availableUsers || availableUsers.length === 0) {
+      return departments.filter(d => {
+        const matchesSearch = d.name.toLowerCase().includes(searchQuery.toLowerCase()) || d.code.toLowerCase().includes(searchQuery.toLowerCase());
+        const matchesStatus = statusFilter === 'all' || (statusFilter === 'Active' ? d.isActive : !d.isActive);
+        return matchesSearch && matchesStatus;
+      });
+    }
+
     // Recalculate staff counts for departments using current user data
     const calculateStaffCountForDepartment = (deptCode: string, deptName: string): number => {
       // Map department codes/names to corresponding user roles
