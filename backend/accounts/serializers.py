@@ -295,6 +295,7 @@ class UserCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = [
+            "id",
             "username",
             "email",
             "first_name",
@@ -317,6 +318,7 @@ class UserCreateSerializer(serializers.ModelSerializer):
             "custom_pages_mode",
             "custom_pages",
         ]
+        read_only_fields = ["id"]
 
     def validate(self, attrs):
         if attrs["password"] != attrs["password_confirm"]:

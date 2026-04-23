@@ -204,6 +204,7 @@ class AdminService {
    * Assign an access Role to a user (drives `permissions.pages` for routing).
    */
   async assignRoleToUser(userId: number, roleId: number): Promise<UserRoleAssignment> {
+    console.log('Assigning role:', { userId, roleId, payload: { user: userId, role: roleId } });
     return apiFetch<UserRoleAssignment>('/permissions/user-roles/', {
       method: 'POST',
       body: JSON.stringify({ user: userId, role: roleId }),

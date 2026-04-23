@@ -1,6 +1,7 @@
 """
 Views for the Accounts app.
 """
+from typing import Optional
 from rest_framework import viewsets, status, permissions
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -213,7 +214,7 @@ class UserViewSet(viewsets.ModelViewSet):
             request=self.request,
         )
 
-    def _pick_default_role_for_user(self, user: User) -> Role | None:
+    def _pick_default_role_for_user(self, user: User) -> Optional[Role]:
         """
         Choose a default active Role for a user based on their `system_role` and department.
 
