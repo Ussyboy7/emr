@@ -131,7 +131,13 @@ export default function ClinicDepartmentPage() {
       ]);
       setTotalCount(clinicsResponse.count || clinicsResponse.results.length);
       
-      // Transform clinics
+      // Calculate clinical staff count (same for all facilities since they're physical sites)
+      const clinicalRoles = ['Medical Doctor', 'Nursing Officer', 'Laboratory Scientist', 'Pharmacist', 'Radiologist', 'Medical Records Officer', 'Physiotherapist'];
+      const clinicalStaffCount = availableUsers.filter(user =>
+        user.is_active && clinicalRoles.includes(user.system_role)
+      ).length;
+
+      // Transform clinics - use calculated staff count since assignments were removed
       const transformedClinics: Clinic[] = clinicsResponse.results.map((clinic: ApiClinic) => ({
         id: clinic.id.toString(),
         code: clinic.code,
@@ -140,7 +146,7 @@ export default function ClinicDepartmentPage() {
         location: clinic.location || '',
         phone: clinic.phone || '',
         email: clinic.email || '',
-        staffCount: clinic.staff_count || 0,
+        staffCount: clinicalStaffCount, // All clinical staff work at the facility
         roomCount: clinic.room_count || 0,
         isActive: clinic.is_active,
         createdAt: clinic.created_at?.split('T')[0] || '',
@@ -264,8 +270,11 @@ export default function ClinicDepartmentPage() {
       };
     }
 
-    // Calculate total staff as sum of all department staff counts
-    const totalStaffCalculated = departments.reduce((sum, dept) => sum + dept.staffCount, 0);
+    // Calculate total staff as count of all active users with clinical roles
+    const clinicalRoles = ['Medical Doctor', 'Nursing Officer', 'Laboratory Scientist', 'Pharmacist', 'Radiologist', 'Medical Records Officer', 'Physiotherapist'];
+    const totalStaffCalculated = availableUsers.filter(user =>
+      user.is_active && clinicalRoles.includes(user.system_role)
+    ).length;
 
     return {
       totalClinics: kpiStats.total_clinics,
@@ -274,7 +283,7 @@ export default function ClinicDepartmentPage() {
       totalStaff: totalStaffCalculated,
       totalRooms: kpiStats.total_rooms,
     };
-  }, [kpiStats, departments]);
+  }, [kpiStats, availableUsers]);
 
   const resetClinicForm = () => {
     setClinicForm({ code: '', name: '', description: '', location: '', phone: '', email: '', isActive: true });
@@ -702,13 +711,13 @@ export default function ClinicDepartmentPage() {
           <Card className="border-l-4 border-l-teal-500"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">Total facilities</p><p className="text-2xl sm:text-3xl font-bold text-teal-600 dark:text-teal-400">{stats.totalClinics}</p></div><Building2 className="h-8 w-8 text-teal-500 opacity-50" /></div></CardContent></Card>
           <Card className="border-l-4 border-l-emerald-500"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">Active facilities</p><p className="text-2xl sm:text-3xl font-bold text-emerald-600 dark:text-emerald-400">{stats.activeClinics}</p></div><CheckCircle2 className="h-8 w-8 text-emerald-500 opacity-50" /></div></CardContent></Card>
           <Card className="border-l-4 border-l-blue-500"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">Departments</p><p className="text-2xl sm:text-3xl font-bold text-blue-600 dark:text-blue-400">{stats.totalDepartments}</p></div><Activity className="h-8 w-8 text-blue-500 opacity-50" /></div></CardContent></Card>
-          <Card className="border-l-4 border-l-purple-500" title="Total staff count calculated by role assignments across all departments.">
+          <Card className="border-l-4 border-l-purple-500" title="Total count of active users with clinical roles (doctors, nurses, lab techs, etc.).">
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Staff (sum)</p>
                   <p className="text-2xl sm:text-3xl font-bold text-purple-600 dark:text-purple-400">{stats.totalStaff}</p>
-                  <p className="text-[10px] text-muted-foreground mt-0.5 leading-tight max-w-[10rem]">Calculated by user roles</p>
+                  <p className="text-[10px] text-muted-foreground mt-0.5 leading-tight max-w-[10rem]">Active clinical staff</p>
                 </div>
                 <Users className="h-8 w-8 text-purple-500 opacity-50 flex-shrink-0" />
               </div>
