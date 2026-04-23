@@ -28,27 +28,18 @@ import {
 // Types
 interface StaffMember {
   id: string;
-  staffId: string;
+  username: string;
   firstName: string;
   middleName?: string;
   lastName: string;
   email: string;
-  phone: string;
-  systemRole: string;
+  phone?: string;
+  systemRole?: string;
   accessRoleId?: number;
   restrictedPages?: string[];
-  department: string;
-  departmentId?: number;
-  clinic: string;
-  clinicId?: number;
+  status: string;
   employeeId?: string;
-  username?: string;
-  password?: string;
-  dateJoined: string;
-  status: 'Active' | 'Inactive';
   lastLogin?: string;
-  permissions: string[];
-  profilePhoto?: string;
 }
 
 interface Clinic {
@@ -66,9 +57,8 @@ interface Department {
 
 // Empty staff object for form initialization
 const emptyStaff: Partial<StaffMember> = {
-  firstName: '', middleName: '', lastName: '', email: '', phone: '', systemRole: '', accessRoleId: undefined, restrictedPages: [], department: '', clinic: '',
-  username: '', password: '',
-  dateJoined: new Date().toISOString().split('T')[0], status: 'Active', permissions: [], employeeId: ''
+  firstName: '', middleName: '', lastName: '', email: '', phone: '', systemRole: '', accessRoleId: undefined, restrictedPages: [],
+  username: '', status: 'Active', employeeId: ''
 };
 
 // Match backend SYSTEM_ROLE_CHOICES exactly (professional identity)
@@ -77,15 +67,13 @@ const statuses = ['All Status', 'Active', 'Inactive'];
 
 export default function UserManagementPage() {
   const [staff, setStaff] = useState<StaffMember[]>([]);
-  const [clinics, setClinics] = useState<Clinic[]>([]);
-  const [departments, setDepartments] = useState<Department[]>([]);
+
   const [accessRoles, setAccessRoles] = useState<ApiRole[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState('all');
-  const [departmentFilter, setDepartmentFilter] = useState('all');
-  const [clinicFilter, setClinicFilter] = useState('all');
+
   const [statusFilter, setStatusFilter] = useState('all');
   
   // Pagination
@@ -93,22 +81,21 @@ export default function UserManagementPage() {
   const [itemsPerPage, setItemsPerPage] = useState(50);
   const [totalCount, setTotalCount] = useState(0);
 
-  const loadClinicsAndDepartments = useCallback(async () => {
+  const loadRoles = useCallback(async () => {
     try {
-      const [clinicsResponse, departmentsResponse, rolesResponse] = await Promise.all([
-        adminService.getClinics({ page_size: 1000 }),
-        adminService.getDepartments({ page_size: 1000 }),
-        adminService.getRoles({ page_size: 1000 }),
-      ]);
-      setClinics(clinicsResponse.results);
-      setDepartments(departmentsResponse.results);
+      const rolesResponse = await adminService.getRoles({ page_size: 1000 });
       // Include inactive roles too so a user's currently-assigned role always appears/selects correctly.
       // (If we filter to active-only, the Select will show empty even though the assignment exists.)
       setAccessRoles(rolesResponse.results || []);
     } catch (err: any) {
-      console.error('Error loading clinics/departments:', err);
+      console.error('Error loading roles:', err);
     }
   }, []);
+
+  // Load roles from API
+  useEffect(() => {
+    loadRoles();
+  }, [loadRoles]);
 
   // Use a ref to track current page to avoid dependency loops
   const currentPageRef = useRef(currentPage);
@@ -141,15 +128,9 @@ export default function UserManagementPage() {
         username: user.username || '',
         systemRole: user.system_role || '',
         restrictedPages: (user as any).custom_pages_mode === "restrict" && Array.isArray((user as any).custom_pages) ? (user as any).custom_pages : [],
-        department: user.department_name || '',
-        departmentId: user.department,
-        clinic: user.clinic_name || '',
-        clinicId: user.clinic,
         employeeId: user.employee_id,
-        dateJoined: user.date_joined?.split('T')[0] || '',
         status: user.is_active ? 'Active' : 'Inactive' as StaffMember['status'],
         lastLogin: user.last_login,
-        permissions: [],
       }));
 
       setStaff(transformedStaff);
@@ -160,36 +141,31 @@ export default function UserManagementPage() {
     } finally {
       setLoading(false);
     }
-  }, [currentPage, itemsPerPage, searchQuery, roleFilter, departmentFilter, clinicFilter, statusFilter]);
+  }, [currentPage, itemsPerPage, searchQuery, roleFilter, statusFilter]);
 
-  // Load clinics and departments from API
-  useEffect(() => {
-    loadClinicsAndDepartments();
-  }, [loadClinicsAndDepartments]);
+
 
   // Track previous filters and reset page to 1 when filters change
-  const prevFiltersRef = useRef<{ searchQuery: string; roleFilter: string; departmentFilter: string; clinicFilter: string; statusFilter: string } | null>(null);
-  
+  const prevFiltersRef = useRef<{ searchQuery: string; roleFilter: string; statusFilter: string } | null>(null);
+
   useEffect(() => {
     if (prevFiltersRef.current === null) {
       // First render - just store current values
-      prevFiltersRef.current = { searchQuery, roleFilter, departmentFilter, clinicFilter, statusFilter };
+      prevFiltersRef.current = { searchQuery, roleFilter, statusFilter };
       return;
     }
-    
-    const filtersChanged = 
+
+    const filtersChanged =
       prevFiltersRef.current.searchQuery !== searchQuery ||
       prevFiltersRef.current.roleFilter !== roleFilter ||
-      prevFiltersRef.current.departmentFilter !== departmentFilter ||
-      prevFiltersRef.current.clinicFilter !== clinicFilter ||
       prevFiltersRef.current.statusFilter !== statusFilter;
-    
+
     if (filtersChanged && currentPage !== 1) {
       setCurrentPage(1);
     }
-    
-    prevFiltersRef.current = { searchQuery, roleFilter, departmentFilter, clinicFilter, statusFilter };
-  }, [searchQuery, roleFilter, departmentFilter, clinicFilter, statusFilter]);
+
+    prevFiltersRef.current = { searchQuery, roleFilter, statusFilter };
+  }, [searchQuery, roleFilter, statusFilter]);
   
   // Also update ref when currentPage changes (for use in loadStaff)
   useEffect(() => {
@@ -276,8 +252,6 @@ export default function UserManagementPage() {
     setSelectedStaff(s);
     setFormData({
       ...s,
-      clinicId: s.clinicId,
-      departmentId: s.departmentId,
     });
     setIsEditDialogOpen(true);
 
@@ -350,14 +324,7 @@ export default function UserManagementPage() {
       toast.error('Password must be at least 8 characters long');
       return;
     }
-    if (!formData.clinicId) {
-      toast.error('Please select a clinic');
-      return;
-    }
-    if (!formData.departmentId) {
-      toast.error('Please select a department');
-      return;
-    }
+
     if (!formData.accessRoleId) {
       toast.error('Please select an access role');
       return;
@@ -366,16 +333,12 @@ export default function UserManagementPage() {
     
     try {
       const newUser = await adminService.createUser({
-        username: (formData as any).username,
-        password: (formData as any).password,
         first_name: formData.firstName,
         middle_name: (formData as any).middleName,
         last_name: formData.lastName,
         email: formData.email,
         phone: formData.phone,
         system_role: formData.systemRole,
-        clinic: formData.clinicId,
-        department: formData.departmentId,
         is_active: formData.status === 'Active',
         employee_id: formData.employeeId || undefined,
       } as any);
@@ -401,15 +364,12 @@ export default function UserManagementPage() {
     try {
       const userId = parseInt(selectedStaff.id);
       await adminService.updateUser(userId, {
-        username: (formData as any).username,
         first_name: formData.firstName,
         middle_name: (formData as any).middleName,
         last_name: formData.lastName,
         email: formData.email,
         phone: formData.phone,
         system_role: formData.systemRole,
-        clinic: formData.clinicId,
-        department: formData.departmentId,
         is_active: formData.status === 'Active',
         employee_id: formData.employeeId || undefined,
         custom_pages_mode: (formData.restrictedPages && formData.restrictedPages.length > 0) ? "restrict" : "",
@@ -633,20 +593,7 @@ export default function UserManagementPage() {
                     {systemRoles.map(r => <SelectItem key={r} value={r === 'All Roles' ? 'all' : r}>{r}</SelectItem>)}
                   </SelectContent>
                 </Select>
-                <Select value={departmentFilter} onValueChange={setDepartmentFilter} disabled>
-                  <SelectTrigger className="w-[170px]"><SelectValue placeholder="Department" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Departments (Coming Soon)</SelectItem>
-                    {departments.map(d => <SelectItem key={d.id} value={d.name}>{d.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-                <Select value={clinicFilter} onValueChange={setClinicFilter} disabled>
-                  <SelectTrigger className="w-[140px]"><SelectValue placeholder="Clinic" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Clinics (Coming Soon)</SelectItem>
-                    {clinics.map(c => <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
+
                 <Select value={statusFilter} onValueChange={setStatusFilter}>
                   <SelectTrigger className="w-[130px]"><SelectValue placeholder="Status" /></SelectTrigger>
                   <SelectContent>
@@ -678,7 +625,7 @@ export default function UserManagementPage() {
                   <tr className="border-b bg-muted/50">
                     <th className="text-left p-4 text-sm font-medium text-muted-foreground">Staff</th>
                     <th className="text-left p-4 text-sm font-medium text-muted-foreground">Role</th>
-                    <th className="text-left p-4 text-sm font-medium text-muted-foreground">Department</th>
+
                     <th className="text-left p-4 text-sm font-medium text-muted-foreground">Status</th>
                     <th className="text-left p-4 text-sm font-medium text-muted-foreground">Last Login</th>
                     <th className="text-left p-4 text-sm font-medium text-muted-foreground">Actions</th>
@@ -686,7 +633,7 @@ export default function UserManagementPage() {
                 </thead>
                 <tbody>
                   {paginatedStaff.length === 0 ? (
-                    <tr><td colSpan={6} className="p-8 text-center text-muted-foreground">No staff members found</td></tr>
+                    <tr><td colSpan={5} className="p-8 text-center text-muted-foreground">No staff members found</td></tr>
                   ) : (
                   paginatedStaff.map((s) => {
                 return (
@@ -698,20 +645,17 @@ export default function UserManagementPage() {
                       </div>
                             <div>
                               <p className="font-medium text-foreground">{s.firstName} {s.lastName}</p>
-                              <p className="text-xs text-muted-foreground">{s.staffId} • {s.email}</p>
+                              <p className="text-xs text-muted-foreground">{s.employeeId || s.username} • {s.email}</p>
                             </div>
                           </div>
                         </td>
                         <td className="p-4">
-                          <Badge variant="outline" className={`${getRoleBadgeColor(s.systemRole)} flex items-center gap-1 w-fit`}>
-                            {getRoleIcon(s.systemRole)}
+                          <Badge variant="outline" className={`${getRoleBadgeColor(s.systemRole || '')} flex items-center gap-1 w-fit`}>
+                            {getRoleIcon(s.systemRole || '')}
                             {s.systemRole || "—"}
                       </Badge>
                         </td>
-                        <td className="p-4">
-                          <p className="text-foreground">{s.department}</p>
-                          <p className="text-xs text-muted-foreground">{s.clinic}</p>
-                        </td>
+
                         <td className="p-4">
                           <Badge variant="outline" className={getStatusBadge(s.status)}>{s.status}</Badge>
                         </td>
@@ -962,53 +906,7 @@ export default function UserManagementPage() {
                     })()}
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label>Clinic *</Label>
-                    <Select 
-                      value={formData.clinicId?.toString() || ''} 
-                      onValueChange={(v) => {
-                        const clinicId = parseInt(v);
-                        const clinic = clinics.find(c => c.id === clinicId);
-                        setFormData(prev => ({ 
-                          ...prev, 
-                          clinicId: clinicId,
-                          clinic: clinic?.name || '',
-                          departmentId: undefined, // Reset department when clinic changes
-                          department: '',
-                        }));
-                      }}
-                    >
-                      <SelectTrigger><SelectValue placeholder="Select clinic" /></SelectTrigger>
-                      <SelectContent>
-                        {clinics.map(c => <SelectItem key={c.id} value={c.id.toString()}>{c.name}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Department *</Label>
-                    <Select 
-                      value={formData.departmentId?.toString() || ''} 
-                      onValueChange={(v) => {
-                        const departmentId = parseInt(v);
-                        const department = departments.find(d => d.id === departmentId);
-                        setFormData(prev => ({ 
-                          ...prev, 
-                          departmentId: departmentId,
-                          department: department?.name || '',
-                        }));
-                      }}
-                      disabled={!formData.clinicId}
-                    >
-                      <SelectTrigger><SelectValue placeholder="Select department" /></SelectTrigger>
-                      <SelectContent>
-                        {departments
-                          .filter(d => !formData.clinicId || d.clinic === formData.clinicId)
-                          .map(d => <SelectItem key={d.id} value={d.id.toString()}>{d.name}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
+
               </TabsContent>
             </Tabs>
 
@@ -1038,9 +936,9 @@ export default function UserManagementPage() {
                 </div>
                   <div>
                     <h3 className="text-xl font-semibold">{selectedStaff.firstName} {selectedStaff.lastName}</h3>
-                    <p className="text-muted-foreground">{selectedStaff.staffId}</p>
-                    <Badge variant="outline" className={`${getRoleBadgeColor(selectedStaff.systemRole)} mt-1`}>
-                      {getRoleIcon(selectedStaff.systemRole)} {selectedStaff.systemRole || "—"}
+                    <p className="text-muted-foreground">{selectedStaff.employeeId || selectedStaff.username}</p>
+                    <Badge variant="outline" className={`${getRoleBadgeColor(selectedStaff.systemRole || '')} mt-1`}>
+                      {getRoleIcon(selectedStaff.systemRole || '')} {selectedStaff.systemRole || "—"}
                     </Badge>
               </div>
                 </div>
@@ -1058,40 +956,21 @@ export default function UserManagementPage() {
                     <p className="text-muted-foreground">Phone</p>
                     <p className="font-medium">{selectedStaff.phone}</p>
                   </div>
-                  <div>
-                    <p className="text-muted-foreground">Department</p>
-                    <p className="font-medium">{selectedStaff.department}</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground">Clinic</p>
-                    <p className="font-medium">{selectedStaff.clinic}</p>
-                  </div>
+
                   {selectedStaff.employeeId && (
                     <div>
                       <p className="text-muted-foreground">Employee ID</p>
                       <p className="font-medium">{selectedStaff.employeeId}</p>
             </div>
           )}
-                  <div>
-                    <p className="text-muted-foreground">Date Joined</p>
-                    <p className="font-medium">{selectedStaff.dateJoined}</p>
-                  </div>
+
                   <div>
                     <p className="text-muted-foreground">Status</p>
                     <Badge variant="outline" className={getStatusBadge(selectedStaff.status)}>{selectedStaff.status}</Badge>
                   </div>
                 </div>
 
-                {selectedStaff.permissions.length > 0 && (
-                  <div>
-                    <p className="text-muted-foreground mb-2">Permissions</p>
-                    <div className="flex flex-wrap gap-1">
-                      {selectedStaff.permissions.map(p => (
-                        <Badge key={p} variant="secondary" className="text-xs">{p.replace('_', ' ')}</Badge>
-                      ))}
-      </div>
-                  </div>
-                )}
+
               </div>
             )}
             <DialogFooter>
