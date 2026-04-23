@@ -333,6 +333,8 @@ export default function UserManagementPage() {
     
     try {
       const newUser = await adminService.createUser({
+        username: (formData as any).username,
+        password: (formData as any).password,
         first_name: formData.firstName,
         middle_name: (formData as any).middleName,
         last_name: formData.lastName,
