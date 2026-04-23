@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { UI_TRANSITION_DELAY } from '@/lib/constants/ui';
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -21,7 +21,7 @@ import { ALL_PAGE_PERMISSIONS, groupPagePermissionsByModule } from "@/lib/page-p
 import {
   Users, Search, Plus, Edit, Trash2, MoreVertical, Eye, UserCog, Shield,
   Stethoscope, Syringe, FlaskConical, Pill, ScanLine, ClipboardList, Building2,
-  Phone, Mail, Calendar, BadgeCheck, AlertTriangle, XCircle,
+  Phone, Mail, Calendar, BadgeCheck, AlertTriangle, XCircle, CheckCircle2,
   Download, Upload, RefreshCw, Filter, UserPlus, Key, Lock, Unlock, Loader2
 } from "lucide-react";
 
@@ -200,6 +200,14 @@ export default function UserManagementPage() {
   useEffect(() => {
     loadStaff();
   }, [loadStaff]);
+
+  // Calculate stats for metrics cards
+  const stats = useMemo(() => ({
+    totalRoles: accessRoles.length,
+    activeRoles: accessRoles.filter(r => r.is_active).length,
+    clinicalRoles: accessRoles.filter(r => ['doctor', 'nurse', 'lab_tech', 'pharmacist', 'radiologist'].includes(r.type)).length,
+    usersWithRoles: totalCount,
+  }), [accessRoles, totalCount]);
 
   // Dialog states
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
@@ -554,17 +562,50 @@ export default function UserManagementPage() {
           </div>
         </div>
 
-        {/* Total matches API count for current search/filters (paginated list is one page only). */}
-        <div className="max-w-md">
+        {/* Metrics Grid */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <Card className="border-l-4 border-l-purple-500">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-sm text-muted-foreground">Total Roles</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-purple-600 dark:text-purple-400">{stats.totalRoles}</p>
+                </div>
+                <Shield className="h-8 w-8 text-purple-500 opacity-50 shrink-0" />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-l-4 border-l-emerald-500">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-sm text-muted-foreground">Active Roles</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-emerald-600 dark:text-emerald-400">{stats.activeRoles}</p>
+                </div>
+                <CheckCircle2 className="h-8 w-8 text-emerald-500 opacity-50 shrink-0" />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-l-4 border-l-teal-500">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-sm text-muted-foreground">Clinical Roles</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-teal-600 dark:text-teal-400">{stats.clinicalRoles}</p>
+                </div>
+                <Stethoscope className="h-8 w-8 text-teal-500 opacity-50 shrink-0" />
+              </div>
+            </CardContent>
+          </Card>
+
           <Card className="border-l-4 border-l-blue-500">
             <CardContent className="p-4">
               <div className="flex items-center justify-between gap-4">
                 <div>
-                  <p className="text-sm text-muted-foreground">Total staff (this filter)</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-blue-600 dark:text-blue-400">{totalCount}</p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Role breakdown is not shown here because results are paginated.
-                  </p>
+                  <p className="text-sm text-muted-foreground">Users with Roles</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-blue-600 dark:text-blue-400">{stats.usersWithRoles}</p>
                 </div>
                 <Users className="h-8 w-8 text-blue-500 opacity-50 shrink-0" />
               </div>
