@@ -1,7 +1,6 @@
 """
 Views for the Permissions app.
 """
-
 from rest_framework import viewsets, permissions
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -15,144 +14,131 @@ from audit.services import AuditService
 
 class RoleViewSet(viewsets.ModelViewSet):
     """ViewSet for managing roles."""
-
+    
     permission_classes = [permissions.IsAdminUser]
     serializer_class = RoleSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ["type", "is_active"]
-    search_fields = ["name", "description"]
-    ordering_fields = ["name", "created_at"]
-    ordering = ["name"]
-
+    filterset_fields = ['type', 'is_active']
+    search_fields = ['name', 'description']
+    ordering_fields = ['name', 'created_at']
+    ordering = ['name']
+    
     def get_queryset(self):
-        return Role.objects.all().prefetch_related("user_roles")
-
+        return Role.objects.all().prefetch_related('user_roles')
+    
     def perform_create(self, serializer):
         """Create role and log audit."""
         role = serializer.save()
         AuditService.log_activity(
             user=self.request.user,
-            action="create",
-            object_type="role",
+            action='create',
+            object_type='role',
             object_id=str(role.id),
-            module="administration",
+            module='administration',
             object_repr=role.name,
-            description=f"Created role: {role.name}",
-            new_values={
-                "name": role.name,
-                "type": role.type,
-                "is_active": role.is_active,
-            },
+            description=f'Created role: {role.name}',
+            new_values={'name': role.name, 'type': role.type, 'is_active': role.is_active},
             request=self.request,
         )
-
+    
     def perform_update(self, serializer):
         """Update role and log audit."""
         old_instance = self.get_object()
         old_values = {
-            "name": old_instance.name,
-            "type": old_instance.type,
-            "is_active": old_instance.is_active,
+            'name': old_instance.name,
+            'type': old_instance.type,
+            'is_active': old_instance.is_active,
         }
         role = serializer.save()
         new_values = {
-            "name": role.name,
-            "type": role.type,
-            "is_active": role.is_active,
+            'name': role.name,
+            'type': role.type,
+            'is_active': role.is_active,
         }
         AuditService.log_activity(
             user=self.request.user,
-            action="update",
-            object_type="role",
+            action='update',
+            object_type='role',
             object_id=str(role.id),
-            module="administration",
+            module='administration',
             object_repr=role.name,
-            description=f"Updated role: {role.name}",
+            description=f'Updated role: {role.name}',
             old_values=old_values,
             new_values=new_values,
             request=self.request,
         )
-
+    
     def perform_destroy(self, instance):
         """Delete role and log audit."""
         role_id = instance.id
         role_name = instance.name
         AuditService.log_activity(
             user=self.request.user,
-            action="delete",
-            object_type="role",
+            action='delete',
+            object_type='role',
             object_id=str(role_id),
-            module="administration",
+            module='administration',
             object_repr=role_name,
-            description=f"Deleted role: {role_name}",
-            old_values={"name": role_name},
+            description=f'Deleted role: {role_name}',
+            old_values={'name': role_name},
             request=self.request,
         )
         instance.delete()
-
-    @action(detail=True, methods=["get"])
+    
+    @action(detail=True, methods=['get'])
     def users(self, request, pk=None):
         """Get all users with this role."""
         role = self.get_object()
-        user_roles = role.user_roles.all().select_related("user", "assigned_by")
+        user_roles = role.user_roles.all().select_related('user', 'assigned_by')
         serializer = UserRoleSerializer(user_roles, many=True)
         return Response(serializer.data)
 
 
 class UserRoleViewSet(viewsets.ModelViewSet):
     """ViewSet for managing user-role assignments."""
-
+    
     permission_classes = [permissions.IsAdminUser]
     serializer_class = UserRoleSerializer
     filter_backends = [DjangoFilterBackend, OrderingFilter]
-    filterset_fields = ["user", "role"]
-    ordering_fields = ["assigned_at"]
-    ordering = ["-assigned_at"]
-
+    filterset_fields = ['user', 'role']
+    ordering_fields = ['assigned_at']
+    ordering = ['-assigned_at']
+    
     def get_queryset(self):
-        return UserRole.objects.all().select_related("user", "role", "assigned_by")
-
+        return UserRole.objects.all().select_related('user', 'role', 'assigned_by')
+    
     def perform_create(self, serializer):
-        print(f"DEBUG: Creating user role with data: {serializer.validated_data}")
-        print(f"DEBUG: Request data: {self.request.data}")
         user_role = serializer.save(assigned_by=self.request.user)
-
+        
         # Log audit
         AuditService.log_activity(
             user=self.request.user,
-            action="create",
-            object_type="user_role",
+            action='create',
+            object_type='user_role',
             object_id=str(user_role.id),
-            module="administration",
-            object_repr=f"Role assignment: {user_role.role.name} to {user_role.user.get_full_name() or user_role.user.username}",
-            description=f"Assigned role {user_role.role.name} to user {user_role.user.get_full_name() or user_role.user.username}",
-            new_values={
-                "user_id": str(user_role.user.id),
-                "role_id": str(user_role.role.id),
-                "role_name": user_role.role.name,
-            },
+            module='administration',
+            object_repr=f'Role assignment: {user_role.role.name} to {user_role.user.get_full_name() or user_role.user.username}',
+            description=f'Assigned role {user_role.role.name} to user {user_role.user.get_full_name() or user_role.user.username}',
+            new_values={'user_id': str(user_role.user.id), 'role_id': str(user_role.role.id), 'role_name': user_role.role.name},
             request=self.request,
         )
-
+    
     def perform_destroy(self, instance):
         """Remove user role and log audit."""
         user_role_id = instance.id
         user_name = instance.user.get_full_name() or instance.user.username
         role_name = instance.role.name
-
+        
         AuditService.log_activity(
             user=self.request.user,
-            action="delete",
-            object_type="user_role",
+            action='delete',
+            object_type='user_role',
             object_id=str(user_role_id),
-            module="administration",
-            object_repr=f"Role removal: {role_name} from {user_name}",
-            description=f"Removed role {role_name} from user {user_name}",
-            old_values={
-                "user_id": str(instance.user.id),
-                "role_id": str(instance.role.id),
-                "role_name": role_name,
-            },
+            module='administration',
+            object_repr=f'Role removal: {role_name} from {user_name}',
+            description=f'Removed role {role_name} from user {user_name}',
+            old_values={'user_id': str(instance.user.id), 'role_id': str(instance.role.id), 'role_name': role_name},
             request=self.request,
         )
         instance.delete()
+

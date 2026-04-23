@@ -167,22 +167,10 @@ class AdminService {
     if (data.is_active !== undefined) createData.is_active = data.is_active;
     if ((data as any).employee_id) createData.employee_id = (data as any).employee_id;
     
-    try {
-      return await apiFetch<User>('/accounts/users/', {
-        method: 'POST',
-        body: JSON.stringify(createData),
-      });
-    } catch (err: any) {
-      // If username conflict, retry with unique timestamp suffix
-      if (err.apiMessage?.includes('A user with that username already exists')) {
-        createData.username = `${createData.username}_${Date.now()}`;
-        return await apiFetch<User>('/accounts/users/', {
-          method: 'POST',
-          body: JSON.stringify(createData),
-        });
-      }
-      throw err;
-    }
+    return apiFetch<User>('/accounts/users/', {
+      method: 'POST',
+      body: JSON.stringify(createData),
+    });
   }
 
   /**
@@ -216,20 +204,10 @@ class AdminService {
    * Assign an access Role to a user (drives `permissions.pages` for routing).
    */
   async assignRoleToUser(userId: number, roleId: number): Promise<UserRoleAssignment> {
-    console.log('Assigning role:', { userId, roleId, payload: { user: userId, role: roleId } });
-    try {
-      return await apiFetch<UserRoleAssignment>('/permissions/user-roles/', {
-        method: 'POST',
-        body: JSON.stringify({ user: userId, role: roleId }),
-      });
-    } catch (err: any) {
-      // If the role is already assigned (unique constraint), that's OK - just return silently
-      if (err.apiMessage?.includes('must make a unique set')) {
-        console.log('Role already assigned to user, skipping');
-        return { user: userId, role: roleId } as any;
-      }
-      throw err;
-    }
+    return apiFetch<UserRoleAssignment>('/permissions/user-roles/', {
+      method: 'POST',
+      body: JSON.stringify({ user: userId, role: roleId }),
+    });
   }
 
   /**
