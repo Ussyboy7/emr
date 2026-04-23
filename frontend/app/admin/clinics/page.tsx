@@ -110,7 +110,7 @@ export default function ClinicDepartmentPage() {
     }
   };
 
-  const loadData = async () => {
+  const loadData = async (users: any[] = []) => {
     try {
       setLoading(true);
       setError(null);
@@ -118,22 +118,20 @@ export default function ClinicDepartmentPage() {
         adminService.getClinics({
           page: currentPage,
           page_size: itemsPerPage,
-          search: searchQuery || undefined,
-          is_active: statusFilter !== 'all' ? (statusFilter === 'Active') : undefined,
+          search: searchQuery,
+          is_active: statusFilter === 'Active' ? true : statusFilter === 'Inactive' ? false : undefined,
         }),
         adminService.getDepartments({
           page: currentPage,
           page_size: itemsPerPage,
-          search: searchQuery || undefined,
-          // Note: clinic filter not yet implemented in backend
-          is_active: statusFilter !== 'all' ? (statusFilter === 'Active') : undefined,
+          search: searchQuery,
+          is_active: statusFilter === 'Active' ? true : statusFilter === 'Inactive' ? false : undefined,
         }),
       ]);
-      setTotalCount(clinicsResponse.count || clinicsResponse.results.length);
-      
+
       // Calculate clinical staff count (same for all facilities since they're physical sites)
       const clinicalRoles = ['Medical Doctor', 'Nursing Officer', 'Laboratory Scientist', 'Pharmacist', 'Radiologist', 'Medical Records Officer', 'Physiotherapist'];
-      const clinicalStaffCount = availableUsers.filter(user =>
+      const clinicalStaffCount = users.filter(user =>
         user.is_active && clinicalRoles.includes(user.system_role)
       ).length;
 
@@ -151,7 +149,7 @@ export default function ClinicDepartmentPage() {
         isActive: clinic.is_active,
         createdAt: clinic.created_at?.split('T')[0] || '',
       }));
-      
+
       // Calculate staff counts based on user roles
       const calculateStaffCountForDepartment = (deptCode: string, deptName: string): number => {
         // Map department codes/names to corresponding user roles
@@ -174,7 +172,7 @@ export default function ClinicDepartmentPage() {
         };
 
         const matchingRoles = roleMappings[deptCode] || roleMappings[deptName] || [];
-        return availableUsers.filter(user =>
+        return users.filter(user =>
           user.is_active && matchingRoles.includes(user.system_role)
         ).length;
       };
@@ -191,7 +189,7 @@ export default function ClinicDepartmentPage() {
         clinic: dept.clinic?.toString() || '',
         isActive: dept.is_active,
       }));
-      
+
       setClinics(transformedClinics);
       setDepartments(transformedDepts);
     } catch (err: any) {
@@ -214,11 +212,21 @@ export default function ClinicDepartmentPage() {
 
   useEffect(() => {
     const loadAllData = async () => {
-      await loadUsers(); // Load users first
-      await loadData();  // Then load departments (which need users for staff counts)
+      // Load users first
+      let users: any[] = [];
+      try {
+        const usersResponse = await adminService.getUsers({ page_size: 1000 });
+        users = usersResponse.results || [];
+        setAvailableUsers(users);
+      } catch (err: any) {
+        console.error('Error loading users:', err);
+      }
+
+      // Then load departments/facilities with users data for staff count calculations
+      await loadData(users);
     };
     loadAllData();
-  }, [currentPage, itemsPerPage]);
+  }, [currentPage, itemsPerPage, searchQuery, statusFilter]);
 
   useEffect(() => {
     void loadKpiStats();
@@ -416,7 +424,7 @@ export default function ClinicDepartmentPage() {
       toast.success(`Facility "${clinicForm.name}" created`);
       setIsCreateDialogOpen(false);
       resetClinicForm();
-      await loadData();
+      await loadData(availableUsers);
       await loadKpiStats();
     } catch (err: any) {
       toast.error(err.message || 'Failed to create clinic');
@@ -447,7 +455,7 @@ export default function ClinicDepartmentPage() {
       setIsEditDialogOpen(false);
       setSelectedClinic(null);
       resetClinicForm();
-      await loadData();
+      await loadData(availableUsers);
       await loadKpiStats();
     } catch (err: any) {
       toast.error(err.message || 'Failed to update clinic');
@@ -467,7 +475,7 @@ export default function ClinicDepartmentPage() {
       toast.success(`Clinic "${selectedClinic.name}" deleted`);
       setIsDeleteDialogOpen(false);
       setSelectedClinic(null);
-      await loadData();
+      await loadData(availableUsers);
       await loadKpiStats();
     } catch (err: any) {
       toast.error(err.message || 'Failed to delete clinic');
@@ -501,7 +509,7 @@ export default function ClinicDepartmentPage() {
       toast.success(`Department "${deptForm.name}" created`);
       setIsCreateDialogOpen(false);
       resetDeptForm();
-      await loadData();
+      await loadData(availableUsers);
       await loadKpiStats();
     } catch (err: any) {
       toast.error(err.message || 'Failed to create department');
@@ -534,7 +542,7 @@ export default function ClinicDepartmentPage() {
       setIsEditDialogOpen(false);
       setSelectedDepartment(null);
       resetDeptForm();
-      await loadData();
+      await loadData(availableUsers);
       await loadKpiStats();
     } catch (err: any) {
       toast.error(err.message || 'Failed to update department');
@@ -554,7 +562,7 @@ export default function ClinicDepartmentPage() {
       toast.success(`Department "${selectedDepartment.name}" deleted`);
       setIsDeleteDialogOpen(false);
       setSelectedDepartment(null);
-      await loadData();
+      await loadData(availableUsers);
       await loadKpiStats();
     } catch (err: any) {
       toast.error(err.message || 'Failed to delete department');
