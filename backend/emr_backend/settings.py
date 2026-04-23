@@ -63,7 +63,7 @@ DEBUG = os.getenv("DJANGO_DEBUG", "True").lower() == "true"
 ALLOWED_HOSTS = [
     host.strip()
     for host in getenv_strict(
-        "ALLOWED_HOSTS", "localhost,127.0.0.1,emr.npa.local"
+        "ALLOWED_HOSTS", "localhost,127.0.0.1,emr.npa.local,172.16.0.32"
     ).split(
         ","
     )
@@ -74,7 +74,7 @@ CSRF_TRUSTED_ORIGINS = [
     origin.strip()
     for origin in getenv_strict(
         "CSRF_TRUSTED_ORIGINS",
-        "http://localhost:8001,http://127.0.0.1:8001,http://localhost:3001,http://127.0.0.1:3001",
+        "http://localhost:8001,http://127.0.0.1:8001,http://localhost:3001,http://127.0.0.1:3001,http://emr.npa.local,https://emr.npa.local,http://172.16.0.32",
     ).split(",")
     if origin.strip()
 ]
@@ -293,7 +293,7 @@ CORS_ALLOWED_ORIGINS = [
     origin.strip()
     for origin in getenv_strict(
         "CORS_ALLOWED_ORIGINS",
-        "http://localhost:3001,http://127.0.0.1:3001,http://emr.npa.local,https://emr.npa.local",
+        "http://localhost:3001,http://127.0.0.1:3001,http://emr.npa.local,https://emr.npa.local,http://172.16.0.32",
     ).split(",")
     if origin.strip()
 ]
