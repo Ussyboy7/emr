@@ -2,78 +2,73 @@
 Custom authentication views with audit logging.
 """
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenBlacklistView
-from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework import status
-from rest_framework.response import Response
-from rest_framework.permissions import AllowAny
 from audit.services import AuditService
+
+from .jwt_serializers import EmailOrUsernameTokenObtainPairSerializer
+from .models import User as AccountUser
+
+
+def _resolve_user_for_login_audit(identifier: str):
+    """Match login identifier to User after a successful token issue (email or username)."""
+    if not identifier or not str(identifier).strip():
+        return None
+    idv = str(identifier).strip()
+    if "@" in idv:
+        return AccountUser.objects.filter(email__iexact=idv).first()
+    return (
+        AccountUser.objects.filter(username__iexact=idv).first()
+        or AccountUser.objects.filter(username=idv).first()
+    )
 
 
 class CustomTokenObtainPairView(TokenObtainPairView):
     """Custom token obtain view with audit logging."""
-    
+
+    serializer_class = EmailOrUsernameTokenObtainPairSerializer
+
     def post(self, request, *args, **kwargs):
-        username = request.data.get('username', 'unknown')
-        password_provided = bool(request.data.get('password'))
-        
+        raw_login = (request.data.get("username") or "")
         response = super().post(request, *args, **kwargs)
-        
+
         if response.status_code == status.HTTP_200_OK:
-            # Login successful - extract user from response
-            from accounts.models import User
             try:
-                # Try to get user by username or email
-                try:
-                    user = User.objects.get(username=username)
-                except User.DoesNotExist:
-                    # Try email as username
-                    user = User.objects.get(email=username)
-                
-                # Update last_login timestamp
-                from django.utils import timezone
-                user.last_login = timezone.now()
-                user.save(update_fields=['last_login'])
-                
-                AuditService.log_activity(
-                    user=user,
-                    action='login',
-                    object_type='user',
-                    object_id=str(user.id),
-                    module='authentication',
-                    object_repr=user.get_full_name() or user.username,
-                    description=f'User {user.get_full_name() or user.username} logged in successfully via API',
-                    result='success',
-                    severity='info',
-                    request=request,
-                )
-            except User.DoesNotExist:
-                # User doesn't exist but login succeeded (shouldn't happen, but log it)
-                AuditService.log_activity(
-                    user=None,
-                    action='login',
-                    object_type='user',
-                    object_id='',
-                    module='authentication',
-                    object_repr=username,
-                    description=f'Login succeeded but user {username} not found in database',
-                    result='error',
-                    severity='warning',
-                    request=request,
-                )
-            except User.MultipleObjectsReturned:
-                # Multiple users found (shouldn't happen, but log it)
-                AuditService.log_activity(
-                    user=None,
-                    action='login',
-                    object_type='user',
-                    object_id='',
-                    module='authentication',
-                    object_repr=username,
-                    description=f'Login succeeded but multiple users found for {username}',
-                    result='error',
-                    severity='error',
-                    request=request,
-                )
+                user = _resolve_user_for_login_audit(raw_login)
+
+                if user is not None:
+                    from django.utils import timezone
+
+                    user.last_login = timezone.now()
+                    user.save(update_fields=["last_login"])
+
+                    AuditService.log_activity(
+                        user=user,
+                        action="login",
+                        object_type="user",
+                        object_id=str(user.id),
+                        module="authentication",
+                        object_repr=user.get_full_name() or user.username,
+                        description=f"User {user.get_full_name() or user.username} logged in successfully via API",
+                        result="success",
+                        severity="info",
+                        request=request,
+                    )
+                else:
+                    AuditService.log_activity(
+                        user=None,
+                        action="login",
+                        object_type="user",
+                        object_id="",
+                        module="authentication",
+                        object_repr=str(raw_login) or "unknown",
+                        description="Login succeeded but user could not be resolved for audit",
+                        result="error",
+                        severity="warning",
+                        request=request,
+                    )
+            except Exception:
+                # Avoid breaking login if audit or last_login update fails
+                pass
         else:
             # Login failed - log the attempt
             error_detail = ''
@@ -82,14 +77,15 @@ class CustomTokenObtainPairView(TokenObtainPairView):
             
             AuditService.log_activity(
                 user=None,
-                action='login',
-                object_type='user',
-                object_id='',
-                module='authentication',
-                object_repr=username,
-                description=f'Failed login attempt for {username}' + (f': {error_detail}' if error_detail else ''),
-                result='failure',
-                severity='warning',
+                action="login",
+                object_type="user",
+                object_id="",
+                module="authentication",
+                object_repr=raw_login or "unknown",
+                description=f"Failed login attempt for {raw_login or 'unknown'}"
+                + (f": {error_detail}" if error_detail else ""),
+                result="failure",
+                severity="warning",
                 request=request,
             )
         

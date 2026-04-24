@@ -630,9 +630,9 @@ export interface LoginResponse {
   expires_in?: number;
 }
 
+/** `username` may be the account username or the user's email (backend resolves). */
 export const login = async (username: string, password: string): Promise<LoginResponse> => {
   try {
-    // Real API call
     const response = await fetch(`${getBaseUrl()}/accounts/auth/token/`, {
       method: "POST",
       headers: {
@@ -643,8 +643,7 @@ export const login = async (username: string, password: string): Promise<LoginRe
     });
 
     if (!response.ok) {
-      // Security: Never expose raw backend error messages to prevent information leakage
-      // Always use generic, non-descriptive error messages
+      // Security: never expose raw backend error messages
       if (response.status === 400) {
         throw new Error("Invalid username or password");
       } else if (response.status === 401) {
@@ -654,8 +653,9 @@ export const login = async (username: string, password: string): Promise<LoginRe
       } else if (response.status === 429) {
         throw new Error("Too many login attempts. Please try again later");
       } else if (response.status >= 500) {
+        const baseUrl = getBaseUrl();
         throw new Error(
-          `Sign-in service error (${response.status}). Check that the API is running and NEXT_PUBLIC_API_URL matches the backend (default ${getBaseUrl()}).`
+          `Sign-in service error (${response.status}). Check that the API is running and NEXT_PUBLIC_API_URL matches the backend (default ${baseUrl}).`
         );
       } else {
         throw new Error("Login failed. Please try again");

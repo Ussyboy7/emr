@@ -17,8 +17,7 @@ import {
   ScanLine,
   FileText,
   ShieldCheck,
-  Activity,
-  Dumbbell
+  Activity
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -287,13 +286,13 @@ export default function LoginPage() {
             <CardContent>
               <form className="space-y-5" onSubmit={handleSubmit}>
                 <div className="space-y-2">
-                  <Label htmlFor="username" className="text-slate-300">Username</Label>
+                  <Label htmlFor="username" className="text-slate-300">Username or email</Label>
                   <Input
                     id="username"
                     name="username"
                     type="text"
                     autoComplete="username"
-                    placeholder="Enter your username"
+                    placeholder="e.g. j.doe or name@hospital.org"
                     value={username}
                     onChange={(event) => setUsername(event.target.value)}
                     className="bg-slate-800/50 border-slate-700 text-white placeholder:text-slate-500 focus:border-teal-500 focus:ring-teal-500/20"

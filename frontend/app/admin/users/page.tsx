@@ -298,21 +298,6 @@ export default function UserManagementPage() {
     });
   }, [openEdit]);
 
-  const openView = useCallback((s: StaffMember) => {
-    setSelectedStaff(s);
-    setIsViewDialogOpen(true);
-  }, []);
-  
-  const openDelete = useCallback((s: StaffMember) => {
-    setSelectedStaff(s);
-    setIsDeleteDialogOpen(true);
-  }, []);
-  
-  const openResetPassword = useCallback((s: StaffMember) => {
-    setSelectedStaff(s);
-    setIsResetPasswordDialogOpen(true);
-  }, []);
-
   const handleCreate = async () => {
     // Canonical: Surname is mandatory; first/middle are optional.
     if (!formData.lastName || !formData.email || !(formData as any).username || !(formData as any).password) {
