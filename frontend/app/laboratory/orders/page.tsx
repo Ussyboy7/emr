@@ -107,6 +107,11 @@ interface LabOrder {
     personal_number?: string;
     division?: string;
     photoUrl?: string;
+    category?: string;
+    employee_type?: string;
+    nonnpa_type?: string;
+    dependent_type?: string;
+    phone?: string;
   };
   doctor: { id: string; name: string; specialty: string; };
   tests: LabTest[];
@@ -131,6 +136,11 @@ const transformOrder = (apiOrder: ApiLabOrder): LabOrder => {
       personal_number: (apiOrder.patient as any).personal_number || undefined,
       division: (apiOrder.patient as any).division || undefined,
       photoUrl: (apiOrder.patient as any).photo || undefined,
+      category: (apiOrder.patient as any).category || undefined,
+      employee_type: (apiOrder.patient as any).employee_type || undefined,
+      nonnpa_type: (apiOrder.patient as any).nonnpa_type || undefined,
+      dependent_type: (apiOrder.patient as any).dependent_type || undefined,
+      phone: (apiOrder.patient as any).phone || undefined,
     },
     doctor: {
       id: apiOrder.doctor?.id?.toString() || '',
@@ -689,6 +699,17 @@ const collectionMethods: Record<string, { name: string; icon: string; descriptio
 
 /** Select value for "type a different lab name" (not in catalog). */
 const OUTSOURCED_LAB_OTHER = '__other__';
+
+  const getCategoryDisplay = (patient: LabOrder['patient']) => {
+    if (!patient?.category) return null;
+    switch (patient.category) {
+      case 'employee': return patient.employee_type ? 'Employee (' + patient.employee_type + ')' : 'Employee';
+      case 'retiree': return 'Retiree';
+      case 'nonnpa': return patient.nonnpa_type ? patient.nonnpa_type : 'Non-NPA';
+      case 'dependent': return patient.dependent_type ? patient.dependent_type : 'Dependent';
+      default: return patient.category;
+    }
+  };
 
 export default function LabOrdersPage() {
   const serverToday = useServerToday();
@@ -1553,6 +1574,11 @@ export default function LabOrdersPage() {
               
               {/* Row 2: Details */}
               <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-wrap">
+                {getCategoryDisplay(order.patient) && (
+                  <Badge variant="outline" className="text-[10px] h-5 px-1.5 bg-blue-50 text-blue-700 border-blue-200">
+                    {getCategoryDisplay(order.patient)}
+                  </Badge>
+                )}
                 <span>{order.patient.age}y {order.patient.gender}</span>
                 <span>•</span>
                 <span className="flex items-center gap-1"><Stethoscope className="h-3 w-3" />{order.doctor.name}</span>
@@ -1818,6 +1844,17 @@ export default function LabOrdersPage() {
                     <p className="text-xs text-muted-foreground">Patient</p>
                     <p className="font-medium">{selectedOrder.patient.name}</p>
                     <p className="text-xs text-muted-foreground">{selectedOrder.patient.age}y {selectedOrder.patient.gender}</p>
+                    {selectedOrder.patient?.category && (
+                      <p className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-xs text-muted-foreground">Category:</span>
+                        <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium bg-blue-100 text-blue-700">
+                          {getCategoryDisplay(selectedOrder.patient)}
+                        </span>
+                      </p>
+                    )}
+                    {selectedOrder.patient?.phone && (
+                      <p className="text-xs text-muted-foreground">Phone: <span className="font-mono">{selectedOrder.patient.phone}</span></p>
+                    )}
                     {(selectedOrder.patient as any).personal_number && (
                       <p className="text-xs text-muted-foreground">Personal #: {(selectedOrder.patient as any).personal_number}</p>
                     )}
@@ -2018,6 +2055,14 @@ export default function LabOrdersPage() {
                       <div className="flex items-center gap-4 text-xs text-muted-foreground">
                         <span>Age: {selectedOrder.patient.age}</span>
                         <span>Gender: {selectedOrder.patient.gender}</span>
+                        {getCategoryDisplay(selectedOrder.patient) && (
+                          <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium bg-blue-100 text-blue-700">
+                            {getCategoryDisplay(selectedOrder.patient)}
+                          </span>
+                        )}
+                        {selectedOrder.patient?.phone && (
+                          <span>Phone: <span className="font-mono">{selectedOrder.patient.phone}</span></span>
+                        )}
                       </div>
 
                       {(selectedOrder.patient.personal_number || selectedOrder.patient.division) && (

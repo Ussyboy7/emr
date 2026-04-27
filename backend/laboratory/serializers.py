@@ -127,6 +127,11 @@ class LabTestSerializer(serializers.ModelSerializer):
                     'name': patient_name,
                     'age': getattr(order.patient, 'age', None),
                     'gender': getattr(order.patient, 'gender', ''),
+                    'category': getattr(order.patient, 'category', None),
+                    'employee_type': getattr(order.patient, 'employee_type', None),
+                    'nonnpa_type': getattr(order.patient, 'nonnpa_type', None),
+                    'dependent_type': getattr(order.patient, 'dependent_type', None),
+                    'phone': getattr(order.patient, 'phone', None),
                 }
             except (AttributeError, TypeError):
                 patient_name = str(order.patient) if order.patient else None
@@ -262,6 +267,11 @@ class LabOrderSerializer(serializers.ModelSerializer):
                 'age': obj.patient.age,
                 'gender': obj.patient.gender,
                 'personal_number': obj.patient.personal_number,
+                'category': getattr(obj.patient, 'category', None),
+                'employee_type': getattr(obj.patient, 'employee_type', None),
+                'nonnpa_type': getattr(obj.patient, 'nonnpa_type', None),
+                'dependent_type': getattr(obj.patient, 'dependent_type', None),
+                'phone': getattr(obj.patient, 'phone', None),
                 'division': obj.patient.division,
             }
         except (AttributeError, TypeError):
