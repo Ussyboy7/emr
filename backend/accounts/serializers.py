@@ -83,6 +83,7 @@ class UserSerializer(serializers.ModelSerializer):
                 "/medical-records": "patient_view",
                 "/medical-records/patients/new": "patient_create",
                 "/medical-records/patients": "patient_view",
+                "/medical-records/patient-records": "patient_view",
                 "/medical-records/visits/new": "visit_create",
                 "/medical-records/visits": "visit_view",
                 "/medical-records/appointments": "visit_view",
