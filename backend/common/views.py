@@ -160,7 +160,7 @@ class SystemMetricsView(views.APIView):
             return Response({'error': str(e)}, status=500)
 
 
-
+class FileUploadView(views.APIView):
     """Handle file uploads."""
     
     permission_classes = [IsAuthenticated]
