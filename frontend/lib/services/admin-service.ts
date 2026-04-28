@@ -543,14 +543,19 @@ class AdminService {
     expiringLicenses: Record<string, unknown>[];
     clinicStatus: Record<string, unknown>[];
     pendingApprovals: Record<string, unknown>[];
+    responseTimeMs?: number;
+    errorRate?: number;
+    dataProcessedGb?: number;
+    backupStatus?: Record<string, unknown>;
   }> {
     // Load all data in parallel
-    const [usersResponse, rolesResponse, clinicsResponse, roomsResponse, auditResponse] = await Promise.all([
+    const [usersResponse, rolesResponse, clinicsResponse, roomsResponse, auditResponse, metricsResponse] = await Promise.all([
       this.getUsers({ page_size: 1000 }),
       this.getRoles({ page_size: 1000 }),
       this.getClinics({ page_size: 1000 }),
       this.getRooms({ page_size: 1000 }), // Use the existing getRooms method
       this.getAuditLogs({ page_size: 10 }),
+      apiFetch('/common/metrics/').catch(() => ({})), // Fetch metrics, fallback to empty object
     ]);
 
     const users = usersResponse.results;
@@ -663,6 +668,9 @@ class AdminService {
     // Pending approvals (simplified)
     const pendingApprovals: Record<string, unknown>[] = [];
 
+    // Extract metrics from response
+    const metrics = metricsResponse as any;
+
     return {
       totalUsers,
       activeUsers,
@@ -680,6 +688,10 @@ class AdminService {
       expiringLicenses,
       clinicStatus,
       pendingApprovals,
+      responseTimeMs: metrics?.responseTimeMs,
+      errorRate: metrics?.errorRate,
+      dataProcessedGb: metrics?.dataProcessedGb,
+      backupStatus: metrics?.backupStatus,
     };
   }
 
