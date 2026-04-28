@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { NotificationBell } from "../notifications/NotificationBell";
 import { ThemeToggle } from "./ThemeToggle";
 import { useCurrentUser } from "@/hooks/use-current-user";
@@ -26,15 +26,14 @@ import { LogOut, Shield, Clock, Calendar, Bell, HelpCircle, Settings, Stethoscop
 export const TopBar = () => {
   const router = useRouter();
   const { currentUser, hydrated } = useCurrentUser();
-  const [authenticated, setAuthenticated] = useState(false);
   const [currentTime, setCurrentTime] = useState<Date | null>(null);
   const [mounted, setMounted] = useState(false);
   const homeRoute = getHomeRouteForUser(currentUser) || "/no-access";
   const canViewOverviewDashboard =
     Boolean(currentUser?.isSuperuser) || Boolean(currentUser?.permissions?.includes("/dashboard"));
+  const authenticated = useMemo(() => hydrated && !!currentUser && hasTokens(), [currentUser, hydrated]);
 
   useEffect(() => {
-    setAuthenticated(hasTokens());
     setMounted(true);
     // Set initial time only on client
     setCurrentTime(new Date());
@@ -52,8 +51,7 @@ export const TopBar = () => {
 
   const handleLogout = async () => {
     await logout();
-    setAuthenticated(false);
-    router.push("/login");
+    window.location.replace("/login");
   };
 
   // Format time as HH:MM AM/PM

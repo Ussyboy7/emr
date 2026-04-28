@@ -10,8 +10,6 @@ import {
   LEGACY_AUTH_IS_SUPERUSER_COOKIE,
   LEGACY_AUTH_NEXT_REDIRECT_COOKIE,
   LEGACY_AUTH_SESSION_COOKIE,
-  REFRESH_TOKEN_COOKIE,
-  LEGACY_REFRESH_TOKEN_COOKIE,
 } from "./lib/auth-cookie-names";
 import { getHomeRouteFromAllowedPages, isPathAllowedByPages } from "./lib/home-route";
 
@@ -24,13 +22,12 @@ export function middleware(request: NextRequest) {
   }
 
   // Authentication presence check:
-  // - Prefer our lightweight auth session cookie (set on successful login).
-  // - Fall back to refresh token cookie if present (older sessions).
+  // Only trust our explicit auth-session cookie for route protection.
+  // Raw refresh-token presence is too loose and can produce "ghost sessions"
+  // after logout if a cookie survives longer than expected.
   const hasAuth =
     request.cookies.get(AUTH_SESSION_COOKIE)?.value === "1" ||
-    request.cookies.get(LEGACY_AUTH_SESSION_COOKIE)?.value === "1" ||
-    Boolean(request.cookies.get(REFRESH_TOKEN_COOKIE)?.value) ||
-    Boolean(request.cookies.get(LEGACY_REFRESH_TOKEN_COOKIE)?.value);
+    request.cookies.get(LEGACY_AUTH_SESSION_COOKIE)?.value === "1";
 
   if (!hasAuth) {
     const url = request.nextUrl.clone();
@@ -73,8 +70,6 @@ export function middleware(request: NextRequest) {
     // session (cookie expired/cleared/tampered). Send the user back to /login
     // to force a fresh handshake; clear the session-presence cookies so the
     // top of this function won't redirect them straight back into the app.
-    // (Refresh-token cookies are httpOnly from the server and will be
-    // revalidated on the next login.)
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     url.searchParams.set("next", pathname);
@@ -126,4 +121,3 @@ export const config = {
   // Exclude Next.js internals, API routes, and any path containing a dot (static assets).
   matcher: ["/((?!_next/static|_next/image|favicon\\.ico|api|.*\\..*).*)"],
 };
-

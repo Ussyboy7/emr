@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { clearTokens, hasTokens } from "@/lib/api-client";
+import { hasTokens, logout } from "@/lib/api-client";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { getHomeRouteForUser } from "@/lib/home-route";
 
@@ -25,9 +25,9 @@ export default function NoAccessPage() {
     if (homeRoute) router.replace(homeRoute);
   }, [hydrated, homeRoute, router]);
 
-  const onLogout = () => {
-    clearTokens();
-    router.push("/login");
+  const onLogout = async () => {
+    await logout();
+    window.location.replace("/login");
   };
 
   return (
@@ -51,4 +51,3 @@ export default function NoAccessPage() {
     </main>
   );
 }
-

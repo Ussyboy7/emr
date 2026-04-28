@@ -33,7 +33,7 @@ import {
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { NPA_LOGO_URL, NPA_BRAND_NAME, NPA_EMR_TITLE, NPA_EMR_FULL_TITLE, NPA_EMR_CONTACT_EMAIL } from "@/lib/branding";
-import { hasTokens, login, clearTokens, apiFetch } from "@/lib/api-client";
+import { login, clearTokens, apiFetch } from "@/lib/api-client";
 import { getStoredRedirectPath } from "@/hooks/use-auth-redirect";
 import { getHomeRouteForUser, getHomeRouteFromAllowedPages, isPathAllowedByPages } from "@/lib/home-route";
 import { useCurrentUser } from "@/hooks/use-current-user";
@@ -63,11 +63,25 @@ export default function LoginPage() {
 
   const homeRoute = useMemo(() => getHomeRouteForUser(currentUser), [currentUser]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const saved = localStorage.getItem("emr_remember_me");
+      if (!saved) return;
+      const parsed = JSON.parse(saved) as { username?: string };
+      if (parsed.username) {
+        setUsername(parsed.username);
+        setRememberMe(true);
+      }
+    } catch {
+      localStorage.removeItem("emr_remember_me");
+    }
+  }, []);
+
   // If already authenticated, don't let users "stick" on /login.
   useEffect(() => {
     // Don't redirect if we're already handling a login redirect
     if (isSubmitting || isRedirecting) return;
-    if (!hasTokens()) return;
     if (!hydrated) return;
     if (!currentUser) return;
     setIsRedirecting(true);
@@ -89,7 +103,7 @@ export default function LoginPage() {
         return;
       }
 
-      await login(username, password);
+      await login(username, password, { persist: rememberMe });
 
       if (rememberMe) {
         localStorage.setItem("emr_remember_me", JSON.stringify({ username }));

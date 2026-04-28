@@ -8,7 +8,6 @@ import { ClientErrorBoundary } from '@/components/shared/ClientErrorBoundary';
 import { Toaster as ToastToaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { OrganizationProvider } from "@/contexts/OrganizationContext";
-import { hasTokens } from "@/lib/api-client";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { getHomeRouteForUser, isPathAllowedByPages } from "@/lib/home-route";
 
@@ -29,21 +28,15 @@ function AuthzGate({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    if (!hasTokens()) {
-      if (typeof window !== "undefined") {
-        sessionStorage.setItem("redirect_after_login", window.location.pathname);
-      }
-      setCanRender(false);
-      router.replace("/login");
-      return;
-    }
-
     if (!hydrated) {
       setCanRender(false);
       return;
     }
 
     if (!currentUser) {
+      if (typeof window !== "undefined") {
+        sessionStorage.setItem("redirect_after_login", window.location.pathname);
+      }
       setCanRender(false);
       router.replace("/login");
       return;
@@ -95,4 +88,3 @@ export function Providers({ children }: { children: React.ReactNode }) {
     </ThemeProvider>
   );
 }
-

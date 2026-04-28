@@ -133,37 +133,6 @@ export const useCurrentUser = () => {
 
   const loadCurrentUser = useCallback(async (opts?: { force?: boolean }) => {
     const force = opts?.force === true;
-    // Check for demo mode first
-    if (typeof window !== 'undefined') {
-      const demoUserStr = localStorage.getItem('demo_user');
-      if (demoUserStr) {
-        try {
-          const demoUser = JSON.parse(demoUserStr);
-          setRemoteUser({
-            id: String(demoUser.id),
-            username: demoUser.username,
-            name: demoUser.name,
-            email: demoUser.email,
-            employeeId: demoUser.employeeId,
-            gradeLevel: demoUser.gradeLevel,
-            systemRole: demoUser.systemRole,
-            permissions: demoUser.permissions?.pages || [],
-            permissionActions: demoUser.permissions?.actions || {},
-            isSuperuser: demoUser.isSuperuser,
-            directorate: demoUser.directorate,
-            division: demoUser.division,
-            department: demoUser.department,
-            avatar: undefined,
-            active: true,
-          });
-          setHydrated(true);
-          return;
-        } catch (e) {
-          // Fall through to API call
-        }
-      }
-    }
-
     if (!hasTokens()) {
       cacheRemoteUser(null);
       setRemoteUser(null);

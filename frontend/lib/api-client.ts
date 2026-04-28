@@ -6,7 +6,15 @@ import {
   ACCESS_TOKEN_COOKIE as ACCESS_TOKEN_KEY,
   REFRESH_TOKEN_COOKIE as REFRESH_TOKEN_KEY,
   ACCESS_TOKEN_EXP_COOKIE as ACCESS_TOKEN_EXP_KEY,
+  AUTH_ALLOWED_PAGES_COOKIE,
+  AUTH_HOME_ROUTE_COOKIE,
+  AUTH_IS_SUPERUSER_COOKIE,
+  AUTH_NEXT_REDIRECT_COOKIE,
   AUTH_SESSION_COOKIE,
+  LEGACY_AUTH_ALLOWED_PAGES_COOKIE,
+  LEGACY_AUTH_HOME_ROUTE_COOKIE,
+  LEGACY_AUTH_IS_SUPERUSER_COOKIE,
+  LEGACY_AUTH_NEXT_REDIRECT_COOKIE,
   LEGACY_ACCESS_TOKEN_COOKIE,
   LEGACY_REFRESH_TOKEN_COOKIE,
   LEGACY_ACCESS_TOKEN_EXP_COOKIE,
@@ -18,9 +26,10 @@ const ORIGINAL_ACCESS_EXP_KEY = "emr_original_access_exp";
 const LEGACY_ORIGINAL_ACCESS_TOKEN_KEY = "npa_ecm_original_access";
 const LEGACY_ORIGINAL_REFRESH_TOKEN_KEY = "npa_ecm_original_refresh";
 const LEGACY_ORIGINAL_ACCESS_EXP_KEY = "npa_ecm_original_access_exp";
+const AUTH_REMEMBER_SESSION_KEY = "emr_remember_session";
 
-/** Max-Age (seconds) for refresh + session cookies; align with server `REFRESH_TOKEN_LIFETIME` (default 1 day). */
-export const AUTH_REFRESH_SESSION_MAX_AGE_SECONDS = 60 * 60 * 24;
+/** Max-Age (seconds) for refresh + session cookies; align with backend default `JWT_REFRESH_HOURS=8`. */
+export const AUTH_REFRESH_SESSION_MAX_AGE_SECONDS = 60 * 60 * 8;
 
 /**
  * API root used by fetch() (must hit Django, not the Next.js dev server).
@@ -39,6 +48,46 @@ const getBaseUrl = (): string => {
 const isBrowser = () => typeof window !== "undefined";
 const inFlightGetRequests = new Map<string, Promise<Response>>();
 
+const getCookieDomainSuffix = (): string => {
+  if (!isBrowser()) return "";
+  return window.location.hostname.includes("npa.local") ? "; Domain=.npa.local" : "";
+};
+
+const getSessionStorageSafe = (): Storage | null => {
+  if (!isBrowser()) return null;
+  return window.sessionStorage;
+};
+
+const getLocalStorageSafe = (): Storage | null => {
+  if (!isBrowser()) return null;
+  return window.localStorage;
+};
+
+const getStorageValue = (key: string): string | null => {
+  const sessionValue = getSessionStorageSafe()?.getItem(key);
+  if (sessionValue) return sessionValue;
+  return getLocalStorageSafe()?.getItem(key) ?? null;
+};
+
+const removeStorageValueEverywhere = (key: string) => {
+  getSessionStorageSafe()?.removeItem(key);
+  getLocalStorageSafe()?.removeItem(key);
+};
+
+export const shouldPersistAuthSession = (): boolean => {
+  if (!isBrowser()) return false;
+  return getLocalStorageSafe()?.getItem(AUTH_REMEMBER_SESSION_KEY) === "1";
+};
+
+const setAuthPersistenceMode = (persist: boolean) => {
+  if (!isBrowser()) return;
+  if (persist) {
+    getLocalStorageSafe()?.setItem(AUTH_REMEMBER_SESSION_KEY, "1");
+  } else {
+    getLocalStorageSafe()?.removeItem(AUTH_REMEMBER_SESSION_KEY);
+  }
+};
+
 const getCookie = (name: string): string | null => {
   if (!isBrowser()) return null;
   const escaped = name.replace(/[$()*+.?[\\\]^{|}-]/g, "\\$&");
@@ -49,14 +98,18 @@ const getCookie = (name: string): string | null => {
 const setCookie = (name: string, value: string, maxAgeSeconds?: number) => {
   if (!isBrowser()) return;
   const maxAge = typeof maxAgeSeconds === "number" ? `; Max-Age=${Math.max(0, Math.floor(maxAgeSeconds))}` : "";
-  // Use domain=.npa.local so cookies work across both emr.npa.local and 172.16.0.32 (localhost)
-  const domain = typeof window !== 'undefined' && window.location.hostname.includes('npa.local') ? '; Domain=.npa.local' : '';
+  // Use domain=.npa.local so cookies work across NPA subdomains when applicable.
+  const domain = getCookieDomainSuffix();
   document.cookie = `${name}=${encodeURIComponent(value)}; Path=/${domain}; SameSite=Lax${maxAge}`;
 };
 
 const clearCookie = (name: string) => {
   if (!isBrowser()) return;
   document.cookie = `${name}=; Path=/; SameSite=Lax; Max-Age=0`;
+  const domain = getCookieDomainSuffix();
+  if (domain) {
+    document.cookie = `${name}=; Path=/${domain}; SameSite=Lax; Max-Age=0`;
+  }
 };
 
 let didMigrateStorageKeys = false;
@@ -66,9 +119,9 @@ const migrateLegacyStorageKeysIfNeeded = () => {
   didMigrateStorageKeys = true;
 
   // Migrate auth tokens (npa_ecm_* -> emr_*)
-  const newAccess = localStorage.getItem(ACCESS_TOKEN_KEY) ?? getCookie(ACCESS_TOKEN_KEY);
-  const newRefresh = localStorage.getItem(REFRESH_TOKEN_KEY) ?? getCookie(REFRESH_TOKEN_KEY);
-  const newExp = localStorage.getItem(ACCESS_TOKEN_EXP_KEY) ?? getCookie(ACCESS_TOKEN_EXP_KEY);
+  const newAccess = getStorageValue(ACCESS_TOKEN_KEY) ?? getCookie(ACCESS_TOKEN_KEY);
+  const newRefresh = getStorageValue(REFRESH_TOKEN_KEY) ?? getCookie(REFRESH_TOKEN_KEY);
+  const newExp = getStorageValue(ACCESS_TOKEN_EXP_KEY) ?? getCookie(ACCESS_TOKEN_EXP_KEY);
 
   const legacyAccess = localStorage.getItem(LEGACY_ACCESS_TOKEN_COOKIE) ?? getCookie(LEGACY_ACCESS_TOKEN_COOKIE);
   const legacyRefresh = localStorage.getItem(LEGACY_REFRESH_TOKEN_COOKIE) ?? getCookie(LEGACY_REFRESH_TOKEN_COOKIE);
@@ -134,8 +187,8 @@ type FetchOptions = RequestInit & {
 export const getStoredAccessToken = () => {
   if (!isBrowser()) return null;
   migrateLegacyStorageKeysIfNeeded();
-  const token = localStorage.getItem(ACCESS_TOKEN_KEY) ?? getCookie(ACCESS_TOKEN_KEY);
-  const expiresAtRaw = localStorage.getItem(ACCESS_TOKEN_EXP_KEY) ?? getCookie(ACCESS_TOKEN_EXP_KEY);
+  const token = getStorageValue(ACCESS_TOKEN_KEY) ?? getCookie(ACCESS_TOKEN_KEY);
+  const expiresAtRaw = getStorageValue(ACCESS_TOKEN_EXP_KEY) ?? getCookie(ACCESS_TOKEN_EXP_KEY);
   if (!token || !expiresAtRaw) return null;
   const expiresAt = Number(expiresAtRaw);
   if (Number.isNaN(expiresAt) || Date.now() > expiresAt) {
@@ -147,26 +200,37 @@ export const getStoredAccessToken = () => {
 export const getStoredRefreshToken = () => {
   if (!isBrowser()) return null;
   migrateLegacyStorageKeysIfNeeded();
-  return localStorage.getItem(REFRESH_TOKEN_KEY) ?? getCookie(REFRESH_TOKEN_KEY);
+  return getStorageValue(REFRESH_TOKEN_KEY) ?? getCookie(REFRESH_TOKEN_KEY);
 };
 
-export const storeTokens = (accessToken: string, refreshToken: string, expiresInSeconds?: number) => {
+export const storeTokens = (
+  accessToken: string,
+  refreshToken: string,
+  expiresInSeconds?: number,
+  options?: { persist?: boolean }
+) => {
   if (!isBrowser()) return;
   migrateLegacyStorageKeysIfNeeded();
-  localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
-  localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
+  const persist = options?.persist ?? shouldPersistAuthSession();
+  const tokenStorage = persist ? getLocalStorageSafe() : getSessionStorageSafe();
+  removeStorageValueEverywhere(ACCESS_TOKEN_KEY);
+  removeStorageValueEverywhere(REFRESH_TOKEN_KEY);
+  removeStorageValueEverywhere(ACCESS_TOKEN_EXP_KEY);
+  tokenStorage?.setItem(ACCESS_TOKEN_KEY, accessToken);
+  tokenStorage?.setItem(REFRESH_TOKEN_KEY, refreshToken);
   const effectiveExpires = typeof expiresInSeconds === "number" ? expiresInSeconds : 60 * 60;
   const expiresAt = Date.now() + effectiveExpires * 1000 - 30 * 1000; // refresh a little early
-  localStorage.setItem(ACCESS_TOKEN_EXP_KEY, `${expiresAt}`);
+  tokenStorage?.setItem(ACCESS_TOKEN_EXP_KEY, `${expiresAt}`);
+  setAuthPersistenceMode(persist);
 
   // Mirror tokens into cookies so middleware can enforce auth on first request.
-  setCookie(ACCESS_TOKEN_KEY, accessToken, effectiveExpires);
+  setCookie(ACCESS_TOKEN_KEY, accessToken, persist ? effectiveExpires : undefined);
   // Align refresh cookie max-age with server refresh token lifetime.
-  setCookie(REFRESH_TOKEN_KEY, refreshToken, AUTH_REFRESH_SESSION_MAX_AGE_SECONDS);
+  setCookie(REFRESH_TOKEN_KEY, refreshToken, persist ? AUTH_REFRESH_SESSION_MAX_AGE_SECONDS : undefined);
   // Store expiry as epoch ms so client can validate even when reading from cookies.
-  setCookie(ACCESS_TOKEN_EXP_KEY, `${expiresAt}`, effectiveExpires);
+  setCookie(ACCESS_TOKEN_EXP_KEY, `${expiresAt}`, persist ? effectiveExpires : undefined);
   // Lightweight auth flag for middleware.
-  setCookie(AUTH_SESSION_COOKIE, "1", AUTH_REFRESH_SESSION_MAX_AGE_SECONDS);
+  setCookie(AUTH_SESSION_COOKIE, "1", persist ? AUTH_REFRESH_SESSION_MAX_AGE_SECONDS : undefined);
 
   // Cleanup legacy token keys so we don't keep duplicates around.
   localStorage.removeItem(LEGACY_ACCESS_TOKEN_COOKIE);
@@ -179,16 +243,26 @@ export const storeTokens = (accessToken: string, refreshToken: string, expiresIn
 
 export const clearTokens = () => {
   if (!isBrowser()) return;
-  localStorage.removeItem(ACCESS_TOKEN_KEY);
-  localStorage.removeItem(REFRESH_TOKEN_KEY);
-  localStorage.removeItem(ACCESS_TOKEN_EXP_KEY);
+  removeStorageValueEverywhere(ACCESS_TOKEN_KEY);
+  removeStorageValueEverywhere(REFRESH_TOKEN_KEY);
+  removeStorageValueEverywhere(ACCESS_TOKEN_EXP_KEY);
   localStorage.removeItem('demo_user'); // Clear demo user on logout
+  localStorage.removeItem(AUTH_REMEMBER_SESSION_KEY);
+  clearOriginalTokens();
 
   clearCookie(ACCESS_TOKEN_KEY);
   clearCookie(REFRESH_TOKEN_KEY);
   clearCookie(ACCESS_TOKEN_EXP_KEY);
   clearCookie(AUTH_SESSION_COOKIE);
+  clearCookie(AUTH_ALLOWED_PAGES_COOKIE);
+  clearCookie(AUTH_IS_SUPERUSER_COOKIE);
+  clearCookie(AUTH_HOME_ROUTE_COOKIE);
+  clearCookie(AUTH_NEXT_REDIRECT_COOKIE);
   clearCookie(LEGACY_AUTH_SESSION_COOKIE);
+  clearCookie(LEGACY_AUTH_ALLOWED_PAGES_COOKIE);
+  clearCookie(LEGACY_AUTH_IS_SUPERUSER_COOKIE);
+  clearCookie(LEGACY_AUTH_HOME_ROUTE_COOKIE);
+  clearCookie(LEGACY_AUTH_NEXT_REDIRECT_COOKIE);
 
   // Also clear legacy token keys.
   localStorage.removeItem(LEGACY_ACCESS_TOKEN_COOKIE);
@@ -291,7 +365,9 @@ const refreshAccessToken = async (): Promise<string | null> => {
       clearTokens();
       return null;
     }
-    storeTokens(data.access, data.refresh ?? refreshToken, data.expires_in);
+    storeTokens(data.access, data.refresh ?? refreshToken, data.expires_in, {
+      persist: shouldPersistAuthSession(),
+    });
     return data.access;
   } catch (error: unknown) {
     // Only log non-network errors (network errors are already handled in refreshWithToken)
@@ -631,7 +707,11 @@ export interface LoginResponse {
 }
 
 /** `username` may be the account username or the user's email (backend resolves). */
-export const login = async (username: string, password: string): Promise<LoginResponse> => {
+export const login = async (
+  username: string,
+  password: string,
+  options?: { persist?: boolean }
+): Promise<LoginResponse> => {
   try {
     const response = await fetch(`${getBaseUrl()}/accounts/auth/token/`, {
       method: "POST",
@@ -663,7 +743,9 @@ export const login = async (username: string, password: string): Promise<LoginRe
     }
 
     const data = (await response.json()) as LoginResponse;
-    storeTokens(data.access, data.refresh, data.expires_in);
+    storeTokens(data.access, data.refresh, data.expires_in, {
+      persist: options?.persist ?? false,
+    });
     return data;
   } catch (error: unknown) {
     // Handle network errors (Failed to fetch, CORS, etc.)
@@ -701,9 +783,7 @@ export const logout = async () => {
 export const hasTokens = () => {
   if (!isBrowser()) return false;
   migrateLegacyStorageKeysIfNeeded();
-  const access = localStorage.getItem(ACCESS_TOKEN_KEY) ?? getCookie(ACCESS_TOKEN_KEY);
-  const refresh = localStorage.getItem(REFRESH_TOKEN_KEY) ?? getCookie(REFRESH_TOKEN_KEY);
-  return Boolean(access && refresh);
+  return Boolean(getStoredAccessToken() || getStoredRefreshToken());
 };
 
 export const buildQueryString = (params: Record<string, string | number | boolean | undefined>) => {
