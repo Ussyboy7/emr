@@ -45,7 +45,7 @@ class Notification(models.Model):
     
     title = models.CharField(max_length=200)
     message = models.TextField()
-    action_url = models.URLField(blank=True, help_text="URL to navigate when notification is clicked")
+    action_url = models.CharField(max_length=500, blank=True, help_text="URL or path to navigate when notification is clicked")
     
     # Related object reference
     object_type = models.CharField(max_length=50, blank=True, help_text="patient, lab_order, prescription, etc.")
