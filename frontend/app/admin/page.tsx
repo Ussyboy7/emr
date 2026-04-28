@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
+import { useCurrentUser } from "@/hooks/use-current-user";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -37,6 +38,14 @@ import {
 import Link from "next/link";
 
 export default function AdminDashboardPage() {
+  const { currentUser } = useCurrentUser();
+  type BackupStatus = {
+    status?: string;
+    message?: string;
+    lastBackup?: string;
+    hoursAgo?: number;
+    filename?: string;
+  };
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -63,7 +72,7 @@ export default function AdminDashboardPage() {
     responseTimeMs: 245,
     errorRate: 0.02,
     dataProcessedGb: 2.4,
-    backupStatus: { status: 'unknown' },
+    backupStatus: { status: 'unknown' } as BackupStatus,
   });
 
   useEffect(() => {
@@ -151,6 +160,29 @@ export default function AdminDashboardPage() {
   };
 
   const totalUsers = usersByRole.reduce((sum, r) => sum + r.count, 0);
+  const displayedOnlineNow = currentUser?.active
+    ? Math.max(systemStats.onlineNow, 1)
+    : systemStats.onlineNow;
+  const backupStatus = performanceMetrics.backupStatus;
+  const backupBadgeVariant =
+    backupStatus.status === "healthy"
+      ? "bg-green-500/10 text-green-700 border-green-500/20"
+      : backupStatus.status === "warning"
+        ? "bg-yellow-500/10 text-yellow-700 border-yellow-500/20"
+        : backupStatus.status === "error"
+          ? "bg-red-500/10 text-red-700 border-red-500/20"
+          : "bg-muted text-muted-foreground border-border";
+  const backupLabel =
+    backupStatus.status === "healthy"
+      ? "Healthy"
+      : backupStatus.status === "warning"
+        ? "Warning"
+        : backupStatus.status === "error"
+          ? "Error"
+          : "Unknown";
+  const backupDescription = backupStatus.lastBackup
+    ? `Last backup ${backupStatus.hoursAgo} hour${backupStatus.hoursAgo === 1 ? "" : "s"} ago${backupStatus.filename ? ` (${backupStatus.filename})` : ""}.`
+    : backupStatus.message || "No backup telemetry available.";
 
   return (
     <DashboardLayout>
@@ -195,7 +227,7 @@ export default function AdminDashboardPage() {
                 <div className="flex items-center gap-2">
                   <Activity className="h-4 w-4 text-blue-400" />
                   <span className="text-sm text-slate-300">
-                    {systemStats.onlineNow} online now
+                    {displayedOnlineNow} online now
                     <span className="text-slate-500"> (API activity or login in last 15 min)</span>
                   </span>
                 </div>
@@ -255,7 +287,7 @@ export default function AdminDashboardPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Online Now</p>
-                  <p className="text-2xl font-bold text-green-500">{systemStats.onlineNow}</p>
+                  <p className="text-2xl font-bold text-green-500">{displayedOnlineNow}</p>
                 </div>
                 <Activity className="h-8 w-8 text-green-500/50" />
               </div>
@@ -425,7 +457,7 @@ export default function AdminDashboardPage() {
                   <div>
                     <CardTitle className="text-lg">System Alerts</CardTitle>
                     <p className="text-xs text-muted-foreground mt-1">
-                      License warnings use staff license expiry data; backup row is a UI placeholder until backup status is wired.
+                      License warnings use staff license expiry data; backup status comes from `/common/metrics/`.
                     </p>
                   </div>
                   <Link href="/admin/audit">
@@ -450,13 +482,13 @@ export default function AdminDashboardPage() {
                       <span className="text-xs text-green-600 dark:text-green-400">Live</span>
                     </div>
 
-                    <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/40 border border-dashed border-border opacity-90">
-                      <Activity className="h-5 w-5 text-muted-foreground flex-shrink-0" />
+                    <div className="flex items-center gap-3 p-3 rounded-lg border border-border/60 bg-muted/20">
+                      <Activity className={`h-5 w-5 flex-shrink-0 ${getStatusColor(backupStatus.status || "unknown")}`} />
                       <div className="flex-1">
-                        <p className="text-sm font-medium text-muted-foreground">Backup status</p>
-                        <p className="text-xs text-muted-foreground">Not connected — hook to backup jobs or monitoring to show real status.</p>
+                        <p className="text-sm font-medium text-foreground">Backup status</p>
+                        <p className="text-xs text-muted-foreground">{backupDescription}</p>
                       </div>
-                      <Badge variant="outline" className="text-[10px] shrink-0">Placeholder</Badge>
+                      <Badge className={`text-[10px] shrink-0 ${backupBadgeVariant}`}>{backupLabel}</Badge>
                     </div>
 
                     {expiringLicenses.length > 0 ? (
@@ -638,7 +670,7 @@ export default function AdminDashboardPage() {
                     <div className="flex items-center justify-between">
                       <span className="text-sm text-muted-foreground">Online now</span>
                       <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium tabular-nums">{systemStats.onlineNow}</span>
+                        <span className="text-sm font-medium tabular-nums">{displayedOnlineNow}</span>
                         <Activity className="h-4 w-4 text-blue-500" />
                       </div>
                     </div>
@@ -740,4 +772,3 @@ export default function AdminDashboardPage() {
     </DashboardLayout>
   );
 }
-

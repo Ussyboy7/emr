@@ -310,6 +310,7 @@ export default function RadiologyOrdersPage() {
   // View & Manage Order Dialog (like lab)
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
   const [selectedPatientFull, setSelectedPatientFull] = useState<any | null>(null);
+  const [selectedPrincipalPersonalNumber, setSelectedPrincipalPersonalNumber] = useState<string | null>(null);
   const [resultEntryMode, setResultEntryMode] = useState<'manual' | 'upload'>('manual');
   const [resultsForm, setResultsForm] = useState({
     report: '',
@@ -478,11 +479,13 @@ export default function RadiologyOrdersPage() {
   useEffect(() => {
     if (!isViewDialogOpen) {
       setSelectedPatientFull(null);
+      setSelectedPrincipalPersonalNumber(null);
       return;
     }
     const patientId = selectedOrder?.patient_details?.id ?? selectedOrder?.patient;
     if (!patientId) {
       setSelectedPatientFull(null);
+      setSelectedPrincipalPersonalNumber(null);
       return;
     }
     let cancelled = false;
@@ -490,8 +493,24 @@ export default function RadiologyOrdersPage() {
       try {
         const p = await patientService.getPatient(Number(patientId));
         if (!cancelled) setSelectedPatientFull(p);
+
+        if (p?.category === 'dependent' && p?.principal_staff) {
+          try {
+            const principal = await patientService.getPatient(Number(p.principal_staff));
+            if (!cancelled) {
+              setSelectedPrincipalPersonalNumber(principal?.personal_number?.trim() || null);
+            }
+          } catch {
+            if (!cancelled) setSelectedPrincipalPersonalNumber(null);
+          }
+        } else if (!cancelled) {
+          setSelectedPrincipalPersonalNumber(null);
+        }
       } catch {
-        if (!cancelled) setSelectedPatientFull(null);
+        if (!cancelled) {
+          setSelectedPatientFull(null);
+          setSelectedPrincipalPersonalNumber(null);
+        }
       }
     })();
     return () => {
@@ -1306,6 +1325,9 @@ export default function RadiologyOrdersPage() {
                               {selectedPatientFull?.category && selectedOrder?.clinic ? ' • ' : ''}
                               {selectedOrder?.clinic ? `Clinic: ${selectedOrder.clinic}` : ''}
                             </p>
+                          )}
+                          {selectedPatientFull?.category === 'dependent' && selectedPrincipalPersonalNumber && (
+                            <p>Principal P.N.: {selectedPrincipalPersonalNumber}</p>
                           )}
                         </div>
                       </div>

@@ -17,7 +17,7 @@ import { toast } from "sonner";
 import { Checkbox } from "@/components/ui/checkbox";
 import { AdvancedDateRangeDialog } from '@/components/shared/AdvancedDateRangeDialog';
 import { CustomDateRangeButton } from '@/components/shared/CustomDateRangeButton';
-import { labService, formatPatientGenderLabel, type LabOrder as ApiLabOrder, type LabTest as ApiLabTest, type LabPartner } from '@/lib/services';
+import { labService, patientService, formatPatientGenderLabel, type LabOrder as ApiLabOrder, type LabTest as ApiLabTest, type LabPartner } from '@/lib/services';
 import { Icd10DiagnosesBlock } from '@/components/medical/Icd10DiagnosesBlock';
 import { transformLabTestStatus, transformPriority, transformToBackendPriority, transformProcessingMethod, transformToBackendProcessingMethod } from '@/lib/services/transformers';
 import { buildDateQuery, formatRejectionReason, LAB_ORDER_STATUS, LAB_TEST_STATUS } from '@/lib/laboratory/constants';
@@ -120,6 +120,10 @@ interface LabOrder {
   clinic: string;
   clinicalNotes?: string;
   icd10_diagnoses?: Array<{ code: string; name: string; type: string; notes?: string }>;
+}
+
+interface PrincipalInfo {
+  personalNumber?: string;
 }
 
 // Helper function to transform backend order to frontend format
@@ -408,6 +412,18 @@ const testTemplates: Record<string, { name: string; fields: { name: string; unit
       { name: 'Organism', unit: '', normalRange: 'No growth' },
     ]
   },
+    VAGINAL_SWAB: {
+    name: 'Vaginal Swab Culture',
+    fields: [
+      { name: 'Organism', unit: '', normalRange: 'Normal flora' },
+    ]
+  },
+  URINARY_SWAB: {
+    name: 'Urinary Culture',
+    fields: [
+      { name: 'Organism', unit: '', normalRange: 'No growth' },
+    ]
+  },
   SPUTUM_AFB: {
     name: 'Sputum Acid Fast Bacilli',
     fields: [
@@ -687,6 +703,8 @@ const collectionMethods: Record<string, { name: string; icon: string; descriptio
     { name: 'Throat Swab', icon: '👅', description: 'From back of throat' },
     { name: 'Wound Swab', icon: '🩹', description: 'From wound site' },
     { name: 'Ear Swab', icon: '👂', description: 'From ear canal' },
+    { name: 'Vaginal Swab', icon: '🧫', description: 'From vaginal canal' },
+    { name: 'Urinary Swab', icon: '🧫', description: 'From urinary tract' },
   ],
   'CSF': [
     { name: 'Lumbar Puncture', icon: '🔬', description: 'Spinal tap procedure' },
@@ -738,6 +756,7 @@ export default function LabOrdersPage() {
 
   // Dialog states
   const [selectedOrder, setSelectedOrder] = useState<LabOrder | null>(null);
+  const [selectedPrincipalInfo, setSelectedPrincipalInfo] = useState<PrincipalInfo | null>(null);
   const [selectedTest, setSelectedTest] = useState<LabTest | null>(null);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
   const [isCollectDialogOpen, setIsCollectDialogOpen] = useState(false);
@@ -780,6 +799,46 @@ export default function LabOrdersPage() {
     if (!sampleType) return 'Other';
     return collectionMethods[sampleType] ? sampleType : 'Other';
   };
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadPrincipalInfo = async () => {
+      if (!selectedOrder || selectedOrder.patient.category !== 'dependent') {
+        setSelectedPrincipalInfo(null);
+        return;
+      }
+
+      try {
+        const patientId = Number(selectedOrder.patient.id);
+        if (!Number.isFinite(patientId)) {
+          setSelectedPrincipalInfo(null);
+          return;
+        }
+
+        const dependent = await patientService.getPatient(patientId);
+        if (!dependent.principal_staff) {
+          if (!cancelled) setSelectedPrincipalInfo(null);
+          return;
+        }
+
+        const principal = await patientService.getPatient(dependent.principal_staff);
+        if (!cancelled) {
+          setSelectedPrincipalInfo({
+            personalNumber: principal.personal_number?.trim() || undefined,
+          });
+        }
+      } catch {
+        if (!cancelled) setSelectedPrincipalInfo(null);
+      }
+    };
+
+    void loadPrincipalInfo();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedOrder]);
 
   // Resolve template for result entry:
   //   1) test-specific `template_normal_range` (best: always matches backend)
@@ -1852,6 +1911,11 @@ export default function LabOrdersPage() {
                         </span>
                       </p>
                     )}
+                    {selectedOrder.patient.category === 'dependent' && selectedPrincipalInfo?.personalNumber && (
+                      <p className="text-xs text-muted-foreground">
+                        Principal P.N.: <span className="font-mono">{selectedPrincipalInfo.personalNumber}</span>
+                      </p>
+                    )}
                     {selectedOrder.patient?.phone && (
                       <p className="text-xs text-muted-foreground">Phone: <span className="font-mono">{selectedOrder.patient.phone}</span></p>
                     )}
@@ -2065,10 +2129,13 @@ export default function LabOrdersPage() {
                         )}
                       </div>
 
-                      {(selectedOrder.patient.personal_number || selectedOrder.patient.division) && (
+                      {(selectedOrder.patient.personal_number || selectedOrder.patient.division || selectedPrincipalInfo?.personalNumber) && (
                         <div className="flex items-center gap-4 text-xs text-muted-foreground">
                           {selectedOrder.patient.personal_number && (
                             <span>Personal #: {selectedOrder.patient.personal_number}</span>
+                          )}
+                          {selectedOrder.patient.category === 'dependent' && selectedPrincipalInfo?.personalNumber && (
+                            <span>Principal P.N.: {selectedPrincipalInfo.personalNumber}</span>
                           )}
                           {selectedOrder.patient.division && (
                             <span>Division: {selectedOrder.patient.division}</span>

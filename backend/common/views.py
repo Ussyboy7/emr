@@ -1,17 +1,21 @@
 """
 Common utility views.
 """
+import json
+import os
+from datetime import datetime, timezone as dt_timezone
+from pathlib import Path
+
 from django.conf import settings
-from django.db import connection
 from django.core.cache import cache
+from django.db import connection
 from django.http import JsonResponse
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 from rest_framework import views
-from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
 from rest_framework.parsers import MultiPartParser, FormParser
-import json
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
 
 from .services import FileUploadService, EmailService, SMSService, BackupService
 
@@ -95,11 +99,6 @@ class SystemMetricsView(views.APIView):
     
     def get(self, request):
         """Return current system metrics."""
-        from django.utils import timezone
-        from django.db.models import Count, Q
-        from datetime import timedelta
-        import os
-        
         try:
             metrics = {}
             
@@ -132,32 +131,94 @@ class SystemMetricsView(views.APIView):
             if backup_status:
                 metrics['backupStatus'] = backup_status
             else:
-                # Check if backup file exists and was recent
-                backups_path = getattr(settings, 'BACKUP_DIR', './backups')
-                if os.path.exists(backups_path):
-                    try:
-                        files = [f for f in os.listdir(backups_path) if f.endswith('.sql')]
-                        if files:
-                            latest_backup = max(files, key=lambda f: os.path.getctime(os.path.join(backups_path, f)))
-                            backup_time = os.path.getctime(os.path.join(backups_path, latest_backup))
-                            last_backup = timezone.datetime.fromtimestamp(backup_time, tz=timezone.utc)
-                            hours_ago = (timezone.now() - last_backup).total_seconds() / 3600
-                            metrics['backupStatus'] = {
-                                'status': 'healthy' if hours_ago < 25 else 'warning',
-                                'lastBackup': last_backup.isoformat(),
-                                'hoursAgo': round(hours_ago, 1),
-                                'filename': latest_backup
-                            }
-                        else:
-                            metrics['backupStatus'] = {'status': 'unknown', 'message': 'No backup found'}
-                    except Exception as e:
-                        metrics['backupStatus'] = {'status': 'error', 'message': str(e)}
-                else:
-                    metrics['backupStatus'] = {'status': 'unknown', 'message': 'Backup directory not found'}
+                metrics['backupStatus'] = self._detect_backup_status()
             
             return Response(metrics)
         except Exception as e:
             return Response({'error': str(e)}, status=500)
+
+    def _detect_backup_status(self):
+        """
+        Inspect likely backup locations and accept both SQL dumps and the JSON
+        backups created by this repository's `backup_data` command.
+        """
+        repo_root = Path(settings.BASE_DIR).resolve().parent
+        candidate_dirs = []
+
+        configured_dir = getattr(settings, 'BACKUP_DIR', None)
+        if configured_dir:
+            candidate_dirs.append(Path(configured_dir))
+
+        candidate_dirs.extend([
+            Path('/backups'),
+            repo_root / 'backups',
+            Path.cwd() / 'backups',
+            Path.home() / 'emr_backups',
+            Path.home() / 'emr-predeploy-backups',
+        ])
+
+        seen = set()
+        unique_dirs = []
+        for path in candidate_dirs:
+            resolved = str(path.resolve()) if path.exists() else str(path)
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            unique_dirs.append(path)
+
+        backup_suffixes = {'.sql', '.json', '.dump', '.bak', '.gz'}
+
+        for backup_dir in unique_dirs:
+            if not backup_dir.exists() or not backup_dir.is_dir():
+                continue
+
+            try:
+                backup_files = self._find_backup_files(backup_dir, backup_suffixes)
+                if not backup_files:
+                    continue
+
+                latest_backup = max(backup_files, key=lambda path: path.stat().st_mtime)
+                last_backup = datetime.fromtimestamp(
+                    latest_backup.stat().st_mtime,
+                    tz=dt_timezone.utc,
+                )
+                hours_ago = (timezone.now() - last_backup).total_seconds() / 3600
+
+                return {
+                    'status': 'healthy' if hours_ago < 25 else 'warning',
+                    'lastBackup': last_backup.isoformat(),
+                    'hoursAgo': round(hours_ago, 1),
+                    'filename': latest_backup.name,
+                    'directory': str(backup_dir),
+                    'message': 'Backup file detected',
+                }
+            except Exception as exc:
+                return {'status': 'error', 'message': str(exc)}
+
+        return {'status': 'unknown', 'message': 'No backup files found'}
+
+    def _find_backup_files(self, backup_dir: Path, backup_suffixes: set[str]):
+        """
+        Accept both flat file layouts (`/backups/*.json`) and dated snapshot
+        directories (`$HOME/emr_backups/20260428/...`).
+        """
+        candidates = []
+
+        for path in backup_dir.iterdir():
+            if path.is_file() and path.suffix.lower() in backup_suffixes:
+                candidates.append(path)
+                continue
+
+            # Common operational layout: one timestamped directory per run.
+            if path.is_dir():
+                try:
+                    for nested in path.iterdir():
+                        if nested.is_file() and nested.suffix.lower() in backup_suffixes:
+                            candidates.append(nested)
+                except OSError:
+                    continue
+
+        return candidates
 
 
 class FileUploadView(views.APIView):
@@ -223,4 +284,3 @@ class ExportDataView(views.APIView):
         else:
             # CSV export would be implemented here
             return Response({'message': 'CSV export not yet implemented'})
-
