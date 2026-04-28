@@ -49,7 +49,8 @@ class EyeSessionSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'order', 'order_details',
             'session_number', 'status', 'scheduled_at', 'started_at', 'completed_at',
-            'duration_minutes', 'notes', 'procedures_performed', 'findings', 'created_at',
+            'duration_minutes', 'notes', 'procedures_performed', 'findings', 'soap_note', 'created_at',
+            'pachymetry_file', 'oct_file', 'visual_field_file',
             'patient_name', 'patient_id',
         ]
         read_only_fields = ['id', 'created_at']
@@ -63,6 +64,7 @@ class EyeSessionCreateSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'order', 'session_number', 'status', 'scheduled_at',
             'started_at', 'completed_at', 'duration_minutes',
-            'notes', 'procedures_performed', 'findings', 'created_at',
+            'notes', 'procedures_performed', 'findings', 'soap_note', 'created_at',
+            'pachymetry_file', 'oct_file', 'visual_field_file',
         ]
         read_only_fields = ['id', 'created_at']

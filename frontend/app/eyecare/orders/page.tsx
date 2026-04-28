@@ -20,10 +20,12 @@ import { apiFetch } from '@/lib/api-client';
 import { PatientAvatar } from '@/components/shared/PatientAvatar';
 import { AdvancedDateRangeDialog } from '@/components/shared/AdvancedDateRangeDialog';
 import { CustomDateRangeButton } from '@/components/shared/CustomDateRangeButton';
-import { eyeCareService, type EyeOrder, type EyeSession } from '@/lib/services/eye-care-service';
+import { PrescriptionOrderModal, type PrescriptionOrderSubmitInput } from '@/components/consultation/orders/PrescriptionOrderModal';
+import { eyeCareService, type EyeOrder, type EyeSession, type EyeSoapNote } from '@/lib/services/eye-care-service';
+import { pharmacyService } from '@/lib/services/pharmacy-service';
 
 import {
-  Search, Clock, CheckCircle, CheckCircle2, Eye, Play, AlertTriangle, Loader2, Activity, RefreshCw, XCircle, FileText, Stethoscope,
+  Search, Clock, CheckCircle, CheckCircle2, Eye, Play, AlertTriangle, Loader2, Activity, RefreshCw, XCircle, FileText, Stethoscope, Upload, X, Pill,
 } from 'lucide-react';
 
 const formatRelativeTime = (dateString: string | null | undefined) => {
@@ -67,6 +69,88 @@ const getQueueStatusLabel = (status: string) => {
   return status.replace('_', ' ');
 };
 
+const visualAcuityRows = [
+  { key: 'distanceUnaided', label: 'Distance VA (Unaided)' },
+  { key: 'distanceAided', label: 'Distance VA (Aided)' },
+  { key: 'pinhole', label: 'Pinhole' },
+  { key: 'nearVa', label: 'Near VA' },
+];
+
+const examinationRows = [
+  'Lid',
+  'Conjunctiva',
+  'Sclera',
+  'Cornea',
+  'Anterior Chamber (A/C)',
+  'Iris',
+  'Pupils',
+  'Lens',
+  'Optic Disc (CDR)',
+  'Fundus',
+].map((label) => ({ key: label.toLowerCase().replace(/[^a-z0-9]+/g, '_'), label }));
+
+const createRefractionEntry = () => ({ sphere: '', cylinder: '', axis: '', va: '' });
+
+const createEmptySoapNote = (): EyeSoapNote => ({
+  subjective: {
+    chiefComplaint: '',
+    ocularHistory: '',
+    medicalHistory: '',
+    drugHistory: '',
+    allergyHistory: '',
+    familyOcularHistory: '',
+    familyMedicalHistory: '',
+    socialHistory: '',
+  },
+  objective: {
+    visualAcuity: Object.fromEntries(visualAcuityRows.map((row) => [row.key, { od: '', os: '', ou: '' }])),
+    examination: Object.fromEntries(examinationRows.map((row) => [row.key, { od: '', os: '' }])),
+    diagnostics: {
+      iopOd: '',
+      iopOs: '',
+      method: '',
+      time: '',
+      pachymetry: '',
+      oct: '',
+      visualField: '',
+    },
+    refraction: {
+      lensometry: { od: createRefractionEntry(), os: createRefractionEntry(), add: '', prism: '' },
+      autorefraction: { od: createRefractionEntry(), os: createRefractionEntry() },
+      retinoscopy: { od: createRefractionEntry(), os: createRefractionEntry() },
+      subjective: { od: createRefractionEntry(), os: createRefractionEntry() },
+      nearAddition: { add: '', nearVa: '' },
+    },
+  },
+  assessment: {
+    diagnosis: '',
+  },
+  plan: {
+    opticalCorrection: '',
+    medications: '',
+    managementPlan: '',
+    followUpDate: '',
+  },
+});
+
+const createSoapNoteFromLegacy = (order: EyeOrder, session: EyeSession): EyeSoapNote => {
+  const soapNote = createEmptySoapNote();
+  soapNote.subjective.chiefComplaint = order.chief_complaint || '';
+  soapNote.objective.visualAcuity.distanceUnaided = {
+    od: order.visual_acuity_od || '',
+    os: order.visual_acuity_os || '',
+    ou: order.visual_acuity_ou || '',
+  };
+  soapNote.objective.diagnostics.iopOd = order.iop_od != null ? String(order.iop_od) : '';
+  soapNote.objective.diagnostics.iopOs = order.iop_os != null ? String(order.iop_os) : '';
+  soapNote.objective.refraction.subjective.od.sphere = order.refraction_od || '';
+  soapNote.objective.refraction.subjective.os.sphere = order.refraction_os || '';
+  soapNote.assessment.diagnosis = order.diagnosis || '';
+  soapNote.plan.managementPlan = order.treatment_plan || '';
+  soapNote.plan.opticalCorrection = session.procedures_performed || '';
+  return soapNote;
+};
+
 export default function EyeClinicOrdersPage() {
   const [authError, setAuthError] = useState<unknown | null>(null);
   useAuthRedirect(authError);
@@ -88,10 +172,20 @@ export default function EyeClinicOrdersPage() {
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
   const [isSessionDialogOpen, setIsSessionDialogOpen] = useState(false);
   const [isSessionReportOpen, setIsSessionReportOpen] = useState(false);
+  const [isPrescriptionDialogOpen, setIsPrescriptionDialogOpen] = useState(false);
   const [currentSession, setCurrentSession] = useState<EyeSession | null>(null);
   const [reportSession, setReportSession] = useState<EyeSession | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [patientVitals, setPatientVitals] = useState<Record<string, string> | null>(null);
+  const [diagnosticFiles, setDiagnosticFiles] = useState<{
+    pachymetry_file: File | null;
+    oct_file: File | null;
+    visual_field_file: File | null;
+  }>({
+    pachymetry_file: null,
+    oct_file: null,
+    visual_field_file: null,
+  });
   const [sessionForm, setSessionForm] = useState({
     chief_complaint: '',
     visual_acuity_od: '',
@@ -107,6 +201,7 @@ export default function EyeClinicOrdersPage() {
     notes: '',
     procedures_performed: '',
     findings: '',
+    soap_note: createEmptySoapNote(),
   });
 
   const loadOrders = useCallback(async (opts?: { silent?: boolean }) => {
@@ -237,23 +332,32 @@ export default function EyeClinicOrdersPage() {
   };
 
   const openSessionDialog = (session: EyeSession, order: EyeOrder) => {
+    const soapNote = session.soap_note && Object.keys(session.soap_note).length > 0
+      ? session.soap_note
+      : createSoapNoteFromLegacy(order, session);
     setCurrentSession(session);
     setSelectedOrder(order);
+    setDiagnosticFiles({
+      pachymetry_file: null,
+      oct_file: null,
+      visual_field_file: null,
+    });
     setSessionForm({
-      chief_complaint: order.chief_complaint || '',
-      visual_acuity_od: order.visual_acuity_od || '',
-      visual_acuity_os: order.visual_acuity_os || '',
-      visual_acuity_ou: order.visual_acuity_ou || '',
-      refraction_od: order.refraction_od || '',
-      refraction_os: order.refraction_os || '',
-      iop_od: order.iop_od != null ? String(order.iop_od) : '',
-      iop_os: order.iop_os != null ? String(order.iop_os) : '',
-      diagnosis: order.diagnosis || '',
-      treatment_plan: order.treatment_plan || '',
+      chief_complaint: soapNote.subjective.chiefComplaint || '',
+      visual_acuity_od: soapNote.objective.visualAcuity.distanceUnaided?.od || '',
+      visual_acuity_os: soapNote.objective.visualAcuity.distanceUnaided?.os || '',
+      visual_acuity_ou: soapNote.objective.visualAcuity.distanceUnaided?.ou || '',
+      refraction_od: soapNote.objective.refraction.subjective.od.sphere || '',
+      refraction_os: soapNote.objective.refraction.subjective.os.sphere || '',
+      iop_od: soapNote.objective.diagnostics.iopOd || '',
+      iop_os: soapNote.objective.diagnostics.iopOs || '',
+      diagnosis: soapNote.assessment.diagnosis || '',
+      treatment_plan: soapNote.plan.managementPlan || '',
       special_instructions: order.special_instructions || '',
       notes: session.notes || '',
       procedures_performed: session.procedures_performed || '',
       findings: session.findings || '',
+      soap_note: soapNote,
     });
     setIsSessionDialogOpen(true);
     setIsViewDialogOpen(false);
@@ -450,27 +554,37 @@ export default function EyeClinicOrdersPage() {
     setIsSubmitting(true);
     try {
       const now = new Date().toISOString();
+      const soapNote = sessionForm.soap_note;
       await eyeCareService.updateOrder(selectedOrder.id, {
-        chief_complaint: sessionForm.chief_complaint,
-        visual_acuity_od: sessionForm.visual_acuity_od,
-        visual_acuity_os: sessionForm.visual_acuity_os,
-        visual_acuity_ou: sessionForm.visual_acuity_ou,
-        refraction_od: sessionForm.refraction_od,
-        refraction_os: sessionForm.refraction_os,
-        iop_od: sessionForm.iop_od ? Number(sessionForm.iop_od) : null,
-        iop_os: sessionForm.iop_os ? Number(sessionForm.iop_os) : null,
-        diagnosis: sessionForm.diagnosis,
-        treatment_plan: sessionForm.treatment_plan,
+        chief_complaint: soapNote.subjective.chiefComplaint,
+        visual_acuity_od: soapNote.objective.visualAcuity.distanceUnaided?.od || '',
+        visual_acuity_os: soapNote.objective.visualAcuity.distanceUnaided?.os || '',
+        visual_acuity_ou: soapNote.objective.visualAcuity.distanceUnaided?.ou || '',
+        refraction_od: soapNote.objective.refraction.subjective.od.sphere,
+        refraction_os: soapNote.objective.refraction.subjective.os.sphere,
+        iop_od: soapNote.objective.diagnostics.iopOd ? Number(soapNote.objective.diagnostics.iopOd) : null,
+        iop_os: soapNote.objective.diagnostics.iopOs ? Number(soapNote.objective.diagnostics.iopOs) : null,
+        diagnosis: soapNote.assessment.diagnosis,
+        treatment_plan: soapNote.plan.managementPlan,
         special_instructions: sessionForm.special_instructions,
       });
-      await eyeCareService.updateSession(currentSession.id, {
-        notes: sessionForm.notes,
-        procedures_performed: sessionForm.procedures_performed,
-        findings: sessionForm.findings,
+      const sessionPayload: Partial<EyeSession> = {
+        notes: [
+          soapNote.plan.opticalCorrection && `Optical Correction: ${soapNote.plan.opticalCorrection}`,
+          soapNote.plan.medications && `Medications: ${soapNote.plan.medications}`,
+          soapNote.plan.followUpDate && `Follow-up Date: ${soapNote.plan.followUpDate}`,
+        ].filter(Boolean).join('\n'),
+        procedures_performed: soapNote.plan.managementPlan,
+        findings: soapNote.assessment.diagnosis,
+        soap_note: soapNote,
         status: opts?.complete ? 'completed' : (currentSession.status === 'completed' ? 'completed' : 'in_progress'),
         started_at: currentSession.started_at || now,
         completed_at: opts?.complete ? now : currentSession.completed_at,
-      });
+      };
+      const hasDiagnosticFiles = Object.values(diagnosticFiles).some(Boolean);
+      await (hasDiagnosticFiles
+        ? eyeCareService.updateSessionWithFiles(currentSession.id, sessionPayload, diagnosticFiles)
+        : eyeCareService.updateSession(currentSession.id, sessionPayload));
 
       if (opts?.complete) {
         await eyeCareService.completeOrder(selectedOrder.id);
@@ -481,6 +595,11 @@ export default function EyeClinicOrdersPage() {
       } else {
         toast.success(currentSession.status === 'completed' ? 'Session updated' : 'Eye notes saved');
       }
+      setDiagnosticFiles({
+        pachymetry_file: null,
+        oct_file: null,
+        visual_field_file: null,
+      });
 
       await loadOrders();
     } catch (err) {
@@ -508,6 +627,128 @@ export default function EyeClinicOrdersPage() {
     }
     return map;
   }, [allSessions, selectedOrder?.id, selectedOrderSessions]);
+
+  const updateSoapNote = (updater: (soapNote: EyeSoapNote) => EyeSoapNote) => {
+    setSessionForm((prev) => {
+      const soapNote = updater(prev.soap_note);
+      return {
+        ...prev,
+        soap_note: soapNote,
+        chief_complaint: soapNote.subjective.chiefComplaint,
+        visual_acuity_od: soapNote.objective.visualAcuity.distanceUnaided?.od || '',
+        visual_acuity_os: soapNote.objective.visualAcuity.distanceUnaided?.os || '',
+        visual_acuity_ou: soapNote.objective.visualAcuity.distanceUnaided?.ou || '',
+        refraction_od: soapNote.objective.refraction.subjective.od.sphere,
+        refraction_os: soapNote.objective.refraction.subjective.os.sphere,
+        iop_od: soapNote.objective.diagnostics.iopOd,
+        iop_os: soapNote.objective.diagnostics.iopOs,
+        diagnosis: soapNote.assessment.diagnosis,
+        treatment_plan: soapNote.plan.managementPlan,
+        findings: soapNote.assessment.diagnosis,
+        procedures_performed: soapNote.plan.managementPlan,
+        notes: [soapNote.plan.opticalCorrection, soapNote.plan.medications, soapNote.plan.followUpDate].filter(Boolean).join('\n'),
+      };
+    });
+  };
+
+  const updateSoapPath = (
+    section: keyof EyeSoapNote,
+    group: string,
+    field: string,
+    value: string,
+    nestedField?: string
+  ) => {
+    updateSoapNote((soapNote) => {
+      const next = structuredClone(soapNote);
+      if (nestedField) {
+        const target = ((next as any)[section][group][field] as any);
+        const [firstKey, secondKey] = nestedField.split('.');
+        if (secondKey) {
+          target[firstKey][secondKey] = value;
+        } else {
+          target[firstKey] = value;
+        }
+      } else {
+        ((next as any)[section][group] as any)[field] = value;
+      }
+      return next;
+    });
+  };
+
+  const updateSubjective = (field: keyof EyeSoapNote['subjective'], value: string) => {
+    updateSoapNote((soapNote) => ({
+      ...soapNote,
+      subjective: { ...soapNote.subjective, [field]: value },
+    }));
+  };
+
+  const updateAssessment = (field: keyof EyeSoapNote['assessment'], value: string) => {
+    updateSoapNote((soapNote) => ({
+      ...soapNote,
+      assessment: { ...soapNote.assessment, [field]: value },
+    }));
+  };
+
+  const updatePlan = (field: keyof EyeSoapNote['plan'], value: string) => {
+    updateSoapNote((soapNote) => ({
+      ...soapNote,
+      plan: { ...soapNote.plan, [field]: value },
+    }));
+  };
+
+  const handleDiagnosticFileChange = (
+    field: keyof typeof diagnosticFiles,
+    file: File | null
+  ) => {
+    setDiagnosticFiles((prev) => ({ ...prev, [field]: file }));
+  };
+
+  const handleEyePrescriptionSubmit = async (payload: PrescriptionOrderSubmitInput) => {
+    if (!selectedOrder || !currentSession) {
+      toast.error('Open an eye session before sending prescriptions');
+      return;
+    }
+
+    const items = payload.items.map((item) => ({
+      generic: item.generic,
+      medication: null,
+      medication_name: item.medication_name,
+      quantity: item.quantity,
+      unit: item.unit,
+      dosage_form: item.dosage_form,
+      strength: item.strength,
+      dose: item.dosage,
+      frequency: item.frequency,
+      duration: item.duration,
+      route: item.route,
+      instructions: item.instructions || payload.clinicalIndication,
+    }));
+
+    const prescription = await pharmacyService.createPrescription({
+      patient: selectedOrder.patient,
+      visit: selectedOrder.visit || undefined,
+      diagnosis: sessionForm.soap_note.assessment.diagnosis,
+      notes: [
+        `Eye clinic session ${currentSession.session_number}`,
+        payload.clinicalIndication,
+      ].filter(Boolean).join('\n'),
+      items,
+    } as any);
+
+    const summary = `Prescription ${prescription.prescription_id || prescription.id} sent to Pharmacy (${items.length} item${items.length === 1 ? '' : 's'}).`;
+    const nextSoapNote = structuredClone(sessionForm.soap_note);
+    nextSoapNote.plan.medications = [nextSoapNote.plan.medications, summary].filter(Boolean).join('\n');
+    updateSoapNote(() => nextSoapNote);
+    await eyeCareService.updateSession(currentSession.id, {
+      soap_note: nextSoapNote,
+      notes: [
+        nextSoapNote.plan.opticalCorrection && `Optical Correction: ${nextSoapNote.plan.opticalCorrection}`,
+        nextSoapNote.plan.medications && `Medications: ${nextSoapNote.plan.medications}`,
+        nextSoapNote.plan.followUpDate && `Follow-up Date: ${nextSoapNote.plan.followUpDate}`,
+      ].filter(Boolean).join('\n'),
+    });
+    toast.success('Prescription sent to Pharmacy queue');
+  };
 
   const OrderCard = ({ order }: { order: EyeOrder }) => {
     const orderSessions = sessionsMap.get(order.id) || [];
@@ -1039,100 +1280,292 @@ export default function EyeClinicOrdersPage() {
                     </div>
                   </div>
 
-                  <div className="space-y-3">
+                  <div className="space-y-4">
                     <h3 className="text-lg font-semibold text-teal-700 dark:text-teal-400 flex items-center gap-2">
                       <Eye className="h-5 w-5" />
-                      A. Patient Assessment
+                      SUBJECTIVE (S)
                     </h3>
                     <div className="space-y-2">
-                      <Label>Presenting Complaint *</Label>
+                      <Label>Chief Complaint (CC) *</Label>
                       <Textarea
-                        value={sessionForm.chief_complaint}
-                        onChange={(e) => setSessionForm((prev) => ({ ...prev, chief_complaint: e.target.value }))}
-                        placeholder="Presenting complaint..."
+                        value={sessionForm.soap_note.subjective.chiefComplaint}
+                        onChange={(e) => updateSubjective('chiefComplaint', e.target.value)}
+                        placeholder="Main ocular complaint..."
                         rows={3}
                         className="resize-none"
                       />
                     </div>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                      <div className="space-y-2">
-                        <Label>VA OD</Label>
-                        <Input value={sessionForm.visual_acuity_od} onChange={(e) => setSessionForm((prev) => ({ ...prev, visual_acuity_od: e.target.value }))} placeholder="e.g. 6/6" />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>VA OS</Label>
-                        <Input value={sessionForm.visual_acuity_os} onChange={(e) => setSessionForm((prev) => ({ ...prev, visual_acuity_os: e.target.value }))} placeholder="e.g. 6/9" />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>VA OU</Label>
-                        <Input value={sessionForm.visual_acuity_ou} onChange={(e) => setSessionForm((prev) => ({ ...prev, visual_acuity_ou: e.target.value }))} placeholder="e.g. 6/6" />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="space-y-3">
-                    <h3 className="text-lg font-semibold text-blue-700 dark:text-blue-400 flex items-center gap-2">
-                      <FileText className="h-5 w-5" />
-                      B. Eye Measurements & Background
-                    </h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {[
+                        ['ocularHistory', 'Patient Ocular History (POHx)'],
+                        ['medicalHistory', 'Patient Medical History (PMHx)'],
+                        ['drugHistory', 'Medication / Drug History'],
+                        ['allergyHistory', 'Allergies'],
+                        ['familyOcularHistory', 'Family Ocular History (FOHx)'],
+                        ['familyMedicalHistory', 'Family Medical History (FMHx)'],
+                        ['socialHistory', 'Social History'],
+                      ].map(([field, label]) => (
+                        <div key={field} className="space-y-2">
+                          <Label>{label}</Label>
+                          <Textarea
+                            value={(sessionForm.soap_note.subjective as any)[field]}
+                            onChange={(e) => updateSubjective(field as keyof EyeSoapNote['subjective'], e.target.value)}
+                            rows={2}
+                            className="resize-none"
+                          />
+                        </div>
+                      ))}
                       <div className="space-y-2">
-                        <Label>Refraction OD</Label>
-                        <Input value={sessionForm.refraction_od} onChange={(e) => setSessionForm((prev) => ({ ...prev, refraction_od: e.target.value }))} placeholder="Right eye refraction..." />
+                        <Label>Special Instructions</Label>
+                        <Textarea
+                          value={sessionForm.special_instructions}
+                          onChange={(e) => setSessionForm((prev) => ({ ...prev, special_instructions: e.target.value }))}
+                          placeholder="Clinical background or instructions..."
+                          rows={2}
+                          className="resize-none"
+                        />
                       </div>
-                      <div className="space-y-2">
-                        <Label>Refraction OS</Label>
-                        <Input value={sessionForm.refraction_os} onChange={(e) => setSessionForm((prev) => ({ ...prev, refraction_os: e.target.value }))} placeholder="Left eye refraction..." />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>IOP OD</Label>
-                        <Input value={sessionForm.iop_od} onChange={(e) => setSessionForm((prev) => ({ ...prev, iop_od: e.target.value }))} placeholder="mmHg" />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>IOP OS</Label>
-                        <Input value={sessionForm.iop_os} onChange={(e) => setSessionForm((prev) => ({ ...prev, iop_os: e.target.value }))} placeholder="mmHg" />
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Special Instructions</Label>
-                      <Textarea
-                        value={sessionForm.special_instructions}
-                        onChange={(e) => setSessionForm((prev) => ({ ...prev, special_instructions: e.target.value }))}
-                        placeholder="Clinical background, medications, social context, or instructions..."
-                        rows={3}
-                        className="resize-none"
-                      />
                     </div>
                   </div>
 
-                  <div className="space-y-3">
-                    <h3 className="text-lg font-semibold text-green-700 dark:text-green-400 flex items-center gap-2">
+                  <div className="space-y-4">
+                    <h3 className="text-lg font-semibold text-blue-700 dark:text-blue-400 flex items-center gap-2">
                       <Activity className="h-5 w-5" />
-                      C. Examination Findings
+                      OBJECTIVE (O)
                     </h3>
+
                     <div className="space-y-2">
-                      <Label>Assessment Findings & Clinical Impression</Label>
-                      <Textarea
-                        value={sessionForm.findings}
-                        onChange={(e) => setSessionForm((prev) => ({ ...prev, findings: e.target.value }))}
-                        placeholder="Key eye assessment findings, clinical impression, prognosis, and rationale..."
-                        rows={5}
-                        className="resize-none"
-                      />
+                      <h4 className="font-medium">1. Visual Acuity</h4>
+                      <div className="overflow-x-auto rounded-md border">
+                        <table className="w-full text-sm">
+                          <thead className="bg-muted/50">
+                            <tr>
+                              <th className="p-2 text-left font-medium">Type</th>
+                              <th className="p-2 text-left font-medium">OD</th>
+                              <th className="p-2 text-left font-medium">OS</th>
+                              <th className="p-2 text-left font-medium">OU</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {visualAcuityRows.map((row) => (
+                              <tr key={row.key} className="border-t">
+                                <td className="p-2 font-medium">{row.label}</td>
+                                {(['od', 'os', 'ou'] as const).map((eye) => (
+                                  <td key={eye} className="p-2">
+                                    <Input
+                                      value={sessionForm.soap_note.objective.visualAcuity[row.key]?.[eye] || ''}
+                                      onChange={(e) => updateSoapPath('objective', 'visualAcuity', row.key, e.target.value, eye)}
+                                      placeholder="e.g. 6/6"
+                                    />
+                                  </td>
+                                ))}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <h4 className="font-medium">2. External / Internal Examination</h4>
+                      <div className="overflow-x-auto rounded-md border">
+                        <table className="w-full text-sm">
+                          <thead className="bg-muted/50">
+                            <tr>
+                              <th className="p-2 text-left font-medium">Structure</th>
+                              <th className="p-2 text-left font-medium">OD</th>
+                              <th className="p-2 text-left font-medium">OS</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {examinationRows.map((row) => (
+                              <tr key={row.key} className="border-t">
+                                <td className="p-2 font-medium">{row.label}</td>
+                                {(['od', 'os'] as const).map((eye) => (
+                                  <td key={eye} className="p-2">
+                                    <Input
+                                      value={sessionForm.soap_note.objective.examination[row.key]?.[eye] || ''}
+                                      onChange={(e) => updateSoapPath('objective', 'examination', row.key, e.target.value, eye)}
+                                    />
+                                  </td>
+                                ))}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <h4 className="font-medium">3. Diagnostic Tests</h4>
+                      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                        {[
+                          ['iopOd', 'IOP OD (mmHg)', 'e.g. 10'],
+                          ['iopOs', 'IOP OS (mmHg)', 'e.g. 20'],
+                          ['method', 'Method', 'e.g. Applanation'],
+                          ['time', 'Time', 'e.g. 09:30'],
+                        ].map(([field, label, placeholder]) => (
+                          <div key={field} className="space-y-2">
+                            <Label>{label}</Label>
+                            <Input
+                              value={(sessionForm.soap_note.objective.diagnostics as any)[field]}
+                              onChange={(e) => updateSoapPath('objective', 'diagnostics', field, e.target.value)}
+                              placeholder={placeholder}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                      <p className="text-xs text-muted-foreground">Upload supporting result files and add any result notes for b to d.</p>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        {[
+                          ['pachymetry', 'b. Pachymetry', 'pachymetry_file'],
+                          ['oct', 'c. OCT', 'oct_file'],
+                          ['visualField', 'd. Visual Field (CVF)', 'visual_field_file'],
+                        ].map(([field, label, fileField]) => (
+                          <div key={field} className="space-y-2">
+                            <Label>{label}</Label>
+                            <div className="rounded-md border border-dashed p-3 space-y-2">
+                              <div className="flex items-center gap-2 text-sm">
+                                <Upload className="h-4 w-4 text-muted-foreground" />
+                                <span className="font-medium">
+                                  {diagnosticFiles[fileField as keyof typeof diagnosticFiles]?.name ||
+                                    ((currentSession as any)?.[fileField] ? 'Existing file uploaded' : 'No file selected')}
+                                </span>
+                              </div>
+                              {(currentSession as any)?.[fileField] && !diagnosticFiles[fileField as keyof typeof diagnosticFiles] && (
+                                <a
+                                  href={(currentSession as any)[fileField]}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-xs text-blue-600 hover:underline"
+                                >
+                                  View existing upload
+                                </a>
+                              )}
+                              {diagnosticFiles[fileField as keyof typeof diagnosticFiles] ? (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handleDiagnosticFileChange(fileField as keyof typeof diagnosticFiles, null)}
+                                  className="h-7"
+                                >
+                                  <X className="h-3 w-3 mr-1" />
+                                  Remove selected file
+                                </Button>
+                              ) : (
+                                <Input
+                                  type="file"
+                                  accept=".pdf,.jpg,.jpeg,.png,.webp"
+                                  onChange={(e) => handleDiagnosticFileChange(fileField as keyof typeof diagnosticFiles, e.target.files?.[0] || null)}
+                                />
+                              )}
+                            </div>
+                            <Textarea
+                              value={(sessionForm.soap_note.objective.diagnostics as any)[field]}
+                              onChange={(e) => updateSoapPath('objective', 'diagnostics', field, e.target.value)}
+                              placeholder="Uploaded result details or notes..."
+                              rows={2}
+                              className="resize-none"
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <h4 className="font-medium">4. Refraction</h4>
+                      {[
+                        ['lensometry', 'a. Lensometry (Current Glasses)'],
+                        ['autorefraction', 'b. Autorefraction'],
+                        ['retinoscopy', 'c. Retinoscopy'],
+                        ['subjective', 'd. Subjective Refraction'],
+                      ].map(([group, label]) => (
+                        <div key={group} className="rounded-md border p-3 space-y-3">
+                          <h5 className="font-medium text-sm">{label}</h5>
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-sm">
+                              <thead>
+                                <tr className="text-muted-foreground">
+                                  <th className="p-2 text-left font-medium">Eye</th>
+                                  <th className="p-2 text-left font-medium">Sphere</th>
+                                  <th className="p-2 text-left font-medium">Cylinder</th>
+                                  <th className="p-2 text-left font-medium">Axis</th>
+                                  <th className="p-2 text-left font-medium">VA</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {(['od', 'os'] as const).map((eye) => (
+                                  <tr key={eye}>
+                                    <td className="p-2 font-medium uppercase">{eye}</td>
+                                    {(['sphere', 'cylinder', 'axis', 'va'] as const).map((field) => (
+                                      <td key={field} className="p-2">
+                                        <Input
+                                          value={(sessionForm.soap_note.objective.refraction as any)[group][eye][field]}
+                                          onChange={(e) => updateSoapPath('objective', 'refraction', group, e.target.value, `${eye}.${field}`)}
+                                        />
+                                      </td>
+                                    ))}
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                          {group === 'lensometry' && (
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                              <div className="space-y-2">
+                                <Label>Add (if present)</Label>
+                                <Input
+                                  value={sessionForm.soap_note.objective.refraction.lensometry.add}
+                                  onChange={(e) => updateSoapPath('objective', 'refraction', 'lensometry', e.target.value, 'add')}
+                                />
+                              </div>
+                              <div className="space-y-2">
+                                <Label>Prism (if any)</Label>
+                                <Input
+                                  value={sessionForm.soap_note.objective.refraction.lensometry.prism}
+                                  onChange={(e) => updateSoapPath('objective', 'refraction', 'lensometry', e.target.value, 'prism')}
+                                />
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                      <div className="rounded-md border p-3 space-y-3">
+                        <h5 className="font-medium text-sm">e. Near Addition (if needed)</h5>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          <div className="space-y-2">
+                            <Label>ADD</Label>
+                            <Input
+                              value={sessionForm.soap_note.objective.refraction.nearAddition.add}
+                              onChange={(e) => updateSoapPath('objective', 'refraction', 'nearAddition', e.target.value, 'add')}
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Near VA</Label>
+                            <Input
+                              value={sessionForm.soap_note.objective.refraction.nearAddition.nearVa}
+                              onChange={(e) => updateSoapPath('objective', 'refraction', 'nearAddition', e.target.value, 'nearVa')}
+                            />
+                          </div>
+                        </div>
+                      </div>
                     </div>
                   </div>
 
                   <div className="space-y-3">
                     <h3 className="text-lg font-semibold text-purple-700 dark:text-purple-400 flex items-center gap-2">
                       <CheckCircle2 className="h-5 w-5" />
-                      D. Diagnosis
+                      ASSESSMENT (A)
                     </h3>
                     <div className="space-y-2">
-                      <Label>Diagnosis</Label>
-                      <Input
-                        value={sessionForm.diagnosis}
-                        onChange={(e) => setSessionForm((prev) => ({ ...prev, diagnosis: e.target.value }))}
-                        placeholder="Working diagnosis..."
+                      <Label>Diagnosis (Primary & Secondary)</Label>
+                      <Textarea
+                        value={sessionForm.soap_note.assessment.diagnosis}
+                        onChange={(e) => updateAssessment('diagnosis', e.target.value)}
+                        placeholder="Primary diagnosis, secondary diagnoses, and clinical impression..."
+                        rows={3}
+                        className="resize-none"
                       />
                     </div>
                   </div>
@@ -1140,44 +1573,43 @@ export default function EyeClinicOrdersPage() {
                   <div className="space-y-3">
                     <h3 className="text-lg font-semibold text-orange-700 dark:text-orange-400 flex items-center gap-2">
                       <FileText className="h-5 w-5" />
-                      E. Treatment Plan
+                      PLAN (P)
                     </h3>
-                    <div className="space-y-2">
-                      <Label>Planned Treatment Approach</Label>
-                      <Textarea
-                        value={sessionForm.treatment_plan}
-                        onChange={(e) => setSessionForm((prev) => ({ ...prev, treatment_plan: e.target.value }))}
-                        placeholder="Treatment modalities, follow-up plan, frequency, goals..."
-                        rows={4}
-                        className="resize-none"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Procedures Performed</Label>
-                      <Textarea
-                        value={sessionForm.procedures_performed}
-                        onChange={(e) => setSessionForm((prev) => ({ ...prev, procedures_performed: e.target.value }))}
-                        placeholder="Record tests, procedures, medications, or treatment actions..."
-                        rows={5}
-                        className="resize-none"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="space-y-3">
-                    <h3 className="text-lg font-semibold text-red-700 dark:text-red-400 flex items-center gap-2">
-                      <FileText className="h-5 w-5" />
-                      F. Session Notes
-                    </h3>
-                    <div className="space-y-2">
-                      <Label>Session Notes</Label>
-                      <Textarea
-                        value={sessionForm.notes}
-                        onChange={(e) => setSessionForm((prev) => ({ ...prev, notes: e.target.value }))}
-                        placeholder="Patient response, follow-up plan, and any additional eye notes..."
-                        rows={5}
-                        className="resize-none"
-                      />
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div className="space-y-2">
+                        <Label>Optical Correction (Comments)</Label>
+                        <Textarea value={sessionForm.soap_note.plan.opticalCorrection} onChange={(e) => updatePlan('opticalCorrection', e.target.value)} rows={3} className="resize-none" />
+                      </div>
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <Label>Medications / Prescriptions</Label>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setIsPrescriptionDialogOpen(true)}
+                            className="h-8"
+                          >
+                            <Pill className="h-3 w-3 mr-1" />
+                            Send to Pharmacy
+                          </Button>
+                        </div>
+                        <Textarea
+                          value={sessionForm.soap_note.plan.medications}
+                          onChange={(e) => updatePlan('medications', e.target.value)}
+                          placeholder="Medication notes or prescription references..."
+                          rows={3}
+                          className="resize-none"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Management Plan</Label>
+                        <Textarea value={sessionForm.soap_note.plan.managementPlan} onChange={(e) => updatePlan('managementPlan', e.target.value)} placeholder="Surgery, referral, or test sent..." rows={3} className="resize-none" />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Follow-up Date</Label>
+                        <Input type="date" value={sessionForm.soap_note.plan.followUpDate} onChange={(e) => updatePlan('followUpDate', e.target.value)} />
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1246,41 +1678,120 @@ export default function EyeClinicOrdersPage() {
                   </div>
 
                   <div className="space-y-3">
-                    <h3 className="text-lg font-semibold text-teal-700 dark:text-teal-400 border-b pb-2">A. Patient Assessment</h3>
-                    <p className="text-sm bg-muted/50 p-3 rounded border min-h-[60px]">{reportSession.order_details?.chief_complaint || 'Not documented'}</p>
-                  </div>
-
-                  <div className="space-y-3">
-                    <h3 className="text-lg font-semibold text-blue-700 dark:text-blue-400 border-b pb-2">B. Eye Measurements & Background</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <p className="text-sm bg-muted/50 p-3 rounded border min-h-[60px]">
-                        VA: OD {reportSession.order_details?.visual_acuity_od || '—'} | OS {reportSession.order_details?.visual_acuity_os || '—'} | OU {reportSession.order_details?.visual_acuity_ou || '—'}
-                      </p>
-                      <p className="text-sm bg-muted/50 p-3 rounded border min-h-[60px]">
-                        Refraction: OD {reportSession.order_details?.refraction_od || '—'} | OS {reportSession.order_details?.refraction_os || '—'}{'\n'}
-                        IOP: OD {reportSession.order_details?.iop_od ?? '—'} | OS {reportSession.order_details?.iop_os ?? '—'}
-                      </p>
+                    <h3 className="text-lg font-semibold text-teal-700 dark:text-teal-400 border-b pb-2">SUBJECTIVE (S)</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                      <p className="bg-muted/50 p-3 rounded border"><span className="font-medium">CC:</span> {reportSession.soap_note?.subjective.chiefComplaint || reportSession.order_details?.chief_complaint || 'Not documented'}</p>
+                      <p className="bg-muted/50 p-3 rounded border"><span className="font-medium">POHx:</span> {reportSession.soap_note?.subjective.ocularHistory || '—'}</p>
+                      <p className="bg-muted/50 p-3 rounded border"><span className="font-medium">PMHx:</span> {reportSession.soap_note?.subjective.medicalHistory || '—'}</p>
+                      <p className="bg-muted/50 p-3 rounded border"><span className="font-medium">Drug History:</span> {reportSession.soap_note?.subjective.drugHistory || '—'}</p>
+                      <p className="bg-muted/50 p-3 rounded border"><span className="font-medium">Allergies:</span> {reportSession.soap_note?.subjective.allergyHistory || '—'}</p>
+                      <p className="bg-muted/50 p-3 rounded border"><span className="font-medium">Social History:</span> {reportSession.soap_note?.subjective.socialHistory || '—'}</p>
                     </div>
                   </div>
 
                   <div className="space-y-3">
-                    <h3 className="text-lg font-semibold text-green-700 dark:text-green-400 border-b pb-2">C. Examination Findings</h3>
-                    <p className="text-sm bg-muted/50 p-3 rounded border min-h-[80px]">{reportSession.findings || 'Not documented'}</p>
+                    <h3 className="text-lg font-semibold text-blue-700 dark:text-blue-400 border-b pb-2">OBJECTIVE (O)</h3>
+                    <div className="space-y-4 text-sm">
+                      <div className="overflow-x-auto rounded-md border">
+                        <table className="w-full text-sm">
+                          <thead className="bg-muted/50">
+                            <tr>
+                              <th className="p-2 text-left">Visual Acuity</th>
+                              <th className="p-2 text-left">OD</th>
+                              <th className="p-2 text-left">OS</th>
+                              <th className="p-2 text-left">OU</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {visualAcuityRows.map((row) => (
+                              <tr key={row.key} className="border-t">
+                                <td className="p-2 font-medium">{row.label}</td>
+                                <td className="p-2">{reportSession.soap_note?.objective.visualAcuity[row.key]?.od || (row.key === 'distanceUnaided' ? reportSession.order_details?.visual_acuity_od : '') || '—'}</td>
+                                <td className="p-2">{reportSession.soap_note?.objective.visualAcuity[row.key]?.os || (row.key === 'distanceUnaided' ? reportSession.order_details?.visual_acuity_os : '') || '—'}</td>
+                                <td className="p-2">{reportSession.soap_note?.objective.visualAcuity[row.key]?.ou || (row.key === 'distanceUnaided' ? reportSession.order_details?.visual_acuity_ou : '') || '—'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      <div className="overflow-x-auto rounded-md border">
+                        <table className="w-full text-sm">
+                          <thead className="bg-muted/50">
+                            <tr>
+                              <th className="p-2 text-left">Structure</th>
+                              <th className="p-2 text-left">OD</th>
+                              <th className="p-2 text-left">OS</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {examinationRows.map((row) => (
+                              <tr key={row.key} className="border-t">
+                                <td className="p-2 font-medium">{row.label}</td>
+                                <td className="p-2">{reportSession.soap_note?.objective.examination[row.key]?.od || '—'}</td>
+                                <td className="p-2">{reportSession.soap_note?.objective.examination[row.key]?.os || '—'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <p className="bg-muted/50 p-3 rounded border">
+                          <span className="font-medium">IOP:</span> OD {reportSession.soap_note?.objective.diagnostics.iopOd || reportSession.order_details?.iop_od || '—'} | OS {reportSession.soap_note?.objective.diagnostics.iopOs || reportSession.order_details?.iop_os || '—'}<br />
+                          <span className="font-medium">Method:</span> {reportSession.soap_note?.objective.diagnostics.method || '—'} | <span className="font-medium">Time:</span> {reportSession.soap_note?.objective.diagnostics.time || '—'}
+                        </p>
+                        <div className="bg-muted/50 p-3 rounded border space-y-1">
+                          <p><span className="font-medium">Pachymetry:</span> {reportSession.soap_note?.objective.diagnostics.pachymetry || '—'} {reportSession.pachymetry_file && <a href={reportSession.pachymetry_file} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline ml-1">View file</a>}</p>
+                          <p><span className="font-medium">OCT:</span> {reportSession.soap_note?.objective.diagnostics.oct || '—'} {reportSession.oct_file && <a href={reportSession.oct_file} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline ml-1">View file</a>}</p>
+                          <p><span className="font-medium">Visual Field:</span> {reportSession.soap_note?.objective.diagnostics.visualField || '—'} {reportSession.visual_field_file && <a href={reportSession.visual_field_file} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline ml-1">View file</a>}</p>
+                        </div>
+                      </div>
+                      <div className="overflow-x-auto rounded-md border">
+                        <table className="w-full text-sm">
+                          <thead className="bg-muted/50">
+                            <tr>
+                              <th className="p-2 text-left">Refraction</th>
+                              <th className="p-2 text-left">Eye</th>
+                              <th className="p-2 text-left">Sphere</th>
+                              <th className="p-2 text-left">Cylinder</th>
+                              <th className="p-2 text-left">Axis</th>
+                              <th className="p-2 text-left">VA</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {[
+                              ['lensometry', 'Lensometry'],
+                              ['autorefraction', 'Autorefraction'],
+                              ['retinoscopy', 'Retinoscopy'],
+                              ['subjective', 'Subjective'],
+                            ].flatMap(([group, label]) => (['od', 'os'] as const).map((eye) => (
+                              <tr key={`${group}-${eye}`} className="border-t">
+                                <td className="p-2 font-medium">{label}</td>
+                                <td className="p-2 uppercase">{eye}</td>
+                                <td className="p-2">{(reportSession.soap_note?.objective.refraction as any)?.[group]?.[eye]?.sphere || (group === 'subjective' && eye === 'od' ? reportSession.order_details?.refraction_od : '') || (group === 'subjective' && eye === 'os' ? reportSession.order_details?.refraction_os : '') || '—'}</td>
+                                <td className="p-2">{(reportSession.soap_note?.objective.refraction as any)?.[group]?.[eye]?.cylinder || '—'}</td>
+                                <td className="p-2">{(reportSession.soap_note?.objective.refraction as any)?.[group]?.[eye]?.axis || '—'}</td>
+                                <td className="p-2">{(reportSession.soap_note?.objective.refraction as any)?.[group]?.[eye]?.va || '—'}</td>
+                              </tr>
+                            )))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
                   </div>
 
                   <div className="space-y-3">
-                    <h3 className="text-lg font-semibold text-purple-700 dark:text-purple-400 border-b pb-2">D. Diagnosis</h3>
-                    <p className="text-sm bg-muted/50 p-3 rounded border min-h-[60px]">{reportSession.order_details?.diagnosis || 'Not documented'}</p>
+                    <h3 className="text-lg font-semibold text-purple-700 dark:text-purple-400 border-b pb-2">ASSESSMENT (A)</h3>
+                    <p className="text-sm bg-muted/50 p-3 rounded border min-h-[60px]">{reportSession.soap_note?.assessment.diagnosis || reportSession.order_details?.diagnosis || reportSession.findings || 'Not documented'}</p>
                   </div>
 
                   <div className="space-y-3">
-                    <h3 className="text-lg font-semibold text-orange-700 dark:text-orange-400 border-b pb-2">E. Treatment Plan</h3>
-                    <p className="text-sm bg-muted/50 p-3 rounded border min-h-[80px]">{reportSession.order_details?.treatment_plan || reportSession.procedures_performed || 'Not documented'}</p>
-                  </div>
-
-                  <div className="space-y-3">
-                    <h3 className="text-lg font-semibold text-red-700 dark:text-red-400 border-b pb-2">F. Session Notes</h3>
-                    <p className="text-sm bg-muted/50 p-3 rounded border min-h-[80px]">{reportSession.notes || 'Not documented'}</p>
+                    <h3 className="text-lg font-semibold text-orange-700 dark:text-orange-400 border-b pb-2">PLAN (P)</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                      <p className="bg-muted/50 p-3 rounded border"><span className="font-medium">Optical Correction:</span> {reportSession.soap_note?.plan.opticalCorrection || '—'}</p>
+                      <p className="bg-muted/50 p-3 rounded border"><span className="font-medium">Medications:</span> {reportSession.soap_note?.plan.medications || '—'}</p>
+                      <p className="bg-muted/50 p-3 rounded border"><span className="font-medium">Management Plan:</span> {reportSession.soap_note?.plan.managementPlan || reportSession.order_details?.treatment_plan || reportSession.procedures_performed || '—'}</p>
+                      <p className="bg-muted/50 p-3 rounded border"><span className="font-medium">Follow-up Date:</span> {reportSession.soap_note?.plan.followUpDate || '—'}</p>
+                    </div>
                   </div>
                 </div>
               )}
@@ -1289,6 +1800,17 @@ export default function EyeClinicOrdersPage() {
               </DialogFooter>
             </DialogContent>
           </Dialog>
+
+          <PrescriptionOrderModal
+            open={isPrescriptionDialogOpen}
+            onOpenChange={setIsPrescriptionDialogOpen}
+            patientAllergies={sessionForm.soap_note.subjective.allergyHistory
+              .split(/[\n,]/)
+              .map((item) => item.trim())
+              .filter(Boolean)}
+            onSubmit={handleEyePrescriptionSubmit}
+            confirmLabel="Send to Pharmacy"
+          />
         </div>
       </DashboardLayout>
     </TooltipProvider>

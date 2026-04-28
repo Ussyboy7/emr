@@ -87,6 +87,10 @@ class EyeSession(models.Model):
     notes = models.TextField(blank=True)
     procedures_performed = models.TextField(blank=True)
     findings = models.TextField(blank=True)
+    soap_note = models.JSONField(default=dict, blank=True)
+    pachymetry_file = models.FileField(upload_to='eye_results/pachymetry/', blank=True, null=True)
+    oct_file = models.FileField(upload_to='eye_results/oct/', blank=True, null=True)
+    visual_field_file = models.FileField(upload_to='eye_results/visual_fields/', blank=True, null=True)
     
     created_at = models.DateTimeField(auto_now_add=True)
 

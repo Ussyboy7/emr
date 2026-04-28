@@ -29,6 +29,55 @@ export interface EyeOrder {
   completed_at: string | null;
 }
 
+export type EyeRefractionEntry = {
+  sphere: string;
+  cylinder: string;
+  axis: string;
+  va: string;
+};
+
+export type EyeSoapNote = {
+  subjective: {
+    chiefComplaint: string;
+    ocularHistory: string;
+    medicalHistory: string;
+    drugHistory: string;
+    allergyHistory: string;
+    familyOcularHistory: string;
+    familyMedicalHistory: string;
+    socialHistory: string;
+  };
+  objective: {
+    visualAcuity: Record<string, { od: string; os: string; ou: string }>;
+    examination: Record<string, { od: string; os: string }>;
+    diagnostics: {
+      iopOd: string;
+      iopOs: string;
+      method: string;
+      time: string;
+      pachymetry: string;
+      oct: string;
+      visualField: string;
+    };
+    refraction: {
+      lensometry: { od: EyeRefractionEntry; os: EyeRefractionEntry; add: string; prism: string };
+      autorefraction: { od: EyeRefractionEntry; os: EyeRefractionEntry };
+      retinoscopy: { od: EyeRefractionEntry; os: EyeRefractionEntry };
+      subjective: { od: EyeRefractionEntry; os: EyeRefractionEntry };
+      nearAddition: { add: string; nearVa: string };
+    };
+  };
+  assessment: {
+    diagnosis: string;
+  };
+  plan: {
+    opticalCorrection: string;
+    medications: string;
+    managementPlan: string;
+    followUpDate: string;
+  };
+};
+
 export interface EyeSession {
   id: number;
   order: number;
@@ -45,6 +94,10 @@ export interface EyeSession {
   notes: string;
   procedures_performed: string;
   findings: string;
+  soap_note?: EyeSoapNote;
+  pachymetry_file?: string | null;
+  oct_file?: string | null;
+  visual_field_file?: string | null;
   created_at?: string;
 }
 
@@ -140,6 +193,33 @@ export const eyeCareService = {
     return apiFetch<EyeSession>(`/eyecare/sessions/${id}/`, {
       method: 'PATCH',
       body: JSON.stringify(data),
+    });
+  },
+
+  /**
+   * Update an eye session with uploaded diagnostic files.
+   */
+  async updateSessionWithFiles(
+    id: number,
+    data: Partial<EyeSession>,
+    files: {
+      pachymetry_file?: File | null;
+      oct_file?: File | null;
+      visual_field_file?: File | null;
+    }
+  ) {
+    const formData = new FormData();
+    Object.entries(data).forEach(([key, value]) => {
+      if (value === undefined || value === null) return;
+      formData.append(key, typeof value === 'object' ? JSON.stringify(value) : String(value));
+    });
+    Object.entries(files).forEach(([key, file]) => {
+      if (file) formData.append(key, file);
+    });
+
+    return apiFetch<EyeSession>(`/eyecare/sessions/${id}/`, {
+      method: 'PATCH',
+      body: formData,
     });
   },
 };

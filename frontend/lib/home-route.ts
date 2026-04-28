@@ -26,10 +26,19 @@ export function isPathAllowedByPages(pathname: string, allowedPages: string[]): 
   if (allowed.includes(pathname)) return true;
 
   // Prefix match for nested routes (e.g. /medical-records/patients/123 allowed by /medical-records/patients)
-  return allowed.some((p) => {
+  if (allowed.some((p) => {
     if (!p || p === "/") return false;
     return pathname === p || pathname.startsWith(p + "/");
-  });
+  })) {
+    return true;
+  }
+
+  // Special case: allow /medical-records/patients/* if user has /medical-records/patient-records
+  if (pathname.startsWith("/medical-records/patients/") && allowed.includes("/medical-records/patient-records")) {
+    return true;
+  }
+
+  return false;
 }
 
 export function getHomeRouteFromAllowedPages(allowedPages: string[]): string | null {
