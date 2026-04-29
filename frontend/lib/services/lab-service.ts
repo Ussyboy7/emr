@@ -43,8 +43,9 @@ export interface LabTest {
   processed_by?: string | number;
   processed_by_name?: string;
   processed_at?: string;
-  results?: Record<string, string>;
+  results?: Record<string, any>;
   result_file?: { name: string; type: string; uploaded_at: string };
+  result_attachments?: LabResultAttachment[];
   template?: string;
   // Provided by backend serializer for UI use
   template_name?: string | null;
@@ -56,6 +57,26 @@ export interface LabTest {
   rejected_at?: string;
   verification_notes?: string;
   notes?: string;
+}
+
+export interface LabResultAttachment {
+  id: number;
+  test: number;
+  row_id: string;
+  row_name: string;
+  file: string;
+  uploaded_by?: number | null;
+  uploaded_by_name?: string | null;
+  uploaded_at: string;
+}
+
+export interface CustomLabResultRow {
+  id: string;
+  name: string;
+  value: string;
+  unit: string;
+  reference_range: string;
+  notes: string;
 }
 
 /** External / outsourced lab partners (managed in Django admin or via API). */
@@ -284,15 +305,24 @@ class LabService {
   async submitResults(
     orderId: number,
     testId: number,
-    results: Record<string, string>,
+    results: Record<string, string> | { custom_results: CustomLabResultRow[] },
     resultFile?: File,
-    notes?: string
+    notes?: string,
+    customAttachments?: Record<string, File | null>
   ): Promise<LabTest> {
-    if (resultFile) {
+    const hasCustomAttachments = customAttachments && Object.values(customAttachments).some(Boolean);
+    const hasCustomRows = Array.isArray((results as any)?.custom_results);
+    if (resultFile || hasCustomAttachments || hasCustomRows) {
       // Upload file using FormData
       const formData = new FormData();
       formData.append('test_id', testId.toString());
-      formData.append('result_file', resultFile);
+      formData.append('results', JSON.stringify(results || {}));
+      if (resultFile) formData.append('result_file', resultFile);
+      if (customAttachments) {
+        Object.entries(customAttachments).forEach(([rowId, file]) => {
+          if (file) formData.append(`custom_attachment_${rowId}`, file);
+        });
+      }
       formData.append('notes', notes || '');
       
       return apiFetch<LabTest>(`/laboratory/orders/${orderId}/submit_results/`, {

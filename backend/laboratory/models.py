@@ -236,6 +236,33 @@ class LabTest(models.Model):
         return f"{self.code} - {self.name} ({self.order.order_id})"
 
 
+class LabTestResultAttachment(models.Model):
+    """File attached to one custom result row inside a LabTest."""
+
+    test = models.ForeignKey(LabTest, on_delete=models.CASCADE, related_name='result_attachments')
+    row_id = models.CharField(max_length=80, db_index=True)
+    row_name = models.CharField(max_length=200, blank=True)
+    file = models.FileField(upload_to='lab_results/attachments/')
+    uploaded_by = models.ForeignKey(
+        'accounts.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='uploaded_lab_result_attachments',
+    )
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'lab_test_result_attachments'
+        ordering = ['uploaded_at']
+        indexes = [
+            models.Index(fields=['test', 'row_id']),
+        ]
+
+    def __str__(self):
+        return f"{self.row_name or self.row_id} attachment for {self.test}"
+
+
 class LabResult(models.Model):
     """
     Verified lab results (for verification workflow).

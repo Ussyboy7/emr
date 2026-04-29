@@ -95,6 +95,7 @@ export function LabCompletedReportDialog({
   const hideUnitNormalColumns = test?.results.every(r =>
     !r.unit?.trim() && (!r.normalRange?.trim() || !r.normalRange.includes('-'))
   ) ?? false;
+  const hasRowAttachments = test?.results.some((r) => Boolean(r.attachment?.url)) ?? false;
 
   const handlePrint = () => {
     if (!test) return;
@@ -234,6 +235,9 @@ export function LabCompletedReportDialog({
                            {!hideUnitNormalColumns && (
                              <th className="text-left p-3 font-medium">Normal Range</th>
                            )}
+                           {hasRowAttachments && (
+                             <th className="text-left p-3 font-medium">File</th>
+                           )}
                            <th className="text-left p-3 font-medium">Status</th>
                          </tr>
                        </thead>
@@ -247,6 +251,23 @@ export function LabCompletedReportDialog({
                              )}
                              {!hideUnitNormalColumns && (
                                <td className="p-3 text-muted-foreground">{r.normalRange}</td>
+                             )}
+                             {hasRowAttachments && (
+                               <td className="p-3">
+                                 {r.attachment?.url ? (
+                                   <Button
+                                     variant="outline"
+                                     size="sm"
+                                     onClick={() => window.open(r.attachment!.url, '_blank')}
+                                     className="h-7"
+                                   >
+                                     <FileText className="h-3.5 w-3.5 mr-1" />
+                                     View
+                                   </Button>
+                                 ) : (
+                                   <span className="text-muted-foreground">—</span>
+                                 )}
+                               </td>
                              )}
                              <td className="p-3">
                                {r.status === 'Normal' ? (

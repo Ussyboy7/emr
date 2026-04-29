@@ -69,6 +69,8 @@ function statusLabel(status: string | undefined): string {
   const s = String(status ?? '').toLowerCase();
   if (s === 'dispensed') return 'Dispensed';
   if (s === 'partially_dispensed') return 'Partially Dispensed';
+  if (s === 'dispensing') return 'Processing';
+  if (s === 'cancelled') return 'Cancelled';
   return 'Pending';
 }
 
@@ -79,6 +81,12 @@ function statusBadgeClass(status: string | undefined): string {
   }
   if (s === 'partially_dispensed') {
     return 'bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/40';
+  }
+  if (s === 'dispensing') {
+    return 'bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/40';
+  }
+  if (s === 'cancelled') {
+    return 'bg-rose-500/10 text-rose-700 dark:text-rose-400 border-rose-500/40';
   }
   return 'bg-muted text-muted-foreground border-border';
 }

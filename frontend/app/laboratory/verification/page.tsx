@@ -51,6 +51,10 @@ interface TestResult {
   unit: string;
   normalRange: string;
   status: 'Normal' | 'Abnormal' | 'Critical';
+  attachment?: {
+    url: string;
+    name: string;
+  } | null;
 }
 
 interface LabResult {
@@ -89,6 +93,27 @@ const transformResult = (
   const testName = testDetails?.name || test?.name || '';
 
   const testCodeForTemplate = (testDetails as any)?.code || (test as any)?.code || '';
+  const toAbsoluteResultFileUrl = (url: string): string => {
+    if (!url) return url;
+    if (url.startsWith('http://') || url.startsWith('https://')) return url;
+    const apiRoot = process.env.NEXT_PUBLIC_API_URL || '';
+    const mediaBase = apiRoot.endsWith('/api') ? apiRoot.slice(0, -4) : apiRoot.endsWith('/api/v1') ? apiRoot.slice(0, -7) : apiRoot;
+    if (url.startsWith('/media/')) return `${mediaBase}${url}`;
+    return `${mediaBase}/media/${url.replace(/^\/+/, '')}`;
+  };
+  const displayNameFromResultFileUrl = (url: string): string => {
+    try {
+      return decodeURIComponent(url.split('?')[0].split('/').filter(Boolean).pop() || 'Result file');
+    } catch {
+      return 'Result file';
+    }
+  };
+  const attachmentsByRowId = new Map<string, any>();
+  const attachmentsByRowName = new Map<string, any>();
+  ((testDetails as any)?.result_attachments || (test as any)?.result_attachments || []).forEach((attachment: any) => {
+    if (attachment?.row_id) attachmentsByRowId.set(String(attachment.row_id), attachment);
+    if (attachment?.row_name) attachmentsByRowName.set(String(attachment.row_name).trim().toLowerCase(), attachment);
+  });
 
   // Canonical template source: test-specific range first, then template object, then
   // a cached per-code map (fallback for legacy rows missing `template_normal_range`).
@@ -139,7 +164,29 @@ const transformResult = (
   
   // Process results if we found them
   if (resultsObj && Object.keys(resultsObj).length > 0) {
-    Object.entries(resultsObj).forEach(([key, value]) => {
+    if (Array.isArray((resultsObj as any).custom_results)) {
+      (resultsObj as any).custom_results.forEach((row: any) => {
+        if (!row || (!row.name && !row.value && !row.unit && !row.reference_range && !row.notes)) return;
+        const rowId = String(row.id || '');
+        const parameter = String(row.name || 'Custom Result');
+        const attachment = attachmentsByRowId.get(rowId) || attachmentsByRowName.get(parameter.trim().toLowerCase());
+        const attachmentUrl = attachment?.file ? toAbsoluteResultFileUrl(String(attachment.file)) : '';
+        results.push({
+          parameter,
+          value: String(row.value || ''),
+          unit: String(row.unit || ''),
+          normalRange: String(row.reference_range || ''),
+          status: 'Normal',
+          attachment: attachmentUrl
+            ? {
+                url: attachmentUrl,
+                name: displayNameFromResultFileUrl(attachmentUrl),
+              }
+            : null,
+        });
+      });
+    } else {
+      Object.entries(resultsObj).forEach(([key, value]) => {
       // Skip if value is null, undefined, or empty string
       if (value === null || value === undefined || value === '') {
         return;
@@ -170,7 +217,8 @@ const transformResult = (
         normalRange,
         status,
       });
-    });
+      });
+    }
 
     // De-duplicate generic "Result" alias when a specific analyte row has the same value/range/unit.
     const genericResultRow = results.find((r) => r.parameter.trim().toLowerCase() === 'result');
@@ -989,6 +1037,9 @@ export default function ResultsVerificationPage() {
                   <p className="text-sm text-muted-foreground mb-2">Test Results</p>
                   {selectedResult.results.length > 0 ? (
                     <div className="overflow-x-auto">
+                      {(() => {
+                        const hasRowAttachments = selectedResult.results.some((result) => result.attachment?.url);
+                        return (
                       <table className="w-full text-sm">
                         <thead><tr className="border-b bg-muted/50">
                           <th className="text-left p-2">Parameter</th>
@@ -996,6 +1047,7 @@ export default function ResultsVerificationPage() {
                           <th className="text-left p-2">Unit</th>
                           <th className="text-left p-2">Normal Range</th>
                           <th className="text-left p-2">Status</th>
+                          {hasRowAttachments && <th className="text-left p-2">File</th>}
                         </tr></thead>
                         <tbody>
                           {selectedResult.results.map(r => (
@@ -1005,10 +1057,30 @@ export default function ResultsVerificationPage() {
                               <td className="p-2 text-muted-foreground">{r.unit}</td>
                               <td className="p-2 text-muted-foreground">{r.normalRange}</td>
                               <td className="p-2"><Badge variant="outline" className={getOverallStatusBadge(r.status)}>{r.status}</Badge></td>
+                              {hasRowAttachments && (
+                                <td className="p-2">
+                                  {r.attachment?.url ? (
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-7 px-2"
+                                      onClick={() => window.open(r.attachment!.url, '_blank', 'noopener,noreferrer')}
+                                    >
+                                      <Download className="h-3.5 w-3.5 mr-1" />
+                                      View
+                                    </Button>
+                                  ) : (
+                                    <span className="text-muted-foreground">-</span>
+                                  )}
+                                </td>
+                              )}
                             </tr>
                           ))}
                         </tbody>
                       </table>
+                        );
+                      })()}
                     </div>
                   ) : selectedResult.resultFile && selectedResult.resultFileExists !== false ? (
                     <div className="p-4 rounded-lg bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800">

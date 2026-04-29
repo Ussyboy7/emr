@@ -564,9 +564,33 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
             'consultation_session__diagnoses__icd10_code',
             'visit__diagnoses__icd10_code',
         )
+
+    @staticmethod
+    def _prescription_cancel_blocker(prescription):
+        if prescription.status in ('dispensed', 'partially_dispensed'):
+            return 'Cannot cancel a prescription that has already been dispensed.'
+
+        if prescription.dispenses.exists():
+            return 'Cannot cancel a prescription with dispense records.'
+
+        for item in prescription.medications.all():
+            if (item.dispensed_quantity or 0) > 0 or item.is_dispensed:
+                return 'Cannot cancel a prescription with dispensed medication items.'
+            if item.dispenses.exists():
+                return 'Cannot cancel a prescription with dispense records.'
+
+        return None
     
     def perform_update(self, serializer):
         """Update prescription and log audit."""
+        instance = self.get_object()
+        requested_status = serializer.validated_data.get('status')
+        if requested_status == 'cancelled' and instance.status != 'cancelled':
+            blocker = self._prescription_cancel_blocker(instance)
+            if blocker:
+                from rest_framework.exceptions import ValidationError
+                raise ValidationError({'error': blocker})
+
         prescription = serializer.save()
         
         # Log audit
@@ -617,6 +641,39 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
         except Exception:
             # Notifications must never break prescription creation
             pass
+
+    @action(detail=True, methods=['post'])
+    def cancel(self, request, pk=None):
+        """Cancel a prescription only if no medication has been dispensed."""
+        prescription = self.get_object()
+        blocker = self._prescription_cancel_blocker(prescription)
+        if blocker:
+            return Response({'error': blocker}, status=status.HTTP_400_BAD_REQUEST)
+
+        if prescription.status == 'cancelled':
+            return Response(self.get_serializer(prescription).data)
+
+        reason = str(request.data.get('reason') or '').strip()
+        old_status = prescription.status
+        prescription.status = 'cancelled'
+        if reason:
+            prescription.notes = f"{prescription.notes}\n\nCancellation reason: {reason}".strip()
+        prescription.save(update_fields=['status', 'notes'])
+
+        AuditService.log_activity(
+            user=request.user,
+            action='cancel',
+            object_type='prescription',
+            object_id=str(prescription.id),
+            module='pharmacy',
+            object_repr=f'Prescription {prescription.prescription_id}',
+            description=f'Cancelled prescription {prescription.prescription_id}',
+            old_values={'status': old_status},
+            new_values={'status': prescription.status, 'reason': reason},
+            request=request,
+        )
+
+        return Response(self.get_serializer(prescription).data)
 
     @staticmethod
     def _resolve_generic_component(component_name: str):

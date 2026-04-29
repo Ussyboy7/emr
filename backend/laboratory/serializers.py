@@ -2,7 +2,39 @@
 Serializers for the Laboratory app.
 """
 from rest_framework import serializers
-from .models import LabTemplate, LabPartner, LabOrder, LabTest, LabResult
+import re
+from .models import LabTemplate, LabPartner, LabOrder, LabTest, LabTestResultAttachment, LabResult
+
+
+OTHER_TEMPLATE_CODES = {'OTHER', 'OTHERS'}
+
+TEST_NAME_ALIASES = {
+    'lft': 'liver function test',
+    'lf t': 'liver function test',
+    'fbc': 'full blood count',
+    'cbc': 'full blood count',
+    'rft': 'renal function test',
+    'uecr': 'urea electrolytes creatinine',
+    'u e cr': 'urea electrolytes creatinine',
+}
+
+
+def _normalize_test_name(value):
+    normalized = re.sub(r'[^a-z0-9]+', ' ', str(value or '').lower()).strip()
+    return TEST_NAME_ALIASES.get(normalized, normalized)
+
+
+def _split_requested_other_tests(notes):
+    if not notes:
+        return []
+    cleaned = re.sub(r'\b(and|&)\b', ',', str(notes), flags=re.IGNORECASE)
+    parts = re.split(r'[,;\n]+', cleaned)
+    result = []
+    for part in parts:
+        name = part.strip(" \t\r\n.-:•")
+        if name:
+            result.append(name)
+    return result
 
 
 class LabPartnerSerializer(serializers.ModelSerializer):
@@ -34,6 +66,23 @@ class LabTemplateSerializer(serializers.ModelSerializer):
         read_only_fields = ['created_at', 'updated_at']
 
 
+class LabTestResultAttachmentSerializer(serializers.ModelSerializer):
+    uploaded_by_name = serializers.SerializerMethodField()
+
+    def get_uploaded_by_name(self, obj):
+        if not obj.uploaded_by:
+            return None
+        try:
+            return obj.uploaded_by.get_full_name()
+        except (AttributeError, TypeError):
+            return str(obj.uploaded_by)
+
+    class Meta:
+        model = LabTestResultAttachment
+        fields = ['id', 'test', 'row_id', 'row_name', 'file', 'uploaded_by', 'uploaded_by_name', 'uploaded_at']
+        read_only_fields = ['id', 'uploaded_by', 'uploaded_at']
+
+
 class LabTestSerializer(serializers.ModelSerializer):
     """Serializer for LabTest model."""
 
@@ -47,6 +96,7 @@ class LabTestSerializer(serializers.ModelSerializer):
     rejected_by_name = serializers.SerializerMethodField()
     order_details = serializers.SerializerMethodField()
     result_file_exists = serializers.SerializerMethodField()
+    result_attachments = LabTestResultAttachmentSerializer(many=True, read_only=True)
 
     def get_template_normal_range(self, obj):
         """
@@ -303,12 +353,75 @@ class LabOrderSerializer(serializers.ModelSerializer):
         """Create lab order with nested tests."""
         tests_data = validated_data.pop('tests_data', [])
         order = LabOrder.objects.create(**validated_data)
-        
+
         # Create lab tests
         for test_data in tests_data:
             LabTest.objects.create(order=order, **test_data)
         
         return order
+
+    def _expand_known_tests_from_other(self, order, tests_data):
+        """
+        If a clinician selected the generic Other template but typed several known
+        investigations in the notes, create real LabTest rows for known templates
+        and leave only unmatched names under Other.
+        """
+        expanded = []
+        explicit_template_ids = {
+            item.get('template').id if hasattr(item.get('template'), 'id') else item.get('template')
+            for item in tests_data
+            if item.get('template')
+        }
+
+        templates = list(LabTemplate.objects.filter(is_active=True))
+        template_by_name = {}
+        for template in templates:
+            keys = {
+                _normalize_test_name(template.name),
+                _normalize_test_name(template.code),
+            }
+            for key in keys:
+                if key:
+                    template_by_name.setdefault(key, template)
+
+        for test_data in tests_data:
+            code = str(test_data.get('code') or '').upper()
+            template = test_data.get('template')
+            template_code = str(getattr(template, 'code', '') or '').upper()
+            is_other = code in OTHER_TEMPLATE_CODES or template_code in OTHER_TEMPLATE_CODES
+
+            if not is_other:
+                expanded.append(test_data)
+                continue
+
+            requested_names = _split_requested_other_tests(test_data.get('notes') or order.clinical_notes)
+            if not requested_names:
+                expanded.append(test_data)
+                continue
+
+            unmatched = []
+            for requested_name in requested_names:
+                matched_template = template_by_name.get(_normalize_test_name(requested_name))
+                if not matched_template or matched_template.id in explicit_template_ids:
+                    unmatched.append(requested_name)
+                    continue
+
+                expanded.append({
+                    'name': matched_template.name,
+                    'code': matched_template.code,
+                    'sample_type': matched_template.sample_type,
+                    'status': test_data.get('status') or 'pending',
+                    'template': matched_template,
+                    'notes': test_data.get('notes') or order.clinical_notes or '',
+                })
+                explicit_template_ids.add(matched_template.id)
+
+            if unmatched:
+                next_other = dict(test_data)
+                next_other['notes'] = ', '.join(unmatched)
+                expanded.append(next_other)
+
+        return expanded
     
     class Meta:
         model = LabOrder

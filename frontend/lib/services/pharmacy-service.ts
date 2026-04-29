@@ -273,6 +273,13 @@ class PharmacyService {
     return this.updatePrescription(prescriptionId, { status, notes });
   }
 
+  async cancelPrescription(prescriptionId: number | string, reason?: string): Promise<Prescription> {
+    return apiFetch<Prescription>(`/v1/pharmacy/prescriptions/${prescriptionId}/cancel/`, {
+      method: 'POST',
+      body: JSON.stringify({ reason: reason || '' }),
+    });
+  }
+
   /**
    * Dispense medication from a prescription
    */

@@ -593,6 +593,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   const [diagnosisNotes, setDiagnosisNotes] = useState('');
   const [prescriptions, setPrescriptions] = useState<{ 
     id: string;
+    prescriptionId?: number;
     medication: string; 
     /** GenericMedication PK (required for pharmacy API `items[].generic`). */
     genericId?: number;
@@ -611,7 +612,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     route: string;
     instructions: string;
     priority: string;
-    status: 'Draft' | 'Sent to Pharmacy' | 'Processing' | 'Dispensed';
+    status: 'Draft' | 'Sent to Pharmacy' | 'Processing' | 'Partially Dispensed' | 'Dispensed' | 'Cancelled';
   }[]>([]);
   const [showAddPrescription, setShowAddPrescription] = useState(false);
   const [prescriptionsSentToPharmacy, setPrescriptionsSentToPharmacy] = useState(false);
@@ -996,6 +997,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           route: med.route || '',
         })),
         status: rx.status || 'pending',
+        canCancel: rx.status === 'pending' || rx.status === 'dispensing',
         diagnoses: icdDx.map((d: any) => ({
           code: String(d.code ?? ''),
           name: String(d.name ?? ''),
@@ -1841,6 +1843,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           const transformedPrescriptions = prescriptionsResult.results?.flatMap((rx: any) => 
             (rx.medications || []).map((item: any) => ({
               id: `RX-${rx.id}-${item.id}`,
+              prescriptionId: rx.id,
               medication: item.medication?.name || item.medication_name || 'Unknown',
               genericId: item.generic ?? item.generic_id,
               brandMedicationId: item.medication?.id ?? item.medication_id,
@@ -1858,6 +1861,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                   priority: item.priority || 'Routine',
               status: rx.status === 'dispensed' ? 'Dispensed' :
                       rx.status === 'partially_dispensed' ? 'Partially Dispensed' :
+                      rx.status === 'cancelled' ? 'Cancelled' :
                       rx.status === 'pending' ? 'Sent to Pharmacy' :
                       'Draft',
             })) || []
@@ -3122,6 +3126,36 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     setShowPrescriptionViewer(true);
   };
 
+  const cancelHistoryPrescription = async (prescription: any) => {
+    if (!prescription?.id) {
+      toast.error('Prescription reference is not available.');
+      return;
+    }
+
+    const confirmed = window.confirm('Cancel this prescription from consultation history? Dispensed or partially dispensed prescriptions cannot be cancelled.');
+    if (!confirmed) return;
+
+    try {
+      const updated = await pharmacyService.cancelPrescription(prescription.id, 'Cancelled from consultation history');
+      setRawPrescriptions((prev) =>
+        prev.map((rx) => (String(rx.id) === String(prescription.id) ? { ...rx, ...updated } : rx))
+      );
+      setPrescriptionHistory((prev) =>
+        prev.map((rx) =>
+          String(rx.id) === String(prescription.id)
+            ? { ...rx, status: 'cancelled', canCancel: false }
+            : rx
+        )
+      );
+      if (selectedPrescription && String(selectedPrescription.id) === String(prescription.id)) {
+        setSelectedPrescription((prev: any) => prev ? { ...prev, status: 'cancelled', canCancel: false } : prev);
+      }
+      toast.success('Prescription cancelled');
+    } catch (err: any) {
+      toast.error(err?.message || 'Could not cancel prescription');
+    }
+  };
+
   // Toggle lab result expansion in history
   const toggleLabResultExpansion = (labId: string) => {
     setExpandedLabResults(prev => 
@@ -3485,8 +3519,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         return;
       }
       
+      let createdPrescription: Prescription;
       try {
-        await pharmacyService.createPrescription({
+        createdPrescription = await pharmacyService.createPrescription({
           patient: numericPatientId,
           visit: numericVisitId || undefined,
           consultation_session: sessionId,
@@ -3505,11 +3540,35 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         return; // Don't update status if creation failed
       }
       
-      setPrescriptions(prev => prev.map(rx => rx.status === 'Draft' ? { ...rx, status: 'Sent to Pharmacy' } : rx));
+      setPrescriptions(prev => prev.map(rx => rx.status === 'Draft' ? { ...rx, prescriptionId: createdPrescription.id, status: 'Sent to Pharmacy' } : rx));
       setPrescriptionsSentToPharmacy(true);
     } catch (err: any) {
       console.error('Error sending prescriptions:', err);
       toast.error(err.message || 'Failed to send prescriptions to pharmacy');
+    }
+  };
+
+  const cancelSentPrescription = async (prescriptionId?: number | string) => {
+    if (!prescriptionId) {
+      toast.error('Prescription reference is not available. Refresh and try again.');
+      return;
+    }
+
+    const confirmed = window.confirm('Cancel this prescription in the pharmacy queue? This is only allowed before any medication is dispensed.');
+    if (!confirmed) return;
+
+    try {
+      await pharmacyService.cancelPrescription(prescriptionId, 'Cancelled from consultation');
+      setPrescriptions((prev) =>
+        prev.map((rx) =>
+          String(rx.prescriptionId) === String(prescriptionId)
+            ? { ...rx, status: 'Cancelled' }
+            : rx
+        )
+      );
+      toast.success('Prescription cancelled');
+    } catch (err: any) {
+      toast.error(err?.message || 'Could not cancel prescription');
     }
   };
 
@@ -5163,7 +5222,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                           case 'Draft': return 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300';
                           case 'Sent to Pharmacy': return 'bg-violet-100 text-violet-800 dark:bg-violet-900/30 dark:text-violet-400';
                           case 'Processing': return 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400';
+                          case 'Partially Dispensed': return 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400';
                           case 'Dispensed': return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400';
+                          case 'Cancelled': return 'bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-400';
                           default: return 'bg-gray-100 text-gray-800';
                         }
                       };
@@ -5229,10 +5290,21 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                 </div>
                               )}
                               {rx.status === 'Sent to Pharmacy' && (
-                                <Badge className="bg-violet-500 text-white">
-                                  <CheckCircle className="h-3 w-3 mr-1" />
-                                  Queued
-                                </Badge>
+                                <div className="flex items-center gap-1">
+                                  <Badge className="bg-violet-500 text-white">
+                                    <CheckCircle className="h-3 w-3 mr-1" />
+                                    Queued
+                                  </Badge>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => cancelSentPrescription(rx.prescriptionId)}
+                                    className="text-rose-500 hover:text-rose-600"
+                                    title="Cancel prescription"
+                                  >
+                                    <X className="h-4 w-4" />
+                                  </Button>
+                                </div>
                               )}
                             </div>
                           </CardContent>
@@ -6531,8 +6603,10 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                               >
                                 <option value="all">All Status</option>
                                 <option value="pending">Pending</option>
+                                <option value="dispensing">Processing</option>
                                 <option value="partially_dispensed">Partially Dispensed</option>
                                 <option value="dispensed">Dispensed</option>
+                                <option value="cancelled">Cancelled</option>
                               </select>
                             </div>
                             <div className="border rounded-lg overflow-hidden">
@@ -6568,18 +6642,36 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                               ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400'
                                               : prescription.status === 'partially_dispensed'
                                               ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400'
+                                              : prescription.status === 'cancelled'
+                                              ? 'bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-400'
+                                              : prescription.status === 'dispensing'
+                                              ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400'
                                               : 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300'
                                           }
                                         >
                                           {prescription.status === 'dispensed' ? 'Dispensed' : 
                                            prescription.status === 'partially_dispensed' ? 'Partially Dispensed' : 
+                                           prescription.status === 'cancelled' ? 'Cancelled' :
+                                           prescription.status === 'dispensing' ? 'Processing' :
                                            'Pending'}
                                         </Badge>
                                       </td>
                                       <td className="px-4 py-3 text-center">
+                                        <div className="flex items-center justify-center gap-1">
                                         <Button variant="ghost" size="sm" onClick={() => viewPrescriptionDetails(prescription)}>
                                           <Eye className="h-4 w-4 mr-1" /> View
                                         </Button>
+                                        {prescription.canCancel && (
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => cancelHistoryPrescription(prescription)}
+                                            className="text-rose-600 hover:text-rose-700"
+                                          >
+                                            <X className="h-4 w-4 mr-1" /> Cancel
+                                          </Button>
+                                        )}
+                                        </div>
                                       </td>
                                     </tr>
                                   ))}

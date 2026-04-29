@@ -225,6 +225,7 @@ class RadiologyStudy(models.Model):
     
     # Reporting
     report = models.TextField(blank=True, help_text="Radiology report text")
+    custom_reports = models.JSONField(default=list, blank=True, help_text="Structured report rows for Other studies")
     recommendations = models.TextField(blank=True)
     critical = models.BooleanField(default=False, help_text="Critical findings flag")
     report_file = models.FileField(upload_to='radiology_reports/', blank=True, null=True, help_text="Uploaded report file")
@@ -250,6 +251,33 @@ class RadiologyStudy(models.Model):
     
     def __str__(self):
         return f"{self.procedure} - {self.order.order_id}"
+
+
+class RadiologyStudyReportAttachment(models.Model):
+    """File attached to one custom report row inside a radiology study."""
+
+    study = models.ForeignKey(RadiologyStudy, on_delete=models.CASCADE, related_name='report_attachments')
+    row_id = models.CharField(max_length=80, db_index=True)
+    row_name = models.CharField(max_length=200, blank=True)
+    file = models.FileField(upload_to='radiology_reports/attachments/')
+    uploaded_by = models.ForeignKey(
+        'accounts.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='uploaded_radiology_report_attachments',
+    )
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'radiology_study_report_attachments'
+        ordering = ['uploaded_at']
+        indexes = [
+            models.Index(fields=['study', 'row_id']),
+        ]
+
+    def __str__(self):
+        return f"{self.row_name or self.row_id} attachment for {self.study}"
 
 
 class RadiologyReport(models.Model):

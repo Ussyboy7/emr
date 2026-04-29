@@ -42,6 +42,8 @@ export interface RadiologyStudy {
   images_count?: number;
   technical_notes?: string;
   report?: string;
+  custom_reports?: CustomRadiologyReportRow[];
+  report_attachments?: RadiologyReportAttachment[];
   recommendations?: string;
   acquired_by?: number;
   acquired_at?: string;
@@ -50,6 +52,23 @@ export interface RadiologyStudy {
   verified_by?: number;
   verified_at?: string;
   verification_notes?: string;
+}
+
+export interface CustomRadiologyReportRow {
+  id: string;
+  procedure: string;
+  report: string;
+  recommendations?: string;
+  critical?: boolean;
+}
+
+export interface RadiologyReportAttachment {
+  id: number;
+  row_id: string;
+  row_name?: string;
+  file: string;
+  uploaded_by_name?: string | null;
+  uploaded_at: string;
 }
 
 export interface RadiologyReport {
@@ -525,6 +544,8 @@ class RadiologyService {
     report: string;
     critical: boolean;
     reportFile?: File | null;
+    customReports?: CustomRadiologyReportRow[];
+    customReportFiles?: Record<string, File | null>;
     status: string;
   }): Promise<any> {
     const formData = new FormData();
@@ -534,6 +555,12 @@ class RadiologyService {
 
     if (data.reportFile) {
       formData.append('report_file', data.reportFile);
+    }
+    if (data.customReports) {
+      formData.append('custom_reports', JSON.stringify(data.customReports));
+      Object.entries(data.customReportFiles || {}).forEach(([rowId, file]) => {
+        if (file) formData.append(`custom_report_file_${rowId}`, file);
+      });
     }
 
     return apiFetch<any>(`/radiology/studies/${studyId}/update_results/`, {

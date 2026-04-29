@@ -40,6 +40,7 @@ interface ImagingStudy {
   acquiredAt?: string;
   imagesCount?: number;
   report?: string;
+  customReports?: Array<{ id: string; procedure: string; report: string; recommendations?: string; critical?: boolean; attachment?: { name: string; url: string } | null }>;
   critical?: boolean;
   reportFile?: { name: string; type: string; uploadedAt: string };
   reportedBy?: string;
@@ -62,6 +63,15 @@ interface RadiologyReport {
   lmp?: string;
 }
 
+const getRadiologyReportFileUrl = (filePath?: string | null) => {
+  if (!filePath) return '';
+  if (filePath.startsWith('http://') || filePath.startsWith('https://')) return filePath;
+  const apiRoot = process.env.NEXT_PUBLIC_API_URL || '';
+  const mediaBase = apiRoot.endsWith('/api') ? apiRoot.slice(0, -4) : apiRoot.endsWith('/api/v1') ? apiRoot.slice(0, -7) : apiRoot;
+  if (filePath.startsWith('/media/')) return `${mediaBase}${filePath}`;
+  return `${mediaBase}/media/${filePath.replace(/^\/+/, '')}`;
+};
+
 // Transform backend radiology report to frontend format
 const transformReport = (apiReport: any): RadiologyReport => {
   const study = apiReport.study_details || apiReport.study;
@@ -72,6 +82,28 @@ const transformReport = (apiReport: any): RadiologyReport => {
   const mergedReportText = legacyImpression
     ? `${reportText}\n\nImpression:\n${legacyImpression}`.trim()
     : reportText;
+  const attachments = Array.isArray(studyObj.report_attachments) ? studyObj.report_attachments : [];
+  const customReports = Array.isArray(studyObj.custom_reports)
+    ? studyObj.custom_reports.map((row: any) => {
+        const attachment = attachments.find((file: any) =>
+          file.row_id === row.id || file.row_name?.trim().toLowerCase() === String(row.procedure || row.name || '').trim().toLowerCase()
+        );
+        const attachmentUrl = getRadiologyReportFileUrl(attachment?.file);
+        return {
+          id: String(row.id || ''),
+          procedure: String(row.procedure || row.name || ''),
+          report: String(row.report || ''),
+          recommendations: row.recommendations ? String(row.recommendations) : undefined,
+          critical: Boolean(row.critical),
+          attachment: attachmentUrl
+            ? {
+                name: String(attachment.row_name || attachment.file.split('/').pop() || 'Report file'),
+                url: attachmentUrl,
+              }
+            : null,
+        };
+      })
+    : [];
   
   // Extract patient details
   const patientId = (apiReport as any).patient_details?.patient_id || '';
@@ -119,6 +151,7 @@ const transformReport = (apiReport: any): RadiologyReport => {
       outsourcedFacility: studyObj.outsourced_facility,
       imagesCount: studyObj.images_count ? Number(studyObj.images_count) : undefined,
       report: mergedReportText || undefined,
+      customReports,
       critical: apiReport.overall_status === 'critical' || studyObj.critical || false,
       reportFile: studyObj.report_file_url ? {
         name: String(studyObj.report_file ? studyObj.report_file.split('/').pop() : 'Report File'),
@@ -858,7 +891,33 @@ export default function RadiologyVerificationPage() {
                 <div>
                   <p className="text-sm text-muted-foreground mb-2 font-medium">Report</p>
                   <div className={`p-3 rounded-lg ${selectedReport.study.critical ? 'bg-rose-50 dark:bg-rose-900/20 border border-rose-200' : 'bg-emerald-50 dark:bg-emerald-900/20'}`}>
-                    <p className={`text-sm whitespace-pre-wrap ${selectedReport.study.critical ? 'font-medium text-rose-700 dark:text-rose-400' : ''}`}>{selectedReport.study.report}</p>
+                    {selectedReport.study.customReports && selectedReport.study.customReports.length > 0 ? (
+                      <div className="space-y-3">
+                        {selectedReport.study.customReports.map((row, idx) => (
+                          <div key={row.id || idx} className="rounded border bg-background/70 p-3 space-y-1">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-sm font-medium">{row.procedure || `Custom study ${idx + 1}`}</p>
+                              {row.critical && <Badge className="bg-rose-500 text-white">Critical</Badge>}
+                            </div>
+                            {row.report && <p className={`text-sm whitespace-pre-wrap ${row.critical ? 'font-medium text-rose-700 dark:text-rose-400' : ''}`}>{row.report}</p>}
+                            {row.recommendations && <p className="text-sm"><span className="text-muted-foreground">Recommendations:</span> {row.recommendations}</p>}
+                            {row.attachment?.url && (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => window.open(row.attachment?.url, '_blank', 'noopener,noreferrer')}
+                              >
+                                <FileText className="h-3.5 w-3.5 mr-1" />
+                                View file
+                              </Button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className={`text-sm whitespace-pre-wrap ${selectedReport.study.critical ? 'font-medium text-rose-700 dark:text-rose-400' : ''}`}>{selectedReport.study.report}</p>
+                    )}
                   </div>
                 </div>
                 {selectedReport.study.reportFile && (

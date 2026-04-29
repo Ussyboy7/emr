@@ -9,14 +9,16 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django.utils import timezone
 from django.db.models import Count, Q
+import json
 
-from .models import LabTemplate, LabPartner, LabOrder, LabTest, LabResult
+from .models import LabTemplate, LabPartner, LabOrder, LabTest, LabTestResultAttachment, LabResult
 from .serializers import (
     LabTemplateSerializer,
     LabPartnerSerializer,
     LabOrderSerializer,
     LabTestSerializer,
     LabResultSerializer,
+    OTHER_TEMPLATE_CODES,
 )
 from .pagination import FlexiblePageNumberPagination
 from audit.services import AuditService
@@ -43,6 +45,22 @@ def _has_meaningful_results_payload(payload) -> bool:
             continue
         return True
     return False
+
+
+def _parse_results_payload(results):
+    if isinstance(results, str):
+        try:
+            parsed = json.loads(results)
+            if isinstance(parsed, dict):
+                return parsed
+            if isinstance(parsed, list):
+                return {'custom_results': parsed}
+            return {'Result': parsed} if parsed not in (None, '') else {}
+        except json.JSONDecodeError:
+            return {'Result': results} if results.strip() else {}
+    if isinstance(results, list):
+        return {'custom_results': results}
+    return results
 
 
 class LabPartnerViewSet(viewsets.ModelViewSet):
@@ -488,7 +506,7 @@ class LabOrderViewSet(viewsets.ModelViewSet):
         """Submit results for a test."""
         order = self.get_object()
         test_id = request.data.get('test_id')
-        results = request.data.get('results', {})
+        results = _parse_results_payload(request.data.get('results', {}))
         notes = request.data.get('notes', '')
         result_file = request.FILES.get('result_file')
         
@@ -499,13 +517,17 @@ class LabOrderViewSet(viewsets.ModelViewSet):
             if results is None:
                 results = {}
             if not isinstance(results, dict):
-                return Response({'error': 'Invalid results payload. Expected an object of {parameter: value}.'}, status=status.HTTP_400_BAD_REQUEST)
+                results = {'Result': str(results)}
+            custom_rows = results.get('custom_results') if isinstance(results, dict) else None
 
             # If the test has a template with defined parameters, enforce required keys.
             # This prevents multi-parameter tests (e.g. FBC) from being saved as a single generic "Result".
             template = getattr(test, 'template', None)
             normal_range = getattr(template, 'normal_range', None) if template else None
-            if isinstance(normal_range, dict) and normal_range:
+            template_code = str(getattr(template, 'code', '') or test.code or '').upper()
+            is_other_test = template_code in OTHER_TEMPLATE_CODES
+            has_custom_rows = isinstance(custom_rows, list)
+            if isinstance(normal_range, dict) and normal_range and not (is_other_test and has_custom_rows):
                 # Canonicalize single-analyte alias payloads:
                 # map legacy {"Result": "..."} to the template parameter key and avoid storing duplicates.
                 if len(normal_range) == 1 and isinstance(results, dict):
@@ -575,6 +597,30 @@ class LabOrderViewSet(viewsets.ModelViewSet):
                     test.verification_notes = ''
             
             test.save()
+
+            if isinstance(custom_rows, list):
+                row_names_by_id = {}
+                for row in custom_rows:
+                    if not isinstance(row, dict):
+                        continue
+                    row_id = str(row.get('id') or '').strip()
+                    if row_id:
+                        row_names_by_id[row_id] = str(row.get('name') or '').strip()
+                for key, uploaded_file in request.FILES.items():
+                    if not key.startswith('custom_attachment_') or not uploaded_file:
+                        continue
+                    row_id = key.replace('custom_attachment_', '', 1).strip()
+                    if not row_id:
+                        continue
+                    LabTestResultAttachment.objects.update_or_create(
+                        test=test,
+                        row_id=row_id,
+                        defaults={
+                            'row_name': row_names_by_id.get(row_id, ''),
+                            'file': uploaded_file,
+                            'uploaded_by': request.user,
+                        },
+                    )
             
             # Create or update result record for verification
             LabResult.objects.update_or_create(

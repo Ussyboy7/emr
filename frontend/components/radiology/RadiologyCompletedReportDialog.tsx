@@ -164,10 +164,37 @@ export function RadiologyCompletedReportDialog({
                   Report Content
                 </h3>
                 <div className="space-y-3 p-4 rounded-lg bg-muted/50 border">
-                  <div>
-                    <p className="text-xs text-muted-foreground font-medium mb-1">Report</p>
-                    <p className="text-sm whitespace-pre-wrap">{report.report}</p>
-                  </div>
+                  {report.customReports && report.customReports.length > 0 ? (
+                    report.customReports.map((row, idx) => (
+                      <div key={row.id || idx} className="rounded border bg-background/70 p-3 space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-sm font-medium">{row.procedure || `Custom study ${idx + 1}`}</p>
+                          {row.critical && <Badge className="bg-rose-500 text-white">Critical</Badge>}
+                        </div>
+                        {row.report && <p className="text-sm whitespace-pre-wrap">{row.report}</p>}
+                        {row.recommendations && (
+                          <p className="text-sm">
+                            <span className="text-muted-foreground">Recommendations:</span> {row.recommendations}
+                          </p>
+                        )}
+                        {row.attachment?.url && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => openRadiologyReportUrl(row.attachment!.url)}
+                          >
+                            <Eye className="h-3.5 w-3.5 mr-1" />
+                            View file
+                          </Button>
+                        )}
+                      </div>
+                    ))
+                  ) : (
+                    <div>
+                      <p className="text-xs text-muted-foreground font-medium mb-1">Report</p>
+                      <p className="text-sm whitespace-pre-wrap">{report.report}</p>
+                    </div>
+                  )}
                 </div>
               </div>
             )}

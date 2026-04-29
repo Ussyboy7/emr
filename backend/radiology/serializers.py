@@ -2,7 +2,28 @@
 Serializers for the Radiology app.
 """
 from rest_framework import serializers
-from .models import RadiologyTemplate, RadiologyOrder, RadiologyStudy, RadiologyReport, ImagingPartner
+import re
+from .models import RadiologyTemplate, RadiologyOrder, RadiologyStudy, RadiologyStudyReportAttachment, RadiologyReport, ImagingPartner
+
+
+OTHER_TEMPLATE_CODES = {'OTHER', 'OTHERS'}
+
+
+def _normalize_study_name(value):
+    return re.sub(r'[^a-z0-9]+', ' ', str(value or '').lower()).strip()
+
+
+def _split_requested_other_studies(notes):
+    if not notes:
+        return []
+    cleaned = re.sub(r'\b(and|&)\b', ',', str(notes), flags=re.IGNORECASE)
+    parts = re.split(r'[,;\n]+', cleaned)
+    result = []
+    for part in parts:
+        name = part.strip(" \t\r\n.-:•")
+        if name:
+            result.append(name)
+    return result
 
 
 class ImagingPartnerSerializer(serializers.ModelSerializer):
@@ -23,6 +44,23 @@ class RadiologyTemplateSerializer(serializers.ModelSerializer):
         read_only_fields = ['created_at', 'updated_at']
 
 
+class RadiologyStudyReportAttachmentSerializer(serializers.ModelSerializer):
+    uploaded_by_name = serializers.SerializerMethodField()
+
+    def get_uploaded_by_name(self, obj):
+        if not obj.uploaded_by:
+            return None
+        try:
+            return obj.uploaded_by.get_full_name()
+        except (AttributeError, TypeError):
+            return str(obj.uploaded_by)
+
+    class Meta:
+        model = RadiologyStudyReportAttachment
+        fields = ['id', 'study', 'row_id', 'row_name', 'file', 'uploaded_by', 'uploaded_by_name', 'uploaded_at']
+        read_only_fields = ['id', 'uploaded_by', 'uploaded_at']
+
+
 class RadiologyStudySerializer(serializers.ModelSerializer):
     """Serializer for RadiologyStudy model."""
 
@@ -33,6 +71,7 @@ class RadiologyStudySerializer(serializers.ModelSerializer):
     rejected_by_name = serializers.CharField(source='rejected_by.get_full_name', read_only=True, allow_null=True)
     verified_by_name = serializers.CharField(source='verified_by.get_full_name', read_only=True, allow_null=True)
     report_file_url = serializers.SerializerMethodField()
+    report_attachments = RadiologyStudyReportAttachmentSerializer(many=True, read_only=True)
 
     def get_report_file_url(self, obj):
         """Get the URL for the uploaded report file."""
@@ -133,6 +172,72 @@ class RadiologyOrderSerializer(serializers.ModelSerializer):
             )
 
         return order
+
+    def _expand_known_studies_from_other(self, order, studies_data):
+        expanded = []
+        explicit_template_ids = {
+            item.get('template')
+            for item in studies_data
+            if item.get('template')
+        }
+        templates = list(RadiologyTemplate.objects.filter(is_active=True))
+        template_by_name = {}
+        for template in templates:
+            for key in {
+                _normalize_study_name(template.name),
+                _normalize_study_name(template.code),
+            }:
+                if key:
+                    template_by_name.setdefault(key, template)
+
+        for study_data in studies_data:
+            template = None
+            template_id = study_data.get('template')
+            if template_id:
+                template = next((t for t in templates if t.id == template_id), None)
+            code = str(getattr(template, 'code', '') or '').upper()
+            procedure = str(study_data.get('procedure') or '').upper()
+            is_other = code in OTHER_TEMPLATE_CODES or procedure in {'OTHER', 'OTHERS'} or 'OTHER' in procedure
+            if not is_other:
+                expanded.append(study_data)
+                continue
+
+            requested_names = _split_requested_other_studies(order.clinical_notes)
+            if not requested_names:
+                expanded.append(study_data)
+                continue
+
+            unmatched = []
+            for requested_name in requested_names:
+                matched_template = template_by_name.get(_normalize_study_name(requested_name))
+                if not matched_template or matched_template.id in explicit_template_ids:
+                    unmatched.append(requested_name)
+                    continue
+                expanded.append({
+                    'template': matched_template.id,
+                    'procedure': matched_template.name,
+                    'body_part': matched_template.body_part or '',
+                    'modality': matched_template.modality or matched_template.category or '',
+                    'status': study_data.get('status') or 'pending',
+                })
+                explicit_template_ids.add(matched_template.id)
+
+            if unmatched:
+                next_other = dict(study_data)
+                next_other['procedure'] = ', '.join(unmatched)
+                next_other['custom_reports'] = [
+                    {
+                        'id': f"custom-{idx + 1}",
+                        'procedure': name,
+                        'report': '',
+                        'recommendations': '',
+                        'critical': False,
+                    }
+                    for idx, name in enumerate(unmatched)
+                ]
+                expanded.append(next_other)
+
+        return expanded
     
     class Meta:
         model = RadiologyOrder

@@ -2,6 +2,7 @@
 Views for the Radiology app.
 """
 import logging
+import json
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -14,7 +15,7 @@ from django.db.models import Count, Q
 
 from laboratory.pagination import FlexiblePageNumberPagination
 
-from .models import RadiologyTemplate, RadiologyOrder, RadiologyStudy, RadiologyReport, ImagingPartner
+from .models import RadiologyTemplate, RadiologyOrder, RadiologyStudy, RadiologyStudyReportAttachment, RadiologyReport, ImagingPartner
 from .serializers import (
     RadiologyTemplateSerializer,
     RadiologyOrderSerializer,
@@ -25,6 +26,43 @@ from .serializers import (
 from audit.services import AuditService
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_custom_reports(value):
+    if not value:
+        return []
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, list) else []
+        except json.JSONDecodeError:
+            return []
+    return []
+
+
+def _summarize_custom_reports(rows):
+    lines = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        procedure = str(row.get('procedure') or row.get('name') or '').strip()
+        report = str(row.get('report') or '').strip()
+        recommendations = str(row.get('recommendations') or '').strip()
+        critical = bool(row.get('critical'))
+        if not any([procedure, report, recommendations, critical]):
+            continue
+        block = []
+        block.append(procedure or 'Custom Study')
+        if critical:
+            block.append('[CRITICAL FINDING]')
+        if report:
+            block.append(report)
+        if recommendations:
+            block.append(f"Recommendations: {recommendations}")
+        lines.append('\n'.join(block))
+    return '\n\n'.join(lines)
 
 
 class ImagingPartnerViewSet(viewsets.ModelViewSet):
@@ -588,6 +626,7 @@ class RadiologyStudyViewSet(viewsets.ModelViewSet):
             report = request.POST.get('report', '')
             legacy_findings = request.POST.get('findings', '')
             legacy_impression = request.POST.get('impression', '')
+            custom_reports = _parse_custom_reports(request.POST.get('custom_reports'))
             critical_str = request.POST.get('critical', 'false')
             critical = critical_str.lower() in ('true', '1', 'yes', 'on')
             status_update = request.POST.get('status')
@@ -596,6 +635,7 @@ class RadiologyStudyViewSet(viewsets.ModelViewSet):
             report = request.data.get('report', '')
             legacy_findings = request.data.get('findings', '')
             legacy_impression = request.data.get('impression', '')
+            custom_reports = _parse_custom_reports(request.data.get('custom_reports'))
             critical = request.data.get('critical', False)
             status_update = request.data.get('status')
 
@@ -610,9 +650,14 @@ class RadiologyStudyViewSet(viewsets.ModelViewSet):
                 legacy_impression_text = str(legacy_impression).strip()
                 if legacy_impression_text:
                     merged_report = f"{merged_report}\n\nImpression:\n{legacy_impression_text}".strip() if merged_report else f"Impression:\n{legacy_impression_text}"
+            if custom_reports:
+                custom_summary = _summarize_custom_reports(custom_reports)
+                if custom_summary:
+                    merged_report = f"{merged_report}\n\n{custom_summary}".strip() if merged_report else custom_summary
 
             study.report = merged_report
-            study.critical = critical
+            study.custom_reports = custom_reports
+            study.critical = critical or any(bool(row.get('critical')) for row in custom_reports if isinstance(row, dict))
 
             old_status = study.status
             if status_update:
@@ -633,6 +678,22 @@ class RadiologyStudyViewSet(viewsets.ModelViewSet):
                 logger.debug("No report_file in request.FILES")
 
             study.save()
+            for row in custom_reports:
+                if not isinstance(row, dict):
+                    continue
+                row_id = str(row.get('id') or '').strip()
+                if not row_id:
+                    continue
+                file_obj = request.FILES.get(f'custom_report_file_{row_id}')
+                if not file_obj:
+                    continue
+                RadiologyStudyReportAttachment.objects.create(
+                    study=study,
+                    row_id=row_id,
+                    row_name=str(row.get('procedure') or row.get('name') or '')[:200],
+                    file=file_obj,
+                    uploaded_by=request.user,
+                )
             logger.debug("Study %s saved successfully", study.id)
 
             # Create or update report record for verification

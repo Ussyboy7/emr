@@ -13,6 +13,10 @@ export interface CompletedTestResultRow {
   unit: string;
   normalRange: string;
   status: 'Normal' | 'Abnormal' | 'Critical';
+  attachment?: {
+    url: string;
+    name: string;
+  } | null;
 }
 
 /** Shape used by Laboratory Completed Tests and shared Lab Report dialog */
@@ -97,7 +101,42 @@ export function transformApiRowToCompletedTest(
   const normalRangeObj: Record<string, any> | undefined =
     (test as any)?.template_normal_range || (test as any)?.template?.normal_range;
 
-  const processedResultsRaw = Object.entries(test.results || {}).map(([key, value]) => {
+  const attachmentsByRowId = new Map<string, any>();
+  const attachmentsByRowName = new Map<string, any>();
+  ((test as any).result_attachments || []).forEach((attachment: any) => {
+    if (attachment?.row_id) attachmentsByRowId.set(String(attachment.row_id), attachment);
+    if (attachment?.row_name) attachmentsByRowName.set(String(attachment.row_name).trim().toLowerCase(), attachment);
+  });
+
+  const resultPayload = (test.results || {}) as Record<string, any>;
+  const customRows = Array.isArray(resultPayload.custom_results) ? resultPayload.custom_results : null;
+
+  const processedResultsRaw = customRows ? customRows.map((row: any) => {
+    const rowId = String(row?.id || '');
+    const parameter = String(row?.name || 'Custom Result');
+    const attachment = attachmentsByRowId.get(rowId) || attachmentsByRowName.get(parameter.trim().toLowerCase());
+    const fileUrl = attachment?.file
+      ? String(attachment.file).startsWith('http')
+        ? String(attachment.file)
+        : typeof window !== 'undefined'
+          ? `${window.location.origin}${attachment.file}`
+          : String(attachment.file)
+      : null;
+
+    return {
+      parameter,
+      value: String(row?.value || ''),
+      unit: String(row?.unit || ''),
+      normalRange: String(row?.reference_range || ''),
+      status: 'Normal' as ResultStatus,
+      attachment: fileUrl
+        ? {
+            url: fileUrl,
+            name: displayNameFromLabResultFileUrl(fileUrl),
+          }
+        : null,
+    };
+  }) : Object.entries(resultPayload).map(([key, value]) => {
     const valueStr = String(value);
     const field = fieldForParameter(key, normalRangeObj);
 

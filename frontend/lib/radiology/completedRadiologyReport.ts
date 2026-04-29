@@ -26,6 +26,14 @@ export interface CompletedRadiologyReport {
   turnaroundTime: string;
   report?: string;
   reportFile?: { name: string; url: string };
+  customReports?: Array<{
+    id: string;
+    procedure: string;
+    report: string;
+    recommendations?: string;
+    critical?: boolean;
+    attachment?: { name: string; url: string } | null;
+  }>;
 }
 
 export function calculateRadiologyTurnaroundTime(createdAt?: string, verifiedAt?: string): string {
@@ -66,8 +74,10 @@ export function sanitizeRadiologyReportFileName(name: string): string {
 function toAbsoluteMediaUrl(url: string): string {
   if (!url) return url;
   if (url.startsWith('http://') || url.startsWith('https://')) return url;
-  if (typeof window === 'undefined') return url;
-  return `${window.location.origin}${url.startsWith('/') ? url : `/${url}`}`;
+  const apiRoot = process.env.NEXT_PUBLIC_API_URL || '';
+  const mediaBase = apiRoot.endsWith('/api') ? apiRoot.slice(0, -4) : apiRoot.endsWith('/api/v1') ? apiRoot.slice(0, -7) : apiRoot;
+  if (url.startsWith('/media/')) return `${mediaBase}${url}`;
+  return `${mediaBase}/media/${url.replace(/^\/+/, '')}`;
 }
 
 /**
@@ -89,6 +99,27 @@ export function transformApiRadiologyReportToCompleted(apiReport: Record<string,
   const rawName =
     (typeof rf === 'string' ? rf.split('/').filter(Boolean).pop() : null) || 'report.pdf';
   const fileName = sanitizeRadiologyReportFileName(rawName);
+  const attachments = Array.isArray(sd.report_attachments) ? sd.report_attachments : [];
+  const customReports = Array.isArray(sd.custom_reports)
+    ? sd.custom_reports.map((row: any) => {
+        const attachment = attachments.find((file: any) =>
+          file.row_id === row.id || file.row_name?.trim().toLowerCase() === String(row.procedure || row.name || '').trim().toLowerCase()
+        );
+        return {
+          id: String(row.id || ''),
+          procedure: String(row.procedure || row.name || ''),
+          report: String(row.report || ''),
+          recommendations: row.recommendations ? String(row.recommendations) : undefined,
+          critical: Boolean(row.critical),
+          attachment: attachment?.file
+            ? {
+                name: String(attachment.row_name || attachment.file.split('/').filter(Boolean).pop() || 'Report file'),
+                url: toAbsoluteMediaUrl(String(attachment.file)),
+              }
+            : null,
+        };
+      })
+    : [];
 
   return {
     id: apiReportAny.id != null ? String(apiReportAny.id) : '',
@@ -130,6 +161,7 @@ export function transformApiRadiologyReportToCompleted(apiReport: Record<string,
     clinic: apiReportAny.order_details?.clinic || '',
     turnaroundTime: calculateRadiologyTurnaroundTime((sd as any).created_at, (sd as any).verified_at),
     report: mergedReportText || undefined,
+    customReports,
     reportFile: fileUrl
       ? {
           name: fileName,

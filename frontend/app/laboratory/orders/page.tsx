@@ -71,6 +71,15 @@ const formatOrderedAtDisplay = (isoString: string | undefined): string => {
   }
 };
 
+const getLabResultFileUrl = (filePath?: string | null) => {
+  if (!filePath) return '';
+  if (filePath.startsWith('http://') || filePath.startsWith('https://')) return filePath;
+  const apiRoot = process.env.NEXT_PUBLIC_API_URL || '';
+  const mediaBase = apiRoot.endsWith('/api') ? apiRoot.slice(0, -4) : apiRoot.endsWith('/api/v1') ? apiRoot.slice(0, -7) : apiRoot;
+  if (filePath.startsWith('/media/')) return `${mediaBase}${filePath}`;
+  return `${mediaBase}/media/${filePath.replace(/^\/+/, '')}`;
+};
+
 // Enhanced Test interface - each test is independent
 interface LabTest {
   id: string;
@@ -85,7 +94,8 @@ interface LabTest {
   collectedAt?: string;
   processedBy?: string;
   processedAt?: string;
-  results?: Record<string, string>;
+  results?: Record<string, any>;
+  resultAttachments?: Array<{ id: number; row_id: string; row_name: string; file: string; uploaded_at: string }>;
   templateNormalRange?: Record<string, any> | null;
   resultFile?: { name: string; type: string; uploadedAt: string };
   template?: string;
@@ -125,6 +135,47 @@ interface LabOrder {
 interface PrincipalInfo {
   personalNumber?: string;
 }
+
+type CustomResultRow = {
+  id: string;
+  name: string;
+  value: string;
+  unit: string;
+  reference_range: string;
+  notes: string;
+};
+
+const isOtherLabTest = (test?: Pick<LabTest, 'code' | 'name'> | null) => {
+  const code = String(test?.code || '').trim().toUpperCase();
+  const name = String(test?.name || '').toLowerCase();
+  return code === 'OTHER' || code === 'OTHERS' || name.includes('others');
+};
+
+const makeCustomRowId = () => `custom-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+const createCustomResultRow = (name = ''): CustomResultRow => ({
+  id: makeCustomRowId(),
+  name,
+  value: '',
+  unit: '',
+  reference_range: '',
+  notes: '',
+});
+
+const customResultNameTrimClass = `${'['}\\-:${String.fromCharCode(8226)}.\\s${']'}`;
+const customResultNameTrimPattern = new RegExp(
+  `^${customResultNameTrimClass}+|${customResultNameTrimClass}+$`,
+  'g'
+);
+
+const parseCustomResultNames = (test?: Pick<LabTest, 'notes'> | null, order?: Pick<LabOrder, 'clinicalNotes'> | null) => {
+  const source = order?.clinicalNotes || test?.notes || '';
+  return source
+    .replace(/\b(and|&)\b/gi, ',')
+    .split(/[,;\n]+/)
+    .map((part) => part.trim().replace(customResultNameTrimPattern, ''))
+    .filter(Boolean);
+};
 
 // Helper function to transform backend order to frontend format
 const transformOrder = (apiOrder: ApiLabOrder): LabOrder => {
@@ -190,6 +241,7 @@ const transformTest = (apiTest: ApiLabTest): LabTest => {
     processedBy: apiTest.processed_by_name || apiTest.processed_by?.toString(),
     processedAt: apiTest.processed_at,
     results: apiTest.results as Record<string, string>,
+    resultAttachments: (apiTest as any).result_attachments || [],
     templateNormalRange: (apiTest as any).template_normal_range || null,
     resultFile: apiTest.result_file ? {
       name: typeof apiTest.result_file === 'string' ? apiTest.result_file : apiTest.result_file.name || '',
@@ -791,6 +843,8 @@ export default function LabOrdersPage() {
   const [resultEntryMode, setResultEntryMode] = useState<'values' | 'upload'>('values');
   const [resultValues, setResultValues] = useState<Record<string, string>>({});
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const [customResultRows, setCustomResultRows] = useState<CustomResultRow[]>([]);
+  const [customResultFiles, setCustomResultFiles] = useState<Record<string, File | null>>({});
 
   // Templates from API for result entry (params from Test Templates / normal_range)
   const [apiTemplatesByCode, setApiTemplatesByCode] = useState<Record<string, { name: string; fields: TemplateField[] }>>({});
@@ -1361,34 +1415,49 @@ export default function LabOrdersPage() {
     if (!selectedOrder || !selectedTest) return;
     
     if (resultEntryMode === 'values') {
-      const template = getTemplateForTest(selectedTest);
-      if (template) {
-        const allFieldsFilled = template.fields.every(f => resultValues[f.name]);
-        if (!allFieldsFilled) {
-          toast.error('Please fill in all result fields');
+      if (isOtherLabTest(selectedTest)) {
+        const validRows = customResultRows.filter((row) =>
+          [row.name, row.value, row.unit, row.reference_range, row.notes].some((value) => String(value || '').trim())
+        );
+        if (validRows.length === 0) {
+          toast.error('Add at least one custom result row or upload a result file');
           return;
         }
-
-        // Critical values come from the template (critical_min/critical_max seeded in
-        // seed_lab_templates.py). Any analyte whose typed value trips that tier warrants
-        // an explicit confirmation before submission.
-        const criticalValues = template.fields.filter(
-          (field) => classifyValue(resultValues[field.name], field) === 'Critical'
-        );
-
-        if (criticalValues.length > 0) {
-          const confirmed = window.confirm(
-            `Warning: This result contains ${criticalValues.length} critical ${criticalValues.length === 1 ? 'value' : 'values'} that may indicate a life-threatening condition.\n\n` +
-            criticalValues.map(field => `${field.name}: ${resultValues[field.name]} ${field.unit}`).join('\n') +
-            '\n\nAre you sure you want to submit these results?'
-          );
-          if (!confirmed) return;
+        const missingNames = validRows.filter((row) => !row.name.trim());
+        if (missingNames.length > 0) {
+          toast.error('Each custom result row needs an investigation name');
+          return;
         }
       } else {
-        const hasValue = Object.values(resultValues).some((v) => String(v ?? "").trim() !== "");
-        if (!hasValue) {
-          toast.error("Enter a result value or switch to file upload");
-          return;
+        const template = getTemplateForTest(selectedTest);
+        if (template) {
+          const allFieldsFilled = template.fields.every(f => resultValues[f.name]);
+          if (!allFieldsFilled) {
+            toast.error('Please fill in all result fields');
+            return;
+          }
+
+          // Critical values come from the template (critical_min/critical_max seeded in
+          // seed_lab_templates.py). Any analyte whose typed value trips that tier warrants
+          // an explicit confirmation before submission.
+          const criticalValues = template.fields.filter(
+            (field) => classifyValue(resultValues[field.name], field) === 'Critical'
+          );
+
+          if (criticalValues.length > 0) {
+            const confirmed = window.confirm(
+              `Warning: This result contains ${criticalValues.length} critical ${criticalValues.length === 1 ? 'value' : 'values'} that may indicate a life-threatening condition.\n\n` +
+              criticalValues.map(field => `${field.name}: ${resultValues[field.name]} ${field.unit}`).join('\n') +
+              '\n\nAre you sure you want to submit these results?'
+            );
+            if (!confirmed) return;
+          }
+        } else {
+          const hasValue = Object.values(resultValues).some((v) => String(v ?? "").trim() !== "");
+          if (!hasValue) {
+            toast.error("Enter a result value or switch to file upload");
+            return;
+          }
         }
       }
     } else if (!uploadedFile) {
@@ -1402,8 +1471,18 @@ export default function LabOrdersPage() {
       await labService.submitResults(
         parseInt(selectedOrder.id),
         parseInt(selectedTest.id),
-        resultEntryMode === 'values' ? resultValues : {},
-        resultEntryMode === 'upload' ? (uploadedFile || undefined) : undefined
+        resultEntryMode === 'values'
+          ? isOtherLabTest(selectedTest)
+            ? {
+                custom_results: customResultRows.filter((row) =>
+                  [row.name, row.value, row.unit, row.reference_range, row.notes].some((value) => String(value || '').trim())
+                ),
+              }
+            : resultValues
+          : {},
+        resultEntryMode === 'upload' ? (uploadedFile || undefined) : undefined,
+        undefined,
+        isOtherLabTest(selectedTest) && resultEntryMode === 'values' ? customResultFiles : undefined
       );
 
       toast.success(`Results submitted for ${selectedTest.name}. Awaiting verification.`);
@@ -1420,6 +1499,8 @@ export default function LabOrdersPage() {
       setIsResultsDialogOpen(false);
       setResultValues({});
       setUploadedFile(null);
+      setCustomResultRows([]);
+      setCustomResultFiles({});
       setResultEntryMode('values');
     } catch (err: any) {
       let errorMessage = 'Failed to submit results. Please try again.';
@@ -1569,10 +1650,23 @@ export default function LabOrdersPage() {
         initial[key] = String(value);
       });
     }
-    
+
+    if (isOtherLabTest(test)) {
+      const existingRows = Array.isArray((test.results as any)?.custom_results)
+        ? ((test.results as any).custom_results as CustomResultRow[])
+        : [];
+      const rows = existingRows.length > 0
+        ? existingRows.map((row) => ({ ...createCustomResultRow(), ...row, id: row.id || makeCustomRowId() }))
+        : parseCustomResultNames(test, selectedOrder).map((name) => createCustomResultRow(name));
+      setCustomResultRows(rows.length > 0 ? rows : [createCustomResultRow()]);
+    } else {
+      setCustomResultRows([]);
+    }
+
     setResultValues(initial);
     setResultEntryMode(test.processingMethod === 'Outsourced' ? 'upload' : 'values');
     setUploadedFile(null);
+    setCustomResultFiles({});
     setIsResultsDialogOpen(true);
   };
 
@@ -2031,11 +2125,62 @@ export default function LabOrdersPage() {
                       {test.results && (
                         <div className="mt-2 p-2 rounded bg-emerald-50 dark:bg-emerald-900/20 text-xs">
                           <p className="font-medium text-emerald-700 dark:text-emerald-400 mb-1">Results:</p>
-                          <div className="grid grid-cols-2 md:grid-cols-3 gap-1">
-                            {Object.entries(test.results).map(([key, value]) => (
-                              <div key={key}><span className="text-muted-foreground">{key}:</span> <span className="font-medium">{value}</span></div>
-                            ))}
-                          </div>
+                          {Array.isArray((test.results as any).custom_results) ? (
+                            <div className="space-y-2">
+                              {((test.results as any).custom_results as CustomResultRow[]).map((row, rowIdx) => {
+                                const attachment = (test.resultAttachments || []).find((file) =>
+                                  file.row_id === row.id || file.row_name?.trim().toLowerCase() === row.name.trim().toLowerCase()
+                                );
+                                const attachmentUrl = getLabResultFileUrl(attachment?.file);
+                                return (
+                                  <div key={row.id || rowIdx} className="rounded border bg-background/70 p-2 space-y-1">
+                                    <div className="flex items-center justify-between gap-2">
+                                      <div className="font-medium">{row.name || `Custom result ${rowIdx + 1}`}</div>
+                                      {attachmentUrl && (
+                                        <Button
+                                          type="button"
+                                          variant="outline"
+                                          size="sm"
+                                          className="h-6 px-2 text-xs"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            window.open(attachmentUrl, '_blank', 'noopener,noreferrer');
+                                          }}
+                                        >
+                                          <Eye className="h-3 w-3 mr-1" />View file
+                                        </Button>
+                                      )}
+                                    </div>
+                                    {row.value && (
+                                      <div>
+                                        <span className="text-muted-foreground">Result:</span>{' '}
+                                        <span className="font-medium">
+                                          {row.value}{row.unit ? ` ${row.unit}` : ''}
+                                        </span>
+                                      </div>
+                                    )}
+                                    {row.reference_range && (
+                                      <div><span className="text-muted-foreground">Reference:</span> {row.reference_range}</div>
+                                    )}
+                                    {row.notes && (
+                                      <div><span className="text-muted-foreground">Notes:</span> {row.notes}</div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-2 md:grid-cols-3 gap-1">
+                              {Object.entries(test.results).map(([key, value]) => (
+                                <div key={key}>
+                                  <span className="text-muted-foreground">{key}:</span>{' '}
+                                  <span className="font-medium">
+                                    {typeof value === 'object' && value !== null ? JSON.stringify(value) : String(value ?? '')}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       )}
                       {test.resultFile && (
@@ -2716,6 +2861,96 @@ export default function LabOrdersPage() {
                     </CardHeader>
                     <CardContent>
                       {(() => {
+                        if (isOtherLabTest(selectedTest)) {
+                          const updateRow = (rowId: string, field: keyof CustomResultRow, value: string) => {
+                            setCustomResultRows((prev) => prev.map((row) => row.id === rowId ? { ...row, [field]: value } : row));
+                          };
+                          return (
+                            <div className="space-y-4">
+                              <div className="flex items-start justify-between gap-3">
+                                <div>
+                                  <p className="text-sm font-medium">Custom / Other Results</p>
+                                  <p className="text-xs text-muted-foreground">
+                                    Add one row for each custom investigation. Known template tests should be ordered separately.
+                                  </p>
+                                </div>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => setCustomResultRows((prev) => [...prev, createCustomResultRow()])}
+                                >
+                                  <Plus className="h-3.5 w-3.5 mr-1" />
+                                  Add Result Row
+                                </Button>
+                              </div>
+                              <div className="space-y-3">
+                                {customResultRows.map((row, index) => (
+                                  <div key={row.id} className="rounded-lg border p-3 space-y-3">
+                                    <div className="flex items-center justify-between gap-2">
+                                      <span className="text-sm font-medium">Result {index + 1}</span>
+                                      {customResultRows.length > 1 && (
+                                        <Button
+                                          type="button"
+                                          variant="ghost"
+                                          size="sm"
+                                          onClick={() => {
+                                            setCustomResultRows((prev) => prev.filter((item) => item.id !== row.id));
+                                            setCustomResultFiles((prev) => {
+                                              const next = { ...prev };
+                                              delete next[row.id];
+                                              return next;
+                                            });
+                                          }}
+                                          className="h-7 text-destructive"
+                                        >
+                                          <X className="h-3.5 w-3.5 mr-1" />
+                                          Remove
+                                        </Button>
+                                      )}
+                                    </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                      <div className="space-y-1">
+                                        <Label className="text-xs">Investigation *</Label>
+                                        <Input value={row.name} onChange={(e) => updateRow(row.id, 'name', e.target.value)} placeholder="e.g. ANA" />
+                                      </div>
+                                      <div className="space-y-1">
+                                        <Label className="text-xs">Result</Label>
+                                        <Input value={row.value} onChange={(e) => updateRow(row.id, 'value', e.target.value)} placeholder="e.g. Positive or 12" />
+                                      </div>
+                                      <div className="space-y-1">
+                                        <Label className="text-xs">Unit</Label>
+                                        <Input value={row.unit} onChange={(e) => updateRow(row.id, 'unit', e.target.value)} placeholder="e.g. mg/L" />
+                                      </div>
+                                      <div className="space-y-1">
+                                        <Label className="text-xs">Reference Range</Label>
+                                        <Input value={row.reference_range} onChange={(e) => updateRow(row.id, 'reference_range', e.target.value)} placeholder="e.g. 0-10" />
+                                      </div>
+                                    </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                      <div className="space-y-1">
+                                        <Label className="text-xs">Row File</Label>
+                                        <Input
+                                          type="file"
+                                          accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+                                          onChange={(e) => setCustomResultFiles((prev) => ({ ...prev, [row.id]: e.target.files?.[0] || null }))}
+                                        />
+                                        {customResultFiles[row.id] && (
+                                          <p className="text-xs text-muted-foreground">{customResultFiles[row.id]?.name}</p>
+                                        )}
+                                      </div>
+                                      <div className="space-y-1">
+                                        <Label className="text-xs">Notes</Label>
+                                        <Input value={row.notes} onChange={(e) => updateRow(row.id, 'notes', e.target.value)} placeholder="Optional comments" />
+                                      </div>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        }
+
                         const tpl = getTemplateForTest(selectedTest);
                         if (!tpl) {
                           return (

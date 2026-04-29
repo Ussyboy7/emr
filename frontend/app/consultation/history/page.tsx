@@ -816,6 +816,74 @@ export default function ConsultationHistoryPage() {
     }
   };
 
+  const canCancelPrescription = (rx: any): boolean => {
+    const status = String(rx?.status || '').toLowerCase();
+    return status === 'pending' || status === 'dispensing';
+  };
+
+  const getPrescriptionStatusLabel = (status: unknown): string => {
+    const normalized = String(status || '').toLowerCase();
+    if (normalized === 'dispensed') return 'Dispensed';
+    if (normalized === 'partially_dispensed') return 'Partially Dispensed';
+    if (normalized === 'dispensing') return 'Processing';
+    if (normalized === 'cancelled') return 'Cancelled';
+    return 'Pending';
+  };
+
+  const getPrescriptionStatusClass = (status: unknown): string => {
+    const normalized = String(status || '').toLowerCase();
+    if (normalized === 'dispensed') return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400';
+    if (normalized === 'partially_dispensed') return 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400';
+    if (normalized === 'dispensing') return 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400';
+    if (normalized === 'cancelled') return 'bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-400';
+    return 'bg-violet-100 text-violet-800 dark:bg-violet-900/30 dark:text-violet-400';
+  };
+
+  const formatOrderDate = (value: unknown): string => {
+    if (!value) return '';
+    const date = new Date(String(value));
+    return Number.isNaN(date.getTime()) ? '' : date.toLocaleDateString();
+  };
+
+  const formatOrderStatus = (status: unknown): string => {
+    return String(status || 'pending')
+      .replace(/_/g, ' ')
+      .replace(/\b\w/g, (char) => char.toUpperCase());
+  };
+
+  const getOrderStatusClass = (status: unknown): string => {
+    const normalized = String(status || '').toLowerCase();
+    if (['completed', 'verified', 'dispensed'].includes(normalized)) return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400';
+    if (['results_ready', 'partially_dispensed', 'scheduled'].includes(normalized)) return 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400';
+    if (['in_progress', 'processing', 'collected', 'sample_collected'].includes(normalized)) return 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400';
+    if (normalized === 'cancelled' || normalized === 'rejected') return 'bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-400';
+    return 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300';
+  };
+
+  const handleCancelEditPrescription = async (rx: any) => {
+    if (!rx?.id) {
+      toast.error('Prescription reference is not available.');
+      return;
+    }
+
+    const confirmed = window.confirm('Cancel this prescription in the pharmacy queue? This is only allowed before any medication is dispensed.');
+    if (!confirmed) return;
+
+    setIsSubmitting(true);
+    try {
+      const updated = await pharmacyService.cancelPrescription(rx.id, 'Cancelled from edit consultation');
+      setEditPrescriptions((prev) =>
+        prev.map((item) => (String(item.id) === String(rx.id) ? { ...item, ...updated } : item))
+      );
+      toast.success('Prescription cancelled');
+      await loadEditOrdersRefetch();
+    } catch (error: any) {
+      toast.error(error?.message || 'Could not cancel prescription');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
 
 
   const handleSubmitLabOrder = async (payload: LabOrderSubmitInput) => {
@@ -1530,20 +1598,61 @@ export default function ConsultationHistoryPage() {
                               <ul className="space-y-2">
                                 {editPrescriptions.map((rx: any) => {
                                   const items = rx.medications || rx.items || [];
+                                  const prescribedDate = rx.prescribed_at ? new Date(rx.prescribed_at).toLocaleDateString() : '';
                                   return (
-                                    <li key={rx.id} className="p-3 rounded-lg border bg-muted/30 text-sm">
-                                      <div className="flex items-center justify-between mb-2">
-                                        <Badge variant="outline" className="text-xs">{rx.status}</Badge>
-                                        <span className="text-xs text-muted-foreground">{new Date(rx.prescribed_at).toLocaleDateString()}</span>
-                                      </div>
+                                    <li key={rx.id} className="space-y-2">
                                       {items.length ? (
-                                        <ul className="space-y-0.5">
+                                        <ul className="space-y-2">
                                           {items.map((m: any, i: number) => (
-                                            <li key={i}>{m.medication_name || m.name} — {m.dosage} {m.frequency} {m.duration}</li>
+                                            <li key={m.id ?? i} className="p-3 rounded-lg border bg-muted/30 text-sm">
+                                              <div className="flex items-start justify-between gap-3">
+                                                <div className="flex-1 min-w-0">
+                                                  <div className="flex items-center gap-2 flex-wrap mb-1">
+                                                    <span className="font-semibold">{m.medication_name || m.medication?.name || m.name || 'Unknown medication'}</span>
+                                                    <Badge variant="outline" className={`text-xs ${getPrescriptionStatusClass(rx.status)}`}>
+                                                      {getPrescriptionStatusLabel(rx.status)}
+                                                    </Badge>
+                                                  </div>
+                                                  <div className="text-xs text-muted-foreground">
+                                                    <span className="font-medium">{m.dose || m.dosage || 'Dose not specified'}</span>
+                                                    {m.route ? ` • ${m.route}` : ''}
+                                                    {m.frequency ? ` • ${m.frequency}` : ''}
+                                                    {m.duration ? ` • ${m.duration}` : ''}
+                                                  </div>
+                                                  <div className="flex items-center gap-3 text-xs text-muted-foreground mt-1">
+                                                    {m.quantity != null && <span><strong>Qty:</strong> {m.quantity}</span>}
+                                                    {m.unit && <span><strong>Unit:</strong> {m.unit}</span>}
+                                                    {m.strength && <span><strong>Strength:</strong> {m.strength}</span>}
+                                                    {m.dosage_form && <span><strong>Form:</strong> {m.dosage_form}</span>}
+                                                  </div>
+                                                  {m.instructions && (
+                                                    <div className="text-xs text-muted-foreground mt-2 p-2 bg-background/70 rounded">
+                                                      <strong>Instructions:</strong> {m.instructions}
+                                                    </div>
+                                                  )}
+                                                </div>
+                                                <div className="flex flex-col items-end gap-1 shrink-0">
+                                                  {prescribedDate && <span className="text-xs text-muted-foreground">{prescribedDate}</span>}
+                                                  {canCancelPrescription(rx) && i === 0 && (
+                                                    <Button
+                                                      variant="ghost"
+                                                      size="sm"
+                                                      onClick={() => handleCancelEditPrescription(rx)}
+                                                      disabled={isSubmitting}
+                                                      className="h-7 px-2 text-rose-600 hover:text-rose-700"
+                                                      title="Cancel the whole prescription"
+                                                    >
+                                                      <X className="h-3.5 w-3.5 mr-1" />
+                                                      Cancel Prescription
+                                                    </Button>
+                                                  )}
+                                                </div>
+                                              </div>
+                                            </li>
                                           ))}
                                         </ul>
                                       ) : (
-                                        <p className="text-muted-foreground text-xs">No medications on this prescription</p>
+                                        <div className="p-3 rounded-lg border bg-muted/30 text-xs text-muted-foreground">No medications on this prescription</div>
                                       )}
                                     </li>
                                   );
@@ -1563,6 +1672,8 @@ export default function ConsultationHistoryPage() {
                           <Badge variant="outline" className="bg-blue-100 dark:bg-blue-900/30">Processing</Badge>
                           <span>→</span>
                           <Badge variant="outline" className="bg-emerald-100 dark:bg-emerald-900/30">Dispensed ✓</Badge>
+                          <span>→</span>
+                          <Badge variant="outline" className="bg-rose-100 dark:bg-rose-900/30">Cancelled</Badge>
                         </div>
                       </div>
                     </CardContent>
@@ -1598,17 +1709,43 @@ export default function ConsultationHistoryPage() {
                         </div>
                       ) : (
                         <ul className="space-y-2">
-                          {editLabOrders.map((order: any) => (
-                            <li key={order.id} className="p-3 rounded-lg border bg-muted/30 text-sm">
-                              <span className="font-medium">{order.order_id || `#${order.id}`}</span>
-                              {(() => {
-                                const testsLine = order.tests?.map((t: any) => t.name || t.template?.name).filter(Boolean).join(', ');
-                                return testsLine ? (
-                                  <p className="text-muted-foreground mt-1">{testsLine}</p>
-                                ) : null;
-                              })()}
-                            </li>
-                          ))}
+                          {editLabOrders.map((order: any) => {
+                            const tests = Array.isArray(order.tests) && order.tests.length ? order.tests : [order];
+                            const orderDate = formatOrderDate(order.ordered_at || order.created_at);
+                            return tests.map((test: any, index: number) => (
+                              <li key={`${order.id}-${test.id ?? index}`} className="p-3 rounded-lg border bg-muted/30 text-sm">
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="flex items-start gap-2 flex-1 min-w-0">
+                                    <div className="p-1.5 rounded-full bg-amber-100 dark:bg-amber-900/30">
+                                      <TestTube className="h-3.5 w-3.5 text-amber-600" />
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                      <div className="flex items-center gap-2 flex-wrap mb-1">
+                                        <span className="font-semibold">{test.name || test.test_name || test.template?.name || order.test_name || 'Lab test'}</span>
+                                        <Badge variant="outline" className={`text-xs ${getOrderStatusClass(test.status || order.status)}`}>
+                                          {formatOrderStatus(test.status || order.status)}
+                                        </Badge>
+                                        {order.priority && (
+                                          <Badge variant="outline" className="text-xs">{order.priority}</Badge>
+                                        )}
+                                      </div>
+                                      <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                                        <span><strong>Order:</strong> {order.order_id || `#${order.id}`}</span>
+                                        {(test.lab_number || test.lab_id) && <span><strong>Lab ID:</strong> {test.lab_number || test.lab_id}</span>}
+                                        {(test.code || test.template?.code) && <span><strong>Code:</strong> {test.code || test.template?.code}</span>}
+                                      </div>
+                                      {(order.clinical_notes || test.notes) && (
+                                        <div className="text-xs text-muted-foreground mt-2 p-2 bg-background/70 rounded">
+                                          <strong>Notes:</strong> {order.clinical_notes || test.notes}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                  {orderDate && <span className="text-xs text-muted-foreground shrink-0">{orderDate}</span>}
+                                </div>
+                              </li>
+                            ));
+                          })}
                         </ul>
                       )}
                       <div className="p-4 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
@@ -1656,17 +1793,43 @@ export default function ConsultationHistoryPage() {
                         </div>
                       ) : (
                         <ul className="space-y-2">
-                          {editRadiologyOrders.map((order: any) => (
-                            <li key={order.id} className="p-3 rounded-lg border bg-muted/30 text-sm">
-                              <span className="font-medium">{order.order_id || `#${order.id}`}</span>
-                              {(() => {
-                                const studiesLine = order.studies?.map((s: any) => s.procedure).filter(Boolean).join(', ');
-                                return studiesLine ? (
-                                  <p className="text-muted-foreground mt-1">{studiesLine}</p>
-                                ) : null;
-                              })()}
-                            </li>
-                          ))}
+                          {editRadiologyOrders.map((order: any) => {
+                            const studies = Array.isArray(order.studies) && order.studies.length ? order.studies : [order];
+                            const orderDate = formatOrderDate(order.ordered_at || order.created_at);
+                            return studies.map((study: any, index: number) => (
+                              <li key={`${order.id}-${study.id ?? index}`} className="p-3 rounded-lg border bg-muted/30 text-sm">
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="flex items-start gap-2 flex-1 min-w-0">
+                                    <div className="p-1.5 rounded-full bg-indigo-100 dark:bg-indigo-900/30">
+                                      <ScanLine className="h-3.5 w-3.5 text-indigo-600" />
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                      <div className="flex items-center gap-2 flex-wrap mb-1">
+                                        <span className="font-semibold">{study.procedure || study.name || order.procedure_name || 'Radiology study'}</span>
+                                        <Badge variant="outline" className={`text-xs ${getOrderStatusClass(study.status || order.status)}`}>
+                                          {formatOrderStatus(study.status || order.status)}
+                                        </Badge>
+                                        {order.priority && (
+                                          <Badge variant="outline" className="text-xs">{order.priority}</Badge>
+                                        )}
+                                      </div>
+                                      <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                                        <span><strong>Order:</strong> {order.order_id || `#${order.id}`}</span>
+                                        {(study.study_id || study.accession_number) && <span><strong>Study ID:</strong> {study.study_id || study.accession_number}</span>}
+                                        {study.modality && <span><strong>Modality:</strong> {study.modality}</span>}
+                                      </div>
+                                      {(order.clinical_notes || study.clinical_notes || study.notes) && (
+                                        <div className="text-xs text-muted-foreground mt-2 p-2 bg-background/70 rounded">
+                                          <strong>Notes:</strong> {order.clinical_notes || study.clinical_notes || study.notes}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                  {orderDate && <span className="text-xs text-muted-foreground shrink-0">{orderDate}</span>}
+                                </div>
+                              </li>
+                            ));
+                          })}
                         </ul>
                       )}
                       <div className="p-4 rounded-lg bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800">
@@ -1716,12 +1879,42 @@ export default function ConsultationHistoryPage() {
                         </div>
                       ) : (
                         <ul className="space-y-2">
-                          {editPhysioOrders.map((order: any) => (
-                            <li key={order.id} className="p-3 rounded-lg border bg-muted/30 text-sm">
-                              <span className="font-medium">{order.diagnosis || 'Physio order'}</span>
-                              {order.chief_complaint && <p className="text-muted-foreground mt-1">{order.chief_complaint}</p>}
-                            </li>
-                          ))}
+                          {editPhysioOrders.map((order: any) => {
+                            const orderDate = formatOrderDate(order.created_at || order.ordered_at || order.scheduled_date);
+                            return (
+                              <li key={order.id} className="p-3 rounded-lg border bg-muted/30 text-sm">
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="flex items-start gap-2 flex-1 min-w-0">
+                                    <div className="p-1.5 rounded-full bg-emerald-100 dark:bg-emerald-900/30">
+                                      <Activity className="h-3.5 w-3.5 text-emerald-600" />
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                      <div className="flex items-center gap-2 flex-wrap mb-1">
+                                        <span className="font-semibold">{order.diagnosis || order.treatment_type || 'Physio order'}</span>
+                                        <Badge variant="outline" className={`text-xs ${getOrderStatusClass(order.status)}`}>
+                                          {formatOrderStatus(order.status)}
+                                        </Badge>
+                                        {order.priority && (
+                                          <Badge variant="outline" className="text-xs">{order.priority}</Badge>
+                                        )}
+                                      </div>
+                                      <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                                        <span><strong>Order:</strong> {order.order_id || `#${order.id}`}</span>
+                                        {order.body_part && <span><strong>Body part:</strong> {order.body_part}</span>}
+                                        {order.sessions_requested && <span><strong>Sessions:</strong> {order.sessions_requested}</span>}
+                                      </div>
+                                      {(order.chief_complaint || order.notes || order.instructions) && (
+                                        <div className="text-xs text-muted-foreground mt-2 p-2 bg-background/70 rounded">
+                                          <strong>Details:</strong> {order.chief_complaint || order.notes || order.instructions}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                  {orderDate && <span className="text-xs text-muted-foreground shrink-0">{orderDate}</span>}
+                                </div>
+                              </li>
+                            );
+                          })}
                         </ul>
                       )}
                       <div className="p-4 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800">
@@ -1771,14 +1964,41 @@ export default function ConsultationHistoryPage() {
                         </div>
                       ) : (
                         <ul className="space-y-2">
-                          {editNursingOrders.map((order: any) => (
-                            <li key={order.id} className="p-3 rounded-lg border bg-muted/30 text-sm">
-                              <span className="font-medium capitalize">{order.order_type || ''}</span>
-                              {order.description ? (
-                                <p className="text-muted-foreground mt-1">{order.description}</p>
-                              ) : null}
-                            </li>
-                          ))}
+                          {editNursingOrders.map((order: any) => {
+                            const orderDate = formatOrderDate(order.created_at || order.ordered_at);
+                            return (
+                              <li key={order.id} className="p-3 rounded-lg border bg-muted/30 text-sm">
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="flex items-start gap-2 flex-1 min-w-0">
+                                    <div className="p-1.5 rounded-full bg-cyan-100 dark:bg-cyan-900/30">
+                                      <Syringe className="h-3.5 w-3.5 text-cyan-600" />
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                      <div className="flex items-center gap-2 flex-wrap mb-1">
+                                        <span className="font-semibold capitalize">{order.order_type || order.procedure || 'Nursing order'}</span>
+                                        <Badge variant="outline" className={`text-xs ${getOrderStatusClass(order.status)}`}>
+                                          {formatOrderStatus(order.status)}
+                                        </Badge>
+                                        {order.priority && (
+                                          <Badge variant="outline" className="text-xs">{order.priority}</Badge>
+                                        )}
+                                      </div>
+                                      <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                                        <span><strong>Order:</strong> {order.order_id || `#${order.id}`}</span>
+                                        {order.assigned_to_name && <span><strong>Assigned:</strong> {order.assigned_to_name}</span>}
+                                      </div>
+                                      {(order.description || order.notes || order.instructions) && (
+                                        <div className="text-xs text-muted-foreground mt-2 p-2 bg-background/70 rounded">
+                                          <strong>Details:</strong> {order.description || order.notes || order.instructions}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                  {orderDate && <span className="text-xs text-muted-foreground shrink-0">{orderDate}</span>}
+                                </div>
+                              </li>
+                            );
+                          })}
                         </ul>
                       )}
                       <div className="p-4 rounded-lg bg-cyan-50 dark:bg-cyan-900/20 border border-cyan-200 dark:border-cyan-800">

@@ -18,6 +18,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { toast } from 'sonner';
 import { patientService, radiologyService, formatPatientGenderLabel } from '@/lib/services';
+import { RAD_OTHER_TEMPLATE_CODE } from '@/lib/constants/order-template-codes';
 import { PatientAvatar } from '@/components/shared/PatientAvatar';
 import { Icd10DiagnosesBlock } from '@/components/medical/Icd10DiagnosesBlock';
 import { AdvancedDateRangeDialog } from '@/components/shared/AdvancedDateRangeDialog';
@@ -42,6 +43,54 @@ const formatOrderedAtDisplay = (isoString: string | undefined): string => {
   } catch {
     return '';
   }
+};
+
+type CustomRadiologyReportRow = {
+  id: string;
+  procedure: string;
+  report: string;
+  recommendations: string;
+  critical: boolean;
+};
+
+const isOtherRadiologyStudy = (study?: any | null) => {
+  if (!study) return false;
+  const code = String(study.template_details?.code || study.template?.code || '').toUpperCase();
+  const procedure = String(study.procedure || '').toUpperCase();
+  return code === RAD_OTHER_TEMPLATE_CODE || procedure === 'OTHER' || procedure === 'OTHERS' || procedure.includes('OTHER');
+};
+
+const makeCustomRadiologyRowId = () => `custom-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+const createCustomRadiologyRow = (procedure = ''): CustomRadiologyReportRow => ({
+  id: makeCustomRadiologyRowId(),
+  procedure,
+  report: '',
+  recommendations: '',
+  critical: false,
+});
+
+const getRadiologyReportFileUrl = (filePath?: string | null) => {
+  if (!filePath) return '';
+  if (filePath.startsWith('http://') || filePath.startsWith('https://')) return filePath;
+  const apiRoot = process.env.NEXT_PUBLIC_API_URL || '';
+  const mediaBase = apiRoot.endsWith('/api') ? apiRoot.slice(0, -4) : apiRoot.endsWith('/api/v1') ? apiRoot.slice(0, -7) : apiRoot;
+  if (filePath.startsWith('/media/')) return `${mediaBase}${filePath}`;
+  return `${mediaBase}/media/${filePath.replace(/^\/+/, '')}`;
+};
+
+const parseCustomRadiologyNames = (study: any, order?: any): string[] => {
+  const existingRows = Array.isArray(study?.custom_reports) ? study.custom_reports : [];
+  if (existingRows.length > 0) {
+    return existingRows
+      .map((row: any) => String(row?.procedure || row?.name || '').trim())
+      .filter(Boolean);
+  }
+  const source = order?.clinical_notes || study?.procedure || '';
+  return String(source)
+    .split(/[,;\n]+/)
+    .map((item) => item.trim())
+    .filter((item) => item && !/^others?$/i.test(item));
 };
 
 export default function RadiologyOrdersPage() {
@@ -317,6 +366,8 @@ export default function RadiologyOrdersPage() {
     critical: false,
     reportFile: null as File | null,
   });
+  const [customReportRows, setCustomReportRows] = useState<CustomRadiologyReportRow[]>([]);
+  const [customReportFiles, setCustomReportFiles] = useState<Record<string, File | null>>({});
   const [isSubmittingResults, setIsSubmittingResults] = useState(false);
 
   // Processing method selection (like lab)
@@ -654,11 +705,23 @@ export default function RadiologyOrdersPage() {
   const openResultsDialog = (study: any, order: any, isRework: boolean = false) => {
     setSelectedStudy(study);
     setSelectedOrder(order);
+    const existingRows = Array.isArray(study.custom_reports) ? study.custom_reports : [];
+    const initialCustomRows = existingRows.length > 0
+      ? existingRows.map((row: any) => ({
+          id: String(row.id || makeCustomRadiologyRowId()),
+          procedure: String(row.procedure || row.name || ''),
+          report: String(row.report || ''),
+          recommendations: String(row.recommendations || ''),
+          critical: Boolean(row.critical),
+        }))
+      : parseCustomRadiologyNames(study, order).map((name) => createCustomRadiologyRow(name));
     setResultsForm({
       report: study.report || study.findings || '',
       critical: study.critical || false,
       reportFile: null,
     });
+    setCustomReportRows(initialCustomRows.length > 0 ? initialCustomRows : [createCustomRadiologyRow()]);
+    setCustomReportFiles({});
     setResultEntryMode(study.processing_method === 'outsourced' ? 'upload' : 'manual');
     setIsResultsDialogOpen(true);
   };
@@ -670,9 +733,22 @@ export default function RadiologyOrdersPage() {
     setIsSubmittingResults(true);
     try {
       await radiologyService.updateStudyResults(selectedStudy.id, {
-        report: resultsForm.report,
-        critical: resultsForm.critical,
+        report: isOtherRadiologyStudy(selectedStudy) ? '' : resultsForm.report,
+        critical: isOtherRadiologyStudy(selectedStudy)
+          ? customReportRows.some((row) => row.critical)
+          : resultsForm.critical,
         reportFile: resultsForm.reportFile,
+        customReports: isOtherRadiologyStudy(selectedStudy)
+          ? customReportRows
+              .map((row) => ({
+                ...row,
+                procedure: row.procedure.trim(),
+                report: row.report.trim(),
+                recommendations: row.recommendations.trim(),
+              }))
+              .filter((row) => row.procedure || row.report || row.recommendations || customReportFiles[row.id])
+          : undefined,
+        customReportFiles: isOtherRadiologyStudy(selectedStudy) ? customReportFiles : undefined,
         status: 'reported'
       });
 
@@ -1103,6 +1179,100 @@ export default function RadiologyOrdersPage() {
                 </div>
 
                 {/* Result Entry Method (like lab) */}
+                {isOtherRadiologyStudy(selectedStudy) ? (
+                  <div className="space-y-3">
+                    <div>
+                      <p className="text-sm font-medium">Custom / Other Studies</p>
+                      <p className="text-xs text-muted-foreground">
+                        Add one row for each custom imaging study. Known catalog studies should be added as separate studies.
+                      </p>
+                    </div>
+                    <div className="space-y-3">
+                      {customReportRows.map((row, index) => (
+                        <div key={row.id} className="rounded-lg border p-3 space-y-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs font-medium text-muted-foreground">Study {index + 1}</span>
+                            {customReportRows.length > 1 && (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 px-2 text-rose-600"
+                                onClick={() => {
+                                  setCustomReportRows((prev) => prev.filter((item) => item.id !== row.id));
+                                  setCustomReportFiles((prev) => {
+                                    const next = { ...prev };
+                                    delete next[row.id];
+                                    return next;
+                                  });
+                                }}
+                              >
+                                <X className="h-3.5 w-3.5 mr-1" />
+                                Remove
+                              </Button>
+                            )}
+                          </div>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <div className="space-y-2">
+                              <Label>Study / Procedure</Label>
+                              <Input
+                                value={row.procedure}
+                                onChange={(e) => setCustomReportRows((prev) => prev.map((item) => item.id === row.id ? { ...item, procedure: e.target.value } : item))}
+                                placeholder="e.g. Soft tissue ultrasound neck"
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label>Upload File</Label>
+                              <Input
+                                type="file"
+                                accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+                                onChange={(e) => setCustomReportFiles((prev) => ({ ...prev, [row.id]: e.target.files?.[0] || null }))}
+                                className="cursor-pointer"
+                              />
+                              {customReportFiles[row.id] && (
+                                <p className="text-xs text-green-600">Selected: {customReportFiles[row.id]?.name}</p>
+                              )}
+                            </div>
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Report</Label>
+                            <Textarea
+                              value={row.report}
+                              onChange={(e) => setCustomReportRows((prev) => prev.map((item) => item.id === row.id ? { ...item, report: e.target.value } : item))}
+                              placeholder="Enter report for this custom study..."
+                              rows={4}
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Recommendations</Label>
+                            <Textarea
+                              value={row.recommendations}
+                              onChange={(e) => setCustomReportRows((prev) => prev.map((item) => item.id === row.id ? { ...item, recommendations: e.target.value } : item))}
+                              placeholder="Optional recommendations..."
+                              rows={2}
+                            />
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <Checkbox
+                              checked={row.critical}
+                              onCheckedChange={(checked) => setCustomReportRows((prev) => prev.map((item) => item.id === row.id ? { ...item, critical: checked as boolean } : item))}
+                            />
+                            <Label className="text-sm font-medium leading-none">Mark this row as Critical Finding</Label>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCustomReportRows((prev) => [...prev, createCustomRadiologyRow()])}
+                    >
+                      <Plus className="h-4 w-4 mr-2" />
+                      Add Custom Study Row
+                    </Button>
+                  </div>
+                ) : (
                 <div className="space-y-3">
                   <Label className="text-sm font-medium">Result Entry Method</Label>
                   <Tabs value={resultEntryMode} onValueChange={(value) => setResultEntryMode(value as 'manual' | 'upload')} className="w-full">
@@ -1206,6 +1376,7 @@ export default function RadiologyOrdersPage() {
                     </TabsContent>
                   </Tabs>
                 </div>
+                )}
 
               </div>
             )}
@@ -1215,7 +1386,12 @@ export default function RadiologyOrdersPage() {
               </Button>
               <Button
                 onClick={handleSubmitResults}
-                disabled={isSubmittingResults || (!resultsForm.reportFile && !resultsForm.report.trim())}
+                disabled={
+                  isSubmittingResults ||
+                  (isOtherRadiologyStudy(selectedStudy)
+                    ? !customReportRows.some((row) => row.procedure.trim() || row.report.trim() || row.recommendations.trim() || customReportFiles[row.id])
+                    : (!resultsForm.reportFile && !resultsForm.report.trim()))
+                }
                 className="bg-amber-500 hover:bg-amber-600"
               >
                 {isSubmittingResults ? 'Submitting...' : 'Submit Results'}
@@ -1456,14 +1632,46 @@ export default function RadiologyOrdersPage() {
                               </Badge>
                             )}
                           </div>
-                          <div className="space-y-1">
-                            {study.report && (
-                              <div><span className="text-muted-foreground">Report:</span> <span className="font-medium">{study.report}</span></div>
-                            )}
-                            {!study.report && (
-                              <div><span className="text-muted-foreground">Status:</span> <span className="font-medium">Normal study</span></div>
-                            )}
-                          </div>
+                          {Array.isArray(study.custom_reports) && study.custom_reports.length > 0 ? (
+                            <div className="space-y-2">
+                              {study.custom_reports.map((row: any, rowIdx: number) => {
+                                const attachment = (study.report_attachments || []).find((file: any) =>
+                                  file.row_id === row.id || file.row_name?.trim().toLowerCase() === String(row.procedure || '').trim().toLowerCase()
+                                );
+                                const fileUrl = getRadiologyReportFileUrl(attachment?.file);
+                                return (
+                                  <div key={row.id || rowIdx} className="rounded border bg-background/70 p-2 space-y-1">
+                                    <div className="flex items-center justify-between gap-2">
+                                      <span className="font-medium">{row.procedure || `Custom study ${rowIdx + 1}`}</span>
+                                      {row.critical && <Badge className="text-[10px] bg-rose-500 text-white">Critical</Badge>}
+                                    </div>
+                                    {row.report && <p className="whitespace-pre-wrap">{row.report}</p>}
+                                    {row.recommendations && <p><span className="text-muted-foreground">Recommendations:</span> {row.recommendations}</p>}
+                                    {fileUrl && (
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-6 px-2 text-xs text-blue-600"
+                                        onClick={() => window.open(fileUrl, '_blank', 'noopener,noreferrer')}
+                                      >
+                                        <Eye className="h-3 w-3 mr-1" />View file
+                                      </Button>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            <div className="space-y-1">
+                              {study.report && (
+                                <div><span className="text-muted-foreground">Report:</span> <span className="font-medium">{study.report}</span></div>
+                              )}
+                              {!study.report && (
+                                <div><span className="text-muted-foreground">Status:</span> <span className="font-medium">Normal study</span></div>
+                              )}
+                            </div>
+                          )}
                           {/* Show uploaded report file if available */}
                           {(study.report_file_url || study.report_file) && (
                             <div className="mt-2 p-2 rounded bg-blue-50 dark:bg-blue-900/20 flex items-center justify-between border border-blue-200 dark:border-blue-800">

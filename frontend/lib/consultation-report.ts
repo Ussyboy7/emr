@@ -134,7 +134,20 @@ const formatLabResult = (value: unknown, normalRange?: Record<string, any>): str
   }
   if (typeof value !== 'object') return String(value);
 
-  const entries = Object.entries(value as Record<string, unknown>).filter(([, v]) => v != null && v !== '');
+  const payload = value as Record<string, unknown>;
+  if (Array.isArray(payload.custom_results)) {
+    return payload.custom_results
+      .filter((row: any) => row && (row.name || row.value || row.unit || row.reference_range || row.notes))
+      .map((row: any) => {
+        const unit = row.unit ? ` ${row.unit}` : '';
+        const range = row.reference_range ? ` (${row.reference_range})` : '';
+        const notes = row.notes ? ` - ${row.notes}` : '';
+        return `${row.name || 'Custom Result'}: ${row.value || 'Pending'}${unit}${range}${notes}`.trim();
+      })
+      .join('\n');
+  }
+
+  const entries = Object.entries(payload).filter(([, v]) => v != null && v !== '');
   if (entries.length === 0) return '';
 
   // Honour template _order so consultation reports match Enter Results / Result Details.
