@@ -179,6 +179,16 @@ export interface LabAnalyticsSummary {
       }>;
     }
   >;
+  /** Breakdown of orders/tests by LabOrder.source_type (internal_emr vs external_manual). */
+  orders_by_source?: Record<string, { orders: number; tests: number }>;
+  /** External manual requests aggregated by originating clinic. */
+  external_orders_by_clinic?: Array<{
+    clinic_id?: number | null;
+    clinic_name: string;
+    clinic_code?: string;
+    orders: number;
+    tests: number;
+  }>;
 }
 
 class LabService {
