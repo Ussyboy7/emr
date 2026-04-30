@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
+  ACCESS_TOKEN_COOKIE,
+  ACCESS_TOKEN_EXP_COOKIE,
   AUTH_ALLOWED_PAGES_COOKIE,
   AUTH_HOME_ROUTE_COOKIE,
   AUTH_IS_SUPERUSER_COOKIE,
   AUTH_NEXT_REDIRECT_COOKIE,
   AUTH_SESSION_COOKIE,
+  LEGACY_ACCESS_TOKEN_COOKIE,
+  LEGACY_ACCESS_TOKEN_EXP_COOKIE,
   LEGACY_AUTH_ALLOWED_PAGES_COOKIE,
   LEGACY_AUTH_HOME_ROUTE_COOKIE,
   LEGACY_AUTH_IS_SUPERUSER_COOKIE,
@@ -21,13 +25,28 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
+  const accessToken =
+    request.cookies.get(ACCESS_TOKEN_COOKIE)?.value ??
+    request.cookies.get(LEGACY_ACCESS_TOKEN_COOKIE)?.value;
+  const accessExpRaw =
+    request.cookies.get(ACCESS_TOKEN_EXP_COOKIE)?.value ??
+    request.cookies.get(LEGACY_ACCESS_TOKEN_EXP_COOKIE)?.value;
+  const accessExp = accessExpRaw ? Number(accessExpRaw) : null;
+  const hasUnexpiredAccessToken =
+    Boolean(accessToken) &&
+    typeof accessExp === "number" &&
+    Number.isFinite(accessExp) &&
+    Date.now() <= accessExp;
+
   // Authentication presence check:
-  // Only trust our explicit auth-session cookie for route protection.
-  // Raw refresh-token presence is too loose and can produce "ghost sessions"
-  // after logout if a cookie survives longer than expected.
+  // Prefer the explicit auth-session marker, but also accept unexpired access
+  // token cookies so older sessions don't redirect-loop when emr_auth is missing.
+  // Do not trust refresh-token-only sessions here: middleware cannot verify or
+  // rotate them, and stale refresh cookies can otherwise create ghost sessions.
   const hasAuth =
     request.cookies.get(AUTH_SESSION_COOKIE)?.value === "1" ||
-    request.cookies.get(LEGACY_AUTH_SESSION_COOKIE)?.value === "1";
+    request.cookies.get(LEGACY_AUTH_SESSION_COOKIE)?.value === "1" ||
+    hasUnexpiredAccessToken;
 
   if (!hasAuth) {
     const url = request.nextUrl.clone();
