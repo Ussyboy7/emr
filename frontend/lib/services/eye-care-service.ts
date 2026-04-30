@@ -1,7 +1,7 @@
 /**
  * Eye Care API service
  */
-import { apiFetch } from '../api-client';
+import { apiFetch, buildQueryString } from '../api-client';
 
 export interface EyeOrder {
   id: number;
@@ -180,10 +180,18 @@ export const eyeCareService = {
     status?: string;
     page?: number;
     page_size?: number;
+    search?: string;
+    completed_after?: string;
+    completed_before?: string;
   }) {
-    const queryString = new URLSearchParams(params as Record<string, string>).toString();
-    const url = `/eyecare/sessions/${queryString ? `?${queryString}` : ''}`;
-    return apiFetch<{ results: EyeSession[]; count?: number }>(url);
+    const query = buildQueryString((params || {}) as Record<string, string | number | boolean | undefined>);
+    return apiFetch<{ results: EyeSession[]; count?: number }>(`/eyecare/sessions/${query}`);
+  },
+
+  async downloadSessionReportPdf(sessionId: number): Promise<Blob> {
+    return apiFetch<Blob>(`/eyecare/sessions/${sessionId}/session_report_pdf/`, {
+      responseType: 'blob',
+    });
   },
 
   /**

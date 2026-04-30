@@ -433,8 +433,10 @@ export const apiFetch = async <T = unknown>(path: string, options: FetchOptions 
     requestHeaders.set("Content-Type", "application/json");
   }
 
-  // Force JSON responses instead of HTML (Django REST Framework browsable API)
-  if (!requestHeaders.has("Accept")) {
+  if (responseType === "blob" && !requestHeaders.has("Accept")) {
+    requestHeaders.set("Accept", "application/pdf, */*;q=0.5");
+  } else if (!requestHeaders.has("Accept")) {
+    // Force JSON responses instead of HTML (Django REST Framework browsable API)
     requestHeaders.set("Accept", "application/json");
   }
 
@@ -522,6 +524,12 @@ export const apiFetch = async <T = unknown>(path: string, options: FetchOptions 
           }
           if (retryResponse.status === 204) {
             return undefined as T;
+          }
+          if (responseType === "blob") {
+            return (await retryResponse.blob()) as T;
+          }
+          if (responseType === "text") {
+            return (await retryResponse.text()) as T;
           }
           return await retryResponse.json() as T;
         }
@@ -684,6 +692,12 @@ export const apiFetch = async <T = unknown>(path: string, options: FetchOptions 
         return undefined as T;
       }
 
+      if (responseType === "blob") {
+        return (await response.blob()) as T;
+      }
+      if (responseType === "text") {
+        return (await response.text()) as T;
+      }
       return await response.json() as T;
 
     } catch (error: unknown) {

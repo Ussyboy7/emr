@@ -1149,24 +1149,13 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     }));
   };
 
-  // Update transformations when currentUser changes
+  // Keep History tab in sync with raw API data (including empty results — avoids showing another patient's rows).
   useEffect(() => {
-    if (rawConsultations.length > 0) {
-      setConsultationHistory(transformConsultations(rawConsultations));
-    }
-    if (rawPrescriptions.length > 0) {
-      setPrescriptionHistory(transformPrescriptions(rawPrescriptions));
-    }
-    if (rawVitals.length > 0) {
-      setVitalsHistory(transformVitals(rawVitals));
-    }
-    if (rawLabResults.length > 0) {
-      setLabHistory(transformLabResults(rawLabResults));
-    }
-    if (rawImagingResults.length > 0) {
-      setImagingHistory(transformImagingResults(rawImagingResults));
-    }
-    // Transform physio results - they come in the right format from API
+    setConsultationHistory(transformConsultations(rawConsultations));
+    setPrescriptionHistory(transformPrescriptions(rawPrescriptions));
+    setVitalsHistory(transformVitals(rawVitals));
+    setLabHistory(transformLabResults(rawLabResults));
+    setImagingHistory(transformImagingResults(rawImagingResults));
     setPhysioHistory(rawPhysioResults);
   }, [currentUser, rawConsultations, rawPrescriptions, rawVitals, rawLabResults, rawImagingResults, rawPhysioResults]);
 
@@ -1189,8 +1178,11 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       const imagingResults = await radiologyService.getVerifiedReports({ patient: patientId.toString() });
       setRawImagingResults(imagingResults?.results || []);
 
-      // Load prescription history
-      const prescriptions = await pharmacyService.getPrescriptions({ patient: patientId.toString() });
+      // Load prescription history (high page size — list endpoint is paginated)
+      const prescriptions = await pharmacyService.getPrescriptions({
+        patient: patientId.toString(),
+        page_size: 500,
+      });
       setRawPrescriptions(prescriptions?.results || []);
 
       // Load vitals history for the History tab
@@ -1224,7 +1216,13 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
     } catch (error) {
       console.error('Error loading patient history:', error);
-      // Set empty arrays on error
+      setRawConsultations([]);
+      setRawLabResults([]);
+      setRawImagingResults([]);
+      setRawPrescriptions([]);
+      setRawVitals([]);
+      setRawPhysioResults([]);
+      setWardAdmissions([]);
       setConsultationHistory([]);
       setLabHistory([]);
       setImagingHistory([]);
@@ -3542,6 +3540,10 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       
       setPrescriptions(prev => prev.map(rx => rx.status === 'Draft' ? { ...rx, prescriptionId: createdPrescription.id, status: 'Sent to Pharmacy' } : rx));
       setPrescriptionsSentToPharmacy(true);
+
+      if (Number.isFinite(numericPatientId)) {
+        void loadPatientHistory(numericPatientId);
+      }
     } catch (err: any) {
       console.error('Error sending prescriptions:', err);
       toast.error(err.message || 'Failed to send prescriptions to pharmacy');

@@ -10,6 +10,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
+from django.http import HttpResponse
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
@@ -45,6 +46,7 @@ def _uploaded_files_for_key(request, key):
     return out
 
 
+from .filters import EyeSessionFilter
 from .models import EyeOrder, EyeSession, EyeSessionDiagnosticFile
 from .serializers import (
     EyeOrderSerializer,
@@ -225,8 +227,17 @@ class EyeSessionViewSet(viewsets.ModelViewSet):
     parser_classes = [MultiPartParser, FormParser, JSONParser]
     queryset = EyeSession.objects.all().select_related('order__patient').order_by('-scheduled_at')
     serializer_class = EyeSessionSerializer
-    filter_backends = [DjangoFilterBackend, OrderingFilter]
-    filterset_fields = ['order', 'status', 'scheduled_at']
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_class = EyeSessionFilter
+    search_fields = [
+        'order__patient__first_name',
+        'order__patient__surname',
+        'order__patient__patient_id',
+        'order__diagnosis',
+        'order__chief_complaint',
+        'notes',
+        'findings',
+    ]
     ordering_fields = ['scheduled_at', 'session_number']
     ordering = ['-scheduled_at']
     
@@ -273,6 +284,17 @@ class EyeSessionViewSet(viewsets.ModelViewSet):
         cache = getattr(session, '_prefetched_objects_cache', None)
         if cache and 'diagnostic_uploads' in cache:
             del cache['diagnostic_uploads']
+
+    @action(detail=True, methods=['get'], url_path='session_report_pdf')
+    def session_report_pdf(self, request, pk=None):
+        session = self.get_object()
+        from common.session_report_pdf import build_eye_session_pdf_bytes
+
+        pdf_bytes = build_eye_session_pdf_bytes(session)
+        fn = f"eye-session-{session.id}.pdf"
+        response = HttpResponse(pdf_bytes, content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="{fn}"'
+        return response
 
 
 class EyeSessionDiagnosticFileViewSet(mixins.DestroyModelMixin, viewsets.GenericViewSet):

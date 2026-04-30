@@ -244,6 +244,8 @@ class PhysioService {
     search?: string;
     page?: number;
     page_size?: number;
+    completed_after?: string;
+    completed_before?: string;
   }): Promise<{ results: PhysioSession[]; count: number }> {
     const query = buildQueryString(params || {});
     return apiFetch<{ results: PhysioSession[]; count: number }>(`/physiotherapy/sessions/${query}`);
@@ -291,6 +293,15 @@ class PhysioService {
   async completeSession(sessionId: number): Promise<PhysioSession> {
     return apiFetch<PhysioSession>(`/physiotherapy/sessions/${sessionId}/complete_session/`, {
       method: 'POST',
+    });
+  }
+
+  /**
+   * Server-generated PDF for a completed-style session report.
+   */
+  async downloadSessionReportPdf(sessionId: number): Promise<Blob> {
+    return apiFetch<Blob>(`/physiotherapy/sessions/${sessionId}/session_report_pdf/`, {
+      responseType: 'blob',
     });
   }
 

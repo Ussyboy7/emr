@@ -3,6 +3,7 @@ Views for the Physiotherapy app.
 """
 import traceback
 
+from django.http import HttpResponse
 from django.utils import timezone
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import viewsets, status
@@ -16,6 +17,7 @@ from rest_framework.views import APIView
 from common.clinic_utils import normalize_clinic_name
 from patients.models import Visit
 from .models import PhysioTemplate, PhysioOrder, PhysioSession
+from .filters import PhysioSessionFilter
 from .serializers import (
     PhysioTemplateSerializer,
     PhysioOrderSerializer,
@@ -245,8 +247,17 @@ class PhysioSessionViewSet(viewsets.ModelViewSet):
     """ViewSet for managing physiotherapy sessions."""
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['status', 'physiotherapist', 'order']
-    search_fields = []
+    filterset_class = PhysioSessionFilter
+    search_fields = [
+        'order__patient__first_name',
+        'order__patient__surname',
+        'order__patient__patient_id',
+        'order__diagnosis',
+        'order__chief_complaint',
+        'presenting_complaint',
+        'treatment_performed',
+        'progress_notes',
+    ]
     ordering = ['-created_at']
 
     def get_queryset(self):
@@ -317,6 +328,17 @@ class PhysioSessionViewSet(viewsets.ModelViewSet):
         if self.action == 'create':
             return PhysioSessionCreateSerializer
         return PhysioSessionSerializer
+
+    @action(detail=True, methods=['get'], url_path='session_report_pdf')
+    def session_report_pdf(self, request, pk=None):
+        session = self.get_object()
+        from common.session_report_pdf import build_physio_session_pdf_bytes
+
+        pdf_bytes = build_physio_session_pdf_bytes(session)
+        fn = f"physio-session-{session.id}.pdf"
+        response = HttpResponse(pdf_bytes, content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="{fn}"'
+        return response
 
 
 class PhysioStatsView(APIView):
