@@ -78,6 +78,14 @@ export type EyeSoapNote = {
   };
 };
 
+export type EyeSessionDiagnosticAttachment = {
+  id: number | null;
+  category: 'pachymetry' | 'oct' | 'visual_field';
+  file: string;
+  uploaded_at: string | null;
+  legacy?: boolean;
+};
+
 export interface EyeSession {
   id: number;
   order: number;
@@ -98,6 +106,8 @@ export interface EyeSession {
   pachymetry_file?: string | null;
   oct_file?: string | null;
   visual_field_file?: string | null;
+  /** Multi-upload rows merged with legacy single-file URLs when present */
+  diagnostic_attachments?: EyeSessionDiagnosticAttachment[];
   created_at?: string;
 }
 
@@ -187,6 +197,13 @@ export const eyeCareService = {
   },
 
   /**
+   * Get one eye session (e.g. after file changes)
+   */
+  async getSession(id: number) {
+    return apiFetch<EyeSession>(`/eyecare/sessions/${id}/`);
+  },
+
+  /**
    * Update an eye session
    */
   async updateSession(id: number, data: Partial<EyeSession>) {
@@ -198,14 +215,16 @@ export const eyeCareService = {
 
   /**
    * Update an eye session with uploaded diagnostic files.
+   * Append any number of files per modality using repeated FormData keys
+   * (backend: getlist pachymetry_files, oct_files, visual_field_files).
    */
   async updateSessionWithFiles(
     id: number,
     data: Partial<EyeSession>,
     files: {
-      pachymetry_file?: File | null;
-      oct_file?: File | null;
-      visual_field_file?: File | null;
+      pachymetry_files?: File[];
+      oct_files?: File[];
+      visual_field_files?: File[];
     }
   ) {
     const formData = new FormData();
@@ -213,13 +232,28 @@ export const eyeCareService = {
       if (value === undefined || value === null) return;
       formData.append(key, typeof value === 'object' ? JSON.stringify(value) : String(value));
     });
-    Object.entries(files).forEach(([key, file]) => {
-      if (file) formData.append(key, file);
-    });
+    for (const f of files.pachymetry_files ?? []) {
+      formData.append('pachymetry_files', f);
+    }
+    for (const f of files.oct_files ?? []) {
+      formData.append('oct_files', f);
+    }
+    for (const f of files.visual_field_files ?? []) {
+      formData.append('visual_field_files', f);
+    }
 
     return apiFetch<EyeSession>(`/eyecare/sessions/${id}/`, {
       method: 'PATCH',
       body: formData,
+    });
+  },
+
+  /**
+   * Remove one diagnostic upload (multi-file rows only; legacy single files are not deletable here).
+   */
+  async deleteSessionDiagnosticFile(fileId: number) {
+    return apiFetch<void>(`/eyecare/session-diagnostic-files/${fileId}/`, {
+      method: 'DELETE',
     });
   },
 };

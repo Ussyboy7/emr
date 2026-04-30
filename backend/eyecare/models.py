@@ -2,7 +2,6 @@
 Eye Care models for the EMR system.
 """
 from django.db import models
-from django.utils import timezone
 
 
 class EyeOrder(models.Model):
@@ -88,6 +87,7 @@ class EyeSession(models.Model):
     procedures_performed = models.TextField(blank=True)
     findings = models.TextField(blank=True)
     soap_note = models.JSONField(default=dict, blank=True)
+    # Legacy single file per modality (kept for backward compatibility)
     pachymetry_file = models.FileField(upload_to='eye_results/pachymetry/', blank=True, null=True)
     oct_file = models.FileField(upload_to='eye_results/oct/', blank=True, null=True)
     visual_field_file = models.FileField(upload_to='eye_results/visual_fields/', blank=True, null=True)
@@ -100,3 +100,32 @@ class EyeSession(models.Model):
 
     def __str__(self):
         return f"Session {self.session_number} - {self.order.patient} - {self.scheduled_at.strftime('%Y-%m-%d')}"
+
+
+class EyeSessionDiagnosticFile(models.Model):
+    """One uploaded file for a diagnostic modality (pachymetry / OCT / visual field)."""
+
+    CATEGORY_CHOICES = [
+        ('pachymetry', 'Pachymetry'),
+        ('oct', 'OCT'),
+        ('visual_field', 'Visual Field'),
+    ]
+
+    session = models.ForeignKey(
+        EyeSession,
+        on_delete=models.CASCADE,
+        related_name='diagnostic_uploads',
+    )
+    category = models.CharField(max_length=30, choices=CATEGORY_CHOICES, db_index=True)
+    file = models.FileField(upload_to='eye_results/diagnostics/')
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'eye_session_diagnostic_files'
+        ordering = ['uploaded_at', 'id']
+        indexes = [
+            models.Index(fields=['session', 'category']),
+        ]
+
+    def __str__(self):
+        return f'{self.session_id} {self.category} {self.file.name if self.file else ""}'

@@ -28,6 +28,29 @@ import {
   Search, Clock, CheckCircle, CheckCircle2, Eye, Play, AlertTriangle, Loader2, Activity, RefreshCw, XCircle, FileText, Stethoscope, Upload, X, Pill,
 } from 'lucide-react';
 
+type DiagnosticCategory = 'pachymetry' | 'oct' | 'visual_field';
+
+const emptyPendingDiagnostics = (): Record<DiagnosticCategory, File[]> => ({
+  pachymetry: [],
+  oct: [],
+  visual_field: [],
+});
+
+function diagnosticAttachmentsForCategory(session: EyeSession | null, category: DiagnosticCategory) {
+  return session?.diagnostic_attachments?.filter((a) => a.category === category) ?? [];
+}
+
+function fileLabelFromAttachmentUrl(url: string, index: number) {
+  try {
+    const path = new URL(url, typeof window !== 'undefined' ? window.location.origin : 'http://localhost').pathname;
+    const seg = path.split('/').filter(Boolean).pop();
+    if (seg) return decodeURIComponent(seg);
+  } catch {
+    /* ignore */
+  }
+  return `File ${index + 1}`;
+}
+
 const formatRelativeTime = (dateString: string | null | undefined) => {
   if (!dateString) return '';
   try {
@@ -177,15 +200,9 @@ export default function EyeClinicOrdersPage() {
   const [reportSession, setReportSession] = useState<EyeSession | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [patientVitals, setPatientVitals] = useState<Record<string, string> | null>(null);
-  const [diagnosticFiles, setDiagnosticFiles] = useState<{
-    pachymetry_file: File | null;
-    oct_file: File | null;
-    visual_field_file: File | null;
-  }>({
-    pachymetry_file: null,
-    oct_file: null,
-    visual_field_file: null,
-  });
+  const [pendingDiagnosticFiles, setPendingDiagnosticFiles] = useState<Record<DiagnosticCategory, File[]>>(
+    () => emptyPendingDiagnostics()
+  );
   const [sessionForm, setSessionForm] = useState({
     chief_complaint: '',
     visual_acuity_od: '',
@@ -331,17 +348,19 @@ export default function EyeClinicOrdersPage() {
     setIsViewDialogOpen(true);
   };
 
-  const openSessionDialog = (session: EyeSession, order: EyeOrder) => {
-    const soapNote = session.soap_note && Object.keys(session.soap_note).length > 0
-      ? session.soap_note
-      : createSoapNoteFromLegacy(order, session);
-    setCurrentSession(session);
+  const openSessionDialog = async (session: EyeSession, order: EyeOrder) => {
+    let hydrated: EyeSession = session;
+    try {
+      hydrated = await eyeCareService.getSession(session.id);
+    } catch {
+      /* use list payload if detail fetch fails */
+    }
+    const soapNote = hydrated.soap_note && Object.keys(hydrated.soap_note).length > 0
+      ? hydrated.soap_note
+      : createSoapNoteFromLegacy(order, hydrated);
+    setCurrentSession(hydrated);
     setSelectedOrder(order);
-    setDiagnosticFiles({
-      pachymetry_file: null,
-      oct_file: null,
-      visual_field_file: null,
-    });
+    setPendingDiagnosticFiles(emptyPendingDiagnostics());
     setSessionForm({
       chief_complaint: soapNote.subjective.chiefComplaint || '',
       visual_acuity_od: soapNote.objective.visualAcuity.distanceUnaided?.od || '',
@@ -354,9 +373,9 @@ export default function EyeClinicOrdersPage() {
       diagnosis: soapNote.assessment.diagnosis || '',
       treatment_plan: soapNote.plan.managementPlan || '',
       special_instructions: order.special_instructions || '',
-      notes: session.notes || '',
-      procedures_performed: session.procedures_performed || '',
-      findings: session.findings || '',
+      notes: hydrated.notes || '',
+      procedures_performed: hydrated.procedures_performed || '',
+      findings: hydrated.findings || '',
       soap_note: soapNote,
     });
     setIsSessionDialogOpen(true);
@@ -364,8 +383,13 @@ export default function EyeClinicOrdersPage() {
     void loadPatientVitals(order.patient);
   };
 
-  const openSessionReport = (session: EyeSession) => {
-    setReportSession(session);
+  const openSessionReport = async (session: EyeSession) => {
+    try {
+      const fresh = await eyeCareService.getSession(session.id);
+      setReportSession(fresh);
+    } catch {
+      setReportSession(session);
+    }
     setIsSessionReportOpen(true);
   };
 
@@ -450,7 +474,7 @@ export default function EyeClinicOrdersPage() {
       toast.success('Processing started successfully');
       await loadOrders();
       const refreshedOrder = { ...order, status: 'in_progress' as const, scheduled_at: order.scheduled_at || new Date().toISOString() };
-      openSessionDialog(activeSession, refreshedOrder);
+      await openSessionDialog(activeSession, refreshedOrder);
     } catch (err) {
       console.error('Error starting eye clinic processing:', err);
       toast.error('Failed to start processing');
@@ -538,7 +562,7 @@ export default function EyeClinicOrdersPage() {
 
       await loadOrders();
       const refreshedOrder = { ...order, status: 'in_progress' as const, scheduled_at: new Date().toISOString() };
-      openSessionDialog(activeSession, refreshedOrder);
+      await openSessionDialog(activeSession, refreshedOrder);
       toast.success(`Session ${nextSessionNumber} started`);
     } catch (err) {
       console.error('Error adding eye session:', err);
@@ -581,10 +605,27 @@ export default function EyeClinicOrdersPage() {
         started_at: currentSession.started_at || now,
         completed_at: opts?.complete ? now : currentSession.completed_at,
       };
-      const hasDiagnosticFiles = Object.values(diagnosticFiles).some(Boolean);
-      await (hasDiagnosticFiles
-        ? eyeCareService.updateSessionWithFiles(currentSession.id, sessionPayload, diagnosticFiles)
-        : eyeCareService.updateSession(currentSession.id, sessionPayload));
+      const hasPendingDiagnosticFiles =
+        pendingDiagnosticFiles.pachymetry.length > 0 ||
+        pendingDiagnosticFiles.oct.length > 0 ||
+        pendingDiagnosticFiles.visual_field.length > 0;
+
+      const updatedSession = hasPendingDiagnosticFiles
+        ? await eyeCareService.updateSessionWithFiles(currentSession.id, sessionPayload,
+          {
+            pachymetry_files: pendingDiagnosticFiles.pachymetry,
+            oct_files: pendingDiagnosticFiles.oct,
+            visual_field_files: pendingDiagnosticFiles.visual_field,
+          })
+        : await eyeCareService.updateSession(currentSession.id, sessionPayload);
+
+      let mergedSession = updatedSession;
+      try {
+        mergedSession = await eyeCareService.getSession(currentSession.id);
+      } catch {
+        /* keep PATCH response */
+      }
+      setCurrentSession(mergedSession);
 
       if (opts?.complete) {
         await eyeCareService.completeOrder(selectedOrder.id);
@@ -595,11 +636,7 @@ export default function EyeClinicOrdersPage() {
       } else {
         toast.success(currentSession.status === 'completed' ? 'Session updated' : 'Eye notes saved');
       }
-      setDiagnosticFiles({
-        pachymetry_file: null,
-        oct_file: null,
-        visual_field_file: null,
-      });
+      setPendingDiagnosticFiles(emptyPendingDiagnostics());
 
       await loadOrders();
     } catch (err) {
@@ -696,11 +733,35 @@ export default function EyeClinicOrdersPage() {
     }));
   };
 
-  const handleDiagnosticFileChange = (
-    field: keyof typeof diagnosticFiles,
-    file: File | null
-  ) => {
-    setDiagnosticFiles((prev) => ({ ...prev, [field]: file }));
+  const appendPendingDiagnostics = (category: DiagnosticCategory, files: FileList | null) => {
+    if (!files?.length) return;
+    setPendingDiagnosticFiles((prev) => ({
+      ...prev,
+      [category]: [...prev[category], ...Array.from(files)],
+    }));
+  };
+
+  const removePendingDiagnosticAt = (category: DiagnosticCategory, index: number) => {
+    setPendingDiagnosticFiles((prev) => ({
+      ...prev,
+      [category]: prev[category].filter((_, i) => i !== index),
+    }));
+  };
+
+  const removeServerDiagnosticFile = async (fileId: number) => {
+    if (!currentSession) return;
+    setIsSubmitting(true);
+    try {
+      await eyeCareService.deleteSessionDiagnosticFile(fileId);
+      const fresh = await eyeCareService.getSession(currentSession.id);
+      setCurrentSession(fresh);
+      toast.success('File removed');
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to remove file');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleEyePrescriptionSubmit = async (payload: PrescriptionOrderSubmitInput) => {
@@ -1140,7 +1201,7 @@ export default function EyeClinicOrdersPage() {
                                   size="sm"
                                   variant="ghost"
                                   className="h-8"
-                                  onClick={() => openSessionReport(session)}
+                                  onClick={() => void openSessionReport(session)}
                                 >
                                   <FileText className="h-4 w-4 mr-1" />
                                   Report
@@ -1149,7 +1210,7 @@ export default function EyeClinicOrdersPage() {
                                   size="sm"
                                   variant="ghost"
                                   className="h-8"
-                                  onClick={() => openSessionDialog(session, selectedOrder)}
+                                  onClick={() => void openSessionDialog(session, selectedOrder)}
                                 >
                                   <Eye className="h-4 w-4 mr-1" />
                                   Edit
@@ -1187,7 +1248,7 @@ export default function EyeClinicOrdersPage() {
                                 toast.error('No active eye session found');
                                 return;
                               }
-                              openSessionDialog(activeSession, selectedOrder);
+                              void openSessionDialog(activeSession, selectedOrder);
                             }}
                             className="bg-blue-600 hover:bg-blue-700 text-white shadow-sm"
                             disabled={isSubmitting}
@@ -1415,51 +1476,87 @@ export default function EyeClinicOrdersPage() {
                           </div>
                         ))}
                       </div>
-                      <p className="text-xs text-muted-foreground">Upload supporting result files and add any result notes for b to d.</p>
+                      <p className="text-xs text-muted-foreground">Upload supporting result files and add any result notes for b to d. You can attach multiple files per test.</p>
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                        {[
-                          ['pachymetry', 'b. Pachymetry', 'pachymetry_file'],
-                          ['oct', 'c. OCT', 'oct_file'],
-                          ['visualField', 'd. Visual Field (CVF)', 'visual_field_file'],
-                        ].map(([field, label, fileField]) => (
+                        {([
+                          ['pachymetry', 'b. Pachymetry', 'pachymetry'] as const,
+                          ['oct', 'c. OCT', 'oct'] as const,
+                          ['visualField', 'd. Visual Field (CVF)', 'visual_field'] as const,
+                        ]).map(([field, label, diagCategory]) => (
                           <div key={field} className="space-y-2">
                             <Label>{label}</Label>
                             <div className="rounded-md border border-dashed p-3 space-y-2">
-                              <div className="flex items-center gap-2 text-sm">
-                                <Upload className="h-4 w-4 text-muted-foreground" />
-                                <span className="font-medium">
-                                  {diagnosticFiles[fileField as keyof typeof diagnosticFiles]?.name ||
-                                    ((currentSession as any)?.[fileField] ? 'Existing file uploaded' : 'No file selected')}
-                                </span>
+                              <div className="space-y-2 max-h-40 overflow-y-auto">
+                                {diagnosticAttachmentsForCategory(currentSession, diagCategory).map((att, idx) => (
+                                  <div
+                                    key={att.id != null ? `s-${att.id}` : `l-${idx}-${att.file}`}
+                                    className="flex items-start justify-between gap-2 text-sm"
+                                  >
+                                    <div className="flex items-start gap-2 min-w-0">
+                                      <Upload className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
+                                      <div className="min-w-0">
+                                        <a
+                                          href={att.file}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          className="text-blue-600 hover:underline break-all"
+                                        >
+                                          {fileLabelFromAttachmentUrl(att.file, idx)}
+                                        </a>
+                                        {att.legacy ? (
+                                          <p className="text-xs text-muted-foreground">Legacy upload</p>
+                                        ) : null}
+                                      </div>
+                                    </div>
+                                    {att.id != null ? (
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-7 shrink-0"
+                                        disabled={isSubmitting}
+                                        onClick={() => void removeServerDiagnosticFile(att.id as number)}
+                                      >
+                                        <X className="h-3 w-3" />
+                                      </Button>
+                                    ) : null}
+                                  </div>
+                                ))}
+                                {pendingDiagnosticFiles[diagCategory].map((file, idx) => (
+                                  <div key={`p-${idx}-${file.name}`} className="flex items-center justify-between gap-2 text-sm">
+                                    <div className="flex items-center gap-2 min-w-0">
+                                      <Upload className="h-4 w-4 text-muted-foreground shrink-0" />
+                                      <span className="font-medium truncate">{file.name}</span>
+                                      <span className="text-xs text-muted-foreground shrink-0">(pending)</span>
+                                    </div>
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-7 shrink-0"
+                                      onClick={() => removePendingDiagnosticAt(diagCategory, idx)}
+                                    >
+                                      <X className="h-3 w-3" />
+                                    </Button>
+                                  </div>
+                                ))}
+                                {diagnosticAttachmentsForCategory(currentSession, diagCategory).length === 0 &&
+                                pendingDiagnosticFiles[diagCategory].length === 0 ? (
+                                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                    <Upload className="h-4 w-4" />
+                                    <span>No files yet</span>
+                                  </div>
+                                ) : null}
                               </div>
-                              {(currentSession as any)?.[fileField] && !diagnosticFiles[fileField as keyof typeof diagnosticFiles] && (
-                                <a
-                                  href={(currentSession as any)[fileField]}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="text-xs text-blue-600 hover:underline"
-                                >
-                                  View existing upload
-                                </a>
-                              )}
-                              {diagnosticFiles[fileField as keyof typeof diagnosticFiles] ? (
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => handleDiagnosticFileChange(fileField as keyof typeof diagnosticFiles, null)}
-                                  className="h-7"
-                                >
-                                  <X className="h-3 w-3 mr-1" />
-                                  Remove selected file
-                                </Button>
-                              ) : (
-                                <Input
-                                  type="file"
-                                  accept=".pdf,.jpg,.jpeg,.png,.webp"
-                                  onChange={(e) => handleDiagnosticFileChange(fileField as keyof typeof diagnosticFiles, e.target.files?.[0] || null)}
-                                />
-                              )}
+                              <Input
+                                type="file"
+                                multiple
+                                accept=".pdf,.jpg,.jpeg,.png,.webp"
+                                onChange={(e) => {
+                                  appendPendingDiagnostics(diagCategory, e.target.files);
+                                  e.target.value = '';
+                                }}
+                              />
                             </div>
                             <Textarea
                               value={(sessionForm.soap_note.objective.diagnostics as any)[field]}
@@ -1739,10 +1836,31 @@ export default function EyeClinicOrdersPage() {
                           <span className="font-medium">IOP:</span> OD {reportSession.soap_note?.objective.diagnostics.iopOd || reportSession.order_details?.iop_od || '—'} | OS {reportSession.soap_note?.objective.diagnostics.iopOs || reportSession.order_details?.iop_os || '—'}<br />
                           <span className="font-medium">Method:</span> {reportSession.soap_note?.objective.diagnostics.method || '—'} | <span className="font-medium">Time:</span> {reportSession.soap_note?.objective.diagnostics.time || '—'}
                         </p>
-                        <div className="bg-muted/50 p-3 rounded border space-y-1">
-                          <p><span className="font-medium">Pachymetry:</span> {reportSession.soap_note?.objective.diagnostics.pachymetry || '—'} {reportSession.pachymetry_file && <a href={reportSession.pachymetry_file} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline ml-1">View file</a>}</p>
-                          <p><span className="font-medium">OCT:</span> {reportSession.soap_note?.objective.diagnostics.oct || '—'} {reportSession.oct_file && <a href={reportSession.oct_file} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline ml-1">View file</a>}</p>
-                          <p><span className="font-medium">Visual Field:</span> {reportSession.soap_note?.objective.diagnostics.visualField || '—'} {reportSession.visual_field_file && <a href={reportSession.visual_field_file} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline ml-1">View file</a>}</p>
+                        <div className="bg-muted/50 p-3 rounded border space-y-2">
+                          {([
+                            ['pachymetry', 'Pachymetry', reportSession.soap_note?.objective.diagnostics.pachymetry],
+                            ['oct', 'OCT', reportSession.soap_note?.objective.diagnostics.oct],
+                            ['visual_field', 'Visual Field', reportSession.soap_note?.objective.diagnostics.visualField],
+                          ] as const).map(([cat, title, noteText]) => {
+                            const items = diagnosticAttachmentsForCategory(reportSession, cat);
+                            return (
+                              <p key={cat}>
+                                <span className="font-medium">{title}:</span> {noteText || '—'}{' '}
+                                {items.map((a, idx) => (
+                                  <span key={a.id != null ? `id-${a.id}` : `u-${idx}`} className="inline-block mr-2">
+                                    <a
+                                      href={a.file}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="text-blue-600 hover:underline"
+                                    >
+                                      {items.length > 1 ? `View file ${idx + 1}` : 'View file'}
+                                    </a>
+                                  </span>
+                                ))}
+                              </p>
+                            );
+                          })}
                         </div>
                       </div>
                       <div className="overflow-x-auto rounded-md border">

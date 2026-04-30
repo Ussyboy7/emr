@@ -2,8 +2,10 @@
 Views for the Eye Care app.
 """
 import logging
-from rest_framework import viewsets, status
+from rest_framework import viewsets, status, mixins
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django_filters.rest_framework import DjangoFilterBackend
@@ -12,12 +14,44 @@ from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
-from .models import EyeOrder, EyeSession
+
+def _uploaded_files_for_key(request, key):
+    """
+    Collect all files for a repeated multipart field name.
+    Uses both request.FILES and request.data (DRF merges files into data).
+    """
+    seen = set()
+    out = []
+
+    def add_upload(upload):
+        if not upload or not hasattr(upload, 'read'):
+            return
+        uid = id(upload)
+        if uid in seen:
+            return
+        seen.add(uid)
+        out.append(upload)
+
+    files = getattr(request, 'FILES', None)
+    if files is not None and hasattr(files, 'getlist'):
+        for f in files.getlist(key):
+            add_upload(f)
+
+    data = getattr(request, 'data', None)
+    if data is not None and hasattr(data, 'getlist'):
+        for item in data.getlist(key):
+            add_upload(item)
+
+    return out
+
+
+from .models import EyeOrder, EyeSession, EyeSessionDiagnosticFile
 from .serializers import (
     EyeOrderSerializer,
     EyeOrderCreateSerializer,
     EyeSessionSerializer,
     EyeSessionCreateSerializer,
+    EyeSessionDiagnosticFileSerializer,
 )
 from audit.services import AuditService
 
@@ -100,7 +134,7 @@ class EyeOrderViewSet(viewsets.ModelViewSet):
         """Check in patient from a visit to eye clinic."""
         visit_id = request.data.get("visit")
         if not visit_id:
-            raise serializers.ValidationError({"visit": "This field is required."})
+            raise ValidationError({"visit": "This field is required."})
 
         try:
             from patients.models import Visit
@@ -188,6 +222,7 @@ class EyeSessionViewSet(viewsets.ModelViewSet):
     """ViewSet for managing eye clinic sessions."""
     
     permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
     queryset = EyeSession.objects.all().select_related('order__patient').order_by('-scheduled_at')
     serializer_class = EyeSessionSerializer
     filter_backends = [DjangoFilterBackend, OrderingFilter]
@@ -196,7 +231,12 @@ class EyeSessionViewSet(viewsets.ModelViewSet):
     ordering = ['-scheduled_at']
     
     def get_queryset(self):
-        return EyeSession.objects.all().select_related('order__patient').order_by('-scheduled_at')
+        return (
+            EyeSession.objects.all()
+            .select_related('order__patient')
+            .prefetch_related('diagnostic_uploads')
+            .order_by('-scheduled_at')
+        )
     
     def get_serializer_class(self):
         if self.action == 'create':
@@ -220,3 +260,24 @@ class EyeSessionViewSet(viewsets.ModelViewSet):
                 )
             except Exception:
                 pass
+
+    def perform_update(self, serializer):
+        session = serializer.save()
+        for key, cat in (
+            ('pachymetry_files', 'pachymetry'),
+            ('oct_files', 'oct'),
+            ('visual_field_files', 'visual_field'),
+        ):
+            for f in _uploaded_files_for_key(self.request, key):
+                EyeSessionDiagnosticFile.objects.create(session=session, category=cat, file=f)
+        cache = getattr(session, '_prefetched_objects_cache', None)
+        if cache and 'diagnostic_uploads' in cache:
+            del cache['diagnostic_uploads']
+
+
+class EyeSessionDiagnosticFileViewSet(mixins.DestroyModelMixin, viewsets.GenericViewSet):
+    """Remove an uploaded diagnostic file (pachymetry / OCT / visual field)."""
+
+    permission_classes = [IsAuthenticated]
+    queryset = EyeSessionDiagnosticFile.objects.select_related('session__order')
+    serializer_class = EyeSessionDiagnosticFileSerializer
