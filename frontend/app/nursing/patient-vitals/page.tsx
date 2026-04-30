@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -66,6 +66,7 @@ interface PatientVitals {
 export default function PatientVitalsPage() {
   const serverToday = useServerToday();
   const [patients, setPatients] = useState<PatientVitals[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [authError, setAuthError] = useState<unknown | null>(null);
@@ -77,237 +78,245 @@ export default function PatientVitalsPage() {
   const [isDateFilterDialogOpen, setIsDateFilterDialogOpen] = useState(false);
   const [dateRange, setDateRange] = useState({ from: '', to: '' });
   
-  // Load patients with vitals from API
-  useEffect(() => {
-    const loadPatients = async () => {
-      try {
+  // Load patients with vitals from API (using proper backend pagination like lab orders)
+  const loadPatients = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent;
+    try {
+      if (!silent) {
         setLoading(true);
         setError(null);
+      }
 
-        // Fetch visits that should be processed by nursing (similar to pool queue)
-        // NOTE: `patientService.getPatientVisits(id)` fetches visits for a single patient.
-        // Passing `0` causes a 404 on backends that don't have a patient with ID 0.
-        // Use the visits endpoint instead.
-        // Anchor on server "today" so filters match the server calendar.
-        const anchor = serverToday ? new Date(`${serverToday}T00:00:00`) : new Date();
-        const anchorYmd = serverToday || formatLocalYmd(anchor);
-        let dateParam: string | undefined = undefined;
-        let startDate: string | undefined = undefined;
-        let endDate: string | undefined = undefined;
-        if (dateRange.from || dateRange.to) {
-          startDate = dateRange.from || undefined;
-          endDate = dateRange.to || undefined;
-        } else if (dateFilter === 'today') {
-          dateParam = anchorYmd;
-        } else if (dateFilter === 'week') {
-          const weekStart = new Date(anchor);
-          weekStart.setDate(anchor.getDate() - anchor.getDay());
-          startDate = formatLocalYmd(weekStart);
-          endDate = anchorYmd;
-        } else if (dateFilter === 'month') {
-          const monthStart = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
-          startDate = formatLocalYmd(monthStart);
-          endDate = anchorYmd;
-        }
+      // Build query parameters for backend filtering (like lab orders page)
+      const params: any = {
+        page: currentPage,
+        page_size: itemsPerPage,
+      };
 
-        const visitsResponse = await visitService.getVisits({
-          page_size: 1000,
-          date: dateParam,
-          start_date: startDate,
-          end_date: endDate,
-        });
-        const allVisits = visitsResponse.results || [];
+      // Add date filtering
+      const anchor = serverToday ? new Date(`${serverToday}T00:00:00`) : new Date();
+      const anchorYmd = serverToday || formatLocalYmd(anchor);
+      let dateParam: string | undefined = undefined;
+      let startDate: string | undefined = undefined;
+      let endDate: string | undefined = undefined;
 
-        // Get all visit IDs that have consultation sessions
-        let visitsWithSessions: Set<number> = new Set();
+      if (dateRange.from || dateRange.to) {
+        startDate = dateRange.from || undefined;
+        endDate = dateRange.to || undefined;
+      } else if (dateFilter === 'today') {
+        dateParam = anchorYmd;
+      } else if (dateFilter === 'week') {
+        const weekStart = new Date(anchor);
+        weekStart.setDate(anchor.getDate() - anchor.getDay());
+        startDate = formatLocalYmd(weekStart);
+        endDate = anchorYmd;
+      } else if (dateFilter === 'month') {
+        const monthStart = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
+        startDate = formatLocalYmd(monthStart);
+        endDate = anchorYmd;
+      }
+
+      if (dateParam) params.date = dateParam;
+      if (startDate) params.start_date = startDate;
+      if (endDate) params.end_date = endDate;
+
+      // Add search and gender filters
+      if (searchQuery.trim()) {
+        params.search = searchQuery.trim();
+      }
+      if (genderFilter !== 'all') {
+        params.gender = genderFilter;
+      }
+
+      // Add nursing status filter (similar to pool queue)
+      if (statusFilter === 'Pending Vitals') {
+        params.nursing_status = 'pending';
+      } else if (statusFilter === 'Ready for Consultation') {
+        params.nursing_status = 'ready';
+      } else if (statusFilter === 'Sent to Rooms') {
+        params.nursing_status = 'sent_to_room';
+      }
+
+      // Fetch visits with backend filtering and pagination
+      const visitsResponse = await visitService.getVisits(params);
+      const nursingVisits = visitsResponse.results || [];
+
+      // Get consultation sessions to exclude already processed visits
+      let visitsWithSessions: Set<number> = new Set();
+      try {
+        const sessionsResult = await consultationService.getSessions({ page_size: 1000 });
+        visitsWithSessions = new Set(
+          sessionsResult.results
+            .map((s: any) => s.visit?.id || s.visit_id)
+            .filter((id: any) => id)
+        );
+      } catch (error) {
+        console.warn('[Patient Vitals] Could not load consultation sessions:', error);
+      }
+
+      // Filter out cancelled visits and those already in consultation
+      const filteredNursingVisits = nursingVisits.filter((visit: any) => {
+        if (visit.status === 'cancelled') return false;
+        if (visitsWithSessions.has(visit.id)) return false;
+        return ['completed', 'in_progress', 'scheduled', 'waiting'].includes(visit.status);
+      });
+
+      if (filteredNursingVisits.length === 0) {
+        setPatients([]);
+        setTotalCount(0);
+        if (!silent) setLoading(false);
+        return;
+      }
+
+      // Get unique patient IDs
+      const patientIds = [
+        ...new Set(
+          filteredNursingVisits
+            .map((v: any) => {
+              if (typeof v.patient === 'number') return String(v.patient);
+              if (v.patient && typeof v.patient === 'object' && v.patient.id) return String(v.patient.id);
+              return null;
+            })
+            .filter((id: string | null): id is string => Boolean(id))
+        ),
+      ];
+
+      // Fetch patient details and vitals in parallel (like lab orders page)
+      const patientPromises = patientIds.map(async (patientId) => {
         try {
-          const sessionsResult = await consultationService.getSessions({ page_size: 1000 });
-          visitsWithSessions = new Set(
-            sessionsResult.results
-              .map((s: any) => s.visit?.id || s.visit_id)
-              .filter((id: any) => id)
-          );
-        } catch (error) {
-          console.warn('[Patient Vitals] Could not load consultation sessions:', error);
-        }
+          const [patient, vitalsResponse] = await Promise.all([
+            patientService.getPatient(parseInt(patientId)),
+            apiFetch<{ results: any[] }>(`/vitals/?patient=${patientId}&ordering=-recorded_at&page_size=10`).catch(() => ({ results: [] }))
+          ]);
 
-        // Filter visits that should go to nursing (active visits that don't have consultation sessions)
-        const nursingVisits = allVisits.filter((visit: any) => {
-          // Exclude cancelled visits
-          if (visit.status === 'cancelled') return false;
+          const patientVitals = vitalsResponse.results || [];
+          const latestVitals = patientVitals.length > 0 ? patientVitals[0] : null;
 
-          // Only include active visits
-          if (!['completed', 'in_progress', 'scheduled', 'waiting'].includes(visit.status)) return false;
+          // Check if vitals were recorded recently (within last 7 days)
+          const hasVitalsToday = latestVitals ? (() => {
+            const sevenDaysAgo = new Date();
+            sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+            const vitalsDate = new Date(latestVitals.recorded_at);
+            return vitalsDate >= sevenDaysAgo;
+          })() : false;
 
-          // Exclude visits that have consultation sessions (already sent to consultation)
-          if (visitsWithSessions.has(visit.id)) {
-            return false;
-          }
+          // Determine nursing status
+          const nursingStatus = hasVitalsToday ? 'Ready for Consultation' : 'Pending Vitals';
 
-          return true;
-        });
+          // Calculate vitals status and alerts
+          let vitalsStatus: 'normal' | 'warning' | 'critical' = 'normal';
+          const alerts: string[] = [];
 
-        if (nursingVisits.length === 0) {
-          setPatients([]);
-          setLoading(false);
-          return;
-        }
-
-        // Get unique *numeric* patient IDs from nursing visits.
-        // IMPORTANT: `visit.patient_id` is the human-readable patient identifier (e.g. "9852"),
-        // not the DB primary key, and will 404 if used with `/patients/:id/`.
-        const patientIds = [
-          ...new Set(
-            nursingVisits
-              .map((v: any) => {
-                if (typeof v.patient === 'number') return String(v.patient);
-                if (v.patient && typeof v.patient === 'object' && v.patient.id) return String(v.patient.id);
-                return null;
-              })
-              .filter((id: string | null): id is string => Boolean(id))
-          ),
-        ];
-
-        // Fetch patient details and check vitals status
-        const patientPromises = patientIds.map(async (patientId) => {
-          try {
-            const patient = await patientService.getPatient(parseInt(patientId));
-
-            // Load patient's vitals history
-            let patientVitals: any[] = [];
-            let latestVitals: any = null;
-            let hasVitalsToday = false;
-
-            try {
-              const vitalsResponse = await apiFetch<{ results: any[] }>(`/vitals/?patient=${patientId}&ordering=-recorded_at&page_size=10`);
-              patientVitals = vitalsResponse.results || [];
-              if (patientVitals.length > 0) {
-                latestVitals = patientVitals[0];
-                // Check if vitals were recorded recently (within last 7 days)
-                const sevenDaysAgo = new Date();
-                sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-                const vitalsDate = new Date(latestVitals.recorded_at);
-                hasVitalsToday = vitalsDate >= sevenDaysAgo;
-              }
-            } catch (vitalsError) {
-              console.warn('[Patient Vitals] Could not load vitals for patient:', patientId, vitalsError);
+          if (latestVitals && hasVitalsToday) {
+            if (latestVitals.temperature) {
+              const temp = parseFloat(latestVitals.temperature);
+              if (temp >= 39) { vitalsStatus = 'critical'; alerts.push('High temperature'); }
+              else if (temp >= 38) { vitalsStatus = vitalsStatus === 'normal' ? 'warning' : vitalsStatus; alerts.push('Elevated temperature'); }
+              else if (temp < 36) { vitalsStatus = vitalsStatus === 'normal' ? 'warning' : vitalsStatus; alerts.push('Low temperature'); }
             }
-            
-            // Determine nursing status based on vitals recording
-            const nursingStatus = hasVitalsToday ? 'Ready for Consultation' : 'Pending Vitals';
 
-            // Calculate vitals status if vitals exist
-            let vitalsStatus: 'normal' | 'warning' | 'critical' = 'normal';
-            const alerts: string[] = [];
+            if (latestVitals.heart_rate) {
+              const hr = parseInt(latestVitals.heart_rate);
+              if (hr >= 120 || hr < 60) { vitalsStatus = vitalsStatus !== 'critical' ? 'warning' : vitalsStatus; alerts.push('Abnormal heart rate'); }
+            }
 
-            if (latestVitals && hasVitalsToday) {
-              if (latestVitals.temperature) {
-                const temp = parseFloat(latestVitals.temperature);
-                if (temp >= 39) { vitalsStatus = 'critical'; alerts.push('High temperature'); }
-                else if (temp >= 38) { vitalsStatus = vitalsStatus === 'normal' ? 'warning' : vitalsStatus; alerts.push('Elevated temperature'); }
-                else if (temp < 36) { vitalsStatus = vitalsStatus === 'normal' ? 'warning' : vitalsStatus; alerts.push('Low temperature'); }
-              }
+            if (latestVitals.blood_pressure_systolic && latestVitals.blood_pressure_diastolic) {
+              const systolic = parseInt(latestVitals.blood_pressure_systolic);
+              const diastolic = parseInt(latestVitals.blood_pressure_diastolic);
 
-              if (latestVitals.heart_rate) {
-                const hr = parseInt(latestVitals.heart_rate);
-                if (hr >= 120 || hr < 60) { vitalsStatus = vitalsStatus !== 'critical' ? 'warning' : vitalsStatus; alerts.push('Abnormal heart rate'); }
-              }
-
-              if (latestVitals.bloodPressureSystolic && latestVitals.bloodPressureDiastolic) {
-                const systolic = parseInt(latestVitals.bloodPressureSystolic);
-                const diastolic = parseInt(latestVitals.bloodPressureDiastolic);
-
-                // Hypertension stages (medical guidelines)
-                if (systolic >= 180 || diastolic >= 120) {
-                  vitalsStatus = 'critical'; alerts.push('Hypertensive crisis');
-                } else if (systolic >= 130 || diastolic >= 80) {
-                  vitalsStatus = vitalsStatus !== 'critical' ? 'warning' : vitalsStatus; alerts.push('High blood pressure');
-                } else if (systolic < 90 || diastolic < 60) {
-                  vitalsStatus = vitalsStatus !== 'critical' ? 'warning' : vitalsStatus; alerts.push('Low blood pressure');
-                }
+              if (systolic >= 180 || diastolic >= 120) {
+                vitalsStatus = 'critical'; alerts.push('Hypertensive crisis');
+              } else if (systolic >= 130 || diastolic >= 80) {
+                vitalsStatus = vitalsStatus !== 'critical' ? 'warning' : vitalsStatus; alerts.push('High blood pressure');
+              } else if (systolic < 90 || diastolic < 60) {
+                vitalsStatus = vitalsStatus !== 'critical' ? 'warning' : vitalsStatus; alerts.push('Low blood pressure');
               }
             }
-            
-            // Transform vitals
-            const transformedVitals: VitalsData = {
-              id: String(latestVitals.id),
-              temperature: latestVitals.temperature?.toString() || '',
-              pulse: latestVitals.heart_rate?.toString() || '',
-              bloodPressureSystolic: latestVitals.blood_pressure_systolic?.toString() || '',
-              bloodPressureDiastolic: latestVitals.blood_pressure_diastolic?.toString() || '',
-              respiratoryRate: latestVitals.respiratory_rate?.toString() || '',
-              oxygenSaturation: latestVitals.oxygen_saturation?.toString() || '',
-              weight: latestVitals.weight?.toString() || '',
-              height: latestVitals.height?.toString() || '',
-              painScale: latestVitals.pain_scale?.toString() || '',
-              bloodSugar: latestVitals.blood_sugar?.toString() || '',
-              randomBloodSugar: latestVitals.random_blood_sugar?.toString() || '',
-              bmi: latestVitals.bmi?.toString() || '',
-              notes: latestVitals.notes || '',
-              recordedAt: latestVitals.recorded_at || new Date().toISOString(),
-              recordedBy: latestVitals.recorded_by_name || 'Unknown',
-            };
-            
-            // Transform vitals history
-            const vitalsHistory: VitalsData[] = patientVitals.map((v: any) => ({
-              id: String(v.id),
-              temperature: v.temperature?.toString() || '',
-              pulse: v.heart_rate?.toString() || '',
-              bloodPressureSystolic: v.blood_pressure_systolic?.toString() || '',
-              bloodPressureDiastolic: v.blood_pressure_diastolic?.toString() || '',
-              respiratoryRate: v.respiratory_rate?.toString() || '',
-              oxygenSaturation: v.oxygen_saturation?.toString() || '',
-              weight: v.weight?.toString() || '',
-              height: v.height?.toString() || '',
-              painScale: v.pain_scale?.toString() || '',
-              bloodSugar: v.blood_sugar?.toString() || '',
-              randomBloodSugar: v.random_blood_sugar?.toString() || '',
-              bmi: v.bmi?.toString() || '',
-              notes: v.notes || '',
-              recordedAt: v.recorded_at || new Date().toISOString(),
-              recordedBy: v.recorded_by_name || 'Unknown',
-            }));
-            
-            return {
-              id: String(patient.id),
-              name: patient.full_name ?? '',
-              patientId: patient.patient_id || '',
-              personalNumber: patient.personal_number || '',
-              age: patient.age || 0,
-              gender: patient.gender || '',
-              latestVitals: transformedVitals,
-              vitalsHistory,
-              status: vitalsStatus,
-              nursingStatus,
-              alerts,
-            } as PatientVitals;
-          } catch (err) {
-            console.error(`[Patient Vitals] Error loading patient ${patientId}:`, err);
-            // Don't fail silently - show which patient failed
-            toast.error(`Failed to load patient ${patientId}: ${err instanceof Error ? err.message : 'Unknown error'}`);
-            return null;
           }
-        });
-        
-        const loadedPatients = (await Promise.all(patientPromises)).filter((p): p is PatientVitals => p !== null);
-        setPatients(loadedPatients);
-      } catch (err) {
-        console.error('[Patient Vitals] Error loading patients with vitals:', err);
-        const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-        
-        if (isAuthenticationError(err)) {
-          setAuthError(err);
-        } else {
-          setError(`Failed to load patient vitals: ${errorMessage}`);
-          toast.error(`Failed to load patient vitals: ${errorMessage}`);
+
+          // Transform vitals data
+          const transformedVitals: VitalsData = {
+            id: String(latestVitals?.id || ''),
+            temperature: latestVitals?.temperature?.toString() || '',
+            pulse: latestVitals?.heart_rate?.toString() || '',
+            bloodPressureSystolic: latestVitals?.blood_pressure_systolic?.toString() || '',
+            bloodPressureDiastolic: latestVitals?.blood_pressure_diastolic?.toString() || '',
+            respiratoryRate: latestVitals?.respiratory_rate?.toString() || '',
+            oxygenSaturation: latestVitals?.oxygen_saturation?.toString() || '',
+            weight: latestVitals?.weight?.toString() || '',
+            height: latestVitals?.height?.toString() || '',
+            painScale: latestVitals?.pain_scale?.toString() || '',
+            bloodSugar: latestVitals?.blood_sugar?.toString() || '',
+            randomBloodSugar: latestVitals?.random_blood_sugar?.toString() || '',
+            bmi: latestVitals?.bmi?.toString() || '',
+            notes: latestVitals?.notes || '',
+            recordedAt: latestVitals?.recorded_at || new Date().toISOString(),
+            recordedBy: latestVitals?.recorded_by_name || 'Unknown',
+          };
+
+          const vitalsHistory: VitalsData[] = patientVitals.map((v: any) => ({
+            id: String(v.id),
+            temperature: v.temperature?.toString() || '',
+            pulse: v.heart_rate?.toString() || '',
+            bloodPressureSystolic: v.blood_pressure_systolic?.toString() || '',
+            bloodPressureDiastolic: v.blood_pressure_diastolic?.toString() || '',
+            respiratoryRate: v.respiratory_rate?.toString() || '',
+            oxygenSaturation: v.oxygen_saturation?.toString() || '',
+            weight: v.weight?.toString() || '',
+            height: v.height?.toString() || '',
+            painScale: v.pain_scale?.toString() || '',
+            bloodSugar: v.blood_sugar?.toString() || '',
+            randomBloodSugar: v.random_blood_sugar?.toString() || '',
+            bmi: v.bmi?.toString() || '',
+            notes: v.notes || '',
+            recordedAt: v.recorded_at || new Date().toISOString(),
+            recordedBy: v.recorded_by_name || 'Unknown',
+          }));
+
+          return {
+            id: String(patient.id),
+            name: patient.full_name ?? '',
+            patientId: patient.patient_id || '',
+            personalNumber: patient.personal_number || '',
+            age: patient.age || 0,
+            gender: patient.gender || '',
+            latestVitals: transformedVitals,
+            vitalsHistory,
+            status: vitalsStatus,
+            nursingStatus,
+            alerts,
+          } as PatientVitals;
+        } catch (err) {
+          console.error(`[Patient Vitals] Error loading patient ${patientId}:`, err);
+          return null;
         }
-      } finally {
+      });
+
+      const loadedPatients = (await Promise.all(patientPromises)).filter((p): p is PatientVitals => p !== null);
+      setPatients(loadedPatients);
+      setTotalCount(visitsResponse.count || loadedPatients.length);
+
+    } catch (err) {
+      console.error('[Patient Vitals] Error loading patients with vitals:', err);
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+
+      if (isAuthenticationError(err)) {
+        setAuthError(err);
+      } else {
+        setError(`Failed to load patient vitals: ${errorMessage}`);
+        toast.error(`Failed to load patient vitals: ${errorMessage}`);
+      }
+    } finally {
+      if (!silent) {
         setLoading(false);
       }
-    };
-    
+    }
+  }, [currentPage, itemsPerPage, dateFilter, dateRange.from, dateRange.to, searchQuery, genderFilter, statusFilter, serverToday]);
+
+  // Load data when filters change
+  useEffect(() => {
     loadPatients();
-  }, [dateFilter, dateRange.from, dateRange.to, serverToday]);
+  }, [loadPatients]);
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -320,55 +329,6 @@ export default function PatientVitalsPage() {
   const [selectedVitals, setSelectedVitals] = useState<VitalsData | null>(null);
   const [isVitalsDetailModalOpen, setIsVitalsDetailModalOpen] = useState(false);
 
-  // Filter patients
-  const filteredPatients = useMemo(() => {
-    return patients.filter(p => {
-      const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                           p.patientId.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                           p.personalNumber.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesStatus = statusFilter === 'all' || p.nursingStatus === statusFilter;
-      const matchesGender = genderFilter === 'all' || p.gender.toLowerCase() === genderFilter.toLowerCase();
-      
-      // Date filter (filter by latest vitals recorded date)
-      if ((dateRange.from || dateRange.to) && p.latestVitals?.recordedAt) {
-        const recordedDate = new Date(p.latestVitals.recordedAt);
-        if (Number.isNaN(recordedDate.getTime())) return false;
-        if (dateRange.from) {
-          const from = new Date(`${dateRange.from}T00:00:00`);
-          if (recordedDate < from) return false;
-        }
-        if (dateRange.to) {
-          const to = new Date(`${dateRange.to}T23:59:59.999`);
-          if (recordedDate > to) return false;
-        }
-      } else if (dateFilter !== 'all' && p.latestVitals?.recordedAt) {
-        const recordedDate = new Date(p.latestVitals.recordedAt);
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        
-        if (dateFilter === 'today' && recordedDate.toDateString() !== today.toDateString()) return false;
-        if (dateFilter === 'week') {
-          const weekAgo = new Date(today);
-          weekAgo.setDate(weekAgo.getDate() - 7);
-          if (recordedDate < weekAgo) return false;
-        }
-        if (dateFilter === 'month') {
-          const monthAgo = new Date(today);
-          monthAgo.setMonth(monthAgo.getMonth() - 1);
-          if (recordedDate < monthAgo) return false;
-        }
-      }
-      
-      return matchesSearch && matchesStatus && matchesGender;
-    });
-  }, [patients, searchQuery, statusFilter, dateFilter, genderFilter, dateRange.from, dateRange.to]);
-
-  // Paginated patients
-  const paginatedPatients = useMemo(() => {
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    return filteredPatients.slice(startIndex, startIndex + itemsPerPage);
-  }, [filteredPatients, currentPage, itemsPerPage]);
-
   // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
@@ -379,13 +339,13 @@ export default function PatientVitalsPage() {
     setIsDateFilterDialogOpen(false);
   };
 
-  // Stats
+  // Stats (calculated from current page - would be better with separate stats endpoint like lab orders)
   const stats = useMemo(() => ({
-    total: patients.length,
+    total: totalCount,
     pendingVitals: patients.filter(p => p.nursingStatus === 'Pending Vitals').length,
     readyForConsultation: patients.filter(p => p.nursingStatus === 'Ready for Consultation').length,
     sentToRooms: patients.filter(p => p.nursingStatus === 'Sent to Rooms').length,
-  }), [patients]);
+  }), [patients, totalCount]);
 
 
   const openHistoryDialog = (patient: PatientVitals) => {
@@ -575,14 +535,14 @@ export default function PatientVitalsPage() {
         {/* Results Count */}
         {!loading && (
         <p className="text-sm text-muted-foreground px-1">
-          Showing <span className="font-medium text-foreground">{paginatedPatients.length}</span> of {filteredPatients.length} patients
+          Showing <span className="font-medium text-foreground">{patients.length}</span> of {totalCount} patients
         </p>
         )}
 
         {/* Patient Vitals List */}
         {!loading && (
         <div className="space-y-3">
-          {patients.length === 0 ? (
+          {totalCount === 0 ? (
             <Card>
               <CardContent className="flex flex-col items-center justify-center py-12">
                 <Activity className="h-12 w-12 text-muted-foreground mb-4" />
@@ -592,7 +552,7 @@ export default function PatientVitalsPage() {
                 </p>
               </CardContent>
             </Card>
-          ) : filteredPatients.length === 0 ? (
+          ) : patients.length === 0 ? (
             <Card>
               <CardContent className="flex flex-col items-center justify-center py-12">
                 <Search className="h-12 w-12 text-muted-foreground mb-4" />
@@ -607,7 +567,7 @@ export default function PatientVitalsPage() {
               </CardContent>
             </Card>
           ) : (
-            paginatedPatients.map((patient) => (
+            patients.map((patient) => (
               <Card key={patient.id} className={`border-l-4 hover:shadow-md transition-shadow ${
                 patient.status === 'critical' ? 'border-l-rose-500' : 
                 patient.status === 'warning' ? 'border-l-amber-500' : 'border-l-emerald-500'
@@ -661,11 +621,11 @@ export default function PatientVitalsPage() {
         )}
 
         {/* Pagination */}
-        {filteredPatients.length > 0 && (
+        {totalCount > 0 && (
           <Card className="p-4">
             <StandardPagination
               currentPage={currentPage}
-              totalItems={filteredPatients.length}
+              totalItems={totalCount}
               itemsPerPage={itemsPerPage}
               onPageChange={setCurrentPage}
               onItemsPerPageChange={setItemsPerPage}
