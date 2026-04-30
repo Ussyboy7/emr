@@ -282,6 +282,13 @@ export default function PrescriptionsPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(50);
   const [totalCount, setTotalCount] = useState(0);
+  const [queueStats, setQueueStats] = useState<{
+    pending: number;
+    processing: number;
+    dispensed: number;
+    total: number;
+  } | null>(null);
+  const [queueStatsLoading, setQueueStatsLoading] = useState(true);
   const [isLoadingPrescriptions, setIsLoadingPrescriptions] = useState(false);
   const silentPollLockRef = useRef(false);
   const userLoadInFlightRef = useRef(false);
@@ -477,7 +484,8 @@ export default function PrescriptionsPage() {
         page: currentPage,
         page_size: itemsPerPage,
         search: searchQuery || undefined,
-        // Note: priorityFilter, dateFilter, genderFilter not yet implemented in backend
+        gender: genderFilter !== 'all' ? genderFilter : undefined,
+        date_preset: dateFilter !== 'all' ? dateFilter : undefined,
       });
       setTotalCount(response.count || response.results.length);
       // Transform API data - extract patient and visit details
@@ -632,12 +640,37 @@ export default function PrescriptionsPage() {
     }
   };
 
+  const loadQueueStats = async () => {
+    setQueueStatsLoading(true);
+    try {
+      const s = await pharmacyService.getPrescriptionQueueStats({
+        search: searchQuery || undefined,
+        status: statusFilter !== 'all' ? statusFilter : undefined,
+        gender: genderFilter !== 'all' ? genderFilter : undefined,
+        date_preset: dateFilter !== 'all' ? dateFilter : undefined,
+      });
+      setQueueStats(s);
+    } catch (e) {
+      console.error('Failed to load prescription queue stats', e);
+      setQueueStats(null);
+    } finally {
+      setQueueStatsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadQueueStats();
+  }, [searchQuery, statusFilter, genderFilter, dateFilter]);
+
+  const loadQueueStatsRef = useRef(loadQueueStats);
+  loadQueueStatsRef.current = loadQueueStats;
+
   const loadPrescriptionsRef = useRef(loadPrescriptions);
   loadPrescriptionsRef.current = loadPrescriptions;
 
   useEffect(() => {
     void loadPrescriptions();
-  }, [currentPage, itemsPerPage, statusFilter, searchQuery]);
+  }, [currentPage, itemsPerPage, statusFilter, searchQuery, genderFilter, dateFilter]);
 
   useEffect(() => {
     if (showViewModal || showDispenseModal || showSubstitutionModal) {
@@ -645,6 +678,7 @@ export default function PrescriptionsPage() {
     }
     const id = setInterval(() => {
       void loadPrescriptionsRef.current({ silent: true });
+      void loadQueueStatsRef.current();
     }, 15000);
     return () => clearInterval(id);
   }, [
@@ -652,6 +686,8 @@ export default function PrescriptionsPage() {
     itemsPerPage,
     statusFilter,
     searchQuery,
+    genderFilter,
+    dateFilter,
     showViewModal,
     showDispenseModal,
     showSubstitutionModal,
@@ -849,60 +885,16 @@ export default function PrescriptionsPage() {
     return () => { cancelled = true; };
   }, [substitutionForm.reason, substitutionForm.selectedSubstitute, substituteSearchResults, substitutionMed]);
 
-  const matchesDateFilter = (isoDate: string | undefined, filter: string): boolean => {
-    if (filter === 'all') return true;
-    if (!isoDate) return false;
-    const dt = new Date(isoDate);
-    if (Number.isNaN(dt.getTime())) return false;
-
-    const now = new Date();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const tomorrowStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-
-    if (filter === 'today') {
-      return dt >= todayStart && dt < tomorrowStart;
-    }
-
-    if (filter === 'week') {
-      const weekStart = new Date(todayStart);
-      weekStart.setDate(todayStart.getDate() - 6);
-      return dt >= weekStart && dt < tomorrowStart;
-    }
-
-    if (filter === 'month') {
-      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-      return dt >= monthStart && dt < tomorrowStart;
-    }
-
-    return true;
-  };
-
-  // Filter prescriptions - apply all filters client-side
+  // Client-side: priority only (no server field on prescription yet).
   const filteredPrescriptions = useMemo(() => {
-    return prescriptions.filter(prescription => {
-      // Date filter
-      if (!matchesDateFilter(prescription.date, dateFilter)) {
-        return false;
-      }
-
-      // Priority filter
+    return prescriptions.filter((prescription) => {
       if (priorityFilter !== 'all' && prescription.priority?.toLowerCase() !== priorityFilter) {
         return false;
       }
-
-      // Gender filter
-      if (genderFilter !== 'all') {
-        const patientGender = normalizeGender(prescription.patient?.gender);
-        if (patientGender !== genderFilter) {
-          return false;
-        }
-      }
-
       return true;
     });
-  }, [prescriptions, dateFilter, priorityFilter, genderFilter]);
+  }, [prescriptions, priorityFilter]);
 
-  // Pagination will be applied to filtered results
   const paginatedPrescriptions = filteredPrescriptions;
 
   // Reset to page 1 when filters change
@@ -910,15 +902,15 @@ export default function PrescriptionsPage() {
     setCurrentPage(1);
   }, [searchQuery, statusFilter, dateFilter, priorityFilter, genderFilter]);
 
-  // Calculate stats from filtered results (queue + date/priority/gender filters)
-  const stats = useMemo(() => ({
-    pending: filteredPrescriptions.filter((r) => r.status === 'Pending').length,
-    processing: filteredPrescriptions.filter((r) => r.status === 'Processing').length,
-    total: filteredPrescriptions.length,
-    dispensed: filteredPrescriptions.filter(
-      (r) => r.status === 'Dispensed' || r.status === 'Partially Dispensed'
-    ).length,
-  }), [filteredPrescriptions]);
+  const stats = useMemo(
+    () => ({
+      pending: queueStats?.pending ?? 0,
+      processing: queueStats?.processing ?? 0,
+      total: queueStats?.total ?? 0,
+      dispensed: queueStats?.dispensed ?? 0,
+    }),
+    [queueStats],
+  );
 
   const getPriorityColor = (priority: string) => {
     switch (priority) {
@@ -1705,7 +1697,9 @@ export default function PrescriptionsPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Pending</p>
-                  <p className="text-2xl font-bold text-amber-600">{stats.pending}</p>
+                  <p className="text-2xl font-bold text-amber-600 tabular-nums">
+                    {queueStatsLoading ? '—' : stats.pending.toLocaleString()}
+                  </p>
                 </div>
                 <Clock className="h-5 w-5 text-amber-500" />
               </div>
@@ -1716,7 +1710,9 @@ export default function PrescriptionsPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Processing</p>
-                  <p className="text-2xl font-bold text-blue-600">{stats.processing}</p>
+                  <p className="text-2xl font-bold text-blue-600 tabular-nums">
+                    {queueStatsLoading ? '—' : stats.processing.toLocaleString()}
+                  </p>
                 </div>
                 <Activity className="h-5 w-5 text-blue-500" />
               </div>
@@ -1727,7 +1723,9 @@ export default function PrescriptionsPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Total prescriptions</p>
-                  <p className="text-2xl font-bold text-violet-600">{stats.total}</p>
+                  <p className="text-2xl font-bold text-violet-600 tabular-nums">
+                    {queueStatsLoading ? '—' : stats.total.toLocaleString()}
+                  </p>
                 </div>
                 <Hash className="h-5 w-5 text-violet-500" />
               </div>
@@ -1738,7 +1736,9 @@ export default function PrescriptionsPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Dispensed</p>
-                  <p className="text-2xl font-bold text-emerald-600">{stats.dispensed}</p>
+                  <p className="text-2xl font-bold text-emerald-600 tabular-nums">
+                    {queueStatsLoading ? '—' : stats.dispensed.toLocaleString()}
+                  </p>
                 </div>
                 <CheckCircle2 className="h-5 w-5 text-emerald-500" />
               </div>

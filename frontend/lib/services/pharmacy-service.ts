@@ -240,9 +240,28 @@ class PharmacyService {
     page?: number;
     page_size?: number;
     consultation_session?: number;
+    gender?: string;
+    date_preset?: 'all' | 'today' | 'week' | 'month' | string;
   }): Promise<{ results: Prescription[]; count: number }> {
     const query = buildQueryString(params || {});
     return apiFetch<{ results: Prescription[]; count: number }>(`/v1/pharmacy/prescriptions/${query}`);
+  }
+
+  /** Full-queue counts (same filters as the list; not limited to one page). */
+  async getPrescriptionQueueStats(params?: {
+    search?: string;
+    status?: string;
+    gender?: string;
+    date_preset?: string;
+  }): Promise<{
+    pending: number;
+    processing: number;
+    dispensed: number;
+    total: number;
+  }> {
+    const query = buildQueryString(params || {});
+    const url = query ? `/v1/pharmacy/prescriptions/queue-stats/${query}` : '/v1/pharmacy/prescriptions/queue-stats/';
+    return apiFetch(url);
   }
 
   /**
@@ -615,20 +634,31 @@ class PharmacyService {
     medication?: string;
     page?: number;
     page_size?: number;
+    search?: string;
+    gender?: string;
+    date_preset?: string;
   }): Promise<{ results: Dispense[]; count: number }> {
     const query = buildQueryString(params || {});
     const url = query ? `/v1/pharmacy/history/${query}` : '/v1/pharmacy/history/';
     return await apiFetch<{ results: Dispense[]; count: number }>(url);
   }
 
-  /** System-wide dispense KPIs (not limited to one list page). */
-  async getDispenseHistorySummaryStats(): Promise<{
+  /** Dispense KPIs for the same filter set as the history list. */
+  async getDispenseHistorySummaryStats(params?: {
+    search?: string;
+    gender?: string;
+    date_preset?: string;
+  }): Promise<{
     total: number;
     today: number;
     substitutions: number;
     avg_wait_minutes: number;
   }> {
-    return apiFetch('/v1/pharmacy/history/summary-stats/');
+    const query = buildQueryString(params || {});
+    const url = query
+      ? `/v1/pharmacy/history/summary-stats/${query}`
+      : '/v1/pharmacy/history/summary-stats/';
+    return apiFetch(url);
   }
 
   /**

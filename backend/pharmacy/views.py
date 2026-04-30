@@ -2,6 +2,8 @@
 Views for the Pharmacy app.
 """
 import logging
+from datetime import timedelta
+
 from rest_framework import viewsets, status
 
 logger = logging.getLogger(__name__)
@@ -551,11 +553,19 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
     serializer_class = PrescriptionSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['patient', 'doctor', 'status', 'consultation_session', 'visit']
-    search_fields = ['prescription_id', 'diagnosis', 'notes']
+    search_fields = [
+        'prescription_id',
+        'diagnosis',
+        'notes',
+        'patient__first_name',
+        'patient__surname',
+        'patient__middle_name',
+        'patient__patient_id',
+    ]
     ordering_fields = ['prescribed_at']
     ordering = ['-prescribed_at']
     
-    def get_queryset(self):
+    def _prescription_base_qs(self):
         return Prescription.objects.all().select_related(
             'patient', 'doctor', 'visit', 'consultation_session', 'created_by'
         ).prefetch_related(
@@ -563,6 +573,48 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
             'medications__dispenses',
             'consultation_session__diagnoses__icd10_code',
             'visit__diagnoses__icd10_code',
+        )
+
+    @staticmethod
+    def _apply_prescription_list_filters(request, qs):
+        params = getattr(request, 'query_params', None) or {}
+        gender = (params.get('gender') or 'all').lower()
+        if gender in ('male', 'female'):
+            qs = qs.filter(patient__gender=gender)
+        date_preset = (params.get('date_preset') or 'all').lower()
+        today = timezone.localdate()
+        if date_preset == 'today':
+            qs = qs.filter(prescribed_at__date=today)
+        elif date_preset == 'week':
+            start = today - timedelta(days=6)
+            qs = qs.filter(prescribed_at__date__gte=start, prescribed_at__date__lte=today)
+        elif date_preset == 'month':
+            start = today.replace(day=1)
+            qs = qs.filter(prescribed_at__date__gte=start, prescribed_at__date__lte=today)
+        return qs
+
+    def get_queryset(self):
+        qs = self._prescription_base_qs()
+        if getattr(self, 'action', None) == 'list':
+            qs = self._apply_prescription_list_filters(self.request, qs)
+        return qs
+
+    @action(detail=False, methods=['get'], url_path='queue-stats')
+    def queue_stats(self, request):
+        """Counts for the queue matching the same filters as the list (full result set, not one page)."""
+        qs = self._apply_prescription_list_filters(request, self._prescription_base_qs())
+        qs = self.filter_queryset(qs)
+        pending = qs.filter(status='pending').count()
+        processing = qs.filter(status='dispensing').count()
+        dispensed = qs.filter(Q(status='dispensed') | Q(status='partially_dispensed')).count()
+        total = qs.count()
+        return Response(
+            {
+                'pending': pending,
+                'processing': processing,
+                'dispensed': dispensed,
+                'total': total,
+            }
         )
 
     @staticmethod
@@ -1259,20 +1311,57 @@ class DispenseViewSet(viewsets.ReadOnlyModelViewSet):
     ordering_fields = ['dispensed_at']
     ordering = ['-dispensed_at']
     
-    def get_queryset(self):
+    @staticmethod
+    def _apply_history_filters(request, qs):
+        """Match frontend: gender, date_preset (server local calendar), search."""
+        params = getattr(request, 'query_params', None) or {}
+        gender = (params.get('gender') or 'all').lower()
+        if gender in ('male', 'female'):
+            qs = qs.filter(prescription__patient__gender=gender)
+
+        date_preset = (params.get('date_preset') or 'all').lower()
+        today = timezone.localdate()
+        if date_preset == 'today':
+            qs = qs.filter(dispensed_at__date=today)
+        elif date_preset == 'week':
+            start = today - timedelta(days=7)
+            qs = qs.filter(dispensed_at__date__gte=start, dispensed_at__date__lte=today)
+        elif date_preset == 'month':
+            start = today - timedelta(days=30)
+            qs = qs.filter(dispensed_at__date__gte=start, dispensed_at__date__lte=today)
+
+        search = (params.get('search') or '').strip()
+        if search:
+            qs = qs.filter(
+                Q(prescription__prescription_id__icontains=search)
+                | Q(dispense_id__icontains=search)
+                | Q(prescription__patient__first_name__icontains=search)
+                | Q(prescription__patient__surname__icontains=search)
+                | Q(prescription__patient__middle_name__icontains=search)
+                | Q(prescription__patient__patient_id__icontains=search)
+            )
+        return qs
+
+    def _base_dispense_qs(self):
         return Dispense.objects.all().select_related(
             'prescription', 'medication', 'dispensed_by', 'inventory_item',
             'prescription_item', 'prescription_item__generic', 'prescription_item__medication'
         )
 
+    def get_queryset(self):
+        qs = self._base_dispense_qs()
+        if getattr(self, 'action', None) == 'list':
+            qs = self._apply_history_filters(self.request, qs)
+        return qs
+
     @action(detail=False, methods=['get'], url_path='summary-stats')
     def summary_stats(self, request):
         """
-        System-wide dispense KPIs (not limited to the current list page).
-        Uses server timezone date for "today".
+        Dispense KPIs for the same filter set as the history list (not limited to one page).
+        Uses configured timezone local calendar for "today".
         """
-        qs = self.get_queryset()
-        today = timezone.now().date()
+        qs = self._apply_history_filters(request, self._base_dispense_qs())
+        today = timezone.localdate()
         total = qs.count()
         today_count = qs.filter(dispensed_at__date=today).count()
         substitutions = qs.filter(dispense_context_snapshot='substituted').count()

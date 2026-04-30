@@ -11,7 +11,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { pharmacyService } from '@/lib/services';
 import { PatientAvatar } from "@/components/shared/PatientAvatar";
-import { useServerToday } from '@/hooks/use-server-today';
 import { getServerToday, peekServerTimezone } from '@/lib/utils/serverTime';
 import { 
   History, Search, Eye, Clock, CheckCircle2, Pill, Calendar, Package,
@@ -41,21 +40,11 @@ interface DispenseHistoryRecord {
   substitutions: number;
 }
 
-/** Calendar YYYY-MM-DD arithmetic (timezone-neutral). */
-function ymdAddDays(ymd: string, deltaDays: number): string {
-  const [y, m, d] = ymd.split('-').map(Number);
-  const x = new Date(Date.UTC(y, m - 1, d));
-  x.setUTCDate(x.getUTCDate() + deltaDays);
-  return x.toISOString().slice(0, 10);
-}
-
 export default function DispenseHistoryPage() {
-  const serverToday = useServerToday();
   const [history, setHistory] = useState<DispenseHistoryRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('all');
   const [genderFilter, setGenderFilter] = useState('all');
   const [currentPage, setCurrentPage] = useState(1);
@@ -71,20 +60,20 @@ export default function DispenseHistoryPage() {
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const [selectedRecord, setSelectedRecord] = useState<DispenseHistoryRecord | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
-  const [serverTzLabel, setServerTzLabel] = useState<string | null>(null);
 
   useEffect(() => {
-    void getServerToday().then(() => setServerTzLabel(peekServerTimezone()));
-  }, []);
-  useEffect(() => {
     loadHistory();
-  }, [currentPage, itemsPerPage]);
+  }, [currentPage, itemsPerPage, searchQuery, genderFilter, dateFilter]);
 
   const loadSummaryStats = async () => {
     setSummaryLoading(true);
     setSummaryError(null);
     try {
-      const s = await pharmacyService.getDispenseHistorySummaryStats();
+      const s = await pharmacyService.getDispenseHistorySummaryStats({
+        search: searchQuery.trim() || undefined,
+        gender: genderFilter !== 'all' ? genderFilter : undefined,
+        date_preset: dateFilter !== 'all' ? dateFilter : undefined,
+      });
       setSummaryStats(s);
     } catch (e: unknown) {
       setSummaryStats(null);
@@ -96,7 +85,7 @@ export default function DispenseHistoryPage() {
 
   useEffect(() => {
     void loadSummaryStats();
-  }, []);
+  }, [searchQuery, genderFilter, dateFilter]);
 
   const loadHistory = async () => {
     try {
@@ -104,14 +93,15 @@ export default function DispenseHistoryPage() {
       setError(null);
       await getServerToday();
       const serverTz = peekServerTimezone();
-      setServerTzLabel(serverTz);
       if (!serverTz) {
         throw new Error('Server timezone unavailable. Check /common/server-time/.');
       }
       const response = await pharmacyService.getDispenseHistory({
         page: currentPage,
         page_size: itemsPerPage,
-        // Note: search, status, date, gender filters not yet implemented in backend
+        search: searchQuery.trim() || undefined,
+        gender: genderFilter !== 'all' ? genderFilter : undefined,
+        date_preset: dateFilter !== 'all' ? dateFilter : undefined,
       });
       setTotalCount(response.count || response.results.length);
       // Transform API data to frontend format
@@ -190,44 +180,6 @@ export default function DispenseHistoryPage() {
     }
   };
 
-  // Filter and sort history
-  const filteredHistory = useMemo(() => {
-    return history.filter(record => {
-      const matchesSearch = 
-        record.patient.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        record.patient.mrn.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        record.prescriptionId.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        record.id.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesStatus = statusFilter === 'all' || record.status.toLowerCase().replace(' ', '-') === statusFilter;
-      const matchesGender = genderFilter === 'all' || record.patient.gender.toLowerCase() === genderFilter.toLowerCase();
-      
-      // Date filter — server calendar only (record.date is YYYY-MM-DD in server TZ).
-      if (dateFilter !== 'all') {
-        if (!serverToday) return false;
-        if (dateFilter === 'today' && record.date !== serverToday) return false;
-        if (dateFilter === 'week') {
-          const weekStartYmd = ymdAddDays(serverToday, -7);
-          if (record.date < weekStartYmd || record.date > serverToday) return false;
-        }
-        if (dateFilter === 'month') {
-          const monthStartYmd = ymdAddDays(serverToday, -30);
-          if (record.date < monthStartYmd || record.date > serverToday) return false;
-        }
-      }
-      
-      return matchesSearch && matchesStatus && matchesGender;
-    });
-  }, [history, searchQuery, statusFilter, dateFilter, serverToday, genderFilter]);
-
-  // Use filtered history directly (server-side pagination when no client-side filters)
-  const paginatedHistory = filteredHistory;
-
-  // Reset to page 1 when filters change
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchQuery, statusFilter, dateFilter, genderFilter]);
-
-  // KPIs: system-wide only (no page-level fallback).
   const stats = useMemo(() => {
     if (!summaryStats) return null;
     return {
@@ -297,7 +249,7 @@ export default function DispenseHistoryPage() {
                 </div>
                 <Package className="h-6 w-6 text-violet-500" />
               </div>
-              <p className="text-xs text-muted-foreground mt-1">All dispense line items (system-wide)</p>
+              <p className="text-xs text-muted-foreground mt-1">All time records</p>
             </CardContent>
           </Card>
           <Card>
@@ -311,9 +263,7 @@ export default function DispenseHistoryPage() {
                 </div>
                 <Calendar className="h-6 w-6 text-emerald-500" />
               </div>
-              <p className="text-xs text-muted-foreground mt-1">
-                Server calendar {serverToday || '—'} ({serverTzLabel || '…'})
-              </p>
+              <p className="text-xs text-muted-foreground mt-1">Dispensed today</p>
             </CardContent>
           </Card>
           <Card>
@@ -327,7 +277,7 @@ export default function DispenseHistoryPage() {
                 </div>
                 <TrendingUp className="h-6 w-6 text-amber-500" />
               </div>
-              <p className="text-xs text-muted-foreground mt-1">Snapshot marked substituted</p>
+              <p className="text-xs text-muted-foreground mt-1">With substitutions</p>
             </CardContent>
           </Card>
           <Card>
@@ -341,7 +291,7 @@ export default function DispenseHistoryPage() {
                 </div>
                 <Clock className="h-6 w-6 text-blue-500" />
               </div>
-              <p className="text-xs text-muted-foreground mt-1">Start dispensing → dispensed</p>
+              <p className="text-xs text-muted-foreground mt-1">Average processing</p>
             </CardContent>
           </Card>
         </div>
@@ -367,15 +317,6 @@ export default function DispenseHistoryPage() {
                     <SelectItem value="today">Today</SelectItem>
                     <SelectItem value="week">This Week</SelectItem>
                     <SelectItem value="month">This Month</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v); setCurrentPage(1); }}>
-                  <SelectTrigger className="w-[150px]"><SelectValue placeholder="Status" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Status</SelectItem>
-                    <SelectItem value="dispensed">Dispensed</SelectItem>
-                    <SelectItem value="partially-dispensed">Partially Dispensed</SelectItem>
-                    <SelectItem value="cancelled">Cancelled</SelectItem>
                   </SelectContent>
                 </Select>
                 <Select value={genderFilter} onValueChange={(v) => { setGenderFilter(v); setCurrentPage(1); }}>
@@ -408,8 +349,8 @@ export default function DispenseHistoryPage() {
                 <Button variant="outline" className="mt-4" onClick={() => { void loadHistory(); void loadSummaryStats(); }}>Retry</Button>
               </CardContent>
             </Card>
-          ) : paginatedHistory.length > 0 ? (
-            paginatedHistory.map((record) => (
+          ) : history.length > 0 ? (
+            history.map((record) => (
               <Card key={record.id} className="border-l-4 border-l-emerald-500 hover:shadow-md transition-shadow">
                 <CardContent className="py-3 px-4">
                   <div className="flex items-center gap-3">
@@ -464,13 +405,11 @@ export default function DispenseHistoryPage() {
         </div>
 
         {/* Pagination */}
-        {filteredHistory.length > 0 && (
+        {history.length > 0 && (
           <Card className="p-4">
             <StandardPagination
               currentPage={currentPage}
-              totalItems={searchQuery || statusFilter !== 'all' || dateFilter !== 'all' || genderFilter !== 'all'
-                ? filteredHistory.length 
-                : totalCount}
+              totalItems={totalCount}
               itemsPerPage={itemsPerPage}
               onPageChange={setCurrentPage}
               onItemsPerPageChange={(newSize) => {
