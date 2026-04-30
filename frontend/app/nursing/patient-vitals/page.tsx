@@ -77,7 +77,11 @@ export default function PatientVitalsPage() {
   const [genderFilter, setGenderFilter] = useState('all');
   const [isDateFilterDialogOpen, setIsDateFilterDialogOpen] = useState(false);
   const [dateRange, setDateRange] = useState({ from: '', to: '' });
-  
+
+  // Pagination state (moved before loadPatients to avoid hoisting issues)
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(50);
+
   // Load patients with vitals from API (using proper backend pagination like lab orders)
   const loadPatients = useCallback(async (opts?: { silent?: boolean }) => {
     const silent = opts?.silent;
@@ -317,10 +321,6 @@ export default function PatientVitalsPage() {
   useEffect(() => {
     loadPatients();
   }, [loadPatients]);
-  
-  // Pagination state
-  const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(50);
   
   // Dialog states
   const [isHistoryDialogOpen, setIsHistoryDialogOpen] = useState(false);
