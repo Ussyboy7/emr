@@ -73,6 +73,40 @@ class LaboratoryAnalyticsSummaryView(APIView):
             "total": tests_total,
         }
 
+        source_rows = (
+            orders_qs.values("source_type")
+            .annotate(orders=Count("id", distinct=True), tests=Count("tests", distinct=True))
+            .order_by("-orders")
+        )
+        orders_by_source = {
+            (row["source_type"] or "internal_emr"): {
+                "orders": row["orders"],
+                "tests": row["tests"],
+            }
+            for row in source_rows
+        }
+
+        external_orders_qs = orders_qs.filter(source_type="external_manual")
+        external_clinic_rows = (
+            external_orders_qs.values(
+                "external_clinic_id",
+                "external_clinic__name",
+                "external_clinic__code",
+            )
+            .annotate(orders=Count("id", distinct=True), tests=Count("tests", distinct=True))
+            .order_by("-orders", "external_clinic__name")
+        )
+        external_by_clinic = [
+            {
+                "clinic_id": row["external_clinic_id"],
+                "clinic_name": row["external_clinic__name"] or "Unspecified clinic",
+                "clinic_code": row["external_clinic__code"] or "",
+                "orders": row["orders"],
+                "tests": row["tests"],
+            }
+            for row in external_clinic_rows
+        ]
+
         daily = (
             LabTest.objects.filter(test_filter)
             .annotate(day=TruncDate("order__ordered_at"))
@@ -197,6 +231,8 @@ class LaboratoryAnalyticsSummaryView(APIView):
                 "tests_by_status": status_breakdown,
                 "tests_by_processing_method": processing_method,
                 "tests_processing_summary": processing_summary,
+                "orders_by_source": orders_by_source,
+                "external_orders_by_clinic": external_by_clinic,
                 "by_day": by_day,
                 "top_tests": [
                     {"code": r["code"], "name": r["name"], "count": r["count"]}

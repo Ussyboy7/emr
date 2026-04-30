@@ -197,8 +197,13 @@ export default function DashboardPage() {
   }, []);
 
   useEffect(() => {
+    // Don't fire 10 parallel API calls before auth state has hydrated — otherwise
+    // a sign-in race can leave the access token momentarily unavailable and the
+    // first apiFetch will throw "Authentication required" before tokens settle.
+    if (!hydrated) return;
+    if (!currentUser) return;
     loadDashboardData();
-  }, [loadDashboardData]);
+  }, [loadDashboardData, hydrated, currentUser]);
 
   if (loading) {
     return (

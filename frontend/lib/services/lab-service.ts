@@ -24,6 +24,12 @@ export interface LabOrder {
   priority: 'routine' | 'urgent' | 'stat';
   ordered_at: string;
   clinic: string;
+  source_type?: 'internal_emr' | 'external_manual';
+  external_clinic?: number | null;
+  external_clinic_details?: { id: number; name: string; code?: string; location?: string } | null;
+  external_requesting_doctor_name?: string;
+  manual_request_reference?: string;
+  manual_request_file?: string | null;
   clinical_notes?: string;
   icd10_diagnoses?: Array<{ code: string; name: string; type: string; notes?: string }>;
 }
@@ -184,6 +190,7 @@ class LabService {
     doctor?: string;
     priority?: string;
     status?: string;
+    source_type?: 'internal_emr' | 'external_manual';
     search?: string;
     /** Filter orders that have at least one test with this processing method */
     processing_method?: 'in_house' | 'outsourced';
@@ -211,6 +218,7 @@ class LabService {
     priority?: string;
     search?: string;
     processing_method?: 'in_house' | 'outsourced';
+    source_type?: 'internal_emr' | 'external_manual';
     gender?: string;
     date?: string;
     start_date?: string;
@@ -241,6 +249,48 @@ class LabService {
     return apiFetch<LabOrder>('/laboratory/orders/', {
       method: 'POST',
       body: JSON.stringify(data),
+    });
+  }
+
+  async createExternalOrder(data: {
+    patient: number;
+    priority: 'routine' | 'urgent' | 'stat';
+    external_clinic: number;
+    external_requesting_doctor_name: string;
+    manual_request_reference?: string;
+    manual_request_file?: File;
+    clinical_notes?: string;
+    tests_data: Array<{
+      template?: number | null;
+      name: string;
+      code: string;
+      sample_type: string;
+      status?: 'pending';
+      notes?: string;
+    }>;
+  }): Promise<LabOrder> {
+    if (data.manual_request_file) {
+      const formData = new FormData();
+      formData.append('source_type', 'external_manual');
+      formData.append('patient', String(data.patient));
+      formData.append('priority', data.priority);
+      formData.append('external_clinic', String(data.external_clinic));
+      formData.append('external_requesting_doctor_name', data.external_requesting_doctor_name);
+      if (data.manual_request_reference) formData.append('manual_request_reference', data.manual_request_reference);
+      if (data.clinical_notes) formData.append('clinical_notes', data.clinical_notes);
+      formData.append('tests_data', JSON.stringify(data.tests_data));
+      formData.append('manual_request_file', data.manual_request_file);
+      return apiFetch<LabOrder>('/laboratory/orders/', {
+        method: 'POST',
+        body: formData,
+      });
+    }
+    return apiFetch<LabOrder>('/laboratory/orders/', {
+      method: 'POST',
+      body: JSON.stringify({
+        source_type: 'external_manual',
+        ...data,
+      }),
     });
   }
 

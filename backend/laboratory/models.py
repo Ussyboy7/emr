@@ -78,6 +78,11 @@ class LabOrder(models.Model):
     """
     Laboratory test order from a doctor/consultation.
     """
+
+    SOURCE_TYPE_CHOICES = [
+        ('internal_emr', 'Internal EMR'),
+        ('external_manual', 'External manual request'),
+    ]
     
     PRIORITY_CHOICES = [
         ('routine', 'Routine'),
@@ -90,6 +95,19 @@ class LabOrder(models.Model):
     doctor = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, related_name='ordered_labs')
     visit = models.ForeignKey('patients.Visit', on_delete=models.SET_NULL, null=True, blank=True, related_name='lab_orders')
     consultation_session = models.ForeignKey('consultation.ConsultationSession', on_delete=models.SET_NULL, null=True, blank=True, related_name='lab_orders')
+
+    source_type = models.CharField(max_length=30, choices=SOURCE_TYPE_CHOICES, default='internal_emr', db_index=True)
+    external_clinic = models.ForeignKey(
+        'organization.Clinic',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='external_lab_orders',
+        help_text='Originating clinic/facility for manual external requests.',
+    )
+    external_requesting_doctor_name = models.CharField(max_length=200, blank=True)
+    manual_request_reference = models.CharField(max_length=100, blank=True)
+    manual_request_file = models.FileField(upload_to='lab_requests/manual/', blank=True, null=True)
     
     priority = models.CharField(max_length=20, choices=PRIORITY_CHOICES, default='routine')
     clinic = models.CharField(max_length=100, blank=True)
@@ -108,6 +126,7 @@ class LabOrder(models.Model):
             models.Index(fields=['order_id']),
             models.Index(fields=['patient', '-ordered_at']),
             models.Index(fields=['priority']),
+            models.Index(fields=['source_type']),
         ]
 
     def _resolve_clinic_raw(self) -> str:

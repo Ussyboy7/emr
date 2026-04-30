@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
   ArrowRight,
@@ -33,10 +34,16 @@ import {
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { NPA_LOGO_URL, NPA_BRAND_NAME, NPA_EMR_TITLE, NPA_EMR_FULL_TITLE, NPA_EMR_CONTACT_EMAIL } from "@/lib/branding";
-import { login, clearTokens, apiFetch } from "@/lib/api-client";
+import { login, clearTokens, apiFetch, AUTH_REFRESH_SESSION_MAX_AGE_SECONDS } from "@/lib/api-client";
 import { getStoredRedirectPath } from "@/hooks/use-auth-redirect";
 import { getHomeRouteForUser, getHomeRouteFromAllowedPages, isPathAllowedByPages } from "@/lib/home-route";
 import { useCurrentUser } from "@/hooks/use-current-user";
+import {
+  AUTH_ALLOWED_PAGES_COOKIE,
+  AUTH_HOME_ROUTE_COOKIE,
+  AUTH_IS_SUPERUSER_COOKIE,
+  AUTH_SESSION_COOKIE,
+} from "@/lib/auth-cookie-names";
 
 
 
@@ -52,6 +59,7 @@ const modules = [
 
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { currentUser, hydrated } = useCurrentUser();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -79,6 +87,16 @@ export default function LoginPage() {
   }, []);
 
   // If already authenticated, don't let users "stick" on /login.
+  useEffect(() => {
+    // If middleware sent us back with missing authorization cookies, force a
+    // clean login handshake by dropping stale client-side tokens first.
+    if (searchParams.get("reason") === "missing_permissions") {
+      clearTokens();
+      setIsRedirecting(false);
+      setIsSubmitting(false);
+    }
+  }, [searchParams]);
+
   useEffect(() => {
     // Don't redirect if we're already handling a login redirect
     if (isSubmitting || isRedirecting) return;
@@ -123,8 +141,23 @@ export default function LoginPage() {
         const userResponse = await apiFetch<AuthMeResponse>("/accounts/auth/me/");
         const allowedPages = userResponse.permissions?.pages || [];
         const isSuperuser = Boolean(userResponse.is_superuser);
-        
+
         const storedRedirect = getStoredRedirectPath();
+        const home = isSuperuser ? "/dashboard" : getHomeRouteFromAllowedPages(allowedPages);
+
+        // CRITICAL: mirror the authorization context into cookies BEFORE the
+        // full-page navigation. Otherwise the Next.js middleware sees a
+        // session-cookie-only auth state ("authenticated but no allowed pages"),
+        // bounces us back to /login?reason=missing_permissions, and clears the
+        // session — which causes the second sign-in (after a sign-out that
+        // wiped the previously persisted context cookies) to "freeze".
+        const cookieMaxAge = `; Max-Age=${AUTH_REFRESH_SESSION_MAX_AGE_SECONDS}`;
+        document.cookie = `${AUTH_SESSION_COOKIE}=1; Path=/; SameSite=Lax${cookieMaxAge}`;
+        document.cookie = `${AUTH_ALLOWED_PAGES_COOKIE}=${encodeURIComponent(JSON.stringify(allowedPages))}; Path=/; SameSite=Lax${cookieMaxAge}`;
+        document.cookie = `${AUTH_IS_SUPERUSER_COOKIE}=${isSuperuser ? "1" : "0"}; Path=/; SameSite=Lax${cookieMaxAge}`;
+        if (home) {
+          document.cookie = `${AUTH_HOME_ROUTE_COOKIE}=${encodeURIComponent(home)}; Path=/; SameSite=Lax${cookieMaxAge}`;
+        }
 
         // Super admin can access everything and keeps the global dashboard.
         if (isSuperuser) {
@@ -138,7 +171,6 @@ export default function LoginPage() {
           return;
         }
 
-        const home = getHomeRouteFromAllowedPages(allowedPages);
         window.location.href = home || "/no-access";
       } catch (userError) {
         // Token was issued but /accounts/auth/me/ failed (wrong API URL, CORS, 5xx, etc.).

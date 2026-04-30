@@ -94,6 +94,7 @@ class RadiologyOrderSerializer(serializers.ModelSerializer):
     patient_details = serializers.SerializerMethodField()
     doctor_name = serializers.CharField(source='doctor.get_full_name', read_only=True, allow_null=True)
     doctor_details = serializers.SerializerMethodField()
+    external_clinic_details = serializers.SerializerMethodField()
     studies = RadiologyStudySerializer(many=True, read_only=True)
     icd10_diagnoses = serializers.SerializerMethodField()
 
@@ -127,6 +128,17 @@ class RadiologyOrderSerializer(serializers.ModelSerializer):
             }
         return None
 
+    def get_external_clinic_details(self, obj):
+        clinic = getattr(obj, 'external_clinic', None)
+        if not clinic:
+            return None
+        return {
+            'id': clinic.id,
+            'name': clinic.name,
+            'code': clinic.code,
+            'location': clinic.location,
+        }
+
     def get_icd10_diagnoses(self, obj):
         from common.diagnosis_serialization import serialize_icd10_diagnoses_for_order
 
@@ -143,12 +155,30 @@ class RadiologyOrderSerializer(serializers.ModelSerializer):
             return normalize_clinic_name(value)
         return value
 
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        source_type = attrs.get('source_type', getattr(self.instance, 'source_type', 'internal_emr'))
+        if source_type == 'external_manual':
+            if not attrs.get('external_clinic') and not getattr(self.instance, 'external_clinic_id', None):
+                raise serializers.ValidationError({'external_clinic': 'Originating clinic is required for external radiology requests.'})
+            doctor_name = attrs.get(
+                'external_requesting_doctor_name',
+                getattr(self.instance, 'external_requesting_doctor_name', ''),
+            )
+            if not str(doctor_name or '').strip():
+                raise serializers.ValidationError({'external_requesting_doctor_name': 'Requesting doctor from the manual form is required.'})
+        return attrs
+
     def create(self, validated_data):
         """Create radiology order with associated studies."""
         studies_data = validated_data.pop('studies_data', [])
 
         # If no doctor is specified, try to get it from consultation session
-        if not validated_data.get('doctor') and validated_data.get('consultation_session'):
+        if (
+            validated_data.get('source_type') != 'external_manual'
+            and not validated_data.get('doctor')
+            and validated_data.get('consultation_session')
+        ):
             consultation_session = validated_data['consultation_session']
             if consultation_session.doctor:
                 validated_data['doctor'] = consultation_session.doctor

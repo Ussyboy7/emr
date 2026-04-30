@@ -76,6 +76,18 @@ function labAnalyticsToCsv(d: LabAnalyticsSummary, viewMode: AnalyticsViewMode, 
   }
 
   lines.push('');
+  lines.push(['Order source', 'Orders', 'Tests'].map(esc).join(','));
+  Object.entries(d.orders_by_source || {}).forEach(([source, info]) => {
+    lines.push([source, String(info.orders), String(info.tests)].map(esc).join(','));
+  });
+
+  lines.push('');
+  lines.push(['External clinic', 'Code', 'Orders', 'Tests'].map(esc).join(','));
+  (d.external_orders_by_clinic || []).forEach((row) => {
+    lines.push([row.clinic_name, row.clinic_code || '', String(row.orders), String(row.tests)].map(esc).join(','));
+  });
+
+  lines.push('');
   lines.push(['Major class', 'Total', 'In-house', 'Outsourced', 'Unassigned'].map(esc).join(','));
   Object.entries(d.major_lab_classes || {}).forEach(([className, info]) => {
     lines.push(
@@ -239,6 +251,29 @@ export default function LaboratoryAnalyticsPage() {
     return Object.entries(data.tests_by_processing_method || {}).map(([name, count]) => ({
       name: name === 'in_house' ? 'In-house' : name === 'outsourced' ? 'Outsourced' : name.replace(/_/g, ' '),
       count,
+    }));
+  }, [data]);
+
+  const sourceBar = useMemo(() => {
+    if (!data?.orders_by_source) return [];
+    const labelMap: Record<string, string> = {
+      internal_emr: 'EMR Orders',
+      external_manual: 'External Requests',
+    };
+    return Object.entries(data.orders_by_source).map(([source, info]) => ({
+      name: labelMap[source] || source.replace(/_/g, ' '),
+      orders: info.orders,
+      tests: info.tests,
+    }));
+  }, [data]);
+
+  const externalClinicBar = useMemo(() => {
+    if (!data?.external_orders_by_clinic?.length) return [];
+    return data.external_orders_by_clinic.map((row) => ({
+      name: row.clinic_code || row.clinic_name,
+      full: row.clinic_name,
+      orders: row.orders,
+      tests: row.tests,
     }));
   }, [data]);
 
@@ -462,6 +497,61 @@ export default function LaboratoryAnalyticsPage() {
                         <YAxis tick={{ fontSize: 11 }} />
                         <Tooltip />
                         <Bar dataKey="count" fill="#0ea5e9" radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+
+            <div className="grid lg:grid-cols-2 gap-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Order source</CardTitle>
+                  <CardDescription>Internal EMR orders vs external manual requests</CardDescription>
+                </CardHeader>
+                <CardContent className="h-[280px]">
+                  {sourceBar.length === 0 ? (
+                    <EmptyChart />
+                  ) : (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={sourceBar}>
+                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                        <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+                        <YAxis tick={{ fontSize: 11 }} />
+                        <Tooltip />
+                        <Legend />
+                        <Bar dataKey="orders" name="Orders" fill="#06b6d4" radius={[4, 4, 0, 0]} />
+                        <Bar dataKey="tests" name="Tests" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">External requests by clinic</CardTitle>
+                  <CardDescription>Manual request volume by originating clinic</CardDescription>
+                </CardHeader>
+                <CardContent className="h-[280px]">
+                  {externalClinicBar.length === 0 ? (
+                    <EmptyChart />
+                  ) : (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={externalClinicBar} layout="vertical" margin={{ left: 24, right: 16 }}>
+                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                        <XAxis type="number" tick={{ fontSize: 11 }} />
+                        <YAxis type="category" dataKey="name" width={80} tick={{ fontSize: 11 }} />
+                        <Tooltip
+                          formatter={(v: number, name: string) => [v, name === 'orders' ? 'Orders' : 'Tests']}
+                          labelFormatter={(_, items) =>
+                            String((items?.[0] as { payload?: { full?: string } })?.payload?.full ?? '')
+                          }
+                        />
+                        <Legend />
+                        <Bar dataKey="orders" name="Orders" fill="#0891b2" radius={[0, 4, 4, 0]} />
+                        <Bar dataKey="tests" name="Tests" fill="#d97706" radius={[0, 4, 4, 0]} />
                       </BarChart>
                     </ResponsiveContainer>
                   )}

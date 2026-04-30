@@ -17,6 +17,12 @@ export interface RadiologyOrder {
   clinical_notes?: string;
   provisional_diagnosis?: string;
   lmp?: string;
+  source_type?: 'internal_emr' | 'external_manual';
+  external_clinic?: number | null;
+  external_clinic_details?: { id: number; name: string; code?: string; location?: string } | null;
+  external_requesting_doctor_name?: string;
+  manual_request_reference?: string;
+  manual_request_file?: string | null;
   report?: string;
   critical?: boolean;
   studies: RadiologyStudy[];
@@ -127,6 +133,14 @@ export interface RadiologyAnalyticsSummary {
     unassigned: number;
     total: number;
   };
+  orders_by_source?: Record<string, { orders: number; studies: number }>;
+  external_orders_by_clinic?: Array<{
+    clinic_id: number | null;
+    clinic_name: string;
+    clinic_code: string;
+    orders: number;
+    studies: number;
+  }>;
   procedures_by_processing_method?: Array<{
     procedure: string;
     total: number;
@@ -167,6 +181,7 @@ class RadiologyService {
     processing_method?: 'in_house' | 'outsourced';
     /** Orders that have at least one study in this workflow status */
     study_status?: 'pending' | 'processing' | 'reported' | 'rejected' | 'verified';
+    source_type?: 'internal_emr' | 'external_manual';
     gender?: 'male' | 'female';
     date?: string;
     start_date?: string;
@@ -200,6 +215,50 @@ class RadiologyService {
     return apiFetch<RadiologyOrder>('/radiology/orders/', {
       method: 'POST',
       body: JSON.stringify(data),
+    });
+  }
+
+  async createExternalOrder(data: {
+    patient: number;
+    priority: 'routine' | 'urgent' | 'stat';
+    external_clinic: number;
+    external_requesting_doctor_name: string;
+    manual_request_reference?: string;
+    manual_request_file?: File;
+    clinical_notes?: string;
+    provisional_diagnosis?: string;
+    studies_data: Array<{
+      template?: number | null;
+      procedure: string;
+      body_part?: string;
+      modality?: string;
+      status?: 'pending';
+    }>;
+  }): Promise<RadiologyOrder> {
+    if (data.manual_request_file) {
+      const formData = new FormData();
+      formData.append('source_type', 'external_manual');
+      formData.append('patient', String(data.patient));
+      formData.append('priority', data.priority);
+      formData.append('external_clinic', String(data.external_clinic));
+      formData.append('external_requesting_doctor_name', data.external_requesting_doctor_name);
+      if (data.manual_request_reference) formData.append('manual_request_reference', data.manual_request_reference);
+      if (data.clinical_notes) formData.append('clinical_notes', data.clinical_notes);
+      if (data.provisional_diagnosis) formData.append('provisional_diagnosis', data.provisional_diagnosis);
+      formData.append('studies_data', JSON.stringify(data.studies_data));
+      formData.append('manual_request_file', data.manual_request_file);
+      return apiFetch<RadiologyOrder>('/radiology/orders/', {
+        method: 'POST',
+        body: formData,
+      });
+    }
+
+    return apiFetch<RadiologyOrder>('/radiology/orders/', {
+      method: 'POST',
+      body: JSON.stringify({
+        source_type: 'external_manual',
+        ...data,
+      }),
     });
   }
 
@@ -447,6 +506,7 @@ class RadiologyService {
     priority?: string;
     search?: string;
     processing_method?: 'in_house' | 'outsourced';
+    source_type?: 'internal_emr' | 'external_manual';
     gender?: 'male' | 'female';
     date?: string;
     start_date?: string;

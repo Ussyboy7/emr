@@ -7,9 +7,9 @@ from .models import RadiologyOrder, RadiologyStudy, RadiologyReport
 
 @admin.register(RadiologyOrder)
 class RadiologyOrderAdmin(admin.ModelAdmin):
-    list_display = ['order_id', 'patient', 'doctor', 'priority', 'ordered_at']
-    list_filter = ['priority', 'ordered_at']
-    search_fields = ['order_id', 'patient__surname', 'patient__first_name']
+    list_display = ['order_id', 'patient', 'doctor', 'source_type', 'external_clinic', 'external_requesting_doctor_name', 'priority', 'ordered_at']
+    list_filter = ['source_type', 'external_clinic', 'priority', 'ordered_at']
+    search_fields = ['order_id', 'patient__surname', 'patient__first_name', 'external_requesting_doctor_name', 'manual_request_reference']
 
 
 @admin.register(RadiologyStudy)

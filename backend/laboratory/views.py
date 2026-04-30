@@ -5,6 +5,7 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.parsers import JSONParser, MultiPartParser, FormParser
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django.utils import timezone
@@ -102,13 +103,17 @@ class LabOrderViewSet(viewsets.ModelViewSet):
     
     permission_classes = [IsAuthenticated]
     serializer_class = LabOrderSerializer
+    parser_classes = [JSONParser, MultiPartParser, FormParser]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['patient', 'doctor', 'priority', 'consultation_session', 'visit']
+    filterset_fields = ['patient', 'doctor', 'priority', 'consultation_session', 'visit', 'source_type', 'external_clinic']
     search_fields = [
         'order_id',
         'clinical_notes',
         'lab_number',
         'tests__lab_number',
+        'external_requesting_doctor_name',
+        'manual_request_reference',
+        'external_clinic__name',
         'patient__first_name',
         'patient__surname',
         'patient__patient_id',
@@ -119,7 +124,7 @@ class LabOrderViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         qs = (
             LabOrder.objects.all()
-            .select_related('patient', 'doctor', 'visit', 'consultation_session', 'created_by')
+            .select_related('patient', 'doctor', 'visit', 'consultation_session', 'created_by', 'external_clinic')
             .prefetch_related(
                 'tests',
                 'consultation_session__diagnoses__icd10_code',
@@ -156,6 +161,9 @@ class LabOrderViewSet(viewsets.ModelViewSet):
         gender = self.request.query_params.get('gender')
         if gender:
             qs = qs.filter(patient__gender=gender)
+        source_type = self.request.query_params.get('source_type')
+        if source_type in ('internal_emr', 'external_manual'):
+            qs = qs.filter(source_type=source_type)
         return qs
 
     @action(detail=False, methods=['get'])
@@ -180,7 +188,7 @@ class LabOrderViewSet(viewsets.ModelViewSet):
         # date field applied, so we can fan it out into two scopes below.
         base_qs = (
             LabOrder.objects.all()
-            .select_related('patient', 'doctor', 'visit', 'consultation_session', 'created_by')
+            .select_related('patient', 'doctor', 'visit', 'consultation_session', 'created_by', 'external_clinic')
             .prefetch_related('tests')
         )
         pm = request.query_params.get('processing_method')
@@ -189,6 +197,9 @@ class LabOrderViewSet(viewsets.ModelViewSet):
         gender = request.query_params.get('gender')
         if gender:
             base_qs = base_qs.filter(patient__gender=gender)
+        source_type = request.query_params.get('source_type')
+        if source_type in ('internal_emr', 'external_manual'):
+            base_qs = base_qs.filter(source_type=source_type)
         # Apply DRF's generic filters (search, filterset_fields, ordering).
         base_qs = self.filter_queryset(base_qs)
 
@@ -235,10 +246,33 @@ class LabOrderViewSet(viewsets.ModelViewSet):
             }
         )
     
+    def create(self, request, *args, **kwargs):
+        data = request.data.dict() if hasattr(request.data, 'dict') else dict(request.data)
+        if 'manual_request_file' in request.FILES:
+            data['manual_request_file'] = request.FILES['manual_request_file']
+
+        tests_data = data.get('tests_data')
+        if isinstance(tests_data, str):
+            try:
+                parsed_tests = json.loads(tests_data)
+                if isinstance(parsed_tests, list):
+                    data['tests_data'] = parsed_tests
+            except json.JSONDecodeError:
+                return Response(
+                    {'tests_data': 'Invalid tests_data JSON payload.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        serializer = self.get_serializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+
     def perform_create(self, serializer):
         # Set the doctor field using multiple fallback strategies
         data = serializer.validated_data.copy()
-        if 'doctor' not in data or data['doctor'] is None:
+        if data.get('source_type') != 'external_manual' and ('doctor' not in data or data['doctor'] is None):
             doctor = self._find_doctor_for_order(data)
             if doctor:
                 data['doctor'] = doctor
@@ -247,7 +281,11 @@ class LabOrderViewSet(viewsets.ModelViewSet):
 
         # Log audit
         try:
-            doctor_name = order.doctor.get_full_name() if order.doctor else 'Unknown'
+            doctor_name = (
+                order.external_requesting_doctor_name
+                if order.source_type == 'external_manual'
+                else (order.doctor.get_full_name() if order.doctor else 'Unknown')
+            )
             AuditService.log_lab_action(
                 user=self.request.user,
                 action='create',
@@ -266,7 +304,11 @@ class LabOrderViewSet(viewsets.ModelViewSet):
 
             patient_name = order.patient.get_full_name()
             title = "New lab order"
-            message = f"Lab order {order.order_id} for {patient_name} is ready for Laboratory."
+            if order.source_type == 'external_manual':
+                clinic_name = order.external_clinic.name if order.external_clinic else 'external clinic'
+                message = f"External lab request {order.order_id} for {patient_name} from {clinic_name} is ready for Laboratory."
+            else:
+                message = f"Lab order {order.order_id} for {patient_name} is ready for Laboratory."
 
             NotificationService.notify_role(
                 role_name='Laboratory Scientist',

@@ -17,7 +17,7 @@ import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { toast } from 'sonner';
-import { patientService, radiologyService, formatPatientGenderLabel } from '@/lib/services';
+import { adminService, patientService, radiologyService, formatPatientGenderLabel, type Clinic, type Patient } from '@/lib/services';
 import { RAD_OTHER_TEMPLATE_CODE } from '@/lib/constants/order-template-codes';
 import { PatientAvatar } from '@/components/shared/PatientAvatar';
 import { Icd10DiagnosesBlock } from '@/components/medical/Icd10DiagnosesBlock';
@@ -29,7 +29,7 @@ import {
   ClipboardList, Search, Eye, Calendar, Clock, Activity, CheckCircle2,
   FileBarChart, AlertTriangle, ScanLine, User, ArrowRight,
   CalendarDays, Loader2, Play, FileText,
-  Beaker, Building2, Truck, RotateCcw, XCircle, TestTube, Plus, X
+  Beaker, Building2, Truck, RotateCcw, XCircle, TestTube, Plus, X, Stethoscope
 } from 'lucide-react';
 
 const formatOrderedAtDisplay = (isoString: string | undefined): string => {
@@ -44,6 +44,19 @@ const formatOrderedAtDisplay = (isoString: string | undefined): string => {
     return '';
   }
 };
+
+/** External/manual request: explicit flag, or form doctor present without an EMR ordering doctor. */
+function isRadiologyExternalManualOrder(order: {
+  source_type?: string;
+  external_requesting_doctor_name?: string;
+  doctor?: number | null;
+  doctor_details?: { id?: number } | null;
+}) {
+  if (order?.source_type === 'external_manual') return true;
+  const hasFormDoctor = Boolean(String(order?.external_requesting_doctor_name ?? '').trim());
+  const hasEmrDoctor = Boolean(order?.doctor_details?.id ?? order?.doctor);
+  return hasFormDoctor && !hasEmrDoctor;
+}
 
 type CustomRadiologyReportRow = {
   id: string;
@@ -104,6 +117,7 @@ export default function RadiologyOrdersPage() {
   const [dateFilter, setDateFilter] = useState('today');
   const [genderFilter, setGenderFilter] = useState('all');
   const [processingFilter, setProcessingFilter] = useState<'all' | 'in_house' | 'outsourced'>('all');
+  const [sourceTypeFilter, setSourceTypeFilter] = useState<'all' | 'internal_emr' | 'external_manual'>('all');
   const [activeTab, setActiveTab] = useState('all');
   const [isDateFilterDialogOpen, setIsDateFilterDialogOpen] = useState(false);
   const [dateRange, setDateRange] = useState({ from: '', to: '' });
@@ -164,6 +178,11 @@ export default function RadiologyOrdersPage() {
                   <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${getPriorityColor(order.priority)}`}>
                     {getPriorityLabel(order.priority)}
                   </Badge>
+                  {isRadiologyExternalManualOrder(order) && (
+                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-amber-500/10 text-amber-700 border-amber-200">
+                      External Request
+                    </Badge>
+                  )}
                   <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${getStatusColor(orderStatus)}`}>
                     {statusLabel}
                   </Badge>
@@ -196,7 +215,18 @@ export default function RadiologyOrdersPage() {
                     (order.patient_gender ? String(order.patient_gender) : '')}
                 </span>
                 <span>•</span>
-                <span>{order.doctor_name || 'System Administrator'}</span>
+                <span className="flex items-center gap-1">
+                  <Stethoscope className="h-3 w-3 shrink-0" />
+                  {isRadiologyExternalManualOrder(order)
+                    ? (order.external_requesting_doctor_name?.trim() || 'External doctor')
+                    : (order.doctor_name?.trim() || 'Unknown')}
+                </span>
+                {isRadiologyExternalManualOrder(order) && order.external_clinic_details?.name && (
+                  <>
+                    <span>•</span>
+                    <span>{order.external_clinic_details.name}</span>
+                  </>
+                )}
                 <span>•</span>
                 <span className="flex items-center gap-1" title="When the order was placed">
                   <Clock className="h-3 w-3 shrink-0" />
@@ -398,6 +428,23 @@ export default function RadiologyOrdersPage() {
   const [addStudyOutsourcedFacility, setAddStudyOutsourcedFacility] = useState('');
   const [isAddingStudy, setIsAddingStudy] = useState(false);
 
+  const [isExternalOrderDialogOpen, setIsExternalOrderDialogOpen] = useState(false);
+  const [externalPatientSearch, setExternalPatientSearch] = useState('');
+  const [externalPatientResults, setExternalPatientResults] = useState<Patient[]>([]);
+  const [searchingExternalPatients, setSearchingExternalPatients] = useState(false);
+  const [selectedExternalPatient, setSelectedExternalPatient] = useState<Patient | null>(null);
+  const [externalClinics, setExternalClinics] = useState<Clinic[]>([]);
+  const [externalClinicId, setExternalClinicId] = useState('');
+  const [externalRequestingDoctorName, setExternalRequestingDoctorName] = useState('');
+  const [externalManualReference, setExternalManualReference] = useState('');
+  const [externalManualFile, setExternalManualFile] = useState<File | null>(null);
+  const [externalClinicalNotes, setExternalClinicalNotes] = useState('');
+  const [externalProvisionalDiagnosis, setExternalProvisionalDiagnosis] = useState('');
+  const [externalPriority, setExternalPriority] = useState<'routine' | 'urgent' | 'stat'>('routine');
+  const [externalTemplateSearch, setExternalTemplateSearch] = useState('');
+  const [selectedExternalTemplateIds, setSelectedExternalTemplateIds] = useState<Set<number>>(new Set());
+  const [isSubmittingExternalOrder, setIsSubmittingExternalOrder] = useState(false);
+
   const buildDateQuery = useCallback(
     (filter: string): Record<string, string> => {
       // Anchor on the server's "today" so filters reflect the server calendar,
@@ -444,6 +491,7 @@ export default function RadiologyOrdersPage() {
         ...(processingFilter !== 'all' ? { processing_method: processingFilter } : {}),
         ...(priorityFilter !== 'all' ? { priority: priorityFilter } : {}),
         ...(genderFilter !== 'all' ? { gender: genderFilter as 'male' | 'female' } : {}),
+        ...(sourceTypeFilter !== 'all' ? { source_type: sourceTypeFilter } : {}),
         ...(studyStatusByTab[activeTab] ? { study_status: studyStatusByTab[activeTab] } : {}),
         ...dateQuery,
         ...rangeQuery,
@@ -492,7 +540,7 @@ export default function RadiologyOrdersPage() {
         setLoading(false);
       }
     }
-  }, [debouncedSearch, processingFilter, priorityFilter, genderFilter, dateFilter, dateRange.from, dateRange.to, activeTab, currentPage, itemsPerPage, buildDateQuery]);
+  }, [debouncedSearch, processingFilter, priorityFilter, genderFilter, sourceTypeFilter, dateFilter, dateRange.from, dateRange.to, activeTab, currentPage, itemsPerPage, buildDateQuery]);
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(searchQuery.trim()), 300);
@@ -509,13 +557,15 @@ export default function RadiologyOrdersPage() {
       isViewDialogOpen ||
       isProcessDialogOpen ||
       isResultsDialogOpen ||
-      isAddStudyDialogOpen,
+      isAddStudyDialogOpen ||
+      isExternalOrderDialogOpen,
     [
       isDateFilterDialogOpen,
       isViewDialogOpen,
       isProcessDialogOpen,
       isResultsDialogOpen,
       isAddStudyDialogOpen,
+      isExternalOrderDialogOpen,
     ]
   );
 
@@ -569,7 +619,7 @@ export default function RadiologyOrdersPage() {
     };
   }, [isViewDialogOpen, selectedOrder?.patient_details?.id, selectedOrder?.patient]);
 
-  const loadTemplates = async () => {
+  const loadTemplates = useCallback(async () => {
     setLoadingTemplates(true);
     try {
       const response = await radiologyService.getTemplates({ page_size: 1000 });
@@ -580,13 +630,55 @@ export default function RadiologyOrdersPage() {
     } finally {
       setLoadingTemplates(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     if (!isAddStudyDialogOpen) return;
     if (templates.length > 0) return;
     loadTemplates();
-  }, [isAddStudyDialogOpen]);
+  }, [isAddStudyDialogOpen, loadTemplates, templates.length]);
+
+  useEffect(() => {
+    if (!isExternalOrderDialogOpen) return;
+    if (templates.length === 0) loadTemplates();
+    (async () => {
+      try {
+        const res = await adminService.getClinics({ is_active: true, page_size: 1000 });
+        setExternalClinics(res.results || []);
+      } catch (err: any) {
+        toast.error(err?.message || 'Failed to load originating clinics');
+        setExternalClinics([]);
+      }
+    })();
+  }, [isExternalOrderDialogOpen, loadTemplates, templates.length]);
+
+  useEffect(() => {
+    if (!isExternalOrderDialogOpen) return;
+    const q = externalPatientSearch.trim();
+    if (q.length < 2) {
+      setExternalPatientResults([]);
+      setSearchingExternalPatients(false);
+      return;
+    }
+
+    let cancelled = false;
+    const t = setTimeout(async () => {
+      setSearchingExternalPatients(true);
+      try {
+        const res = await patientService.getPatients({ search: q, page_size: 10 });
+        if (!cancelled) setExternalPatientResults(res.results || []);
+      } catch {
+        if (!cancelled) setExternalPatientResults([]);
+      } finally {
+        if (!cancelled) setSearchingExternalPatients(false);
+      }
+    }, 300);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [isExternalOrderDialogOpen, externalPatientSearch]);
 
   const filteredTemplates = useMemo(() => {
     const q = templateSearch.trim().toLowerCase();
@@ -598,6 +690,99 @@ export default function RadiologyOrdersPage() {
     });
     return matches.slice(0, 25);
   }, [templateSearch, templates]);
+
+  const selectedExternalTemplates = useMemo(
+    () => templates.filter((template) => selectedExternalTemplateIds.has(Number(template.id))),
+    [templates, selectedExternalTemplateIds],
+  );
+
+  const filteredExternalTemplates = useMemo(() => {
+    const q = externalTemplateSearch.trim().toLowerCase();
+    if (!q) return templates.slice(0, 25);
+    return templates
+      .filter((template) => {
+        const name = String(template?.name ?? '').toLowerCase();
+        const code = String(template?.code ?? '').toLowerCase();
+        const modality = String(template?.modality ?? template?.category ?? '').toLowerCase();
+        return name.includes(q) || code.includes(q) || modality.includes(q);
+      })
+      .slice(0, 25);
+  }, [externalTemplateSearch, templates]);
+
+  const resetExternalOrderForm = () => {
+    setExternalPatientSearch('');
+    setExternalPatientResults([]);
+    setSelectedExternalPatient(null);
+    setExternalClinicId('');
+    setExternalRequestingDoctorName('');
+    setExternalManualReference('');
+    setExternalManualFile(null);
+    setExternalClinicalNotes('');
+    setExternalProvisionalDiagnosis('');
+    setExternalPriority('routine');
+    setExternalTemplateSearch('');
+    setSelectedExternalTemplateIds(new Set());
+  };
+
+  const handleCreateExternalOrder = async () => {
+    if (!selectedExternalPatient) {
+      toast.error('Select a patient from Medical Records');
+      return;
+    }
+    if (!externalClinicId) {
+      toast.error('Select the originating clinic');
+      return;
+    }
+    if (!externalRequestingDoctorName.trim()) {
+      toast.error('Enter the requesting doctor from the manual form');
+      return;
+    }
+    if (selectedExternalTemplates.length === 0) {
+      toast.error('Select at least one requested study');
+      return;
+    }
+
+    setIsSubmittingExternalOrder(true);
+    try {
+      const clinicId = Number(externalClinicId);
+      const selectedClinic = externalClinics.find((clinic) => clinic.id === clinicId);
+      if (!selectedClinic?.name) {
+        toast.error('Select a configured originating clinic. Ask admin to add this clinic if it is missing.');
+        return;
+      }
+
+      await radiologyService.createExternalOrder({
+        patient: selectedExternalPatient.id,
+        priority: externalPriority,
+        external_clinic: clinicId,
+        external_requesting_doctor_name: externalRequestingDoctorName.trim(),
+        manual_request_reference: externalManualReference.trim() || undefined,
+        manual_request_file: externalManualFile || undefined,
+        clinical_notes: externalClinicalNotes.trim(),
+        provisional_diagnosis: externalProvisionalDiagnosis.trim(),
+        studies_data: selectedExternalTemplates.map((template) => ({
+          template: template.id,
+          procedure: template.name,
+          body_part: template.body_part || '',
+          modality: template.modality || template.category || '',
+          status: 'pending',
+        })),
+      });
+
+      toast.success('External radiology request created');
+      setIsExternalOrderDialogOpen(false);
+      resetExternalOrderForm();
+      setSourceTypeFilter('external_manual');
+      setActiveTab('pending');
+      setCurrentPage(1);
+      await loadOrders();
+    } catch (err: any) {
+      console.error('Failed to create external radiology request:', err);
+      toast.error(err?.message || 'Failed to create external radiology request');
+    } finally {
+      setIsSubmittingExternalOrder(false);
+    }
+  };
 
   const formatLmp = (value: any) => {
     if (!value) return '';
@@ -664,7 +849,7 @@ export default function RadiologyOrdersPage() {
   // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, priorityFilter, dateFilter, genderFilter, processingFilter, activeTab, dateRange.from, dateRange.to]);
+  }, [searchQuery, priorityFilter, dateFilter, genderFilter, processingFilter, sourceTypeFilter, activeTab, dateRange.from, dateRange.to]);
 
   const clearDateRangeFilters = () => {
     setDateRange({ from: '', to: '' });
@@ -796,6 +981,13 @@ export default function RadiologyOrdersPage() {
             </h1>
             <p className="text-muted-foreground mt-1">Process studies individually - acquire, process & report results per study</p>
           </div>
+          <Button
+            onClick={() => setIsExternalOrderDialogOpen(true)}
+            className="bg-amber-500 hover:bg-amber-600 text-white"
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            New External Radiology Request
+          </Button>
         </div>
 
         {/* Stats */}
@@ -947,6 +1139,17 @@ export default function RadiologyOrdersPage() {
                       <SelectItem value="outsourced">Outsourced</SelectItem>
                     </SelectContent>
                   </Select>
+                  <Select
+                    value={sourceTypeFilter}
+                    onValueChange={(v) => setSourceTypeFilter(v as 'all' | 'internal_emr' | 'external_manual')}
+                  >
+                    <SelectTrigger className="w-[170px]"><SelectValue placeholder="Source" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All sources</SelectItem>
+                      <SelectItem value="internal_emr">EMR Orders</SelectItem>
+                      <SelectItem value="external_manual">External Requests</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
             </div>
@@ -1012,6 +1215,243 @@ export default function RadiologyOrdersPage() {
             </p>
           </Card>
         )}
+
+        <Dialog open={isExternalOrderDialogOpen} onOpenChange={setIsExternalOrderDialogOpen}>
+          <DialogContent className="w-[95vw] sm:max-w-[900px] max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Plus className="h-5 w-5 text-amber-500" />
+                New External Radiology Request
+              </DialogTitle>
+              <DialogDescription>
+                Create a radiology order from a manual request form. Patient is selected from Medical Records.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-5 py-4">
+              <div className="space-y-2">
+                <Label>Patient from Medical Records *</Label>
+                {selectedExternalPatient ? (
+                  <div className="flex items-center justify-between rounded-md border p-3">
+                    <div className="flex items-center gap-3">
+                      <PatientAvatar name={selectedExternalPatient.full_name || `${selectedExternalPatient.first_name} ${selectedExternalPatient.surname}`} size="sm" />
+                      <div>
+                        <p className="text-sm font-medium">
+                          {selectedExternalPatient.full_name || `${selectedExternalPatient.first_name} ${selectedExternalPatient.surname}`}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {[selectedExternalPatient.patient_id, selectedExternalPatient.personal_number, formatPatientGenderLabel(selectedExternalPatient.gender), selectedExternalPatient.age != null ? `${selectedExternalPatient.age}y` : '']
+                            .filter(Boolean)
+                            .join(' • ')}
+                        </p>
+                      </div>
+                    </div>
+                    <Button variant="ghost" size="sm" onClick={() => setSelectedExternalPatient(null)}>
+                      Change
+                    </Button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        value={externalPatientSearch}
+                        onChange={(event) => setExternalPatientSearch(event.target.value)}
+                        placeholder="Search patient name, MRN, or personal number"
+                        className="pl-10"
+                      />
+                    </div>
+                    <div className="rounded-md border divide-y max-h-48 overflow-y-auto">
+                      {searchingExternalPatients ? (
+                        <div className="p-3 text-sm text-muted-foreground flex items-center gap-2">
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          Searching patients...
+                        </div>
+                      ) : externalPatientResults.length > 0 ? (
+                        externalPatientResults.map((patient) => (
+                          <button
+                            key={patient.id}
+                            type="button"
+                            className="w-full p-3 text-left hover:bg-muted flex items-center gap-3"
+                            onClick={() => setSelectedExternalPatient(patient)}
+                          >
+                            <PatientAvatar name={patient.full_name || `${patient.first_name} ${patient.surname}`} size="sm" />
+                            <span>
+                              <span className="block text-sm font-medium">{patient.full_name || `${patient.first_name} ${patient.surname}`}</span>
+                              <span className="block text-xs text-muted-foreground">
+                                {[patient.patient_id, patient.personal_number, formatPatientGenderLabel(patient.gender)].filter(Boolean).join(' • ')}
+                              </span>
+                            </span>
+                          </button>
+                        ))
+                      ) : (
+                        <div className="p-3 text-sm text-muted-foreground">
+                          Type at least 2 characters to search Medical Records.
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Originating Clinic *</Label>
+                  <Select value={externalClinicId} onValueChange={setExternalClinicId}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select clinic/facility" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {externalClinics.map((clinic) => (
+                        <SelectItem key={clinic.id} value={String(clinic.id)}>
+                          {clinic.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Requesting Doctor on Form *</Label>
+                  <Input
+                    value={externalRequestingDoctorName}
+                    onChange={(event) => setExternalRequestingDoctorName(event.target.value)}
+                    placeholder="e.g. Dr. Musa"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Priority</Label>
+                  <Select value={externalPriority} onValueChange={(value) => setExternalPriority(value as 'routine' | 'urgent' | 'stat')}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="routine">Routine</SelectItem>
+                      <SelectItem value="urgent">Urgent</SelectItem>
+                      <SelectItem value="stat">STAT</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Manual Form Reference</Label>
+                  <Input
+                    value={externalManualReference}
+                    onChange={(event) => setExternalManualReference(event.target.value)}
+                    placeholder="Optional form/reference number"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Attach Manual Request Form</Label>
+                <Input
+                  type="file"
+                  accept=".pdf,.jpg,.jpeg,.png,.webp"
+                  onChange={(event) => setExternalManualFile(event.target.files?.[0] || null)}
+                />
+                {externalManualFile && (
+                  <p className="text-xs text-muted-foreground">Selected: {externalManualFile.name}</p>
+                )}
+                <p className="text-xs text-muted-foreground">
+                  Files are saved on the server with this order. After you create the request, open the order and use{' '}
+                  <span className="font-medium text-foreground">View attached manual request</span> to open or download it.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Requested Studies from Templates *</Label>
+                <Input
+                  value={externalTemplateSearch}
+                  onChange={(event) => setExternalTemplateSearch(event.target.value)}
+                  placeholder="Search procedure, code, or modality"
+                />
+                <div className="rounded-md border divide-y max-h-56 overflow-y-auto">
+                  {loadingTemplates ? (
+                    <div className="p-3 text-sm text-muted-foreground flex items-center gap-2">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Loading templates...
+                    </div>
+                  ) : filteredExternalTemplates.length > 0 ? (
+                    filteredExternalTemplates.map((template) => {
+                      const checked = selectedExternalTemplateIds.has(Number(template.id));
+                      return (
+                        <label key={template.id} className="flex items-start gap-3 p-3 hover:bg-muted cursor-pointer">
+                          <Checkbox
+                            checked={checked}
+                            onCheckedChange={(value) => {
+                              setSelectedExternalTemplateIds((prev) => {
+                                const next = new Set(prev);
+                                if (value) next.add(Number(template.id));
+                                else next.delete(Number(template.id));
+                                return next;
+                              });
+                            }}
+                          />
+                          <span>
+                            <span className="block text-sm font-medium">{template.name}</span>
+                            <span className="block text-xs text-muted-foreground">
+                              {[template.code, template.modality || template.category, template.body_part].filter(Boolean).join(' • ')}
+                            </span>
+                          </span>
+                        </label>
+                      );
+                    })
+                  ) : (
+                    <div className="p-3 text-sm text-muted-foreground">No matching templates found.</div>
+                  )}
+                </div>
+                {selectedExternalTemplates.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {selectedExternalTemplates.map((template) => (
+                      <Badge key={template.id} variant="secondary">
+                        {template.name}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Clinical Notes / Indication from Form</Label>
+                  <Textarea
+                    value={externalClinicalNotes}
+                    onChange={(event) => setExternalClinicalNotes(event.target.value)}
+                    rows={3}
+                    placeholder="Copy indication, clinical notes, or special instructions from the manual form..."
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Provisional Diagnosis</Label>
+                  <Textarea
+                    value={externalProvisionalDiagnosis}
+                    onChange={(event) => setExternalProvisionalDiagnosis(event.target.value)}
+                    rows={3}
+                    placeholder="Optional diagnosis from the form..."
+                  />
+                </div>
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsExternalOrderDialogOpen(false)} disabled={isSubmittingExternalOrder}>
+                Cancel
+              </Button>
+              <Button onClick={handleCreateExternalOrder} disabled={isSubmittingExternalOrder}>
+                {isSubmittingExternalOrder ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Creating...
+                  </>
+                ) : (
+                  'Create External Request'
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* Process Study Dialog (like lab) */}
         <Dialog open={isProcessDialogOpen} onOpenChange={setIsProcessDialogOpen}>
@@ -1462,10 +1902,10 @@ export default function RadiologyOrdersPage() {
                 </div>
 
                 {/* Patient & Doctor Info */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 rounded-lg bg-muted/50">
                   <div>
-                    <p className="text-sm font-medium mb-2">Patient</p>
-                    <div className="flex items-start gap-2">
+                    <p className="text-xs text-muted-foreground">Patient</p>
+                    <div className="flex items-start gap-2 mt-1">
                       <PatientAvatar name={selectedOrder.patient_name} size="sm" />
                       <div>
                         <p className="font-medium">{selectedOrder.patient_name}</p>
@@ -1510,12 +1950,41 @@ export default function RadiologyOrdersPage() {
                     </div>
                   </div>
                   <div>
-                    <p className="text-sm font-medium mb-2">Ordering Doctor</p>
-                    {selectedOrder.doctor_name?.trim() && (
-                      <p className="font-medium">{selectedOrder.doctor_name}</p>
-                    )}
-                    {selectedOrder.doctor_details?.specialty?.trim() && (
-                      <p className="text-xs text-muted-foreground">{selectedOrder.doctor_details.specialty}</p>
+                    {isRadiologyExternalManualOrder(selectedOrder) ? (
+                      <>
+                        <p className="text-xs text-muted-foreground">Requesting Doctor on Form</p>
+                        <div className="space-y-1 mt-1">
+                          <p className="font-medium">
+                            {selectedOrder.external_requesting_doctor_name?.trim() || '—'}
+                          </p>
+                          {selectedOrder.external_clinic_details?.name && (
+                            <p className="text-xs text-muted-foreground">
+                              Originating clinic: {selectedOrder.external_clinic_details.name}
+                            </p>
+                          )}
+                          {selectedOrder.manual_request_reference && (
+                            <p className="text-xs text-muted-foreground">Reference: {selectedOrder.manual_request_reference}</p>
+                          )}
+                          {selectedOrder.manual_request_file && (
+                            <a
+                              className="text-xs text-blue-600 hover:underline"
+                              href={getRadiologyReportFileUrl(selectedOrder.manual_request_file)}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              View attached manual request
+                            </a>
+                          )}
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-xs text-muted-foreground">Ordering Doctor</p>
+                        <p className="font-medium mt-1">{selectedOrder.doctor_name?.trim() || 'Unknown'}</p>
+                        {selectedOrder.doctor_details?.specialty?.trim() && (
+                          <p className="text-xs text-muted-foreground">{selectedOrder.doctor_details.specialty}</p>
+                        )}
+                      </>
                     )}
                   </div>
                 </div>

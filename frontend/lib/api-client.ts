@@ -355,36 +355,56 @@ const refreshWithToken = async (refreshToken: string): Promise<LoginResponse | n
   }
 };
 
+// Shared in-flight refresh promise so concurrent apiFetch callers do NOT all
+// hit /token/refresh/ in parallel. Without this, 10 simultaneous requests on
+// dashboard mount would each spawn their own refresh — only the first succeeds
+// when JWT rotation/blacklist is enabled, the rest 401 and call clearTokens(),
+// which then cascades into spurious "Authentication required" errors.
+let inFlightRefreshPromise: Promise<string | null> | null = null;
+
 const refreshAccessToken = async (): Promise<string | null> => {
+  if (inFlightRefreshPromise) {
+    return inFlightRefreshPromise;
+  }
+
   const refreshToken = getStoredRefreshToken();
   if (!refreshToken) return null;
 
-  try {
-    const data = await refreshWithToken(refreshToken);
-    if (!data || !data.access) {
+  inFlightRefreshPromise = (async () => {
+    try {
+      const data = await refreshWithToken(refreshToken);
+      if (!data || !data.access) {
+        clearTokens();
+        return null;
+      }
+      storeTokens(data.access, data.refresh ?? refreshToken, data.expires_in, {
+        persist: shouldPersistAuthSession(),
+      });
+      return data.access;
+    } catch (error: unknown) {
+      // Only log non-network errors (network errors are already handled in refreshWithToken)
+      const errorObj = error as any;
+      if (errorObj?.message !== "Failed to fetch" && errorObj?.name !== "TypeError") {
+        logError("Failed to refresh access token", error);
+      }
       clearTokens();
       return null;
+    } finally {
+      inFlightRefreshPromise = null;
     }
-    storeTokens(data.access, data.refresh ?? refreshToken, data.expires_in, {
-      persist: shouldPersistAuthSession(),
-    });
-    return data.access;
-  } catch (error: unknown) {
-    // Only log non-network errors (network errors are already handled in refreshWithToken)
-    const errorObj = error as any;
-    if (errorObj?.message !== "Failed to fetch" && errorObj?.name !== "TypeError") {
-      logError("Failed to refresh access token", error);
-    }
-    // Clear tokens on any error to prevent retry loops
-    clearTokens();
-  }
+  })();
 
-  return null;
+  return inFlightRefreshPromise;
 };
 
 const ensureAccessToken = async (): Promise<string | null> => {
   const token = getStoredAccessToken();
   if (token) return token;
+  // If another caller is already refreshing, await its result instead of
+  // racing a second refresh that would invalidate the first rotation.
+  if (inFlightRefreshPromise) {
+    return inFlightRefreshPromise;
+  }
   return refreshAccessToken();
 };
 

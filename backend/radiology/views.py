@@ -8,6 +8,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.exceptions import ValidationError
+from rest_framework.parsers import JSONParser, MultiPartParser, FormParser
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django.utils import timezone
@@ -165,12 +166,16 @@ class RadiologyOrderViewSet(viewsets.ModelViewSet):
 
     permission_classes = [IsAuthenticated]
     serializer_class = RadiologyOrderSerializer
+    parser_classes = [JSONParser, MultiPartParser, FormParser]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['patient', 'doctor', 'priority', 'consultation_session', 'visit']
+    filterset_fields = ['patient', 'doctor', 'priority', 'consultation_session', 'visit', 'source_type', 'external_clinic']
     search_fields = [
         'order_id',
         'clinical_notes',
         'provisional_diagnosis',
+        'external_requesting_doctor_name',
+        'manual_request_reference',
+        'external_clinic__name',
         'studies__procedure',
         'studies__body_part',
         'studies__modality',
@@ -184,7 +189,7 @@ class RadiologyOrderViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         qs = (
             RadiologyOrder.objects.all()
-            .select_related('patient', 'doctor', 'visit', 'consultation_session', 'created_by')
+            .select_related('patient', 'doctor', 'visit', 'consultation_session', 'created_by', 'external_clinic')
             .prefetch_related(
                 'studies',
                 'consultation_session__diagnoses__icd10_code',
@@ -194,6 +199,9 @@ class RadiologyOrderViewSet(viewsets.ModelViewSet):
         pm = self.request.query_params.get('processing_method')
         if pm in ('in_house', 'outsourced'):
             qs = qs.filter(studies__processing_method=pm).distinct()
+        source_type = self.request.query_params.get('source_type')
+        if source_type in ('internal_emr', 'external_manual'):
+            qs = qs.filter(source_type=source_type)
         study_status = self.request.query_params.get('study_status')
         if study_status in ('pending', 'processing', 'reported', 'rejected', 'verified'):
             qs = qs.filter(studies__status=study_status).distinct()
@@ -240,12 +248,15 @@ class RadiologyOrderViewSet(viewsets.ModelViewSet):
 
         base_qs = (
             RadiologyOrder.objects.all()
-            .select_related('patient', 'doctor', 'visit', 'consultation_session', 'created_by')
+            .select_related('patient', 'doctor', 'visit', 'consultation_session', 'created_by', 'external_clinic')
             .prefetch_related('studies')
         )
         pm = request.query_params.get('processing_method')
         if pm in ('in_house', 'outsourced'):
             base_qs = base_qs.filter(studies__processing_method=pm).distinct()
+        source_type = request.query_params.get('source_type')
+        if source_type in ('internal_emr', 'external_manual'):
+            base_qs = base_qs.filter(source_type=source_type)
         gender = request.query_params.get('gender')
         if gender in ('male', 'female'):
             base_qs = base_qs.filter(patient__gender=gender)
@@ -282,6 +293,29 @@ class RadiologyOrderViewSet(viewsets.ModelViewSet):
             'rejected': rejected_count,
             'stat': summary.get('stat', 0) or 0,
         })
+
+    def create(self, request, *args, **kwargs):
+        data = request.data.dict() if hasattr(request.data, 'dict') else dict(request.data)
+        if 'manual_request_file' in request.FILES:
+            data['manual_request_file'] = request.FILES['manual_request_file']
+
+        studies_data = data.get('studies_data')
+        if isinstance(studies_data, str):
+            try:
+                parsed_studies = json.loads(studies_data)
+                if isinstance(parsed_studies, list):
+                    data['studies_data'] = parsed_studies
+            except json.JSONDecodeError:
+                return Response(
+                    {'studies_data': 'Invalid studies_data JSON payload.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        serializer = self.get_serializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
     def list(self, request, *args, **kwargs):
         logger.debug("RadiologyOrderViewSet.list() called")
@@ -351,6 +385,11 @@ class RadiologyOrderViewSet(viewsets.ModelViewSet):
         order = serializer.save(created_by=self.request.user)
         
         # Log audit
+        requester_name = (
+            order.external_requesting_doctor_name
+            if order.source_type == 'external_manual'
+            else (order.doctor.get_full_name() if order.doctor else 'Unknown')
+        )
         AuditService.log_activity(
             user=self.request.user,
             action='create',
@@ -358,8 +397,13 @@ class RadiologyOrderViewSet(viewsets.ModelViewSet):
             object_id=str(order.id),
             module='radiology',
             object_repr=f'Radiology Order {order.order_id}',
-            description=f'Created radiology order {order.order_id} for patient {order.patient.get_full_name()}',
-            new_values={'order_id': order.order_id, 'priority': order.priority, 'patient_id': str(order.patient.id)},
+            description=f'Created radiology order {order.order_id} for patient {order.patient.get_full_name()} by Dr. {requester_name}',
+            new_values={
+                'order_id': order.order_id,
+                'priority': order.priority,
+                'patient_id': str(order.patient.id),
+                'source_type': order.source_type,
+            },
             request=self.request,
             )
 
@@ -369,7 +413,11 @@ class RadiologyOrderViewSet(viewsets.ModelViewSet):
 
             patient_name = order.patient.get_full_name()
             title = "New radiology order"
-            message = f"Radiology order {order.order_id} for {patient_name} is ready for Radiology."
+            if order.source_type == 'external_manual':
+                clinic_name = order.external_clinic.name if order.external_clinic else 'external clinic'
+                message = f"External radiology request {order.order_id} for {patient_name} from {clinic_name} is ready for Radiology."
+            else:
+                message = f"Radiology order {order.order_id} for {patient_name} is ready for Radiology."
 
             NotificationService.notify_role(
                 role_name='Radiologist',

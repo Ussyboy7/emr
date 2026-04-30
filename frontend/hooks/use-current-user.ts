@@ -14,9 +14,11 @@ import {
   AUTH_ALLOWED_PAGES_COOKIE,
   AUTH_HOME_ROUTE_COOKIE,
   AUTH_IS_SUPERUSER_COOKIE,
+  AUTH_SESSION_COOKIE,
   LEGACY_AUTH_ALLOWED_PAGES_COOKIE,
   LEGACY_AUTH_HOME_ROUTE_COOKIE,
   LEGACY_AUTH_IS_SUPERUSER_COOKIE,
+  LEGACY_AUTH_SESSION_COOKIE,
 } from "@/lib/auth-cookie-names";
 import { getHomeRouteForUser } from "@/lib/home-route";
 
@@ -111,6 +113,8 @@ const shouldUseCachedRemoteUser = (): boolean => {
 
 const writeAuthMirrorCookies = (mapped: User) => {
   try {
+    // Ensure middleware can treat this browser session as authenticated.
+    setCookie(AUTH_SESSION_COOKIE, "1", AUTH_REFRESH_SESSION_MAX_AGE_SECONDS);
     setCookie(AUTH_ALLOWED_PAGES_COOKIE, JSON.stringify(mapped.permissions || []), AUTH_REFRESH_SESSION_MAX_AGE_SECONDS);
     setCookie(AUTH_IS_SUPERUSER_COOKIE, mapped.isSuperuser ? "1" : "0", AUTH_REFRESH_SESSION_MAX_AGE_SECONDS);
     const home = getHomeRouteForUser(mapped);
@@ -120,6 +124,7 @@ const writeAuthMirrorCookies = (mapped: User) => {
     clearCookie(LEGACY_AUTH_ALLOWED_PAGES_COOKIE);
     clearCookie(LEGACY_AUTH_IS_SUPERUSER_COOKIE);
     clearCookie(LEGACY_AUTH_HOME_ROUTE_COOKIE);
+    clearCookie(LEGACY_AUTH_SESSION_COOKIE);
   } catch {
     // ignore cookie write errors
   }

@@ -92,6 +92,40 @@ class RadiologyAnalyticsSummaryView(APIView):
             "total": studies_total,
         }
 
+        source_rows = (
+            orders_qs.values("source_type")
+            .annotate(orders=Count("id", distinct=True), studies=Count("studies", distinct=True))
+            .order_by("-orders")
+        )
+        orders_by_source = {
+            (row["source_type"] or "internal_emr"): {
+                "orders": row["orders"],
+                "studies": row["studies"],
+            }
+            for row in source_rows
+        }
+
+        external_orders_qs = orders_qs.filter(source_type="external_manual")
+        external_clinic_rows = (
+            external_orders_qs.values(
+                "external_clinic_id",
+                "external_clinic__name",
+                "external_clinic__code",
+            )
+            .annotate(orders=Count("id", distinct=True), studies=Count("studies", distinct=True))
+            .order_by("-orders", "external_clinic__name")
+        )
+        external_by_clinic = [
+            {
+                "clinic_id": row["external_clinic_id"],
+                "clinic_name": row["external_clinic__name"] or "Unspecified clinic",
+                "clinic_code": row["external_clinic__code"] or "",
+                "orders": row["orders"],
+                "studies": row["studies"],
+            }
+            for row in external_clinic_rows
+        ]
+
         procedure_method_rows = (
             studies_qs.values("procedure", "processing_method")
             .annotate(count=Count("id"))
@@ -169,6 +203,8 @@ class RadiologyAnalyticsSummaryView(APIView):
                 "studies_by_template_category": by_template_category,
                 "studies_by_processing_method": processing_method,
                 "studies_processing_summary": processing_summary,
+                "orders_by_source": orders_by_source,
+                "external_orders_by_clinic": external_by_clinic,
                 "procedures_by_processing_method": procedures_processing_breakdown,
                 "orders_by_priority": orders_by_priority,
                 "by_day": by_day,

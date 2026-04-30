@@ -114,6 +114,11 @@ class RadiologyOrder(models.Model):
     """
     Radiology/imaging order from a doctor.
     """
+
+    SOURCE_TYPE_CHOICES = [
+        ('internal_emr', 'Internal EMR'),
+        ('external_manual', 'External manual request'),
+    ]
     
     PRIORITY_CHOICES = [
         ('routine', 'Routine'),
@@ -126,6 +131,19 @@ class RadiologyOrder(models.Model):
     doctor = models.ForeignKey('accounts.User', on_delete=models.SET_NULL, null=True, related_name='ordered_radiology')
     visit = models.ForeignKey('patients.Visit', on_delete=models.SET_NULL, null=True, blank=True, related_name='radiology_orders')
     consultation_session = models.ForeignKey('consultation.ConsultationSession', on_delete=models.SET_NULL, null=True, blank=True, related_name='radiology_orders')
+
+    source_type = models.CharField(max_length=30, choices=SOURCE_TYPE_CHOICES, default='internal_emr', db_index=True)
+    external_clinic = models.ForeignKey(
+        'organization.Clinic',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='external_radiology_orders',
+        help_text='Originating clinic/facility for manual external requests.',
+    )
+    external_requesting_doctor_name = models.CharField(max_length=200, blank=True)
+    manual_request_reference = models.CharField(max_length=100, blank=True)
+    manual_request_file = models.FileField(upload_to='radiology_requests/manual/', blank=True, null=True)
     
     priority = models.CharField(max_length=20, choices=PRIORITY_CHOICES, default='routine')
     clinic = models.CharField(max_length=100, blank=True)
@@ -153,6 +171,9 @@ class RadiologyOrder(models.Model):
     class Meta:
         db_table = 'radiology_orders'
         ordering = ['-ordered_at']
+        indexes = [
+            models.Index(fields=['source_type']),
+        ]
     
     def save(self, *args, **kwargs):
         """Auto-generate order_id if not provided and normalize clinic names."""

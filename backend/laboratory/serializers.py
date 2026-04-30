@@ -257,6 +257,7 @@ class LabOrderSerializer(serializers.ModelSerializer):
     doctor_name = serializers.SerializerMethodField()
     patient_details = serializers.SerializerMethodField()
     doctor_details = serializers.SerializerMethodField()
+    external_clinic_details = serializers.SerializerMethodField()
     tests = LabTestSerializer(many=True, read_only=True)
     # Allow tests to be written during creation (using nested serializer without order field)
     tests_data = LabTestCreateSerializer(many=True, write_only=True, required=False)
@@ -305,6 +306,17 @@ class LabOrderSerializer(serializers.ModelSerializer):
                 'name': str(obj.doctor) if obj.doctor else None,
                 'specialty': '',
             }
+
+    def get_external_clinic_details(self, obj):
+        clinic = getattr(obj, 'external_clinic', None)
+        if not clinic:
+            return None
+        return {
+            'id': clinic.id,
+            'name': clinic.name,
+            'code': clinic.code,
+            'location': clinic.location,
+        }
     
     def get_patient_details(self, obj):
         """Get patient details."""
@@ -348,10 +360,32 @@ class LabOrderSerializer(serializers.ModelSerializer):
             from common.clinic_utils import normalize_clinic_name
             return normalize_clinic_name(value)
         return value
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        source_type = attrs.get('source_type', getattr(self.instance, 'source_type', 'internal_emr'))
+        if source_type == 'external_manual':
+            if not attrs.get('external_clinic') and not getattr(self.instance, 'external_clinic_id', None):
+                raise serializers.ValidationError({'external_clinic': 'Originating clinic is required for external lab requests.'})
+            doctor_name = attrs.get(
+                'external_requesting_doctor_name',
+                getattr(self.instance, 'external_requesting_doctor_name', ''),
+            )
+            if not str(doctor_name or '').strip():
+                raise serializers.ValidationError({'external_requesting_doctor_name': 'Requesting doctor from the manual form is required.'})
+        return attrs
     
     def create(self, validated_data):
         """Create lab order with nested tests."""
         tests_data = validated_data.pop('tests_data', [])
+        if (
+            validated_data.get('source_type') != 'external_manual'
+            and not validated_data.get('doctor')
+            and validated_data.get('consultation_session')
+        ):
+            consultation_session = validated_data['consultation_session']
+            if consultation_session.doctor:
+                validated_data['doctor'] = consultation_session.doctor
         order = LabOrder.objects.create(**validated_data)
 
         # Create lab tests

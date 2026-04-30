@@ -604,8 +604,6 @@ export default function PatientVitalsPage() {
                       <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-wrap">
                         <span>{patient.patientId}</span>
                         <span>•</span>
-                        <span>{patient.personalNumber}</span>
-                        <span>•</span>
                         <span>{patient.age}y {patient.gender}</span>
                         <span>•</span>
                         <span>Last: {new Date(patient.latestVitals.recordedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} {new Date(patient.latestVitals.recordedAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</span>
