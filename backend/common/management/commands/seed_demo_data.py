@@ -236,7 +236,7 @@ class Command(BaseCommand):
                     "/consultation", "/consultation/history", "/consultation/referrals", "/consultation/start", "/consultation/wards",
                     "/laboratory", "/laboratory/completed", "/laboratory/orders", "/laboratory/templates", "/laboratory/verification",
                     "/medical-records", "/medical-records/appointments", "/medical-records/dependents", "/medical-records/patients", "/medical-records/patients/new", "/medical-records/referrals", "/medical-records/reports", "/medical-records/visits", "/medical-records/visits/new",
-                    "/nursing", "/nursing/patient-vitals", "/nursing/pool-queue", "/nursing/procedures", "/nursing/procedures/history", "/nursing/room-queue", "/nursing/wards",
+                    "/nursing", "/nursing/analytics", "/nursing/patient-vitals", "/nursing/pool-queue", "/nursing/procedures", "/nursing/procedures/history", "/nursing/room-queue", "/nursing/wards",
                     "/pharmacy", "/pharmacy/history", "/pharmacy/inventory", "/pharmacy/prescriptions",
                     "/physiotherapy", "/physiotherapy/completed", "/physiotherapy/pool-queue",
                     "/radiology", "/radiology/completed", "/radiology/orders", "/radiology/templates", "/radiology/verification",
@@ -261,7 +261,7 @@ class Command(BaseCommand):
                     '/consultation', '/consultation/start', '/consultation/history',
                     '/consultation/wards', '/consultation/referrals',
                     # Nursing - Limited access
-                    '/nursing', '/nursing/patient-vitals', '/nursing/pool-queue', '/nursing/room-queue',
+                    '/nursing', '/nursing/analytics', '/nursing/patient-vitals', '/nursing/pool-queue', '/nursing/room-queue',
                     # Laboratory - View access
                     '/laboratory', '/laboratory/orders', '/laboratory/verification', '/laboratory/completed',
                     # Pharmacy - View access
@@ -297,6 +297,7 @@ class Command(BaseCommand):
                     # Nursing - All permissions (add explicit permissions for UI display)
                     '/nursing/patient-vitals',  # nursing_vitals
                     '/nursing/pool-queue',  # nursing_queue
+                    '/nursing/analytics',  # nursing_queue — pool metrics
                     '/nursing/room-queue',  # nursing_queue
                     '/nursing/procedures',  # nursing_procedures
                     '/nursing/procedures/history',  # nursing_notes (map to notes)
@@ -396,6 +397,7 @@ class Command(BaseCommand):
 
                     # Nursing coordination for patient management
                     '/nursing/pool-queue',  # Access to pool queue for patient coordination
+                    '/nursing/analytics',  # Pool workload metrics
 
                     # Limited consultation access for referrals
                     '/consultation/referrals',  # View physiotherapy referrals

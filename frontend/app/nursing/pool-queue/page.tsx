@@ -1005,6 +1005,7 @@ export default function NursingPoolQueuePage() {
       case 'Ready for Consultation': return 'border-emerald-500/50 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10';
       case 'Sent to Room': return 'border-violet-500/50 text-violet-600 dark:text-violet-400 bg-violet-500/10';
       case 'Sent to Physiotherapy': return 'border-indigo-500/50 text-indigo-600 dark:text-indigo-400 bg-indigo-500/10';
+      case 'Sent to Eye Clinic': return 'border-sky-500/50 text-sky-600 dark:text-sky-400 bg-sky-500/10';
       default: return 'border-gray-500/50 text-gray-600 dark:text-gray-400 bg-gray-500/10';
     }
   };
@@ -1190,7 +1191,27 @@ export default function NursingPoolQueuePage() {
               </CardContent>
             </Card>
           ) : (
-            displayedPatients.map((patient) => (
+            displayedPatients.map((patient) => {
+              const hasPhysio = patient.clinics?.some((c: string) =>
+                clinicMatches(c, 'Physiotherapy', opdClinicNames)
+              ) ?? false;
+              const hasEye = patient.clinics?.some((c: string) =>
+                clinicMatches(c, 'Eye Clinic', opdClinicNames)
+              ) ?? false;
+              const hasOtherClinics = patient.clinics?.some(
+                (c: string) =>
+                  !clinicMatches(c, 'Physiotherapy', opdClinicNames) &&
+                  !clinicMatches(c, 'Eye Clinic', opdClinicNames)
+              ) ?? false;
+              const isOnlyPhysio = hasPhysio && !hasOtherClinics;
+              const isOnlyEye = hasEye && !hasOtherClinics;
+              const isMultiClinic = (patient.clinics?.length ?? 0) > 1;
+              const showMarkLeft =
+                isMultiClinic ||
+                (patient.nursingStatus !== 'Sent to Physiotherapy' &&
+                  patient.nursingStatus !== 'Sent to Eye Clinic');
+
+              return (
               <Card key={patient.id} className={`border-l-4 ${getVisitTypeBorderColor(patient.visitType)} hover:shadow-md transition-shadow`}>
                 <CardContent className="py-3 px-4">
                   <div className="flex items-center gap-3">
@@ -1201,16 +1222,61 @@ export default function NursingPoolQueuePage() {
                     <div className="flex-1 min-w-0">
                       {/* Row 1: Name + Badges + Actions */}
                       <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2 flex-wrap min-w-0">
-                          <span className="font-semibold text-foreground truncate">{patient.name}</span>
-                          <Badge variant="outline" className={`text-[10px] px-1.5 py-0 h-5 ${getVisitTypeBadge(patient.visitType)}`}>{getVisitTypeLabel(patient.visitType)}</Badge>
-                          <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${getStatusColor(patient.nursingStatus)}`}>
-                            {patient.nursingStatus === 'Sent to Room' && patient.consultationRoom
-                              ? `Sent to ${patient.consultationRoom}`
-                              : patient.nursingStatus === 'Sent to Physiotherapy'
-                                ? 'Checked in to Physiotherapy'
-                                : patient.nursingStatus}
-                          </Badge>
+                        <div className="flex flex-col gap-1 min-w-0 flex-1">
+                          <div className="flex items-center gap-2 flex-wrap min-w-0">
+                            <span className="font-semibold text-foreground truncate">{patient.name}</span>
+                            <Badge variant="outline" className={`text-[10px] px-1.5 py-0 h-5 ${getVisitTypeBadge(patient.visitType)}`}>{getVisitTypeLabel(patient.visitType)}</Badge>
+                            <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${getStatusColor(patient.nursingStatus)}`}>
+                              {patient.nursingStatus === 'Sent to Room' && patient.consultationRoom
+                                ? `Sent to ${patient.consultationRoom}`
+                                : patient.nursingStatus === 'Sent to Physiotherapy'
+                                  ? 'Checked in to Physiotherapy'
+                                  : patient.nursingStatus === 'Sent to Eye Clinic'
+                                    ? 'Sent to Eye Clinic'
+                                    : patient.nursingStatus}
+                            </Badge>
+                          </div>
+                          {isMultiClinic && (
+                            <div className="flex flex-wrap gap-1 items-center">
+                              {hasEye && (
+                                <Badge
+                                  variant="outline"
+                                  className={`text-[9px] px-1.5 py-0 h-4 ${
+                                    patient.sentToEyeClinic
+                                      ? 'border-emerald-500/40 text-emerald-700 dark:text-emerald-400 bg-emerald-500/10'
+                                      : 'border-amber-500/40 text-amber-800 dark:text-amber-400 bg-amber-500/10'
+                                  }`}
+                                >
+                                  Eye clinic {patient.sentToEyeClinic ? '✓' : 'pending'}
+                                </Badge>
+                              )}
+                              {hasOtherClinics && (
+                                <Badge
+                                  variant="outline"
+                                  className={`text-[9px] px-1.5 py-0 h-4 ${
+                                    patient.consultationRoom
+                                      ? 'border-emerald-500/40 text-emerald-700 dark:text-emerald-400 bg-emerald-500/10'
+                                      : 'border-amber-500/40 text-amber-800 dark:text-amber-400 bg-amber-500/10'
+                                  }`}
+                                  title={patient.consultationRoom || undefined}
+                                >
+                                  Consultation {patient.consultationRoom ? `✓ ${patient.consultationRoom}` : 'pending'}
+                                </Badge>
+                              )}
+                              {hasPhysio && (
+                                <Badge
+                                  variant="outline"
+                                  className={`text-[9px] px-1.5 py-0 h-4 ${
+                                    patient.sentToPhysio
+                                      ? 'border-emerald-500/40 text-emerald-700 dark:text-emerald-400 bg-emerald-500/10'
+                                      : 'border-amber-500/40 text-amber-800 dark:text-amber-400 bg-amber-500/10'
+                                  }`}
+                                >
+                                  Physio {patient.sentToPhysio ? '✓' : 'pending'}
+                                </Badge>
+                              )}
+                            </div>
+                          )}
                         </div>
                         <div className="flex items-center gap-1 flex-shrink-0">
                           {patient.nursingStatus === 'Pending' && (
@@ -1218,7 +1284,11 @@ export default function NursingPoolQueuePage() {
                               <Stethoscope className="h-3 w-3 mr-1" />Vitals
                             </Button>
                           )}
-                          {(patient.nursingStatus === 'Vitals Recorded' || patient.nursingStatus === 'Ready for Consultation' || patient.nursingStatus === 'Sent to Physiotherapy' || patient.nursingStatus === 'Sent to Room') && (
+                          {(patient.nursingStatus === 'Vitals Recorded' ||
+                            patient.nursingStatus === 'Ready for Consultation' ||
+                            patient.nursingStatus === 'Sent to Physiotherapy' ||
+                            patient.nursingStatus === 'Sent to Room' ||
+                            patient.nursingStatus === 'Sent to Eye Clinic') && (
                             <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openViewVitals(patient)}>
                               <Eye className="h-4 w-4 text-muted-foreground hover:text-primary" />
                             </Button>
@@ -1230,26 +1300,14 @@ export default function NursingPoolQueuePage() {
                           )}
                           {/* Action buttons for sending patient to rooms */}
                           {(() => {
-                            const hasPhysio = patient.clinics?.some((c: string) =>
-                              clinicMatches(c, 'Physiotherapy', opdClinicNames)
-                            );
-                            const hasEye = patient.clinics?.some((c: string) =>
-                              clinicMatches(c, 'Eye Clinic', opdClinicNames)
-                            );
-                            const hasOtherClinics = patient.clinics?.some(
-                              (c: string) =>
-                                !clinicMatches(c, 'Physiotherapy', opdClinicNames) &&
-                                !clinicMatches(c, 'Eye Clinic', opdClinicNames)
-                            );
-                            const isOnlyPhysio = hasPhysio && !hasOtherClinics;
-                            const isOnlyEye = hasEye && !hasOtherClinics;
                             const canRoute = patient.nursingStatus === 'Vitals Recorded' || patient.nursingStatus === 'Ready for Consultation';
 
-                            // Multi-clinic: allow explicit direct sends to specialty clinics and room routing in parallel.
-                            if (patient.clinics && patient.clinics.length > 1) {
-                              if (!canRoute) return null;
+                            // Multi-clinic: each routing leg is independent once vitals are no longer Pending.
+                            if (isMultiClinic) {
+                              const vitalsNotPending = patient.nursingStatus !== 'Pending';
+                              if (!vitalsNotPending) return null;
                               return (
-                                <div className="flex items-center gap-1">
+                                <div className="flex items-center gap-1 flex-wrap justify-end">
                                   {hasPhysio && (
                                     patient.sentToPhysio ? (
                                       <div className="h-7 w-7 flex items-center justify-center rounded border border-indigo-500/50 text-indigo-600 dark:text-indigo-400 bg-indigo-500/10">
@@ -1290,14 +1348,24 @@ export default function NursingPoolQueuePage() {
                                   )}
 
                                   {hasOtherClinics && (
-                                    <Button
-                                      size="sm"
-                                      onClick={() => openRoomPicker(patient)}
-                                      className="h-7 px-2 bg-emerald-500 hover:bg-emerald-600 text-white text-xs"
-                                    >
-                                      <ArrowRight className="h-3 w-3 mr-1" />
-                                      Send
-                                    </Button>
+                                    patient.consultationRoom ? (
+                                      <div
+                                        className="h-7 px-2 flex items-center justify-center rounded border border-emerald-500/50 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 text-xs font-medium max-w-[140px] truncate"
+                                        title={patient.consultationRoom}
+                                      >
+                                        <CheckCircle2 className="h-3 w-3 mr-1 shrink-0" />
+                                        Room
+                                      </div>
+                                    ) : (
+                                      <Button
+                                        size="sm"
+                                        onClick={() => openRoomPicker(patient)}
+                                        className="h-7 px-2 bg-emerald-500 hover:bg-emerald-600 text-white text-xs"
+                                      >
+                                        <ArrowRight className="h-3 w-3 mr-1" />
+                                        Send
+                                      </Button>
+                                    )
                                   )}
                                 </div>
                               );
@@ -1371,7 +1439,7 @@ export default function NursingPoolQueuePage() {
                               <CheckCircle2 className="h-4 w-4" />
                             </div>
                           )}
-                          {patient.nursingStatus !== 'Sent to Physiotherapy' && patient.nursingStatus !== 'Sent to Eye Clinic' && (
+                          {showMarkLeft && (
                             <Button
                               size="sm"
                               variant="destructive"
@@ -1445,7 +1513,8 @@ export default function NursingPoolQueuePage() {
                   </div>
                 </CardContent>
               </Card>
-            ))
+              );
+            })
           )}
         </div>
 

@@ -22,6 +22,44 @@ export interface VisitFilters {
   nursing_status?: 'pending' | 'vitals_incomplete' | 'ready' | 'sent_to_room';
 }
 
+/** Full nursing pool report (trends, legs, aligned vs queue-date room counts). */
+export interface NursingPoolAnalyticsSummary {
+  total: number;
+  pending_vitals: number;
+  vitals_incomplete: number;
+  ready_for_consultation: number;
+  /** Legacy dashboard card: active queue rows whose queued_at is in range. */
+  sent_to_room: number;
+  sent_to_room_by_queue_date: number;
+  /** Active queue row present; visit already limited by visit date (recommended for reporting). */
+  sent_to_room_aligned: number;
+  multi_clinic_visits: number;
+  single_clinic_visits: number;
+  visits_with_eye_clinic: number;
+  visits_with_physiotherapy: number;
+  eye_checked_in: number;
+  physio_checked_in: number;
+}
+
+export interface NursingPoolAnalyticsDayRow {
+  date: string;
+  total: number;
+  pending_vitals: number;
+  vitals_incomplete: number;
+  ready_for_consultation: number;
+  sent_to_room_aligned: number;
+  sent_to_room_by_queue_date: number;
+  multi_clinic: number;
+  checked_in_physio: number;
+  checked_in_eye: number;
+}
+
+export interface NursingPoolAnalyticsResponse {
+  summary: NursingPoolAnalyticsSummary;
+  by_day: NursingPoolAnalyticsDayRow[];
+  period: { start: string; end: string };
+}
+
 class VisitService {
   /**
    * Get all visits
@@ -45,6 +83,17 @@ class VisitService {
     const query = buildQueryString((params || {}) as Record<string, string | number | boolean | undefined>);
     // Trailing slash before query (same pattern as `/visits/?page=1`) — Django route is `nursing-pool-metrics/`.
     const path = query ? `/visits/nursing-pool-metrics/?${query.slice(1)}` : '/visits/nursing-pool-metrics/';
+    return apiFetch(path);
+  }
+
+  /** Analytics report: daily breakdown, vitals_incomplete, physio/eye legs, aligned sent_to_room. */
+  async getNursingPoolAnalytics(
+    params?: Omit<VisitFilters, 'page' | 'page_size' | 'nursing_status'>
+  ): Promise<NursingPoolAnalyticsResponse> {
+    const query = buildQueryString((params || {}) as Record<string, string | number | boolean | undefined>);
+    const path = query
+      ? `/visits/nursing-pool-analytics/?${query.slice(1)}`
+      : '/visits/nursing-pool-analytics/';
     return apiFetch(path);
   }
 

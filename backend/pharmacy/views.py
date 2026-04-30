@@ -12,7 +12,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django.utils import timezone
 from django.db import transaction
-from django.db.models import Q, F
+from django.db.models import Q, F, Avg, DurationField, ExpressionWrapper
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import never_cache
 from decimal import Decimal, InvalidOperation
@@ -1263,6 +1263,44 @@ class DispenseViewSet(viewsets.ReadOnlyModelViewSet):
         return Dispense.objects.all().select_related(
             'prescription', 'medication', 'dispensed_by', 'inventory_item',
             'prescription_item', 'prescription_item__generic', 'prescription_item__medication'
+        )
+
+    @action(detail=False, methods=['get'], url_path='summary-stats')
+    def summary_stats(self, request):
+        """
+        System-wide dispense KPIs (not limited to the current list page).
+        Uses server timezone date for "today".
+        """
+        qs = self.get_queryset()
+        today = timezone.now().date()
+        total = qs.count()
+        today_count = qs.filter(dispensed_at__date=today).count()
+        substitutions = qs.filter(dispense_context_snapshot='substituted').count()
+
+        wait_qs = qs.filter(prescription__dispensing_started_at__isnull=False)
+        agg = (
+            wait_qs.annotate(
+                _wait=ExpressionWrapper(
+                    F('dispensed_at') - F('prescription__dispensing_started_at'),
+                    output_field=DurationField(),
+                )
+            ).aggregate(avg_wait=Avg('_wait'))
+        )
+        avg_td = agg.get('avg_wait')
+        avg_minutes = 0
+        if avg_td is not None:
+            try:
+                avg_minutes = max(0, int(avg_td.total_seconds() // 60))
+            except Exception:
+                avg_minutes = 0
+
+        return Response(
+            {
+                'total': total,
+                'today': today_count,
+                'substitutions': substitutions,
+                'avg_wait_minutes': avg_minutes,
+            }
         )
 
 

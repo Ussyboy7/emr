@@ -115,6 +115,7 @@ const menuSections: MenuSection[] = [
     basePath: "/nursing",
     items: [
       { label: "Home", href: "/nursing", icon: LayoutDashboard },
+      { label: "Analytics", href: "/nursing/analytics", icon: BarChart3 },
       { label: "Pool Queue", href: "/nursing/pool-queue", icon: Users },
       { label: "Room Queue", href: "/nursing/room-queue", icon: DoorOpen },
       { label: "Patient Vitals", href: "/nursing/patient-vitals", icon: Activity },

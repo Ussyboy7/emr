@@ -16,6 +16,11 @@ export type {
   VitalReading,
 } from './patient-service';
 export type {
+  NursingPoolAnalyticsResponse,
+  NursingPoolAnalyticsSummary,
+  NursingPoolAnalyticsDayRow,
+} from './visit-service';
+export type {
   Prescription,
   PrescriptionItem,
   Medication,

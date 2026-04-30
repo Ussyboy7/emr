@@ -3,20 +3,19 @@
 import { useState, useMemo, useEffect } from 'react';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { pharmacyService, type Dispense as ApiDispense } from '@/lib/services';
+import { pharmacyService } from '@/lib/services';
 import { PatientAvatar } from "@/components/shared/PatientAvatar";
 import { useServerToday } from '@/hooks/use-server-today';
-import { formatLocalYmd } from '@/lib/laboratory/constants';
+import { getServerToday, peekServerTimezone } from '@/lib/utils/serverTime';
 import { 
   History, Search, Eye, Clock, CheckCircle2, Pill, Calendar, Package,
-  User, TrendingUp, ArrowUpDown, Loader2, AlertTriangle
+  TrendingUp, Loader2, AlertTriangle
 } from 'lucide-react';
 
 // Type definitions
@@ -42,7 +41,13 @@ interface DispenseHistoryRecord {
   substitutions: number;
 }
 
-// Dispense history data will be loaded from API
+/** Calendar YYYY-MM-DD arithmetic (timezone-neutral). */
+function ymdAddDays(ymd: string, deltaDays: number): string {
+  const [y, m, d] = ymd.split('-').map(Number);
+  const x = new Date(Date.UTC(y, m - 1, d));
+  x.setUTCDate(x.getUTCDate() + deltaDays);
+  return x.toISOString().slice(0, 10);
+}
 
 export default function DispenseHistoryPage() {
   const serverToday = useServerToday();
@@ -51,23 +56,58 @@ export default function DispenseHistoryPage() {
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [dateFilter, setDateFilter] = useState('today');
+  const [dateFilter, setDateFilter] = useState('all');
   const [genderFilter, setGenderFilter] = useState('all');
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(50);
   const [totalCount, setTotalCount] = useState(0);
+  const [summaryStats, setSummaryStats] = useState<{
+    total: number;
+    today: number;
+    substitutions: number;
+    avg_wait_minutes: number;
+  } | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(true);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
   const [selectedRecord, setSelectedRecord] = useState<DispenseHistoryRecord | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
+  const [serverTzLabel, setServerTzLabel] = useState<string | null>(null);
 
-  // Load dispense history from API
+  useEffect(() => {
+    void getServerToday().then(() => setServerTzLabel(peekServerTimezone()));
+  }, []);
   useEffect(() => {
     loadHistory();
   }, [currentPage, itemsPerPage]);
+
+  const loadSummaryStats = async () => {
+    setSummaryLoading(true);
+    setSummaryError(null);
+    try {
+      const s = await pharmacyService.getDispenseHistorySummaryStats();
+      setSummaryStats(s);
+    } catch (e: unknown) {
+      setSummaryStats(null);
+      setSummaryError(e instanceof Error ? e.message : 'Failed to load summary statistics');
+    } finally {
+      setSummaryLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadSummaryStats();
+  }, []);
 
   const loadHistory = async () => {
     try {
       setLoading(true);
       setError(null);
+      await getServerToday();
+      const serverTz = peekServerTimezone();
+      setServerTzLabel(serverTz);
+      if (!serverTz) {
+        throw new Error('Server timezone unavailable. Check /common/server-time/.');
+      }
       const response = await pharmacyService.getDispenseHistory({
         page: currentPage,
         page_size: itemsPerPage,
@@ -130,8 +170,12 @@ export default function DispenseHistoryPage() {
           medications,
           doctor: doctorName,
           pharmacist: dispense.dispensed_by_name || '',
-          date: dispense.dispensed_at.split('T')[0],
-          time: new Date(dispense.dispensed_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+          date: new Date(dispense.dispensed_at).toLocaleDateString('en-CA', { timeZone: serverTz }),
+          time: new Date(dispense.dispensed_at).toLocaleTimeString('en-US', {
+            hour: '2-digit',
+            minute: '2-digit',
+            timeZone: serverTz,
+          }),
           status: 'Dispensed',
           waitTime,
           substitutions,
@@ -157,22 +201,17 @@ export default function DispenseHistoryPage() {
       const matchesStatus = statusFilter === 'all' || record.status.toLowerCase().replace(' ', '-') === statusFilter;
       const matchesGender = genderFilter === 'all' || record.patient.gender.toLowerCase() === genderFilter.toLowerCase();
       
-      // Date filter — anchor on the server's calendar when available.
+      // Date filter — server calendar only (record.date is YYYY-MM-DD in server TZ).
       if (dateFilter !== 'all') {
-        const dispensedDate = new Date(record.date);
-        const today = serverToday ? new Date(`${serverToday}T00:00:00`) : new Date();
-        today.setHours(0, 0, 0, 0);
-
-        if (dateFilter === 'today' && dispensedDate.toDateString() !== today.toDateString()) return false;
+        if (!serverToday) return false;
+        if (dateFilter === 'today' && record.date !== serverToday) return false;
         if (dateFilter === 'week') {
-          const weekAgo = new Date(today);
-          weekAgo.setDate(weekAgo.getDate() - 7);
-          if (dispensedDate < weekAgo) return false;
+          const weekStartYmd = ymdAddDays(serverToday, -7);
+          if (record.date < weekStartYmd || record.date > serverToday) return false;
         }
         if (dateFilter === 'month') {
-          const monthAgo = new Date(today);
-          monthAgo.setMonth(monthAgo.getMonth() - 1);
-          if (dispensedDate < monthAgo) return false;
+          const monthStartYmd = ymdAddDays(serverToday, -30);
+          if (record.date < monthStartYmd || record.date > serverToday) return false;
         }
       }
       
@@ -188,17 +227,16 @@ export default function DispenseHistoryPage() {
     setCurrentPage(1);
   }, [searchQuery, statusFilter, dateFilter, genderFilter]);
 
-  // Stats — anchor "today" on the server's calendar so counts match the rest
-  // of the app regardless of the user's timezone.
+  // KPIs: system-wide only (no page-level fallback).
   const stats = useMemo(() => {
-    const todayYmd = serverToday || formatLocalYmd(new Date());
+    if (!summaryStats) return null;
     return {
-      total: history.length,
-      today: history.filter(r => r.date === todayYmd).length,
-      withSubstitutions: history.filter(r => r.substitutions > 0).length,
-      avgWaitTime: Math.round(history.reduce((sum, r) => sum + parseInt(r.waitTime), 0) / history.length) || 0,
+      total: summaryStats.total,
+      today: summaryStats.today,
+      withSubstitutions: summaryStats.substitutions,
+      avgWaitTime: summaryStats.avg_wait_minutes,
     };
-  }, [history, serverToday]);
+  }, [summaryStats]);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -210,10 +248,15 @@ export default function DispenseHistoryPage() {
   };
 
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
+    const parts = dateString.split('-').map(Number);
+    if (parts.length !== 3 || parts.some((n) => !Number.isFinite(n))) {
+      return dateString;
+    }
+    const [y, m, d] = parts;
+    return new Date(y, m - 1, d).toLocaleDateString('en-US', {
       month: 'short',
       day: 'numeric',
-      year: 'numeric'
+      year: 'numeric',
     });
   };
 
@@ -237,17 +280,24 @@ export default function DispenseHistoryPage() {
         </div>
 
         {/* Stats Cards */}
+        {summaryError && (
+          <Card className="border-destructive/50 bg-destructive/5">
+            <CardContent className="py-3 text-sm text-destructive">{summaryError}</CardContent>
+          </Card>
+        )}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <Card>
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Total Dispensed</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-violet-600">{stats.total}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-violet-600 tabular-nums">
+                    {summaryLoading ? '—' : stats ? stats.total.toLocaleString() : '—'}
+                  </p>
                 </div>
                 <Package className="h-6 w-6 text-violet-500" />
               </div>
-              <p className="text-xs text-muted-foreground mt-1">All time records</p>
+              <p className="text-xs text-muted-foreground mt-1">All dispense line items (system-wide)</p>
             </CardContent>
           </Card>
           <Card>
@@ -255,11 +305,15 @@ export default function DispenseHistoryPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Today</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-emerald-600">{stats.today}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-emerald-600 tabular-nums">
+                    {summaryLoading ? '—' : stats ? stats.today.toLocaleString() : '—'}
+                  </p>
                 </div>
                 <Calendar className="h-6 w-6 text-emerald-500" />
               </div>
-              <p className="text-xs text-muted-foreground mt-1">Dispensed today</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Server calendar {serverToday || '—'} ({serverTzLabel || '…'})
+              </p>
             </CardContent>
           </Card>
           <Card>
@@ -267,11 +321,13 @@ export default function DispenseHistoryPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Substitutions</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-amber-600">{stats.withSubstitutions}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-amber-600 tabular-nums">
+                    {summaryLoading ? '—' : stats ? stats.withSubstitutions.toLocaleString() : '—'}
+                  </p>
                 </div>
                 <TrendingUp className="h-6 w-6 text-amber-500" />
               </div>
-              <p className="text-xs text-muted-foreground mt-1">With substitutions</p>
+              <p className="text-xs text-muted-foreground mt-1">Snapshot marked substituted</p>
             </CardContent>
           </Card>
           <Card>
@@ -279,11 +335,13 @@ export default function DispenseHistoryPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Avg Wait Time</p>
-                  <p className="text-2xl sm:text-3xl font-bold text-blue-600">{stats.avgWaitTime}m</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-blue-600 tabular-nums">
+                    {summaryLoading ? '—' : stats ? `${stats.avgWaitTime}m` : '—'}
+                  </p>
                 </div>
                 <Clock className="h-6 w-6 text-blue-500" />
               </div>
-              <p className="text-xs text-muted-foreground mt-1">Average processing</p>
+              <p className="text-xs text-muted-foreground mt-1">Start dispensing → dispensed</p>
             </CardContent>
           </Card>
         </div>
@@ -347,7 +405,7 @@ export default function DispenseHistoryPage() {
               <CardContent className="p-8 text-center text-muted-foreground">
                 <AlertTriangle className="h-12 w-12 mx-auto mb-4 opacity-50" />
                 <p className="text-red-600 dark:text-red-400">{error}</p>
-                <Button variant="outline" className="mt-4" onClick={loadHistory}>Retry</Button>
+                <Button variant="outline" className="mt-4" onClick={() => { void loadHistory(); void loadSummaryStats(); }}>Retry</Button>
               </CardContent>
             </Card>
           ) : paginatedHistory.length > 0 ? (

@@ -621,6 +621,16 @@ class PharmacyService {
     return await apiFetch<{ results: Dispense[]; count: number }>(url);
   }
 
+  /** System-wide dispense KPIs (not limited to one list page). */
+  async getDispenseHistorySummaryStats(): Promise<{
+    total: number;
+    today: number;
+    substitutions: number;
+    avg_wait_minutes: number;
+  }> {
+    return apiFetch('/v1/pharmacy/history/summary-stats/');
+  }
+
   /**
    * Get pharmacy statistics
    */

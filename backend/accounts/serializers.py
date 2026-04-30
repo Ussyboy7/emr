@@ -92,6 +92,7 @@ class UserSerializer(serializers.ModelSerializer):
                 "/medical-records/reports": "reports_view",
                 # Nursing
                 "/nursing": "nursing_vitals",  # Just need one permission to count as having nursing access
+                "/nursing/analytics": "nursing_queue",
                 "/nursing/pool-queue": "nursing_queue",
                 "/nursing/room-queue": "nursing_queue",
                 "/nursing/patient-vitals": "nursing_vitals",

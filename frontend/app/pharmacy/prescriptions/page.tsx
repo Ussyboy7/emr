@@ -117,6 +117,7 @@ const mapApiPrescriptionStatusToUi = (s: string | undefined, fallback: string): 
   if (s === 'dispensing') return 'Processing';
   if (s === 'dispensed') return 'Dispensed';
   if (s === 'partially_dispensed') return 'Partially Dispensed';
+  if (s === 'cancelled') return 'On Hold';
   return fallback;
 };
 
@@ -595,7 +596,18 @@ export default function PrescriptionsPage() {
           location,
           date: rx.prescribed_at.split('T')[0],
           time: new Date(rx.prescribed_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
-          status: rx.status === 'pending' ? 'Pending' : rx.status === 'dispensing' ? 'Processing' : rx.status === 'dispensed' ? 'Dispensed' : rx.status === 'partially_dispensed' ? 'Partially Dispensed' : 'On Hold',
+          status:
+            rx.status === 'pending'
+              ? 'Pending'
+              : rx.status === 'dispensing'
+                ? 'Processing'
+                : rx.status === 'dispensed'
+                  ? 'Dispensed'
+                  : rx.status === 'partially_dispensed'
+                    ? 'Partially Dispensed'
+                    : rx.status === 'cancelled'
+                      ? 'On Hold'
+                      : 'On Hold',
           priority,
           waitTime,
           clinicalNotes: rx.diagnosis || '',
@@ -898,13 +910,14 @@ export default function PrescriptionsPage() {
     setCurrentPage(1);
   }, [searchQuery, statusFilter, dateFilter, priorityFilter, genderFilter]);
 
-  // Calculate stats from filtered results
+  // Calculate stats from filtered results (queue + date/priority/gender filters)
   const stats = useMemo(() => ({
-    pending: filteredPrescriptions.filter(r => r.status === 'Pending').length,
-    processing: filteredPrescriptions.filter(r => r.status === 'Processing').length,
-    ready: filteredPrescriptions.filter(r => r.status === 'Ready').length,
-    onHold: filteredPrescriptions.filter(r => r.status === 'On Hold').length,
-    emergency: filteredPrescriptions.filter(r => r.priority === 'Emergency').length,
+    pending: filteredPrescriptions.filter((r) => r.status === 'Pending').length,
+    processing: filteredPrescriptions.filter((r) => r.status === 'Processing').length,
+    total: filteredPrescriptions.length,
+    dispensed: filteredPrescriptions.filter(
+      (r) => r.status === 'Dispensed' || r.status === 'Partially Dispensed'
+    ).length,
   }), [filteredPrescriptions]);
 
   const getPriorityColor = (priority: string) => {
@@ -1685,7 +1698,7 @@ export default function PrescriptionsPage() {
           </div>
         </div>
 
-        {/* Stats Cards - 4 key workflow metrics */}
+        {/* Stats Cards — workflow + volume */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <Card>
             <CardContent className="p-4">
@@ -1713,10 +1726,10 @@ export default function PrescriptionsPage() {
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-muted-foreground">Ready</p>
-                  <p className="text-2xl font-bold text-emerald-600">{stats.ready}</p>
+                  <p className="text-sm text-muted-foreground">Total prescriptions</p>
+                  <p className="text-2xl font-bold text-violet-600">{stats.total}</p>
                 </div>
-                <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+                <Hash className="h-5 w-5 text-violet-500" />
               </div>
             </CardContent>
           </Card>
@@ -1724,10 +1737,10 @@ export default function PrescriptionsPage() {
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-muted-foreground">Emergency</p>
-                  <p className="text-2xl font-bold text-red-600">{stats.emergency}</p>
+                  <p className="text-sm text-muted-foreground">Dispensed</p>
+                  <p className="text-2xl font-bold text-emerald-600">{stats.dispensed}</p>
                 </div>
-                <AlertTriangle className="h-5 w-5 text-red-500" />
+                <CheckCircle2 className="h-5 w-5 text-emerald-500" />
               </div>
             </CardContent>
           </Card>
@@ -1747,7 +1760,7 @@ export default function PrescriptionsPage() {
                 />
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                <Select value={dateFilter} onValueChange={setDateFilter} >
+                <Select value={dateFilter} onValueChange={setDateFilter}>
                   <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Time</SelectItem>
@@ -1761,13 +1774,13 @@ export default function PrescriptionsPage() {
                   <SelectContent>
                     <SelectItem value="all">All Status</SelectItem>
                     <SelectItem value="pending">Pending</SelectItem>
-                    <SelectItem value="processing">Processing</SelectItem>
-                    <SelectItem value="ready">Ready</SelectItem>
-                    <SelectItem value="on hold">On Hold</SelectItem>
-                    <SelectItem value="partially dispensed">Partial</SelectItem>
+                    <SelectItem value="dispensing">Processing</SelectItem>
+                    <SelectItem value="dispensed">Dispensed</SelectItem>
+                    <SelectItem value="partially_dispensed">Partially Dispensed</SelectItem>
+                    <SelectItem value="cancelled">Cancelled</SelectItem>
                   </SelectContent>
                 </Select>
-                <Select value={priorityFilter} onValueChange={setPriorityFilter} >
+                <Select value={priorityFilter} onValueChange={setPriorityFilter}>
                   <SelectTrigger className="w-[150px]"><SelectValue placeholder="Priority" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Priority</SelectItem>
@@ -1777,7 +1790,7 @@ export default function PrescriptionsPage() {
                     <SelectItem value="low">Low</SelectItem>
                   </SelectContent>
                 </Select>
-                <Select value={genderFilter} onValueChange={setGenderFilter} >
+                <Select value={genderFilter} onValueChange={setGenderFilter}>
                   <SelectTrigger className="w-[120px]"><SelectValue placeholder="Gender" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Gender</SelectItem>

@@ -40,9 +40,12 @@ const getBaseUrl = (): string => {
   if (!baseUrl || baseUrl.trim() === "") {
     throw new Error("NEXT_PUBLIC_API_URL environment variable is not set");
   }
-  // Ensure URL ends with /api
   const normalized = baseUrl.trim().replace(/\/$/, "");
-  return normalized.endsWith("/api") ? normalized : `${normalized}/api`;
+  // Accept full roots: /api (legacy alias) or /api/v1 (versioned).
+  if (normalized.endsWith("/api/v1") || normalized.endsWith("/api")) {
+    return normalized;
+  }
+  return `${normalized}/api`;
 };
 
 const isBrowser = () => typeof window !== "undefined";

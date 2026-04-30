@@ -12,7 +12,7 @@ import {
   Heart, Thermometer, Syringe, ClipboardList, Users,
   Clock, CheckCircle2, Activity, ArrowRight, DoorOpen, FileCheck,
   AlertTriangle, Zap, UserCheck, Pill, Stethoscope,
-  Loader2, TrendingUp, FileText
+  Loader2, TrendingUp, FileText, BarChart3
 } from 'lucide-react';
 import { nursingService } from '@/lib/services';
 
@@ -146,6 +146,14 @@ export default function NursingDashboardPage() {
                 >
                   <Activity className="h-4 w-4 mr-2" />
                   Record Vitals
+                </Button>
+                <Button
+                  variant="outline"
+                  className="border-2 border-white/90 text-white hover:bg-white/30 hover:border-white dark:border-white dark:text-white dark:hover:bg-white/20 shadow-md backdrop-blur-sm bg-white/10"
+                  onClick={() => router.push('/nursing/analytics')}
+                >
+                  <BarChart3 className="h-4 w-4 mr-2" />
+                  Analytics
                 </Button>
                 <Button
                   variant="outline"
@@ -313,7 +321,7 @@ export default function NursingDashboardPage() {
             <Activity className="h-5 w-5 text-blue-500 dark:text-blue-400" />
             Quick Actions
           </h2>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
             <Button onClick={() => router.push('/nursing/pool-queue')} className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 bg-gradient-to-br from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 text-white border-l-4 border-l-white/20">
               <div className="flex items-center gap-2">
                 <Users className="h-5 w-5 sm:h-6 sm:w-6" />
@@ -347,6 +355,11 @@ export default function NursingDashboardPage() {
               </div>
               <span className="text-xs sm:text-sm font-medium">Room Queue</span>
               <span className="text-[10px] sm:text-xs text-muted-foreground">Room assignments</span>
+            </Button>
+            <Button onClick={() => router.push('/nursing/analytics')} variant="outline" className="h-auto py-4 sm:py-6 flex flex-col items-center gap-2 sm:gap-3 border-rose-500/30 hover:bg-rose-500/10 border-l-4 border-l-violet-500">
+              <BarChart3 className="h-5 w-5 sm:h-6 sm:w-6 text-violet-500 dark:text-violet-400" />
+              <span className="text-xs sm:text-sm font-medium">Analytics</span>
+              <span className="text-[10px] sm:text-xs text-muted-foreground">Pool metrics</span>
             </Button>
           </div>
         </div>

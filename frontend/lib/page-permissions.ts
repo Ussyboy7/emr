@@ -29,6 +29,7 @@ export const ALL_PAGE_PERMISSIONS: PagePermission[] = [
 
   // Nursing
   { id: "/nursing", name: "Dashboard", description: "Nursing Dashboard", module: "Nursing" },
+  { id: "/nursing/analytics", name: "Analytics", description: "Nursing pool analytics", module: "Nursing" },
   { id: "/nursing/pool-queue", name: "Pool Queue", description: "Manage nursing pool queue", module: "Nursing" },
   { id: "/nursing/room-queue", name: "Room Queue", description: "Manage nursing room queue", module: "Nursing" },
   { id: "/nursing/patient-vitals", name: "Patient Vitals", description: "Record patient vital signs", module: "Nursing" },

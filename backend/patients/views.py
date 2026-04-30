@@ -69,10 +69,20 @@ def _latest_vital_subqueries():
     )
 
 
-def apply_nursing_status_filter(queryset, nursing_status: str, request):
+def apply_nursing_status_filter(
+    queryset,
+    nursing_status: str,
+    request,
+    *,
+    sent_to_room_basis='queued_at',
+):
     """
     Narrow visits for nursing pool queue (expects queryset already limited, e.g. in_progress + date).
     nursing_status: pending | vitals_incomplete | ready | sent_to_room
+
+    sent_to_room_basis (only sent_to_room):
+    - queued_at: restrict queue rows by queued_at date (legacy; matches historical dashboard cards).
+    - visit_date: any active queue row for visits already in queryset (visit date defines the period).
     """
     from consultation.models import ConsultationQueue
 
@@ -101,6 +111,10 @@ def apply_nursing_status_filter(queryset, nursing_status: str, request):
 
     if ns == 'sent_to_room':
         q_items = ConsultationQueue.objects.filter(is_active=True, visit_id__isnull=False)
+        basis = (sent_to_room_basis or 'queued_at').strip().lower()
+        if basis == 'visit_date':
+            visit_ids = q_items.values('visit_id')
+            return queryset.filter(id__in=visit_ids)
         date = request.query_params.get('date')
         start_date = request.query_params.get('start_date')
         end_date = request.query_params.get('end_date')
@@ -360,6 +374,26 @@ class VisitViewSet(viewsets.ModelViewSet):
                 'sent_to_room': apply_nursing_status_filter(base, 'sent_to_room', request).count(),
             }
         )
+
+    @action(detail=False, methods=['get'], url_path='nursing-pool-analytics')
+    def nursing_pool_analytics(self, request):
+        """
+        Rich nursing pool report: daily trends, vitals_incomplete, aligned vs queue-date sent_to_room,
+        multi-clinic counts, eye/physio route + check-in counts (same base filters as list + metrics).
+        """
+        base = _nursing_pool_base_queryset_for_metrics(self, request)
+        from .nursing_analytics import build_nursing_pool_analytics_response
+
+        body = build_nursing_pool_analytics_response(self, request, base)
+        date = request.query_params.get('date')
+        start_date = request.query_params.get('start_date')
+        end_date = request.query_params.get('end_date')
+        period = {}
+        if date:
+            period = {'start': date, 'end': date}
+        elif start_date or end_date:
+            period = {'start': start_date or '', 'end': end_date or ''}
+        return Response({**body, 'period': period})
 
     def perform_update(self, serializer):
         """
