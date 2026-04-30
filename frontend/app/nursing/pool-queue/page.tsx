@@ -738,9 +738,37 @@ export default function NursingPoolQueuePage() {
     setIsSubmitting(true);
     
     try {
+      // Validate required vitals fields
+      const requiredFields = [
+        { field: 'temperature', label: 'Temperature', value: vitalsForm.temperature },
+        { field: 'pulse', label: 'Pulse/Heart Rate', value: vitalsForm.pulse },
+        { field: 'bloodPressureSystolic', label: 'Blood Pressure Systolic', value: vitalsForm.bloodPressureSystolic },
+        { field: 'bloodPressureDiastolic', label: 'Blood Pressure Diastolic', value: vitalsForm.bloodPressureDiastolic },
+      ];
+
+      const missingFields = requiredFields.filter(f => !f.value || f.value.trim() === '');
+
+      if (missingFields.length > 0) {
+        const fieldNames = missingFields.map(f => f.label).join(', ');
+        toast.error('Required vitals missing', {
+          description: `Please enter: ${fieldNames}`
+        });
+        return;
+      }
+
+      // Validate blood pressure values make sense
+      const systolic = parseInt(vitalsForm.bloodPressureSystolic);
+      const diastolic = parseInt(vitalsForm.bloodPressureDiastolic);
+      if (systolic <= diastolic) {
+        toast.error('Invalid blood pressure', {
+          description: 'Systolic pressure must be higher than diastolic pressure'
+        });
+        return;
+      }
+
       // Find the visit ID from the selected patient
       const visitId = selectedPatient.id; // This is the visit ID
-      
+
       const visit = await visitService.getVisit(parseInt(visitId, 10));
       if (!visit?.patient) {
         throw new Error('Visit not found');
@@ -1496,7 +1524,7 @@ export default function NursingPoolQueuePage() {
               {/* Blood Pressure */}
               <div className="space-y-2">
                 <Label className="flex items-center gap-1">
-                  <Activity className="h-3 w-3" />Blood Pressure (mmHg)
+                  <Activity className="h-3 w-3" />Blood Pressure (mmHg) <span className="text-red-500">*</span>
                 </Label>
                 <div className="flex items-center gap-2">
                   <Input type="number" placeholder="120" value={vitalsForm.bloodPressureSystolic} onChange={(e) => setVitalsForm(prev => ({ ...prev, bloodPressureSystolic: e.target.value }))} className="w-24" />

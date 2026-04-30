@@ -627,12 +627,10 @@ export default function PatientVitalsPage() {
                           {patient.alerts.length > 0 && (
                             <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-rose-500 text-rose-500">⚠️ Alert</Badge>
                           )}
-                          {/* Compact Vitals */}
-                          <span className="text-[10px] text-muted-foreground hidden md:inline">
-                            BP:{patient.latestVitals.bloodPressureSystolic}/{patient.latestVitals.bloodPressureDiastolic} • 
-                            P:{patient.latestVitals.pulse} • 
-                            T:{patient.latestVitals.temperature}°
-                          </span>
+                           {/* Compact Vitals */}
+                           <span className="text-[10px] text-muted-foreground hidden md:inline">
+                             {patient.latestVitals.bloodPressureSystolic && patient.latestVitals.bloodPressureDiastolic ? `BP:${patient.latestVitals.bloodPressureSystolic}/${patient.latestVitals.bloodPressureDiastolic}` : ''}
+                           </span>
                         </div>
                         <div className="flex items-center gap-1 flex-shrink-0">
                           <Button variant="ghost" size="sm" className="h-7 px-2 gap-1" onClick={() => openHistoryDialog(patient)}>
