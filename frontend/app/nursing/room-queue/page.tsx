@@ -272,6 +272,7 @@ export default function RoomQueuePage() {
   const [selectedPatient, setSelectedPatient] = useState<QueuedPatient | null>(null);
   const [selectedNewRoom, setSelectedNewRoom] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isMarkingLeft, setIsMarkingLeft] = useState(false);
 
   // Filter patients
   const filteredPatients = useMemo(() => {
@@ -323,7 +324,7 @@ export default function RoomQueuePage() {
   const handleReassign = async () => {
     if (!selectedPatient || !selectedNewRoom) return;
     setIsSubmitting(true);
-    
+
     try {
       const queueItemId = parseInt(selectedPatient.id);
       if (isNaN(queueItemId)) {
@@ -331,7 +332,7 @@ export default function RoomQueuePage() {
         setIsSubmitting(false);
         return;
       }
-      
+
       const newRoomId = parseInt(selectedNewRoom);
       if (isNaN(newRoomId)) {
         toast.error('Invalid room ID');
@@ -346,13 +347,13 @@ export default function RoomQueuePage() {
         method: 'PATCH',
         body: JSON.stringify({ room: newRoomId }),
       });
-      
+
       console.log('Reassign response:', response);
-      
+
       const oldRoom = rooms.find(r => r.id === selectedPatient.roomId);
       const newRoom = rooms.find(r => r.id === selectedNewRoom);
 
-      setPatients(prev => prev.map(p => 
+      setPatients(prev => prev.map(p =>
         p.id === selectedPatient.id ? { ...p, roomId: selectedNewRoom } : p
       ));
 
@@ -360,11 +361,11 @@ export default function RoomQueuePage() {
         description: `${selectedPatient.name} moved from ${oldRoom?.name} to ${newRoom?.name}`
       });
       setIsReassignDialogOpen(false);
-      
+
       // Data will refresh on next page load
     } catch (err: any) {
       console.error('Error reassigning patient:', err);
-      
+
       // Extract error message
       let errorMessage = 'Failed to reassign patient. Please try again.';
       if (err?.message) {
@@ -386,10 +387,38 @@ export default function RoomQueuePage() {
           errorMessage = fieldErrors || errorMessage;
         }
       }
-      
+
       toast.error(errorMessage);
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleMarkPatientLeft = async (patient: QueuedPatient) => {
+    setIsMarkingLeft(true);
+    try {
+      const queueItemId = parseInt(patient.id);
+      if (isNaN(queueItemId)) {
+        toast.error('Invalid queue item ID');
+        return;
+      }
+
+      // Remove patient from queue by deleting the queue item
+      await apiFetch(`/consultation/queue/${queueItemId}/`, {
+        method: 'DELETE',
+      });
+
+      // Remove patient from local state
+      setPatients(prev => prev.filter(p => p.id !== patient.id));
+
+      toast.success('Patient marked as left', {
+        description: `${patient.name} has been removed from the queue`
+      });
+    } catch (err: any) {
+      console.error('Error marking patient as left:', err);
+      toast.error(err?.message || 'Failed to mark patient as left');
+    } finally {
+      setIsMarkingLeft(false);
     }
   };
 
@@ -588,14 +617,24 @@ export default function RoomQueuePage() {
                                 </p>
                               </div>
                             </div>
-                            <div className="flex gap-1">
-                              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openPatientDetails(patient)} title="View details">
-                                <Eye className="h-3 w-3" />
-                              </Button>
-                              <Button variant="ghost" size="icon" className="h-6 w-6 text-blue-500" onClick={() => openReassignDialog(patient)} title="Reassign to another room">
-                                <ArrowLeftRight className="h-3 w-3" />
-                              </Button>
-                            </div>
+                             <div className="flex gap-1">
+                               <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openPatientDetails(patient)} title="View details">
+                                 <Eye className="h-3 w-3" />
+                               </Button>
+                               <Button variant="ghost" size="icon" className="h-6 w-6 text-blue-500" onClick={() => openReassignDialog(patient)} title="Reassign to another room">
+                                 <ArrowLeftRight className="h-3 w-3" />
+                               </Button>
+                               <Button
+                                 size="sm"
+                                 variant="destructive"
+                                 className="h-6 w-6 p-0"
+                                 onClick={() => handleMarkPatientLeft(patient)}
+                                 disabled={isMarkingLeft}
+                                 title="Mark Left"
+                               >
+                                 {isMarkingLeft ? <Loader2 className="h-3 w-3 animate-spin" /> : <X className="h-3 w-3" />}
+                               </Button>
+                             </div>
                           </div>
                         </div>
                       ))}

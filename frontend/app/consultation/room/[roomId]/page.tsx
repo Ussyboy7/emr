@@ -4640,14 +4640,26 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                               {patient.allergies.length > 0 && <div className="mt-2 flex items-center gap-1 text-xs"><AlertTriangle className="h-3 w-3 text-red-500" /><span className="text-red-600 dark:text-red-400 font-medium">Allergies: {patient.allergies.join(", ")}</span></div>}
                             </div>
                           </div>
-                          <Button
-                            onClick={() => handleStartSession(patient)}
-                            disabled={isStartingSession}
-                            className="bg-emerald-600 hover:bg-emerald-700 shadow-md"
-                          >
-                            <Stethoscope className="mr-2 h-4 w-4" />
-                            {isStartingSession ? "Starting..." : "Start Session"}
-                          </Button>
+                          <div className="flex gap-2">
+                            <Button
+                              onClick={() => handleStartSession(patient)}
+                              disabled={isStartingSession}
+                              className="bg-emerald-600 hover:bg-emerald-700 shadow-md"
+                            >
+                              <Stethoscope className="mr-2 h-4 w-4" />
+                              {isStartingSession ? "Starting..." : "Start Session"}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              className="h-9 w-9 p-0"
+                              onClick={() => handleMarkQueuePatientLeft(patient)}
+                              disabled={isMarkingLeft}
+                              title="Mark Left"
+                            >
+                              {isMarkingLeft ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserX className="h-4 w-4" />}
+                            </Button>
+                          </div>
                         </div>
                       </CardContent>
                     </Card>
@@ -8889,11 +8901,12 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                 <Button
                                   size="sm"
                                   variant="destructive"
+                                  className="h-6 w-6 p-0"
                                   onClick={() => handleMarkQueuePatientLeft(patient)}
                                   disabled={isMarkingLeft}
+                                  title="Mark Left"
                                 >
-                                  {isMarkingLeft ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <UserX className="h-4 w-4 mr-1" />}
-                                  Mark Left
+                                  {isMarkingLeft ? <Loader2 className="h-3 w-3 animate-spin" /> : <UserX className="h-3 w-3" />}
                                 </Button>
                               </div>
                             )}
