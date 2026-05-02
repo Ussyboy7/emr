@@ -742,8 +742,6 @@ export default function NursingPoolQueuePage() {
       const requiredFields = [
         { field: 'temperature', label: 'Temperature', value: vitalsForm.temperature },
         { field: 'pulse', label: 'Pulse/Heart Rate', value: vitalsForm.pulse },
-        { field: 'bloodPressureSystolic', label: 'Blood Pressure Systolic', value: vitalsForm.bloodPressureSystolic },
-        { field: 'bloodPressureDiastolic', label: 'Blood Pressure Diastolic', value: vitalsForm.bloodPressureDiastolic },
       ];
 
       const missingFields = requiredFields.filter(f => !f.value || f.value.trim() === '');
@@ -756,14 +754,16 @@ export default function NursingPoolQueuePage() {
         return;
       }
 
-      // Validate blood pressure values make sense
-      const systolic = parseInt(vitalsForm.bloodPressureSystolic);
-      const diastolic = parseInt(vitalsForm.bloodPressureDiastolic);
-      if (systolic <= diastolic) {
-        toast.error('Invalid blood pressure', {
-          description: 'Systolic pressure must be higher than diastolic pressure'
-        });
-        return;
+      // Validate blood pressure values make sense (only if both are provided)
+      if (vitalsForm.bloodPressureSystolic && vitalsForm.bloodPressureDiastolic) {
+        const systolic = parseInt(vitalsForm.bloodPressureSystolic);
+        const diastolic = parseInt(vitalsForm.bloodPressureDiastolic);
+        if (systolic <= diastolic) {
+          toast.error('Invalid blood pressure', {
+            description: 'Systolic pressure must be higher than diastolic pressure'
+          });
+          return;
+        }
       }
 
       // Find the visit ID from the selected patient
@@ -1443,16 +1443,16 @@ export default function NursingPoolQueuePage() {
                             <Button
                               size="sm"
                               variant="destructive"
-                              className="h-7 px-2 text-xs"
+                              className="h-6 w-6 p-0"
                               onClick={() => openMarkLeftDialog(patient)}
                               disabled={markingLeftVisitId === patient.visitNumericId}
+                              title="Mark Left"
                             >
                               {markingLeftVisitId === patient.visitNumericId ? (
-                                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                <Loader2 className="h-3 w-3 animate-spin" />
                               ) : (
-                                <X className="h-3 w-3 mr-1" />
+                                <X className="h-3 w-3" />
                               )}
-                              Mark Left
                             </Button>
                           )}
                         </div>
@@ -1593,7 +1593,7 @@ export default function NursingPoolQueuePage() {
               {/* Blood Pressure */}
               <div className="space-y-2">
                 <Label className="flex items-center gap-1">
-                  <Activity className="h-3 w-3" />Blood Pressure (mmHg) <span className="text-red-500">*</span>
+                  <Activity className="h-3 w-3" />Blood Pressure (mmHg)
                 </Label>
                 <div className="flex items-center gap-2">
                   <Input type="number" placeholder="120" value={vitalsForm.bloodPressureSystolic} onChange={(e) => setVitalsForm(prev => ({ ...prev, bloodPressureSystolic: e.target.value }))} className="w-24" />
