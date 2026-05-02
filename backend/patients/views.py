@@ -138,6 +138,11 @@ def _nursing_pool_base_queryset_for_metrics(view, request):
     date = request.query_params.get('date')
     start_date = request.query_params.get('start_date')
     end_date = request.query_params.get('end_date')
+    # Comprehensive analytics (and shared date parser) use `start` / `end` (YYYY-MM-DD).
+    if not start_date and request.query_params.get('start'):
+        start_date = request.query_params.get('start')
+    if not end_date and request.query_params.get('end'):
+        end_date = request.query_params.get('end')
     if date:
         qs = qs.filter(date=date)
     elif start_date:
@@ -147,7 +152,13 @@ def _nursing_pool_base_queryset_for_metrics(view, request):
     elif end_date:
         qs = qs.filter(date__lte=end_date)
 
-    qs = qs.filter(status='in_progress')
+    # Pool snapshot (no module start/end): only visits currently in nursing workflow.
+    # Date-range reports send both `start` and `end` (parse_analytics_dates); include
+    # scheduled + in_progress + completed so the report matches calendar visit dates.
+    if request.query_params.get('start') and request.query_params.get('end'):
+        qs = qs.exclude(status='cancelled')
+    else:
+        qs = qs.filter(status='in_progress')
     if request.query_params.get('nursing_pool') == '1':
         qs = _exclude_visits_with_completed_consultation(qs)
     qs = annotate_visit_history_flags(qs)
@@ -394,6 +405,92 @@ class VisitViewSet(viewsets.ModelViewSet):
         elif start_date or end_date:
             period = {'start': start_date or '', 'end': end_date or ''}
         return Response({**body, 'period': period})
+
+    @action(detail=False, methods=['get'], url_path='nursing-flow-analytics')
+    def nursing_flow_analytics(self, request):
+        """
+        Patient flow efficiency analytics: processing times, throughput, bottlenecks.
+        Requires start and end date parameters.
+        """
+        from common.module_analytics import parse_analytics_dates
+        dates = parse_analytics_dates(request)
+        if isinstance(dates, Response):
+            return dates
+
+        start_date, end_date = dates
+        base = _nursing_pool_base_queryset_for_metrics(self, request)
+
+        from .nursing_analytics import build_patient_flow_analytics
+        analytics = build_patient_flow_analytics(base, start_date, end_date)
+
+        return Response(analytics)
+
+    @action(detail=False, methods=['get'], url_path='nursing-vitals-analytics')
+    def nursing_vitals_analytics(self, request):
+        """
+        Vitals quality analytics: completion rates, accuracy, error analysis.
+        Requires start and end date parameters.
+        """
+        from common.module_analytics import parse_analytics_dates
+        dates = parse_analytics_dates(request)
+        if isinstance(dates, Response):
+            return dates
+
+        start_date, end_date = dates
+        base = _nursing_pool_base_queryset_for_metrics(self, request)
+
+        from .nursing_analytics import build_vitals_quality_analytics
+        analytics = build_vitals_quality_analytics(base, start_date, end_date)
+
+        return Response(analytics)
+
+    @action(detail=False, methods=['get'], url_path='nursing-wait-times')
+    def nursing_wait_times(self, request):
+        """
+        Wait time analytics: distribution, peak times, priority impact.
+        Requires start and end date parameters.
+        """
+        from common.module_analytics import parse_analytics_dates
+        dates = parse_analytics_dates(request)
+        if isinstance(dates, Response):
+            return dates
+
+        start_date, end_date = dates
+        base = _nursing_pool_base_queryset_for_metrics(self, request)
+
+        from .nursing_analytics import build_wait_time_analytics
+        analytics = build_wait_time_analytics(base, start_date, end_date)
+
+        return Response(analytics)
+
+    @action(detail=False, methods=['get'], url_path='nursing-comprehensive-analytics')
+    def nursing_comprehensive_analytics(self, request):
+        """
+        Comprehensive nursing analytics combining all metrics.
+        Requires start and end date parameters.
+        """
+        from common.module_analytics import parse_analytics_dates
+        dates = parse_analytics_dates(request)
+        if isinstance(dates, Response):
+            return dates
+
+        start_date, end_date = dates
+        # Comprehensive report should be period-based (visit calendar date), not
+        # constrained by pool snapshot rules from the queue page.
+        base = (
+            Visit.objects
+            .all()
+            .select_related('patient', 'doctor', 'created_by')
+            .prefetch_related('vital_readings')
+            .filter(date__gte=start_date.date(), date__lte=end_date.date())
+            .exclude(status='cancelled')
+        )
+        base = annotate_visit_history_flags(base)
+
+        from .nursing_analytics import build_comprehensive_nursing_analytics
+        analytics = build_comprehensive_nursing_analytics(base, start_date, end_date)
+
+        return Response(analytics)
 
     def perform_update(self, serializer):
         """

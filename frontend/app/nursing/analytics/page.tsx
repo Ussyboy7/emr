@@ -1,216 +1,258 @@
-'use client';
+"use client";
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { DashboardLayout } from '@/components/shared/DashboardLayout';
+import React, { useEffect, useMemo, useState } from "react";
+import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import {
   AnalyticsReportLayout,
   analyticsRangeFromFilters,
   type AnalyticsViewMode,
-} from '@/components/analytics/AnalyticsReportLayout';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { getReadableApiError } from '@/lib/api-client';
-import { visitService, type NursingPoolAnalyticsResponse } from '@/lib/services';
-import { toast } from 'sonner';
-import { endOfMonth, format, startOfMonth } from 'date-fns';
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Legend,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts';
-import type { LucideIcon } from 'lucide-react';
-import {
-  ClipboardCheck,
-  DoorOpen,
-  Eye,
-  GitBranch,
-  Heart,
-  Thermometer,
-  Users,
-  Activity,
-} from 'lucide-react';
+} from "@/components/analytics/AnalyticsReportLayout";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Progress } from "@/components/ui/progress";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Activity, Heart, Timer, Users } from "lucide-react";
+import { toast } from "sonner";
+import { apiFetch, buildQueryString } from "@/lib/api-client";
+import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
-function toYmd(d: Date) {
-  return format(d, 'yyyy-MM-dd');
+interface ComprehensiveAnalytics {
+  patient_flow: {
+    summary: {
+      total_visits: number;
+      completed_flows: number;
+      vitals_completion_rate: number;
+      average_processing_time: number;
+      average_vitals_time: number;
+      average_room_wait: number;
+    };
+    bottlenecks: {
+      pool_delays: { count: number; average_delay: number };
+      vitals_delays: { count: number; average_delay: number };
+      room_assignment_delays: { count: number; average_delay: number };
+    };
+    throughput: Record<string, number>;
+    peak_hours: Array<[number, number]>;
+    category_analysis: Record<string, { count: number; avg_time: number; total_time: number }>;
+    attendance_by_category: Array<{
+      sn: number;
+      key: string;
+      label: string;
+      male: number;
+      female: number;
+      total: number;
+      percentage: number;
+    }>;
+    attendance_totals: {
+      male: number;
+      female: number;
+      total: number;
+    };
+  };
+  vitals_quality: {
+    summary: {
+      total_visits: number;
+      fully_completed_visits: number;
+      total_vitals_recorded: number;
+      overall_completion_rate: number;
+      average_vitals_per_visit: number;
+    };
+    completion_by_vital: Record<string, { completed: number; completion_rate: number }>;
+  };
+  wait_times: {
+    summary: {
+      total_waited: number;
+      average_wait_time: number;
+      median_wait_time: number;
+      max_wait_time: number;
+    };
+    distribution: Record<string, number>;
+  };
+  period: {
+    start_date: string;
+    end_date: string;
+  };
 }
 
-function triggerCsvDownload(filename: string, content: string) {
-  const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-function analyticsToCsv(
-  payload: NursingPoolAnalyticsResponse,
-  viewMode: AnalyticsViewMode,
-  year: string,
-  start: string,
-  end: string
-) {
-  const esc = (s: string) => `"${String(s).replace(/"/g, '""')}"`;
-  const m = payload.summary;
-  const periodLabel = viewMode === 'year' ? year : `${start}_to_${end}`;
-  const lines: string[] = [];
-  lines.push(['Nursing pool analytics', periodLabel].map(esc).join(','));
-  lines.push(['Period start', payload.period?.start ?? ''].map(esc).join(','));
-  lines.push(['Period end', payload.period?.end ?? ''].map(esc).join(','));
-  lines.push('');
-  lines.push(['Metric', 'Value'].map(esc).join(','));
-  Object.entries(m).forEach(([k, v]) => lines.push([k, String(v)].map(esc).join(',')));
-  lines.push('');
-  lines.push(
-    [
-      'date',
-      'total',
-      'pending_vitals',
-      'vitals_incomplete',
-      'ready_for_consultation',
-      'sent_to_room_aligned',
-      'sent_to_room_by_queue_date',
-      'multi_clinic',
-      'checked_in_physio',
-      'checked_in_eye',
-    ]
-      .map(esc)
-      .join(',')
-  );
-  (payload.by_day || []).forEach((row) =>
-    lines.push(
-      [
-        row.date,
-        String(row.total),
-        String(row.pending_vitals),
-        String(row.vitals_incomplete),
-        String(row.ready_for_consultation),
-        String(row.sent_to_room_aligned),
-        String(row.sent_to_room_by_queue_date),
-        String(row.multi_clinic),
-        String(row.checked_in_physio),
-        String(row.checked_in_eye),
-      ]
-        .map(esc)
-        .join(',')
-    )
-  );
-  return lines.join('\n');
-}
+const CHART_COLORS = {
+  category: "#3b82f6",
+  vitals: "#a855f7",
+  wait: "#f59e0b",
+  throughput: "#10b981",
+};
 
 export default function NursingAnalyticsPage() {
-  const [viewMode, setViewMode] = useState<AnalyticsViewMode>('year');
-  const [year, setYear] = useState(() => new Date().getFullYear().toString());
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
   const [loading, setLoading] = useState(false);
-  const [data, setData] = useState<NursingPoolAnalyticsResponse | null>(null);
-  const [resolvedRange, setResolvedRange] = useState<{ start: string; end: string } | null>(null);
+  const [analyticsData, setAnalyticsData] = useState<ComprehensiveAnalytics | null>(null);
+  const [year, setYear] = useState(new Date().getFullYear().toString());
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [viewMode, setViewMode] = useState<AnalyticsViewMode>("year");
 
-  const highlightThisMonth =
-    viewMode === 'range' &&
-    startDate === toYmd(startOfMonth(new Date())) &&
-    endDate === toYmd(endOfMonth(new Date()));
-
-  const highlightThisYear =
-    viewMode === 'year' && year === new Date().getFullYear().toString();
+  const emptyState = () => setAnalyticsData(null);
 
   const setThisMonth = () => {
     const now = new Date();
-    setViewMode('range');
-    setStartDate(toYmd(startOfMonth(now)));
-    setEndDate(toYmd(endOfMonth(now)));
+    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    setStartDate(firstDay.toISOString().split("T")[0]);
+    setEndDate(lastDay.toISOString().split("T")[0]);
+    setViewMode("range");
   };
 
   const setThisYear = () => {
-    setViewMode('year');
     setYear(new Date().getFullYear().toString());
+    setViewMode("year");
   };
 
-  const fetchReport = useCallback(async () => {
-    const r = analyticsRangeFromFilters(viewMode, year, startDate, endDate);
-    if (!r) {
-      if (viewMode === 'range') toast.error('Please select start and end dates');
+  const loadAnalytics = async () => {
+    const range = analyticsRangeFromFilters(viewMode, year, startDate, endDate);
+    if (!range) {
+      toast.error("Please select a valid date range");
       return;
     }
+
     setLoading(true);
     try {
-      const params = {
-        status: 'in_progress' as const,
-        nursing_pool: 1 as const,
-        start_date: r.start,
-        end_date: r.end,
-      };
-      const report = await visitService.getNursingPoolAnalytics(params);
-      setData(report);
-      setResolvedRange(r);
-    } catch (e: unknown) {
-      console.error(e);
-      toast.error(getReadableApiError(e) || 'Failed to load nursing analytics');
-      setData(null);
-      setResolvedRange(null);
+      const qs = buildQueryString({ start: range.start, end: range.end });
+      const path = qs
+        ? `/visits/nursing-comprehensive-analytics/?${qs.slice(1)}`
+        : "/visits/nursing-comprehensive-analytics/";
+      const data = await apiFetch<ComprehensiveAnalytics>(path);
+      setAnalyticsData(data);
+    } catch (error: any) {
+      console.error("Error loading analytics:", error);
+      toast.error(error?.message || "Failed to load nursing analytics");
+      emptyState();
     } finally {
       setLoading(false);
     }
-  }, [viewMode, year, startDate, endDate]);
+  };
 
   useEffect(() => {
-    if (viewMode === 'year' && year) {
-      void fetchReport();
-    } else if (viewMode === 'range' && startDate && endDate) {
-      void fetchReport();
+    if (viewMode === "year" && year) {
+      void loadAnalytics();
+    } else if (viewMode === "range" && startDate && endDate) {
+      void loadAnalytics();
     }
-  }, [viewMode, year, startDate, endDate, fetchReport]);
+  }, [viewMode, year, startDate, endDate]);
 
-  const summary = data?.summary;
+  const exportCSV = () => {
+    if (!analyticsData) {
+      toast.error("No data to export");
+      return;
+    }
 
-  const barData = useMemo(() => {
-    if (!summary) return [];
-    return [
-      { name: 'Pending vitals', value: summary.pending_vitals },
-      { name: 'Vitals incomplete', value: summary.vitals_incomplete },
-      { name: 'Ready', value: summary.ready_for_consultation },
-      { name: 'Room (visit day)', value: summary.sent_to_room_aligned },
-      { name: 'Room (queue day)', value: summary.sent_to_room_by_queue_date },
+    const csvData = [
+      ["Nursing Analytics Report"],
+      ["Period", `${analyticsData.period.start_date} to ${analyticsData.period.end_date}`],
+      [""],
+      ["Patient Flow Metrics"],
+      ["Total Visits", analyticsData.patient_flow.summary.total_visits],
+      ["Completed Flows", analyticsData.patient_flow.summary.completed_flows],
+      ["Vitals Completion Rate (%)", analyticsData.patient_flow.summary.vitals_completion_rate.toFixed(2)],
+      ["Average Processing Time (min)", analyticsData.patient_flow.summary.average_processing_time.toFixed(2)],
+      [""],
+      ["Vitals Quality Metrics"],
+      ["Overall Completion Rate (%)", analyticsData.vitals_quality.summary.overall_completion_rate.toFixed(2)],
+      ["Total Vitals Recorded", analyticsData.vitals_quality.summary.total_vitals_recorded],
+      ["Average Vitals per Visit", analyticsData.vitals_quality.summary.average_vitals_per_visit.toFixed(2)],
+      [""],
+      ["Wait Time Metrics"],
+      ["Average Wait Time (min)", analyticsData.wait_times.summary.average_wait_time.toFixed(2)],
+      ["Median Wait Time (min)", analyticsData.wait_times.summary.median_wait_time.toFixed(2)],
+      ["Max Wait Time (min)", analyticsData.wait_times.summary.max_wait_time.toFixed(2)],
     ];
-  }, [summary]);
 
-  const trendData = useMemo(() => {
-    if (!data?.by_day?.length) return [];
-    return data.by_day.map((row) => ({
-      ...row,
-      shortDate: row.date.slice(5),
-    }));
-  }, [data]);
-
-  const exportCsv = () => {
-    if (!data || !resolvedRange) return;
-    const csv = analyticsToCsv(data, viewMode, year, startDate, endDate);
-    const slug =
-      viewMode === 'year' ? year : `${startDate.replace(/-/g, '')}_${endDate.replace(/-/g, '')}`;
-    triggerCsvDownload(`nursing_pool_analytics_${slug}.csv`, csv);
+    const csvContent = csvData.map((row) => row.join(",")).join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `nursing-analytics-${analyticsData.period.start_date}-to-${analyticsData.period.end_date}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success("Report exported successfully");
   };
+
+  const summaryStats = useMemo(() => {
+    if (!analyticsData) return null;
+
+    const flow = analyticsData.patient_flow;
+    const vitals = analyticsData.vitals_quality;
+    const wait = analyticsData.wait_times;
+    const totalPatients = flow.summary.total_visits;
+
+    return {
+      totalPatients,
+      avgProcessingTime: flow.summary.average_processing_time,
+      vitalsCompletedCount: vitals.summary.fully_completed_visits,
+      avgWaitTime: wait.summary.average_wait_time,
+      processingCategories: Object.entries(flow.category_analysis).map(([category, stats]) => ({
+        name: category,
+        count: stats.count,
+        percentage: totalPatients > 0 ? (stats.count / totalPatients) * 100 : 0,
+        avgTime: stats.avg_time,
+      })),
+      attendanceRows: flow.attendance_by_category,
+      attendanceTotals: flow.attendance_totals,
+    };
+  }, [analyticsData]);
+
+  const categoryChartData = useMemo(() => {
+    if (!summaryStats) return [];
+    return summaryStats.processingCategories.map((c) => ({
+      category: c.name.replace(/_/g, " "),
+      patients: c.count,
+      avgTime: Number(c.avgTime.toFixed(2)),
+    }));
+  }, [summaryStats]);
+
+  const vitalsChartData = useMemo(() => {
+    if (!analyticsData) return [];
+    return Object.entries(analyticsData.vitals_quality.completion_by_vital).map(([key, value]) => ({
+      vital: key.replace(/_/g, " "),
+      completionRate: Number(value.completion_rate.toFixed(2)),
+    }));
+  }, [analyticsData]);
+
+  const waitDistributionChartData = useMemo(() => {
+    if (!analyticsData) return [];
+    return Object.entries(analyticsData.wait_times.distribution).map(([range, count]) => ({
+      range,
+      patients: count,
+    }));
+  }, [analyticsData]);
+
+  const throughputChartData = useMemo(() => {
+    if (!analyticsData) return [];
+    return Object.entries(analyticsData.patient_flow.throughput)
+      .map(([hour, count]) => ({
+        hour: Number(hour),
+        patients: count,
+      }))
+      .sort((a, b) => a.hour - b.hour);
+  }, [analyticsData]);
+
+  const years = Array.from({ length: 10 }, (_, i) => (new Date().getFullYear() - i).toString());
+  const highlightThisMonth =
+    viewMode === "range" &&
+    Boolean(startDate) &&
+    startDate.includes(new Date().toISOString().slice(0, 7));
+  const highlightThisYear = viewMode === "year" && year === new Date().getFullYear().toString();
 
   return (
     <DashboardLayout>
       <AnalyticsReportLayout
-        reportTitle="Nursing analytics"
-        reportDescription="Nursing pool workload by visit date, with daily trends, vitals segments, room queue (aligned vs queue-date), and Eye / Physio legs."
-        ReportIcon={Heart}
-        reportIconClassName="text-rose-500 dark:text-rose-400"
+        reportTitle="Nursing Analytics Report"
+        reportDescription="Comprehensive nursing performance metrics and patient flow analysis"
+        ReportIcon={Activity}
+        reportIconClassName="text-violet-500"
         loading={loading}
-        onRefresh={fetchReport}
-        onGenerate={fetchReport}
-        exportCsvDisabled={!data}
-        onExportCsv={exportCsv}
-        printDisabled={!data}
+        onRefresh={loadAnalytics}
+        onGenerate={loadAnalytics}
+        exportCsvDisabled={!analyticsData}
+        onExportCsv={exportCSV}
+        printDisabled={!analyticsData}
         viewMode={viewMode}
         onViewModeChange={setViewMode}
         year={year}
@@ -223,141 +265,215 @@ export default function NursingAnalyticsPage() {
         onThisYear={setThisYear}
         highlightThisMonth={highlightThisMonth}
         highlightThisYear={highlightThisYear}
-        backLink={{ href: '/nursing', label: 'Nursing home' }}
-        contentClassName="max-w-7xl mx-auto"
+        yearOptions={years}
       >
-        {summary && resolvedRange && (
+        {analyticsData && summaryStats && (
           <>
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-              <Stat icon={Users} label="In nursing pool" value={summary.total} />
-              <Stat icon={Thermometer} label="Pending vitals" value={summary.pending_vitals} />
-              <Stat icon={Activity} label="Vitals incomplete" value={summary.vitals_incomplete} />
-              <Stat icon={ClipboardCheck} label="Ready" value={summary.ready_for_consultation} />
-              <Stat icon={DoorOpen} label="Sent to rm (visit day)" value={summary.sent_to_room_aligned} />
-              <Stat icon={DoorOpen} label="Sent to rm (queue day)" value={summary.sent_to_room_by_queue_date} />
-            </div>
-
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-              <Stat icon={GitBranch} label="Multi-clinic visits" value={summary.multi_clinic_visits} />
-              <Stat icon={Users} label="Single-clinic" value={summary.single_clinic_visits} />
-              <Stat icon={Eye} label="Eye on route" value={summary.visits_with_eye_clinic} />
-              <Stat icon={Eye} label="Eye checked in" value={summary.eye_checked_in} />
-              <Stat icon={Activity} label="Physio on route" value={summary.visits_with_physiotherapy} />
-              <Stat icon={Activity} label="Physio checked in" value={summary.physio_checked_in} />
+            <div className="grid gap-4 md:grid-cols-4">
+              <Card className="border-l-4 border-l-blue-500">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-muted-foreground">Total Patients</p>
+                      <p className="text-2xl sm:text-3xl font-bold">{summaryStats.totalPatients}</p>
+                    </div>
+                    <Users className="h-10 w-10 text-blue-500 opacity-50" />
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className="border-l-4 border-l-green-500">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-muted-foreground">Avg Processing Time</p>
+                      <p className="text-2xl sm:text-3xl font-bold">{summaryStats.avgProcessingTime.toFixed(1)}m</p>
+                    </div>
+                    <Timer className="h-10 w-10 text-green-500 opacity-50" />
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className="border-l-4 border-l-purple-500">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-muted-foreground">Vitals Completed</p>
+                      <p className="text-2xl sm:text-3xl font-bold">{summaryStats.vitalsCompletedCount}</p>
+                    </div>
+                    <Heart className="h-10 w-10 text-purple-500 opacity-50" />
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className="border-l-4 border-l-amber-500">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-muted-foreground">Avg Wait Time</p>
+                      <p className="text-2xl sm:text-3xl font-bold">{summaryStats.avgWaitTime.toFixed(1)}m</p>
+                    </div>
+                    <Timer className="h-10 w-10 text-amber-500 opacity-50" />
+                  </div>
+                </CardContent>
+              </Card>
             </div>
 
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">Volume by segment</CardTitle>
-                <CardDescription>
-                  Segments can overlap (for example ready and an active room queue). Use{' '}
-                  <strong>Room (visit day)</strong> for counts aligned to the same visit-date window as the pool.
-                </CardDescription>
+                <CardTitle>Vitals Taken by Category</CardTitle>
+                <p className="text-sm text-muted-foreground">Breakdown of visits with nursing vitals by category</p>
               </CardHeader>
-              <CardContent className="h-[340px]">
-                {barData.every((r) => r.value === 0) ? (
-                  <EmptyChart message="No visits in pool for this period" />
-                ) : (
+              <CardContent>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-14">S/N</TableHead>
+                      <TableHead>Category</TableHead>
+                      <TableHead className="text-right">Male</TableHead>
+                      <TableHead className="text-right">Female</TableHead>
+                      <TableHead className="text-right">Total</TableHead>
+                      <TableHead className="text-right">%</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {summaryStats.attendanceRows.map((row) => (
+                      <TableRow key={row.key}>
+                        <TableCell className="py-3">{row.sn}</TableCell>
+                        <TableCell className="py-3 font-medium">{row.label}</TableCell>
+                        <TableCell className="py-3 text-right">{row.male}</TableCell>
+                        <TableCell className="py-3 text-right">{row.female}</TableCell>
+                        <TableCell className="py-3 text-right">{row.total}</TableCell>
+                        <TableCell className="py-3 text-right">{row.percentage.toFixed(1)}%</TableCell>
+                      </TableRow>
+                    ))}
+                    <TableRow className="font-semibold">
+                      <TableCell className="py-3" colSpan={2}>TOTAL</TableCell>
+                      <TableCell className="py-3 text-right">{summaryStats.attendanceTotals.male}</TableCell>
+                      <TableCell className="py-3 text-right">{summaryStats.attendanceTotals.female}</TableCell>
+                      <TableCell className="py-3 text-right">{summaryStats.attendanceTotals.total}</TableCell>
+                      <TableCell className="py-3 text-right">
+                        {summaryStats.attendanceTotals.total > 0 ? "100.0%" : "0.0%"}
+                      </TableCell>
+                    </TableRow>
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+
+            <div className="grid gap-6 lg:grid-cols-2">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Vitals Completion by Type</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {Object.entries(analyticsData.vitals_quality.completion_by_vital).map(([vital, stats]) => (
+                    <div key={vital} className="space-y-2">
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="font-medium capitalize">{vital.replace(/_/g, " ")}</span>
+                        <span>{stats.completion_rate.toFixed(1)}%</span>
+                      </div>
+                      <Progress value={stats.completion_rate} className="h-2" />
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Category Avg Processing Time</CardTitle>
+                </CardHeader>
+                <CardContent className="h-72">
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={barData} margin={{ top: 8, right: 8, left: 0, bottom: 48 }}>
-                      <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                      <XAxis dataKey="name" tick={{ fontSize: 10 }} interval={0} angle={-20} textAnchor="end" height={70} />
-                      <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
-                      <Tooltip
-                        contentStyle={{ fontSize: 12 }}
-                        formatter={(v: number) => [v.toLocaleString(), 'Count']}
-                      />
-                      <Bar dataKey="value" fill="rgb(244 63 94)" radius={[4, 4, 0, 0]} name="Visits" />
+                    <BarChart data={categoryChartData}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="category" tick={{ fontSize: 12 }} />
+                      <YAxis tick={{ fontSize: 12 }} />
+                      <Tooltip />
+                      <Bar dataKey="avgTime" fill={CHART_COLORS.category} radius={[6, 6, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
-                )}
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
+            </div>
+
+            <div className="grid gap-6 lg:grid-cols-2">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Vitals Completion Rates</CardTitle>
+                </CardHeader>
+                <CardContent className="h-72">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={vitalsChartData}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="vital" tick={{ fontSize: 11 }} interval={0} angle={-25} textAnchor="end" height={70} />
+                      <YAxis domain={[0, 100]} tick={{ fontSize: 12 }} />
+                      <Tooltip />
+                      <Bar dataKey="completionRate" fill={CHART_COLORS.vitals} radius={[6, 6, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Wait Time Distribution Chart</CardTitle>
+                </CardHeader>
+                <CardContent className="h-64">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={waitDistributionChartData}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="range" />
+                      <YAxis />
+                      <Tooltip />
+                      <Bar dataKey="patients" fill={CHART_COLORS.wait} radius={[6, 6, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </CardContent>
+              </Card>
+            </div>
 
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">Trends by visit day</CardTitle>
-                <CardDescription>Pool size and key segments per calendar day (visit date).</CardDescription>
+                <CardTitle>Wait Time Distribution</CardTitle>
               </CardHeader>
-              <CardContent className="h-[360px]">
-                {trendData.length === 0 ? (
-                  <EmptyChart message="No daily rows (empty pool for this range)" />
-                ) : (
+              <CardContent className="space-y-4">
+                {Object.entries(analyticsData.wait_times.distribution).map(([range, count]) => {
+                  const total = analyticsData.wait_times.summary.total_waited;
+                  const percentage = total > 0 ? (count / total) * 100 : 0;
+                  return (
+                    <div key={range} className="space-y-2">
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="font-medium">{range}</span>
+                        <span>
+                          {count} patient{count === 1 ? "" : "s"} ({percentage.toFixed(1)}%)
+                        </span>
+                      </div>
+                      <Progress value={percentage} className="h-2" />
+                    </div>
+                  );
+                })}
+              </CardContent>
+            </Card>
+
+            <div className="grid gap-6 lg:grid-cols-2">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Throughput by Hour</CardTitle>
+                </CardHeader>
+                <CardContent className="h-64">
                   <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={trendData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                      <XAxis dataKey="shortDate" tick={{ fontSize: 10 }} />
-                      <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
-                      <Tooltip contentStyle={{ fontSize: 12 }} />
-                      <Legend wrapperStyle={{ fontSize: 12 }} />
-                      <Line type="monotone" dataKey="total" name="In pool" stroke="#f43f5e" dot={false} strokeWidth={2} />
-                      <Line
-                        type="monotone"
-                        dataKey="sent_to_room_aligned"
-                        name="Room (visit day)"
-                        stroke="#8b5cf6"
-                        dot={false}
-                        strokeWidth={2}
-                      />
-                      <Line type="monotone" dataKey="pending_vitals" name="Pending vitals" stroke="#f59e0b" dot={false} />
-                      <Line
-                        type="monotone"
-                        dataKey="vitals_incomplete"
-                        name="Vitals incomplete"
-                        stroke="#0ea5e9"
-                        dot={false}
-                      />
+                    <LineChart data={throughputChartData}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="hour" />
+                      <YAxis />
+                      <Tooltip />
+                      <Line type="monotone" dataKey="patients" stroke={CHART_COLORS.throughput} strokeWidth={2} dot />
                     </LineChart>
                   </ResponsiveContainer>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Definitions</CardTitle>
-              </CardHeader>
-              <CardContent className="text-sm text-muted-foreground space-y-2">
-                <p>
-                  <strong className="text-foreground">In nursing pool</strong> — In-progress visits in the selected date
-                  range (by visit date), excluding visits that already have a completed consultation.
-                </p>
-                <p>
-                  <strong className="text-foreground">Sent to room (visit day)</strong> — Same pool window, plus an
-                  active consultation queue row on that visit (no filter on <code className="text-xs bg-muted px-1 rounded">queued_at</code>
-                  ). Matches reporting to visit date.
-                </p>
-                <p>
-                  <strong className="text-foreground">Sent to room (queue day)</strong> — Legacy dashboard semantics:
-                  active queue rows whose <code className="text-xs bg-muted px-1 rounded">queued_at</code> date falls in
-                  the requested range (can differ from visit day).
-                </p>
-                <p>
-                  <strong className="text-foreground">Eye / Physio</strong> — “On route” uses visit clinic lines (multi-clinic
-                  JSON). “Checked in” counts open eye orders or physio orders linked to those visits (same rules as the pool queue
-                  check-in APIs).
-                </p>
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
+            </div>
           </>
         )}
       </AnalyticsReportLayout>
     </DashboardLayout>
   );
-}
-
-function Stat({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: number }) {
-  return (
-    <Card>
-      <CardContent className="p-4 flex flex-col gap-1">
-        <Icon className="h-4 w-4 text-muted-foreground" />
-        <p className="text-2xl font-bold tabular-nums">{value.toLocaleString()}</p>
-        <p className="text-xs text-muted-foreground leading-tight">{label}</p>
-      </CardContent>
-    </Card>
-  );
-}
-
-function EmptyChart({ message }: { message: string }) {
-  return <p className="text-sm text-muted-foreground h-full flex items-center justify-center">{message}</p>;
 }
