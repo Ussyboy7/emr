@@ -13,7 +13,7 @@ import json
 
 from patients.models import Patient, Visit, MedicalCertificate
 from laboratory.models import LabOrder, LabTest
-from pharmacy.models import Prescription, MedicationInventory, PrescriptionItem
+from pharmacy.models import Prescription, MedicationInventory, PrescriptionItem, Dispense
 from radiology.models import RadiologyOrder, RadiologyStudy
 from nursing.models import NursingOrder, Procedure
 from consultation.models import Referral, ConsultationSession
@@ -687,22 +687,32 @@ class DispensedPrescriptionsReportView(views.APIView):
         from django.db.models.functions import Coalesce
         from django.db.models import Value as DjangoValue
 
+        # Get dispensed items that have associated Dispense records
+        dispensed_item_ids = Dispense.objects.filter(
+            dispensed_at__isnull=False
+        ).values_list('prescription_item_id', flat=True).distinct()
+
         dispensed_items_qs = PrescriptionItem.objects.select_related(
             'medication',
             'generic',
             'prescription',
         ).filter(
-            prescription__status='dispensed',
-            prescription__dispensed_at__isnull=False,
+            id__in=dispensed_item_ids,
             dispensed_quantity__gt=0,
         )
+
+        # Filter by dispense date
         if parsed_start_date and parsed_end_date:
-            dispensed_items_qs = dispensed_items_qs.filter(
-                prescription__dispensed_at__date__gte=parsed_start_date,
-                prescription__dispensed_at__date__lte=parsed_end_date,
-            )
+            dispense_ids = Dispense.objects.filter(
+                dispensed_at__date__gte=parsed_start_date,
+                dispensed_at__date__lte=parsed_end_date,
+            ).values_list('prescription_item_id', flat=True).distinct()
+            dispensed_items_qs = dispensed_items_qs.filter(id__in=dispense_ids)
         else:
-            dispensed_items_qs = dispensed_items_qs.filter(prescription__dispensed_at__year=year_int)
+            dispense_ids = Dispense.objects.filter(
+                dispensed_at__year=year_int
+            ).values_list('prescription_item_id', flat=True).distinct()
+            dispensed_items_qs = dispensed_items_qs.filter(id__in=dispense_ids)
 
         dispensed_items_rows = (
             dispensed_items_qs

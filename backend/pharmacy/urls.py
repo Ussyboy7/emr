@@ -7,6 +7,7 @@ from .views import (
     GenericMedicationViewSet, MedicationViewSet, MedicationInventoryViewSet, PrescriptionViewSet,
     DispenseViewSet, InventoryAlertViewSet, StockRequestViewSet, StockIssueViewSet
 )
+from .analytics_views import PharmacyAnalyticsSummaryView
 
 router = DefaultRouter()
 router.register(r'generics', GenericMedicationViewSet, basename='generic-medication')
@@ -20,4 +21,5 @@ router.register(r'stock-issues', StockIssueViewSet, basename='stock-issue')
 
 urlpatterns = [
     path('pharmacy/', include(router.urls)),
+    path('pharmacy/analytics/summary/', PharmacyAnalyticsSummaryView.as_view(), name='pharmacy-analytics-summary'),
 ]

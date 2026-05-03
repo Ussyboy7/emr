@@ -29,7 +29,6 @@ export const ALL_PAGE_PERMISSIONS: PagePermission[] = [
 
   // Nursing
   { id: "/nursing", name: "Dashboard", description: "Nursing Dashboard", module: "Nursing" },
-  { id: "/nursing/analytics", name: "Analytics", description: "Nursing pool analytics", module: "Nursing" },
   { id: "/nursing/pool-queue", name: "Pool Queue", description: "Manage nursing pool queue", module: "Nursing" },
   { id: "/nursing/room-queue", name: "Room Queue", description: "Manage nursing room queue", module: "Nursing" },
   { id: "/nursing/patient-vitals", name: "Patient Vitals", description: "Record patient vital signs", module: "Nursing" },
@@ -38,6 +37,8 @@ export const ALL_PAGE_PERMISSIONS: PagePermission[] = [
   { id: "/nursing/wards", name: "Ward Management", description: "Manage wards and beds", module: "Nursing" },
   { id: "/nursing/inventory", name: "Ward Stock", description: "Manage ward inventory", module: "Nursing" },
   { id: "/nursing/requests", name: "Drug Requests", description: "Request drugs from pharmacy", module: "Nursing" },
+  { id: "/nursing/analytics", name: "Analytics", description: "Nursing pool analytics", module: "Nursing" },
+
 
   // Consultation
   { id: "/consultation", name: "My Dashboard", description: "Consultation Dashboard", module: "Consultation" },

@@ -295,6 +295,84 @@ class ConsultationSessionViewSet(viewsets.ModelViewSet):
         )
         return Response(ConsultationSessionSerializer(session).data)
 
+    @action(detail=False, methods=['get'], url_path='comprehensive-analytics')
+    def comprehensive_analytics(self, request):
+        """
+        Comprehensive consultation analytics combining all metrics.
+        Requires start and end date parameters.
+        """
+        from common.module_analytics import parse_analytics_dates
+        dates = parse_analytics_dates(request)
+        if isinstance(dates, Response):
+            return dates
+
+        start_date, end_date = dates
+
+        # Get consultation sessions for the period
+        base = (
+            ConsultationSession.objects
+            .all()
+            .select_related('room__clinic', 'patient', 'doctor', 'visit')
+            .filter(started_at__gte=start_date, started_at__lte=end_date)
+            .exclude(status='cancelled')
+        )
+
+        from .analytics import build_comprehensive_consultation_analytics
+        analytics = build_comprehensive_consultation_analytics(base, start_date, end_date)
+
+        # Add clinical outcomes data
+        from pharmacy.models import Prescription
+        from laboratory.models import LabOrder
+        from nursing.models import NursingOrder
+
+        # Get visits from completed sessions
+        completed_session_visits = set(
+            base.filter(status='completed')
+            .exclude(visit__isnull=True)
+            .values_list('visit_id', flat=True)
+        )
+
+        if completed_session_visits:
+            analytics['clinical_outcomes'] = {
+                'prescriptions': Prescription.objects.filter(visit_id__in=completed_session_visits).count(),
+                'lab_orders': LabOrder.objects.filter(visit_id__in=completed_session_visits).count(),
+                'nursing_orders': NursingOrder.objects.filter(visit_id__in=completed_session_visits).count(),
+            }
+        else:
+            analytics['clinical_outcomes'] = {
+                'prescriptions': 0,
+                'lab_orders': 0,
+                'nursing_orders': 0,
+            }
+
+        # Add referral stats
+        from .models import Referral
+        period_referrals = Referral.objects.filter(
+            referred_at__gte=start_date,
+            referred_at__lte=end_date
+        )
+        analytics['referrals'] = {
+            'total': period_referrals.count(),
+            'pending': period_referrals.filter(status__in=['draft', 'sent']).count(),
+            'completed': period_referrals.filter(status='completed').count(),
+        }
+
+        # Add diagnosis stats
+        from .models import Diagnosis
+        period_diagnoses = Diagnosis.objects.filter(
+            diagnosed_at__gte=start_date,
+            diagnosed_at__lte=end_date
+        )
+        analytics['diagnoses'] = {
+            'total': period_diagnoses.count(),
+            'by_certainty': {
+                certainty: period_diagnoses.filter(certainty=certainty).count()
+                for certainty in ['confirmed', 'probable', 'possible', 'ruled_out']
+            }
+        }
+
+        return Response(analytics)
+
     @action(detail=False, methods=['get'])
     def stats(self, request):
         """Get consultation statistics for dashboard."""

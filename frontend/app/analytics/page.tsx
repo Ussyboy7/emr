@@ -84,10 +84,10 @@ export default function AnalyticsPage() {
         analyticsService.getTopDiagnoses(10),
         analyticsService.getLabTestDistribution(),
         analyticsService.getPharmacyMetrics(12),
-        analyticsService.getPatientDemographics().catch(() => null), // Don't fail if this endpoint doesn't exist
-        apiFetch<any>('/dashboard/stats/').catch(() => null), // Load dashboard stats for consultation metrics
-        apiFetch<any>('/reports/lab-performance/').catch(() => null), // Lab performance metrics
-        apiFetch<any>('/reports/pharmacy-performance/').catch(() => null), // Pharmacy performance metrics
+        analyticsService.getPatientDemographics(),
+        apiFetch<any>('/dashboard/stats/'),
+        apiFetch<any>('/reports/lab-performance/'),
+        apiFetch<any>('/reports/pharmacy-performance/'),
       ]);
       
       setStats(summaryStats);

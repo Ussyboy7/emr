@@ -50,6 +50,7 @@ export type {
   Diagnosis,
   PresentingComplaintCategory,
   PresentingComplaint,
+  ConsultationAnalytics,
 } from './consultation-service';
 export type {
   PhysioOrder,

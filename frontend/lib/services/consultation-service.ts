@@ -133,6 +133,64 @@ export interface PresentingComplaint {
   updated_at?: string;
 }
 
+export interface ConsultationAnalytics {
+  session_metrics: {
+    total_sessions: number;
+    completed_sessions: number;
+    active_sessions: number;
+    completion_rate: number;
+    avg_duration: number;
+    median_duration: number;
+    max_duration: number;
+    min_duration: number;
+  };
+  throughput: Record<string, number>;
+  room_utilization: Record<string, {
+    sessions: number;
+    completed: number;
+    avg_duration: number;
+  }>;
+  doctor_productivity: Record<string, {
+    sessions: number;
+    completed: number;
+    avg_duration: number;
+  }>;
+  patient_demographics: {
+    attendance_by_category: Array<{
+      sn: number;
+      key: string;
+      label: string;
+      male: number;
+      female: number;
+      total: number;
+      percentage: number;
+    }>;
+    attendance_totals: {
+      male: number;
+      female: number;
+      total: number;
+    };
+  };
+  clinical_outcomes: {
+    prescriptions: number;
+    lab_orders: number;
+    nursing_orders: number;
+  };
+  referrals: {
+    total: number;
+    pending: number;
+    completed: number;
+  };
+  diagnoses: {
+    total: number;
+    by_certainty: Record<string, number>;
+  };
+  period: {
+    start_date: string;
+    end_date: string;
+  };
+}
+
 class ConsultationService {
   /**
    * Get consultation statistics for dashboard
@@ -141,6 +199,17 @@ class ConsultationService {
     const params = doctorId ? { doctor: doctorId } : {};
     const query = buildQueryString(params);
     return apiFetch<ConsultationStats>(`/consultation/sessions/stats/${query}`);
+  }
+
+  /**
+   * Get comprehensive consultation analytics
+   */
+  async getComprehensiveAnalytics(params: {
+    start: string;
+    end: string;
+  }): Promise<ConsultationAnalytics> {
+    const query = buildQueryString(params);
+    return apiFetch<ConsultationAnalytics>(`/consultation/sessions/comprehensive-analytics/${query}`);
   }
 
   /**

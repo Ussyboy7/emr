@@ -10,6 +10,7 @@ from .views import (
     LabTestViewSet,
     LabResultViewSet,
 )
+from .analytics_views import LaboratoryAnalyticsSummaryView
 
 router = DefaultRouter()
 router.register(r'lab-partners', LabPartnerViewSet, basename='lab-partner')
@@ -20,5 +21,6 @@ router.register(r'verification', LabResultViewSet, basename='lab-result')
 
 urlpatterns = [
     path('laboratory/', include(router.urls)),
+    path('laboratory/analytics/summary/', LaboratoryAnalyticsSummaryView.as_view(), name='laboratory-analytics-summary'),
 ]
 

@@ -254,17 +254,8 @@ export default function NursingPoolQueuePage() {
           try {
             const metrics = await visitService.getNursingPoolMetrics(metricsParams);
             setPoolMetrics(metrics);
-          } catch (me: any) {
-            if (me?.status === 404) {
-              setPoolMetrics({
-                total: result.count ?? result.results.length,
-                pending_vitals: 0,
-                ready_for_consultation: 0,
-                sent_to_room: 0,
-              });
-            } else {
-              throw me;
-            }
+          } catch (me: unknown) {
+            console.warn('Nursing pool metrics failed', me);
           }
         }
 
@@ -282,20 +273,9 @@ export default function NursingPoolQueuePage() {
           queueVisitToSentAt = new Map();
           if (combinedVisitIds.length > 0) {
             try {
-              let queueResult: { results: any[] };
-              try {
-                queueResult = await apiFetch<{ results: any[] }>(
-                  `/consultation/queue/by-visits/?visit_ids=${combinedVisitIds.join(',')}`
-                );
-              } catch (qe: any) {
-                if (qe?.status === 404) {
-                  queueResult = await apiFetch<{ results: any[] }>(
-                    '/consultation/queue/?is_active=true&page_size=250'
-                  );
-                } else {
-                  throw qe;
-                }
-              }
+              const queueResult = await apiFetch<{ results: any[] }>(
+                `/consultation/queue/by-visits/?visit_ids=${combinedVisitIds.join(',')}`
+              );
               (queueResult.results || []).forEach((item: any) => {
                 if (item.visit != null && item.room_name) {
                   const vid = typeof item.visit === 'number' ? item.visit : parseInt(String(item.visit), 10);

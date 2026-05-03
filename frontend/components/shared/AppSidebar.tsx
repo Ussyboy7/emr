@@ -115,13 +115,14 @@ const menuSections: MenuSection[] = [
     basePath: "/nursing",
     items: [
       { label: "Home", href: "/nursing", icon: LayoutDashboard },
-      { label: "Analytics", href: "/nursing/analytics", icon: BarChart3 },
       { label: "Pool Queue", href: "/nursing/pool-queue", icon: Users },
       { label: "Room Queue", href: "/nursing/room-queue", icon: DoorOpen },
       { label: "Patient Vitals", href: "/nursing/patient-vitals", icon: Activity },
       { label: "Procedures", href: "/nursing/procedures", icon: Syringe },
       { label: "Procedures History", href: "/nursing/procedures/history", icon: ClipboardList },
       { label: "Ward Management", href: "/nursing/wards", icon: Building2 },
+      { label: "Analytics", href: "/nursing/analytics", icon: BarChart3 },
+
     ],
   },
   {
@@ -136,6 +137,8 @@ const menuSections: MenuSection[] = [
       { label: "Consultation History", href: "/consultation/history", icon: History },
       { label: "Ward Overview", href: "/consultation/wards", icon: Building2 },
       { label: "Referrals", href: "/consultation/referrals", icon: ArrowRight },
+      { label: "Analytics", href: "/consultation/analytics", icon: BarChart3 },
+
     ],
   },
   {

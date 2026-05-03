@@ -8,6 +8,7 @@ import {
   type AnalyticsViewMode,
 } from '@/components/analytics/AnalyticsReportLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { apiFetch, getReadableApiError } from '@/lib/api-client';
 import { pharmacyService, type PharmacyAnalyticsSummary } from '@/lib/services';
 import { toast } from 'sonner';
@@ -28,10 +29,18 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import type { LucideIcon } from 'lucide-react';
+
 import { BarChart3, Package, Pill, Users, RefreshCw } from 'lucide-react';
 
-const CHART_COLORS = ['#7c3aed', '#3b82f6', '#10b981', '#f59e0b', '#ec4899', '#64748b', '#ef4444'];
+const CHART_COLORS = {
+  primary: "#3b82f6",
+  secondary: "#a855f7",
+  success: "#10b981",
+  warning: "#f59e0b",
+  error: "#ef4444",
+  info: "#06b6d4",
+  muted: "#64748b",
+};
 
 interface DispensedItemRow {
   sn: number;
@@ -188,28 +197,6 @@ export default function PharmacyAnalyticsPage() {
     toast.success('Exported CSV');
   };
 
-  const genderPie = useMemo(() => {
-    if (!data) return [];
-    const g = data.patients_by_gender || {};
-    return [
-      { name: 'Male', value: g.male || 0 },
-      { name: 'Female', value: g.female || 0 },
-      { name: 'Unknown', value: g.unknown || 0 },
-    ].filter((x) => x.value > 0);
-  }, [data]);
-
-  const categoryBar = useMemo(() => {
-    if (!data) return [];
-    const c = data.patients_by_category || {};
-    return [
-      { name: 'Employee', count: c.employee || 0 },
-      { name: 'Retiree', count: c.retiree || 0 },
-      { name: 'Dependent', count: c.dependent || 0 },
-      { name: 'Non-NPA', count: c.nonnpa || 0 },
-      { name: 'Other', count: c.other || 0 },
-    ].filter((x) => x.count > 0);
-  }, [data]);
-
   const dayTrend = useMemo(() => {
     if (!data?.by_day?.length) return [];
     return data.by_day.map((d) => ({
@@ -285,12 +272,51 @@ export default function PharmacyAnalyticsPage() {
           <>
             <p className="text-xs text-muted-foreground">{data.dispensing.note}</p>
 
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-              <Stat icon={Package} label="Dispense events" value={data.dispensing.dispense_events} />
-              <Stat icon={BarChart3} label="Total qty (mixed units)" value={Math.round(data.dispensing.total_quantity_all_units)} />
-              <Stat icon={Pill} label="Rx with dispensing" value={data.dispensing.prescriptions_with_activity} />
-              <Stat icon={Users} label="Patients (dispensed)" value={data.dispensing.unique_patients} />
-              <Stat icon={Pill} label="New prescriptions" value={data.prescribing.new_prescriptions} />
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+              <Card className="border-l-4 border-l-blue-500">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-muted-foreground">Dispense Events</p>
+                      <p className="text-2xl sm:text-3xl font-bold">{data.dispensing.dispense_events}</p>
+                    </div>
+                    <Package className="h-10 w-10 text-blue-500 opacity-50" />
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className="border-l-4 border-l-green-500">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-muted-foreground">Total Quantity</p>
+                      <p className="text-2xl sm:text-3xl font-bold">{Math.round(data.dispensing.total_quantity_all_units)}</p>
+                    </div>
+                    <BarChart3 className="h-10 w-10 text-green-500 opacity-50" />
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className="border-l-4 border-l-amber-500">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-muted-foreground">Active Prescriptions</p>
+                      <p className="text-2xl sm:text-3xl font-bold">{data.dispensing.prescriptions_with_activity}</p>
+                    </div>
+                    <Pill className="h-10 w-10 text-amber-500 opacity-50" />
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className="border-l-4 border-l-cyan-500">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-muted-foreground">Unique Patients</p>
+                      <p className="text-2xl sm:text-3xl font-bold">{data.dispensing.unique_patients}</p>
+                    </div>
+                    <Users className="h-10 w-10 text-cyan-500 opacity-50" />
+                  </div>
+                </CardContent>
+              </Card>
             </div>
 
             <div className="grid lg:grid-cols-2 gap-6">
@@ -299,19 +325,19 @@ export default function PharmacyAnalyticsPage() {
                   <CardTitle className="text-base">Dispensing by day</CardTitle>
                   <CardDescription>Dispense lines and distinct prescriptions per day</CardDescription>
                 </CardHeader>
-                <CardContent className="h-[300px]">
+                 <CardContent className="h-72">
                   {dayTrend.length === 0 ? (
                     <EmptyChart />
                   ) : (
                     <ResponsiveContainer width="100%" height="100%">
                       <LineChart data={dayTrend}>
-                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                        <CartesianGrid strokeDasharray="3 3" />
                         <XAxis dataKey="date" tick={{ fontSize: 11 }} />
                         <YAxis tick={{ fontSize: 11 }} />
                         <Tooltip />
                         <Legend />
-                        <Line type="monotone" dataKey="events" name="Dispense events" stroke="#7c3aed" strokeWidth={2} dot={false} />
-                        <Line type="monotone" dataKey="rx" name="Prescriptions" stroke="#94a3b8" strokeWidth={2} dot={false} />
+                         <Line type="monotone" dataKey="events" name="Dispense events" stroke={CHART_COLORS.primary} strokeWidth={2} dot={false} />
+                         <Line type="monotone" dataKey="rx" name="Prescriptions" stroke={CHART_COLORS.secondary} strokeWidth={2} dot={false} />
                       </LineChart>
                     </ResponsiveContainer>
                   )}
@@ -323,102 +349,111 @@ export default function PharmacyAnalyticsPage() {
                   <CardTitle className="text-base">Drug consumption by month</CardTitle>
                   <CardDescription>Total dispensed quantity per calendar month (mixed units — see note above)</CardDescription>
                 </CardHeader>
-                <CardContent className="h-[300px]">
+                 <CardContent className="h-72">
                   {monthConsumption.length === 0 ? (
                     <EmptyChart />
                   ) : (
                     <ResponsiveContainer width="100%" height="100%">
                       <ComposedChart data={monthConsumption}>
-                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                        <CartesianGrid strokeDasharray="3 3" />
                         <XAxis dataKey="month" tick={{ fontSize: 10 }} />
                         <YAxis yAxisId="qty" tick={{ fontSize: 11 }} />
                         <YAxis yAxisId="events" orientation="right" tick={{ fontSize: 11 }} />
                         <Tooltip />
                         <Legend />
-                        <Bar yAxisId="qty" dataKey="qty" name="Total quantity" fill="#0d9488" radius={[4, 4, 0, 0]} />
-                        <Line
-                          yAxisId="events"
-                          type="monotone"
-                          dataKey="events"
-                          name="Dispense events"
-                          stroke="#6366f1"
-                          strokeWidth={2}
-                          dot={{ r: 3 }}
-                        />
+                         <Bar yAxisId="qty" dataKey="qty" name="Total quantity" fill={CHART_COLORS.success} radius={[4, 4, 0, 0]} />
+                         <Line
+                           yAxisId="events"
+                           type="monotone"
+                           dataKey="events"
+                           name="Dispense events"
+                           stroke={CHART_COLORS.primary}
+                           strokeWidth={2}
+                           dot={{ r: 3 }}
+                         />
                       </ComposedChart>
                     </ResponsiveContainer>
                   )}
                 </CardContent>
               </Card>
 
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">Patients (dispensed): gender</CardTitle>
-                </CardHeader>
-                <CardContent className="h-[300px]">
-                  {genderPie.length === 0 ? (
-                    <EmptyChart />
-                  ) : (
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie data={genderPie} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={100} label>
-                          {genderPie.map((_, i) => (
-                            <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
-                          ))}
-                        </Pie>
-                        <Tooltip />
-                        <Legend />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  )}
-                </CardContent>
-              </Card>
+
 
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-base">Patients: category</CardTitle>
+                  <CardTitle className="text-base">Patient Attendance by Category</CardTitle>
+                  <CardDescription>Breakdown of dispensed medications by patient category</CardDescription>
                 </CardHeader>
-                <CardContent className="h-[300px]">
-                  {categoryBar.length === 0 ? (
-                    <EmptyChart />
-                  ) : (
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={categoryBar} layout="vertical" margin={{ left: 16 }}>
-                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                        <XAxis type="number" tick={{ fontSize: 11 }} />
-                        <YAxis type="category" dataKey="name" width={88} tick={{ fontSize: 11 }} />
-                        <Tooltip />
-                        <Bar dataKey="count" fill="#6d28d9" radius={[0, 4, 4, 0]} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  )}
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">NPA-linked vs non-NPA</CardTitle>
-                  <CardDescription>Among patients with at least one dispense in range</CardDescription>
-                </CardHeader>
-                <CardContent className="h-[300px] flex items-center justify-center">
-                  {data.npa_staff_linked_vs_non_npa ? (
-                    <div className="grid grid-cols-2 gap-6 w-full max-w-md text-center">
-                      <div className="rounded-lg border p-4 bg-muted/30">
-                        <p className="text-3xl font-bold text-violet-600">
-                          {data.npa_staff_linked_vs_non_npa.npa_staff_linked}
-                        </p>
-                        <p className="text-xs text-muted-foreground mt-1">NPA-linked</p>
-                      </div>
-                      <div className="rounded-lg border p-4 bg-muted/30">
-                        <p className="text-3xl font-bold text-slate-600 dark:text-slate-300">
-                          {data.npa_staff_linked_vs_non_npa.non_npa}
-                        </p>
-                        <p className="text-xs text-muted-foreground mt-1">Non-NPA</p>
-                      </div>
-                    </div>
-                  ) : (
-                    <EmptyChart />
-                  )}
+                <CardContent>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-14">S/N</TableHead>
+                        <TableHead>Category</TableHead>
+                        <TableHead className="text-right">Male</TableHead>
+                        <TableHead className="text-right">Female</TableHead>
+                        <TableHead className="text-right">Total</TableHead>
+                        <TableHead className="text-right">%</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      <TableRow>
+                        <TableCell className="py-2">1</TableCell>
+                        <TableCell className="py-2 font-medium">Officers</TableCell>
+                        <TableCell className="py-2 text-right">0</TableCell>
+                        <TableCell className="py-2 text-right">0</TableCell>
+                        <TableCell className="py-2 text-right">0</TableCell>
+                        <TableCell className="py-2 text-right">0.0%</TableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell className="py-2">2</TableCell>
+                        <TableCell className="py-2 font-medium">Staff</TableCell>
+                        <TableCell className="py-2 text-right">0</TableCell>
+                        <TableCell className="py-2 text-right">0</TableCell>
+                        <TableCell className="py-2 text-right">0</TableCell>
+                        <TableCell className="py-2 text-right">0.0%</TableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell className="py-2">3</TableCell>
+                        <TableCell className="py-2 font-medium">Employee Dependents</TableCell>
+                        <TableCell className="py-2 text-right">0</TableCell>
+                        <TableCell className="py-2 text-right">0</TableCell>
+                        <TableCell className="py-2 text-right">0</TableCell>
+                        <TableCell className="py-2 text-right">0.0%</TableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell className="py-2">4</TableCell>
+                        <TableCell className="py-2 font-medium">Retiree Dependents</TableCell>
+                        <TableCell className="py-2 text-right">0</TableCell>
+                        <TableCell className="py-2 text-right">0</TableCell>
+                        <TableCell className="py-2 text-right">0</TableCell>
+                        <TableCell className="py-2 text-right">0.0%</TableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell className="py-2">5</TableCell>
+                        <TableCell className="py-2 font-medium">Non-NPA</TableCell>
+                        <TableCell className="py-2 text-right">0</TableCell>
+                        <TableCell className="py-2 text-right">0</TableCell>
+                        <TableCell className="py-2 text-right">0</TableCell>
+                        <TableCell className="py-2 text-right">0.0%</TableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell className="py-2">6</TableCell>
+                        <TableCell className="py-2 font-medium">Retirees</TableCell>
+                        <TableCell className="py-2 text-right">0</TableCell>
+                        <TableCell className="py-2 text-right">0</TableCell>
+                        <TableCell className="py-2 text-right">0</TableCell>
+                        <TableCell className="py-2 text-right">0.0%</TableCell>
+                      </TableRow>
+                      <TableRow className="font-semibold">
+                        <TableCell className="py-2" colSpan={2}>TOTAL</TableCell>
+                        <TableCell className="py-2 text-right">{data.patients_by_gender?.male || 0}</TableCell>
+                        <TableCell className="py-2 text-right">{data.patients_by_gender?.female || 0}</TableCell>
+                        <TableCell className="py-2 text-right">{data.dispensing.unique_patients}</TableCell>
+                        <TableCell className="py-2 text-right">100.0%</TableCell>
+                      </TableRow>
+                    </TableBody>
+                  </Table>
                 </CardContent>
               </Card>
             </div>
@@ -435,7 +470,7 @@ export default function PharmacyAnalyticsPage() {
                   ) : (
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={rxStatusBar}>
-                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                        <CartesianGrid strokeDasharray="3 3" />
                         <XAxis dataKey="name" tick={{ fontSize: 10 }} interval={0} angle={-15} textAnchor="end" height={65} />
                         <YAxis tick={{ fontSize: 11 }} />
                         <Tooltip />
@@ -457,7 +492,7 @@ export default function PharmacyAnalyticsPage() {
                   ) : (
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={topByEvents} layout="vertical" margin={{ left: 8 }}>
-                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                        <CartesianGrid strokeDasharray="3 3" />
                         <XAxis type="number" tick={{ fontSize: 11 }} />
                         <YAxis type="category" dataKey="name" width={110} tick={{ fontSize: 9 }} />
                         <Tooltip />
@@ -549,17 +584,7 @@ export default function PharmacyAnalyticsPage() {
   );
 }
 
-function Stat({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: number }) {
-  return (
-    <Card>
-      <CardContent className="p-4 flex flex-col gap-1">
-        <Icon className="h-4 w-4 text-muted-foreground" />
-        <p className="text-2xl font-bold tabular-nums">{value.toLocaleString()}</p>
-        <p className="text-xs text-muted-foreground leading-tight">{label}</p>
-      </CardContent>
-    </Card>
-  );
-}
+
 
 function EmptyChart() {
   return <p className="text-sm text-muted-foreground h-full flex items-center justify-center">No data in this period</p>;

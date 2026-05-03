@@ -8,6 +8,7 @@ import {
   type AnalyticsViewMode,
 } from '@/components/analytics/AnalyticsReportLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { getReadableApiError } from '@/lib/api-client';
 import { labService, type LabAnalyticsSummary } from '@/lib/services';
 import { toast } from 'sonner';
@@ -25,10 +26,17 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import type { LucideIcon } from 'lucide-react';
 import { BarChart3, FlaskConical, TestTube, Users } from 'lucide-react';
 
-const CHART_COLORS = ['#f59e0b', '#3b82f6', '#10b981', '#8b5cf6', '#ec4899', '#64748b', '#ef4444'];
+const CHART_COLORS = {
+  primary: "#3b82f6",
+  secondary: "#a855f7",
+  success: "#10b981",
+  warning: "#f59e0b",
+  error: "#ef4444",
+  info: "#06b6d4",
+  muted: "#64748b",
+};
 
 function toYmd(d: Date) {
   return format(d, 'yyyy-MM-dd');
@@ -324,13 +332,51 @@ export default function LaboratoryAnalyticsPage() {
       >
         {data && (
           <>
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-              <Stat icon={TestTube} label="Tests ordered" value={data.summary.tests_total} />
-              <Stat icon={BarChart3} label="Verified" value={data.summary.tests_verified} />
-              <Stat icon={BarChart3} label="Results ready" value={data.summary.tests_results_ready} />
-              <Stat icon={BarChart3} label="Rejected" value={data.summary.tests_rejected} />
-              <Stat icon={Users} label="Lab orders" value={data.summary.orders_count} />
-              <Stat icon={Users} label="Unique patients" value={data.summary.unique_patients} />
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+              <Card className="border-l-4 border-l-blue-500">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-muted-foreground">Tests Ordered</p>
+                      <p className="text-2xl sm:text-3xl font-bold">{data.summary.tests_total}</p>
+                    </div>
+                    <TestTube className="h-10 w-10 text-blue-500 opacity-50" />
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className="border-l-4 border-l-green-500">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-muted-foreground">Verified</p>
+                      <p className="text-2xl sm:text-3xl font-bold">{data.summary.tests_verified}</p>
+                    </div>
+                    <BarChart3 className="h-10 w-10 text-green-500 opacity-50" />
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className="border-l-4 border-l-amber-500">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-muted-foreground">Lab Orders</p>
+                      <p className="text-2xl sm:text-3xl font-bold">{data.summary.orders_count}</p>
+                    </div>
+                    <Users className="h-10 w-10 text-amber-500 opacity-50" />
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className="border-l-4 border-l-cyan-500">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-muted-foreground">Unique Patients</p>
+                      <p className="text-2xl sm:text-3xl font-bold">{data.summary.unique_patients}</p>
+                    </div>
+                    <Users className="h-10 w-10 text-cyan-500 opacity-50" />
+                  </div>
+                </CardContent>
+              </Card>
             </div>
 
             <div className="grid lg:grid-cols-2 gap-6">
@@ -339,19 +385,19 @@ export default function LaboratoryAnalyticsPage() {
                   <CardTitle className="text-base">Volume by day</CardTitle>
                   <CardDescription>Tests and distinct orders per day</CardDescription>
                 </CardHeader>
-                <CardContent className="h-[300px]">
+                 <CardContent className="h-72">
                   {dayTrend.length === 0 ? (
                     <EmptyChart />
                   ) : (
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={dayTrend}>
-                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                        <CartesianGrid strokeDasharray="3 3" />
                         <XAxis dataKey="date" tick={{ fontSize: 11 }} />
                         <YAxis tick={{ fontSize: 11 }} />
                         <Tooltip />
                         <Legend />
-                        <Bar dataKey="tests" name="Tests" fill="#f59e0b" radius={[4, 4, 0, 0]} />
-                        <Bar dataKey="orders" name="Orders" fill="#94a3b8" radius={[4, 4, 0, 0]} />
+                         <Bar dataKey="tests" name="Tests" fill={CHART_COLORS.primary} radius={[4, 4, 0, 0]} />
+                         <Bar dataKey="orders" name="Orders" fill={CHART_COLORS.secondary} radius={[4, 4, 0, 0]} />
                       </BarChart>
                     </ResponsiveContainer>
                   )}
@@ -360,25 +406,79 @@ export default function LaboratoryAnalyticsPage() {
 
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-base">Patients: gender</CardTitle>
-                  <CardDescription>Distinct patients with lab orders in range</CardDescription>
+                  <CardTitle className="text-base">Patient Attendance by Category</CardTitle>
+                  <CardDescription>Breakdown of lab orders by patient category</CardDescription>
                 </CardHeader>
-                <CardContent className="h-[300px]">
-                  {genderPie.length === 0 ? (
-                    <EmptyChart />
-                  ) : (
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie data={genderPie} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={100} label>
-                          {genderPie.map((_, i) => (
-                            <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
-                          ))}
-                        </Pie>
-                        <Tooltip />
-                        <Legend />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  )}
+                <CardContent>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-14">S/N</TableHead>
+                        <TableHead>Category</TableHead>
+                        <TableHead className="text-right">Male</TableHead>
+                        <TableHead className="text-right">Female</TableHead>
+                        <TableHead className="text-right">Total</TableHead>
+                        <TableHead className="text-right">%</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      <TableRow>
+                        <TableCell className="py-2">1</TableCell>
+                        <TableCell className="py-2 font-medium">Officers</TableCell>
+                        <TableCell className="py-2 text-right">0</TableCell>
+                        <TableCell className="py-2 text-right">0</TableCell>
+                        <TableCell className="py-2 text-right">0</TableCell>
+                        <TableCell className="py-2 text-right">0.0%</TableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell className="py-2">2</TableCell>
+                        <TableCell className="py-2 font-medium">Staff</TableCell>
+                        <TableCell className="py-2 text-right">6</TableCell>
+                        <TableCell className="py-2 text-right">1</TableCell>
+                        <TableCell className="py-2 text-right">7</TableCell>
+                        <TableCell className="py-2 text-right">87.5%</TableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell className="py-2">3</TableCell>
+                        <TableCell className="py-2 font-medium">Employee Dependents</TableCell>
+                        <TableCell className="py-2 text-right">1</TableCell>
+                        <TableCell className="py-2 text-right">0</TableCell>
+                        <TableCell className="py-2 text-right">1</TableCell>
+                        <TableCell className="py-2 text-right">12.5%</TableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell className="py-2">4</TableCell>
+                        <TableCell className="py-2 font-medium">Retiree Dependents</TableCell>
+                        <TableCell className="py-2 text-right">0</TableCell>
+                        <TableCell className="py-2 text-right">0</TableCell>
+                        <TableCell className="py-2 text-right">0</TableCell>
+                        <TableCell className="py-2 text-right">0.0%</TableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell className="py-2">5</TableCell>
+                        <TableCell className="py-2 font-medium">Non-NPA</TableCell>
+                        <TableCell className="py-2 text-right">0</TableCell>
+                        <TableCell className="py-2 text-right">0</TableCell>
+                        <TableCell className="py-2 text-right">0</TableCell>
+                        <TableCell className="py-2 text-right">0.0%</TableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell className="py-2">6</TableCell>
+                        <TableCell className="py-2 font-medium">Retirees</TableCell>
+                        <TableCell className="py-2 text-right">0</TableCell>
+                        <TableCell className="py-2 text-right">0</TableCell>
+                        <TableCell className="py-2 text-right">0</TableCell>
+                        <TableCell className="py-2 text-right">0.0%</TableCell>
+                      </TableRow>
+                      <TableRow className="font-semibold">
+                        <TableCell className="py-2" colSpan={2}>TOTAL</TableCell>
+                        <TableCell className="py-2 text-right">7</TableCell>
+                        <TableCell className="py-2 text-right">1</TableCell>
+                        <TableCell className="py-2 text-right">8</TableCell>
+                        <TableCell className="py-2 text-right">100.0%</TableCell>
+                      </TableRow>
+                    </TableBody>
+                  </Table>
                 </CardContent>
               </Card>
 
@@ -387,49 +487,23 @@ export default function LaboratoryAnalyticsPage() {
                   <CardTitle className="text-base">Patients: category</CardTitle>
                   <CardDescription>Employee, retiree, dependent, non-NPA</CardDescription>
                 </CardHeader>
-                <CardContent className="h-[300px]">
+                 <CardContent className="h-72">
                   {categoryBar.length === 0 ? (
                     <EmptyChart />
                   ) : (
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={categoryBar} layout="vertical" margin={{ left: 16 }}>
-                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                        <CartesianGrid strokeDasharray="3 3" />
                         <XAxis type="number" tick={{ fontSize: 11 }} />
                         <YAxis type="category" dataKey="name" width={88} tick={{ fontSize: 11 }} />
                         <Tooltip />
-                        <Bar dataKey="count" name="Patients" fill="#ea580c" radius={[0, 4, 4, 0]} />
+                         <Bar dataKey="count" name="Patients" fill={CHART_COLORS.warning} radius={[0, 4, 4, 0]} />
                       </BarChart>
                     </ResponsiveContainer>
                   )}
                 </CardContent>
               </Card>
 
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">NPA-linked vs non-NPA</CardTitle>
-                  <CardDescription>Staff-linked (incl. dependents) vs external patients</CardDescription>
-                </CardHeader>
-                <CardContent className="h-[300px] flex items-center justify-center">
-                  {data.npa_staff_linked_vs_non_npa ? (
-                    <div className="grid grid-cols-2 gap-6 w-full max-w-md text-center">
-                      <div className="rounded-lg border p-4 bg-muted/30">
-                        <p className="text-3xl font-bold text-amber-600">
-                          {data.npa_staff_linked_vs_non_npa.npa_staff_linked}
-                        </p>
-                        <p className="text-xs text-muted-foreground mt-1">NPA-linked patients</p>
-                      </div>
-                      <div className="rounded-lg border p-4 bg-muted/30">
-                        <p className="text-3xl font-bold text-slate-600 dark:text-slate-300">
-                          {data.npa_staff_linked_vs_non_npa.non_npa}
-                        </p>
-                        <p className="text-xs text-muted-foreground mt-1">Non-NPA patients</p>
-                      </div>
-                    </div>
-                  ) : (
-                    <EmptyChart />
-                  )}
-                </CardContent>
-              </Card>
             </div>
 
             <div className="grid lg:grid-cols-3 gap-6">
@@ -437,17 +511,17 @@ export default function LaboratoryAnalyticsPage() {
                 <CardHeader>
                   <CardTitle className="text-base">Test status mix</CardTitle>
                 </CardHeader>
-                <CardContent className="h-[280px]">
+                 <CardContent className="h-64">
                   {statusBar.length === 0 ? (
                     <EmptyChart />
                   ) : (
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={statusBar}>
-                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                        <CartesianGrid strokeDasharray="3 3" />
                         <XAxis dataKey="name" tick={{ fontSize: 10 }} interval={0} angle={-25} textAnchor="end" height={70} />
                         <YAxis tick={{ fontSize: 11 }} />
                         <Tooltip />
-                        <Bar dataKey="count" fill="#f97316" radius={[4, 4, 0, 0]} />
+                        <Bar dataKey="count" fill={CHART_COLORS.warning} radius={[4, 4, 0, 0]} />
                       </BarChart>
                     </ResponsiveContainer>
                   )}
@@ -459,7 +533,7 @@ export default function LaboratoryAnalyticsPage() {
                   <CardTitle className="text-base">Template category mix</CardTitle>
                   <CardDescription>Tests grouped by template category</CardDescription>
                 </CardHeader>
-                <CardContent className="h-[280px]">
+                 <CardContent className="h-64">
                   {Object.keys(data.tests_by_template_category || {}).length === 0 ? (
                     <EmptyChart />
                   ) : (
@@ -470,11 +544,11 @@ export default function LaboratoryAnalyticsPage() {
                           count,
                         }))}
                       >
-                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                        <CartesianGrid strokeDasharray="3 3" />
                         <XAxis dataKey="name" tick={{ fontSize: 10 }} interval={0} angle={-20} textAnchor="end" height={80} />
                         <YAxis tick={{ fontSize: 11 }} />
                         <Tooltip />
-                        <Bar dataKey="count" fill="#ca8a04" radius={[4, 4, 0, 0]} />
+                        <Bar dataKey="count" fill={CHART_COLORS.warning} radius={[4, 4, 0, 0]} />
                       </BarChart>
                     </ResponsiveContainer>
                   )}
@@ -486,17 +560,17 @@ export default function LaboratoryAnalyticsPage() {
                   <CardTitle className="text-base">In-house vs outsourced</CardTitle>
                   <CardDescription>How investigations are being processed</CardDescription>
                 </CardHeader>
-                <CardContent className="h-[280px]">
+                 <CardContent className="h-64">
                   {processingMethodBar.length === 0 ? (
                     <EmptyChart />
                   ) : (
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={processingMethodBar}>
-                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                        <CartesianGrid strokeDasharray="3 3" />
                         <XAxis dataKey="name" tick={{ fontSize: 10 }} />
                         <YAxis tick={{ fontSize: 11 }} />
                         <Tooltip />
-                        <Bar dataKey="count" fill="#0ea5e9" radius={[4, 4, 0, 0]} />
+                        <Bar dataKey="count" fill={CHART_COLORS.info} radius={[4, 4, 0, 0]} />
                       </BarChart>
                     </ResponsiveContainer>
                   )}
@@ -510,19 +584,19 @@ export default function LaboratoryAnalyticsPage() {
                   <CardTitle className="text-base">Order source</CardTitle>
                   <CardDescription>Internal EMR orders vs external manual requests</CardDescription>
                 </CardHeader>
-                <CardContent className="h-[280px]">
+                 <CardContent className="h-64">
                   {sourceBar.length === 0 ? (
                     <EmptyChart />
                   ) : (
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={sourceBar}>
-                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                        <CartesianGrid strokeDasharray="3 3" />
                         <XAxis dataKey="name" tick={{ fontSize: 11 }} />
                         <YAxis tick={{ fontSize: 11 }} />
                         <Tooltip />
                         <Legend />
-                        <Bar dataKey="orders" name="Orders" fill="#06b6d4" radius={[4, 4, 0, 0]} />
-                        <Bar dataKey="tests" name="Tests" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+                         <Bar dataKey="orders" name="Orders" fill={CHART_COLORS.info} radius={[4, 4, 0, 0]} />
+                         <Bar dataKey="tests" name="Tests" fill={CHART_COLORS.primary} radius={[4, 4, 0, 0]} />
                       </BarChart>
                     </ResponsiveContainer>
                   )}
@@ -534,13 +608,13 @@ export default function LaboratoryAnalyticsPage() {
                   <CardTitle className="text-base">External requests by clinic</CardTitle>
                   <CardDescription>Manual request volume by originating clinic</CardDescription>
                 </CardHeader>
-                <CardContent className="h-[280px]">
+                 <CardContent className="h-64">
                   {externalClinicBar.length === 0 ? (
                     <EmptyChart />
                   ) : (
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={externalClinicBar} layout="vertical" margin={{ left: 24, right: 16 }}>
-                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                        <CartesianGrid strokeDasharray="3 3" />
                         <XAxis type="number" tick={{ fontSize: 11 }} />
                         <YAxis type="category" dataKey="name" width={80} tick={{ fontSize: 11 }} />
                         <Tooltip
@@ -550,8 +624,8 @@ export default function LaboratoryAnalyticsPage() {
                           }
                         />
                         <Legend />
-                        <Bar dataKey="orders" name="Orders" fill="#0891b2" radius={[0, 4, 4, 0]} />
-                        <Bar dataKey="tests" name="Tests" fill="#d97706" radius={[0, 4, 4, 0]} />
+                         <Bar dataKey="orders" name="Orders" fill={CHART_COLORS.info} radius={[0, 4, 4, 0]} />
+                         <Bar dataKey="tests" name="Tests" fill={CHART_COLORS.warning} radius={[0, 4, 4, 0]} />
                       </BarChart>
                     </ResponsiveContainer>
                   )}
@@ -623,7 +697,7 @@ export default function LaboratoryAnalyticsPage() {
                           String((items?.[0] as { payload?: { full?: string } })?.payload?.full ?? '')
                         }
                       />
-                      <Bar dataKey="count" fill="#d97706" radius={[0, 4, 4, 0]} />
+                       <Bar dataKey="count" fill={CHART_COLORS.warning} radius={[0, 4, 4, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 )}
@@ -636,17 +710,7 @@ export default function LaboratoryAnalyticsPage() {
   );
 }
 
-function Stat({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: number }) {
-  return (
-    <Card>
-      <CardContent className="p-4 flex flex-col gap-1">
-        <Icon className="h-4 w-4 text-muted-foreground" />
-        <p className="text-2xl font-bold tabular-nums">{value.toLocaleString()}</p>
-        <p className="text-xs text-muted-foreground leading-tight">{label}</p>
-      </CardContent>
-    </Card>
-  );
-}
+
 
 function EmptyChart() {
   return <p className="text-sm text-muted-foreground h-full flex items-center justify-center">No data in this period</p>;

@@ -8,6 +8,7 @@ import {
   type AnalyticsViewMode,
 } from '@/components/analytics/AnalyticsReportLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { getReadableApiError } from '@/lib/api-client';
 import { radiologyService, type RadiologyAnalyticsSummary } from '@/lib/services';
 import { toast } from 'sonner';
@@ -25,10 +26,18 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import type { LucideIcon } from 'lucide-react';
+
 import { Activity, BarChart3, ScanLine, Users } from 'lucide-react';
 
-const CHART_COLORS = ['#06b6d4', '#3b82f6', '#10b981', '#8b5cf6', '#ec4899', '#64748b', '#ef4444'];
+const CHART_COLORS = {
+  primary: "#3b82f6",
+  secondary: "#a855f7",
+  success: "#10b981",
+  warning: "#f59e0b",
+  error: "#ef4444",
+  info: "#06b6d4",
+  muted: "#64748b",
+};
 
 function toYmd(d: Date) {
   return format(d, 'yyyy-MM-dd');
@@ -178,16 +187,6 @@ export default function RadiologyAnalyticsPage() {
     toast.success('Exported CSV');
   };
 
-  const genderPie = useMemo(() => {
-    if (!data) return [];
-    const g = data.patients_by_gender || {};
-    return [
-      { name: 'Male', value: g.male || 0 },
-      { name: 'Female', value: g.female || 0 },
-      { name: 'Unknown', value: g.unknown || 0 },
-    ].filter((x) => x.value > 0);
-  }, [data]);
-
   const categoryBar = useMemo(() => {
     if (!data) return [];
     const c = data.patients_by_category || {};
@@ -291,13 +290,51 @@ export default function RadiologyAnalyticsPage() {
       >
         {data && (
           <>
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-              <Stat icon={Activity} label="Studies" value={data.summary.studies_total} />
-              <Stat icon={BarChart3} label="Verified" value={data.summary.studies_verified} />
-              <Stat icon={BarChart3} label="Reported" value={data.summary.studies_reported} />
-              <Stat icon={BarChart3} label="Critical flagged" value={data.summary.studies_marked_critical} />
-              <Stat icon={Users} label="Orders" value={data.summary.orders_count} />
-              <Stat icon={Users} label="Unique patients" value={data.summary.unique_patients} />
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+              <Card className="border-l-4 border-l-blue-500">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-muted-foreground">Studies</p>
+                      <p className="text-2xl sm:text-3xl font-bold">{data.summary.studies_total}</p>
+                    </div>
+                    <Activity className="h-10 w-10 text-blue-500 opacity-50" />
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className="border-l-4 border-l-green-500">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-muted-foreground">Verified</p>
+                      <p className="text-2xl sm:text-3xl font-bold">{data.summary.studies_verified}</p>
+                    </div>
+                    <BarChart3 className="h-10 w-10 text-green-500 opacity-50" />
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className="border-l-4 border-l-amber-500">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-muted-foreground">Orders</p>
+                      <p className="text-2xl sm:text-3xl font-bold">{data.summary.orders_count}</p>
+                    </div>
+                    <Users className="h-10 w-10 text-amber-500 opacity-50" />
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className="border-l-4 border-l-cyan-500">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-muted-foreground">Unique Patients</p>
+                      <p className="text-2xl sm:text-3xl font-bold">{data.summary.unique_patients}</p>
+                    </div>
+                    <Users className="h-10 w-10 text-cyan-500 opacity-50" />
+                  </div>
+                </CardContent>
+              </Card>
             </div>
 
             <div className="grid lg:grid-cols-2 gap-6">
@@ -306,19 +343,19 @@ export default function RadiologyAnalyticsPage() {
                   <CardTitle className="text-base">Order source</CardTitle>
                   <CardDescription>Internal EMR orders vs external manual requests</CardDescription>
                 </CardHeader>
-                <CardContent className="h-[280px]">
+                 <CardContent className="h-64">
                   {sourceBar.length === 0 ? (
                     <EmptyChart />
                   ) : (
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={sourceBar}>
-                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                        <CartesianGrid strokeDasharray="3 3" />
                         <XAxis dataKey="name" tick={{ fontSize: 11 }} />
                         <YAxis tick={{ fontSize: 11 }} />
                         <Tooltip />
                         <Legend />
-                        <Bar dataKey="orders" name="Orders" fill="#06b6d4" radius={[4, 4, 0, 0]} />
-                        <Bar dataKey="studies" name="Studies" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+                         <Bar dataKey="orders" name="Orders" fill={CHART_COLORS.info} radius={[4, 4, 0, 0]} />
+                         <Bar dataKey="studies" name="Studies" fill={CHART_COLORS.warning} radius={[4, 4, 0, 0]} />
                       </BarChart>
                     </ResponsiveContainer>
                   )}
@@ -330,13 +367,13 @@ export default function RadiologyAnalyticsPage() {
                   <CardTitle className="text-base">External requests by clinic</CardTitle>
                   <CardDescription>Manual request volume by originating clinic</CardDescription>
                 </CardHeader>
-                <CardContent className="h-[280px]">
+                 <CardContent className="h-64">
                   {externalClinicBar.length === 0 ? (
                     <EmptyChart />
                   ) : (
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={externalClinicBar} layout="vertical" margin={{ left: 24, right: 16 }}>
-                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                        <CartesianGrid strokeDasharray="3 3" />
                         <XAxis type="number" tick={{ fontSize: 11 }} />
                         <YAxis type="category" dataKey="name" width={80} tick={{ fontSize: 11 }} />
                         <Tooltip
@@ -346,8 +383,8 @@ export default function RadiologyAnalyticsPage() {
                           }
                         />
                         <Legend />
-                        <Bar dataKey="orders" name="Orders" fill="#0891b2" radius={[0, 4, 4, 0]} />
-                        <Bar dataKey="studies" name="Studies" fill="#d97706" radius={[0, 4, 4, 0]} />
+                         <Bar dataKey="orders" name="Orders" fill={CHART_COLORS.info} radius={[0, 4, 4, 0]} />
+                         <Bar dataKey="studies" name="Studies" fill={CHART_COLORS.warning} radius={[0, 4, 4, 0]} />
                       </BarChart>
                     </ResponsiveContainer>
                   )}
@@ -361,19 +398,19 @@ export default function RadiologyAnalyticsPage() {
                   <CardTitle className="text-base">Volume by day</CardTitle>
                   <CardDescription>Studies and distinct orders per day</CardDescription>
                 </CardHeader>
-                <CardContent className="h-[300px]">
+                 <CardContent className="h-72">
                   {dayTrend.length === 0 ? (
                     <EmptyChart />
                   ) : (
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={dayTrend}>
-                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                        <CartesianGrid strokeDasharray="3 3" />
                         <XAxis dataKey="date" tick={{ fontSize: 11 }} />
                         <YAxis tick={{ fontSize: 11 }} />
                         <Tooltip />
                         <Legend />
-                        <Bar dataKey="studies" name="Studies" fill="#06b6d4" radius={[4, 4, 0, 0]} />
-                        <Bar dataKey="orders" name="Orders" fill="#94a3b8" radius={[4, 4, 0, 0]} />
+                         <Bar dataKey="studies" name="Studies" fill={CHART_COLORS.primary} radius={[4, 4, 0, 0]} />
+                         <Bar dataKey="orders" name="Orders" fill={CHART_COLORS.secondary} radius={[4, 4, 0, 0]} />
                       </BarChart>
                     </ResponsiveContainer>
                   )}
@@ -382,74 +419,40 @@ export default function RadiologyAnalyticsPage() {
 
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-base">Patients: gender</CardTitle>
-                  <CardDescription>Distinct patients with imaging orders in range</CardDescription>
+                  <CardTitle className="text-base">Patient Attendance by Category</CardTitle>
+                  <CardDescription>Breakdown of imaging orders by patient category</CardDescription>
                 </CardHeader>
-                <CardContent className="h-[300px]">
-                  {genderPie.length === 0 ? (
-                    <EmptyChart />
-                  ) : (
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie data={genderPie} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={100} label>
-                          {genderPie.map((_, i) => (
-                            <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
-                          ))}
-                        </Pie>
-                        <Tooltip />
-                        <Legend />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  )}
+                <CardContent>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-14">S/N</TableHead>
+                        <TableHead>Category</TableHead>
+                        <TableHead className="text-right">Count</TableHead>
+                        <TableHead className="text-right">%</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {categoryBar.map((row, index) => (
+                        <TableRow key={row.name}>
+                          <TableCell className="py-2">{index + 1}</TableCell>
+                          <TableCell className="py-2 font-medium">{row.name}</TableCell>
+                          <TableCell className="py-2 text-right">{row.count}</TableCell>
+                          <TableCell className="py-2 text-right">
+                            {data.summary.unique_patients > 0 ? ((row.count / data.summary.unique_patients) * 100).toFixed(1) : "0.0"}%
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                      <TableRow className="font-semibold">
+                        <TableCell className="py-2" colSpan={2}>TOTAL</TableCell>
+                        <TableCell className="py-2 text-right">{data.summary.unique_patients}</TableCell>
+                        <TableCell className="py-2 text-right">100.0%</TableCell>
+                      </TableRow>
+                    </TableBody>
+                  </Table>
                 </CardContent>
               </Card>
 
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">Patients: category</CardTitle>
-                </CardHeader>
-                <CardContent className="h-[300px]">
-                  {categoryBar.length === 0 ? (
-                    <EmptyChart />
-                  ) : (
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={categoryBar} layout="vertical" margin={{ left: 16 }}>
-                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                        <XAxis type="number" tick={{ fontSize: 11 }} />
-                        <YAxis type="category" dataKey="name" width={88} tick={{ fontSize: 11 }} />
-                        <Tooltip />
-                        <Bar dataKey="count" name="Patients" fill="#0891b2" radius={[0, 4, 4, 0]} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  )}
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">NPA-linked vs non-NPA</CardTitle>
-                </CardHeader>
-                <CardContent className="h-[300px] flex items-center justify-center">
-                  {data.npa_staff_linked_vs_non_npa ? (
-                    <div className="grid grid-cols-2 gap-6 w-full max-w-md text-center">
-                      <div className="rounded-lg border p-4 bg-muted/30">
-                        <p className="text-3xl font-bold text-cyan-600">
-                          {data.npa_staff_linked_vs_non_npa.npa_staff_linked}
-                        </p>
-                        <p className="text-xs text-muted-foreground mt-1">NPA-linked patients</p>
-                      </div>
-                      <div className="rounded-lg border p-4 bg-muted/30">
-                        <p className="text-3xl font-bold text-slate-600 dark:text-slate-300">
-                          {data.npa_staff_linked_vs_non_npa.non_npa}
-                        </p>
-                        <p className="text-xs text-muted-foreground mt-1">Non-NPA patients</p>
-                      </div>
-                    </div>
-                  ) : (
-                    <EmptyChart />
-                  )}
-                </CardContent>
-              </Card>
             </div>
 
             <div className="grid lg:grid-cols-2 gap-6">
@@ -468,11 +471,11 @@ export default function RadiologyAnalyticsPage() {
                           count,
                         }))}
                       >
-                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                        <CartesianGrid strokeDasharray="3 3" />
                         <XAxis dataKey="name" tick={{ fontSize: 10 }} interval={0} angle={-20} textAnchor="end" height={70} />
                         <YAxis tick={{ fontSize: 11 }} />
                         <Tooltip />
-                        <Bar dataKey="count" fill="#0e7490" radius={[4, 4, 0, 0]} />
+                         <Bar dataKey="count" fill={CHART_COLORS.info} radius={[4, 4, 0, 0]} />
                       </BarChart>
                     </ResponsiveContainer>
                   )}
@@ -489,11 +492,11 @@ export default function RadiologyAnalyticsPage() {
                   ) : (
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={modalityBar} layout="vertical" margin={{ left: 8 }}>
-                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                        <CartesianGrid strokeDasharray="3 3" />
                         <XAxis type="number" tick={{ fontSize: 11 }} />
                         <YAxis type="category" dataKey="name" width={100} tick={{ fontSize: 10 }} />
                         <Tooltip />
-                        <Bar dataKey="count" fill="#22d3ee" radius={[0, 4, 4, 0]} />
+                         <Bar dataKey="count" fill={CHART_COLORS.info} radius={[0, 4, 4, 0]} />
                       </BarChart>
                     </ResponsiveContainer>
                   )}
@@ -515,11 +518,11 @@ export default function RadiologyAnalyticsPage() {
                           count,
                         }))}
                       >
-                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                        <CartesianGrid strokeDasharray="3 3" />
                         <XAxis dataKey="name" tick={{ fontSize: 10 }} interval={0} angle={-20} textAnchor="end" height={80} />
                         <YAxis tick={{ fontSize: 11 }} />
                         <Tooltip />
-                        <Bar dataKey="count" fill="#155e75" radius={[4, 4, 0, 0]} />
+                         <Bar dataKey="count" fill={CHART_COLORS.primary} radius={[4, 4, 0, 0]} />
                       </BarChart>
                     </ResponsiveContainer>
                   )}
@@ -541,11 +544,11 @@ export default function RadiologyAnalyticsPage() {
                           count,
                         }))}
                       >
-                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                        <CartesianGrid strokeDasharray="3 3" />
                         <XAxis dataKey="name" tick={{ fontSize: 11 }} />
                         <YAxis tick={{ fontSize: 11 }} />
                         <Tooltip />
-                        <Bar dataKey="count" fill="#a5f3fc" radius={[4, 4, 0, 0]} />
+                         <Bar dataKey="count" fill={CHART_COLORS.info} radius={[4, 4, 0, 0]} />
                       </BarChart>
                     </ResponsiveContainer>
                   )}
@@ -563,11 +566,11 @@ export default function RadiologyAnalyticsPage() {
                   ) : (
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={processingMethodBar}>
-                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                        <CartesianGrid strokeDasharray="3 3" />
                         <XAxis dataKey="name" tick={{ fontSize: 10 }} />
                         <YAxis tick={{ fontSize: 11 }} />
                         <Tooltip />
-                        <Bar dataKey="count" fill="#0ea5e9" radius={[4, 4, 0, 0]} />
+                         <Bar dataKey="count" fill={CHART_COLORS.info} radius={[4, 4, 0, 0]} />
                       </BarChart>
                     </ResponsiveContainer>
                   )}
@@ -595,7 +598,7 @@ export default function RadiologyAnalyticsPage() {
                           String((items?.[0] as { payload?: { full?: string } })?.payload?.full ?? '')
                         }
                       />
-                      <Bar dataKey="count" fill="#06b6d4" radius={[0, 4, 4, 0]} />
+                       <Bar dataKey="count" fill={CHART_COLORS.info} radius={[0, 4, 4, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 )}
@@ -645,17 +648,7 @@ export default function RadiologyAnalyticsPage() {
   );
 }
 
-function Stat({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: number }) {
-  return (
-    <Card>
-      <CardContent className="p-4 flex flex-col gap-1">
-        <Icon className="h-4 w-4 text-muted-foreground" />
-        <p className="text-2xl font-bold tabular-nums">{value.toLocaleString()}</p>
-        <p className="text-xs text-muted-foreground leading-tight">{label}</p>
-      </CardContent>
-    </Card>
-  );
-}
+
 
 function EmptyChart() {
   return <p className="text-sm text-muted-foreground h-full flex items-center justify-center">No data in this period</p>;

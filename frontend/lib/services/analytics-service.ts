@@ -8,7 +8,7 @@ import { patientService } from './patient-service';
 import { visitService } from './visit-service';
 import { adminService } from './admin-service';
 import labService from './lab-service';
-import { logError, logWarn } from '../client-logger';
+import { logError } from '../client-logger';
 import type { ApiResponse } from '../types/common';
 import { pharmacyService } from './pharmacy-service';
 import { radiologyService } from './radiology-service';
@@ -86,12 +86,7 @@ class AnalyticsService {
    * Get patient demographics report
    */
   async getPatientDemographics(): Promise<any> {
-    try {
-      return await apiFetch<any>('/reports/patient-demographics/');
-    } catch (err) {
-      logWarn('Patient demographics endpoint not available, using fallback');
-      return null;
-    }
+    return apiFetch<any>('/reports/patient-demographics/');
   }
 
   /**
@@ -310,13 +305,8 @@ class AnalyticsService {
    * Get top diagnoses from consultation sessions.
    */
   async getTopDiagnoses(limit: number = 10): Promise<TopDiagnosis[]> {
-    try {
-      const response = await apiFetch<any[]>(`/reports/top-diagnoses/?limit=${limit}`);
-      return response || [];
-    } catch (err) {
-      logWarn('Top diagnoses endpoint not available:', err);
-      return [];
-    }
+    const response = await apiFetch<any[]>(`/reports/top-diagnoses/?limit=${limit}`);
+    return response || [];
   }
 
   /**

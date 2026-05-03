@@ -741,30 +741,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           if (allMedications.length >= 50) break;
         }
 
-        // Fallback: if no results from search, load a small set and filter client-side
-        if (allMedications.length === 0) {
-          try {
-            const fallbackResponse = await pharmacyService.getMedications({ page_size: 50 });
-            allMedications = (fallbackResponse.results || [])
-              .filter((m: any) => {
-                const nameLower = (m.name || '').toLowerCase();
-                const formLower = (m.form || '').toLowerCase();
-                return nameLower.includes('injection') || nameLower.includes('inj') ||
-                       formLower.includes('injection') || formLower.includes('injectable');
-              })
-              .map((m: any) => ({
-                id: m.id,
-                name: m.name,
-                category: m.category || '',
-                strength: m.strength || '',
-                generic_name: m.generic_name || '',
-              }));
-          } catch (fallbackErr) {
-            console.warn('Failed to load fallback medications:', fallbackErr);
-            allMedications = [];
-          }
-        }
-        
         // Set medications from API (empty array if none found)
         setInjectionMedications(allMedications);
         if (allMedications.length > 0) {
