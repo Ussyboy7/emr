@@ -105,7 +105,6 @@ THIRD_PARTY_APPS = [
 ]
 
 LOCAL_APPS = [
-    "common",
     "accounts",
     "organization",
     "support",
@@ -123,6 +122,7 @@ LOCAL_APPS = [
     "permissions",
     "dashboard",
     "reports",
+    "analytics",
     "appointments",
 ]
 

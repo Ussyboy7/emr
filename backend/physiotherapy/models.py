@@ -1,23 +1,31 @@
 """
-Physiotherapy models for the EMR system.
+Physiotherapy models.
 """
 from django.db import models
+from django.contrib.auth import get_user_model
+
+User = get_user_model()
 
 
 class PhysioTemplate(models.Model):
     """Physiotherapy treatment templates."""
-    name = models.CharField(max_length=200)
+    name = models.CharField(max_length=255)
     code = models.CharField(max_length=50, unique=True)
-    category = models.CharField(max_length=50, default='general')
+    category = models.CharField(max_length=100)
     description = models.TextField(blank=True)
+    duration_minutes = models.PositiveIntegerField(default=30)
+    equipment_needed = models.JSONField(default=list)
+    contraindications = models.TextField(blank=True)
+    instructions = models.TextField(blank=True)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = 'physio_templates'
+        ordering = ['name']
 
     def __str__(self):
-        return self.name
+        return f"{self.code} - {self.name}"
 
 
 class PhysioOrder(models.Model):
@@ -31,140 +39,129 @@ class PhysioOrder(models.Model):
     ]
 
     PRIORITY_CHOICES = [
-        ('routine', 'Routine'),
+        ('low', 'Low'),
+        ('normal', 'Normal'),
+        ('high', 'High'),
         ('urgent', 'Urgent'),
-        ('stat', 'STAT'),
     ]
 
-    patient = models.ForeignKey('patients.Patient', on_delete=models.CASCADE, related_name='physio_orders')
-    ordered_by = models.ForeignKey('accounts.User', on_delete=models.CASCADE, related_name='physio_orders_created')
-    visit = models.ForeignKey(
-        'patients.Visit',
-        on_delete=models.CASCADE,
-        null=True,
-        blank=True,
-        related_name='physio_orders',
-        help_text="Visit this physio order is associated with (for multi-clinic visits)"
-    )
+    patient = models.ForeignKey('patients.Patient', on_delete=models.CASCADE)
+    visit = models.ForeignKey('patients.Visit', on_delete=models.SET_NULL, null=True, blank=True)
+    ordered_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='physio_orders')
     consultation_session = models.ForeignKey(
-        'consultation.ConsultationSession',
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name='physio_orders'
+        'consultation.ConsultationSession', on_delete=models.SET_NULL, null=True, blank=True
     )
-    diagnosis = models.CharField(max_length=500, blank=True)
-    chief_complaint = models.TextField(blank=True)
-    treatment_goal = models.TextField(blank=True)
-    special_instructions = models.TextField(blank=True)
-    priority = models.CharField(max_length=20, choices=PRIORITY_CHOICES, default='routine')
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
 
-    REFERRAL_SOURCE_CHOICES = [
-        ('unspecified', 'Unspecified'),
-        ('nursing', 'Nursing'),
-        ('doctor', 'Doctor / clinic'),
-        ('self', 'Self / walk-in'),
-        ('other', 'Other'),
-    ]
-    referral_source = models.CharField(
-        max_length=20,
-        choices=REFERRAL_SOURCE_CHOICES,
-        default='unspecified',
-        db_index=True,
-    )
+    diagnosis = models.TextField()
+    chief_complaint = models.TextField()
+    treatment_goal = models.TextField()
+    special_instructions = models.TextField(blank=True)
+
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    priority = models.CharField(max_length=20, choices=PRIORITY_CHOICES, default='normal')
+
+    referral_source = models.CharField(max_length=50, blank=True)
 
     ordered_at = models.DateTimeField(auto_now_add=True)
     scheduled_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
 
-    # Session tracking (physiotherapist determines session count)
-    sessions_completed = models.PositiveIntegerField(default=0, help_text="Number of sessions completed so far")
+    sessions_completed = models.PositiveIntegerField(default=0)
+
+    # Add defaults for other positive integer fields
+    pain_level_before = models.PositiveIntegerField(null=True, blank=True)
+    pain_level_after = models.PositiveIntegerField(null=True, blank=True)
 
     class Meta:
-        db_table = 'physio_orders'
         ordering = ['-ordered_at']
 
     def __str__(self):
-        return f"Physio Order {self.id} - {self.patient}"
+        return f"Physio Order for {self.patient} - {self.status}"
 
 
 class PhysioSession(models.Model):
-    """Physiotherapy sessions with comprehensive assessment documentation."""
+    """Individual physiotherapy sessions."""
     STATUS_CHOICES = [
         ('scheduled', 'Scheduled'),
         ('in_progress', 'In Progress'),
         ('completed', 'Completed'),
         ('cancelled', 'Cancelled'),
-        ('no_show', 'No Show'),
     ]
 
-    # Basic session info
     order = models.ForeignKey(PhysioOrder, on_delete=models.CASCADE, related_name='sessions')
-    physiotherapist = models.ForeignKey('accounts.User', on_delete=models.CASCADE, related_name='physio_sessions')
-    session_number = models.PositiveIntegerField(default=1, help_text="Session number in the treatment plan (1, 2, 3, etc.)")
+    physiotherapist = models.ForeignKey(User, on_delete=models.CASCADE)
+    template = models.ForeignKey(PhysioTemplate, on_delete=models.SET_NULL, null=True, blank=True)
+
+    session_number = models.PositiveIntegerField(default=1)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='scheduled')
+
     scheduled_at = models.DateTimeField(null=True, blank=True)
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
-    duration_minutes = models.PositiveIntegerField(null=True, blank=True, help_text="Actual session duration in minutes")
+    duration_minutes = models.PositiveIntegerField(null=True, blank=True)
+
+    # Patient Assessment
+    presenting_complaint = models.TextField(blank=True)
+    pain_level_before = models.PositiveIntegerField(null=True, blank=True)
+    pain_level_after = models.PositiveIntegerField(null=True, blank=True)
+
+    # Medical & Social Background
+    medical_history = models.TextField(blank=True)
+    surgical_history = models.TextField(blank=True)
+    medications = models.TextField(blank=True)
+    allergies = models.TextField(blank=True)
+    social_history = models.TextField(blank=True)
+    previous_treatments = models.TextField(blank=True)
+
+    # Physical Examination
+    posture_gait = models.TextField(blank=True)
+    range_of_motion = models.TextField(blank=True)
+    muscle_strength = models.TextField(blank=True)
+    sensation = models.TextField(blank=True)
+    reflexes = models.TextField(blank=True)
+    balance_coordination = models.TextField(blank=True)
+    special_tests = models.TextField(blank=True)
+
+    # Functional Evaluation
+    functional_assessment = models.TextField(blank=True)
+    assistive_devices = models.TextField(blank=True)
+    functional_goals = models.TextField(blank=True)
+    functional_limitations = models.TextField(blank=True)
+
+    # Clinical Reasoning
+    assessment_findings = models.TextField(blank=True)
+    diagnosis_impression = models.TextField(blank=True)
+    prognosis = models.TextField(blank=True)
+    clinical_reasoning = models.TextField(blank=True)
+
+    # Treatment & Plan
+    treatment_performed = models.TextField(blank=True)
+    exercises_prescribed = models.JSONField(default=list)
+    equipment_used = models.JSONField(default=list)
+    patient_education = models.TextField(blank=True)
+    next_session_plan = models.TextField(blank=True)
+
+    # Session & Continuity
+    session_notes = models.TextField(blank=True)
+    progress_notes = models.TextField(blank=True)
+    recommendations = models.JSONField(default=list)
+    follow_up_instructions = models.TextField(blank=True)
+
+    # Legacy fields
+    notes = models.TextField(blank=True)
+    patient_response = models.TextField(blank=True)
+    functional_improvement = models.TextField(blank=True)
+    next_session_date = models.DateField(null=True, blank=True)
+    follow_up_notes = models.TextField(blank=True)
+    assessment = models.TextField(blank=True)
+    home_exercises = models.JSONField(default=list)
+
     created_at = models.DateTimeField(auto_now_add=True)
-
-    # A. Patient Assessment (Top section)
-    presenting_complaint = models.TextField(blank=True, help_text="Chief complaint and symptoms")
-    pain_level_before = models.PositiveIntegerField(null=True, blank=True, help_text="Pain level 0-10 before treatment")
-    pain_level_after = models.PositiveIntegerField(null=True, blank=True, help_text="Pain level 0-10 after treatment")
-
-    # B. Medical & Social Background
-    medical_history = models.TextField(blank=True, help_text="Relevant medical history")
-    surgical_history = models.TextField(blank=True, help_text="Previous surgeries")
-    medications = models.TextField(blank=True, help_text="Current medications")
-    allergies = models.TextField(blank=True, help_text="Known allergies")
-    social_history = models.TextField(blank=True, help_text="Occupation, lifestyle, support systems")
-    previous_treatments = models.TextField(blank=True, help_text="Previous physiotherapy or related treatments")
-
-    # C. Physical Examination (Core Physio Section)
-    posture_gait = models.TextField(blank=True, help_text="Posture and gait assessment")
-    range_of_motion = models.TextField(blank=True, help_text="Joint ROM measurements")
-    muscle_strength = models.TextField(blank=True, help_text="Manual muscle testing results")
-    sensation = models.TextField(blank=True, help_text="Sensory assessment findings")
-    reflexes = models.TextField(blank=True, help_text="Reflex testing results")
-    balance_coordination = models.TextField(blank=True, help_text="Balance and coordination assessment")
-    special_tests = models.TextField(blank=True, help_text="Special orthopedic/neurological tests")
-
-    # D. Functional Evaluation
-    functional_assessment = models.TextField(blank=True, help_text="Activities of daily living assessment")
-    assistive_devices = models.TextField(blank=True, help_text="Current assistive devices used")
-    functional_goals = models.TextField(blank=True, help_text="Short-term and long-term functional goals")
-    functional_limitations = models.TextField(blank=True, help_text="Identified functional limitations")
-
-    # E. Clinical Reasoning
-    assessment_findings = models.TextField(blank=True, help_text="Key assessment findings")
-    diagnosis_impression = models.TextField(blank=True, help_text="Clinical impression and working diagnosis")
-    prognosis = models.TextField(blank=True, help_text="Expected recovery timeline and prognosis")
-    clinical_reasoning = models.TextField(blank=True, help_text="Rationale for treatment approach")
-
-    # F. Treatment & Plan
-    treatment_performed = models.TextField(blank=True, help_text="Treatments administered in this session")
-    exercises_prescribed = models.JSONField(default=list, blank=True, help_text="Home exercise program")
-    equipment_used = models.JSONField(default=list, blank=True, help_text="Equipment/modalities used")
-    patient_education = models.TextField(blank=True, help_text="Education provided to patient")
-    next_session_plan = models.TextField(blank=True, help_text="Plan for next session")
-
-    # G. Session & Continuity
-    session_notes = models.TextField(blank=True, help_text="Additional session notes")
-    progress_notes = models.TextField(blank=True, help_text="Progress compared to previous sessions")
-    recommendations = models.JSONField(default=list, blank=True, help_text="Recommendations for other healthcare providers")
-    follow_up_instructions = models.TextField(blank=True, help_text="Instructions for patient between sessions")
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = 'physio_sessions'
-        constraints = [
-            models.UniqueConstraint(
-                fields=['order', 'session_number'],
-                name='unique_order_session_number',
-            ),
-        ]
+        ordering = ['-scheduled_at', 'session_number']
+        unique_together = ['order', 'session_number']
 
     def __str__(self):
-        return f"Session {self.id}"
+        return f"Session {self.session_number} for {self.order.patient} - {self.status}"

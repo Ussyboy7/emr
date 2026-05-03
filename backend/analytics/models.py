@@ -1,0 +1,1 @@
+# Analytics models - primarily for caching/aggregation if needed

@@ -24,14 +24,15 @@ const nextConfig = {
   output: "standalone",
   transpilePackages: [],
   /**
-   * In dev, proxy same-origin `/api/*` to Django so a mis-set `NEXT_PUBLIC_API_URL`
-   * (e.g. `http://localhost:3001/api`) still reaches the backend on :8001.
+   * In dev, proxy same-origin `/api/*` to Django.
+   * Docker note: 127.0.0.1 points to the frontend container itself, so default
+   * to the backend container DNS name unless API_PROXY_TARGET is explicitly set.
    */
   async rewrites() {
     if (process.env.NODE_ENV !== "development") {
       return [];
     }
-    const target = (process.env.API_PROXY_TARGET || "http://127.0.0.1:8001").replace(/\/$/, "");
+    const target = (process.env.API_PROXY_TARGET || "http://emr-backend-local:8001").replace(/\/$/, "");
     return [{ source: "/api/:path*", destination: `${target}/api/:path*` }];
   },
   images: {

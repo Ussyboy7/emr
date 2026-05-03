@@ -10,7 +10,17 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django.utils import timezone
 from django.db.models import Count, Q
+from django.http import HttpResponse
+from django.shortcuts import get_object_or_404
+from io import BytesIO
 import json
+
+# PDF generation
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import letter, A4
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
 
 from .models import LabTemplate, LabPartner, LabOrder, LabTest, LabTestResultAttachment, LabResult
 from .serializers import (
@@ -890,6 +900,217 @@ class LabResultViewSet(viewsets.ReadOnlyModelViewSet):
             'critical': by_status.get('critical', 0) or 0,
         })
     
+    @action(detail=True, methods=['get'])
+    def download_report(self, request, pk=None):
+        """Download lab result as PDF report."""
+        # Do not rely on list filters (status/date/search) for detail download.
+        # Some frontend callers pass LabResult.id while others pass LabTest.id.
+        base_qs = LabResult.objects.select_related(
+            'test',
+            'order',
+            'patient',
+            'order__doctor',
+            'test__template',
+            'test__processed_by',
+            'test__verified_by',
+        )
+        result = base_qs.filter(pk=pk).first() or base_qs.filter(test_id=pk).first()
+        if result is None:
+            result = get_object_or_404(base_qs, pk=pk)
+
+        # Create PDF buffer
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=A4)
+        styles = getSampleStyleSheet()
+
+        # Styles aligned with the in-app report dialog.
+        title_style = ParagraphStyle(
+            'LabReportTitle',
+            parent=styles['Heading1'],
+            fontSize=18,
+            spaceAfter=6,
+            alignment=1,
+            textColor=colors.black,
+        )
+        subtitle_style = ParagraphStyle(
+            'LabReportSubtitle',
+            parent=styles['Heading3'],
+            fontSize=11,
+            spaceAfter=16,
+            alignment=1,
+            textColor=colors.grey,
+        )
+        section_style = ParagraphStyle(
+            'LabReportSection',
+            parent=styles['Heading2'],
+            fontSize=13,
+            spaceAfter=8,
+            textColor=colors.black,
+        )
+        normal_style = ParagraphStyle(
+            'LabReportNormal',
+            parent=styles['Normal'],
+            fontSize=10,
+            leading=13,
+            spaceAfter=4,
+        )
+
+        story = []
+
+        def _fmt_dt(value):
+            if not value:
+                return 'N/A'
+            try:
+                return timezone.localtime(value).strftime('%b %d, %Y %I:%M %p')
+            except Exception:
+                try:
+                    return value.strftime('%b %d, %Y %I:%M %p')
+                except Exception:
+                    return 'N/A'
+
+        # Header (matches report dialog wording)
+        story.append(Paragraph("LABORATORY REPORT", title_style))
+        story.append(Paragraph("Nigerian Ports Authority Medical Services", subtitle_style))
+        story.append(Spacer(1, 10))
+
+        patient_age = getattr(result.patient, 'age', None)
+        age_gender = f"{patient_age} years / {result.patient.gender}" if patient_age else f"N/A / {result.patient.gender or 'N/A'}"
+        doctor_name = result.order.doctor.get_full_name() if result.order and result.order.doctor else 'N/A'
+        clinic_name = getattr(getattr(result, 'order', None), 'clinic', None) or 'N/A'
+
+        details_rows = [
+            ['Patient Name', result.patient.get_full_name()],
+            ['Age / Gender', age_gender],
+            ['Ordering Doctor', doctor_name],
+            ['Order ID', result.order.order_id if result.order else 'N/A'],
+            ['Test Name', f"{result.test.name} ({result.test.code})"],
+            ['Clinic', clinic_name],
+        ]
+        details_table = Table(details_rows, colWidths=[2.2 * inch, 3.8 * inch])
+        details_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), colors.whitesmoke),
+            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('GRID', (0, 0), (-1, -1), 0.4, colors.lightgrey),
+            ('LEFTPADDING', (0, 0), (-1, -1), 8),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 8),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ]))
+        story.append(details_table)
+        story.append(Spacer(1, 12))
+
+        # Test results block
+        story.append(Paragraph("Test Results", section_style))
+        story.append(Paragraph(result.overall_status.title() if result.overall_status else 'Normal', normal_style))
+
+        results_rows = [['Parameter', 'Result', 'Status']]
+        if result.test.results and isinstance(result.test.results, dict):
+            for param, param_data in result.test.results.items():
+                if param == 'custom_results' and isinstance(param_data, list):
+                    for row in param_data:
+                        if not isinstance(row, dict):
+                            continue
+                        name = str(row.get('name') or 'Custom Result')
+                        value = row.get('value', '')
+                        if value is None:
+                            value = ''
+                        status = str(row.get('status') or 'normal').title()
+                        results_rows.append([name, str(value), status])
+                    continue
+                if isinstance(param_data, dict):
+                    results_rows.append([
+                        str(param),
+                        str(param_data.get('value', '')),
+                        str(param_data.get('status', 'normal')).title(),
+                    ])
+                else:
+                    results_rows.append([str(param), str(param_data), ''])
+        if len(results_rows) == 1:
+            results_rows.append(['Result', 'N/A', ''])
+
+        results_table = Table(results_rows, colWidths=[2.5 * inch, 2.0 * inch, 1.5 * inch])
+        results_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+            ('LEFTPADDING', (0, 0), (-1, -1), 6),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+            ('TOPPADDING', (0, 0), (-1, -1), 5),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+        ]))
+        story.append(results_table)
+        story.append(Spacer(1, 14))
+
+        # Timing Information
+        ordered_at = None
+        try:
+            ordered_at = getattr(getattr(result, 'order', None), 'ordered_at', None)
+        except Exception:
+            ordered_at = None
+        if not ordered_at:
+            try:
+                ordered_at = getattr(getattr(getattr(result, 'test', None), 'order', None), 'ordered_at', None)
+            except Exception:
+                ordered_at = None
+
+        processed_at = getattr(result.test, 'processed_at', None)
+        verified_at = getattr(result.test, 'verified_at', None)
+        turnaround_text = 'N/A'
+        if processed_at and verified_at:
+            delta = verified_at - processed_at
+            mins = int(delta.total_seconds() // 60)
+            turnaround_text = '< 1 min' if mins <= 0 else f'{mins} min'
+
+        timing_rows = [
+            ['Ordered', _fmt_dt(ordered_at)],
+            ['Completed', _fmt_dt(processed_at)],
+            ['Verified', _fmt_dt(verified_at)],
+            ['Turnaround Time', turnaround_text],
+            ['Performed By', result.test.processed_by.get_full_name() if result.test.processed_by else 'N/A'],
+            ['Verified By', result.test.verified_by.get_full_name() if result.test.verified_by else 'Unknown'],
+        ]
+        timing_table = Table(timing_rows, colWidths=[2.2 * inch, 3.8 * inch])
+        timing_table.setStyle(TableStyle([
+            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('GRID', (0, 0), (-1, -1), 0.4, colors.lightgrey),
+            ('LEFTPADDING', (0, 0), (-1, -1), 8),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 8),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ]))
+        story.append(timing_table)
+        story.append(Spacer(1, 15))
+
+        # Notes
+        if result.test.verification_notes:
+            story.append(Paragraph("Verification Notes", section_style))
+            story.append(Paragraph(result.test.verification_notes, normal_style))
+            story.append(Spacer(1, 10))
+
+        # Footer
+        story.append(Spacer(1, 16))
+        story.append(Paragraph("This report was generated electronically and is valid without signature.", styles['Italic']))
+        story.append(Paragraph(f"Generated on: {timezone.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Italic']))
+
+        # Build PDF
+        doc.build(story)
+
+        # Return PDF response
+        buffer.seek(0)
+        filename = f"lab_result_{result.patient.patient_id}_{result.test.code}_{result.id}.pdf"
+
+        response = HttpResponse(buffer, content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+
+        return response
+
     @action(detail=True, methods=['post'])
     def verify(self, request, pk=None):
         """Verify a lab result."""

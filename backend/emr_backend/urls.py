@@ -33,6 +33,7 @@ api_v1_patterns = [
     path("", include("permissions.urls")),
     path("", include("dashboard.urls")),
     path("", include("reports.urls")),
+    path("", include("analytics.urls")),
     path("", include("wards.urls")),
     path("", include("appointments.urls")),
     path("", include("common.urls")),

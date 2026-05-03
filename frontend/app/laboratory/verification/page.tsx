@@ -16,6 +16,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { labService, type LabResult as ApiLabResult } from '@/lib/services';
+import { apiFetch } from '@/lib/api-client';
 import { PatientAvatar } from "@/components/shared/PatientAvatar";
 import { transformPriority, transformToBackendPriority } from '@/lib/services/transformers';
 import { buildDateQuery, formatRejectionReason, LAB_TEST_STATUS } from '@/lib/laboratory/constants';
@@ -658,12 +659,31 @@ export default function ResultsVerificationPage() {
     }
   };
 
-  const downloadResult = (result: LabResult) => {
-    toast.success(`Downloading result for ${result.patient.name}...`, {
-      description: `${result.testName} - ${result.overallStatus}`
-    });
-    // Placeholder for actual download logic (e.g., API call to generate PDF)
-    console.log('Initiating download for result:', result.id);
+  const downloadResult = async (result: LabResult) => {
+    try {
+      const blob = await apiFetch<Blob>(
+        `/laboratory/verification/${result.id}/download_report/`,
+        { responseType: 'blob' }
+      );
+      const filename = `lab_result_${result.patient.id}_${result.testCode}_${result.id}.pdf`;
+
+      // Create and download the file
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      toast.success(`Downloaded lab report for ${result.patient.name}`, {
+        description: `${result.testName} - ${result.overallStatus}`
+      });
+    } catch (error) {
+      console.error('Download error:', error);
+      toast.error((error as Error)?.message || 'Failed to download lab report');
+    }
   };
 
   const toggleSelection = (id: string) => {

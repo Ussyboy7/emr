@@ -342,6 +342,40 @@ class PhysioService {
   }> {
     return apiFetch('/physiotherapy/stats/');
   }
+
+  async getAnalyticsSummary(start: string, end: string): Promise<PhysiotherapyAnalyticsSummary> {
+    const query = buildQueryString({ start_date: start, end_date: end });
+    return apiFetch<PhysiotherapyAnalyticsSummary>(`/physiotherapy/analytics/summary/${query}`);
+  }
+}
+
+export interface PhysiotherapyAnalyticsSummary {
+  session_metrics: {
+    total_sessions: number;
+    completed_sessions: number;
+    avg_duration: number;
+    completion_rate: number;
+  };
+  patient_demographics: {
+    attendance_by_category: Array<{
+      sn: number;
+      key: string;
+      label: string;
+      male: number;
+      female: number;
+      total: number;
+      percentage: number;
+    }>;
+    attendance_totals: {
+      male: number;
+      female: number;
+      total: number;
+    };
+  };
+  period: {
+    start_date: string;
+    end_date: string;
+  };
 }
 
 export const physioService = new PhysioService();

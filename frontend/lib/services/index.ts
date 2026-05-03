@@ -56,7 +56,10 @@ export type {
   PhysioOrder,
   PhysioSession,
   PhysioTemplate,
+  PhysiotherapyAnalyticsSummary,
 } from './physio-service';
+export type { EyecareAnalyticsSummary } from './eyecare-service';
+export type { ClinicalDashboardData } from './analytics-service';
 export type {
   User,
   Role,
@@ -84,6 +87,7 @@ export { consultationService } from './consultation-service';
 export { appointmentService } from './appointment-service';
 export { wardService } from './ward-service';
 export { physioService } from './physio-service';
+export { eyecareService } from './eyecare-service';
 export { nursingService } from './nursing-service';
 
 export { medicalCertificateService } from './medical-certificate-service';

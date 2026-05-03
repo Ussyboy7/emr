@@ -11,6 +11,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
+import { apiFetch } from '@/lib/api-client';
 import {
   AlertTriangle,
   CheckCircle2,
@@ -18,7 +19,6 @@ import {
   Eye,
   FileText,
   FlaskConical,
-  Printer,
 } from 'lucide-react';
 import {
   displayNameFromLabResultFileUrl,
@@ -97,21 +97,180 @@ export function LabCompletedReportDialog({
   ) ?? false;
   const hasRowAttachments = test?.results.some((r) => Boolean(r.attachment?.url)) ?? false;
 
-  const handlePrint = () => {
+  const handlePrint = async () => {
     if (!test) return;
     toast.info(`Printing result for ${test.patient.name}...`);
-    window.print();
+
+    // Always print the same backend-generated report used for downloads.
+    try {
+      let printUrl: string | null = null;
+      let revokeAfterPrint = false;
+
+      if (hasUsableResultFile && test.result_file) {
+        printUrl = test.result_file;
+      } else {
+        const blob = await apiFetch<Blob>(
+          `/laboratory/verification/${test.id}/download_report/`,
+          { responseType: 'blob' }
+        );
+        printUrl = URL.createObjectURL(blob);
+        revokeAfterPrint = true;
+      }
+
+      const printWindow = window.open(printUrl, '_blank');
+      if (!printWindow) {
+        if (revokeAfterPrint && printUrl) URL.revokeObjectURL(printUrl);
+        toast.error('Failed to open print window. Please allow popups.');
+        return;
+      }
+
+      // Give browser time to load PDF before printing.
+      setTimeout(() => {
+        try {
+          printWindow.focus();
+          printWindow.print();
+        } finally {
+          if (revokeAfterPrint && printUrl) URL.revokeObjectURL(printUrl);
+        }
+      }, 700);
+    } catch (error) {
+      console.error('Print error:', error);
+      toast.error((error as Error)?.message || 'Failed to print lab report');
+    }
+  };
+
+  const generatePrintContent = () => {
+    if (!test) return '';
+
+    return `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Lab Report - ${test.patient.name}</title>
+        <style>
+          body { font-family: Arial, sans-serif; margin: 20px; }
+          .header { text-align: center; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; }
+          .section { margin-bottom: 20px; }
+          .section h3 { border-bottom: 1px solid #ccc; padding-bottom: 5px; }
+          table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+          th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+          th { background-color: #f5f5f5; }
+          .status-normal { color: #22c55e; }
+          .status-abnormal { color: #f59e0b; }
+          .status-critical { color: #ef4444; font-weight: bold; }
+          @media print { body { margin: 0; } }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <h1>LABORATORY TEST RESULT REPORT</h1>
+          <h2>Nigerian Ports Authority Medical Services</h2>
+        </div>
+
+        <div class="section">
+          <h3>Patient Information</h3>
+          <table>
+            <tr><td><strong>Name:</strong></td><td>${test.patient.name}</td></tr>
+            <tr><td><strong>ID:</strong></td><td>${test.patient.id}</td></tr>
+            <tr><td><strong>Age/Gender:</strong></td><td>${test.patient.age} years / ${test.patient.gender}</td></tr>
+          </table>
+        </div>
+
+        <div class="section">
+          <h3>Test Information</h3>
+          <table>
+            <tr><td><strong>Test Name:</strong></td><td>${test.name}</td></tr>
+            <tr><td><strong>Test Code:</strong></td><td>${test.code}</td></tr>
+            <tr><td><strong>Order ID:</strong></td><td>${test.orderId}</td></tr>
+            <tr><td><strong>Ordering Doctor:</strong></td><td>${test.doctor?.name || 'N/A'}</td></tr>
+            <tr><td><strong>Clinic:</strong></td><td>${test.clinic || 'N/A'}</td></tr>
+            <tr><td><strong>Overall Status:</strong></td><td><span class="status-${test.overallStatus.toLowerCase()}">${test.overallStatus}</span></td></tr>
+          </table>
+        </div>
+
+        ${test.results && test.results.length > 0 ? `
+        <div class="section">
+          <h3>Test Results</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Parameter</th>
+                <th>Result</th>
+                <th>Unit</th>
+                <th>Normal Range</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${test.results.map(result => `
+                <tr>
+                  <td>${result.parameter}</td>
+                  <td>${result.value}</td>
+                  <td>${result.unit || ''}</td>
+                  <td>${result.normalRange || ''}</td>
+                  <td><span class="status-${result.status.toLowerCase()}">${result.status}</span></td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+        ` : ''}
+
+        <div class="section">
+          <h3>Timing Information</h3>
+          <table>
+            <tr><td><strong>Ordered:</strong></td><td>${formatDateTime(test.orderedAt)}</td></tr>
+            <tr><td><strong>Completed:</strong></td><td>${formatDateTime(test.completedAt)}</td></tr>
+            <tr><td><strong>Verified:</strong></td><td>${formatDateTime(test.verifiedAt)}</td></tr>
+            ${test.processedBy ? `<tr><td><strong>Performed By:</strong></td><td>${test.processedBy}</td></tr>` : ''}
+            ${test.verifiedBy ? `<tr><td><strong>Verified By:</strong></td><td>${test.verifiedBy}</td></tr>` : ''}
+          </table>
+        </div>
+      </body>
+      </html>
+    `;
   };
 
   const handleFooterDownload = () => {
     if (!test) return;
+
+    // If there's an uploaded PDF file, download it
     if (hasUsableResultFile && test.result_file) {
       const name = displayNameFromLabResultFileUrl(test.result_file);
       downloadResultFile(test.result_file, name);
       toast.success(`Downloaded result for ${test.patient.name}`);
       return;
     }
-    toast.info('No accessible PDF file is attached to this test.');
+
+    // Otherwise, generate and download a PDF report
+    generateAndDownloadPDFReport();
+  };
+
+  const generateAndDownloadPDFReport = async () => {
+    if (!test) return;
+
+    try {
+      const blob = await apiFetch<Blob>(
+        `/laboratory/verification/${test.id}/download_report/`,
+        { responseType: 'blob' }
+      );
+      const filename = `lab_report_${test.patient.id}_${test.code}_${test.id}.pdf`;
+
+      // Create and download the file
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      toast.success(`Downloaded lab report for ${test.patient.name}`);
+    } catch (error) {
+      console.error('PDF generation error:', error);
+      toast.error((error as Error)?.message || 'Failed to generate PDF report');
+    }
   };
 
   const pdfDisplayName =
@@ -403,10 +562,6 @@ export function LabCompletedReportDialog({
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Close
-          </Button>
-          <Button variant="outline" onClick={handlePrint} disabled={!test}>
-            <Printer className="h-4 w-4 mr-2" />
-            Print
           </Button>
           <Button onClick={handleFooterDownload} disabled={!test}>
             <Download className="h-4 w-4 mr-2" />
