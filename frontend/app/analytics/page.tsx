@@ -64,7 +64,7 @@ function clinicalDashboardToCsv(
   lines.push(['Total Patients', String(d.metrics.total_patients)].map(esc).join(','));
   lines.push(['Total Visits', String(d.metrics.total_visits)].map(esc).join(','));
   lines.push(['Avg Wait Time (minutes)', String(d.metrics.avg_wait_time_minutes)].map(esc).join(','));
-  lines.push(['Satisfaction (%)', String(d.metrics.satisfaction_percentage)].map(esc).join(','));
+  lines.push(['Completion Rate (%)', String(d.metrics.completion_rate_percentage)].map(esc).join(','));
   lines.push('');
   lines.push(['Category', 'Male', 'Female', 'Total', 'Percentage'].map(esc).join(','));
   d.patient_demographics.attendance_by_category.forEach((row) =>

@@ -179,8 +179,8 @@ export function LabCompletedReportDialog({
         <div class="section">
           <h3>Test Information</h3>
           <table>
-            <tr><td><strong>Test Name:</strong></td><td>${test.name}</td></tr>
-            <tr><td><strong>Test Code:</strong></td><td>${test.code}</td></tr>
+            <tr><td><strong>Test Name:</strong></td><td>${test.testName}</td></tr>
+            <tr><td><strong>Test Code:</strong></td><td>${test.testCode}</td></tr>
             <tr><td><strong>Order ID:</strong></td><td>${test.orderId}</td></tr>
             <tr><td><strong>Ordering Doctor:</strong></td><td>${test.doctor?.name || 'N/A'}</td></tr>
             <tr><td><strong>Clinic:</strong></td><td>${test.clinic || 'N/A'}</td></tr>
@@ -222,7 +222,7 @@ export function LabCompletedReportDialog({
             <tr><td><strong>Ordered:</strong></td><td>${formatDateTime(test.orderedAt)}</td></tr>
             <tr><td><strong>Completed:</strong></td><td>${formatDateTime(test.completedAt)}</td></tr>
             <tr><td><strong>Verified:</strong></td><td>${formatDateTime(test.verifiedAt)}</td></tr>
-            ${test.processedBy ? `<tr><td><strong>Performed By:</strong></td><td>${test.processedBy}</td></tr>` : ''}
+            ${test.submittedBy ? `<tr><td><strong>Submitted By:</strong></td><td>${test.submittedBy}</td></tr>` : ''}
             ${test.verifiedBy ? `<tr><td><strong>Verified By:</strong></td><td>${test.verifiedBy}</td></tr>` : ''}
           </table>
         </div>
@@ -254,7 +254,7 @@ export function LabCompletedReportDialog({
         `/laboratory/verification/${test.id}/download_report/`,
         { responseType: 'blob' }
       );
-      const filename = `lab_report_${test.patient.id}_${test.code}_${test.id}.pdf`;
+      const filename = `lab_report_${test.patient.id}_${test.testCode}_${test.id}.pdf`;
 
       // Create and download the file
       const url = window.URL.createObjectURL(blob);
