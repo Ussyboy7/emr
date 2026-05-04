@@ -274,12 +274,7 @@ class AdminService {
     return apiFetch<Role>(`/permissions/roles/${roleId}/`);
   }
 
-  /**
-   * Get system roles (professional roles)
-   */
-  async getSystemRoles(): Promise<string[]> {
-    return apiFetch<string[]>('/admin/system-roles/');
-  }
+
 
   /**
    * Create a new role

@@ -94,14 +94,9 @@ export default function UserManagementPage() {
   }, []);
 
   const loadSystemRoles = useCallback(async () => {
-    try {
-      const systemRolesResponse = await adminService.getSystemRoles();
-      setSystemRoles(['All Roles', ...systemRolesResponse]);
-    } catch (err: any) {
-      console.error('Error loading system roles:', err);
-      // Fallback to hardcoded list if API fails
-      setSystemRoles(['All Roles', 'Medical Doctor', 'Nursing Officer', 'Laboratory Scientist', 'Pharmacist', 'Radiologist', 'Optamologist', 'Medical Records Officer', 'System Administrator', 'Admin Staff']);
-    }
+    // TODO: Fetch from backend API when available
+    // For now, use hardcoded list - update when /admin/system-roles/ endpoint is implemented
+    setSystemRoles(['All Roles', 'Medical Doctor', 'Nursing Officer', 'Laboratory Scientist', 'Pharmacist', 'Radiologist', 'Optamologist', 'Medical Records Officer', 'System Administrator', 'Admin Staff']);
   }, []);
 
   // Load roles and system roles from API
