@@ -364,7 +364,15 @@ class SystemRoleViewSet(viewsets.ModelViewSet):
     """
     queryset = SystemRole.objects.all()
     serializer_class = SystemRoleSerializer
-    permission_classes = [permissions.IsAuthenticated]
+
+    def get_permissions(self):
+        """
+        Allow unauthenticated read access for listing system roles (needed for user creation forms),
+        but require authentication for write operations.
+        """
+        if self.action in ['list', 'retrieve', 'stats']:
+            return [permissions.AllowAny()]
+        return [permissions.IsAuthenticated()]
 
     def get_queryset(self):
         queryset = SystemRole.objects.all()

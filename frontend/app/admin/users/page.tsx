@@ -96,9 +96,15 @@ export default function UserManagementPage() {
   const loadSystemRoles = useCallback(async () => {
     try {
       const systemRolesResponse = await adminService.getSystemRoles();
-      // Filter to active roles and map to the expected format
-      const activeRoles = systemRolesResponse.filter(role => role.is_active);
-      setSystemRoles(['All Roles', ...activeRoles.map(role => role.name)]);
+      // Check if response is an array
+      if (Array.isArray(systemRolesResponse)) {
+        // Filter to active roles and map to the expected format
+        const activeRoles = systemRolesResponse.filter(role => role.is_active);
+        setSystemRoles(['All Roles', ...activeRoles.map(role => role.name)]);
+      } else {
+        // If not an array, use fallback
+        throw new Error('Invalid response format');
+      }
     } catch (err: any) {
       console.error('Error loading system roles:', err);
       // Fallback to basic roles if API fails
