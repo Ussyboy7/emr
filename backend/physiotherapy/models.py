@@ -52,9 +52,9 @@ class PhysioOrder(models.Model):
         'consultation.ConsultationSession', on_delete=models.SET_NULL, null=True, blank=True
     )
 
+    history_clinical_findings = models.TextField(blank=True)
     diagnosis = models.TextField()
-    chief_complaint = models.TextField()
-    treatment_goal = models.TextField()
+    drug_history = models.TextField(blank=True)
     special_instructions = models.TextField(blank=True)
 
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')

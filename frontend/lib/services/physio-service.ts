@@ -27,9 +27,9 @@ export interface PhysioOrder {
   ordered_by: number;
   ordered_by_name: string;
   consultation_session?: number;
+  history_clinical_findings: string;
   diagnosis: string;
-  chief_complaint: string;
-  treatment_goal: string;
+  drug_history: string;
   special_instructions: string;
   status: string;
   priority: string;
@@ -198,7 +198,17 @@ class PhysioService {
   async createOrder(order: Omit<PhysioOrder, 'id' | 'ordered_at' | 'created_at' | 'updated_at' | 'patient_name' | 'patient_id' | 'ordered_by_name' | 'clinic_name'>): Promise<PhysioOrder> {
     return apiFetch<PhysioOrder>('/physiotherapy/orders/', {
       method: 'POST',
-      body: JSON.stringify(order),
+      body: JSON.stringify({
+        patient: order.patient,
+        visit: order.visit,
+        consultation_session: order.consultation_session,
+        history_clinical_findings: order.history_clinical_findings,
+        diagnosis: order.diagnosis,
+        drug_history: order.drug_history,
+        special_instructions: order.special_instructions,
+        priority: order.priority,
+        referral_source: order.referral_source,
+      }),
     });
   }
 

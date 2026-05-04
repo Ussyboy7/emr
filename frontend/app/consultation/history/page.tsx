@@ -957,9 +957,9 @@ export default function ConsultationHistoryPage() {
     await physioService.createOrder({
       patient: patientId,
       consultation_session: sessionId,
+      history_clinical_findings: payload.historyClinicalFindings || undefined,
       diagnosis: payload.diagnosis.trim(),
-      chief_complaint: payload.chiefComplaint || undefined,
-      treatment_goal: payload.treatmentGoal || undefined,
+      drug_history: payload.drugHistory || undefined,
       special_instructions: payload.specialInstructions || undefined,
       priority: payload.priority,
       referral_source: 'doctor',

@@ -432,15 +432,7 @@ export default function PhysioCompletedPage() {
                             <Calendar className="h-3 w-3" />
                             {completedDate.toLocaleDateString()} {completedDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                           </span>
-                          {session.order_details?.treatment_goal && (
-                            <>
-                              <span>•</span>
-                              <span className="flex items-center gap-1">
-                                <Target className="h-3 w-3" />
-                                {session.order_details.treatment_goal}
-                              </span>
-                            </>
-                          )}
+
                         </div>
                       </div>
                     </div>
@@ -506,14 +498,7 @@ export default function PhysioCompletedPage() {
                       </div>
                     )}
 
-                    {selectedSession.order_details.treatment_goal && (
-                      <div className="p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
-                        <p className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
-                          <Target className="h-3 w-3" /> Treatment Goal
-                        </p>
-                        <p className="text-sm">{selectedSession.order_details.treatment_goal}</p>
-                      </div>
-                    )}
+
                   </div>
                 )}
 

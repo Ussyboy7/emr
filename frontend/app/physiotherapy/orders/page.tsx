@@ -1214,34 +1214,31 @@ export default function PhysioPoolQueuePage() {
                     </div>
                   )}
 
-                  {/* Chief Complaint */}
-                  {selectedOrder.chief_complaint && (
+                  {/* History/Clinical Findings */}
+                  {selectedOrder.history_clinical_findings && (
                     <div className="p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
-                      <p className="text-xs text-muted-foreground mb-1">Chief Complaint</p>
-                      <p className="text-sm">{selectedOrder.chief_complaint}</p>
+                      <p className="text-xs text-muted-foreground mb-1">History/Clinical Findings</p>
+                      <p className="text-sm">{selectedOrder.history_clinical_findings}</p>
                     </div>
                   )}
 
-                  {/* Treatment Goal & Instructions */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {selectedOrder.treatment_goal && (
-                      <div className="p-3 rounded-lg border bg-card">
-                        <p className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
-                          <Target className="h-3 w-3" /> Treatment Goal
-                        </p>
-                        <p className="text-sm">{selectedOrder.treatment_goal}</p>
-                      </div>
-                    )}
+                  {/* Drug History */}
+                  {selectedOrder.drug_history && (
+                    <div className="p-3 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800">
+                      <p className="text-xs text-muted-foreground mb-1">Drug History</p>
+                      <p className="text-sm">{selectedOrder.drug_history}</p>
+                    </div>
+                  )}
 
-                    {selectedOrder.special_instructions && (
-                      <div className="p-3 rounded-lg border bg-card">
-                        <p className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
-                          <ClipboardList className="h-3 w-3" /> Special Instructions
-                        </p>
-                        <p className="text-sm">{selectedOrder.special_instructions}</p>
-                      </div>
-                    )}
-                  </div>
+                  {/* Special Instructions */}
+                  {selectedOrder.special_instructions && (
+                    <div className="p-3 rounded-lg border bg-card">
+                      <p className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
+                        <ClipboardList className="h-3 w-3" /> Special Instructions
+                      </p>
+                      <p className="text-sm">{selectedOrder.special_instructions}</p>
+                    </div>
+                  )}
 
                   {/* Active Sessions */}
                   {selectedOrder.status === 'in_progress' && activeUncompletedSession && (

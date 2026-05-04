@@ -12,11 +12,11 @@ import { Activity, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 export type PhysioOrderSubmitInput = {
+  historyClinicalFindings: string;
   diagnosis: string;
-  chiefComplaint: string;
-  treatmentGoal: string;
+  drugHistory: string;
   specialInstructions: string;
-  priority: "routine" | "urgent" | "stat";
+  priority: "low" | "normal" | "high" | "urgent";
 };
 
 export function PhysioOrderModal({
@@ -30,15 +30,15 @@ export function PhysioOrderModal({
 }) {
   const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState<PhysioOrderSubmitInput>({
+    historyClinicalFindings: "",
     diagnosis: "",
-    chiefComplaint: "",
-    treatmentGoal: "",
+    drugHistory: "",
     specialInstructions: "",
-    priority: "routine",
+    priority: "normal",
   } as PhysioOrderSubmitInput);
 
   const reset = useCallback(() => {
-    setForm({ diagnosis: "", chiefComplaint: "", treatmentGoal: "", specialInstructions: "", priority: "routine" } as PhysioOrderSubmitInput);
+    setForm({ historyClinicalFindings: "", diagnosis: "", drugHistory: "", specialInstructions: "", priority: "normal" } as PhysioOrderSubmitInput);
     setSubmitting(false);
   }, []);
 
@@ -51,9 +51,9 @@ export function PhysioOrderModal({
       setSubmitting(true);
       await onSubmit({
         ...form,
+        historyClinicalFindings: form.historyClinicalFindings.trim(),
         diagnosis: form.diagnosis.trim(),
-        chiefComplaint: form.chiefComplaint.trim(),
-        treatmentGoal: form.treatmentGoal.trim(),
+        drugHistory: form.drugHistory.trim(),
         specialInstructions: form.specialInstructions.trim(),
       });
       onOpenChange(false);
@@ -85,30 +85,31 @@ export function PhysioOrderModal({
 
         <div className="space-y-4 py-2">
           <div className="space-y-2">
+            <Label>History/Clinical Findings</Label>
+            <Textarea value={form.historyClinicalFindings} onChange={(e) => setForm((p) => ({ ...p, historyClinicalFindings: e.target.value }))} placeholder="Patient's medical history and clinical findings..." rows={3} />
+          </div>
+
+          <div className="space-y-2">
             <Label>Diagnosis *</Label>
-            <Input value={form.diagnosis} onChange={(e) => setForm((p) => ({ ...p, diagnosis: e.target.value }))} placeholder="Primary diagnosis requiring physiotherapy" />
+            <Textarea value={form.diagnosis} onChange={(e) => setForm((p) => ({ ...p, diagnosis: e.target.value }))} placeholder="Primary diagnosis requiring physiotherapy" rows={2} />
           </div>
 
           <div className="space-y-2">
-            <Label>Chief Complaint</Label>
-            <Textarea value={form.chiefComplaint} onChange={(e) => setForm((p) => ({ ...p, chiefComplaint: e.target.value }))} placeholder="Patient's main complaint and symptoms..." rows={2} />
-          </div>
-
-          <div className="space-y-2">
-            <Label>Treatment Goal</Label>
-            <Textarea value={form.treatmentGoal} onChange={(e) => setForm((p) => ({ ...p, treatmentGoal: e.target.value }))} placeholder="Expected outcomes and treatment objectives..." rows={2} />
+            <Label>Drug History</Label>
+            <Textarea value={form.drugHistory} onChange={(e) => setForm((p) => ({ ...p, drugHistory: e.target.value }))} placeholder="Current medications, allergies, and drug history..." rows={2} />
           </div>
 
           <div className="space-y-2">
             <Label>Priority</Label>
-            <Select value={form.priority} onValueChange={(v) => setForm((p) => ({ ...p, priority: v as "routine" | "urgent" | "stat" }))}>
+            <Select value={form.priority} onValueChange={(v) => setForm((p) => ({ ...p, priority: v as "low" | "normal" | "high" | "urgent" }))}>
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="routine">Routine</SelectItem>
+                <SelectItem value="low">Low</SelectItem>
+                <SelectItem value="normal">Normal</SelectItem>
+                <SelectItem value="high">High</SelectItem>
                 <SelectItem value="urgent">Urgent</SelectItem>
-                <SelectItem value="stat">STAT</SelectItem>
               </SelectContent>
             </Select>
           </div>

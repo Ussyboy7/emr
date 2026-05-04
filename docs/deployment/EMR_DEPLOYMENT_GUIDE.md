@@ -630,27 +630,6 @@ sudo ss -tulpn | grep -E ':(8082|8002|5434|6381)'
 # Update docker-compose.prod.yml with different ports if needed
 ```
 
-### Docker build: cannot pull `python:3.13-slim` / `registry-1.docker.io` (DNS timeout)
-
-The deploy runs `docker compose up --build`. If the server cannot resolve or reach Docker Hub, you will see errors such as:
-
-`lookup registry-1.docker.io on 127.0.0.53:53: read udp … i/o timeout`
-
-This is a **host network / DNS** problem, not an application bug. On the server:
-
-1. **Check DNS:** `resolvectl status` or `cat /etc/resolv.conf` — ensure nameservers are reachable (corporate DNS, `8.8.8.8`, etc.).
-2. **Test reachability:** `curl -I https://registry-1.docker.io/v2/` or `docker pull hello-world`.
-3. **Firewall / proxy:** Allow HTTPS to `registry-1.docker.io` (and mirrors if used).
-4. **Retry** after DNS fix; optionally pre-pull images during a quiet window: `docker compose -f docker-compose.prod.yml pull`.
-
-### Failed deploy rollback mangled the database (`relation already exists`, duplicate keys)
-
-Pre-deploy snapshots are **plain `pg_dump` SQL**. Restoring by piping that file into `psql` **while the database still contains the old schema** replays `CREATE TABLE` / `COPY` on top of existing data and produces floods of errors.
-
-The `env-manager.sh` `deploy` rollback now **drops and recreates** the target database before replaying the snapshot, and new snapshots use `pg_dump --clean --if-exists` so replays are safer when a full drop is not used.
-
-**If a past rollback already left production inconsistent:** stop app containers, keep Postgres up, restore from the known-good `.sql` snapshot (same drop/create + `psql` procedure), or call your DBA. Pull the latest `scripts/ops/env-manager.sh` before the next deploy so rollback behaviour is fixed.
-
 ### Permission Issues
 
 ```bash
