@@ -6,12 +6,31 @@ from django.db import models
 from django.utils import timezone
 
 
+class SystemRole(models.Model):
+    """
+    Professional role definitions for system users.
+    Separated from permission-based access roles for better organization.
+    """
+    name = models.CharField(max_length=100, unique=True)
+    description = models.TextField(blank=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+
+
 class User(AbstractUser):
     """
     Custom User model for the EMR system.
     Extends Django's AbstractUser with EMR-specific fields.
     """
-    
+
+    # Legacy choices for backward compatibility during migration
     SYSTEM_ROLE_CHOICES = [
         ('System Administrator', 'System Administrator'),
         ('Medical Doctor', 'Medical Doctor'),
@@ -23,11 +42,20 @@ class User(AbstractUser):
         ('Medical Records Officer', 'Medical Records Officer'),
         ('Admin Staff', 'Admin Staff'),
     ]
-    
+
     # NPA-specific fields
     employee_id = models.CharField(max_length=50, unique=True, blank=True, null=True, db_index=True)
     grade_level = models.CharField(max_length=50, blank=True)
     system_role = models.CharField(max_length=50, choices=SYSTEM_ROLE_CHOICES, blank=True)
+
+    # New dynamic system role relationship
+    system_role_obj = models.ForeignKey(
+        SystemRole,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='users'
+    )
     
     # Organizational structure - linked to organization app
     clinic = models.ForeignKey(

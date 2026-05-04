@@ -268,10 +268,10 @@ class AdminService {
   }
 
   /**
-   * Get a single role
+   * Get system roles (professional roles)
    */
-  async getRole(roleId: number): Promise<Role> {
-    return apiFetch<Role>(`/permissions/roles/${roleId}/`);
+  async getSystemRoles(): Promise<Array<{id: number, name: string, description: string, is_active: boolean}>> {
+    return apiFetch<Array<{id: number, name: string, description: string, is_active: boolean}>>('/accounts/system-roles/');
   }
 
 

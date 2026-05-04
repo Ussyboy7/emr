@@ -94,9 +94,16 @@ export default function UserManagementPage() {
   }, []);
 
   const loadSystemRoles = useCallback(async () => {
-    // TODO: Fetch from backend API when available
-    // For now, use hardcoded list - update when /admin/system-roles/ endpoint is implemented
-    setSystemRoles(['All Roles', 'Medical Doctor', 'Nursing Officer', 'Laboratory Scientist', 'Pharmacist', 'Radiologist', 'Optamologist', 'Medical Records Officer', 'System Administrator', 'Admin Staff']);
+    try {
+      const systemRolesResponse = await adminService.getSystemRoles();
+      // Filter to active roles and map to the expected format
+      const activeRoles = systemRolesResponse.filter(role => role.is_active);
+      setSystemRoles(['All Roles', ...activeRoles.map(role => role.name)]);
+    } catch (err: any) {
+      console.error('Error loading system roles:', err);
+      // Fallback to basic roles if API fails
+      setSystemRoles(['All Roles', 'Medical Doctor', 'Nursing Officer', 'Laboratory Scientist', 'Pharmacist', 'Radiologist', 'Optamologist', 'Medical Records Officer', 'System Administrator', 'Admin Staff']);
+    }
   }, []);
 
   // Load roles and system roles from API
