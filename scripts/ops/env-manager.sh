@@ -440,7 +440,8 @@ _deploy_backup_database() {
     rm -f "${BACKUP_DIR}/.emr_write_test"
     local backup_file="${BACKUP_DIR}/predeploy_${STACK_ENVIRONMENT}_$(stack_timestamp).sql"
     if docker ps --format '{{.Names}}' | grep -q "^${PG_CONTAINER}$"; then
-        if docker exec "$PG_CONTAINER" pg_dump -U "$DB_USER" "$DB_NAME" > "$backup_file" 2>/dev/null; then
+        # --clean --if-exists: replaying this dump replaces objects in-place (needed for rollback onto a non-empty DB).
+        if docker exec "$PG_CONTAINER" pg_dump -U "$DB_USER" --clean --if-exists "$DB_NAME" > "$backup_file" 2>/dev/null; then
             ui_success "Snapshot saved: ${backup_file}"
             echo "$backup_file" > "${BACKUP_DIR}/.latest_predeploy_${STACK_ENVIRONMENT}"
         else
@@ -542,13 +543,35 @@ _deploy_rollback() {
     if [[ -n "$latest" && -f "$latest" ]]; then
         ui_step "Restoring DB from ${latest}"
         stack_compose up -d "$STACK_POSTGRES_SERVICE"
-        sleep 10
+        local rlog="${BACKUP_DIR}/.rollback_restore_${STACK_ENVIRONMENT}_$(stack_timestamp).log"
+        local i
+        for ((i = 1; i <= 30; i++)); do
+            if docker exec "$PG_CONTAINER" pg_isready -U "$DB_USER" -d postgres >/dev/null 2>&1; then
+                break
+            fi
+            sleep 2
+        done
         if docker ps --format '{{.Names}}' | grep -q "^${PG_CONTAINER}$"; then
-            docker exec -i "$PG_CONTAINER" psql -U "$DB_USER" -d "$DB_NAME" < "$latest" >/dev/null \
-                || ui_warning "psql restore reported errors (check logs)"
+            # Plain pg_dump files assume an empty database. Replaying into the live DB without a drop left the schema
+            # in place and produced "already exists" / duplicate-key errors. Drop + create is atomic for rollout/rollback.
+            ui_info "Replacing database ${DB_NAME} (terminating connections, drop/create, restore) — details: ${rlog}"
+            if docker exec -i "$PG_CONTAINER" psql -U "$DB_USER" -d postgres -v ON_ERROR_STOP=1 \
+                -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${DB_NAME}' AND pid <> pg_backend_pid();" \
+                -c "DROP DATABASE IF EXISTS \"${DB_NAME}\";" \
+                -c "CREATE DATABASE \"${DB_NAME}\" OWNER \"${DB_USER}\";" >>"$rlog" 2>&1; then
+                if docker exec -i "$PG_CONTAINER" psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 <"$latest" >>"$rlog" 2>&1; then
+                    ui_success "Database restore completed (${rlog})"
+                else
+                    ui_error "psql restore failed — inspect ${rlog}"
+                fi
+            else
+                ui_error "Could not drop/recreate ${DB_NAME} — inspect ${rlog}"
+            fi
+        else
+            ui_error "Postgres container ${PG_CONTAINER} not running; cannot restore DB"
         fi
         stack_compose up -d
-        ui_warning "Rolled back to snapshot — verify manually!"
+        ui_warning "Rollback steps finished — verify application and DB manually!"
     else
         ui_error "No pre-deploy snapshot found for ${STACK_ENVIRONMENT}"
     fi
