@@ -19,6 +19,7 @@ class User(AbstractUser):
         ('Laboratory Scientist', 'Laboratory Scientist'),
         ('Pharmacist', 'Pharmacist'),
         ('Radiologist', 'Radiologist'),
+        ('Optamologist', 'Optamologist'),
         ('Medical Records Officer', 'Medical Records Officer'),
         ('Admin Staff', 'Admin Staff'),
     ]
