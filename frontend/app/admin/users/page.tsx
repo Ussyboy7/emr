@@ -61,20 +61,21 @@ const emptyStaff: Partial<StaffMember> = {
   username: '', status: 'Active', employeeId: ''
 };
 
-// System roles (professional identity) - fetched from backend
-const [systemRoles, setSystemRoles] = useState<string[]>(['All Roles']);
 const statuses = ['All Status', 'Active', 'Inactive'];
 
 export default function UserManagementPage() {
-  const [staff, setStaff] = useState<StaffMember[]>([]);
+  // System roles (professional identity) - fetched from backend
+  const [systemRoles, setSystemRoles] = useState<string[]>(['All Roles']);
 
-  const [accessRoles, setAccessRoles] = useState<ApiRole[]>([]);
+  const [staff, setStaff] = useState<StaffMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState('all');
 
   const [statusFilter, setStatusFilter] = useState('all');
+
+  const [accessRoles, setAccessRoles] = useState<ApiRole[]>([]);
   
   // Pagination
   const [currentPage, setCurrentPage] = useState(1);
