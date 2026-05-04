@@ -874,7 +874,7 @@ export default function ResultsVerificationPage() {
                             </Badge>
                                  <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${getPriorityBadge(result.priority)}`}>{result.priority}</Badge>
                                  <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{result.testCode}</Badge>
-                                 {result.orderId && (
+                                 {result.orderId && result.orderId !== result.testCode && (
                                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/50">
                                      {result.orderId}
                                    </Badge>

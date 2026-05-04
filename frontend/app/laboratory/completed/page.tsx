@@ -385,7 +385,7 @@ export default function CompletedTestsPage() {
                                {test.overallStatus === 'Critical' && <AlertTriangle className="h-2 w-2 mr-0.5" />}{test.overallStatus}
                              </Badge>
                              <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{test.testCode}</Badge>
-                             {test.orderId && (
+                             {test.orderId && test.orderId !== test.testCode && (
                                <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/50">
                                  {test.orderId}
                                </Badge>
