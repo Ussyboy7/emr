@@ -55,6 +55,15 @@ interface Department {
   clinic?: number;
 }
 
+interface SystemRole {
+  id: number;
+  name: string;
+  description: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 // Empty staff object for form initialization
 const emptyStaff: Partial<StaffMember> = {
   firstName: '', middleName: '', lastName: '', email: '', phone: '', systemRole: '', accessRoleId: undefined, restrictedPages: [],
@@ -76,6 +85,16 @@ export default function UserManagementPage() {
   const [statusFilter, setStatusFilter] = useState('all');
 
   const [accessRoles, setAccessRoles] = useState<ApiRole[]>([]);
+
+  // System roles management state
+  const [allSystemRoles, setAllSystemRoles] = useState<SystemRole[]>([]);
+  const [systemRoleDialogOpen, setSystemRoleDialogOpen] = useState(false);
+  const [editingSystemRole, setEditingSystemRole] = useState<SystemRole | null>(null);
+  const [systemRoleForm, setSystemRoleForm] = useState({
+    name: '',
+    description: '',
+    is_active: true,
+  });
   
   // Pagination
   const [currentPage, setCurrentPage] = useState(1);
@@ -115,11 +134,86 @@ export default function UserManagementPage() {
     }
   }, []);
 
+  const loadAllSystemRoles = useCallback(async () => {
+    try {
+      const response = await adminService.getSystemRoles();
+      if (response.results) {
+        setAllSystemRoles(response.results);
+      }
+    } catch (err: any) {
+      console.error('Error loading system roles:', err);
+    }
+  }, []);
+
+  const handleCreateSystemRole = async () => {
+    try {
+      await apiFetch('/accounts/system-roles/', {
+        method: 'POST',
+        body: JSON.stringify(systemRoleForm),
+      });
+      toast.success('System role created successfully');
+      setSystemRoleDialogOpen(false);
+      setSystemRoleForm({ name: '', description: '', is_active: true });
+      loadAllSystemRoles();
+      loadSystemRoles(); // Refresh the dropdown
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to create system role');
+    }
+  };
+
+  const handleUpdateSystemRole = async () => {
+    if (!editingSystemRole) return;
+    try {
+      await apiFetch(`/accounts/system-roles/${editingSystemRole.id}/`, {
+        method: 'PUT',
+        body: JSON.stringify(systemRoleForm),
+      });
+      toast.success('System role updated successfully');
+      setSystemRoleDialogOpen(false);
+      setEditingSystemRole(null);
+      setSystemRoleForm({ name: '', description: '', is_active: true });
+      loadAllSystemRoles();
+      loadSystemRoles(); // Refresh the dropdown
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to update system role');
+    }
+  };
+
+  const handleDeleteSystemRole = async (roleId: number) => {
+    if (!confirm('Are you sure you want to delete this system role?')) return;
+    try {
+      await apiFetch(`/accounts/system-roles/${roleId}/`, {
+        method: 'DELETE',
+      });
+      toast.success('System role deleted successfully');
+      loadAllSystemRoles();
+      loadSystemRoles(); // Refresh the dropdown
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to delete system role');
+    }
+  };
+
+  const openSystemRoleDialog = (role?: SystemRole) => {
+    if (role) {
+      setEditingSystemRole(role);
+      setSystemRoleForm({
+        name: role.name,
+        description: role.description,
+        is_active: role.is_active,
+      });
+    } else {
+      setEditingSystemRole(null);
+      setSystemRoleForm({ name: '', description: '', is_active: true });
+    }
+    setSystemRoleDialogOpen(true);
+  };
+
   // Load roles and system roles from API
   useEffect(() => {
     loadRoles();
     loadSystemRoles();
-  }, [loadRoles, loadSystemRoles]);
+    loadAllSystemRoles();
+  }, [loadRoles, loadSystemRoles, loadAllSystemRoles]);
 
   // Use a ref to track current page to avoid dependency loops
   const currentPageRef = useRef(currentPage);

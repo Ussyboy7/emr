@@ -24,6 +24,7 @@ import {
   Stethoscope, Syringe, FlaskConical, Pill, ScanLine, ClipboardList, UserCog,
   Building2, Settings, Lock, Key, AlertTriangle, CheckCircle2, Loader2
 } from "lucide-react";
+import { apiFetch } from "@/lib/api-client";
 
 interface Role {
   id: string;
@@ -37,6 +38,15 @@ interface Role {
   updatedAt: string;
 }
 
+interface SystemRole {
+  id: number;
+  name: string;
+  description: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 const pageModules = [...new Set(ALL_PAGE_PERMISSIONS.map((p) => p.module))];
 const roleTypes = ['All Types', 'System', 'Clinical', 'Administrative', 'Custom'];
 
@@ -45,9 +55,20 @@ export default function RolesPermissionsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Load roles from API
+  // System roles management state
+  const [allSystemRoles, setAllSystemRoles] = useState<SystemRole[]>([]);
+  const [systemRoleDialogOpen, setSystemRoleDialogOpen] = useState(false);
+  const [editingSystemRole, setEditingSystemRole] = useState<SystemRole | null>(null);
+  const [systemRoleForm, setSystemRoleForm] = useState({
+    name: '',
+    description: '',
+    is_active: true,
+  });
+
+  // Load roles and system roles from API
   useEffect(() => {
     loadRoles();
+    loadAllSystemRoles();
   }, []);
 
   // Map backend role types to frontend types
@@ -215,6 +236,78 @@ export default function RolesPermissionsPage() {
   const openView = (role: Role) => { setSelectedRole(role); setIsViewDialogOpen(true); };
   const openEdit = (role: Role) => { setSelectedRole(role); setFormData({ name: role.name, description: role.description, type: role.type, permissions: role.permissions, isActive: role.isActive }); setIsEditDialogOpen(true); };
   const openDelete = (role: Role) => { setSelectedRole(role); setIsDeleteDialogOpen(true); };
+
+  // System role functions
+  const loadAllSystemRoles = async () => {
+    try {
+      const response = await apiFetch('/accounts/system-roles/');
+      if (response.results) {
+        setAllSystemRoles(response.results);
+      }
+    } catch (err: any) {
+      console.error('Error loading system roles:', err);
+    }
+  };
+
+  const handleCreateSystemRole = async () => {
+    try {
+      await apiFetch('/accounts/system-roles/', {
+        method: 'POST',
+        body: JSON.stringify(systemRoleForm),
+      });
+      toast.success('System role created successfully');
+      setSystemRoleDialogOpen(false);
+      setSystemRoleForm({ name: '', description: '', is_active: true });
+      loadAllSystemRoles();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to create system role');
+    }
+  };
+
+  const handleUpdateSystemRole = async () => {
+    if (!editingSystemRole) return;
+    try {
+      await apiFetch(`/accounts/system-roles/${editingSystemRole.id}/`, {
+        method: 'PUT',
+        body: JSON.stringify(systemRoleForm),
+      });
+      toast.success('System role updated successfully');
+      setSystemRoleDialogOpen(false);
+      setEditingSystemRole(null);
+      setSystemRoleForm({ name: '', description: '', is_active: true });
+      loadAllSystemRoles();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to update system role');
+    }
+  };
+
+  const handleDeleteSystemRole = async (roleId: number) => {
+    if (!confirm('Are you sure you want to delete this system role?')) return;
+    try {
+      await apiFetch(`/accounts/system-roles/${roleId}/`, {
+        method: 'DELETE',
+      });
+      toast.success('System role deleted successfully');
+      loadAllSystemRoles();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to delete system role');
+    }
+  };
+
+  const openSystemRoleDialog = (role?: SystemRole) => {
+    if (role) {
+      setEditingSystemRole(role);
+      setSystemRoleForm({
+        name: role.name,
+        description: role.description,
+        is_active: role.is_active,
+      });
+    } else {
+      setEditingSystemRole(null);
+      setSystemRoleForm({ name: '', description: '', is_active: true });
+    }
+    setSystemRoleDialogOpen(true);
+  };
 
   const handleCreate = async () => {
     if (!formData.name) {
@@ -417,6 +510,69 @@ export default function RolesPermissionsPage() {
           </Card>
         )}
 
+        {/* System Roles Management */}
+        <Card className="mt-8">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <UserCog className="h-5 w-5 text-blue-500" />
+              System Roles (Professional Identities)
+            </CardTitle>
+            <CardDescription>
+              Manage professional role identities for staff. These are different from access roles - they define what someone IS (Doctor, Nurse) rather than what they can DO.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              <div className="flex justify-between items-center">
+                <div className="text-sm text-muted-foreground">
+                  Total System Roles: {allSystemRoles.length}
+                </div>
+                <Button onClick={() => openSystemRoleDialog()} size="sm">
+                  <Plus className="h-4 w-4 mr-2" />
+                  Add System Role
+                </Button>
+              </div>
+
+              <div className="grid gap-3">
+                {allSystemRoles.map(role => (
+                  <Card key={role.id} className={`border-l-4 ${role.is_active ? 'border-l-green-500' : 'border-l-gray-400'}`}>
+                    <CardContent className="py-3 px-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-1">
+                            <h4 className="font-medium">{role.name}</h4>
+                            {!role.is_active && <Badge variant="secondary" className="text-xs">Inactive</Badge>}
+                          </div>
+                          <p className="text-sm text-muted-foreground">{role.description || 'No description'}</p>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <Button variant="ghost" size="sm" onClick={() => openSystemRoleDialog(role)}>
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                          <Button variant="ghost" size="sm" onClick={() => handleDeleteSystemRole(role.id)}>
+                            <Trash2 className="h-4 w-4 text-rose-500" />
+                          </Button>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+
+              {allSystemRoles.length === 0 && (
+                <div className="text-center py-8 text-muted-foreground">
+                  <UserCog className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                  <p>No system roles found</p>
+                  <Button onClick={() => openSystemRoleDialog()} className="mt-4" size="sm">
+                    <Plus className="h-4 w-4 mr-2" />
+                    Create First System Role
+                  </Button>
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
         <Dialog open={isCreateDialogOpen || isEditDialogOpen} onOpenChange={(open) => { if (!open) { setIsCreateDialogOpen(false); setIsEditDialogOpen(false); } }}>
           <DialogContent className="w-[95vw] sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
             <DialogHeader><DialogTitle className="flex items-center gap-2"><Shield className="h-5 w-5 text-purple-500" />{isCreateDialogOpen ? 'Create Role' : 'Edit Role'}</DialogTitle><DialogDescription>{isCreateDialogOpen ? 'Define a new role with specific permissions' : `Update "${selectedRole?.name}" role settings`}</DialogDescription></DialogHeader>
@@ -492,6 +648,66 @@ export default function RolesPermissionsPage() {
             <DialogFooter><Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)}>Cancel</Button><Button variant="destructive" onClick={handleDelete} disabled={isSubmitting}>{isSubmitting ? 'Deleting...' : 'Delete Role'}</Button></DialogFooter>
           </DialogContent>
         </Dialog>
+
+        {/* System Role Create/Edit Dialog */}
+        <Dialog open={systemRoleDialogOpen} onOpenChange={setSystemRoleDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <UserCog className="h-5 w-5 text-blue-500" />
+                {editingSystemRole ? 'Edit System Role' : 'Create System Role'}
+              </DialogTitle>
+              <DialogDescription>
+                {editingSystemRole
+                  ? `Update the "${editingSystemRole.name}" professional role`
+                  : 'Define a new professional role identity for staff'
+                }
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label htmlFor="system-role-name">Role Name *</Label>
+                <Input
+                  id="system-role-name"
+                  value={systemRoleForm.name}
+                  onChange={(e) => setSystemRoleForm(prev => ({ ...prev, name: e.target.value }))}
+                  placeholder="e.g., Cardiologist, Dermatologist"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="system-role-description">Description</Label>
+                <Input
+                  id="system-role-description"
+                  value={systemRoleForm.description}
+                  onChange={(e) => setSystemRoleForm(prev => ({ ...prev, description: e.target.value }))}
+                  placeholder="Brief description of this professional role"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="system-role-active"
+                  checked={systemRoleForm.is_active}
+                  onCheckedChange={(checked) =>
+                    setSystemRoleForm(prev => ({ ...prev, is_active: checked as boolean }))
+                  }
+                />
+                <Label htmlFor="system-role-active">Active</Label>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setSystemRoleDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                onClick={editingSystemRole ? handleUpdateSystemRole : handleCreateSystemRole}
+                disabled={!systemRoleForm.name.trim()}
+              >
+                {editingSystemRole ? 'Update Role' : 'Create Role'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
       </div>
     </DashboardLayout>
   );
