@@ -8,6 +8,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.utils.dateparse import parse_datetime
 from django.utils import timezone
 from .analytics import build_physiotherapy_analytics
+from .models import PhysioOrder, PhysioSession
 
 
 @method_decorator(csrf_exempt, name='dispatch')
@@ -39,3 +40,17 @@ class PhysiotherapyAnalyticsSummaryView(View):
         analytics_data = build_physiotherapy_analytics(start_date, end_date)
 
         return JsonResponse(analytics_data)
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class PhysiotherapyStatsView(View):
+    """Basic physiotherapy queue/session counters."""
+
+    def get(self, request):
+        return JsonResponse({
+            'total_orders': PhysioOrder.objects.count(),
+            'pending_orders': PhysioOrder.objects.filter(status__in=['pending', 'scheduled']).count(),
+            'completed_sessions': PhysioSession.objects.filter(status='completed').count(),
+            'active_sessions': PhysioSession.objects.filter(status='in_progress').count(),
+            'total_sessions': PhysioSession.objects.count(),
+        })
