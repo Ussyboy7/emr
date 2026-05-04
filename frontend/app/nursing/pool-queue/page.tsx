@@ -165,6 +165,7 @@ export default function NursingPoolQueuePage() {
   const [rooms, setRooms] = useState<ConsultationRoom[]>([]);
   const [roomsLoading, setRoomsLoading] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [authError, setAuthError] = useState<unknown | null>(null);
   useAuthRedirect(authError);
@@ -176,7 +177,6 @@ export default function NursingPoolQueuePage() {
   const [physioCheckins, setPhysioCheckins] = useState<Record<number, { orderId: number; status: string }>>({});
   const [eyeCheckins, setEyeCheckins] = useState<Record<number, { orderId: number; status: string }>>({});
   const [searchQuery, setSearchQuery] = useState('');
-  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('today');
   const [typeFilter, setTypeFilter] = useState('all');
@@ -223,7 +223,7 @@ export default function NursingPoolQueuePage() {
           date: dateParam,
           start_date: startDate,
           end_date: endDate,
-          search: debouncedSearchQuery || undefined,
+          search: searchQuery || undefined,
           visit_type: typeFilter !== 'all' ? typeFilter : undefined,
           clinic: clinicFilter !== 'all' ? clinicFilter : undefined,
         };
@@ -252,7 +252,11 @@ export default function NursingPoolQueuePage() {
 
         if (!silent) {
           try {
-            const metrics = await visitService.getNursingPoolMetrics(metricsParams);
+            const metrics = await visitService.getNursingPoolMetrics({
+              ...metricsParams,
+              // Keep stat cards independent of search typing (list-only filtering UX).
+              search: undefined,
+            });
             setPoolMetrics(metrics);
           } catch (me: unknown) {
             console.warn('Nursing pool metrics failed', me);
@@ -482,6 +486,7 @@ export default function NursingPoolQueuePage() {
       } finally {
         if (!silent) {
           setLoading(false);
+          setHasLoadedOnce(true);
         }
       }
   }, [
@@ -489,18 +494,13 @@ export default function NursingPoolQueuePage() {
     statusFilter,
     dateRange.from,
     dateRange.to,
-    debouncedSearchQuery,
+    searchQuery,
     typeFilter,
     clinicFilter,
     currentPage,
     itemsPerPage,
     serverToday,
   ]);
-
-  useEffect(() => {
-    const t = setTimeout(() => setDebouncedSearchQuery(searchQuery), 300);
-    return () => clearTimeout(t);
-  }, [searchQuery]);
 
   // Load data when filters change
   useEffect(() => {
@@ -510,7 +510,7 @@ export default function NursingPoolQueuePage() {
     statusFilter,
     dateRange.from,
     dateRange.to,
-    debouncedSearchQuery,
+    searchQuery,
     typeFilter,
     clinicFilter,
     currentPage,
@@ -631,7 +631,7 @@ export default function NursingPoolQueuePage() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [debouncedSearchQuery, statusFilter, dateFilter, typeFilter, clinicFilter, dateRange.from, dateRange.to]);
+  }, [searchQuery, statusFilter, dateFilter, typeFilter, clinicFilter, dateRange.from, dateRange.to]);
 
   const clearDateRangeFilters = () => {
     setDateRange({ from: '', to: '' });
@@ -1029,8 +1029,8 @@ export default function NursingPoolQueuePage() {
     return styles[type] || 'border-l-gray-500';
   };
 
-  // Show loading state
-  if (loading) {
+  // Show full-page loading only on first load. Subsequent refreshes keep UI visible.
+  if (loading && !hasLoadedOnce) {
     return (
       <DashboardLayout>
         <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
@@ -1102,7 +1102,6 @@ export default function NursingPoolQueuePage() {
         </div>
 
         {/* Filters */}
-        {!loading && (
         <Card>
           <CardContent className="p-4">
             <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-3">
@@ -1160,7 +1159,6 @@ export default function NursingPoolQueuePage() {
             </div>
           </CardContent>
         </Card>
-        )}
 
         <AdvancedDateRangeDialog
           open={isDateFilterDialogOpen}
@@ -1173,7 +1171,6 @@ export default function NursingPoolQueuePage() {
         />
 
         {/* Results Count */}
-        {!loading && (
           <>
             <div className="flex items-center justify-between px-1">
               <p className="text-sm text-muted-foreground">
@@ -1542,7 +1539,6 @@ export default function NursingPoolQueuePage() {
           </Card>
         )}
           </>
-        )}
 
         {/* Record/Edit Vitals Dialog */}
         <Dialog open={isVitalsDialogOpen} onOpenChange={(open) => {
