@@ -260,11 +260,11 @@ const transformResult = (
 
   const order = (apiResult as any).order || (test as any).order;
   const patient = apiResult.patient || order?.patient || {};
-  
+
   // Get test details - handle case where test might be just an ID
   const testId = typeof test === 'number' ? test.toString() : (testDetails?.id?.toString() || test?.id?.toString() || apiResult.id.toString());
   const testCode = testDetails?.code || test?.code || '';
-  
+
   // Extract result file URL if available
   let resultFileUrl: string | undefined = undefined;
   const resultFileExists = (testDetails as any)?.result_file_exists !== false;
@@ -272,7 +272,7 @@ const transformResult = (
     const fileField = testDetails.result_file;
     if (typeof fileField === 'string') {
       // If it's already a full URL, use it; otherwise construct it
-      resultFileUrl = fileField.startsWith('http') 
+      resultFileUrl = fileField.startsWith('http')
         ? fileField
         : fileField.startsWith('/')
           ? `${process.env.NEXT_PUBLIC_API_URL}${fileField}`
@@ -287,11 +287,11 @@ const transformResult = (
       }
     }
   }
-  
+
   return {
     id: apiResult.id.toString(),
     testId: testId, // Store test ID for API operations
-    orderId: (apiResult as any).order_id || order?.order_id || '',
+    orderId: order?.lab_number || (apiResult as any).order_id || order?.order_id || '',
     patient: {
       id: (patient as any)?.id?.toString() || '',
       name: (apiResult as any).patient_name ?? (patient as any)?.name ?? '',

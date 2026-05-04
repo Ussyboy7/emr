@@ -62,7 +62,7 @@ export function transformApiRowToCompletedTest(
   const age = (patientDetails as any)?.age ?? null;
   const gender = (patientDetails as any)?.gender || '';
 
-  const orderId = (orderDetails as any).order_id || '';
+  const orderId = (orderDetails as any).lab_number || (orderDetails as any).order_id || '';
 
   const doctorDetails = (orderDetails as any).doctor_details;
   const doctorName = (doctorDetails as any)?.name || (orderDetails as any).doctor_name || '';
