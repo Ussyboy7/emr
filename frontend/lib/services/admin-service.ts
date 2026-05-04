@@ -275,6 +275,13 @@ class AdminService {
   }
 
   /**
+   * Get system roles (professional roles)
+   */
+  async getSystemRoles(): Promise<string[]> {
+    return apiFetch<string[]>('/admin/system-roles/');
+  }
+
+  /**
    * Create a new role
    */
   async createRole(data: Partial<Role>): Promise<Role> {

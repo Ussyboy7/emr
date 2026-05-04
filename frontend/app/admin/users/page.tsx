@@ -61,8 +61,8 @@ const emptyStaff: Partial<StaffMember> = {
   username: '', status: 'Active', employeeId: ''
 };
 
-// Match backend SYSTEM_ROLE_CHOICES exactly (professional identity)
-const systemRoles = ['All Roles', 'Medical Doctor', 'Nursing Officer', 'Laboratory Scientist', 'Pharmacist', 'Radiologist', 'Medical Records Officer', 'System Administrator', 'Admin Staff'];
+// System roles (professional identity) - fetched from backend
+const [systemRoles, setSystemRoles] = useState<string[]>(['All Roles']);
 const statuses = ['All Status', 'Active', 'Inactive'];
 
 export default function UserManagementPage() {
@@ -92,10 +92,22 @@ export default function UserManagementPage() {
     }
   }, []);
 
-  // Load roles from API
+  const loadSystemRoles = useCallback(async () => {
+    try {
+      const systemRolesResponse = await adminService.getSystemRoles();
+      setSystemRoles(['All Roles', ...systemRolesResponse]);
+    } catch (err: any) {
+      console.error('Error loading system roles:', err);
+      // Fallback to hardcoded list if API fails
+      setSystemRoles(['All Roles', 'Medical Doctor', 'Nursing Officer', 'Laboratory Scientist', 'Pharmacist', 'Radiologist', 'Optamologist', 'Medical Records Officer', 'System Administrator', 'Admin Staff']);
+    }
+  }, []);
+
+  // Load roles and system roles from API
   useEffect(() => {
     loadRoles();
-  }, [loadRoles]);
+    loadSystemRoles();
+  }, [loadRoles, loadSystemRoles]);
 
   // Use a ref to track current page to avoid dependency loops
   const currentPageRef = useRef(currentPage);
