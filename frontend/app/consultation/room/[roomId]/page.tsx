@@ -823,22 +823,22 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   // Physiotherapy state
   const [physioOrders, setPhysioOrders] = useState<{
     id: string;
+    historyClinicalFindings: string;
     diagnosis: string;
-    chiefComplaint: string;
-    treatmentGoal: string;
+    drugHistory: string;
     specialInstructions?: string;
-    priority: 'routine' | 'urgent' | 'stat';
+    priority: 'low' | 'normal' | 'high' | 'urgent';
     status: 'Draft' | 'Sent to Physiotherapy' | 'Scheduled' | 'In Progress' | 'Completed';
   }[]>([]);
   const [physioOrdersFromApi, setPhysioOrdersFromApi] = useState<any[]>([]);
   const [showAddPhysio, setShowAddPhysio] = useState(false);
   const [editingPhysioIndex, setEditingPhysioIndex] = useState<number | null>(null);
   const [newPhysio, setNewPhysio] = useState({
+    historyClinicalFindings: "",
     diagnosis: "",
-    chiefComplaint: "",
-    treatmentGoal: "",
+    drugHistory: "",
     specialInstructions: "",
-    priority: "routine" as 'routine' | 'urgent' | 'stat'
+    priority: "normal" as 'low' | 'normal' | 'high' | 'urgent'
   });
   const [physioTemplates, setPhysioTemplates] = useState<any[]>([]);
   const [loadingPhysioTemplates, setLoadingPhysioTemplates] = useState(false);
@@ -4319,13 +4319,13 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
     if (editingPhysioIndex !== null) {
       // Editing existing order
-      setPhysioOrders(prev => prev.map((order, i) => 
-        i === editingPhysioIndex 
+      setPhysioOrders(prev => prev.map((order, i) =>
+        i === editingPhysioIndex
           ? {
               ...order,
+              historyClinicalFindings: newPhysio.historyClinicalFindings.trim(),
               diagnosis: newPhysio.diagnosis.trim(),
-              chiefComplaint: newPhysio.chiefComplaint.trim(),
-              treatmentGoal: newPhysio.treatmentGoal.trim(),
+              drugHistory: newPhysio.drugHistory.trim(),
               specialInstructions: newPhysio.specialInstructions.trim() || undefined,
               priority: newPhysio.priority,
             }
@@ -4336,10 +4336,10 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       // Adding new order
       const newOrder = {
         id: `physio-${Date.now()}`,
+        historyClinicalFindings: newPhysio.historyClinicalFindings?.trim() || '',
         diagnosis: newPhysio.diagnosis.trim(),
-        chiefComplaint: newPhysio.chiefComplaint.trim(),
-        treatmentGoal: newPhysio.treatmentGoal.trim(),
-        specialInstructions: newPhysio.specialInstructions.trim() || undefined,
+        drugHistory: newPhysio.drugHistory?.trim() || '',
+        specialInstructions: newPhysio.specialInstructions?.trim() || undefined,
         priority: newPhysio.priority,
         status: 'Draft' as const
       };
@@ -4348,11 +4348,11 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     }
 
     setNewPhysio({
+      historyClinicalFindings: "",
       diagnosis: "",
-      chiefComplaint: "",
-      treatmentGoal: "",
+      drugHistory: "",
       specialInstructions: "",
-      priority: "routine"
+      priority: "normal"
     });
     setEditingPhysioIndex(null);
     setShowAddPhysio(false);
@@ -4360,17 +4360,15 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
   const editPhysioOrder = (index: number) => {
     const orderToEdit = physioOrders[index];
-    if (!orderToEdit) return;
-
-      setNewPhysio({
-        diagnosis: orderToEdit.diagnosis || "",
-        chiefComplaint: orderToEdit.chiefComplaint || "",
-        treatmentGoal: orderToEdit.treatmentGoal || "",
-        specialInstructions: orderToEdit.specialInstructions || "",
-        priority: orderToEdit.priority,
-      });
+    setNewPhysio({
+      historyClinicalFindings: orderToEdit.historyClinicalFindings || "",
+      diagnosis: orderToEdit.diagnosis,
+      drugHistory: orderToEdit.drugHistory || "",
+      specialInstructions: orderToEdit.specialInstructions || "",
+      priority: orderToEdit.priority
+    });
     setEditingPhysioIndex(index);
-    setShowAddPhysio(true);
+    setIsPhysioOrderDialogOpen(true);
   };
 
   const sendPhysioOrders = async () => {
@@ -4405,7 +4403,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
       // Combine all clinical notes
       const combinedClinicalNotes = draftOrders.map(order =>
-        `${order.diagnosis}${order.chiefComplaint ? ` - ${order.chiefComplaint}` : ''}${order.specialInstructions ? ` (${order.specialInstructions})` : ''}`
+        `${order.diagnosis}${order.historyClinicalFindings ? ` - ${order.historyClinicalFindings}` : ''}${order.specialInstructions ? ` (${order.specialInstructions})` : ''}`
       ).join('; ');
 
       // Create separate physiotherapy orders for each draft order
@@ -4413,9 +4411,9 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         await physioService.createOrder({
           patient: numericPatientId,
           visit: numericVisitId && !isNaN(numericVisitId) ? numericVisitId : undefined,
+          history_clinical_findings: order.historyClinicalFindings,
           diagnosis: order.diagnosis,
-          chief_complaint: order.chiefComplaint,
-          treatment_goal: order.treatmentGoal,
+          drug_history: order.drugHistory,
           special_instructions: order.specialInstructions || undefined,
           priority: order.priority,
           consultation_session: sessionId,
@@ -5490,7 +5488,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
               <CardContent className="space-y-4">
                 {(() => {
                   const apiDisplay = (physioOrdersFromApi || []).map((o: any) => ({
-                    id: o.id, diagnosis: o.diagnosis, chiefComplaint: o.chief_complaint, treatmentGoal: o.treatment_goal, specialInstructions: o.special_instructions, priority: o.priority || 'routine',
+                    id: o.id, historyClinicalFindings: o.history_clinical_findings || '', diagnosis: o.diagnosis, drugHistory: o.drug_history || '', specialInstructions: o.special_instructions, priority: o.priority || 'normal',
                     status: (o.status === 'pending' ? 'Sent to Physiotherapy' : o.status === 'scheduled' ? 'Scheduled' : o.status === 'in_progress' ? 'In Progress' : o.status === 'completed' ? 'Completed' : String(o.status || '')) as any,
                     fromApi: true
                   }));
@@ -5533,8 +5531,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
                                     </Badge>
                                     <Badge className={`text-xs px-1.5 py-0.5 ${getStatusBadge(order.status)}`}>{order.status}</Badge>
                                   </div>
-                                  {(order.chiefComplaint || order.chief_complaint) && <p className="text-xs text-muted-foreground mb-0.5">{order.chiefComplaint || order.chief_complaint}</p>}
-                                  {(order.treatmentGoal || order.treatment_goal) && <p className="text-xs text-muted-foreground">{order.treatmentGoal || order.treatment_goal}</p>}
+                                  {order.historyClinicalFindings && <p className="text-xs text-muted-foreground mb-0.5">{order.historyClinicalFindings}</p>}
+                                  {order.drugHistory && <p className="text-xs text-muted-foreground">{order.drugHistory}</p>}
                                   {order.status === 'Sent to Physiotherapy' && (
                                     <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
                                       <Clock className="h-3 w-3" />
@@ -8128,7 +8126,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           setShowAddPhysio(open);
           if (!open) {
             setEditingPhysioIndex(null);
-            setNewPhysio({ diagnosis: "", chiefComplaint: "", treatmentGoal: "", specialInstructions: "", priority: "routine" });
+            setNewPhysio({ historyClinicalFindings: "", diagnosis: "", drugHistory: "", specialInstructions: "", priority: "normal" });
           }
         }}>
           <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
@@ -8147,52 +8145,50 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
             <div className="space-y-4 py-2">
               {/* Diagnosis */}
               <div className="space-y-2">
+                <Label>History/Clinical Findings</Label>
+                <Textarea
+                  value={newPhysio.historyClinicalFindings}
+                  onChange={(e) => setNewPhysio({ ...newPhysio, historyClinicalFindings: e.target.value })}
+                  placeholder="Patient's medical history and clinical findings..."
+                  rows={3}
+                />
+              </div>
+
+              <div className="space-y-2">
                 <Label>Diagnosis *</Label>
-                <Input
+                <Textarea
                   value={newPhysio.diagnosis}
                   onChange={(e) => setNewPhysio({ ...newPhysio, diagnosis: e.target.value })}
                   placeholder="Primary diagnosis requiring physiotherapy"
-                />
-              </div>
-
-              {/* Chief Complaint */}
-              <div className="space-y-2">
-                <Label>Chief Complaint</Label>
-                <Textarea
-                  value={newPhysio.chiefComplaint}
-                  onChange={(e) => setNewPhysio({ ...newPhysio, chiefComplaint: e.target.value })}
-                  placeholder="Patient's main complaint and symptoms..."
                   rows={2}
                 />
               </div>
 
-              {/* Treatment Goal */}
               <div className="space-y-2">
-                <Label>Treatment Goal</Label>
+                <Label>Drug History</Label>
                 <Textarea
-                  value={newPhysio.treatmentGoal}
-                  onChange={(e) => setNewPhysio({ ...newPhysio, treatmentGoal: e.target.value })}
-                  placeholder="Expected outcomes and treatment objectives..."
+                  value={newPhysio.drugHistory}
+                  onChange={(e) => setNewPhysio({ ...newPhysio, drugHistory: e.target.value })}
+                  placeholder="Current medications, allergies, and drug history..."
                   rows={2}
                 />
               </div>
 
-              {/* Priority */}
               <div className="space-y-2">
                 <Label>Priority</Label>
-                <Select value={newPhysio.priority} onValueChange={(v) => setNewPhysio({ ...newPhysio, priority: v as 'routine' | 'urgent' | 'stat' })}>
+                <Select value={newPhysio.priority} onValueChange={(v) => setNewPhysio({ ...newPhysio, priority: v as 'low' | 'normal' | 'high' | 'urgent' })}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="routine">Routine</SelectItem>
+                    <SelectItem value="low">Low</SelectItem>
+                    <SelectItem value="normal">Normal</SelectItem>
+                    <SelectItem value="high">High</SelectItem>
                     <SelectItem value="urgent">Urgent</SelectItem>
-                    <SelectItem value="stat">STAT</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
 
-              {/* Special Instructions */}
               <div className="space-y-2">
                 <Label>Special Instructions</Label>
                 <Textarea

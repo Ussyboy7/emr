@@ -12,11 +12,11 @@ import { Activity, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 export type PhysioOrderSubmitInput = {
-  historyClinicalFindings: string;
+  historyClinicalFindings?: string;
   diagnosis: string;
-  drugHistory: string;
-  specialInstructions: string;
-  priority: "low" | "normal" | "high" | "urgent";
+  drugHistory?: string;
+  specialInstructions?: string;
+  priority?: "low" | "normal" | "high" | "urgent";
 };
 
 export function PhysioOrderModal({
@@ -30,15 +30,12 @@ export function PhysioOrderModal({
 }) {
   const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState<PhysioOrderSubmitInput>({
-    historyClinicalFindings: "",
     diagnosis: "",
-    drugHistory: "",
-    specialInstructions: "",
     priority: "normal",
-  } as PhysioOrderSubmitInput);
+  });
 
   const reset = useCallback(() => {
-    setForm({ historyClinicalFindings: "", diagnosis: "", drugHistory: "", specialInstructions: "", priority: "normal" } as PhysioOrderSubmitInput);
+    setForm({ diagnosis: "", priority: "normal" });
     setSubmitting(false);
   }, []);
 
@@ -50,11 +47,11 @@ export function PhysioOrderModal({
     try {
       setSubmitting(true);
       await onSubmit({
-        ...form,
-        historyClinicalFindings: form.historyClinicalFindings.trim(),
         diagnosis: form.diagnosis.trim(),
-        drugHistory: form.drugHistory.trim(),
-        specialInstructions: form.specialInstructions.trim(),
+        historyClinicalFindings: form.historyClinicalFindings?.trim() || undefined,
+        drugHistory: form.drugHistory?.trim() || undefined,
+        specialInstructions: form.specialInstructions?.trim() || undefined,
+        priority: form.priority || "normal",
       });
       onOpenChange(false);
       reset();

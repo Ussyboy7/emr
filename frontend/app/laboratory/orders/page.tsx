@@ -803,6 +803,7 @@ export default function LabOrdersPage() {
   const [genderFilter, setGenderFilter] = useState('all');
   const [processingFilter, setProcessingFilter] = useState<'all' | 'in_house' | 'outsourced'>('all');
   const [sourceTypeFilter, setSourceTypeFilter] = useState<'all' | 'internal_emr' | 'external_manual'>('all');
+  const [sortBy, setSortBy] = useState<'priority' | 'lab_id' | 'date'>('priority');
   const [activeTab, setActiveTab] = useState('pending');
   const [isDateFilterDialogOpen, setIsDateFilterDialogOpen] = useState(false);
   const [dateRange, setDateRange] = useState({ from: '', to: '' });
@@ -1911,6 +1912,11 @@ export default function LabOrdersPage() {
                     {getCategoryDisplay(order.patient)}
                   </Badge>
                 )}
+                {order.lab_number && (
+                  <Badge variant="outline" className="text-[10px] h-5 px-1.5 bg-green-50 text-green-700 border-green-200 font-mono">
+                    {order.lab_number}
+                  </Badge>
+                )}
                 <span>{order.patient.age}y {order.patient.gender}</span>
                 <span>•</span>
                 <span className="flex items-center gap-1">
@@ -2071,15 +2077,23 @@ export default function LabOrdersPage() {
                       <SelectItem value="month">This Month</SelectItem>
                     </SelectContent>
                   </Select>
-                  <Select value={priorityFilter} onValueChange={setPriorityFilter}>
-                    <SelectTrigger className="w-[130px]"><SelectValue placeholder="Priority" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Priority</SelectItem>
-                      <SelectItem value="STAT">STAT</SelectItem>
-                      <SelectItem value="Urgent">Urgent</SelectItem>
-                      <SelectItem value="Routine">Routine</SelectItem>
-                    </SelectContent>
-                  </Select>
+                   <Select value={priorityFilter} onValueChange={setPriorityFilter}>
+                     <SelectTrigger className="w-[130px]"><SelectValue placeholder="Priority" /></SelectTrigger>
+                     <SelectContent>
+                       <SelectItem value="all">All Priority</SelectItem>
+                       <SelectItem value="STAT">STAT</SelectItem>
+                       <SelectItem value="Urgent">Urgent</SelectItem>
+                       <SelectItem value="Routine">Routine</SelectItem>
+                     </SelectContent>
+                   </Select>
+                   <Select value={sortBy} onValueChange={(v) => setSortBy(v as 'priority' | 'lab_id' | 'date')}>
+                     <SelectTrigger className="w-[120px]"><SelectValue placeholder="Sort by" /></SelectTrigger>
+                     <SelectContent>
+                       <SelectItem value="priority">Priority</SelectItem>
+                       <SelectItem value="lab_id">Lab ID</SelectItem>
+                       <SelectItem value="date">Date</SelectItem>
+                     </SelectContent>
+                   </Select>
                   <Select value={genderFilter} onValueChange={setGenderFilter} >
                     <SelectTrigger className="w-[120px]"><SelectValue placeholder="Gender" /></SelectTrigger>
                     <SelectContent>
@@ -2144,8 +2158,20 @@ export default function LabOrdersPage() {
           ) : (
             paginatedOrders
               .sort((a, b) => {
-                const priorityOrder = { STAT: 0, Urgent: 1, Routine: 2 };
-                return priorityOrder[a.priority] - priorityOrder[b.priority];
+                if (sortBy === 'priority') {
+                  const priorityOrder = { STAT: 0, Urgent: 1, Routine: 2 };
+                  return priorityOrder[a.priority] - priorityOrder[b.priority];
+                } else if (sortBy === 'lab_id') {
+                  // Sort by Lab ID - orders without Lab ID go to the end
+                  if (!a.lab_number && !b.lab_number) return 0;
+                  if (!a.lab_number) return 1;
+                  if (!b.lab_number) return -1;
+                  return a.lab_number.localeCompare(b.lab_number);
+                } else if (sortBy === 'date') {
+                  // Sort by order date (most recent first)
+                  return new Date(b.orderedAt).getTime() - new Date(a.orderedAt).getTime();
+                }
+                return 0;
               })
               .map(order => <OrderCard key={order.id} order={order} />)
           )}
