@@ -385,11 +385,6 @@ export default function CompletedTestsPage() {
                                {test.overallStatus === 'Critical' && <AlertTriangle className="h-2 w-2 mr-0.5" />}{test.overallStatus}
                              </Badge>
                              <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{test.testCode}</Badge>
-                             {test.orderId && test.orderId !== test.testCode && (
-                               <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/50">
-                                 {test.orderId}
-                               </Badge>
-                             )}
                           </div>
                           <div className="flex items-center gap-1 flex-shrink-0">
                             <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openViewDialog(test)}>
@@ -406,6 +401,8 @@ export default function CompletedTestsPage() {
                              {formatPatientGenderLabel(test.patient.gender) ||
                                (test.patient.gender ? String(test.patient.gender) : '')}
                            </span>
+                           <span>•</span>
+                           <span>{test.orderId}</span>
                            <span>•</span>
                            <span>{test.testName}</span>
                            <span>•</span>

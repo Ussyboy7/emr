@@ -874,16 +874,6 @@ export default function ResultsVerificationPage() {
                             </Badge>
                                  <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${getPriorityBadge(result.priority)}`}>{result.priority}</Badge>
                                  <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{result.testCode}</Badge>
-                                 {result.orderId && result.orderId !== result.testCode && (
-                                   <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/50">
-                                     {result.orderId}
-                                   </Badge>
-                                 )}
-                             {result.orderId && (
-                               <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/50">
-                                 {result.orderId}
-                               </Badge>
-                             )}
                           </div>
                           <div className="flex items-center gap-1 flex-shrink-0">
                             <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openViewDialog(result)}>
@@ -901,6 +891,8 @@ export default function ResultsVerificationPage() {
                          {/* Row 2: Details */}
                          <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-wrap">
                            <span>{result.testName}</span>
+                           <span>•</span>
+                           <span>{result.orderId}</span>
                            <span>•</span>
                            <span className="flex items-center gap-1"><Stethoscope className="h-3 w-3" />{result.doctor.name}</span>
                            <span>•</span>
@@ -1000,6 +992,8 @@ export default function ResultsVerificationPage() {
                              {/* Row 2: Details */}
                              <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-wrap">
                                <span>{result.testName}</span>
+                               <span>•</span>
+                               <span>{result.orderId}</span>
                                <span>•</span>
                                <span className="flex items-center gap-1"><Stethoscope className="h-3 w-3" />{result.doctor.name}</span>
                                <span>•</span>
