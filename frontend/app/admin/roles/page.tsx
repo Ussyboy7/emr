@@ -21,8 +21,9 @@ import {
 } from "@/lib/page-permissions";
 import {
   Shield, Search, Plus, Edit, Trash2, Eye, Users, Copy, Check,
-  Stethoscope, Syringe, FlaskConical, Pill, ScanLine, ClipboardList, UserCog,
-  Building2, Settings, Lock, Key, AlertTriangle, CheckCircle2, Loader2
+  Stethoscope, Syringe, FlaskConical, Pill, ScanLine, ClipboardList,
+  Building2, Settings, Lock, Key, AlertTriangle, CheckCircle2, Loader2,
+  UserCog
 } from "lucide-react";
 import { apiFetch } from "@/lib/api-client";
 
@@ -240,7 +241,7 @@ export default function RolesPermissionsPage() {
   // System role functions
   const loadAllSystemRoles = async () => {
     try {
-      const response = await apiFetch('/accounts/system-roles/');
+      const response = await apiFetch<{results: SystemRole[]}>('/accounts/system-roles/');
       if (response.results) {
         setAllSystemRoles(response.results);
       }
@@ -388,10 +389,10 @@ export default function RolesPermissionsPage() {
       <div className="container mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl sm:text-3xl font-bold text-foreground flex items-center gap-3"><Shield className="h-8 w-8 text-purple-500" />Roles & Permissions</h1>
-            <p className="text-muted-foreground mt-1">Define access levels and clinical privileges</p>
+            <h1 className="text-2xl sm:text-3xl font-bold text-foreground flex items-center gap-3"><Shield className="h-8 w-8 text-purple-500" />Roles Management</h1>
+            <p className="text-muted-foreground mt-1">Manage access permissions and professional role identities</p>
           </div>
-          <Button onClick={openCreate} className="bg-purple-600 hover:bg-purple-700 text-white"><Plus className="h-4 w-4 mr-2" />Create Role</Button>
+          <Button onClick={openCreate} className="bg-purple-600 hover:bg-purple-700 text-white"><Plus className="h-4 w-4 mr-2" />Create Access Role</Button>
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -401,7 +402,22 @@ export default function RolesPermissionsPage() {
           <Card className="border-l-4 border-l-blue-500"><CardContent className="p-4"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">Users with Roles</p><p className="text-2xl sm:text-3xl font-bold text-blue-600 dark:text-blue-400">{stats.totalUsers}</p></div><Users className="h-8 w-8 text-blue-500 opacity-50" /></div></CardContent></Card>
         </div>
 
-        <Card>
+        {/* Main Content Tabs */}
+        <Tabs defaultValue="access-roles" className="w-full">
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="access-roles" className="flex items-center gap-2">
+              <Shield className="h-4 w-4" />
+              Access Roles
+            </TabsTrigger>
+            <TabsTrigger value="system-roles" className="flex items-center gap-2">
+              <UserCog className="h-4 w-4" />
+              System Roles
+            </TabsTrigger>
+          </TabsList>
+
+          {/* Access Roles Tab */}
+          <TabsContent value="access-roles" className="space-y-4 mt-6">
+            <Card>
           <CardContent className="p-4">
             <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-3">
               <div className="relative flex-1 min-w-[min(100%,16rem)]">
@@ -509,8 +525,11 @@ export default function RolesPermissionsPage() {
             <StandardPagination currentPage={currentPage} totalItems={filteredRoles.length} itemsPerPage={itemsPerPage} onPageChange={setCurrentPage} onItemsPerPageChange={setItemsPerPage} itemName="roles" />
           </Card>
         )}
+          </TabsContent>
 
-        {/* System Roles Management */}
+          {/* System Roles Tab */}
+          <TabsContent value="system-roles" className="space-y-4 mt-6">
+            {/* System Roles Management */}
         <Card className="mt-8">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -572,6 +591,8 @@ export default function RolesPermissionsPage() {
             </div>
           </CardContent>
         </Card>
+          </TabsContent>
+        </Tabs>
 
         <Dialog open={isCreateDialogOpen || isEditDialogOpen} onOpenChange={(open) => { if (!open) { setIsCreateDialogOpen(false); setIsEditDialogOpen(false); } }}>
           <DialogContent className="w-[95vw] sm:max-w-[800px] max-h-[90vh] overflow-y-auto">

@@ -18,6 +18,7 @@ import { toast } from "sonner";
 import { StandardPagination } from "@/components/shared/StandardPagination";
 import { adminService, type User as ApiUser, type Role as ApiRole } from "@/lib/services";
 import { ALL_PAGE_PERMISSIONS, groupPagePermissionsByModule } from "@/lib/page-permissions";
+import { apiFetch } from "@/lib/api-client";
 import {
   Users, Search, Plus, Edit, Trash2, MoreVertical, Eye, UserCog, Shield,
   Stethoscope, Syringe, FlaskConical, Pill, ScanLine, ClipboardList, Building2,
@@ -60,8 +61,8 @@ interface SystemRole {
   name: string;
   description: string;
   is_active: boolean;
-  created_at: string;
-  updated_at: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
 // Empty staff object for form initialization
