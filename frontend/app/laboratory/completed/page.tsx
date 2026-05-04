@@ -398,25 +398,23 @@ export default function CompletedTestsPage() {
                           </div>
                         </div>
                         
-                        {/* Row 2: Details */}
-                        <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-wrap">
-                          <span>
-                            {test.patient.age !== null && test.patient.age !== undefined ? `${test.patient.age}y` : ''}
-                            {test.patient.age !== null && test.patient.age !== undefined ? ' ' : ''}
-                            {formatPatientGenderLabel(test.patient.gender) ||
-                              (test.patient.gender ? String(test.patient.gender) : '')}
-                          </span>
-                          <span>•</span>
-                          <span>{test.orderId}</span>
-                          <span>•</span>
-                          <span>{test.testName}</span>
-                          <span>•</span>
-                          <span>{test.clinic}</span>
-                          <span>•</span>
-                          <span>{completed.date} {completed.time}</span>
-                          <span>•</span>
-                          <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{test.turnaroundTime}</span>
-                        </div>
+                         {/* Row 2: Details */}
+                         <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-wrap">
+                           <span>
+                             {test.patient.age !== null && test.patient.age !== undefined ? `${test.patient.age}y` : ''}
+                             {test.patient.age !== null && test.patient.age !== undefined ? ' ' : ''}
+                             {formatPatientGenderLabel(test.patient.gender) ||
+                               (test.patient.gender ? String(test.patient.gender) : '')}
+                           </span>
+                           <span>•</span>
+                           <span>{test.testName}</span>
+                           <span>•</span>
+                           <span>{test.clinic}</span>
+                           <span>•</span>
+                           <span>{completed.date} {completed.time}</span>
+                           <span>•</span>
+                           <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{test.turnaroundTime}</span>
+                         </div>
                       </div>
                     </div>
                   </CardContent>

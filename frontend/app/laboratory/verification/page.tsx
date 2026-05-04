@@ -898,21 +898,19 @@ export default function ResultsVerificationPage() {
                           </div>
                         </div>
                         
-                        {/* Row 2: Details */}
-                        <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-wrap">
-                          <span>{result.testName}</span>
-                          <span>•</span>
-                          <span>{result.orderId}</span>
-                          <span>•</span>
-                          <span className="flex items-center gap-1"><Stethoscope className="h-3 w-3" />{result.doctor.name}</span>
-                          <span>•</span>
-                          <span>By: {result.submittedBy}</span>
-                          <span>•</span>
-                          <span className="flex items-center gap-1" title="Submitted">
-                            <Clock className="h-3 w-3 shrink-0" />
-                            {formatLabDateTime(result.submittedAt) || '—'}
-                          </span>
-                        </div>
+                         {/* Row 2: Details */}
+                         <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-wrap">
+                           <span>{result.testName}</span>
+                           <span>•</span>
+                           <span className="flex items-center gap-1"><Stethoscope className="h-3 w-3" />{result.doctor.name}</span>
+                           <span>•</span>
+                           <span>By: {result.submittedBy}</span>
+                           <span>•</span>
+                           <span className="flex items-center gap-1" title="Submitted">
+                             <Clock className="h-3 w-3 shrink-0" />
+                             {formatLabDateTime(result.submittedAt) || '—'}
+                           </span>
+                         </div>
                       </div>
                     </div>
                   </CardContent>
@@ -999,21 +997,19 @@ export default function ResultsVerificationPage() {
                               </div>
                             </div>
 
-                            {/* Row 2: Details */}
-                            <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-wrap">
-                              <span>{result.testName}</span>
-                              <span>•</span>
-                              <span>{result.orderId}</span>
-                              <span>•</span>
-                              <span className="flex items-center gap-1"><Stethoscope className="h-3 w-3" />{result.doctor.name}</span>
-                              <span>•</span>
-                              <span>Verified by: {result.verifiedBy || 'Unknown'}</span>
-                              <span>•</span>
-                              <span className="flex items-center gap-1" title="Verified">
-                                <CheckCircle2 className="h-3 w-3 shrink-0" />
-                                {formatLabDateTime(result.verifiedAt || result.submittedAt) || '—'}
-                              </span>
-                            </div>
+                             {/* Row 2: Details */}
+                             <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-wrap">
+                               <span>{result.testName}</span>
+                               <span>•</span>
+                               <span className="flex items-center gap-1"><Stethoscope className="h-3 w-3" />{result.doctor.name}</span>
+                               <span>•</span>
+                               <span>Verified by: {result.verifiedBy || 'Unknown'}</span>
+                               <span>•</span>
+                               <span className="flex items-center gap-1" title="Verified">
+                                 <CheckCircle2 className="h-3 w-3 shrink-0" />
+                                 {formatLabDateTime(result.verifiedAt || result.submittedAt) || '—'}
+                               </span>
+                             </div>
                           </div>
                         </div>
                       </CardContent>
