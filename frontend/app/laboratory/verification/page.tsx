@@ -872,8 +872,18 @@ export default function ResultsVerificationPage() {
                             <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${getOverallStatusBadge(result.overallStatus)}`}>
                               {result.overallStatus === 'Critical' && <AlertTriangle className="h-2 w-2 mr-0.5" />}{result.overallStatus}
                             </Badge>
-                            <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${getPriorityBadge(result.priority)}`}>{result.priority}</Badge>
-                            <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{result.testCode}</Badge>
+                                 <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${getPriorityBadge(result.priority)}`}>{result.priority}</Badge>
+                                 <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{result.testCode}</Badge>
+                                 {result.orderId && (
+                                   <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/50">
+                                     {result.orderId}
+                                   </Badge>
+                                 )}
+                             {result.orderId && (
+                               <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/50">
+                                 {result.orderId}
+                               </Badge>
+                             )}
                           </div>
                           <div className="flex items-center gap-1 flex-shrink-0">
                             <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openViewDialog(result)}>

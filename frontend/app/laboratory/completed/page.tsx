@@ -381,10 +381,15 @@ export default function CompletedTestsPage() {
                         <div className="flex items-center justify-between gap-2">
                           <div className="flex items-center gap-2 flex-wrap min-w-0">
                             <span className="font-semibold text-foreground truncate">{test.patient.name}</span>
-                            <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${getOverallStatusBadge(test.overallStatus)}`}>
-                              {test.overallStatus === 'Critical' && <AlertTriangle className="h-2 w-2 mr-0.5" />}{test.overallStatus}
-                            </Badge>
-                            <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{test.testCode}</Badge>
+                             <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${getOverallStatusBadge(test.overallStatus)}`}>
+                               {test.overallStatus === 'Critical' && <AlertTriangle className="h-2 w-2 mr-0.5" />}{test.overallStatus}
+                             </Badge>
+                             <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{test.testCode}</Badge>
+                             {test.orderId && (
+                               <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/50">
+                                 {test.orderId}
+                               </Badge>
+                             )}
                           </div>
                           <div className="flex items-center gap-1 flex-shrink-0">
                             <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openViewDialog(test)}>
