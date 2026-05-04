@@ -304,39 +304,46 @@ export default function NursingPoolQueuePage() {
           vitalsMap = new Map(vitalsEnrichmentCacheRef.current as Map<number, any>);
         } else if (combinedVisitIds.length > 0) {
           const visitIdsParam = combinedVisitIds.join(',');
+          // Fetch vitals independently: physiotherapy/eyecare must not abort vitals when those endpoints error.
           try {
-            const [physioRes, eyeRes, vitalsRes] = await Promise.all([
-              apiFetch<{ results: Record<string, { checked_in: boolean; order_id?: number; status?: string }> }>(
-                `/physiotherapy/orders/checkins-for-visits/?visit_ids=${visitIdsParam}`
-              ),
-              apiFetch<{ results: Record<string, { checked_in: boolean; order_id?: number; status?: string }> }>(
-                `/eyecare/orders/checkins-for-visits/?visit_ids=${visitIdsParam}`
-              ),
-              apiFetch<{ results: Record<string, any> }>(
-                `/vitals/latest-by-visits/?visit_ids=${visitIdsParam}`
-              ),
-            ]);
+            const vitalsRes = await apiFetch<{ results: Record<string, any> }>(
+              `/vitals/latest-by-visits/?visit_ids=${visitIdsParam}`
+            );
+            Object.entries(vitalsRes.results || {}).forEach(([visitIdRaw, vital]) => {
+              const visitId = Number(visitIdRaw);
+              if (Number.isFinite(visitId)) vitalsMap.set(visitId, vital);
+            });
+          } catch (err) {
+            debugLog('Vitals enrichment failed:', err);
+          }
+          try {
+            const physioRes = await apiFetch<{ results: Record<string, { checked_in: boolean; order_id?: number; status?: string }> }>(
+              `/physiotherapy/orders/checkins-for-visits/?visit_ids=${visitIdsParam}`
+            );
             Object.entries(physioRes.results || {}).forEach(([visitIdRaw, payload]) => {
               const visitId = Number(visitIdRaw);
               if (!Number.isFinite(visitId) || !payload?.checked_in || typeof payload.order_id !== 'number') return;
               physioCheckedInByVisitId[visitId] = { orderId: payload.order_id, status: payload.status || 'scheduled' };
             });
+          } catch (err) {
+            debugLog('Physiotherapy check-in enrichment failed:', err);
+          }
+          try {
+            const eyeRes = await apiFetch<{ results: Record<string, { checked_in: boolean; order_id?: number; status?: string }> }>(
+              `/eyecare/orders/checkins-for-visits/?visit_ids=${visitIdsParam}`
+            );
             Object.entries(eyeRes.results || {}).forEach(([visitIdRaw, payload]) => {
               const visitId = Number(visitIdRaw);
               if (!Number.isFinite(visitId) || !payload?.checked_in || typeof payload.order_id !== 'number') return;
               eyeCheckedInByVisitId[visitId] = { orderId: payload.order_id, status: payload.status || 'scheduled' };
             });
-            Object.entries(vitalsRes.results || {}).forEach(([visitIdRaw, vital]) => {
-              const visitId = Number(visitIdRaw);
-              if (Number.isFinite(visitId)) vitalsMap.set(visitId, vital);
-            });
-            visitEnrichmentKeyRef.current = visitIdsKey;
-            physioEnrichmentCacheRef.current = physioCheckedInByVisitId;
-            eyeEnrichmentCacheRef.current = eyeCheckedInByVisitId;
-            vitalsEnrichmentCacheRef.current = vitalsMap;
           } catch (err) {
-            debugLog('Enrichment (physio/eye/vitals) failed:', err);
+            debugLog('Eyecare check-in enrichment failed:', err);
           }
+          visitEnrichmentKeyRef.current = visitIdsKey;
+          physioEnrichmentCacheRef.current = physioCheckedInByVisitId;
+          eyeEnrichmentCacheRef.current = eyeCheckedInByVisitId;
+          vitalsEnrichmentCacheRef.current = vitalsMap;
         } else {
           visitEnrichmentKeyRef.current = '';
           physioEnrichmentCacheRef.current = {};
@@ -349,18 +356,36 @@ export default function NursingPoolQueuePage() {
 
         debugLog('Starting transformation of', nursingVisits.length, 'visits to nursing patients');
         const transformedPatients: NursingPatient[] = nursingVisits.map((visit: Visit) => {
+          const patientNumericId = (() => {
+            if (typeof (visit as any).patient === 'number') return (visit as any).patient;
+            if ((visit as any).patient && typeof (visit as any).patient === 'object') {
+              const raw = (visit as any).patient.id;
+              const n = typeof raw === 'number' ? raw : parseInt(String(raw), 10);
+              return Number.isFinite(n) ? n : 0;
+            }
+            const raw = (visit as any).patient_id;
+            const n = typeof raw === 'number' ? raw : parseInt(String(raw), 10);
+            return Number.isFinite(n) ? n : 0;
+          })();
+          const visitNumericId = (() => {
+            const raw = (visit as any).id;
+            const n = typeof raw === 'number' ? raw : parseInt(String(raw), 10);
+            return Number.isFinite(n) ? n : 0;
+          })();
+
           // Calculate wait time (minutes since visit was created)
           const visitDateTime = new Date(`${visit.date}T${visit.time}`);
           const waitTime = Math.floor((Date.now() - visitDateTime.getTime()) / (1000 * 60));
           
           // Get vitals for this visit
-          const vitalsData = vitalsMap.get(visit.id);
+          const visitKey = typeof visit.id === 'number' ? visit.id : Number(visit.id);
+          const vitalsData = Number.isFinite(visitKey) ? vitalsMap.get(visitKey) : undefined;
 
           // Determine nursing status based on visit data, vitals, and queue status
           let nursingStatus: 'Pending' | 'Vitals Recorded' | 'Ready for Consultation' | 'Sent to Room' | 'Sent to Physiotherapy' | 'Sent to Eye Clinic' = 'Pending';
-          const roomName = queueVisitToRoom.get(visit.id);
-          const sentToPhysio = Boolean(physioCheckedInByVisitId[visit.id]);
-          const sentToEyeClinic = Boolean(eyeCheckedInByVisitId[visit.id]);
+          const roomName = Number.isFinite(visitKey) ? queueVisitToRoom.get(visitKey) : undefined;
+          const sentToPhysio = Number.isFinite(visitKey) && Boolean(physioCheckedInByVisitId[visitKey]);
+          const sentToEyeClinic = Number.isFinite(visitKey) && Boolean(eyeCheckedInByVisitId[visitKey]);
           const visitClinics = getVisitServiceClinicsList({ clinic: visit.clinic, clinics: visit.clinics });
           const hasPhysioClinic = visitClinics.some((c: string) =>
             clinicMatches(c, 'Physiotherapy', opdClinicNames)
@@ -377,8 +402,12 @@ export default function NursingPoolQueuePage() {
           } else if (sentToPhysio && hasPhysioClinic) {
             nursingStatus = 'Sent to Physiotherapy';
           } else if (vitalsData) {
-            // Check if vitals are complete (have essential measurements - only temp and pulse required)
-            const hasCompleteVitals = vitalsData.temperature && vitalsData.heart_rate;
+            // Temp + heart rate required for "ready"; do not treat 0 as missing (truthiness bug).
+            const t = vitalsData.temperature;
+            const hr = vitalsData.heart_rate ?? vitalsData.pulse;
+            const hasTemp = t != null && String(t).trim() !== '';
+            const hasHr = hr != null && String(hr).trim() !== '';
+            const hasCompleteVitals = hasTemp && hasHr;
             nursingStatus = hasCompleteVitals ? 'Ready for Consultation' : 'Vitals Recorded';
           }
           
@@ -417,12 +446,12 @@ export default function NursingPoolQueuePage() {
             consultationRoom: roomName, // Store room name if patient is in queue
             vitals,
             waitTime: waitTime > 0 ? waitTime : 0,
-            patientNumericId: visit.patient, // Store the actual patient ID from backend
-            visitNumericId: visit.id, // Store the actual visit ID from backend
+            patientNumericId, // Store normalized numeric patient ID from backend
+            visitNumericId, // Store normalized numeric visit ID from backend
             visitNotes: visit.clinical_notes, // Clinical notes from the visit
             age: typeof visit.age === 'number' && !Number.isNaN(visit.age) ? visit.age : undefined,
             gender: visit.gender,
-            sentAt: queueVisitToSentAt.get(visit.id),
+            sentAt: Number.isFinite(visitKey) ? queueVisitToSentAt.get(visitKey) : undefined,
             sentToPhysio,
             sentToEyeClinic,
           };
@@ -746,18 +775,18 @@ export default function NursingPoolQueuePage() {
         }
       }
 
-      // Find the visit ID from the selected patient
-      const visitId = selectedPatient.id; // This is the visit ID
-
-      const visit = await visitService.getVisit(parseInt(visitId, 10));
-      if (!visit?.patient) {
-        throw new Error('Visit not found');
+      // Use IDs already present in the selected row (avoid an extra visit lookup
+      // that can fail and block vitals save even when the row is valid).
+      const visitId = selectedPatient.visitNumericId || parseInt(selectedPatient.id, 10);
+      const patientId = selectedPatient.patientNumericId;
+      if (!Number.isFinite(visitId) || !patientId) {
+        throw new Error('Visit or patient ID not found for vitals save');
       }
       
       // Prepare payload for API (trimmed strings; 0 is valid for pain / glucose)
       const payload = {
-        visit: parseInt(visitId), // Link vitals to visit
-        patient: visit.patient, // Patient ID
+        visit: visitId, // Link vitals to visit
+        patient: patientId, // Patient ID
         temperature: parseOptionalFloat(vitalsForm.temperature),
         blood_pressure_systolic: parseOptionalInt(vitalsForm.bloodPressureSystolic),
         blood_pressure_diastolic: parseOptionalInt(vitalsForm.bloodPressureDiastolic),
