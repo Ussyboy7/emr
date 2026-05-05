@@ -351,12 +351,136 @@ export function LabCompletedReportDialog({
               <p className="text-sm text-muted-foreground">Nigerian Ports Authority Medical Services</p>
             </div>
 
-            <div className="p-8 text-center border rounded-lg">
-              <FlaskConical className="h-8 w-8 text-amber-500" />
-              <p className="font-medium text-amber-800 dark:text-amber-200 mt-3">Test Report</p>
-              <p className="text-sm text-muted-foreground mt-1">
-                Report display temporarily disabled for maintenance.
-              </p>
+            <div className="grid grid-cols-2 gap-4 p-4 rounded-lg bg-muted/50">
+              <div>
+                <p className="text-xs text-muted-foreground">Patient Name</p>
+                <p className="font-medium">{test.patient.name}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Age / Gender</p>
+                <p className="font-medium">
+                  {test.patient.age !== null && test.patient.age !== undefined
+                    ? `${test.patient.age} years`
+                    : ''}{' '}
+                  / {test.patient.gender}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Ordering Doctor</p>
+                <p className="font-medium">{test.doctor.name}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Clinic</p>
+                <p className="font-medium">{test.clinic}</p>
+              </div>
+            </div>
+
+            <div>
+              <h3 className="font-semibold mb-3 flex items-center gap-2">
+                <FlaskConical className="h-4 w-4 text-amber-500" />
+                Test Results
+                {(test.results.length > 0 || hasUsableResultFile) && (
+                  <Badge variant="outline" className={getOverallStatusBadge(test.overallStatus)}>
+                    {test.overallStatus}
+                  </Badge>
+                )}
+              </h3>
+
+              {(() => {
+                const pdfDisplayName = getPdfDisplayName(test);
+                return pdfDisplayName != null && hasUsableResultFile && test.result_file ? (
+                  <div className="mb-4 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="flex items-start gap-3 min-w-0">
+                        <FileText className="h-5 w-5 text-blue-600 shrink-0 mt-0.5" />
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-blue-900 dark:text-blue-100">Report PDF</p>
+                          <p className="text-xs text-muted-foreground truncate" title={pdfDisplayName}>
+                            {pdfDisplayName}
+                          </p>
+                        </div>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => downloadResultFile(test.result_file, pdfDisplayName)}
+                        className="shrink-0"
+                      >
+                        <Download className="h-3.5 w-3.5 mr-1" />
+                        Download
+                      </Button>
+                    </div>
+                  </div>
+                ) : null;
+              })()}
+
+              {test.results.length > 0 ? (
+                <div className="border rounded-lg overflow-hidden">
+                  <table className="w-full">
+                    <thead className="bg-muted/50">
+                      <tr>
+                        <th className="text-left p-3 font-medium">Parameter</th>
+                        <th className="text-left p-3 font-medium">Result</th>
+                        <th className="text-left p-3 font-medium">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {test.results.map((result, index) => (
+                        <tr key={index} className="border-t">
+                          <td className="p-3">
+                            <div className="font-medium">{result.parameter}</div>
+                            <div className="text-xs text-muted-foreground">{result.unit}</div>
+                          </td>
+                          <td className="p-3 font-mono">{result.value}</td>
+                          <td className="p-3">
+                            {result.status !== 'Normal' && (
+                              <Badge variant="outline" className={getResultStatusColor(result.status)}>
+                                {result.status}
+                              </Badge>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                hasUsableResultFile && test.result_file ? null : (
+                  <div className="p-8 text-center border rounded-lg">
+                    <div className="flex flex-col items-center gap-3">
+                      <FlaskConical className="h-8 w-8 text-amber-500" />
+                      <div>
+                        <p className="font-medium text-amber-800 dark:text-amber-200">No Results Available</p>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          Test results have not been entered or uploaded yet.
+                        </p>
+                        {!hideLabWorkflowActions && (
+                          <div className="flex gap-2 mt-3 justify-center">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => onOpenChange(false)}
+                            >
+                              Close
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 gap-4 pt-4 border-t">
+              <div>
+                <p className="text-xs text-muted-foreground">Performed By</p>
+                <p className="font-medium">{test.submittedBy}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Verified By</p>
+                <p className="font-medium">{test.verifiedBy}</p>
+              </div>
             </div>
           </div>
         )}
