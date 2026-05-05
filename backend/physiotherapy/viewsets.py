@@ -124,57 +124,71 @@ class PhysioOrderViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["post"], url_path="checkin-from-visit")
     def checkin_from_visit(self, request):
-        visit_raw = request.data.get("visit")
-        if visit_raw is None:
-            return Response({"detail": "visit is required"}, status=status.HTTP_400_BAD_REQUEST)
         try:
-            visit_id = int(visit_raw)
-        except (TypeError, ValueError):
-            return Response({"detail": "Invalid visit id"}, status=status.HTTP_400_BAD_REQUEST)
-        if visit_id <= 0:
-            return Response({"detail": "Invalid visit id"}, status=status.HTTP_400_BAD_REQUEST)
+            visit_raw = request.data.get("visit")
+            if visit_raw is None:
+                return Response({"detail": "visit is required"}, status=status.HTTP_400_BAD_REQUEST)
+            try:
+                visit_id = int(visit_raw)
+            except (TypeError, ValueError):
+                return Response({"detail": "Invalid visit id"}, status=status.HTTP_400_BAD_REQUEST)
+            if visit_id <= 0:
+                return Response({"detail": "Invalid visit id"}, status=status.HTTP_400_BAD_REQUEST)
 
-        visit = Visit.objects.select_related("patient").filter(pk=visit_id).first()
-        if visit is None:
-            return Response({"detail": "Visit not found."}, status=status.HTTP_404_NOT_FOUND)
-        if visit.patient_id is None:
-            return Response({"detail": "Visit has no patient."}, status=status.HTTP_400_BAD_REQUEST)
+            visit = Visit.objects.select_related("patient").filter(pk=visit_id).first()
+            if visit is None:
+                return Response({"detail": "Visit not found."}, status=status.HTTP_404_NOT_FOUND)
+            if visit.patient_id is None:
+                return Response({"detail": "Visit has no patient."}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({"detail": f"Error validating visit: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-        order = (
-            PhysioOrder.objects.filter(
-                visit_id=visit_id,
-                patient_id=visit.patient_id,
-                status__in=ACTIVE_ORDER_STATUSES,
+        try:
+            order = (
+                PhysioOrder.objects.filter(
+                    visit_id=visit_id,
+                    patient_id=visit.patient_id,
+                    status__in=ACTIVE_ORDER_STATUSES,
+                )
+                .order_by("-ordered_at")
+                .first()
             )
-            .order_by("-ordered_at")
-            .first()
-        )
+        except Exception as e:
+            return Response({"detail": f"Failed to query physiotherapy orders: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
         created = False
         if order is None:
-            order = PhysioOrder.objects.create(
-                patient_id=visit.patient_id,
-                visit_id=visit_id,
-                ordered_by=request.user,
-                consultation_session=None,
-                diagnosis="",
-                chief_complaint="Nursing pool check-in — Physiotherapy",
-                treatment_goal="",
-                special_instructions="",
-                priority="normal",
-                status="scheduled",
-                referral_source="nursing",
-                scheduled_at=timezone.now(),
-                sessions_completed=0,
-            )
-            created = True
+            try:
+                order = PhysioOrder.objects.create(
+                    patient_id=visit.patient_id,
+                    visit_id=visit_id,
+                    ordered_by=request.user,
+                    consultation_session=None,
+                    diagnosis="Nursing pool check-in — Physiotherapy",
+                    special_instructions="",
+                    priority="normal",
+                    status="scheduled",
+                    referral_source="nursing",
+                    scheduled_at=timezone.now(),
+                    sessions_completed=0,
+                )
+                created = True
+            except Exception as e:
+                return Response({"detail": f"Failed to create physiotherapy order: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         elif order.status == "pending":
-            order.status = "scheduled"
-            if order.scheduled_at is None:
-                order.scheduled_at = timezone.now()
-            order.save(update_fields=["status", "scheduled_at"])
+            try:
+                order.status = "scheduled"
+                if order.scheduled_at is None:
+                    order.scheduled_at = timezone.now()
+                order.save(update_fields=["status", "scheduled_at"])
+            except Exception as e:
+                return Response({"detail": f"Failed to update physiotherapy order: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-        data = PhysioOrderSerializer(order).data
-        return Response(data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+        try:
+            data = PhysioOrderSerializer(order).data
+            return Response(data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+        except Exception as e:
+            return Response({"detail": f"Failed to serialize physiotherapy order: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class PhysioSessionViewSet(viewsets.ModelViewSet):

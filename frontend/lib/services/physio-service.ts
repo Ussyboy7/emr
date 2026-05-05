@@ -127,44 +127,32 @@ class PhysioService {
     page_size?: number;
   }): Promise<{ results: PhysioTemplate[]; count: number }> {
     const query = buildQueryString(params || {});
-    return apiFetch<{ results: PhysioTemplate[]; count: number }>(`/physiotherapy/templates/${query}`);
+    return apiFetch<{ results: PhysioTemplate[]; count: number }>(`/templates/${query}`);
   }
 
-  /**
-   * Get a single physiotherapy template
-   */
-  async getTemplate(templateId: number): Promise<PhysioTemplate> {
-    return apiFetch<PhysioTemplate>(`/physiotherapy/templates/${templateId}/`);
-  }
+  getTemplate(templateId: number): Promise<PhysioTemplate> {
+      return apiFetch<PhysioTemplate>(`/templates/${templateId}/`);
+    }
 
-  /**
-   * Create a physiotherapy template
-   */
-  async createTemplate(template: Omit<PhysioTemplate, 'id' | 'created_at' | 'updated_at'>): Promise<PhysioTemplate> {
-    return apiFetch<PhysioTemplate>('/physiotherapy/templates/', {
-      method: 'POST',
-      body: JSON.stringify(template),
-    });
-  }
+    createTemplate(data: Partial<PhysioTemplate>): Promise<PhysioTemplate> {
+      return apiFetch<PhysioTemplate>('/templates/', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      });
+    }
 
-  /**
-   * Update a physiotherapy template
-   */
-  async updateTemplate(templateId: number, template: Partial<PhysioTemplate>): Promise<PhysioTemplate> {
-    return apiFetch<PhysioTemplate>(`/physiotherapy/templates/${templateId}/`, {
-      method: 'PATCH',
-      body: JSON.stringify(template),
-    });
-  }
+    updateTemplate(templateId: number, data: Partial<PhysioTemplate>): Promise<PhysioTemplate> {
+      return apiFetch<PhysioTemplate>(`/templates/${templateId}/`, {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      });
+    }
 
-  /**
-   * Delete a physiotherapy template
-   */
-  async deleteTemplate(templateId: number): Promise<void> {
-    return apiFetch<void>(`/physiotherapy/templates/${templateId}/`, {
-      method: 'DELETE',
-    });
-  }
+    deleteTemplate(templateId: number): Promise<void> {
+      return apiFetch<void>(`/templates/${templateId}/`, {
+        method: 'DELETE',
+      });
+    }
 
   /**
    * Get physiotherapy orders
@@ -182,51 +170,29 @@ class PhysioService {
     page_size?: number;
   }): Promise<{ results: PhysioOrder[]; count: number }> {
     const query = buildQueryString(params || {});
-    return apiFetch<{ results: PhysioOrder[]; count: number }>(`/physiotherapy/orders/${query}`);
+    return apiFetch<{ results: PhysioOrder[]; count: number }>(`/orders/${query}`);
   }
 
-  /**
-   * Get a single physiotherapy order
-   */
-  async getOrder(orderId: number): Promise<PhysioOrder> {
-    return apiFetch<PhysioOrder>(`/physiotherapy/orders/${orderId}/`);
+  getOrder(orderId: number): Promise<PhysioOrder> {
+    return apiFetch<PhysioOrder>(`/orders/${orderId}/`);
   }
 
-  /**
-   * Create a physiotherapy order
-   */
-  async createOrder(order: Omit<PhysioOrder, 'id' | 'ordered_at' | 'created_at' | 'updated_at' | 'patient_name' | 'patient_id' | 'ordered_by_name' | 'clinic_name'>): Promise<PhysioOrder> {
-    return apiFetch<PhysioOrder>('/physiotherapy/orders/', {
+  createOrder(data: Partial<PhysioOrder>): Promise<PhysioOrder> {
+    return apiFetch<PhysioOrder>('/orders/', {
       method: 'POST',
-      body: JSON.stringify({
-        patient: order.patient,
-        visit: order.visit,
-        consultation_session: order.consultation_session,
-        history_clinical_findings: order.history_clinical_findings,
-        diagnosis: order.diagnosis,
-        drug_history: order.drug_history,
-        special_instructions: order.special_instructions,
-        priority: order.priority,
-        referral_source: order.referral_source,
-      }),
+      body: JSON.stringify(data),
     });
   }
 
-  /**
-   * Update a physiotherapy order
-   */
-  async updateOrder(orderId: number, order: Partial<PhysioOrder>): Promise<PhysioOrder> {
-    return apiFetch<PhysioOrder>(`/physiotherapy/orders/${orderId}/`, {
+  updateOrder(orderId: number, data: Partial<PhysioOrder>): Promise<PhysioOrder> {
+    return apiFetch<PhysioOrder>(`/orders/${orderId}/`, {
       method: 'PATCH',
-      body: JSON.stringify(order),
+      body: JSON.stringify(data),
     });
   }
 
-  /**
-   * Schedule a physiotherapy order
-   */
-  async scheduleOrder(orderId: number, scheduledAt: string): Promise<PhysioOrder> {
-    return apiFetch<PhysioOrder>(`/physiotherapy/orders/${orderId}/schedule/`, {
+  scheduleOrder(orderId: number, scheduledAt: string): Promise<PhysioOrder> {
+    return apiFetch<PhysioOrder>(`/orders/${orderId}/schedule/`, {
       method: 'POST',
       body: JSON.stringify({ scheduled_at: scheduledAt }),
     });
@@ -258,85 +224,57 @@ class PhysioService {
     completed_before?: string;
   }): Promise<{ results: PhysioSession[]; count: number }> {
     const query = buildQueryString(params || {});
-    return apiFetch<{ results: PhysioSession[]; count: number }>(`/physiotherapy/sessions/${query}`);
+    return apiFetch<{ results: PhysioSession[]; count: number }>(`/sessions/${query}`);
   }
 
-  /**
-   * Get a single physiotherapy session
-   */
-  async getSession(sessionId: number): Promise<PhysioSession> {
-    return apiFetch<PhysioSession>(`/physiotherapy/sessions/${sessionId}/`);
+  getSession(sessionId: number): Promise<PhysioSession> {
+    return apiFetch<PhysioSession>(`/sessions/${sessionId}/`);
   }
 
-  /**
-   * Create a physiotherapy session
-   */
-  async createSession(session: Omit<PhysioSession, 'id' | 'created_at' | 'updated_at' | 'patient_name' | 'patient_id' | 'physiotherapist_name' | 'template_name' | 'order_details'>): Promise<PhysioSession> {
-    return apiFetch<PhysioSession>('/physiotherapy/sessions/', {
+  createSession(data: Partial<PhysioSession>): Promise<PhysioSession> {
+    return apiFetch<PhysioSession>('/sessions/', {
       method: 'POST',
-      body: JSON.stringify(session),
+      body: JSON.stringify(data),
     });
   }
 
-  /**
-   * Update a physiotherapy session
-   */
-  async updateSession(sessionId: number, session: Partial<PhysioSession>): Promise<PhysioSession> {
-    return apiFetch<PhysioSession>(`/physiotherapy/sessions/${sessionId}/`, {
+  updateSession(sessionId: number, data: Partial<PhysioSession>): Promise<PhysioSession> {
+    return apiFetch<PhysioSession>(`/sessions/${sessionId}/`, {
       method: 'PATCH',
-      body: JSON.stringify(session),
+      body: JSON.stringify(data),
     });
   }
 
-  /**
-   * Start a physiotherapy session
-   */
-  async startSession(sessionId: number): Promise<PhysioSession> {
-    return apiFetch<PhysioSession>(`/physiotherapy/sessions/${sessionId}/start_session/`, {
+  startSession(sessionId: number): Promise<PhysioSession> {
+    return apiFetch<PhysioSession>(`/sessions/${sessionId}/start_session/`, {
       method: 'POST',
     });
   }
 
-  /**
-   * Complete a physiotherapy session
-   */
-  async completeSession(sessionId: number): Promise<PhysioSession> {
-    return apiFetch<PhysioSession>(`/physiotherapy/sessions/${sessionId}/complete_session/`, {
+  completeSession(sessionId: number, data?: { notes?: string; pain_level_before?: number; pain_level_after?: number }): Promise<PhysioSession> {
+    return apiFetch<PhysioSession>(`/sessions/${sessionId}/complete_session/`, {
       method: 'POST',
+      body: JSON.stringify(data || {}),
     });
   }
 
-  /**
-   * Server-generated PDF for a completed-style session report.
-   */
-  async downloadSessionReportPdf(sessionId: number): Promise<Blob> {
-    return apiFetch<Blob>(`/physiotherapy/sessions/${sessionId}/session_report_pdf/`, {
+  downloadSessionReport(sessionId: number): Promise<Blob> {
+    return apiFetch<Blob>(`/sessions/${sessionId}/session_report_pdf/`, {
       responseType: 'blob',
     });
   }
 
-  /**
-   * Create the next session in a treatment plan
-   */
-  async createNextSession(orderId: number, scheduledAt: string, physiotherapistId: number, notes?: string): Promise<PhysioSession> {
-    return apiFetch<PhysioSession>('/physiotherapy/sessions/create_next_session/', {
+  createNextSession(orderId: number): Promise<PhysioSession> {
+    return apiFetch<PhysioSession>('/sessions/create_next_session/', {
       method: 'POST',
-      body: JSON.stringify({
-        order_id: orderId,
-        scheduled_at: scheduledAt,
-        physiotherapist_id: physiotherapistId,
-        notes: notes || '',
-      }),
+      body: JSON.stringify({ order: orderId }),
     });
   }
 
-  /**
-   * Add recommendation to a session
-   */
-  async addRecommendation(sessionId: number, recommendation: string, type: string = 'general'): Promise<PhysioSession> {
-    return apiFetch<PhysioSession>(`/physiotherapy/sessions/${sessionId}/add_recommendation/`, {
+  addRecommendation(sessionId: number, recommendation: string): Promise<PhysioSession> {
+    return apiFetch<PhysioSession>(`/sessions/${sessionId}/add_recommendation/`, {
       method: 'POST',
-      body: JSON.stringify({ recommendation, type }),
+      body: JSON.stringify({ recommendation }),
     });
   }
 
@@ -350,12 +288,15 @@ class PhysioService {
     active_sessions: number;
     total_sessions: number;
   }> {
-    return apiFetch('/physiotherapy/stats/');
+    return apiFetch('/stats/');
   }
 
-  async getAnalyticsSummary(start: string, end: string): Promise<PhysiotherapyAnalyticsSummary> {
-    const query = buildQueryString({ start_date: start, end_date: end });
-    return apiFetch<PhysiotherapyAnalyticsSummary>(`/physiotherapy/analytics/summary/${query}`);
+  getAnalyticsSummary(params?: {
+    start_date?: string;
+    end_date?: string;
+  }): Promise<PhysiotherapyAnalyticsSummary> {
+    const query = buildQueryString(params || {});
+    return apiFetch<PhysiotherapyAnalyticsSummary>(`/analytics/summary/${query}`);
   }
 }
 

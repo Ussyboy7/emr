@@ -102,7 +102,7 @@ export default function PhysiotherapyAnalyticsPage() {
     }
     setLoading(true);
     try {
-      const res = await physioService.getAnalyticsSummary(r.start, r.end);
+      const res = await physioService.getAnalyticsSummary({ start_date: r.start, end_date: r.end });
       setData(res);
     } catch (e: unknown) {
       console.error(e);

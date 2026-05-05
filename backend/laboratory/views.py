@@ -1111,6 +1111,327 @@ class LabResultViewSet(viewsets.ReadOnlyModelViewSet):
 
         return response
 
+    @action(detail=True, methods=['get'])
+    def referral_letter(self, request, pk=None):
+        """Generate referral letter PDF for outsourced lab tests."""
+        result = self.get_object()
+
+        # Only generate for outsourced tests
+        if result.test.processing_method != 'outsourced':
+            return Response(
+                {'error': 'Referral letters are only available for outsourced lab tests'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Create PDF buffer
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=A4)
+        styles = getSampleStyleSheet()
+
+        # Styles
+        title_style = ParagraphStyle(
+            'Title',
+            parent=styles['Heading1'],
+            fontSize=18,
+            spaceAfter=6,
+            alignment=1,
+            textColor=colors.black,
+        )
+        subtitle_style = ParagraphStyle(
+            'Subtitle',
+            parent=styles['Heading3'],
+            fontSize=11,
+            spaceAfter=16,
+            alignment=1,
+            textColor=colors.grey,
+        )
+        section_style = ParagraphStyle(
+            'Section',
+            parent=styles['Heading2'],
+            fontSize=13,
+            spaceAfter=8,
+            textColor=colors.black,
+        )
+        normal_style = ParagraphStyle(
+            'Normal',
+            parent=styles['Normal'],
+            fontSize=10,
+            leading=13,
+            spaceAfter=4,
+        )
+        label_style = ParagraphStyle(
+            'Label',
+            parent=styles['Normal'],
+            fontSize=10,
+            fontName='Helvetica-Bold',
+        )
+
+        story = []
+
+        # Header
+        story.append(Paragraph("LABORATORY REFERRAL LETTER", title_style))
+        story.append(Paragraph("Nigerian Ports Authority Medical Services", subtitle_style))
+        story.append(Spacer(1, 10))
+
+        # Date and Order ID
+        ordered_at = getattr(result.order, 'ordered_at', None)
+        if ordered_at:
+            date_str = timezone.localtime(ordered_at).strftime('%B %d, %Y')
+        else:
+            date_str = 'N/A'
+
+        details_rows = [
+            ['Date', date_str],
+            ['Order ID', result.order.order_id if result.order else 'N/A'],
+            ['Lab Test', f"{result.test.name} ({result.test.code})"],
+        ]
+        details_table = Table(details_rows, colWidths=[2.2 * inch, 3.8 * inch])
+        details_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), colors.whitesmoke),
+            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('GRID', (0, 0), (-1, -1), 0.4, colors.lightgrey),
+            ('LEFTPADDING', (0, 0), (-1, -1), 8),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 8),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ]))
+        story.append(details_table)
+        story.append(Spacer(1, 12))
+
+        # To: Lab Partner
+        story.append(Paragraph("To:", label_style))
+        story.append(Paragraph(result.test.outsourced_lab or 'External Laboratory', normal_style))
+        story.append(Spacer(1, 12))
+
+        # Patient Information
+        story.append(Paragraph("Patient Information", section_style))
+
+        patient_age = getattr(result.patient, 'age', None)
+        age_gender = f"{patient_age} years / {result.patient.gender}" if patient_age else f"N/A / {result.patient.gender or 'N/A'}"
+        doctor_name = result.order.doctor.get_full_name() if result.order and result.order.doctor else 'N/A'
+
+        patient_rows = [
+            ['Patient Name', result.patient.get_full_name()],
+            ['Age / Gender', age_gender],
+            ['Ordering Doctor', doctor_name],
+        ]
+        patient_table = Table(patient_rows, colWidths=[2.2 * inch, 3.8 * inch])
+        patient_table.setStyle(TableStyle([
+            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('GRID', (0, 0), (-1, -1), 0.4, colors.lightgrey),
+            ('LEFTPADDING', (0, 0), (-1, -1), 8),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 8),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ]))
+        story.append(patient_table)
+        story.append(Spacer(1, 14))
+
+        # Test Details
+        story.append(Paragraph("Test Details", section_style))
+        story.append(Paragraph(f"Please perform the following laboratory test: {result.test.name} ({result.test.code})", normal_style))
+
+        if result.test.template and result.test.template.description:
+            story.append(Paragraph(f"Description: {result.test.template.description}", normal_style))
+
+        if result.order and result.order.clinical_notes:
+            story.append(Spacer(1, 10))
+            story.append(Paragraph("Clinical Notes:", label_style))
+            story.append(Paragraph(result.order.clinical_notes, normal_style))
+
+        story.append(Spacer(1, 15))
+
+        # Footer
+        story.append(Spacer(1, 16))
+        story.append(Paragraph("This referral letter was generated electronically and is valid for laboratory testing.", styles['Italic']))
+        story.append(Paragraph(f"Generated on: {timezone.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Italic']))
+
+        # Build PDF
+        doc.build(story)
+
+        # Return PDF response
+        buffer.seek(0)
+        filename = f"referral_letter_{result.patient.patient_id}_{result.test.code}_{result.id}.pdf"
+
+        response = HttpResponse(buffer, content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+
+        return response
+
+    @action(detail=True, methods=['get'])
+    def test_order(self, request, pk=None):
+        """Generate test order PDF for outsourced lab tests."""
+        result = self.get_object()
+
+        # Only generate for outsourced tests
+        if result.test.processing_method != 'outsourced':
+            return Response(
+                {'error': 'Test orders are only available for outsourced lab tests'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Create PDF buffer
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=A4)
+        styles = getSampleStyleSheet()
+
+        # Styles
+        title_style = ParagraphStyle(
+            'Title',
+            parent=styles['Heading1'],
+            fontSize=18,
+            spaceAfter=6,
+            alignment=1,
+            textColor=colors.black,
+        )
+        subtitle_style = ParagraphStyle(
+            'Subtitle',
+            parent=styles['Heading3'],
+            fontSize=11,
+            spaceAfter=16,
+            alignment=1,
+            textColor=colors.grey,
+        )
+        section_style = ParagraphStyle(
+            'Section',
+            parent=styles['Heading2'],
+            fontSize=13,
+            spaceAfter=8,
+            textColor=colors.black,
+        )
+        normal_style = ParagraphStyle(
+            'Normal',
+            parent=styles['Normal'],
+            fontSize=10,
+            leading=13,
+            spaceAfter=4,
+        )
+        label_style = ParagraphStyle(
+            'Label',
+            parent=styles['Normal'],
+            fontSize=10,
+            fontName='Helvetica-Bold',
+        )
+
+        story = []
+
+        # Header
+        story.append(Paragraph("LABORATORY TEST ORDER", title_style))
+        story.append(Paragraph("Nigerian Ports Authority Medical Services", subtitle_style))
+        story.append(Spacer(1, 10))
+
+        # Date and Order ID
+        ordered_at = getattr(result.order, 'ordered_at', None)
+        if ordered_at:
+            date_str = timezone.localtime(ordered_at).strftime('%B %d, %Y')
+        else:
+            date_str = 'N/A'
+
+        details_rows = [
+            ['Date', date_str],
+            ['Order ID', result.order.order_id if result.order else 'N/A'],
+            ['Lab Test', f"{result.test.name} ({result.test.code})"],
+            ['Lab Partner', result.test.outsourced_lab or 'External Laboratory'],
+        ]
+        details_table = Table(details_rows, colWidths=[2.2 * inch, 3.8 * inch])
+        details_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), colors.whitesmoke),
+            ('FONTNAME', (0, 0), (0, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('GRID', (0, 0), (-1, -1), 0.4, colors.lightgrey),
+            ('LEFTPADDING', (0, 0), (-1, -1), 8),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 8),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ]))
+        story.append(details_table)
+        story.append(Spacer(1, 12))
+
+        # Patient Information
+        story.append(Paragraph("Patient Information", section_style))
+
+        patient_age = getattr(result.patient, 'age', None)
+        age_gender = f"{patient_age} years / {result.patient.gender}" if patient_age else f"N/A / {result.patient.gender or 'N/A'}"
+        doctor_name = result.order.doctor.get_full_name() if result.order and result.order.doctor else 'N/A'
+
+        patient_rows = [
+            ['Patient Name', result.patient.get_full_name()],
+            ['Patient ID', result.patient.patient_id or 'N/A'],
+            ['Age / Gender', age_gender],
+            ['Ordering Doctor', doctor_name],
+        ]
+        patient_table = Table(patient_rows, colWidths=[2.2 * inch, 3.8 * inch])
+        patient_table.setStyle(TableStyle([
+            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('GRID', (0, 0), (-1, -1), 0.4, colors.lightgrey),
+            ('LEFTPADDING', (0, 0), (-1, -1), 8),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 8),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ]))
+        story.append(patient_table)
+        story.append(Spacer(1, 14))
+
+        # Test Requirements
+        story.append(Paragraph("Test Requirements", section_style))
+
+        requirements = []
+
+        if result.test.template:
+            if result.test.template.sample_type:
+                requirements.append(f"Sample Type: {result.test.template.sample_type}")
+            if result.test.template.collection_instructions:
+                requirements.append(f"Collection: {result.test.template.collection_instructions}")
+            if result.test.template.processing_instructions:
+                requirements.append(f"Processing: {result.test.template.processing_instructions}")
+
+        if requirements:
+            for req in requirements:
+                story.append(Paragraph(req, normal_style))
+        else:
+            story.append(Paragraph("Please follow standard laboratory protocols for this test.", normal_style))
+
+        if result.order and result.order.clinical_notes:
+            story.append(Spacer(1, 10))
+            story.append(Paragraph("Clinical Notes:", label_style))
+            story.append(Paragraph(result.order.clinical_notes, normal_style))
+
+        story.append(Spacer(1, 15))
+
+        # Instructions for Lab
+        story.append(Paragraph("Instructions for Laboratory", section_style))
+        story.append(Paragraph("Please perform the requested test according to your standard procedures.", normal_style))
+        story.append(Paragraph("Report results back to Nigerian Ports Authority Medical Services.", normal_style))
+        story.append(Paragraph(f"Priority: {result.order.priority.title() if result.order and result.order.priority else 'Normal'}", normal_style))
+
+        story.append(Spacer(1, 15))
+
+        # Footer
+        story.append(Spacer(1, 16))
+        story.append(Paragraph("This test order was generated electronically and is valid for laboratory testing.", styles['Italic']))
+        story.append(Paragraph(f"Generated on: {timezone.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Italic']))
+
+        # Build PDF
+        doc.build(story)
+
+        # Return PDF response
+        buffer.seek(0)
+        filename = f"test_order_{result.patient.patient_id}_{result.test.code}_{result.id}.pdf"
+
+        response = HttpResponse(buffer, content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+
+        return response
+
     @action(detail=True, methods=['post'])
     def verify(self, request, pk=None):
         """Verify a lab result."""

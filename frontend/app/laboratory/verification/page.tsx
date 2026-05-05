@@ -78,6 +78,8 @@ interface LabResult {
   verifiedAt?: string;
   clinic: string;
   clinicalNotes?: string;
+  processing_method?: 'in_house' | 'outsourced';
+  outsourced_lab?: string;
 }
 
 // Transform backend LabResult to frontend format
@@ -332,6 +334,8 @@ const transformResult = (
       }
       return notes;
     })(),
+    processing_method: testDetails?.processing_method,
+    outsourced_lab: testDetails?.outsourced_lab,
   };
 };
 
@@ -669,20 +673,68 @@ export default function ResultsVerificationPage() {
 
       // Create and download the file
       const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
       URL.revokeObjectURL(url);
 
-      toast.success(`Downloaded lab report for ${result.patient.name}`, {
-        description: `${result.testName} - ${result.overallStatus}`
-      });
+      toast.success(`Downloaded lab report for ${result.patient.name}`);
     } catch (error) {
-      console.error('Download error:', error);
-      toast.error((error as Error)?.message || 'Failed to download lab report');
+      console.error('Error downloading PDF report:', error);
+      toast.error('Failed to download PDF report');
+    }
+  };
+
+  const downloadReferralLetter = async (result: LabResult) => {
+    try {
+      const blob = await apiFetch<Blob>(
+        `/laboratory/verification/${result.id}/referral_letter/`,
+        { responseType: 'blob' }
+      );
+      const filename = `referral_letter_${result.patient.id}_${result.testCode}_${result.id}.pdf`;
+
+      // Create and download the file
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      toast.success(`Downloaded referral letter for ${result.patient.name}`);
+    } catch (error) {
+      console.error('Error downloading referral letter:', error);
+      toast.error('Failed to download referral letter');
+    }
+  };
+
+  const downloadTestOrder = async (result: LabResult) => {
+    try {
+      const blob = await apiFetch<Blob>(
+        `/laboratory/verification/${result.id}/test_order/`,
+        { responseType: 'blob' }
+      );
+      const filename = `test_order_${result.patient.id}_${result.testCode}_${result.id}.pdf`;
+
+      // Create and download the file
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      toast.success(`Downloaded test order for ${result.patient.name}`);
+    } catch (error) {
+      console.error('Error downloading test order:', error);
+      toast.error('Failed to download test order');
     }
   };
 
@@ -1155,6 +1207,26 @@ export default function ResultsVerificationPage() {
             )}
             <DialogFooter>
               <Button variant="outline" onClick={() => setIsViewDialogOpen(false)}>Close</Button>
+              {selectedResult?.processing_method === 'outsourced' && (
+                <>
+                  <Button
+                    variant="outline"
+                    onClick={() => downloadReferralLetter(selectedResult)}
+                    disabled={!selectedResult}
+                  >
+                    <FileText className="h-4 w-4 mr-2" />
+                    Referral Letter
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => downloadTestOrder(selectedResult)}
+                    disabled={!selectedResult}
+                  >
+                    <FileText className="h-4 w-4 mr-2" />
+                    Test Order
+                  </Button>
+                </>
+              )}
               {isSelectedResultMutable && (
                 <>
                   <Button variant="outline" onClick={() => { setIsViewDialogOpen(false); if (selectedResult) openRejectDialog(selectedResult); }} className="text-rose-600">

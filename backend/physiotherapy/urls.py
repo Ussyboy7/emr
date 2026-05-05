@@ -14,7 +14,7 @@ router.register(r"orders", PhysioOrderViewSet, basename="physio-order")
 router.register(r"sessions", PhysioSessionViewSet, basename="physio-session")
 
 urlpatterns = [
-    path('physiotherapy/analytics/summary/', PhysiotherapyAnalyticsSummaryView.as_view(), name='physiotherapy-analytics-summary'),
-    path('physiotherapy/stats/', PhysiotherapyStatsView.as_view(), name='physiotherapy-stats'),
-    path("physiotherapy/", include(router.urls)),
+    path('analytics/summary/', PhysiotherapyAnalyticsSummaryView.as_view(), name='physiotherapy-analytics-summary'),
+    path('stats/', PhysiotherapyStatsView.as_view(), name='physiotherapy-stats'),
+    path("", include(router.urls)),
 ]

@@ -322,7 +322,7 @@ export default function NursingPoolQueuePage() {
           }
           try {
             const physioRes = await apiFetch<{ results: Record<string, { checked_in: boolean; order_id?: number; status?: string }> }>(
-              `/physiotherapy/orders/checkins-for-visits/?visit_ids=${visitIdsParam}`
+              `/orders/checkins-for-visits/?visit_ids=${visitIdsParam}`
             );
             Object.entries(physioRes.results || {}).forEach(([visitIdRaw, payload]) => {
               const visitId = Number(visitIdRaw);
@@ -669,7 +669,7 @@ export default function NursingPoolQueuePage() {
     if (!patient.visitNumericId) return;
     setSendingToPhysioVisitId(patient.visitNumericId);
     try {
-      const order = await apiFetch<any>('/physiotherapy/orders/checkin-from-visit/', {
+      const order = await apiFetch<any>('/orders/checkin-from-visit/', {
         method: 'POST',
         body: JSON.stringify({ visit: patient.visitNumericId }),
       });

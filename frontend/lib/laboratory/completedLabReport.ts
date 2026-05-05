@@ -39,6 +39,8 @@ export interface CompletedTest {
   submittedBy: string;
   clinic: string;
   turnaroundTime: string;
+  processing_method?: 'in_house' | 'outsourced';
+  outsourced_lab?: string;
 }
 
 /**
@@ -225,6 +227,8 @@ export function transformApiRowToCompletedTest(
     turnaroundTime,
     result_file: resultFileUrl,
     result_file_exists: resultFileExists,
+    processing_method: (test as any).processing_method,
+    outsourced_lab: (test as any).outsourced_lab,
   };
 }
 

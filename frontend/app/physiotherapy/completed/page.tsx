@@ -180,7 +180,7 @@ export default function PhysioCompletedPage() {
   const handleDownloadSessionPdf = async (sessionId: number) => {
     setPdfDownloadLoading(true);
     try {
-      const blob = await physioService.downloadSessionReportPdf(sessionId);
+      const blob = await physioService.downloadSessionReport(sessionId);
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
