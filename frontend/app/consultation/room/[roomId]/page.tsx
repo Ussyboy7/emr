@@ -886,7 +886,96 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       cancelled = true;
     };
   }, []);
-  
+
+  // Session state persistence
+  useEffect(() => {
+    const roomSessionKey = `consultation_room_${roomId}_session`;
+
+    // Save session state to localStorage
+    const sessionState = {
+      sessionActive,
+      sessionId,
+      currentPatient,
+      sessionStartTime: sessionStartTime?.toISOString(),
+      sessionBaseActiveSeconds,
+      sessionDuration,
+    };
+
+    if (sessionActive || sessionId || currentPatient) {
+      localStorage.setItem(roomSessionKey, JSON.stringify(sessionState));
+    } else {
+      localStorage.removeItem(roomSessionKey);
+    }
+  }, [sessionActive, sessionId, currentPatient, sessionStartTime, sessionBaseActiveSeconds, sessionDuration, roomId]);
+
+  // Restore session state from localStorage on mount
+  useEffect(() => {
+    const roomSessionKey = `consultation_room_${roomId}_session`;
+    const savedSession = localStorage.getItem(roomSessionKey);
+
+    if (savedSession) {
+      try {
+        const sessionState = JSON.parse(savedSession);
+
+        if (sessionState.sessionId && sessionState.currentPatient) {
+          // Restore session state
+          setSessionActive(sessionState.sessionActive || false);
+          setSessionId(sessionState.sessionId);
+          setCurrentPatient(sessionState.currentPatient);
+          setSessionStartTime(sessionState.sessionStartTime ? new Date(sessionState.sessionStartTime) : null);
+          setSessionBaseActiveSeconds(sessionState.sessionBaseActiveSeconds || 0);
+          setSessionDuration(sessionState.sessionDuration || 0);
+
+          // Try to restore the active session from backend (async)
+          if (sessionState.sessionId) {
+            restoreActiveSession(sessionState.sessionId, { silent: true }).then((restored) => {
+              if (!restored) {
+                console.warn('Failed to restore session from localStorage, clearing state');
+                // Clear invalid session state
+                localStorage.removeItem(roomSessionKey);
+                clearSessionState();
+              }
+            }).catch((error) => {
+              console.warn('Failed to restore session from localStorage:', error);
+              localStorage.removeItem(roomSessionKey);
+              clearSessionState();
+            });
+          }
+        }
+      } catch (error) {
+        console.warn('Failed to parse saved session state:', error);
+        localStorage.removeItem(roomSessionKey);
+      }
+    }
+  }, [roomId]); // Only run on roomId change
+
+  // Clear session state utility
+  const clearSessionState = useCallback(() => {
+    setSessionActive(false);
+    setSessionId(null);
+    setCurrentPatient(null);
+    setSessionStartTime(null);
+    setSessionBaseActiveSeconds(0);
+    setSessionDuration(0);
+
+    // Clear localStorage
+    const roomSessionKey = `consultation_room_${roomId}_session`;
+    localStorage.removeItem(roomSessionKey);
+
+    // Reset form states
+    setMedicalNotes({ presentationComplaint: "", historyOfPresentIllness: "", physicalExamination: "", assessment: "", plan: "" });
+    setDiagnoses([]);
+    setPrescriptions([]);
+    setLabOrders([]);
+    setNursingOrders([]);
+    setRadiologyOrders([]);
+    setPhysioOrders([]);
+    setReferrals([]);
+    setFollowUpRequired(false);
+    setFollowUpDate("");
+    setFollowUpReason("");
+  }, [roomId]);
+
   // Vitals detail modal state
   const [selectedVital, setSelectedVital] = useState<VitalsData | null>(null);
   const [isVitalsDetailModalOpen, setIsVitalsDetailModalOpen] = useState(false);
@@ -1486,7 +1575,10 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         // Check for active session and restore it
         const activeSession = (roomData as any).active_session;
         if (activeSession && activeSession.id) {
-          await restoreActiveSession(activeSession.id);
+          const restored = await restoreActiveSession(activeSession.id, { silent: true });
+          if (!restored) {
+            console.warn('Failed to restore active session, clearing state');
+          }
         }
       } catch (err) {
         console.error('Error loading room data:', err);
@@ -1500,19 +1592,25 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       }
     };
   
-  // Function to restore active session
-  const restoreActiveSession = async (sessionId: number) => {
+  // Function to restore active session with robust error handling
+  const restoreActiveSession = async (sessionId: number, options: { silent?: boolean } = {}) => {
     try {
-      // Security: Removed console.log to prevent session ID exposure
-      
-      // Load full session data
+      // Check if session is still valid and active
       const session: ConsultationSession = await consultationService.getSession(sessionId);
-      // Security: Removed console.log to prevent session data exposure
+
+      // Verify session is still active and belongs to this room
+      if (session.status !== 'active' || session.room !== parseInt(roomId)) {
+        if (!options.silent) {
+          console.warn(`Session ${sessionId} is no longer active or in wrong room`);
+        }
+        // Clear local session state if invalid
+        clearSessionState();
+        return false;
+      }
 
       // Load patient data
       const patient = await patientService.getPatient(session.patient);
-      // Security: Removed console.log to prevent patient ID exposure
-      
+
       // Load visit data if available
       let visitData: any = null;
       let visitId: string | number | null = null;
@@ -2080,6 +2178,43 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     }
   }, [showAddRadiology, showRadiologyTemplateDropdown, radiologyTemplates.length]);
 
+  // Navigation guard to prevent session creation abuse
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      // Warn user if they have an active session
+      if (sessionActive) {
+        e.preventDefault();
+        e.returnValue = 'You have an active consultation session. Are you sure you want to leave?';
+      }
+    };
+
+    const handlePopState = (e: PopStateEvent) => {
+      // Prevent back/forward navigation if session is active
+      if (sessionActive) {
+        const confirmLeave = window.confirm(
+          'You have an active consultation session. Navigating away will pause the session. Continue?'
+        );
+        if (!confirmLeave) {
+          // Restore the URL if user cancels
+          window.history.pushState(null, '', `/consultation/room/${roomId}`);
+          return;
+        }
+        // Pause the session before navigation
+        if (sessionId) {
+          consultationService.pauseSession(sessionId).catch(console.error);
+        }
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    window.addEventListener('popstate', handlePopState);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, [sessionActive, sessionId, roomId]);
+
   // Load physio orders from API for this consultation session so doctor sees real status (pending/scheduled/in_progress/completed)
   useEffect(() => {
     if (!sessionId) {
@@ -2237,7 +2372,28 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         console.error('Room ID:', numericRoomId, 'Patient ID:', numericPatientId);
         return;
       }
-      
+
+      // Check for existing active sessions for this visit/patient/room combination
+      try {
+        const existingSessions = await consultationService.getSessions({
+          visit: numericVisitId || undefined,
+          patient: numericPatientId,
+          room: numericRoomId,
+          status: 'active'
+        });
+
+        if (existingSessions.results && existingSessions.results.length > 0) {
+          const existingSession = existingSessions.results[0];
+          await restoreActiveSession(existingSession.id);
+          await loadPausedSessions();
+          toast.success(`Resumed existing active session with ${patient.name}`);
+          return;
+        }
+      } catch (checkError) {
+        console.warn('Error checking for existing sessions:', checkError);
+        // Continue with session creation if check fails
+      }
+
       const sessionData = await apiFetch<{ id: number; resumed?: boolean; started_at?: string }>('/consultation/sessions/', {
         method: 'POST',
         body: JSON.stringify({
@@ -2249,6 +2405,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         }),
       });
 
+      // Handle case where backend returns resumed=true (shouldn't happen with our check, but safety)
       if (sessionData?.resumed) {
         await restoreActiveSession(sessionData.id);
         await loadPausedSessions();
