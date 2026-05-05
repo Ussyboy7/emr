@@ -403,7 +403,7 @@ export function LabCompletedReportDialog({
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => downloadResultFile(test.result_file, pdfDisplayName)}
+                        onClick={() => test.result_file && downloadResultFile(test.result_file, pdfDisplayName)}
                         className="shrink-0"
                       >
                         <Download className="h-3.5 w-3.5 mr-1" />
