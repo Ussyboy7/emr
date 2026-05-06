@@ -1,8 +1,8 @@
 """Pharmacy module analytics (dispensing & prescribing patterns)."""
 from decimal import Decimal
 
-from django.db.models import Count, Sum
-from django.db.models.functions import TruncDate, TruncMonth, TruncWeek, TruncQuarter
+from django.db.models import Case, CharField, Count, IntegerField, Sum, Value, When
+from django.db.models.functions import ExtractYear, TruncDate, TruncMonth, TruncWeek, TruncQuarter
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -142,11 +142,19 @@ class PharmacyAnalyticsSummaryView(APIView):
         # For bimonthly, group by year and bimonth (1-2, 3-4, 5-6, 7-8, 9-10, 11-12)
         bimonthly = (
             Dispense.objects.filter(dispensed_at__gte=start_dt, dispensed_at__lte=end_dt)
-            .extra(select={
-                'bimonth': "FLOOR((EXTRACT(MONTH FROM dispensed_at) - 1) / 2) + 1",
-                'year': "EXTRACT(YEAR FROM dispensed_at)"
-            })
-            .values("bimonth", "year")
+            .annotate(
+                year=ExtractYear("dispensed_at"),
+                bimonth=Case(
+                    When(dispensed_at__month__in=[1, 2], then=Value(1)),
+                    When(dispensed_at__month__in=[3, 4], then=Value(2)),
+                    When(dispensed_at__month__in=[5, 6], then=Value(3)),
+                    When(dispensed_at__month__in=[7, 8], then=Value(4)),
+                    When(dispensed_at__month__in=[9, 10], then=Value(5)),
+                    When(dispensed_at__month__in=[11, 12], then=Value(6)),
+                    output_field=IntegerField()
+                )
+            )
+            .values("year", "bimonth")
             .annotate(events=Count("id"), quantity=Sum("quantity"), rx=Count("prescription_id", distinct=True))
             .order_by("year", "bimonth")
         )
@@ -163,11 +171,15 @@ class PharmacyAnalyticsSummaryView(APIView):
         # For half-yearly, group by year and half (H1 or H2)
         halfyearly = (
             Dispense.objects.filter(dispensed_at__gte=start_dt, dispensed_at__lte=end_dt)
-            .extra(select={
-                'half': "CASE WHEN EXTRACT(MONTH FROM dispensed_at) <= 6 THEN 'H1' ELSE 'H2' END",
-                'year': "EXTRACT(YEAR FROM dispensed_at)"
-            })
-            .values("half", "year")
+            .annotate(
+                year=ExtractYear("dispensed_at"),
+                half=Case(
+                    When(dispensed_at__month__lte=6, then=Value('H1')),
+                    default=Value('H2'),
+                    output_field=CharField()
+                )
+            )
+            .values("year", "half")
             .annotate(events=Count("id"), quantity=Sum("quantity"), rx=Count("prescription_id", distinct=True))
             .order_by("year", "half")
         )
