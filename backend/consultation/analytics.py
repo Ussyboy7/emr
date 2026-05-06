@@ -14,7 +14,8 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Any
 
-from django.db.models import Avg, Count, F, Q, QuerySet
+from django.db.models import Avg, Case, CharField, Count, F, IntegerField, Q, QuerySet, Value, When
+from django.db.models.functions import ExtractYear, TruncDate, TruncMonth, TruncWeek
 from django.utils import timezone
 
 # from common.module_analytics import patient_category_breakdown, patient_gender_breakdown
@@ -182,6 +183,132 @@ def build_comprehensive_consultation_analytics(
     # Clinical outcomes - we'll need to join with diagnoses, referrals, prescriptions
     # This would require additional queries in the view
 
+    # Add period aggregations
+    from consultation.models import ConsultationSession
+
+    daily = (
+        ConsultationSession.objects.filter(started_at__gte=start_date, started_at__lte=end_date)
+        .annotate(day=TruncDate("started_at"))
+        .values("day")
+        .annotate(sessions=Count("id"), completed=Count("id", filter=Q(status="completed")))
+        .order_by("day")
+    )
+    by_day = [
+        {
+            "date": row["day"].isoformat() if row["day"] else None,
+            "sessions": row["sessions"],
+            "completed": row["completed"],
+        }
+        for row in daily
+        if row["day"]
+    ]
+
+    weekly = (
+        ConsultationSession.objects.filter(started_at__gte=start_date, started_at__lte=end_date)
+        .annotate(w=TruncWeek("started_at"))
+        .values("w")
+        .annotate(sessions=Count("id"), completed=Count("id", filter=Q(status="completed")))
+        .order_by("w")
+    )
+    by_week = [
+        {
+            "week": row["w"].strftime("%Y-%m-%d") if row["w"] else None,
+            "sessions": row["sessions"],
+            "completed": row["completed"],
+        }
+        for row in weekly
+        if row["w"]
+    ]
+
+    monthly = (
+        ConsultationSession.objects.filter(started_at__gte=start_date, started_at__lte=end_date)
+        .annotate(m=TruncMonth("started_at"))
+        .values("m")
+        .annotate(sessions=Count("id"), completed=Count("id", filter=Q(status="completed")))
+        .order_by("m")
+    )
+    by_month = [
+        {
+            "month": row["m"].strftime("%Y-%m") if row["m"] else None,
+            "sessions": row["sessions"],
+            "completed": row["completed"],
+        }
+        for row in monthly
+        if row["m"]
+    ]
+
+    # Bimonthly using Case
+    bimonthly = (
+        ConsultationSession.objects.filter(started_at__gte=start_date, started_at__lte=end_date)
+        .annotate(
+            year=ExtractYear("started_at"),
+            bimonth=Case(
+                When(started_at__month__in=[1, 2], then=Value(1)),
+                When(started_at__month__in=[3, 4], then=Value(2)),
+                When(started_at__month__in=[5, 6], then=Value(3)),
+                When(started_at__month__in=[7, 8], then=Value(4)),
+                When(started_at__month__in=[9, 10], then=Value(5)),
+                When(started_at__month__in=[11, 12], then=Value(6)),
+                output_field=IntegerField()
+            )
+        )
+        .values("year", "bimonth")
+        .annotate(sessions=Count("id"), completed=Count("id", filter=Q(status="completed")))
+        .order_by("year", "bimonth")
+    )
+    by_bimonth = [
+        {
+            "bimonth": f"{row['year']}-B{row['bimonth']}",
+            "sessions": row["sessions"],
+            "completed": row["completed"],
+        }
+        for row in bimonthly
+    ]
+
+    # Quarterly using proper ORM
+    quarterly = (
+        ConsultationSession.objects.filter(started_at__gte=start_date, started_at__lte=end_date)
+        .annotate(
+            year=ExtractYear("started_at"),
+            quarter=((TruncDate("started_at").month - 1) // 3 + 1)
+        )
+        .values("year", "quarter")
+        .annotate(sessions=Count("id"), completed=Count("id", filter=Q(status="completed")))
+        .order_by("year", "quarter")
+    )
+    by_quarter = [
+        {
+            "quarter": f"{row['year']}-Q{row['quarter']}",
+            "sessions": row["sessions"],
+            "completed": row["completed"],
+        }
+        for row in quarterly
+    ]
+
+    # Half-yearly using proper ORM
+    halfyearly = (
+        ConsultationSession.objects.filter(started_at__gte=start_date, started_at__lte=end_date)
+        .annotate(
+            year=ExtractYear("started_at"),
+            half=Case(
+                When(started_at__month__lte=6, then=Value('H1')),
+                default=Value('H2'),
+                output_field=CharField()
+            )
+        )
+        .values("year", "half")
+        .annotate(sessions=Count("id"), completed=Count("id", filter=Q(status="completed")))
+        .order_by("year", "half")
+    )
+    by_halfyear = [
+        {
+            "halfyear": f"{row['year']}-{row['half']}",
+            "sessions": row["sessions"],
+            "completed": row["completed"],
+        }
+        for row in halfyearly
+    ]
+
     return {
         'session_metrics': {
             'total_sessions': total_sessions,
@@ -200,6 +327,12 @@ def build_comprehensive_consultation_analytics(
             'attendance_by_category': attendance_by_category,
             'attendance_totals': attendance_totals,
         },
+        'by_day': by_day,
+        'by_week': by_week,
+        'by_month': by_month,
+        'by_bimonth': by_bimonth,
+        'by_quarter': by_quarter,
+        'by_halfyear': by_halfyear,
         'period': {
             'start_date': start_date.date().isoformat(),
             'end_date': end_date.date().isoformat(),

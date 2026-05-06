@@ -2,7 +2,7 @@
 from collections import defaultdict
 
 from django.db.models import Count, Q
-from django.db.models.functions import TruncDate
+from django.db.models.functions import ExtractYear, TruncDate, TruncMonth, TruncWeek
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -124,6 +124,99 @@ class LaboratoryAnalyticsSummaryView(APIView):
             if row["day"]
         ]
 
+        weekly = (
+            LabTest.objects.filter(test_filter)
+            .annotate(w=TruncWeek("order__ordered_at"))
+            .values("w")
+            .annotate(tests=Count("id"), orders=Count("order_id", distinct=True))
+            .order_by("w")
+        )
+        by_week = [
+            {
+                "week": row["w"].strftime("%Y-%m-%d") if row["w"] else None,
+                "tests": row["tests"],
+                "orders": row["orders"],
+            }
+            for row in weekly
+            if row["w"]
+        ]
+
+        monthly = (
+            LabTest.objects.filter(test_filter)
+            .annotate(m=TruncMonth("order__ordered_at"))
+            .values("m")
+            .annotate(tests=Count("id"), orders=Count("order_id", distinct=True))
+            .order_by("m")
+        )
+        by_month = [
+            {
+                "month": row["m"].strftime("%Y-%m") if row["m"] else None,
+                "tests": row["tests"],
+                "orders": row["orders"],
+            }
+            for row in monthly
+            if row["m"]
+        ]
+
+        # Bimonthly
+        bimonthly = (
+            LabTest.objects.filter(test_filter)
+            .extra(select={
+                'bimonth': "FLOOR((EXTRACT(MONTH FROM order__ordered_at) - 1) / 2) + 1",
+                'year': "EXTRACT(YEAR FROM order__ordered_at)"
+            })
+            .values("bimonth", "year")
+            .annotate(tests=Count("id"), orders=Count("order_id", distinct=True))
+            .order_by("year", "bimonth")
+        )
+        by_bimonth = [
+            {
+                "bimonth": f"{row['year']}-B{row['bimonth']}",
+                "tests": row["tests"],
+                "orders": row["orders"],
+            }
+            for row in bimonthly
+        ]
+
+        quarterly = (
+            LabTest.objects.filter(test_filter)
+            .extra(select={
+                'year': "EXTRACT(YEAR FROM order__ordered_at)",
+                'quarter': "FLOOR((EXTRACT(MONTH FROM order__ordered_at) - 1) / 3) + 1",
+                'q': "EXTRACT(YEAR FROM order__ordered_at) * 100 + FLOOR((EXTRACT(MONTH FROM order__ordered_at) - 1) / 3) + 1"
+            })
+            .values("q")
+            .annotate(tests=Count("id"), orders=Count("order_id", distinct=True))
+            .order_by("q")
+        )
+        by_quarter = [
+            {
+                "quarter": f"{row['q'] // 100}-Q{(row['q'] % 100)}",
+                "tests": row["tests"],
+                "orders": row["orders"],
+            }
+            for row in quarterly
+        ]
+
+        halfyearly = (
+            LabTest.objects.filter(test_filter)
+            .extra(select={
+                'half': "CASE WHEN EXTRACT(MONTH FROM order__ordered_at) <= 6 THEN 'H1' ELSE 'H2' END",
+                'year': "EXTRACT(YEAR FROM order__ordered_at)"
+            })
+            .values("half", "year")
+            .annotate(tests=Count("id"), orders=Count("order_id", distinct=True))
+            .order_by("year", "half")
+        )
+        by_halfyear = [
+            {
+                "halfyear": f"{row['year']}-{row['half']}",
+                "tests": row["tests"],
+                "orders": row["orders"],
+            }
+            for row in halfyearly
+        ]
+
         top_tests = list(
             tests_qs.values("code", "name")
             .annotate(count=Count("id"))
@@ -234,6 +327,11 @@ class LaboratoryAnalyticsSummaryView(APIView):
                 "orders_by_source": orders_by_source,
                 "external_orders_by_clinic": external_by_clinic,
                 "by_day": by_day,
+                "by_week": by_week,
+                "by_month": by_month,
+                "by_bimonth": by_bimonth,
+                "by_quarter": by_quarter,
+                "by_halfyear": by_halfyear,
                 "top_tests": [
                     {"code": r["code"], "name": r["name"], "count": r["count"]}
                     for r in top_tests

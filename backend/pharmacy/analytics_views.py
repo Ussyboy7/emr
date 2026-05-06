@@ -2,7 +2,7 @@
 from decimal import Decimal
 
 from django.db.models import Count, Sum
-from django.db.models.functions import TruncDate, TruncMonth
+from django.db.models.functions import TruncDate, TruncMonth, TruncWeek, TruncQuarter
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -85,6 +85,24 @@ class PharmacyAnalyticsSummaryView(APIView):
             if row["day"]
         ]
 
+        weekly = (
+            Dispense.objects.filter(dispensed_at__gte=start_dt, dispensed_at__lte=end_dt)
+            .annotate(w=TruncWeek("dispensed_at"))
+            .values("w")
+            .annotate(events=Count("id"), quantity=Sum("quantity"), rx=Count("prescription_id", distinct=True))
+            .order_by("w")
+        )
+        by_week = [
+            {
+                "week": row["w"].strftime("%Y-%m-%d") if row["w"] else None,  # ISO week start date
+                "dispense_events": row["events"],
+                "total_quantity": _dec_to_float(row["quantity"]),
+                "prescriptions": row["rx"],
+            }
+            for row in weekly
+            if row["w"]
+        ]
+
         monthly = (
             Dispense.objects.filter(dispensed_at__gte=start_dt, dispensed_at__lte=end_dt)
             .annotate(m=TruncMonth("dispensed_at"))
@@ -101,6 +119,66 @@ class PharmacyAnalyticsSummaryView(APIView):
             }
             for row in monthly
             if row["m"]
+        ]
+
+        quarterly = (
+            Dispense.objects.filter(dispensed_at__gte=start_dt, dispensed_at__lte=end_dt)
+            .annotate(q=TruncQuarter("dispensed_at"))
+            .values("q")
+            .annotate(events=Count("id"), quantity=Sum("quantity"), rx=Count("prescription_id", distinct=True))
+            .order_by("q")
+        )
+        by_quarter = [
+            {
+                "quarter": row["q"].strftime("%Y-Q") + str((row["q"].month - 1) // 3 + 1) if row["q"] else None,
+                "dispense_events": row["events"],
+                "total_quantity": _dec_to_float(row["quantity"]),
+                "prescriptions": row["rx"],
+            }
+            for row in quarterly
+            if row["q"]
+        ]
+
+        # For bimonthly, group by year and bimonth (1-2, 3-4, 5-6, 7-8, 9-10, 11-12)
+        bimonthly = (
+            Dispense.objects.filter(dispensed_at__gte=start_dt, dispensed_at__lte=end_dt)
+            .extra(select={
+                'bimonth': "FLOOR((EXTRACT(MONTH FROM dispensed_at) - 1) / 2) + 1",
+                'year': "EXTRACT(YEAR FROM dispensed_at)"
+            })
+            .values("bimonth", "year")
+            .annotate(events=Count("id"), quantity=Sum("quantity"), rx=Count("prescription_id", distinct=True))
+            .order_by("year", "bimonth")
+        )
+        by_bimonth = [
+            {
+                "bimonth": f"{row['year']}-B{row['bimonth']}",
+                "dispense_events": row["events"],
+                "total_quantity": _dec_to_float(row["quantity"]),
+                "prescriptions": row["rx"],
+            }
+            for row in bimonthly
+        ]
+
+        # For half-yearly, group by year and half (H1 or H2)
+        halfyearly = (
+            Dispense.objects.filter(dispensed_at__gte=start_dt, dispensed_at__lte=end_dt)
+            .extra(select={
+                'half': "CASE WHEN EXTRACT(MONTH FROM dispensed_at) <= 6 THEN 'H1' ELSE 'H2' END",
+                'year': "EXTRACT(YEAR FROM dispensed_at)"
+            })
+            .values("half", "year")
+            .annotate(events=Count("id"), quantity=Sum("quantity"), rx=Count("prescription_id", distinct=True))
+            .order_by("year", "half")
+        )
+        by_halfyear = [
+            {
+                "halfyear": f"{row['year']}-{row['half']}",
+                "dispense_events": row["events"],
+                "total_quantity": _dec_to_float(row["quantity"]),
+                "prescriptions": row["rx"],
+            }
+            for row in halfyearly
         ]
 
         top_medications = list(
@@ -148,7 +226,11 @@ class PharmacyAnalyticsSummaryView(APIView):
                 "patients_by_category": category,
                 "npa_staff_linked_vs_non_npa": staff_split,
                 "by_day": by_day,
+                "by_week": by_week,
                 "by_month": by_month,
+                "by_bimonth": by_bimonth,
+                "by_quarter": by_quarter,
+                "by_halfyear": by_halfyear,
                 "top_medications_by_quantity": [
                     {
                         "medication_id": r["medication_id"],

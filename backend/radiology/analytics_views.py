@@ -2,7 +2,7 @@
 from collections import defaultdict
 
 from django.db.models import Count, Q
-from django.db.models.functions import TruncDate
+from django.db.models.functions import ExtractYear, TruncDate, TruncMonth, TruncWeek
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -170,6 +170,99 @@ class RadiologyAnalyticsSummaryView(APIView):
             if row["day"]
         ]
 
+        weekly = (
+            RadiologyStudy.objects.filter(study_filter)
+            .annotate(w=TruncWeek("order__ordered_at"))
+            .values("w")
+            .annotate(studies=Count("id"), orders=Count("order_id", distinct=True))
+            .order_by("w")
+        )
+        by_week = [
+            {
+                "week": row["w"].strftime("%Y-%m-%d") if row["w"] else None,
+                "studies": row["studies"],
+                "orders": row["orders"],
+            }
+            for row in weekly
+            if row["w"]
+        ]
+
+        monthly = (
+            RadiologyStudy.objects.filter(study_filter)
+            .annotate(m=TruncMonth("order__ordered_at"))
+            .values("m")
+            .annotate(studies=Count("id"), orders=Count("order_id", distinct=True))
+            .order_by("m")
+        )
+        by_month = [
+            {
+                "month": row["m"].strftime("%Y-%m") if row["m"] else None,
+                "studies": row["studies"],
+                "orders": row["orders"],
+            }
+            for row in monthly
+            if row["m"]
+        ]
+
+        # Bimonthly
+        bimonthly = (
+            RadiologyStudy.objects.filter(study_filter)
+            .extra(select={
+                'bimonth': "FLOOR((EXTRACT(MONTH FROM order__ordered_at) - 1) / 2) + 1",
+                'year': "EXTRACT(YEAR FROM order__ordered_at)"
+            })
+            .values("bimonth", "year")
+            .annotate(studies=Count("id"), orders=Count("order_id", distinct=True))
+            .order_by("year", "bimonth")
+        )
+        by_bimonth = [
+            {
+                "bimonth": f"{row['year']}-B{row['bimonth']}",
+                "studies": row["studies"],
+                "orders": row["orders"],
+            }
+            for row in bimonthly
+        ]
+
+        quarterly = (
+            RadiologyStudy.objects.filter(study_filter)
+            .extra(select={
+                'year': "EXTRACT(YEAR FROM order__ordered_at)",
+                'quarter': "FLOOR((EXTRACT(MONTH FROM order__ordered_at) - 1) / 3) + 1",
+                'q': "EXTRACT(YEAR FROM order__ordered_at) * 100 + FLOOR((EXTRACT(MONTH FROM order__ordered_at) - 1) / 3) + 1"
+            })
+            .values("q")
+            .annotate(studies=Count("id"), orders=Count("order_id", distinct=True))
+            .order_by("q")
+        )
+        by_quarter = [
+            {
+                "quarter": f"{row['q'] // 100}-Q{(row['q'] % 100)}",
+                "studies": row["studies"],
+                "orders": row["orders"],
+            }
+            for row in quarterly
+        ]
+
+        halfyearly = (
+            RadiologyStudy.objects.filter(study_filter)
+            .extra(select={
+                'half': "CASE WHEN EXTRACT(MONTH FROM order__ordered_at) <= 6 THEN 'H1' ELSE 'H2' END",
+                'year': "EXTRACT(YEAR FROM order__ordered_at)"
+            })
+            .values("half", "year")
+            .annotate(studies=Count("id"), orders=Count("order_id", distinct=True))
+            .order_by("year", "half")
+        )
+        by_halfyear = [
+            {
+                "halfyear": f"{row['year']}-{row['half']}",
+                "studies": row["studies"],
+                "orders": row["orders"],
+            }
+            for row in halfyearly
+        ]
+
         top_procedures = list(
             studies_qs.values("procedure")
             .annotate(count=Count("id"))
@@ -208,6 +301,11 @@ class RadiologyAnalyticsSummaryView(APIView):
                 "procedures_by_processing_method": procedures_processing_breakdown,
                 "orders_by_priority": orders_by_priority,
                 "by_day": by_day,
+                "by_week": by_week,
+                "by_month": by_month,
+                "by_bimonth": by_bimonth,
+                "by_quarter": by_quarter,
+                "by_halfyear": by_halfyear,
                 "top_procedures": [
                     {"procedure": r["procedure"], "count": r["count"]} for r in top_procedures
                 ],
