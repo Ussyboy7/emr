@@ -116,13 +116,14 @@ def build_nursing_analytics(
         NursingOrder.objects.filter(ordered_at__gte=start_date, ordered_at__lte=end_date)
         .annotate(
             year=ExtractYear("ordered_at"),
+            month=ExtractMonth("ordered_at"),
             bimonth=Case(
-                When(ordered_at__month__in=[1, 2], then=Value(1)),
-                When(ordered_at__month__in=[3, 4], then=Value(2)),
-                When(ordered_at__month__in=[5, 6], then=Value(3)),
-                When(ordered_at__month__in=[7, 8], then=Value(4)),
-                When(ordered_at__month__in=[9, 10], then=Value(5)),
-                When(ordered_at__month__in=[11, 12], then=Value(6)),
+                When(month__in=[1, 2], then=Value(1)),
+                When(month__in=[3, 4], then=Value(2)),
+                When(month__in=[5, 6], then=Value(3)),
+                When(month__in=[7, 8], then=Value(4)),
+                When(month__in=[9, 10], then=Value(5)),
+                When(month__in=[11, 12], then=Value(6)),
                 output_field=IntegerField()
             )
         )
@@ -163,8 +164,9 @@ def build_nursing_analytics(
         NursingOrder.objects.filter(ordered_at__gte=start_date, ordered_at__lte=end_date)
         .annotate(
             year=ExtractYear("ordered_at"),
+            month=ExtractMonth("ordered_at"),
             half=Case(
-                When(ordered_at__month__lte=6, then=Value('H1')),
+                When(month__lte=6, then=Value('H1')),
                 default=Value('H2'),
                 output_field=CharField()
             )
