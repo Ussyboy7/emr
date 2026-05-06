@@ -1598,8 +1598,15 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       // Check if session is still valid and active
       const session: ConsultationSession = await consultationService.getSession(sessionId);
 
-      // Verify session is still active and belongs to this room
-      if (session.status !== 'active' || session.room !== parseInt(roomId)) {
+      // Verify session is still active and belongs to this room.
+      // Some API responses can serialize room as string/object; normalize first.
+      const status = String(session.status || '').toLowerCase();
+      const currentRoomId = Number.parseInt(roomId, 10);
+      const sessionRoomId = typeof session.room === 'object'
+        ? Number((session.room as any)?.id)
+        : Number(session.room);
+      const isSameRoom = Number.isFinite(currentRoomId) ? sessionRoomId === currentRoomId : true;
+      if (status !== 'active' || !isSameRoom) {
         if (!options.silent) {
           console.warn(`Session ${sessionId} is no longer active or in wrong room`);
         }
@@ -2494,7 +2501,16 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         await consultationService.pauseSession(sessionId);
       }
       await consultationService.resumeSession(pausedSession.id);
-      await restoreActiveSession(pausedSession.id);
+      let restored = false;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        restored = await restoreActiveSession(pausedSession.id, { silent: attempt < 2 });
+        if (restored) break;
+        // Small backoff to avoid race between resume response and session read.
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+      if (!restored) {
+        throw new Error('Session resumed but could not be restored. Please retry.');
+      }
       await loadPausedSessions();
       setShowPausedSessionsDialog(false);
       toast.success(`Resumed session with ${pausedSession.patient_name || 'patient'}`);
