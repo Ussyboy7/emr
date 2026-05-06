@@ -2,6 +2,7 @@
 Views for the Consultation app.
 """
 import logging
+from django.db import IntegrityError, transaction
 from django.db.models import Count, Q
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
@@ -102,6 +103,82 @@ class ConsultationSessionViewSet(viewsets.ModelViewSet):
             qs = qs.filter(visit__clinic=clinic)
 
         return qs
+
+    def create(self, request, *args, **kwargs):
+        """
+        Start a consultation session.
+
+        Starting can be retried from the frontend or repeated for a patient that
+        already has an active session. Treat those cases as resume requests
+        instead of surfacing database uniqueness errors as production 500s.
+        """
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        existing_session = self._find_existing_active_session(data)
+        if existing_session:
+            payload = self.get_serializer(existing_session).data
+            payload['resumed'] = True
+            return Response(payload, status=status.HTTP_200_OK)
+
+        doctor = data.get('doctor') or self._find_doctor_for_session(data)
+        save_kwargs = {'created_by': request.user}
+        if doctor:
+            save_kwargs['doctor'] = doctor
+
+        try:
+            with transaction.atomic():
+                session = serializer.save(**save_kwargs)
+        except IntegrityError:
+            existing_session = self._find_existing_active_session(data)
+            if existing_session:
+                payload = self.get_serializer(existing_session).data
+                payload['resumed'] = True
+                return Response(payload, status=status.HTTP_200_OK)
+            logger.exception("Failed to create consultation session")
+            return Response(
+                {'detail': 'Could not start consultation session. Please refresh and try again.'},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        AuditService.log_activity(
+            user=request.user,
+            action='create',
+            object_type='consultation_session',
+            object_id=str(session.id),
+            module='consultation',
+            object_repr=f'Session {session.session_id}',
+            description=f'Started consultation session {session.session_id} for patient {session.patient.get_full_name()}',
+            new_values={'session_id': session.session_id, 'status': session.status, 'room': str(session.room.id) if session.room else ''},
+            request=request,
+        )
+
+        headers = self.get_success_headers(serializer.data)
+        return Response(self.get_serializer(session).data, status=status.HTTP_201_CREATED, headers=headers)
+
+    def _find_existing_active_session(self, data):
+        visit = data.get('visit')
+        if visit:
+            existing = (
+                ConsultationSession.objects
+                .filter(visit=visit, status='active')
+                .select_related('room', 'patient', 'doctor', 'visit', 'created_by')
+                .first()
+            )
+            if existing:
+                return existing
+
+        patient = data.get('patient')
+        room = data.get('room')
+        if patient and room:
+            return (
+                ConsultationSession.objects
+                .filter(patient=patient, room=room, status='active')
+                .select_related('room', 'patient', 'doctor', 'visit', 'created_by')
+                .first()
+            )
+        return None
     
     def perform_create(self, serializer):
         """Create consultation session and log audit."""
