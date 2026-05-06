@@ -20,6 +20,7 @@ export type {
   NursingPoolAnalyticsSummary,
   NursingPoolAnalyticsDayRow,
 } from './visit-service';
+export type { NursingAnalyticsSummary } from './nursing-service';
 export type {
   Prescription,
   PrescriptionItem,

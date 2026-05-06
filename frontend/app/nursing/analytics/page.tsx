@@ -189,7 +189,7 @@ export default function NursingAnalyticsPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `nursing-analytics-${analyticsData.period.start_date}-to-${analyticsData.period.end_date}.csv`;
+    a.download = `nursing-analytics-${analyticsData.period.start}-to-${analyticsData.period.end}.csv`;
     a.click();
     URL.revokeObjectURL(url);
     toast.success("Report exported successfully");
@@ -208,7 +208,7 @@ export default function NursingAnalyticsPage() {
       label: key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
       male: 0, // Simplified - not breaking down by gender for now
       female: 0,
-      total: count,
+      total: Number(count || 0),
       percentage: uniquePatients > 0 ? ((count / uniquePatients) * 100) : 0,
     }));
 
@@ -233,7 +233,7 @@ export default function NursingAnalyticsPage() {
     if (!analyticsData) return [];
     return Object.entries(analyticsData.orders_by_status).map(([status, count]) => ({
       name: status.replace(/_/g, " "),
-      count,
+      count: Number(count || 0),
     }));
   }, [analyticsData]);
 
@@ -241,7 +241,7 @@ export default function NursingAnalyticsPage() {
     if (!analyticsData) return [];
     return Object.entries(analyticsData.orders_by_priority).map(([priority, count]) => ({
       name: priority,
-      count,
+      count: Number(count || 0),
     }));
   }, [analyticsData]);
 
@@ -249,7 +249,7 @@ export default function NursingAnalyticsPage() {
     if (!analyticsData) return [];
     return Object.entries(analyticsData.orders_by_type).map(([type, count]) => ({
       name: type.replace(/_/g, " "),
-      count,
+      count: Number(count || 0),
     }));
   }, [analyticsData]);
 

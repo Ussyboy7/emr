@@ -136,7 +136,7 @@ export default function EyecareAnalyticsPage() {
       source = data.by_week || [];
       key = 'week';
       label = 'Week';
-    } else if (viewMode === 'monthly' || viewMode === 'bimonthly' || viewMode === 'annually' || viewMode === 'year') {
+    } else if (viewMode === 'monthly' || viewMode === 'annually' || viewMode === 'year') {
       source = data.by_month || [];
       key = 'month';
       label = 'Month';
