@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from django.db.models import Avg, Case, CharField, Count, F, IntegerField, Q, QuerySet, Value, When
-from django.db.models.functions import ExtractYear, TruncDate, TruncMonth, TruncWeek
+from django.db.models.functions import ExtractMonth, ExtractYear, TruncDate, TruncMonth, TruncWeek
 from django.utils import timezone
 
 # from common.module_analytics import patient_category_breakdown, patient_gender_breakdown
@@ -242,13 +242,14 @@ def build_comprehensive_consultation_analytics(
         ConsultationSession.objects.filter(started_at__gte=start_date, started_at__lte=end_date)
         .annotate(
             year=ExtractYear("started_at"),
+            month=ExtractMonth("started_at"),
             bimonth=Case(
-                When(started_at__month__in=[1, 2], then=Value(1)),
-                When(started_at__month__in=[3, 4], then=Value(2)),
-                When(started_at__month__in=[5, 6], then=Value(3)),
-                When(started_at__month__in=[7, 8], then=Value(4)),
-                When(started_at__month__in=[9, 10], then=Value(5)),
-                When(started_at__month__in=[11, 12], then=Value(6)),
+                When(month__in=[1, 2], then=Value(1)),
+                When(month__in=[3, 4], then=Value(2)),
+                When(month__in=[5, 6], then=Value(3)),
+                When(month__in=[7, 8], then=Value(4)),
+                When(month__in=[9, 10], then=Value(5)),
+                When(month__in=[11, 12], then=Value(6)),
                 output_field=IntegerField()
             )
         )
@@ -270,7 +271,8 @@ def build_comprehensive_consultation_analytics(
         ConsultationSession.objects.filter(started_at__gte=start_date, started_at__lte=end_date)
         .annotate(
             year=ExtractYear("started_at"),
-            quarter=((TruncDate("started_at").month - 1) // 3 + 1)
+            month=ExtractMonth("started_at"),
+            quarter=((ExtractMonth("started_at") - 1) // 3 + 1)
         )
         .values("year", "quarter")
         .annotate(sessions=Count("id"), completed=Count("id", filter=Q(status="completed")))
@@ -290,8 +292,9 @@ def build_comprehensive_consultation_analytics(
         ConsultationSession.objects.filter(started_at__gte=start_date, started_at__lte=end_date)
         .annotate(
             year=ExtractYear("started_at"),
+            month=ExtractMonth("started_at"),
             half=Case(
-                When(started_at__month__lte=6, then=Value('H1')),
+                When(month__lte=6, then=Value('H1')),
                 default=Value('H2'),
                 output_field=CharField()
             )
