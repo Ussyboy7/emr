@@ -267,7 +267,7 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_RATES": {
         # Global baselines.
         "anon": os.getenv("THROTTLE_ANON", "30/min"),
-        "user": os.getenv("THROTTLE_USER", "240/min"),
+        "user": os.getenv("THROTTLE_USER", "1000/min"),
         # Scoped buckets — attach via ``throttle_scope`` on the view.
         "auth_login": os.getenv("THROTTLE_AUTH_LOGIN", "10/min"),
         "auth_refresh": os.getenv("THROTTLE_AUTH_REFRESH", "30/min"),
