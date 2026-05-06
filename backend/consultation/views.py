@@ -327,8 +327,28 @@ class ConsultationSessionViewSet(viewsets.ModelViewSet):
             .exclude(status='cancelled')
         )
 
-        from .analytics import build_comprehensive_consultation_analytics
-        analytics = build_comprehensive_consultation_analytics(base, start_date, end_date)
+        # Temporarily use simple analytics to test endpoint
+        analytics = {
+            "session_metrics": {
+                "total_sessions": base.count(),
+                "completed_sessions": base.filter(status='completed').count(),
+                "active_sessions": base.filter(status='active').count(),
+                "completion_rate": 0,
+                "avg_duration": 0,
+                "median_duration": 0,
+                "max_duration": 0,
+                "min_duration": 0,
+            },
+            "throughput": {},
+            "room_utilization": {},
+            "doctor_productivity": {},
+            "patient_demographics": {
+                "attendance_by_category": [],
+                "attendance_totals": {"male": 0, "female": 0, "total": 0}
+            }
+        }
+        # from .analytics import build_comprehensive_consultation_analytics
+        # analytics = build_comprehensive_consultation_analytics(base, start_date, end_date)
 
         # Add clinical outcomes data
         try:
