@@ -2,6 +2,7 @@
 from collections import defaultdict
 
 from django.db.models import Count, Q
+from django.db.models import Case, CharField, Count, IntegerField, Sum, Value, When
 from django.db.models.functions import ExtractYear, TruncDate, TruncMonth, TruncWeek
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -207,11 +208,19 @@ class RadiologyAnalyticsSummaryView(APIView):
         # Bimonthly
         bimonthly = (
             RadiologyStudy.objects.filter(study_filter)
-            .extra(select={
-                'bimonth': "FLOOR((EXTRACT(MONTH FROM order__ordered_at) - 1) / 2) + 1",
-                'year': "EXTRACT(YEAR FROM order__ordered_at)"
-            })
-            .values("bimonth", "year")
+            .annotate(
+                year=ExtractYear("order__ordered_at"),
+                bimonth=Case(
+                    When(order__ordered_at__month__in=[1, 2], then=Value(1)),
+                    When(order__ordered_at__month__in=[3, 4], then=Value(2)),
+                    When(order__ordered_at__month__in=[5, 6], then=Value(3)),
+                    When(order__ordered_at__month__in=[7, 8], then=Value(4)),
+                    When(order__ordered_at__month__in=[9, 10], then=Value(5)),
+                    When(order__ordered_at__month__in=[11, 12], then=Value(6)),
+                    output_field=IntegerField()
+                )
+            )
+            .values("year", "bimonth")
             .annotate(studies=Count("id"), orders=Count("order_id", distinct=True))
             .order_by("year", "bimonth")
         )
@@ -226,11 +235,11 @@ class RadiologyAnalyticsSummaryView(APIView):
 
         quarterly = (
             RadiologyStudy.objects.filter(study_filter)
-            .extra(select={
-                'year': "EXTRACT(YEAR FROM order__ordered_at)",
-                'quarter': "FLOOR((EXTRACT(MONTH FROM order__ordered_at) - 1) / 3) + 1",
-                'q': "EXTRACT(YEAR FROM order__ordered_at) * 100 + FLOOR((EXTRACT(MONTH FROM order__ordered_at) - 1) / 3) + 1"
-            })
+            .annotate(
+                year=ExtractYear("order__ordered_at"),
+                quarter=((TruncDate("order__ordered_at").month - 1) // 3 + 1),
+                q=ExtractYear("order__ordered_at") * 100 + ((TruncDate("order__ordered_at").month - 1) // 3 + 1)
+            )
             .values("q")
             .annotate(studies=Count("id"), orders=Count("order_id", distinct=True))
             .order_by("q")
@@ -246,11 +255,15 @@ class RadiologyAnalyticsSummaryView(APIView):
 
         halfyearly = (
             RadiologyStudy.objects.filter(study_filter)
-            .extra(select={
-                'half': "CASE WHEN EXTRACT(MONTH FROM order__ordered_at) <= 6 THEN 'H1' ELSE 'H2' END",
-                'year': "EXTRACT(YEAR FROM order__ordered_at)"
-            })
-            .values("half", "year")
+            .annotate(
+                year=ExtractYear("order__ordered_at"),
+                half=Case(
+                    When(order__ordered_at__month__lte=6, then=Value('H1')),
+                    default=Value('H2'),
+                    output_field=CharField()
+                )
+            )
+            .values("year", "half")
             .annotate(studies=Count("id"), orders=Count("order_id", distinct=True))
             .order_by("year", "half")
         )
