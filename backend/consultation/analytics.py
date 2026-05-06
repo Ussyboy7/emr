@@ -56,11 +56,10 @@ def build_comprehensive_consultation_analytics(
     # Convert to list for multiple iterations
     session_list = list(sessions.values(
         'id', 'session_id', 'status', 'started_at', 'ended_at', 'active_seconds',
-        'room__name', 'room__clinic__name',
+        'room__name',
         'patient__id', 'patient__first_name', 'patient__surname', 'patient__middle_name',
         'patient__gender', 'patient__category', 'patient__employee_type', 'patient__dependent_type',
-        'doctor__id', 'doctor__first_name', 'doctor__last_name',
-        'visit__id', 'visit__date', 'visit__visit_type'
+        'doctor__id', 'doctor__first_name', 'doctor__last_name'
     ))
 
     # Basic session metrics
