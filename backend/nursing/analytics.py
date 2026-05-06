@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Any
 
 from django.db.models import Case, CharField, Count, IntegerField, Q, Value, When
-from django.db.models.functions import ExtractYear, TruncDate, TruncMonth, TruncWeek
+from django.db.models.functions import ExtractYear, ExtractMonth, TruncDate, TruncMonth, TruncWeek
 
 from common.module_analytics import (
     npa_staff_vs_non_npa,
@@ -143,7 +143,8 @@ def build_nursing_analytics(
         NursingOrder.objects.filter(ordered_at__gte=start_date, ordered_at__lte=end_date)
         .annotate(
             year=ExtractYear("ordered_at"),
-            quarter=((TruncDate("ordered_at").month - 1) // 3 + 1)
+            month=ExtractMonth("ordered_at"),
+            quarter=((ExtractMonth("ordered_at") - 1) // 3 + 1)
         )
         .values("year", "quarter")
         .annotate(orders=Count("id"), completed=Count("id", filter=Q(status="completed")))
