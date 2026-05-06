@@ -15,6 +15,15 @@ import { toast } from "sonner";
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { patientService, formatPatientGenderLabel, type Patient as ApiPatient } from '@/lib/services';
+import {
+  DEPENDENT_TYPES,
+  TITLES,
+  MARITAL_STATUSES,
+  RELIGIONS,
+  NIGERIAN_TRIBES,
+  NIGERIA_STATES,
+  NIGERIA_STATES_AND_LGAS
+} from '@/lib/constants/patient';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { 
@@ -23,34 +32,8 @@ import {
   Camera, Upload
 } from 'lucide-react';
 
-// Dependent types
-const dependentTypes = ['Employee Dependent', 'Retiree Dependent'];
-
 // Relationship types (matching backend expectations)
 const relationshipTypes = ['Spouse', 'Child', 'Parent', 'Sibling', 'Guardian', 'Other'];
-
-// Constants for form fields (matching patient registration)
-const titles = ['Mr', 'Mrs', 'Ms', 'Dr', 'Chief', 'Engr', 'Prof', 'Alhaji', 'Hajia'];
-const maritalStatuses = ['Single', 'Married', 'Divorced', 'Widowed'];
-const religions = ['Christianity', 'Islam', 'Traditional', 'Other', 'None'];
-const tribes = [
-  'Hausa', 'Fulani', 'Yoruba', 'Igbo',
-  'Ijaw', 'Urhobo', 'Isoko', 'Itsekiri', 'Edo (Bini)', 'Esan', 'Anioma',
-  'Ibibio', 'Efik', 'Annang', 'Ikwerre', 'Ogoni', 'Kalabari',
-  'Tiv', 'Idoma', 'Igala', 'Ebira', 'Nupe', 'Gbagyi (Gwari)',
-  'Jukun', 'Tarok', 'Berom', 'Bachama', 'Angas', 'Atyap (Kataf)',
-  'Mumuye', 'Kuteb',
-  'Kanuri', 'Shuwa Arab', 'Higgi (Kamwe)', 'Margi', 'Bura',
-  'Other',
-];
-
-const NIGERIA_STATES = [
-  'Abia', 'Adamawa', 'Akwa Ibom', 'Anambra', 'Bauchi', 'Bayelsa', 'Benue', 'Borno',
-  'Cross River', 'Delta', 'Ebonyi', 'Edo', 'Ekiti', 'Enugu', 'FCT', 'Gombe', 'Imo',
-  'Jigawa', 'Kaduna', 'Kano', 'Katsina', 'Kebbi', 'Kogi', 'Kwara', 'Lagos', 'Nasarawa',
-  'Niger', 'Ogun', 'Ondo', 'Osun', 'Oyo', 'Plateau', 'Rivers', 'Sokoto', 'Taraba',
-  'Yobe', 'Zamfara'
-];
 
 // Entitlement rules
 const DEPENDENT_ENTITLEMENTS = {
@@ -1225,7 +1208,7 @@ export default function DependentsPage() {
                             <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
                             <SelectContent>
                               <SelectItem value="none">None</SelectItem>
-                              {titles.map(title => <SelectItem key={title} value={title.toLowerCase()}>{title}</SelectItem>)}
+                              {TITLES.map(title => <SelectItem key={title} value={title.toLowerCase()}>{title}</SelectItem>)}
                             </SelectContent>
                           </Select>
                         </div>
@@ -1253,7 +1236,7 @@ export default function DependentsPage() {
                             <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
                             <SelectContent>
                               <SelectItem value="not-specified">Unspecified</SelectItem>
-                              {maritalStatuses.map(status => <SelectItem key={status} value={status.toLowerCase()}>{status}</SelectItem>)}
+                              {MARITAL_STATUSES.map(status => <SelectItem key={status} value={status.toLowerCase()}>{status}</SelectItem>)}
                             </SelectContent>
                           </Select>
                         </div>
@@ -1265,7 +1248,7 @@ export default function DependentsPage() {
                             <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
                             <SelectContent>
                               <SelectItem value="not-specified">Unspecified</SelectItem>
-                              {religions.map(religion => <SelectItem key={religion} value={religion}>{religion}</SelectItem>)}
+                              {RELIGIONS.map(religion => <SelectItem key={religion} value={religion}>{religion}</SelectItem>)}
                             </SelectContent>
                           </Select>
                         </div>
@@ -1275,7 +1258,7 @@ export default function DependentsPage() {
                             <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
                             <SelectContent>
                               <SelectItem value="not-specified">Unspecified</SelectItem>
-                              {tribes.map(tribe => <SelectItem key={tribe} value={tribe}>{tribe}</SelectItem>)}
+                              {NIGERIAN_TRIBES.map(tribe => <SelectItem key={tribe} value={tribe}>{tribe}</SelectItem>)}
                             </SelectContent>
                           </Select>
                         </div>

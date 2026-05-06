@@ -16,6 +16,15 @@ import { toast } from "sonner";
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { patientService, type Patient as ApiPatient } from '@/lib/services';
+import {
+  TITLES,
+  MARITAL_STATUSES,
+  RELIGIONS,
+  NIGERIAN_TRIBES,
+  NOK_RELATIONSHIPS,
+  NPA_DIVISIONS,
+  NIGERIA_STATES
+} from '@/lib/constants/patient';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import { useCurrentUser } from '@/hooks/use-current-user';
@@ -58,38 +67,7 @@ const formatTime = (dateString: string | undefined): string => {
   }
 };
 
-// Constants for form fields
-const titles = ['Mr', 'Mrs', 'Ms', 'Dr', 'Chief', 'Engr', 'Prof', 'Alhaji', 'Hajia'];
-const maritalStatuses = ['Single', 'Married', 'Divorced', 'Widowed'];
-const religions = ['Christianity', 'Islam', 'Traditional', 'Other', 'None'];
-const tribes = [
-  'Hausa', 'Fulani', 'Yoruba', 'Igbo',
-  'Ijaw', 'Urhobo', 'Isoko', 'Itsekiri', 'Edo (Bini)', 'Esan', 'Anioma',
-  'Ibibio', 'Efik', 'Annang', 'Ikwerre', 'Ogoni', 'Kalabari',
-  'Tiv', 'Idoma', 'Igala', 'Ebira', 'Nupe', 'Gbagyi (Gwari)',
-  'Jukun', 'Tarok', 'Berom', 'Bachama', 'Angas', 'Atyap (Kataf)',
-  'Mumuye', 'Kuteb',
-  'Kanuri', 'Shuwa Arab', 'Higgi (Kamwe)', 'Margi', 'Bura',
-  'Other',
-];
-const NOK_RELATIONSHIPS = ['Spouse', 'Parent', 'Child', 'Sibling', 'Relative', 'Friend', 'Other'];
 
-// NPA Divisions
-const divisions = [
-  "Engineering", "Land & Asset Administration", "Marine and Operations", "Monitoring & Regulation",
-  "HSE", "Security", "Port Managers", "HR", "Medical", "Admin", "Finance", "Superannuation & Investment",
-  "Enterprise Risk Management", "Procurement", "Corporate & Strategic Communications",
-  "Corporate & Strategic Planning", "Legal Services", "Audit", "ICT", "PPP",
-  "Abuja Liaison Office", "Servicom", "Overseas Liaison Office", "MD's Office"
-];
-
-const NIGERIA_STATES = [
-  'Abia', 'Adamawa', 'Akwa Ibom', 'Anambra', 'Bauchi', 'Bayelsa', 'Benue', 'Borno',
-  'Cross River', 'Delta', 'Ebonyi', 'Edo', 'Ekiti', 'Enugu', 'FCT', 'Gombe', 'Imo',
-  'Jigawa', 'Kaduna', 'Kano', 'Katsina', 'Kebbi', 'Kogi', 'Kwara', 'Lagos', 'Nasarawa',
-  'Niger', 'Ogun', 'Ondo', 'Osun', 'Oyo', 'Plateau', 'Rivers', 'Sokoto', 'Taraba',
-  'Yobe', 'Zamfara'
-];
 
 // Patient type
 type Patient = {
@@ -1412,7 +1390,7 @@ export default function PatientsListPage() {
                             <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
                             <SelectContent>
                               <SelectItem value="none">None</SelectItem>
-                              {titles.map(title => <SelectItem key={title} value={title.toLowerCase()}>{title}</SelectItem>)}
+                              {TITLES.map(title => <SelectItem key={title} value={title.toLowerCase()}>{title}</SelectItem>)}
                             </SelectContent>
                           </Select>
                         </div>
@@ -1440,7 +1418,7 @@ export default function PatientsListPage() {
                             <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
                             <SelectContent>
                               <SelectItem value="not-specified">Unspecified</SelectItem>
-                              {maritalStatuses.map(status => <SelectItem key={status} value={status.toLowerCase()}>{status}</SelectItem>)}
+                              {MARITAL_STATUSES.map(status => <SelectItem key={status} value={status.toLowerCase()}>{status}</SelectItem>)}
                             </SelectContent>
                           </Select>
                         </div>
@@ -1465,7 +1443,7 @@ export default function PatientsListPage() {
                             <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
                             <SelectContent>
                               <SelectItem value="not-specified">Unspecified</SelectItem>
-                              {religions.map(religion => <SelectItem key={religion} value={religion}>{religion}</SelectItem>)}
+                              {RELIGIONS.map(religion => <SelectItem key={religion} value={religion}>{religion}</SelectItem>)}
                             </SelectContent>
                           </Select>
                         </div>
@@ -1475,7 +1453,7 @@ export default function PatientsListPage() {
                             <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
                             <SelectContent>
                               <SelectItem value="not-specified">Unspecified</SelectItem>
-                              {tribes.map(tribe => <SelectItem key={tribe} value={tribe}>{tribe}</SelectItem>)}
+                              {NIGERIAN_TRIBES.map(tribe => <SelectItem key={tribe} value={tribe}>{tribe}</SelectItem>)}
                             </SelectContent>
                           </Select>
                         </div>
@@ -2007,7 +1985,7 @@ export default function PatientsListPage() {
                                 <SelectTrigger><SelectValue placeholder="Select division" /></SelectTrigger>
                                 <SelectContent>
                                   <SelectItem value="not-specified">Unspecified</SelectItem>
-                                  {divisions.map(div => <SelectItem key={div} value={div}>{div}</SelectItem>)}
+                                  {NPA_DIVISIONS.map(div => <SelectItem key={div} value={div}>{div}</SelectItem>)}
                                 </SelectContent>
                               </Select>
                             </div>
