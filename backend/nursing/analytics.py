@@ -7,8 +7,8 @@ from collections import defaultdict
 from datetime import datetime
 from typing import Any
 
-from django.db.models import Case, CharField, Count, IntegerField, Q, Value, When
-from django.db.models.functions import ExtractYear, ExtractMonth, TruncDate, TruncMonth, TruncWeek
+from django.db.models import Count, Q
+from django.db.models.functions import TruncDate, TruncMonth, TruncWeek
 
 from common.module_analytics import (
     npa_staff_vs_non_npa,
@@ -114,19 +114,10 @@ def build_nursing_analytics(
     # Bimonthly - using Django ORM
     bimonthly = (
         NursingOrder.objects.filter(ordered_at__gte=start_date, ordered_at__lte=end_date)
-        .annotate(
-            year=ExtractYear("ordered_at"),
-            month=ExtractMonth("ordered_at"),
-            bimonth=Case(
-                When(month__in=[1, 2], then=Value(1)),
-                When(month__in=[3, 4], then=Value(2)),
-                When(month__in=[5, 6], then=Value(3)),
-                When(month__in=[7, 8], then=Value(4)),
-                When(month__in=[9, 10], then=Value(5)),
-                When(month__in=[11, 12], then=Value(6)),
-                output_field=IntegerField()
-            )
-        )
+        .extra(select={
+            'year': "EXTRACT(YEAR FROM ordered_at)",
+            'bimonth': "FLOOR((EXTRACT(MONTH FROM ordered_at) - 1) / 2) + 1"
+        })
         .values("year", "bimonth")
         .annotate(orders=Count("id"), completed=Count("id", filter=Q(status="completed")))
         .order_by("year", "bimonth")
@@ -142,11 +133,10 @@ def build_nursing_analytics(
 
     quarterly = (
         NursingOrder.objects.filter(ordered_at__gte=start_date, ordered_at__lte=end_date)
-        .annotate(
-            year=ExtractYear("ordered_at"),
-            month=ExtractMonth("ordered_at"),
-            quarter=((ExtractMonth("ordered_at") - 1) // 3 + 1)
-        )
+        .extra(select={
+            'year': "EXTRACT(YEAR FROM ordered_at)",
+            'quarter': "FLOOR((EXTRACT(MONTH FROM ordered_at) - 1) / 3) + 1"
+        })
         .values("year", "quarter")
         .annotate(orders=Count("id"), completed=Count("id", filter=Q(status="completed")))
         .order_by("year", "quarter")
@@ -162,15 +152,10 @@ def build_nursing_analytics(
 
     halfyearly = (
         NursingOrder.objects.filter(ordered_at__gte=start_date, ordered_at__lte=end_date)
-        .annotate(
-            year=ExtractYear("ordered_at"),
-            month=ExtractMonth("ordered_at"),
-            half=Case(
-                When(month__lte=6, then=Value('H1')),
-                default=Value('H2'),
-                output_field=CharField()
-            )
-        )
+        .extra(select={
+            'year': "EXTRACT(YEAR FROM ordered_at)",
+            'half': "CASE WHEN EXTRACT(MONTH FROM ordered_at) <= 6 THEN 'H1' ELSE 'H2' END"
+        })
         .values("year", "half")
         .annotate(orders=Count("id"), completed=Count("id", filter=Q(status="completed")))
         .order_by("year", "half")
