@@ -1187,6 +1187,30 @@ export interface PharmacyAnalyticsSummary {
     total_quantity: number;
     prescriptions: number;
   }>;
+  by_week?: Array<{
+    week: string;
+    dispense_events: number;
+    total_quantity: number;
+    prescriptions: number;
+  }>;
+  by_bimonth?: Array<{
+    bimonth: string;
+    dispense_events: number;
+    total_quantity: number;
+    prescriptions: number;
+  }>;
+  by_quarter?: Array<{
+    quarter: string;
+    dispense_events: number;
+    total_quantity: number;
+    prescriptions: number;
+  }>;
+  by_halfyear?: Array<{
+    halfyear: string;
+    dispense_events: number;
+    total_quantity: number;
+    prescriptions: number;
+  }>;
   top_medications_by_quantity: Array<{
     medication_id: number;
     name: string;

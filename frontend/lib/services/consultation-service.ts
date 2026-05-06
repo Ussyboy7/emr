@@ -185,6 +185,12 @@ export interface ConsultationAnalytics {
     total: number;
     by_certainty: Record<string, number>;
   };
+  by_day?: Array<{ date: string; sessions: number; completed: number }>;
+  by_week?: Array<{ week: string; sessions: number; completed: number }>;
+  by_month?: Array<{ month: string; sessions: number; completed: number }>;
+  by_bimonth?: Array<{ bimonth: string; sessions: number; completed: number }>;
+  by_quarter?: Array<{ quarter: string; sessions: number; completed: number }>;
+  by_halfyear?: Array<{ halfyear: string; sessions: number; completed: number }>;
   period: {
     start_date: string;
     end_date: string;

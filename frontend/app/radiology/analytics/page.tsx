@@ -70,8 +70,35 @@ function radiologyAnalyticsToCsv(
   lines.push(['Summary metric', 'Value'].map(esc).join(','));
   Object.entries(d.summary).forEach(([k, v]) => lines.push([k, String(v)].map(esc).join(',')));
   lines.push('');
-  lines.push(['Day', 'Studies', 'Orders'].map(esc).join(','));
-  (d.by_day || []).forEach((row) => lines.push([row.date || '', String(row.studies), String(row.orders)].map(esc).join(',')));
+  if (d.by_day?.length) {
+    lines.push(['Day', 'Studies', 'Orders'].map(esc).join(','));
+    d.by_day.forEach((row) => lines.push([row.date || '', String(row.studies), String(row.orders)].map(esc).join(',')));
+  }
+  if (d.by_week?.length) {
+    lines.push('');
+    lines.push(['Week', 'Studies', 'Orders'].map(esc).join(','));
+    d.by_week.forEach((row) => lines.push([row.week || '', String(row.studies), String(row.orders)].map(esc).join(',')));
+  }
+  if (d.by_month?.length) {
+    lines.push('');
+    lines.push(['Month', 'Studies', 'Orders'].map(esc).join(','));
+    d.by_month.forEach((row) => lines.push([row.month || '', String(row.studies), String(row.orders)].map(esc).join(',')));
+  }
+  if (d.by_bimonth?.length) {
+    lines.push('');
+    lines.push(['Bi-Month', 'Studies', 'Orders'].map(esc).join(','));
+    d.by_bimonth.forEach((row) => lines.push([row.bimonth || '', String(row.studies), String(row.orders)].map(esc).join(',')));
+  }
+  if (d.by_quarter?.length) {
+    lines.push('');
+    lines.push(['Quarter', 'Studies', 'Orders'].map(esc).join(','));
+    d.by_quarter.forEach((row) => lines.push([row.quarter || '', String(row.studies), String(row.orders)].map(esc).join(',')));
+  }
+  if (d.by_halfyear?.length) {
+    lines.push('');
+    lines.push(['Half-Year', 'Studies', 'Orders'].map(esc).join(','));
+    d.by_halfyear.forEach((row) => lines.push([row.halfyear || '', String(row.studies), String(row.orders)].map(esc).join(',')));
+  }
   lines.push('');
   lines.push(['Procedure', 'Count'].map(esc).join(','));
   (d.top_procedures || []).forEach((p) => lines.push([p.procedure, String(p.count)].map(esc).join(',')));
@@ -157,9 +184,11 @@ export default function RadiologyAnalyticsPage() {
   }, [viewMode, year, startDate, endDate]);
 
   useEffect(() => {
-    if (viewMode === 'year' && year) {
-      void fetchReport();
-    } else if (viewMode === 'range' && startDate && endDate) {
+    const shouldFetch =
+      (viewMode === 'year' && year) ||
+      (viewMode === 'range' && startDate && endDate) ||
+      ['daily', 'weekly', 'monthly', 'bimonthly', 'quarterly', 'half-yearly', 'annually'].includes(viewMode);
+    if (shouldFetch) {
       void fetchReport();
     }
   }, [viewMode, year, startDate, endDate, fetchReport]);
@@ -207,6 +236,43 @@ export default function RadiologyAnalyticsPage() {
       orders: d.orders,
     }));
   }, [data]);
+
+  const periodBreakdown = useMemo(() => {
+    if (!data) return [];
+    let source: any[] = [];
+    let key = '';
+    let label = '';
+    if (viewMode === 'daily' || viewMode === 'range') {
+      source = data.by_day || [];
+      key = 'date';
+      label = 'Day';
+    } else if (viewMode === 'weekly') {
+      source = data.by_week || [];
+      key = 'week';
+      label = 'Week';
+    } else if (viewMode === 'monthly' || viewMode === 'bimonthly' || viewMode === 'annually' || viewMode === 'year') {
+      source = data.by_month || [];
+      key = 'month';
+      label = 'Month';
+    } else if (viewMode === 'bimonthly') {
+      source = data.by_bimonth || [];
+      key = 'bimonth';
+      label = 'Bi-Month';
+    } else if (viewMode === 'quarterly') {
+      source = data.by_quarter || [];
+      key = 'quarter';
+      label = 'Quarter';
+    } else if (viewMode === 'half-yearly') {
+      source = data.by_halfyear || [];
+      key = 'halfyear';
+      label = 'Half-Year';
+    }
+    return source.map((row) => ({
+      period: row[key] ?? '',
+      studies: row.studies,
+      orders: row.orders,
+    }));
+  }, [data, viewMode]);
 
   const topProcedures = useMemo(() => {
     if (!data?.top_procedures?.length) return [];
@@ -337,7 +403,29 @@ export default function RadiologyAnalyticsPage() {
               </Card>
             </div>
 
-            <div className="grid lg:grid-cols-2 gap-6">
+             <div className="grid lg:grid-cols-2 gap-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Studies by Period</CardTitle>
+                  <CardDescription>Number of studies ordered in the selected period breakdown</CardDescription>
+                </CardHeader>
+                <CardContent className="h-64">
+                  {periodBreakdown.length === 0 ? (
+                    <EmptyChart />
+                  ) : (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={periodBreakdown}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="period" tick={{ fontSize: 10 }} />
+                        <YAxis tick={{ fontSize: 11 }} />
+                        <Tooltip />
+                        <Bar dataKey="studies" name="Studies" fill={CHART_COLORS.primary} radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  )}
+                </CardContent>
+              </Card>
+
               <Card>
                 <CardHeader>
                   <CardTitle className="text-base">Order source</CardTitle>

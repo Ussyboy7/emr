@@ -313,6 +313,11 @@ class ConsultationSessionViewSet(viewsets.ModelViewSet):
         Requires start and end date parameters.
         """
         from common.module_analytics import parse_analytics_dates
+        from pharmacy.models import Prescription
+        from laboratory.models import LabOrder
+        from nursing.models import NursingOrder
+        from .analytics import build_comprehensive_consultation_analytics
+
         dates = parse_analytics_dates(request)
         if isinstance(dates, Response):
             return dates
@@ -327,84 +332,30 @@ class ConsultationSessionViewSet(viewsets.ModelViewSet):
             .exclude(status='cancelled')
         )
 
-        # Temporarily use simple analytics to test endpoint
-        analytics = {
-            "session_metrics": {
-                "total_sessions": base.count(),
-                "completed_sessions": base.filter(status='completed').count(),
-                "active_sessions": base.filter(status='active').count(),
-                "completion_rate": 0,
-                "avg_duration": 0,
-                "median_duration": 0,
-                "max_duration": 0,
-                "min_duration": 0,
-            },
-            "throughput": {},
-            "room_utilization": {},
-            "doctor_productivity": {},
-            "patient_demographics": {
-                "attendance_by_category": [],
-                "attendance_totals": {"male": 0, "female": 0, "total": 0}
-            }
+        analytics = build_comprehensive_consultation_analytics(base, start_date, end_date)
+
+        completed_session_visits = list(
+            base.filter(status='completed')
+            .exclude(visit__isnull=True)
+            .values_list('visit_id', flat=True)
+            .distinct()
+        )
+        analytics['clinical_outcomes'] = {
+            'prescriptions': Prescription.objects.filter(visit_id__in=completed_session_visits).count() if completed_session_visits else 0,
+            'lab_orders': LabOrder.objects.filter(visit_id__in=completed_session_visits).count() if completed_session_visits else 0,
+            'nursing_orders': NursingOrder.objects.filter(visit_id__in=completed_session_visits).count() if completed_session_visits else 0,
         }
-        # from .analytics import build_comprehensive_consultation_analytics
-        # analytics = build_comprehensive_consultation_analytics(base, start_date, end_date)
 
-        # Add clinical outcomes data
-        try:
-            from pharmacy.models import Prescription
-            from laboratory.models import LabOrder
-            from nursing.models import NursingOrder
+        period_referrals = Referral.objects.filter(
+            referred_at__gte=start_date,
+            referred_at__lte=end_date
+        )
+        analytics['referrals'] = {
+            'total': period_referrals.count(),
+            'pending': period_referrals.exclude(status__in=['closed', 'cancelled']).count(),
+            'completed': period_referrals.filter(status='closed').count(),
+        }
 
-            # Get visits from completed sessions
-            completed_session_visits = set(
-                base.filter(status='completed')
-                .exclude(visit__isnull=True)
-                .values_list('visit_id', flat=True)
-            )
-
-            if completed_session_visits:
-                analytics['clinical_outcomes'] = {
-                    'prescriptions': Prescription.objects.filter(visit_id__in=completed_session_visits).count(),
-                    'lab_orders': LabOrder.objects.filter(visit_id__in=completed_session_visits).count(),
-                    'nursing_orders': NursingOrder.objects.filter(visit_id__in=completed_session_visits).count(),
-                }
-            else:
-                analytics['clinical_outcomes'] = {
-                    'prescriptions': 0,
-                    'lab_orders': 0,
-                    'nursing_orders': 0,
-                }
-        except Exception as e:
-            # If clinical outcomes queries fail, provide default values
-            analytics['clinical_outcomes'] = {
-                'prescriptions': 0,
-                'lab_orders': 0,
-                'nursing_orders': 0,
-            }
-
-        # Add referral stats
-        try:
-            from .models import Referral
-            period_referrals = Referral.objects.filter(
-                referred_at__gte=start_date,
-                referred_at__lte=end_date
-            )
-            analytics['referrals'] = {
-                'total': period_referrals.count(),
-                'pending': period_referrals.filter(status__in=['draft', 'sent']).count(),
-                'completed': period_referrals.filter(status='completed').count(),
-            }
-        except Exception as e:
-            # If referral queries fail, provide default values
-            analytics['referrals'] = {
-                'total': 0,
-                'pending': 0,
-                'completed': 0,
-            }
-
-        # Add diagnosis stats
-        from .models import Diagnosis
         period_diagnoses = Diagnosis.objects.filter(
             diagnosed_at__gte=start_date,
             diagnosed_at__lte=end_date
@@ -413,7 +364,7 @@ class ConsultationSessionViewSet(viewsets.ModelViewSet):
             'total': period_diagnoses.count(),
             'by_certainty': {
                 certainty: period_diagnoses.filter(certainty=certainty).count()
-                for certainty in ['confirmed', 'probable', 'possible', 'ruled_out']
+                for certainty in ['confirmed', 'probable', 'possible']
             }
         }
 

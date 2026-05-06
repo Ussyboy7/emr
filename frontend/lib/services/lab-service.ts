@@ -151,6 +151,11 @@ export interface LabAnalyticsSummary {
     total: number;
   };
   by_day: Array<{ date: string; tests: number; orders: number }>;
+  by_week?: Array<{ week: string; tests: number; orders: number }>;
+  by_month?: Array<{ month: string; tests: number; orders: number }>;
+  by_bimonth?: Array<{ bimonth: string; tests: number; orders: number }>;
+  by_quarter?: Array<{ quarter: string; tests: number; orders: number }>;
+  by_halfyear?: Array<{ halfyear: string; tests: number; orders: number }>;
   top_tests: Array<{ code: string; name: string; count: number }>;
   tests_by_template_category: Record<string, number>;
   tests_by_category_with_investigations?: Record<

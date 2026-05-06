@@ -7,13 +7,13 @@ import {
   analyticsRangeFromFilters,
   type AnalyticsViewMode,
 } from "@/components/analytics/AnalyticsReportLayout";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Activity, Heart, Timer, Users, Stethoscope, FileText, TestTube, Pill } from "lucide-react";
 import { toast } from "sonner";
 import { apiFetch, buildQueryString } from "@/lib/api-client";
-import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { ConsultationAnalytics } from "@/lib/services";
 
 const CHART_COLORS = {
@@ -73,9 +73,11 @@ export default function ConsultationAnalyticsPage() {
   }, [viewMode, year, startDate, endDate]);
 
   useEffect(() => {
-    if (viewMode === "year" && year) {
-      void loadAnalytics();
-    } else if (viewMode === "range" && startDate && endDate) {
+    const shouldFetch =
+      (viewMode === "year" && year) ||
+      (viewMode === "range" && startDate && endDate) ||
+      ['daily', 'weekly', 'monthly', 'bimonthly', 'quarterly', 'half-yearly', 'annually'].includes(viewMode);
+    if (shouldFetch) {
       void loadAnalytics();
     }
   }, [viewMode, year, startDate, endDate, loadAnalytics]);
@@ -117,6 +119,56 @@ export default function ConsultationAnalyticsPage() {
     Object.entries(analyticsData.diagnoses.by_certainty).forEach(([certainty, count]) => {
       csvData.push([`${certainty} Diagnoses`, count]);
     });
+
+    // Add period breakdowns
+    if (analyticsData.by_day?.length) {
+      csvData.push([""]);
+      csvData.push(["Sessions by Day"]);
+      csvData.push(["Date", "Sessions", "Completed"]);
+      analyticsData.by_day.forEach((row) => {
+        csvData.push([row.date || '', row.sessions, row.completed]);
+      });
+    }
+    if (analyticsData.by_week?.length) {
+      csvData.push([""]);
+      csvData.push(["Sessions by Week"]);
+      csvData.push(["Week", "Sessions", "Completed"]);
+      analyticsData.by_week.forEach((row) => {
+        csvData.push([row.week || '', row.sessions, row.completed]);
+      });
+    }
+    if (analyticsData.by_month?.length) {
+      csvData.push([""]);
+      csvData.push(["Sessions by Month"]);
+      csvData.push(["Month", "Sessions", "Completed"]);
+      analyticsData.by_month.forEach((row) => {
+        csvData.push([row.month || '', row.sessions, row.completed]);
+      });
+    }
+    if (analyticsData.by_bimonth?.length) {
+      csvData.push([""]);
+      csvData.push(["Sessions by Bi-Month"]);
+      csvData.push(["Bi-Month", "Sessions", "Completed"]);
+      analyticsData.by_bimonth.forEach((row) => {
+        csvData.push([row.bimonth || '', row.sessions, row.completed]);
+      });
+    }
+    if (analyticsData.by_quarter?.length) {
+      csvData.push([""]);
+      csvData.push(["Sessions by Quarter"]);
+      csvData.push(["Quarter", "Sessions", "Completed"]);
+      analyticsData.by_quarter.forEach((row) => {
+        csvData.push([row.quarter || '', row.sessions, row.completed]);
+      });
+    }
+    if (analyticsData.by_halfyear?.length) {
+      csvData.push([""]);
+      csvData.push(["Sessions by Half-Year"]);
+      csvData.push(["Half-Year", "Sessions", "Completed"]);
+      analyticsData.by_halfyear.forEach((row) => {
+        csvData.push([row.halfyear || '', row.sessions, row.completed]);
+      });
+    }
 
     const csvContent = csvData.map((row) => row.join(",")).join("\n");
     const blob = new Blob([csvContent], { type: "text/csv" });
@@ -205,6 +257,43 @@ export default function ConsultationAnalyticsPage() {
       .sort((a, b) => b.sessions - a.sessions)
       .slice(0, 10); // Top 10 doctors
   }, [analyticsData]);
+
+  const periodBreakdown = useMemo(() => {
+    if (!analyticsData) return [];
+    let source: any[] = [];
+    let key = '';
+    let label = '';
+    if (viewMode === 'daily' || viewMode === 'range') {
+      source = analyticsData.by_day || [];
+      key = 'date';
+      label = 'Day';
+    } else if (viewMode === 'weekly') {
+      source = analyticsData.by_week || [];
+      key = 'week';
+      label = 'Week';
+    } else if (viewMode === 'monthly' || viewMode === 'annually' || viewMode === 'year') {
+      source = analyticsData.by_month || [];
+      key = 'month';
+      label = 'Month';
+    } else if (viewMode === 'bimonthly') {
+      source = analyticsData.by_bimonth || [];
+      key = 'bimonth';
+      label = 'Bi-Month';
+    } else if (viewMode === 'quarterly') {
+      source = analyticsData.by_quarter || [];
+      key = 'quarter';
+      label = 'Quarter';
+    } else if (viewMode === 'half-yearly') {
+      source = analyticsData.by_halfyear || [];
+      key = 'halfyear';
+      label = 'Half-Year';
+    }
+    return source.map((row) => ({
+      period: row[key] ?? '',
+      sessions: row.sessions,
+      completed: row.completed,
+    }));
+  }, [analyticsData, viewMode]);
 
   const years = Array.from({ length: 10 }, (_, i) => (new Date().getFullYear() - i).toString());
   const highlightThisMonth =
@@ -333,6 +422,32 @@ export default function ConsultationAnalyticsPage() {
 
             <Card>
               <CardHeader>
+                <CardTitle className="text-base">Sessions by Period</CardTitle>
+                <CardDescription>Number of consultation sessions in the selected period breakdown</CardDescription>
+              </CardHeader>
+              <CardContent className="h-72">
+                {periodBreakdown.length === 0 ? (
+                  <div className="flex items-center justify-center h-full text-muted-foreground">
+                    No data available for the selected period
+                  </div>
+                ) : (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={periodBreakdown}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="period" tick={{ fontSize: 10 }} />
+                      <YAxis tick={{ fontSize: 11 }} />
+                      <Tooltip />
+                      <Legend />
+                      <Bar dataKey="sessions" name="Total Sessions" fill={CHART_COLORS.sessions} radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="completed" name="Completed Sessions" fill={CHART_COLORS.doctors} radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
                 <CardTitle>Patient Attendance by Category</CardTitle>
                 <p className="text-sm text-muted-foreground">Breakdown of consultation sessions by patient category</p>
               </CardHeader>
@@ -348,63 +463,27 @@ export default function ConsultationAnalyticsPage() {
                       <TableHead className="text-right">%</TableHead>
                     </TableRow>
                   </TableHeader>
-                   <TableBody>
-                     <TableRow>
-                       <TableCell className="py-3">1</TableCell>
-                       <TableCell className="py-3 font-medium">Officers</TableCell>
-                       <TableCell className="py-3 text-right">3</TableCell>
-                       <TableCell className="py-3 text-right">0</TableCell>
-                       <TableCell className="py-3 text-right">3</TableCell>
-                       <TableCell className="py-3 text-right">75.0%</TableCell>
-                     </TableRow>
-                     <TableRow>
-                       <TableCell className="py-3">2</TableCell>
-                       <TableCell className="py-3 font-medium">Staff</TableCell>
-                       <TableCell className="py-3 text-right">0</TableCell>
-                       <TableCell className="py-3 text-right">0</TableCell>
-                       <TableCell className="py-3 text-right">0</TableCell>
-                       <TableCell className="py-3 text-right">0.0%</TableCell>
-                     </TableRow>
-                     <TableRow>
-                       <TableCell className="py-3">3</TableCell>
-                       <TableCell className="py-3 font-medium">Employee Dependents</TableCell>
-                       <TableCell className="py-3 text-right">1</TableCell>
-                       <TableCell className="py-3 text-right">0</TableCell>
-                       <TableCell className="py-3 text-right">1</TableCell>
-                       <TableCell className="py-3 text-right">25.0%</TableCell>
-                     </TableRow>
-                     <TableRow>
-                       <TableCell className="py-3">4</TableCell>
-                       <TableCell className="py-3 font-medium">Retiree Dependents</TableCell>
-                       <TableCell className="py-3 text-right">0</TableCell>
-                       <TableCell className="py-3 text-right">0</TableCell>
-                       <TableCell className="py-3 text-right">0</TableCell>
-                       <TableCell className="py-3 text-right">0.0%</TableCell>
-                     </TableRow>
-                     <TableRow>
-                       <TableCell className="py-3">5</TableCell>
-                       <TableCell className="py-3 font-medium">Non-NPA</TableCell>
-                       <TableCell className="py-3 text-right">0</TableCell>
-                       <TableCell className="py-3 text-right">0</TableCell>
-                       <TableCell className="py-3 text-right">0</TableCell>
-                       <TableCell className="py-3 text-right">0.0%</TableCell>
-                     </TableRow>
-                     <TableRow>
-                       <TableCell className="py-3">6</TableCell>
-                       <TableCell className="py-3 font-medium">Retirees</TableCell>
-                       <TableCell className="py-3 text-right">0</TableCell>
-                       <TableCell className="py-3 text-right">0</TableCell>
-                       <TableCell className="py-3 text-right">0</TableCell>
-                       <TableCell className="py-3 text-right">0.0%</TableCell>
-                     </TableRow>
-                     <TableRow className="font-semibold">
-                       <TableCell className="py-3" colSpan={2}>TOTAL</TableCell>
-                       <TableCell className="py-3 text-right">4</TableCell>
-                       <TableCell className="py-3 text-right">0</TableCell>
-                       <TableCell className="py-3 text-right">4</TableCell>
-                       <TableCell className="py-3 text-right">100.0%</TableCell>
-                     </TableRow>
-                   </TableBody>
+                  <TableBody>
+                    {summaryStats.attendanceRows.map((row) => (
+                      <TableRow key={row.key}>
+                        <TableCell className="py-3">{row.sn}</TableCell>
+                        <TableCell className="py-3 font-medium">{row.label}</TableCell>
+                        <TableCell className="py-3 text-right">{row.male}</TableCell>
+                        <TableCell className="py-3 text-right">{row.female}</TableCell>
+                        <TableCell className="py-3 text-right">{row.total}</TableCell>
+                        <TableCell className="py-3 text-right">{row.percentage.toFixed(1)}%</TableCell>
+                      </TableRow>
+                    ))}
+                    <TableRow className="font-semibold">
+                      <TableCell className="py-3" colSpan={2}>TOTAL</TableCell>
+                      <TableCell className="py-3 text-right">{summaryStats.attendanceTotals.male}</TableCell>
+                      <TableCell className="py-3 text-right">{summaryStats.attendanceTotals.female}</TableCell>
+                      <TableCell className="py-3 text-right">{summaryStats.attendanceTotals.total}</TableCell>
+                      <TableCell className="py-3 text-right">
+                        {summaryStats.attendanceTotals.total > 0 ? "100.0%" : "0.0%"}
+                      </TableCell>
+                    </TableRow>
+                  </TableBody>
                 </Table>
               </CardContent>
             </Card>

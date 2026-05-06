@@ -191,16 +191,21 @@ class LaboratoryAnalyticsSummaryView(APIView):
             LabTest.objects.filter(test_filter)
             .annotate(
                 year=ExtractYear("order__ordered_at"),
-                quarter=((TruncDate("order__ordered_at").month - 1) // 3 + 1),
-                q=ExtractYear("order__ordered_at") * 100 + ((TruncDate("order__ordered_at").month - 1) // 3 + 1)
+                quarter=Case(
+                    When(order__ordered_at__month__in=[1, 2, 3], then=Value(1)),
+                    When(order__ordered_at__month__in=[4, 5, 6], then=Value(2)),
+                    When(order__ordered_at__month__in=[7, 8, 9], then=Value(3)),
+                    default=Value(4),
+                    output_field=IntegerField(),
+                ),
             )
-            .values("q")
+            .values("year", "quarter")
             .annotate(tests=Count("id"), orders=Count("order_id", distinct=True))
-            .order_by("q")
+            .order_by("year", "quarter")
         )
         by_quarter = [
             {
-                "quarter": f"{row['q'] // 100}-Q{(row['q'] % 100)}",
+                "quarter": f"{row['year']}-Q{row['quarter']}",
                 "tests": row["tests"],
                 "orders": row["orders"],
             }

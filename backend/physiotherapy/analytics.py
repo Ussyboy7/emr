@@ -94,6 +94,12 @@ def build_physiotherapy_analytics(
             ],
             'attendance_totals': {'male': 0, 'female': 0, 'total': 0},
         },
+        'by_day': [],
+        'by_week': [],
+        'by_month': [],
+        'by_bimonth': [],
+        'by_quarter': [],
+        'by_halfyear': [],
         'period': {
             'start_date': start_date.date().isoformat(),
             'end_date': end_date.date().isoformat(),

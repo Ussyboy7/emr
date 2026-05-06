@@ -152,6 +152,11 @@ export interface RadiologyAnalyticsSummary {
   }>;
   orders_by_priority: Record<string, number>;
   by_day: Array<{ date: string; studies: number; orders: number }>;
+  by_week?: Array<{ week: string; studies: number; orders: number }>;
+  by_month?: Array<{ month: string; studies: number; orders: number }>;
+  by_bimonth?: Array<{ bimonth: string; studies: number; orders: number }>;
+  by_quarter?: Array<{ quarter: string; studies: number; orders: number }>;
+  by_halfyear?: Array<{ halfyear: string; studies: number; orders: number }>;
   top_procedures: Array<{ procedure: string; count: number }>;
 }
 

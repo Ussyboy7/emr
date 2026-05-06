@@ -2526,6 +2526,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         setCurrentPatient(null);
       }
       await loadPausedSessions();
+      // Refresh room queue in case the patient was still in queue
+      await refreshQueueData({ silent: true });
       toast.success(`Ended session for ${label}`);
     } catch (err: any) {
       console.error('Error ending paused session:', err);

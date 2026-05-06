@@ -26,6 +26,12 @@ export interface EyecareAnalyticsSummary {
       total: number;
     };
   };
+  by_day?: Array<any>;
+  by_week?: Array<any>;
+  by_month?: Array<any>;
+  by_bimonth?: Array<any>;
+  by_quarter?: Array<any>;
+  by_halfyear?: Array<any>;
   period: {
     start_date: string;
     end_date: string;

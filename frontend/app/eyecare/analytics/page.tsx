@@ -114,12 +114,51 @@ export default function EyecareAnalyticsPage() {
   }, [viewMode, year, startDate, endDate]);
 
   useEffect(() => {
-    if (viewMode === 'year' && year) {
-      void fetchReport();
-    } else if (viewMode === 'range' && startDate && endDate) {
+    const shouldFetch =
+      (viewMode === 'year' && year) ||
+      (viewMode === 'range' && startDate && endDate) ||
+      ['daily', 'weekly', 'monthly', 'bimonthly', 'quarterly', 'half-yearly', 'annually'].includes(viewMode);
+    if (shouldFetch) {
       void fetchReport();
     }
   }, [viewMode, year, startDate, endDate, fetchReport]);
+
+  const periodBreakdown = useMemo(() => {
+    if (!data) return [];
+    let source: any[] = [];
+    let key = '';
+    let label = '';
+    if (viewMode === 'daily' || viewMode === 'range') {
+      source = data.by_day || [];
+      key = 'date';
+      label = 'Day';
+    } else if (viewMode === 'weekly') {
+      source = data.by_week || [];
+      key = 'week';
+      label = 'Week';
+    } else if (viewMode === 'monthly' || viewMode === 'bimonthly' || viewMode === 'annually' || viewMode === 'year') {
+      source = data.by_month || [];
+      key = 'month';
+      label = 'Month';
+    } else if (viewMode === 'bimonthly') {
+      source = data.by_bimonth || [];
+      key = 'bimonth';
+      label = 'Bi-Month';
+    } else if (viewMode === 'quarterly') {
+      source = data.by_quarter || [];
+      key = 'quarter';
+      label = 'Quarter';
+    } else if (viewMode === 'half-yearly') {
+      source = data.by_halfyear || [];
+      key = 'halfyear';
+      label = 'Half-Year';
+    }
+    return source.map((row) => ({
+      period: row[key] ?? '',
+      sessions: row.sessions || 0,
+      completed: row.completed || 0,
+    }));
+  }, [data, viewMode]);
 
   const setThisMonth = () => {
     const n = new Date();
@@ -219,6 +258,32 @@ export default function EyecareAnalyticsPage() {
                 </CardContent>
               </Card>
             </div>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Sessions by Period</CardTitle>
+                <CardDescription>Number of eyecare sessions in the selected period breakdown</CardDescription>
+              </CardHeader>
+              <CardContent className="h-72">
+                {periodBreakdown.length === 0 ? (
+                  <div className="flex items-center justify-center h-full text-muted-foreground">
+                    No data available for the selected period
+                  </div>
+                ) : (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={periodBreakdown}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="period" tick={{ fontSize: 10 }} />
+                      <YAxis tick={{ fontSize: 11 }} />
+                      <Tooltip />
+                      <Legend />
+                      <Bar dataKey="sessions" name="Total Sessions" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="completed" name="Completed Sessions" fill="#a855f7" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                )}
+              </CardContent>
+            </Card>
 
             <Card>
               <CardHeader>

@@ -17,7 +17,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
-export type AnalyticsViewMode = 'year' | 'range';
+export type AnalyticsViewMode = 'daily' | 'weekly' | 'monthly' | 'bimonthly' | 'quarterly' | 'half-yearly' | 'annually' | 'year' | 'range';
 
 export interface AnalyticsReportLayoutProps {
   /** Primary page title (module or report name) */
@@ -175,6 +175,13 @@ export function AnalyticsReportLayout({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="daily">Daily</SelectItem>
+                  <SelectItem value="weekly">Weekly</SelectItem>
+                  <SelectItem value="monthly">Monthly</SelectItem>
+                  <SelectItem value="bimonthly">Bi-monthly</SelectItem>
+                  <SelectItem value="quarterly">Quarterly</SelectItem>
+                  <SelectItem value="half-yearly">Half-yearly</SelectItem>
+                  <SelectItem value="annually">Annually</SelectItem>
                   <SelectItem value="year">By Year</SelectItem>
                   <SelectItem value="range">Date Range</SelectItem>
                 </SelectContent>
@@ -197,7 +204,7 @@ export function AnalyticsReportLayout({
                   </SelectContent>
                 </Select>
               </div>
-            ) : (
+            ) : viewMode === 'range' ? (
               <>
                 <div className="space-y-2">
                   <Label>Start date</Label>
@@ -208,6 +215,19 @@ export function AnalyticsReportLayout({
                   <Input type="date" value={endDate} onChange={(e) => onEndDateChange(e.target.value)} />
                 </div>
               </>
+            ) : (
+              <div className="space-y-2 col-span-2">
+                <Label>Period</Label>
+                <p className="text-sm text-muted-foreground">
+                  {viewMode === 'daily' && 'Today'}
+                  {viewMode === 'weekly' && 'This week'}
+                  {viewMode === 'monthly' && 'This month'}
+                  {viewMode === 'bimonthly' && 'Last 2 months'}
+                  {viewMode === 'quarterly' && 'This quarter'}
+                  {viewMode === 'half-yearly' && 'This half-year'}
+                  {viewMode === 'annually' && 'This year'}
+                </p>
+              </div>
             )}
 
             <div className="flex items-end">
@@ -232,6 +252,54 @@ export function analyticsRangeFromFilters(
   startDate: string,
   endDate: string
 ): { start: string; end: string } | null {
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth();
+  const currentDate = now.getDate();
+
+  if (viewMode === 'daily') {
+    const start = new Date(now);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(now);
+    end.setHours(23, 59, 59, 999);
+    return { start: start.toISOString().split('T')[0], end: end.toISOString().split('T')[0] };
+  }
+  if (viewMode === 'weekly') {
+    const start = new Date(now);
+    start.setDate(now.getDate() - now.getDay()); // Start of week (Sunday)
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(start);
+    end.setDate(start.getDate() + 6);
+    end.setHours(23, 59, 59, 999);
+    return { start: start.toISOString().split('T')[0], end: end.toISOString().split('T')[0] };
+  }
+  if (viewMode === 'monthly') {
+    const start = new Date(currentYear, currentMonth, 1);
+    const end = new Date(currentYear, currentMonth + 1, 0);
+    return { start: start.toISOString().split('T')[0], end: end.toISOString().split('T')[0] };
+  }
+  if (viewMode === 'bimonthly') {
+    const start = new Date(currentYear, currentMonth - 1, 1);
+    const end = new Date(currentYear, currentMonth + 1, 0);
+    return { start: start.toISOString().split('T')[0], end: end.toISOString().split('T')[0] };
+  }
+  if (viewMode === 'quarterly') {
+    const quarterStartMonth = Math.floor(currentMonth / 3) * 3;
+    const start = new Date(currentYear, quarterStartMonth, 1);
+    const end = new Date(currentYear, quarterStartMonth + 3, 0);
+    return { start: start.toISOString().split('T')[0], end: end.toISOString().split('T')[0] };
+  }
+  if (viewMode === 'half-yearly') {
+    const half = currentMonth < 6 ? 0 : 6;
+    const start = new Date(currentYear, half, 1);
+    const end = new Date(currentYear, half + 6, 0);
+    return { start: start.toISOString().split('T')[0], end: end.toISOString().split('T')[0] };
+  }
+  if (viewMode === 'annually') {
+    const start = new Date(currentYear, 0, 1);
+    const end = new Date(currentYear, 11, 31);
+    return { start: start.toISOString().split('T')[0], end: end.toISOString().split('T')[0] };
+  }
   if (viewMode === 'year') {
     const y = year.trim();
     if (!/^\d{4}$/.test(y)) return null;

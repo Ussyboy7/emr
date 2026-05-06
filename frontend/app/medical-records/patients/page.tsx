@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -212,9 +212,11 @@ export default function PatientsListPage() {
   // Handle authentication redirects
   useAuthRedirect(authError);
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   const [genderFilter, setGenderFilter] = useState('all');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [locationFilter, setLocationFilter] = useState('all');
+  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [isFilterDialogOpen, setIsFilterDialogOpen] = useState(false);
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
   
@@ -326,15 +328,31 @@ export default function PatientsListPage() {
     patientService.getPatientCounts().then(setCounts).catch(() => setCounts(null));
   }, []);
 
+  // Debounce search query to avoid excessive API calls
+  useEffect(() => {
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+    searchTimeoutRef.current = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery);
+    }, 300); // 300ms delay
+
+    return () => {
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current);
+      }
+    };
+  }, [searchQuery]);
+
   // Load patients from API when page, page size, or server-side filters change
   useEffect(() => {
     loadPatients();
-  }, [currentPage, itemsPerPage, searchQuery, genderFilter, categoryFilter, locationFilter]);
+  }, [currentPage, itemsPerPage, debouncedSearchQuery, genderFilter, categoryFilter, locationFilter]);
 
   // Reset to page 1 when filters or items per page change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, genderFilter, categoryFilter, locationFilter, ageRange, itemsPerPage]);
+  }, [debouncedSearchQuery, genderFilter, categoryFilter, locationFilter, ageRange, itemsPerPage]);
 
   const loadPatients = async () => {
     try {

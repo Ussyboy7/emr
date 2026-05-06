@@ -100,12 +100,57 @@ function pharmacyAnalyticsToCsv(
   (d.top_medications_by_quantity || []).forEach((m) =>
     lines.push([m.name, String(m.total_quantity), String(m.dispense_events)].map(esc).join(','))
   );
+  if (d.by_day?.length) {
+    lines.push('');
+    lines.push(['Day', 'Dispense events', 'Total qty', 'Prescriptions'].map(esc).join(','));
+    d.by_day.forEach((row) =>
+      lines.push(
+        [row.date, String(row.dispense_events), String(row.total_quantity), String(row.prescriptions)].map(esc).join(',')
+      )
+    );
+  }
+  if (d.by_week?.length) {
+    lines.push('');
+    lines.push(['Week', 'Dispense events', 'Total qty', 'Prescriptions'].map(esc).join(','));
+    d.by_week.forEach((row) =>
+      lines.push(
+        [row.week, String(row.dispense_events), String(row.total_quantity), String(row.prescriptions)].map(esc).join(',')
+      )
+    );
+  }
   if (d.by_month?.length) {
     lines.push('');
     lines.push(['Month', 'Dispense events', 'Total qty', 'Prescriptions'].map(esc).join(','));
     d.by_month.forEach((row) =>
       lines.push(
         [row.month, String(row.dispense_events), String(row.total_quantity), String(row.prescriptions)].map(esc).join(',')
+      )
+    );
+  }
+  if (d.by_bimonth?.length) {
+    lines.push('');
+    lines.push(['Bi-Month', 'Dispense events', 'Total qty', 'Prescriptions'].map(esc).join(','));
+    d.by_bimonth.forEach((row) =>
+      lines.push(
+        [row.bimonth, String(row.dispense_events), String(row.total_quantity), String(row.prescriptions)].map(esc).join(',')
+      )
+    );
+  }
+  if (d.by_quarter?.length) {
+    lines.push('');
+    lines.push(['Quarter', 'Dispense events', 'Total qty', 'Prescriptions'].map(esc).join(','));
+    d.by_quarter.forEach((row) =>
+      lines.push(
+        [row.quarter, String(row.dispense_events), String(row.total_quantity), String(row.prescriptions)].map(esc).join(',')
+      )
+    );
+  }
+  if (d.by_halfyear?.length) {
+    lines.push('');
+    lines.push(['Half-Year', 'Dispense events', 'Total qty', 'Prescriptions'].map(esc).join(','));
+    d.by_halfyear.forEach((row) =>
+      lines.push(
+        [row.halfyear, String(row.dispense_events), String(row.total_quantity), String(row.prescriptions)].map(esc).join(',')
       )
     );
   }
@@ -167,9 +212,11 @@ export default function PharmacyAnalyticsPage() {
   }, [viewMode, year, startDate, endDate]);
 
   useEffect(() => {
-    if (viewMode === 'year' && year) {
-      void fetchReport();
-    } else if (viewMode === 'range' && startDate && endDate) {
+    const shouldFetch =
+      (viewMode === 'year' && year) ||
+      (viewMode === 'range' && startDate && endDate) ||
+      ['daily', 'weekly', 'monthly', 'bimonthly', 'quarterly', 'half-yearly', 'annually'].includes(viewMode);
+    if (shouldFetch) {
       void fetchReport();
     }
   }, [viewMode, year, startDate, endDate, fetchReport]);
@@ -240,6 +287,44 @@ export default function PharmacyAnalyticsPage() {
       count,
     }));
   }, [data]);
+
+  const periodBreakdown = useMemo(() => {
+    if (!data) return [];
+    let source: any[] = [];
+    let key = '';
+    let label = '';
+    if (viewMode === 'daily' || viewMode === 'range') {
+      source = data.by_day || [];
+      key = 'date';
+      label = 'Day';
+    } else if (viewMode === 'weekly') {
+      source = data.by_week || [];
+      key = 'week';
+      label = 'Week';
+    } else if (viewMode === 'monthly' || viewMode === 'bimonthly' || viewMode === 'annually' || viewMode === 'year') {
+      source = data.by_month || [];
+      key = 'month';
+      label = 'Month';
+    } else if (viewMode === 'bimonthly') {
+      source = data.by_bimonth || [];
+      key = 'bimonth';
+      label = 'Bi-Month';
+    } else if (viewMode === 'quarterly') {
+      source = data.by_quarter || [];
+      key = 'quarter';
+      label = 'Quarter';
+    } else if (viewMode === 'half-yearly') {
+      source = data.by_halfyear || [];
+      key = 'halfyear';
+      label = 'Half-Year';
+    }
+    return source.map((row) => ({
+      period: row[key] ?? '',
+      prescriptions: row.prescriptions,
+      events: row.dispense_events,
+      quantity: row.total_quantity,
+    }));
+  }, [data, viewMode]);
 
   return (
     <DashboardLayout>
@@ -319,7 +404,29 @@ export default function PharmacyAnalyticsPage() {
               </Card>
             </div>
 
-            <div className="grid lg:grid-cols-2 gap-6">
+             <div className="grid lg:grid-cols-2 gap-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Prescriptions Dispensed by Period</CardTitle>
+                  <CardDescription>Number of prescriptions dispensed in the selected period breakdown</CardDescription>
+                </CardHeader>
+                <CardContent className="h-72">
+                  {periodBreakdown.length === 0 ? (
+                    <EmptyChart />
+                  ) : (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={periodBreakdown}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="period" tick={{ fontSize: 10 }} />
+                        <YAxis tick={{ fontSize: 11 }} />
+                        <Tooltip />
+                        <Bar dataKey="prescriptions" name="Prescriptions" fill={CHART_COLORS.primary} radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  )}
+                </CardContent>
+              </Card>
+
               <Card>
                 <CardHeader>
                   <CardTitle className="text-base">Dispensing by day</CardTitle>

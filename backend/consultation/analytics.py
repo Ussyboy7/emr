@@ -11,15 +11,12 @@ Includes:
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any
 
-from django.db.models import Avg, Case, CharField, Count, F, IntegerField, Q, QuerySet, Value, When
-from django.db.models.functions import ExtractMonth, ExtractYear, TruncDate, TruncMonth, TruncWeek
+from django.db.models import Case, CharField, Count, IntegerField, Q, QuerySet, Value, When
+from django.db.models.functions import ExtractYear, TruncDate, TruncMonth, TruncWeek
 from django.utils import timezone
-
-# from common.module_analytics import patient_category_breakdown, patient_gender_breakdown
-
 
 def _ensure_aware(dt):
     """Normalize datetimes for safe subtraction (avoid naive/aware mix errors)."""
@@ -37,6 +34,42 @@ def _compose_patient_name(row: dict[str, Any]) -> str:
         (row.get('patient__middle_name') or '').strip(),
     ]
     return ' '.join(part for part in parts if part).strip() or 'Unknown'
+
+
+def _build_attendance_rows(
+    category_gender_counts: dict[str, dict[str, int]],
+    total_sessions: int,
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    category_labels = {
+        'employee': 'Officers',
+        'retiree': 'Retirees',
+        'dependent': 'Employee Dependents',
+        'nonnpa': 'Non-NPA',
+        'other': 'Other',
+    }
+    ordered_keys = ['employee', 'retiree', 'dependent', 'nonnpa', 'other']
+
+    attendance_rows: list[dict[str, Any]] = []
+    totals = {'male': 0, 'female': 0, 'total': 0}
+    for key in ordered_keys:
+        counts = category_gender_counts.get(key, {})
+        male = int(counts.get('male', 0) or 0)
+        female = int(counts.get('female', 0) or 0)
+        total = int(counts.get('total', male + female) or 0)
+        totals['male'] += male
+        totals['female'] += female
+        totals['total'] += total
+        attendance_rows.append({
+            'sn': len(attendance_rows) + 1,
+            'key': key,
+            'label': category_labels[key],
+            'male': male,
+            'female': female,
+            'total': total,
+            'percentage': (total / total_sessions * 100) if total_sessions > 0 else 0,
+        })
+
+    return attendance_rows, totals
 
 
 def build_comprehensive_consultation_analytics(
@@ -136,45 +169,20 @@ def build_comprehensive_consultation_analytics(
         else:
             stats['avg_duration'] = 0
 
-    # Patient demographics from sessions
-    # Calculate attendance breakdown from session data
-    category_counts = defaultdict(lambda: {'male': 0, 'female': 0, 'total': 0})
-
+    category_gender_counts: dict[str, dict[str, int]] = defaultdict(lambda: {'male': 0, 'female': 0, 'total': 0})
     for session in session_list:
-        category = session.get('patient__category') or 'other'
-        gender = session.get('patient__gender') or 'unknown'
-        if gender.lower() == 'male':
-            category_counts[category]['male'] += 1
-        elif gender.lower() == 'female':
-            category_counts[category]['female'] += 1
-        category_counts[category]['total'] += 1
+        category = (session.get('patient__category') or 'other').strip().lower()
+        if category not in {'employee', 'retiree', 'dependent', 'nonnpa'}:
+            category = 'other'
 
-    # Convert to the expected format
-    attendance_by_category = []
-    attendance_totals = {'male': 0, 'female': 0, 'total': 0}
+        gender = (session.get('patient__gender') or '').strip().lower()
+        if gender == 'male':
+            category_gender_counts[category]['male'] += 1
+        elif gender == 'female':
+            category_gender_counts[category]['female'] += 1
+        category_gender_counts[category]['total'] += 1
 
-    category_mapping = {
-        'employee': 'officers',  # Simplified mapping
-        'dependent': 'employee_dependents',
-        'retiree': 'retirees',
-        'nonnpa': 'non_npa',
-        'other': 'other'
-    }
-
-    for category, counts in category_counts.items():
-        mapped_category = category_mapping.get(category, 'other')
-        attendance_by_category.append({
-            'sn': len(attendance_by_category) + 1,
-            'key': mapped_category,
-            'label': mapped_category.replace('_', ' ').title(),
-            'male': counts['male'],
-            'female': counts['female'],
-            'total': counts['total'],
-            'percentage': (counts['total'] / total_sessions * 100) if total_sessions > 0 else 0,
-        })
-        attendance_totals['male'] += counts['male']
-        attendance_totals['female'] += counts['female']
-        attendance_totals['total'] += counts['total']
+    attendance_by_category, attendance_totals = _build_attendance_rows(category_gender_counts, total_sessions)
 
     # Queue analytics (if we have queue data)
     # For now, we'll use session start times as proxy for queue completion
@@ -182,11 +190,10 @@ def build_comprehensive_consultation_analytics(
     # Clinical outcomes - we'll need to join with diagnoses, referrals, prescriptions
     # This would require additional queries in the view
 
-    # Add period aggregations
-    from consultation.models import ConsultationSession
+    scoped_sessions = sessions.exclude(status='cancelled')
 
     daily = (
-        ConsultationSession.objects.filter(started_at__gte=start_date, started_at__lte=end_date)
+        scoped_sessions
         .annotate(day=TruncDate("started_at"))
         .values("day")
         .annotate(sessions=Count("id"), completed=Count("id", filter=Q(status="completed")))
@@ -203,7 +210,7 @@ def build_comprehensive_consultation_analytics(
     ]
 
     weekly = (
-        ConsultationSession.objects.filter(started_at__gte=start_date, started_at__lte=end_date)
+        scoped_sessions
         .annotate(w=TruncWeek("started_at"))
         .values("w")
         .annotate(sessions=Count("id"), completed=Count("id", filter=Q(status="completed")))
@@ -220,7 +227,7 @@ def build_comprehensive_consultation_analytics(
     ]
 
     monthly = (
-        ConsultationSession.objects.filter(started_at__gte=start_date, started_at__lte=end_date)
+        scoped_sessions
         .annotate(m=TruncMonth("started_at"))
         .values("m")
         .annotate(sessions=Count("id"), completed=Count("id", filter=Q(status="completed")))
@@ -236,19 +243,17 @@ def build_comprehensive_consultation_analytics(
         if row["m"]
     ]
 
-    # Bimonthly using Case
     bimonthly = (
-        ConsultationSession.objects.filter(started_at__gte=start_date, started_at__lte=end_date)
+        scoped_sessions
         .annotate(
             year=ExtractYear("started_at"),
-            month=ExtractMonth("started_at"),
             bimonth=Case(
-                When(month__in=[1, 2], then=Value(1)),
-                When(month__in=[3, 4], then=Value(2)),
-                When(month__in=[5, 6], then=Value(3)),
-                When(month__in=[7, 8], then=Value(4)),
-                When(month__in=[9, 10], then=Value(5)),
-                When(month__in=[11, 12], then=Value(6)),
+                When(started_at__month__in=[1, 2], then=Value(1)),
+                When(started_at__month__in=[3, 4], then=Value(2)),
+                When(started_at__month__in=[5, 6], then=Value(3)),
+                When(started_at__month__in=[7, 8], then=Value(4)),
+                When(started_at__month__in=[9, 10], then=Value(5)),
+                When(started_at__month__in=[11, 12], then=Value(6)),
                 output_field=IntegerField()
             )
         )
@@ -265,13 +270,17 @@ def build_comprehensive_consultation_analytics(
         for row in bimonthly
     ]
 
-    # Quarterly using proper ORM
     quarterly = (
-        ConsultationSession.objects.filter(started_at__gte=start_date, started_at__lte=end_date)
+        scoped_sessions
         .annotate(
             year=ExtractYear("started_at"),
-            month=ExtractMonth("started_at"),
-            quarter=((ExtractMonth("started_at") - 1) // 3 + 1)
+            quarter=Case(
+                When(started_at__month__in=[1, 2, 3], then=Value(1)),
+                When(started_at__month__in=[4, 5, 6], then=Value(2)),
+                When(started_at__month__in=[7, 8, 9], then=Value(3)),
+                default=Value(4),
+                output_field=IntegerField(),
+            ),
         )
         .values("year", "quarter")
         .annotate(sessions=Count("id"), completed=Count("id", filter=Q(status="completed")))
@@ -286,14 +295,12 @@ def build_comprehensive_consultation_analytics(
         for row in quarterly
     ]
 
-    # Half-yearly using proper ORM
     halfyearly = (
-        ConsultationSession.objects.filter(started_at__gte=start_date, started_at__lte=end_date)
+        scoped_sessions
         .annotate(
             year=ExtractYear("started_at"),
-            month=ExtractMonth("started_at"),
             half=Case(
-                When(month__lte=6, then=Value('H1')),
+                When(started_at__month__lte=6, then=Value('H1')),
                 default=Value('H2'),
                 output_field=CharField()
             )

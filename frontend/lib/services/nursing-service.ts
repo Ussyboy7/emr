@@ -31,6 +31,28 @@ export interface NursingActivity {
   status: 'completed' | 'pending' | 'in_progress';
 }
 
+export interface NursingAnalyticsSummary {
+  period: { start: string; end: string };
+  summary: {
+    total_orders: number;
+    completed_orders: number;
+    pending_orders: number;
+    unique_patients: number;
+  };
+  patients_by_gender: Record<string, number>;
+  patients_by_category: Record<string, number>;
+  npa_staff_linked_vs_non_npa: { npa_staff_linked: number; non_npa: number };
+  orders_by_status: Record<string, number>;
+  orders_by_priority: Record<string, number>;
+  orders_by_type: Record<string, number>;
+  by_day?: Array<{ date: string; orders: number; completed: number }>;
+  by_week?: Array<{ week: string; orders: number; completed: number }>;
+  by_month?: Array<{ month: string; orders: number; completed: number }>;
+  by_bimonth?: Array<{ bimonth: string; orders: number; completed: number }>;
+  by_quarter?: Array<{ quarter: string; orders: number; completed: number }>;
+  by_halfyear?: Array<{ halfyear: string; orders: number; completed: number }>;
+}
+
 
 class NursingService {
   /**
@@ -231,6 +253,11 @@ class NursingService {
       'cancelled': 'pending'
     };
     return statusMap[status] || 'pending';
+  }
+
+  async getAnalyticsSummary(start: string, end: string): Promise<NursingAnalyticsSummary> {
+    const query = buildQueryString({ start, end });
+    return apiFetch<NursingAnalyticsSummary>(`/nursing/analytics/summary/${query}`);
   }
 }
 
