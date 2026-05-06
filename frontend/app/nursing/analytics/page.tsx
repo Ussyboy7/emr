@@ -7,71 +7,17 @@ import {
   analyticsRangeFromFilters,
   type AnalyticsViewMode,
 } from "@/components/analytics/AnalyticsReportLayout";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Activity, Heart, Timer, Users } from "lucide-react";
 import { toast } from "sonner";
 import { apiFetch, buildQueryString } from "@/lib/api-client";
-import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
-interface ComprehensiveAnalytics {
-  patient_flow: {
-    summary: {
-      total_visits: number;
-      completed_flows: number;
-      vitals_completion_rate: number;
-      average_processing_time: number;
-      average_vitals_time: number;
-      average_room_wait: number;
-    };
-    bottlenecks: {
-      pool_delays: { count: number; average_delay: number };
-      vitals_delays: { count: number; average_delay: number };
-      room_assignment_delays: { count: number; average_delay: number };
-    };
-    throughput: Record<string, number>;
-    peak_hours: Array<[number, number]>;
-    category_analysis: Record<string, { count: number; avg_time: number; total_time: number }>;
-    attendance_by_category: Array<{
-      sn: number;
-      key: string;
-      label: string;
-      male: number;
-      female: number;
-      total: number;
-      percentage: number;
-    }>;
-    attendance_totals: {
-      male: number;
-      female: number;
-      total: number;
-    };
-  };
-  vitals_quality: {
-    summary: {
-      total_visits: number;
-      fully_completed_visits: number;
-      total_vitals_recorded: number;
-      overall_completion_rate: number;
-      average_vitals_per_visit: number;
-    };
-    completion_by_vital: Record<string, { completed: number; completion_rate: number }>;
-  };
-  wait_times: {
-    summary: {
-      total_waited: number;
-      average_wait_time: number;
-      median_wait_time: number;
-      max_wait_time: number;
-    };
-    distribution: Record<string, number>;
-  };
-  period: {
-    start_date: string;
-    end_date: string;
-  };
-}
+import { nursingService, type NursingAnalyticsSummary } from '@/lib/services';
+
+type ComprehensiveAnalytics = NursingAnalyticsSummary;
 
 const CHART_COLORS = {
   category: "#3b82f6",
@@ -113,11 +59,7 @@ export default function NursingAnalyticsPage() {
 
     setLoading(true);
     try {
-      const qs = buildQueryString({ start: range.start, end: range.end });
-      const path = qs
-        ? `/visits/nursing-comprehensive-analytics/?${qs.slice(1)}`
-        : "/visits/nursing-comprehensive-analytics/";
-      const data = await apiFetch<ComprehensiveAnalytics>(path);
+      const data = await nursingService.getAnalyticsSummary(range.start, range.end);
       setAnalyticsData(data);
     } catch (error: any) {
       console.error("Error loading analytics:", error);
@@ -129,12 +71,51 @@ export default function NursingAnalyticsPage() {
   };
 
   useEffect(() => {
-    if (viewMode === "year" && year) {
-      void loadAnalytics();
-    } else if (viewMode === "range" && startDate && endDate) {
+    const shouldFetch =
+      (viewMode === "year" && year) ||
+      (viewMode === "range" && startDate && endDate) ||
+      ['daily', 'weekly', 'monthly', 'bimonthly', 'quarterly', 'half-yearly', 'annually'].includes(viewMode);
+    if (shouldFetch) {
       void loadAnalytics();
     }
   }, [viewMode, year, startDate, endDate]);
+
+  const periodBreakdown = useMemo(() => {
+    if (!analyticsData) return [];
+    let source: any[] = [];
+    let key = '';
+    let label = '';
+    if (viewMode === 'daily' || viewMode === 'range') {
+      source = analyticsData.by_day || [];
+      key = 'date';
+      label = 'Day';
+    } else if (viewMode === 'weekly') {
+      source = analyticsData.by_week || [];
+      key = 'week';
+      label = 'Week';
+    } else if (viewMode === 'monthly' || viewMode === 'annually' || viewMode === 'year') {
+      source = analyticsData.by_month || [];
+      key = 'month';
+      label = 'Month';
+    } else if (viewMode === 'bimonthly') {
+      source = analyticsData.by_bimonth || [];
+      key = 'bimonth';
+      label = 'Bi-Month';
+    } else if (viewMode === 'quarterly') {
+      source = analyticsData.by_quarter || [];
+      key = 'quarter';
+      label = 'Quarter';
+    } else if (viewMode === 'half-yearly') {
+      source = analyticsData.by_halfyear || [];
+      key = 'halfyear';
+      label = 'Half-Year';
+    }
+    return source.map((row) => ({
+      period: row[key] ?? '',
+      orders: row.orders,
+      completed: row.completed,
+    }));
+  }, [analyticsData, viewMode]);
 
   const exportCSV = () => {
     if (!analyticsData) {
@@ -144,24 +125,64 @@ export default function NursingAnalyticsPage() {
 
     const csvData = [
       ["Nursing Analytics Report"],
-      ["Period", `${analyticsData.period.start_date} to ${analyticsData.period.end_date}`],
+      ["Period", `${analyticsData.period.start} to ${analyticsData.period.end}`],
       [""],
-      ["Patient Flow Metrics"],
-      ["Total Visits", analyticsData.patient_flow.summary.total_visits],
-      ["Completed Flows", analyticsData.patient_flow.summary.completed_flows],
-      ["Vitals Completion Rate (%)", analyticsData.patient_flow.summary.vitals_completion_rate.toFixed(2)],
-      ["Average Processing Time (min)", analyticsData.patient_flow.summary.average_processing_time.toFixed(2)],
+      ["Summary"],
+      ["Total Orders", analyticsData.summary.total_orders],
+      ["Completed Orders", analyticsData.summary.completed_orders],
+      ["Pending Orders", analyticsData.summary.pending_orders],
+      ["Unique Patients", analyticsData.summary.unique_patients],
       [""],
-      ["Vitals Quality Metrics"],
-      ["Overall Completion Rate (%)", analyticsData.vitals_quality.summary.overall_completion_rate.toFixed(2)],
-      ["Total Vitals Recorded", analyticsData.vitals_quality.summary.total_vitals_recorded],
-      ["Average Vitals per Visit", analyticsData.vitals_quality.summary.average_vitals_per_visit.toFixed(2)],
+      ["Orders by Status"],
+    ].concat(
+      Object.entries(analyticsData.orders_by_status).map(([status, count]) => [status, count])
+    ).concat([
       [""],
-      ["Wait Time Metrics"],
-      ["Average Wait Time (min)", analyticsData.wait_times.summary.average_wait_time.toFixed(2)],
-      ["Median Wait Time (min)", analyticsData.wait_times.summary.median_wait_time.toFixed(2)],
-      ["Max Wait Time (min)", analyticsData.wait_times.summary.max_wait_time.toFixed(2)],
-    ];
+      ["Orders by Priority"],
+    ]).concat(
+      Object.entries(analyticsData.orders_by_priority).map(([priority, count]) => [priority, count])
+    ).concat([
+      [""],
+      ["Orders by Type"],
+    ]).concat(
+      Object.entries(analyticsData.orders_by_type).map(([type, count]) => [type, count])
+    ).concat([
+      [""],
+      ["Orders by Day"],
+      ["Date", "Orders", "Completed"],
+    ]).concat(
+      (analyticsData.by_day || []).map((row) => [row.date || '', row.orders, row.completed])
+    ).concat([
+      [""],
+      ["Orders by Week"],
+      ["Week", "Orders", "Completed"],
+    ]).concat(
+      (analyticsData.by_week || []).map((row) => [row.week || '', row.orders, row.completed])
+    ).concat([
+      [""],
+      ["Orders by Month"],
+      ["Month", "Orders", "Completed"],
+    ]).concat(
+      (analyticsData.by_month || []).map((row) => [row.month || '', row.orders, row.completed])
+    ).concat([
+      [""],
+      ["Orders by Bi-Month"],
+      ["Bi-Month", "Orders", "Completed"],
+    ]).concat(
+      (analyticsData.by_bimonth || []).map((row) => [row.bimonth || '', row.orders, row.completed])
+    ).concat([
+      [""],
+      ["Orders by Quarter"],
+      ["Quarter", "Orders", "Completed"],
+    ]).concat(
+      (analyticsData.by_quarter || []).map((row) => [row.quarter || '', row.orders, row.completed])
+    ).concat([
+      [""],
+      ["Orders by Half-Year"],
+      ["Half-Year", "Orders", "Completed"],
+    ]).concat(
+      (analyticsData.by_halfyear || []).map((row) => [row.halfyear || '', row.orders, row.completed])
+    );
 
     const csvContent = csvData.map((row) => row.join(",")).join("\n");
     const blob = new Blob([csvContent], { type: "text/csv" });
@@ -177,60 +198,59 @@ export default function NursingAnalyticsPage() {
   const summaryStats = useMemo(() => {
     if (!analyticsData) return null;
 
-    const flow = analyticsData.patient_flow;
-    const vitals = analyticsData.vitals_quality;
-    const wait = analyticsData.wait_times;
-    const totalPatients = flow.summary.total_visits;
+    const totalOrders = analyticsData.summary.total_orders;
+    const uniquePatients = analyticsData.summary.unique_patients;
+
+    // Use patient demographics for attendance
+    const attendanceRows = Object.entries(analyticsData.patients_by_category).map(([key, count]) => ({
+      sn: Object.keys(analyticsData.patients_by_category).indexOf(key) + 1,
+      key,
+      label: key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+      male: 0, // Simplified - not breaking down by gender for now
+      female: 0,
+      total: count,
+      percentage: uniquePatients > 0 ? ((count / uniquePatients) * 100) : 0,
+    }));
+
+    const attendanceTotals = {
+      male: analyticsData.patients_by_gender.male || 0,
+      female: analyticsData.patients_by_gender.female || 0,
+      total: uniquePatients,
+    };
 
     return {
-      totalPatients,
-      avgProcessingTime: flow.summary.average_processing_time,
-      vitalsCompletedCount: vitals.summary.fully_completed_visits,
-      avgWaitTime: wait.summary.average_wait_time,
-      processingCategories: Object.entries(flow.category_analysis).map(([category, stats]) => ({
-        name: category,
-        count: stats.count,
-        percentage: totalPatients > 0 ? (stats.count / totalPatients) * 100 : 0,
-        avgTime: stats.avg_time,
-      })),
-      attendanceRows: flow.attendance_by_category,
-      attendanceTotals: flow.attendance_totals,
+      totalOrders,
+      completedOrders: analyticsData.summary.completed_orders,
+      pendingOrders: analyticsData.summary.pending_orders,
+      uniquePatients,
+      vitalsCompletedCount: analyticsData.summary.completed_orders, // Use completed orders as proxy
+      attendanceRows,
+      attendanceTotals,
     };
   }, [analyticsData]);
 
-  const categoryChartData = useMemo(() => {
-    if (!summaryStats) return [];
-    return summaryStats.processingCategories.map((c) => ({
-      category: c.name.replace(/_/g, " "),
-      patients: c.count,
-      avgTime: Number(c.avgTime.toFixed(2)),
-    }));
-  }, [summaryStats]);
-
-  const vitalsChartData = useMemo(() => {
+  const statusChartData = useMemo(() => {
     if (!analyticsData) return [];
-    return Object.entries(analyticsData.vitals_quality.completion_by_vital).map(([key, value]) => ({
-      vital: key.replace(/_/g, " "),
-      completionRate: Number(value.completion_rate.toFixed(2)),
+    return Object.entries(analyticsData.orders_by_status).map(([status, count]) => ({
+      name: status.replace(/_/g, " "),
+      count,
     }));
   }, [analyticsData]);
 
-  const waitDistributionChartData = useMemo(() => {
+  const priorityChartData = useMemo(() => {
     if (!analyticsData) return [];
-    return Object.entries(analyticsData.wait_times.distribution).map(([range, count]) => ({
-      range,
-      patients: count,
+    return Object.entries(analyticsData.orders_by_priority).map(([priority, count]) => ({
+      name: priority,
+      count,
     }));
   }, [analyticsData]);
 
-  const throughputChartData = useMemo(() => {
+  const typeChartData = useMemo(() => {
     if (!analyticsData) return [];
-    return Object.entries(analyticsData.patient_flow.throughput)
-      .map(([hour, count]) => ({
-        hour: Number(hour),
-        patients: count,
-      }))
-      .sort((a, b) => a.hour - b.hour);
+    return Object.entries(analyticsData.orders_by_type).map(([type, count]) => ({
+      name: type.replace(/_/g, " "),
+      count,
+    }));
   }, [analyticsData]);
 
   const years = Array.from({ length: 10 }, (_, i) => (new Date().getFullYear() - i).toString());
@@ -274,10 +294,10 @@ export default function NursingAnalyticsPage() {
                 <CardContent className="p-4">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm text-muted-foreground">Total Patients</p>
-                      <p className="text-2xl sm:text-3xl font-bold">{summaryStats.totalPatients}</p>
+                      <p className="text-sm text-muted-foreground">Total Orders</p>
+                      <p className="text-2xl sm:text-3xl font-bold">{summaryStats.totalOrders}</p>
                     </div>
-                    <Users className="h-10 w-10 text-blue-500 opacity-50" />
+                    <Activity className="h-10 w-10 text-blue-500 opacity-50" />
                   </div>
                 </CardContent>
               </Card>
@@ -285,8 +305,41 @@ export default function NursingAnalyticsPage() {
                 <CardContent className="p-4">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm text-muted-foreground">Avg Processing Time</p>
-                      <p className="text-2xl sm:text-3xl font-bold">{summaryStats.avgProcessingTime.toFixed(1)}m</p>
+                      <p className="text-sm text-muted-foreground">Completed Orders</p>
+                      <p className="text-2xl sm:text-3xl font-bold">{summaryStats.completedOrders}</p>
+                    </div>
+                    <Users className="h-10 w-10 text-green-500 opacity-50" />
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className="border-l-4 border-l-purple-500">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-muted-foreground">Pending Orders</p>
+                      <p className="text-2xl sm:text-3xl font-bold">{summaryStats.pendingOrders}</p>
+                    </div>
+                    <Timer className="h-10 w-10 text-purple-500 opacity-50" />
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className="border-l-4 border-l-amber-500">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-muted-foreground">Unique Patients</p>
+                      <p className="text-2xl sm:text-3xl font-bold">{summaryStats.uniquePatients}</p>
+                    </div>
+                    <Heart className="h-10 w-10 text-amber-500 opacity-50" />
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className="border-l-4 border-l-green-500">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-muted-foreground">Pending Orders</p>
+                      <p className="text-2xl sm:text-3xl font-bold">{summaryStats.pendingOrders}</p>
                     </div>
                     <Timer className="h-10 w-10 text-green-500 opacity-50" />
                   </div>
@@ -296,8 +349,8 @@ export default function NursingAnalyticsPage() {
                 <CardContent className="p-4">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm text-muted-foreground">Vitals Completed</p>
-                      <p className="text-2xl sm:text-3xl font-bold">{summaryStats.vitalsCompletedCount}</p>
+                      <p className="text-sm text-muted-foreground">Orders Completed</p>
+                      <p className="text-2xl sm:text-3xl font-bold">{summaryStats.completedOrders}</p>
                     </div>
                     <Heart className="h-10 w-10 text-purple-500 opacity-50" />
                   </div>
@@ -307,14 +360,44 @@ export default function NursingAnalyticsPage() {
                 <CardContent className="p-4">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm text-muted-foreground">Avg Wait Time</p>
-                      <p className="text-2xl sm:text-3xl font-bold">{summaryStats.avgWaitTime.toFixed(1)}m</p>
+                      <p className="text-sm text-muted-foreground">Completion Rate</p>
+                      <p className="text-2xl sm:text-3xl font-bold">
+                        {summaryStats.totalOrders > 0
+                          ? ((summaryStats.completedOrders / summaryStats.totalOrders) * 100).toFixed(1)
+                          : "0.0"}%
+                      </p>
                     </div>
                     <Timer className="h-10 w-10 text-amber-500 opacity-50" />
                   </div>
                 </CardContent>
               </Card>
             </div>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Orders by Period</CardTitle>
+                <CardDescription>Number of nursing orders in the selected period breakdown</CardDescription>
+              </CardHeader>
+              <CardContent className="h-72">
+                {periodBreakdown.length === 0 ? (
+                  <div className="flex items-center justify-center h-full text-muted-foreground">
+                    No data available for the selected period
+                  </div>
+                ) : (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={periodBreakdown}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="period" tick={{ fontSize: 10 }} />
+                      <YAxis tick={{ fontSize: 11 }} />
+                      <Tooltip />
+                      <Legend />
+                      <Bar dataKey="orders" name="Total Orders" fill={CHART_COLORS.category} radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="completed" name="Completed Orders" fill={CHART_COLORS.vitals} radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                )}
+              </CardContent>
+            </Card>
 
             <Card>
               <CardHeader>
@@ -361,33 +444,37 @@ export default function NursingAnalyticsPage() {
             <div className="grid gap-6 lg:grid-cols-2">
               <Card>
                 <CardHeader>
-                  <CardTitle>Vitals Completion by Type</CardTitle>
+                  <CardTitle>Order Types Distribution</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  {Object.entries(analyticsData.vitals_quality.completion_by_vital).map(([vital, stats]) => (
-                    <div key={vital} className="space-y-2">
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="font-medium capitalize">{vital.replace(/_/g, " ")}</span>
-                        <span>{stats.completion_rate.toFixed(1)}%</span>
+                  {Object.entries(analyticsData.orders_by_type).map(([type, count]) => {
+                    const total = analyticsData.summary.total_orders;
+                    const percentage = total > 0 ? (count / total) * 100 : 0;
+                    return (
+                      <div key={type} className="space-y-2">
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="font-medium capitalize">{type.replace(/_/g, " ")}</span>
+                          <span>{count} ({percentage.toFixed(1)}%)</span>
+                        </div>
+                        <Progress value={percentage} className="h-2" />
                       </div>
-                      <Progress value={stats.completion_rate} className="h-2" />
-                    </div>
-                  ))}
+                    );
+                  })}
                 </CardContent>
               </Card>
 
               <Card>
                 <CardHeader>
-                  <CardTitle>Category Avg Processing Time</CardTitle>
+                  <CardTitle>Orders by Priority</CardTitle>
                 </CardHeader>
                 <CardContent className="h-72">
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={categoryChartData}>
+                    <BarChart data={priorityChartData}>
                       <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="category" tick={{ fontSize: 12 }} />
+                      <XAxis dataKey="name" tick={{ fontSize: 12 }} />
                       <YAxis tick={{ fontSize: 12 }} />
                       <Tooltip />
-                      <Bar dataKey="avgTime" fill={CHART_COLORS.category} radius={[6, 6, 0, 0]} />
+                      <Bar dataKey="count" fill={CHART_COLORS.category} radius={[6, 6, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </CardContent>
@@ -397,16 +484,16 @@ export default function NursingAnalyticsPage() {
             <div className="grid gap-6 lg:grid-cols-2">
               <Card>
                 <CardHeader>
-                  <CardTitle>Vitals Completion Rates</CardTitle>
+                  <CardTitle>Orders by Status</CardTitle>
                 </CardHeader>
                 <CardContent className="h-72">
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={vitalsChartData}>
+                    <BarChart data={statusChartData}>
                       <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="vital" tick={{ fontSize: 11 }} interval={0} angle={-25} textAnchor="end" height={70} />
-                      <YAxis domain={[0, 100]} tick={{ fontSize: 12 }} />
+                      <XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} angle={-25} textAnchor="end" height={70} />
+                      <YAxis tick={{ fontSize: 12 }} />
                       <Tooltip />
-                      <Bar dataKey="completionRate" fill={CHART_COLORS.vitals} radius={[6, 6, 0, 0]} />
+                      <Bar dataKey="count" fill={CHART_COLORS.vitals} radius={[6, 6, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </CardContent>
@@ -414,59 +501,36 @@ export default function NursingAnalyticsPage() {
 
               <Card>
                 <CardHeader>
-                  <CardTitle>Wait Time Distribution Chart</CardTitle>
+                  <CardTitle>Orders by Priority</CardTitle>
                 </CardHeader>
                 <CardContent className="h-64">
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={waitDistributionChartData}>
+                    <BarChart data={priorityChartData}>
                       <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="range" />
+                      <XAxis dataKey="name" />
                       <YAxis />
                       <Tooltip />
-                      <Bar dataKey="patients" fill={CHART_COLORS.wait} radius={[6, 6, 0, 0]} />
+                      <Bar dataKey="count" fill={CHART_COLORS.wait} radius={[6, 6, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </CardContent>
               </Card>
             </div>
 
-            <Card>
-              <CardHeader>
-                <CardTitle>Wait Time Distribution</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {Object.entries(analyticsData.wait_times.distribution).map(([range, count]) => {
-                  const total = analyticsData.wait_times.summary.total_waited;
-                  const percentage = total > 0 ? (count / total) * 100 : 0;
-                  return (
-                    <div key={range} className="space-y-2">
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="font-medium">{range}</span>
-                        <span>
-                          {count} patient{count === 1 ? "" : "s"} ({percentage.toFixed(1)}%)
-                        </span>
-                      </div>
-                      <Progress value={percentage} className="h-2" />
-                    </div>
-                  );
-                })}
-              </CardContent>
-            </Card>
-
             <div className="grid gap-6 lg:grid-cols-2">
               <Card>
                 <CardHeader>
-                  <CardTitle>Throughput by Hour</CardTitle>
+                  <CardTitle>Orders by Type</CardTitle>
                 </CardHeader>
                 <CardContent className="h-64">
                   <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={throughputChartData}>
+                    <BarChart data={typeChartData}>
                       <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="hour" />
+                      <XAxis dataKey="name" />
                       <YAxis />
                       <Tooltip />
-                      <Line type="monotone" dataKey="patients" stroke={CHART_COLORS.throughput} strokeWidth={2} dot />
-                    </LineChart>
+                      <Bar dataKey="count" fill={CHART_COLORS.throughput} radius={[4, 4, 0, 0]} />
+                    </BarChart>
                   </ResponsiveContainer>
                 </CardContent>
               </Card>
