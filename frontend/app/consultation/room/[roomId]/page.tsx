@@ -2503,7 +2503,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       await consultationService.resumeSession(pausedSession.id);
       let restored = false;
       for (let attempt = 0; attempt < 3; attempt++) {
-        restored = await restoreActiveSession(pausedSession.id, { silent: attempt < 2 });
+        restored = (await restoreActiveSession(pausedSession.id, { silent: attempt < 2 })) ?? false;
         if (restored) break;
         // Small backoff to avoid race between resume response and session read.
         await new Promise((resolve) => setTimeout(resolve, 250));

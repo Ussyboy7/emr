@@ -976,6 +976,36 @@ class ReferralViewSet(viewsets.ModelViewSet):
             request=self.request,
         )
 
+    @action(detail=True, methods=['post'])
+    def acknowledge_responsibility_form(self, request, pk=None):
+        """Acknowledge responsibility for referral letter."""
+        referral = self.get_object()
+
+        # Update acknowledgment fields
+        referral.referral_letter_acknowledged_at = timezone.now()
+        referral.referral_letter_acknowledged_by = request.user
+        referral.save(update_fields=['referral_letter_acknowledged_at', 'referral_letter_acknowledged_by'])
+
+        # Log audit activity
+        AuditService.log_activity(
+            user=request.user,
+            action='acknowledge',
+            object_type='referral',
+            object_id=str(referral.id),
+            module='consultation',
+            object_repr=f'Referral {referral.referral_id}',
+            description=f'Acknowledged responsibility for referral letter {referral.referral_id}',
+            new_values={
+                'referral_letter_acknowledged_at': referral.referral_letter_acknowledged_at,
+                'referral_letter_acknowledged_by': request.user.get_full_name(),
+            },
+            request=request,
+        )
+
+        # Return updated referral data
+        serializer = self.get_serializer(referral)
+        return Response(serializer.data)
+
 
 class ICD10CodeViewSet(viewsets.ReadOnlyModelViewSet):
     """ViewSet for ICD-10 codes (read-only reference data)."""
