@@ -21,6 +21,7 @@ import {
 import Link from "next/link";
 import { apiFetch } from '@/lib/api-client';
 import { patientService, consultationService, pharmacyService, labService, radiologyService, physioService } from '@/lib/services';
+import type { Diagnosis } from '@/lib/services/consultation-service';
 import { loadConsultationReportSession, type ConsultationReportSession } from '@/lib/consultation-report';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
@@ -1019,7 +1020,7 @@ export default function ConsultationHistoryPage() {
   const handleSaveEdit = async () => {
     if (!selectedConsultation) return;
     setIsSubmitting(true);
-    
+
     try {
       const sessionId = parseInt(selectedConsultation.id);
       if (isNaN(sessionId)) {
@@ -1027,27 +1028,17 @@ export default function ConsultationHistoryPage() {
         setIsSubmitting(false);
         return;
       }
-      
-      // Update consultation session notes directly
-      // Store diagnosis codes as JSON in notes field
-      const diagnosisData = editForm.diagnosisCodes.length > 0 ? JSON.stringify({
-        diagnosis_codes: editForm.diagnosisCodes.map(d => ({
-          code: d.code,
-          description: d.name,
-          type: d.type,
-          notes: d.notes || ''
-        }))
-      }) : '';
 
+      // Update consultation session with medical notes
       const updateData: any = {
         presentation_complaint: editForm.presentationComplaint,
         history_of_presenting_illness: editForm.historyOfPresentIllness,
         physical_examination: editForm.physicalExamination,
         assessment: editForm.assessment,
         plan: editForm.plan,
-        notes: diagnosisData, // Store structured diagnosis data as JSON
+        notes: '', // Clear notes field since diagnoses are stored separately
       };
-      
+
       // Update session status if changed
       if (editForm.status !== selectedConsultation.status) {
         updateData.status = editForm.status === 'Completed' ? 'completed' : 'in_progress';
@@ -1055,16 +1046,69 @@ export default function ConsultationHistoryPage() {
           updateData.ended_at = new Date().toISOString();
         }
       }
-      
+
       await consultationService.updateSession(sessionId, updateData);
-      
+
+      // Handle diagnosis updates
+      // Get existing diagnoses for this session
+      const existingDiagnosesRes = await consultationService.getDiagnoses({ session: sessionId, page_size: 100 });
+      const existingDiagnoses = existingDiagnosesRes.results || [];
+
+      // Map existing diagnoses by ID for easy lookup
+      const existingById = new Map(existingDiagnoses.map(d => [d.id, d]));
+
+      // Process each diagnosis in the edit form
+      for (const dx of editForm.diagnosisCodes) {
+        // Find matching ICD-10 code
+        const icd10Results = await consultationService.getICD10Codes({
+          search: dx.code,
+          page_size: 1
+        });
+        const icd10Code = icd10Results.results?.length > 0 ? icd10Results.results[0] : null;
+
+        if (!icd10Code) {
+          console.warn(`Could not find ICD-10 code ${dx.code} for diagnosis`);
+          continue;
+        }
+
+        // Check if a diagnosis with this ICD-10 code already exists
+        const existingDiagnosis = Array.from(existingById.values()).find(d =>
+          d.icd10_code_details?.code === dx.code
+        );
+
+        const diagnosisData: Partial<Diagnosis> = {
+          patient: selectedConsultation.patientIdNumeric || parseInt(selectedConsultation.patientId),
+          visit: selectedConsultation.visitId,
+          session: sessionId,
+          icd10_code: icd10Code.id,
+          diagnosis_text: dx.notes || '',
+          status: 'confirmed',
+          certainty: (dx.type === 'Primary' ? 'confirmed' : dx.type === 'Secondary' ? 'probable' : 'possible') as 'confirmed' | 'probable' | 'possible',
+          notes: dx.notes || ''
+        };
+
+        if (existingDiagnosis) {
+          // Update existing diagnosis
+          await consultationService.updateDiagnosis(existingDiagnosis.id, diagnosisData);
+          existingById.delete(existingDiagnosis.id); // Remove from map so it won't be deleted
+        } else {
+          // Create new diagnosis
+          await consultationService.createDiagnosis(diagnosisData);
+        }
+      }
+
+      // Delete diagnoses that were removed from the form
+      for (const [id, diagnosis] of existingById) {
+        await apiFetch(`/consultation/diagnoses/${id}/`, { method: 'DELETE' });
+      }
+
       // Update local state
       setConsultations(prev => prev.map(c =>
         c.id === selectedConsultation.id
           ? { ...c, diagnosis: editForm.diagnosis, presentationComplaint: editForm.presentationComplaint, historyOfPresentIllness: editForm.historyOfPresentIllness, physicalExamination: editForm.physicalExamination, assessment: editForm.assessment, plan: editForm.plan, status: editForm.status, diagnosisCodes: editForm.diagnosisCodes.map(dx => ({ code: dx.code, description: dx.name, type: dx.type })) }
           : c
       ));
-      
+
       toast.success(`Consultation ${selectedConsultation.id} updated`);
       setShowEditModal(false);
     } catch (err: any) {
