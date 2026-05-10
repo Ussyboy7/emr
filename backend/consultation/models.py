@@ -15,6 +15,13 @@ class ConsultationRoom(models.Model):
         ('inactive', 'Inactive'),
         ('maintenance', 'Maintenance'),
     ]
+
+    ROOM_TYPE_CHOICES = [
+        ('consultation', 'Consultation'),
+        ('procedure', 'Procedure'),
+        ('emergency', 'Emergency'),
+        ('examination', 'Examination'),
+    ]
     
     name = models.CharField(max_length=100, unique=True)
     room_number = models.CharField(max_length=50, unique=True, db_index=True)
@@ -29,6 +36,12 @@ class ConsultationRoom(models.Model):
     location = models.CharField(max_length=200, blank=True)
     floor = models.CharField(max_length=50, blank=True)
     specialty = models.CharField(max_length=100, blank=True)
+    room_type = models.CharField(
+        max_length=20,
+        choices=ROOM_TYPE_CHOICES,
+        default='consultation',
+        db_index=True,
+    )
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active')
     capacity = models.IntegerField(default=1)
     is_active = models.BooleanField(default=True)

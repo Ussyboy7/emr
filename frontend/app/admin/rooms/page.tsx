@@ -1,15 +1,14 @@
 "use client";
 
-import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { StandardPagination } from '@/components/shared/StandardPagination';
 import { DashboardLayout } from '@/components/shared/DashboardLayout';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
-import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
@@ -18,8 +17,8 @@ import { roomService, type Room as ApiRoom } from '@/lib/services';
 import { useAuthRedirect } from '@/hooks/use-auth-redirect';
 import { isAuthenticationError } from '@/lib/auth-errors';
 import {
-  DoorOpen, Search, Plus, Eye, Edit, Trash2, CheckCircle2, XCircle, Clock,
-  Loader2, Save, MapPin, Stethoscope, Users, Activity, Settings
+  DoorOpen, Search, Plus, Eye, Edit, Trash2, CheckCircle2, XCircle,
+  Loader2, Save, MapPin, Stethoscope, Users, Settings
 } from 'lucide-react';
 import { normalizeClinicName } from '@/lib/utils/clinic-utils';
 import { useLocationOptions } from '@/hooks/use-location-options';
@@ -43,9 +42,27 @@ interface Room {
   updated_at?: string;
 }
 
-// Rooms data will be loaded from API
+// Rooms data is loaded from API (consultation rooms).
 
 const roomTypes: string[] = ['Consultation', 'Procedure', 'Emergency', 'Examination'];
+
+function displayRoomType(api?: string): NonNullable<Room['type']> {
+  const map: Record<string, NonNullable<Room['type']>> = {
+    consultation: 'Consultation',
+    procedure: 'Procedure',
+    emergency: 'Emergency',
+    examination: 'Examination',
+  };
+  return map[(api || 'consultation').toLowerCase()] || 'Consultation';
+}
+
+function toApiRoomType(label: string): 'consultation' | 'procedure' | 'emergency' | 'examination' {
+  const key = label.toLowerCase();
+  if (key === 'consultation' || key === 'procedure' || key === 'emergency' || key === 'examination') {
+    return key;
+  }
+  return 'consultation';
+}
 
 export default function RoomManagementPage() {
   const { names: opdClinicNames } = useOutpatientClinicTypes();
@@ -56,32 +73,94 @@ export default function RoomManagementPage() {
   const [authError, setAuthError] = useState<unknown | null>(null);
   useAuthRedirect(authError);
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState('all');
+  /** organisation.Clinic pk as string, or "all" */
   const [locationFilter, setLocationFilter] = useState('all');
-  
-  // Pagination state
+
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(50);
+  /** Total rows matching list filters (status + search + clinic + type) — server count */
   const [totalCount, setTotalCount] = useState(0);
+  /** Breakdown ignoring status dropdown — search / clinic / room_type only */
+  const [stats, setStats] = useState({
+    total: 0,
+    active: 0,
+    inactive: 0,
+    maintenance: 0,
+  });
+  /** Bumps the room list query after local mutations (create / edit / delete). */
+  const [refreshToken, setRefreshToken] = useState(0);
 
-  // Load rooms from API
+  const [selectedRoom, setSelectedRoom] = useState<Room | null>(null);
+  const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const [formData, setFormData] = useState<Partial<Room>>({
+    name: '', type: 'Consultation', location: '', floor: '', specialty: '', capacity: 2, status: 'Active', description: ''
+  });
+
+  const hasNarrowingFilters =
+    Boolean(debouncedSearch) ||
+    statusFilter !== 'all' ||
+    typeFilter !== 'all' ||
+    locationFilter !== 'all';
+
+  useEffect(() => {
+    const t = window.setTimeout(() => setDebouncedSearch(searchQuery.trim()), 400);
+    return () => window.clearTimeout(t);
+  }, [searchQuery]);
+
+  const buildStatsBaseFilters = useCallback(() => {
+    return {
+      search: debouncedSearch || undefined,
+      clinic: locationFilter !== 'all' ? Number(locationFilter) : undefined,
+      room_type: typeFilter !== 'all' ? typeFilter : undefined,
+    };
+  }, [debouncedSearch, locationFilter, typeFilter]);
+
+  const loadStats = useCallback(async () => {
+    try {
+      const base = buildStatsBaseFilters();
+      const [t, a, i, m] = await Promise.all([
+        roomService.getRooms({ ...base, page: 1, page_size: 1 }),
+        roomService.getRooms({ ...base, status: 'active', page: 1, page_size: 1 }),
+        roomService.getRooms({ ...base, status: 'inactive', page: 1, page_size: 1 }),
+        roomService.getRooms({ ...base, status: 'maintenance', page: 1, page_size: 1 }),
+      ]);
+      setStats({
+        total: t.count ?? 0,
+        active: a.count ?? 0,
+        inactive: i.count ?? 0,
+        maintenance: m.count ?? 0,
+      });
+    } catch {
+      // Non-fatal — list fetch will surface errors
+    }
+  }, [buildStatsBaseFilters]);
+
+  useEffect(() => {
+    loadStats();
+  }, [loadStats]);
+
   useEffect(() => {
     const loadRooms = async () => {
       try {
         setLoading(true);
         setError(null);
+        const base = buildStatsBaseFilters();
         const result = await roomService.getRooms({
+          ...base,
+          status: statusFilter !== 'all' ? statusFilter : undefined,
           page: currentPage,
           page_size: itemsPerPage,
-          search: searchQuery || undefined,
-          status: statusFilter !== 'all' ? statusFilter : undefined,
-          specialty: typeFilter !== 'all' ? typeFilter : undefined,
-          is_active: locationFilter !== 'all' ? (locationFilter === 'Active') : undefined,
         });
-        setTotalCount(result.count || result.results.length);
-        
-        // Transform API rooms to frontend format
+        setTotalCount(result.count ?? result.results.length);
+
         const transformedRooms: Room[] = result.results.map((room: ApiRoom) => ({
           id: room.id,
           name: room.name,
@@ -89,12 +168,13 @@ export default function RoomManagementPage() {
           location: room.location || '',
           floor: room.floor || '',
           specialty: room.specialty || '',
+          type: displayRoomType(room.room_type),
           capacity: room.capacity || 1,
           status: (room.status.charAt(0).toUpperCase() + room.status.slice(1)) as Room['status'],
           createdAt: room.created_at?.split('T')[0] || '',
           lastModified: room.updated_at?.split('T')[0] || '',
         }));
-        
+
         setRooms(transformedRooms);
       } catch (err) {
         console.error('Error loading rooms:', err);
@@ -107,45 +187,13 @@ export default function RoomManagementPage() {
         setLoading(false);
       }
     };
-    
+
     loadRooms();
-  }, [currentPage, itemsPerPage]);
+  }, [currentPage, itemsPerPage, debouncedSearch, statusFilter, typeFilter, locationFilter, buildStatsBaseFilters, refreshToken]);
 
-  // Dialog states
-  const [selectedRoom, setSelectedRoom] = useState<Room | null>(null);
-  const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
-  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
-  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
-  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-
-  // Form state
-  const [formData, setFormData] = useState<Partial<Room>>({
-    name: '', type: 'Consultation', location: '', floor: '', specialty: '', capacity: 2, status: 'Active', description: ''
-  });
-
-  const filteredRooms = useMemo(() => rooms.filter(room => {
-    const matchesSearch = room.name.toLowerCase().includes(searchQuery.toLowerCase()) || String(room.id).toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesStatus = statusFilter === 'all' || room.status.toLowerCase() === statusFilter;
-    const matchesType = typeFilter === 'all' || (room.type && room.type.toLowerCase() === typeFilter);
-    const matchesLocation = locationFilter === 'all' || room.location === locationFilter;
-    return matchesSearch && matchesStatus && matchesType && matchesLocation;
-  }), [rooms, searchQuery, statusFilter, typeFilter, locationFilter]);
-
-  // Use filtered rooms directly (server-side pagination when no client-side filters)
-  const paginatedRooms = filteredRooms;
-
-  // Reset to page 1 when filters change or items per page changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, statusFilter, typeFilter, locationFilter, itemsPerPage]);
-
-  const stats = {
-    total: rooms.length,
-    active: rooms.filter(r => r.status === 'Active').length,
-    inactive: rooms.filter(r => r.status === 'Inactive').length,
-    maintenance: rooms.filter(r => r.status === 'Maintenance').length,
-  };
+  }, [debouncedSearch, statusFilter, typeFilter, locationFilter, itemsPerPage]);
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -201,29 +249,17 @@ export default function RoomManagementPage() {
       
       const newRoom = await roomService.createRoom({
         name: formData.name!,
-        room_number: `ROOM-${String(rooms.length + 1).padStart(3, '0')}`, // Generate room number
+        room_number: `ROOM-${Date.now()}`,
         location: formData.location!,
         floor: formData.floor || '',
         specialty: normalizeClinicName(formData.specialty!, opdClinicNames),
         capacity: formData.capacity || 2,
         status: backendStatus as 'active' | 'inactive' | 'maintenance',
+        room_type: toApiRoomType(formData.type || 'Consultation'),
       });
 
-      // Transform and add to local state
-      const transformedRoom: Room = {
-        id: newRoom.id,
-        name: newRoom.name,
-        room_number: newRoom.room_number,
-        location: newRoom.location || '',
-        floor: newRoom.floor || '',
-        specialty: newRoom.specialty || '',
-        capacity: newRoom.capacity || 1,
-        status: (newRoom.status.charAt(0).toUpperCase() + newRoom.status.slice(1)) as Room['status'],
-        createdAt: newRoom.created_at?.split('T')[0] || '',
-        lastModified: newRoom.updated_at?.split('T')[0] || '',
-      };
-
-      setRooms(prev => [...prev, transformedRoom]);
+      void loadStats();
+      setRefreshToken((x) => x + 1);
       toast.success(`Room "${newRoom.name}" created successfully`);
       setIsCreateDialogOpen(false);
       setFormData({ name: '', type: 'Consultation', location: '', floor: '', specialty: '', capacity: 2, status: 'Active', description: '' });
@@ -256,23 +292,11 @@ export default function RoomManagementPage() {
         specialty: normalizeClinicName(formData.specialty || '', opdClinicNames),
         capacity: formData.capacity || 2,
         status: backendStatus as 'active' | 'inactive' | 'maintenance',
+        room_type: toApiRoomType(formData.type || 'Consultation'),
       });
 
-      // Transform and update local state
-      const transformedRoom: Room = {
-        id: updatedRoom.id,
-        name: updatedRoom.name,
-        room_number: updatedRoom.room_number,
-        location: updatedRoom.location || '',
-        floor: updatedRoom.floor || '',
-        specialty: updatedRoom.specialty || '',
-        capacity: updatedRoom.capacity || 1,
-        status: (updatedRoom.status.charAt(0).toUpperCase() + updatedRoom.status.slice(1)) as Room['status'],
-        createdAt: updatedRoom.created_at?.split('T')[0] || '',
-        lastModified: updatedRoom.updated_at?.split('T')[0] || '',
-      };
-
-      setRooms(prev => prev.map(r => r.id === selectedRoom.id ? transformedRoom : r));
+      void loadStats();
+      setRefreshToken((x) => x + 1);
       toast.success(`Room "${formData.name}" updated successfully`);
       setIsEditDialogOpen(false);
     } catch (err) {
@@ -295,7 +319,8 @@ export default function RoomManagementPage() {
       }
       
       await roomService.deleteRoom(roomId);
-      setRooms(prev => prev.filter(r => r.id !== selectedRoom.id));
+      void loadStats();
+      setRefreshToken((x) => x + 1);
       toast.success(`Room "${selectedRoom.name}" deleted`);
       setIsDeleteDialogOpen(false);
     } catch (err) {
@@ -303,36 +328,6 @@ export default function RoomManagementPage() {
       toast.error('Failed to delete room. Please try again.');
     } finally {
       setIsSubmitting(false);
-    }
-  };
-
-  const handleToggleStatus = async (room: Room) => {
-    try {
-      const roomId = typeof room.id === 'string' ? parseInt(room.id) : room.id;
-      if (isNaN(roomId)) {
-        toast.error('Invalid room ID');
-        return;
-      }
-      
-      const currentStatus = typeof room.status === 'string' ? room.status.toLowerCase() : 'active';
-      const newStatus = currentStatus === 'active' ? 'inactive' : 'active';
-      
-      const updatedRoom = await roomService.updateRoom(roomId, {
-        status: newStatus as 'active' | 'inactive' | 'maintenance',
-      });
-
-      // Transform and update local state
-      const transformedRoom: Room = {
-        ...room,
-        status: (updatedRoom.status.charAt(0).toUpperCase() + updatedRoom.status.slice(1)) as Room['status'],
-        lastModified: updatedRoom.updated_at?.split('T')[0] || '',
-      };
-
-      setRooms(prev => prev.map(r => r.id === room.id ? transformedRoom : r));
-      toast.success(`Room ${room.name} is now ${transformedRoom.status}`);
-    } catch (err) {
-      console.error('Error toggling room status:', err);
-      toast.error('Failed to update room status. Please try again.');
     }
   };
 
@@ -432,6 +427,9 @@ export default function RoomManagementPage() {
             </CardContent>
           </Card>
         </div>
+        <p className="text-xs text-muted-foreground">
+          KPI totals use location, room type, and search across all statuses. The status filter below only narrows the list.
+        </p>
 
         {/* Filters */}
         <Card>
@@ -443,10 +441,15 @@ export default function RoomManagementPage() {
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <Select value={locationFilter} onValueChange={setLocationFilter}>
-                  <SelectTrigger className="w-[180px]"><SelectValue placeholder="Location" /></SelectTrigger>
+                  <SelectTrigger className="w-[200px]"><SelectValue placeholder="Location" /></SelectTrigger>
                   <SelectContent>
                     {locationOptions.map((l) => (
-                      <SelectItem key={l.value} value={l.value}>{l.label}</SelectItem>
+                      <SelectItem
+                        key={l.value === 'all' ? 'all' : `clinic-${l.id}`}
+                        value={l.value === 'all' ? 'all' : String(l.id)}
+                      >
+                        {l.label}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -488,7 +491,14 @@ export default function RoomManagementPage() {
               <XCircle className="h-12 w-12 text-destructive mb-4" />
               <h3 className="text-lg font-semibold mb-2">Error loading rooms</h3>
               <p className="text-muted-foreground mb-4">{error}</p>
-              <Button onClick={() => window.location.reload()}>Retry</Button>
+              <Button
+                onClick={() => {
+                  setError(null);
+                  setRefreshToken((x) => x + 1);
+                }}
+              >
+                Retry
+              </Button>
             </CardContent>
           </Card>
         )}
@@ -496,13 +506,30 @@ export default function RoomManagementPage() {
         {/* Rooms List */}
         {!loading && !error && (
           <div className="space-y-3">
-            {filteredRooms.length === 0 ? (
-              <Card><CardContent className="p-8 text-center text-muted-foreground">
-                <DoorOpen className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                <p>No rooms found</p>
-              </CardContent></Card>
+            {rooms.length === 0 ? (
+              <Card>
+                <CardContent className="p-10 text-center space-y-4">
+                  <DoorOpen className="h-14 w-14 mx-auto text-muted-foreground/40" />
+                  <div>
+                    <p className="text-lg font-medium text-foreground">
+                      {hasNarrowingFilters ? 'No rooms match your filters' : 'No consultation rooms yet'}
+                    </p>
+                    <p className="text-sm text-muted-foreground mt-1 max-w-md mx-auto">
+                      {hasNarrowingFilters
+                        ? 'Try clearing search or setting location and type to “All”.'
+                        : 'Create your first room so clinicians can be assigned to consultation spaces.'}
+                    </p>
+                  </div>
+                  {!hasNarrowingFilters && (
+                    <Button onClick={openCreateDialog} className="bg-blue-600 hover:bg-blue-700 text-white">
+                      <Plus className="h-4 w-4 mr-2" />
+                      Create your first room
+                    </Button>
+                  )}
+                </CardContent>
+              </Card>
             ) : (
-              paginatedRooms.map((room) => {
+              rooms.map((room) => {
                 const borderColor = room.status === 'Active' ? 'border-l-emerald-500' : room.status === 'Maintenance' ? 'border-l-amber-500' : 'border-l-gray-500';
                 return (
                   <Card key={room.id} className={`border-l-4 hover:shadow-md transition-shadow ${borderColor} ${room.status === 'Inactive' ? 'opacity-60' : ''}`}>
@@ -537,18 +564,35 @@ export default function RoomManagementPage() {
                           </div>
                           <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-wrap">
                             <span>{room.room_number || room.id}</span>
-                            <span>•</span>
-                            <span className="flex items-center gap-1"><MapPin className="h-3 w-3" />{room.location}</span>
-                            <span>•</span>
-                            <span>{room.floor}</span>
-                            <span>•</span>
-                            <span className="flex items-center gap-1"><Users className="h-3 w-3" />Capacity: {room.capacity}</span>
-                            {room.assignedDoctor && (
+                            {room.location ? (
                               <>
                                 <span>•</span>
-                                <span className="flex items-center gap-1"><Stethoscope className="h-3 w-3" />{room.assignedDoctor}</span>
+                                <span className="flex items-center gap-1">
+                                  <MapPin className="h-3 w-3 shrink-0" />
+                                  {room.location}
+                                </span>
                               </>
-                            )}
+                            ) : null}
+                            {room.floor ? (
+                              <>
+                                <span>•</span>
+                                <span>{room.floor}</span>
+                              </>
+                            ) : null}
+                            <span>•</span>
+                            <span className="flex items-center gap-1">
+                              <Users className="h-3 w-3 shrink-0" />
+                              Capacity: {room.capacity}
+                            </span>
+                            {room.assignedDoctor ? (
+                              <>
+                                <span>•</span>
+                                <span className="flex items-center gap-1">
+                                  <Stethoscope className="h-3 w-3 shrink-0" />
+                                  {room.assignedDoctor}
+                                </span>
+                              </>
+                            ) : null}
                           </div>
                         </div>
                       </div>
@@ -561,11 +605,11 @@ export default function RoomManagementPage() {
         )}
 
         {/* Pagination */}
-        {!loading && !error && filteredRooms.length > 0 && (
+        {!loading && !error && totalCount > 0 && (
           <Card className="p-4 col-span-full">
             <StandardPagination
               currentPage={currentPage}
-              totalItems={filteredRooms.length}
+              totalItems={totalCount}
               itemsPerPage={itemsPerPage}
               onPageChange={setCurrentPage}
               onItemsPerPageChange={setItemsPerPage}

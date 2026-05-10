@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { DashboardLayout } from "@/components/shared/DashboardLayout";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -57,6 +57,7 @@ export default function AdminDashboardPage() {
     inactiveUsers: 0,
     onlineNow: 0,
     totalRoles: 0,
+    rolesInUse: 0,
     totalClinics: 0,
     activeClinics: 0,
     totalRooms: 0,
@@ -69,21 +70,61 @@ export default function AdminDashboardPage() {
   const [clinicStatus, setClinicStatus] = useState<any[]>([]);
   const [expiringLicenses, setExpiringLicenses] = useState<any[]>([]);
   const [performanceMetrics, setPerformanceMetrics] = useState({
-    responseTimeMs: 245,
-    errorRate: 0.02,
-    dataProcessedGb: 2.4,
+    responseTimeMs: undefined as number | undefined,
+    errorRate: undefined as number | undefined,
+    mediaStorageGb: undefined as number | undefined,
+    responseTimeSample: undefined as number | undefined,
     backupStatus: { status: 'unknown' } as BackupStatus,
   });
+  const [metricSources, setMetricSources] = useState<Record<string, 'live' | 'sample'>>({});
 
-  useEffect(() => {
-    loadDashboardData();
-    // Set initial time after mount to avoid hydration mismatch
-    setLastUpdated(new Date().toLocaleTimeString());
+  // Auto-poll cadence for "live" feel on Online Now / system health.
+  // 30s is cheap (one fan-out hit on /api/v1/users/?page_size=1000 etc.)
+  // and matches the 5-min activity bump granularity well enough that
+  // users see a sign-in tick over within a minute. We skip the tick
+  // entirely when the tab is in the background so we don't burn cycles
+  // for a dashboard nobody is watching.
+  const POLL_INTERVAL_MS = 30_000;
+  const isMountedRef = useRef(true);
+  const inFlightRef = useRef(false);
+
+  // Silent ticks call a slim ``/common/dashboard/live/`` endpoint that
+  // only returns ``onlineNow`` + ``systemHealth``. We skip the heavy
+  // users/roles/audit fan-out for those — KPI cards like Total Users
+  // and Recent Audit Activity don't shift in 30 s anyway, so a full
+  // refetch every tick was wasted bandwidth and DB load.
+  const loadLiveSlice = useCallback(async () => {
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
+    try {
+      const live = await adminService.getDashboardLive();
+      if (!isMountedRef.current) return;
+      setSystemStats(prev => ({ ...prev, onlineNow: live.onlineNow }));
+      const iconMap: Record<string, any> = {
+        'Server': Server,
+        'Database': Database,
+        'HardDrive': HardDrive,
+        'Wifi': Wifi,
+      };
+      const withIcons = (live.systemHealth || []).map((s: any) => ({
+        ...s,
+        icon: iconMap[s.icon as string] || Server,
+      }));
+      if (withIcons.length > 0) setSystemHealth(withIcons);
+      setLastUpdated(new Date().toLocaleTimeString());
+    } catch (err) {
+      // Background tick — fail silently, the previous payload remains.
+      console.debug('Live tick failed', err);
+    } finally {
+      inFlightRef.current = false;
+    }
   }, []);
 
-  const loadDashboardData = async () => {
+  const loadDashboardData = useCallback(async (opts: { silent?: boolean } = {}) => {
+    if (inFlightRef.current) return; // de-dup overlapping polls
+    inFlightRef.current = true;
     try {
-      setLoading(true);
+      if (!opts.silent) setLoading(true);
       setError(null);
       const stats = await adminService.getDashboardStats();
       setSystemStats({
@@ -92,6 +133,7 @@ export default function AdminDashboardPage() {
         inactiveUsers: stats.inactiveUsers,
         onlineNow: stats.onlineNow,
         totalRoles: stats.totalRoles,
+        rolesInUse: stats.rolesInUse,
         totalClinics: stats.totalClinics,
         activeClinics: stats.activeClinics,
         totalRooms: stats.totalRooms,
@@ -99,15 +141,14 @@ export default function AdminDashboardPage() {
         occupiedRooms: stats.occupiedRooms,
       });
       
-      // Set performance metrics if available
-      if (stats.responseTimeMs !== undefined || stats.errorRate !== undefined || stats.dataProcessedGb !== undefined) {
-        setPerformanceMetrics({
-          responseTimeMs: stats.responseTimeMs ?? 245,
-          errorRate: stats.errorRate ?? 0.02,
-          dataProcessedGb: stats.dataProcessedGb ?? 2.4,
-          backupStatus: stats.backupStatus ?? { status: 'unknown' },
-        });
-      }
+      setPerformanceMetrics({
+        responseTimeMs: stats.responseTimeMs,
+        errorRate: stats.errorRate,
+        mediaStorageGb: stats.mediaStorageGb,
+        responseTimeSample: stats.responseTimeSample,
+        backupStatus: stats.backupStatus ?? { status: 'unknown' },
+      });
+      setMetricSources(stats.metricSources ?? {});
       
       setUsersByRole(stats.usersByRole);
       setRecentAuditEvents(stats.recentAuditEvents);
@@ -125,19 +166,66 @@ export default function AdminDashboardPage() {
       setSystemHealth(systemHealthWithIcons);
       setClinicStatus(stats.clinicStatus);
       setExpiringLicenses(stats.expiringLicenses ?? []);
+      if (isMountedRef.current) {
+        setLastUpdated(new Date().toLocaleTimeString());
+      }
     } catch (err: any) {
       setError(err.message || 'Failed to load dashboard data');
-      toast.error('Failed to load dashboard. Please try again.');
+      // Don't spam toasts on background polls — only on the initial
+      // load or a user-triggered refresh.
+      if (!opts.silent) {
+        toast.error('Failed to load dashboard. Please try again.');
+      }
       console.error('Error loading dashboard:', err);
     } finally {
-      setLoading(false);
+      if (!opts.silent && isMountedRef.current) setLoading(false);
+      inFlightRef.current = false;
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    loadDashboardData();
+
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+
+    const startPolling = () => {
+      if (intervalId !== null) return;
+      intervalId = setInterval(() => {
+        if (typeof document !== 'undefined' && document.hidden) return;
+        loadLiveSlice();
+      }, POLL_INTERVAL_MS);
+    };
+
+    const stopPolling = () => {
+      if (intervalId !== null) {
+        clearInterval(intervalId);
+        intervalId = null;
+      }
+    };
+
+    startPolling();
+
+    // When the tab becomes visible again, kick off an immediate
+    // refresh so the user doesn't stare at a stale snapshot for up to
+    // 30 seconds before the next interval fires.
+    const onVisibility = () => {
+      if (typeof document !== 'undefined' && !document.hidden) {
+        loadLiveSlice();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+
+    return () => {
+      isMountedRef.current = false;
+      stopPolling();
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [loadDashboardData, loadLiveSlice]);
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
-    await loadDashboardData();
-    setLastUpdated(new Date().toLocaleTimeString());
+    await loadDashboardData({ silent: true });
     setIsRefreshing(false);
   };
 
@@ -164,10 +252,17 @@ export default function AdminDashboardPage() {
     ? Math.max(systemStats.onlineNow, 1)
     : systemStats.onlineNow;
   const backupStatus = performanceMetrics.backupStatus;
+  // The backend returns status="unknown" + message="No backup files found"
+  // when it successfully checked all backup dirs and they were empty.
+  // That's a distinct (and actionable) state from truly unknown, so we
+  // surface it as "No backups" with a warning tone.
+  const noBackupsFound =
+    backupStatus.status === "unknown" &&
+    /no backup files found/i.test(backupStatus.message || "");
   const backupBadgeVariant =
     backupStatus.status === "healthy"
       ? "bg-green-500/10 text-green-700 border-green-500/20"
-      : backupStatus.status === "warning"
+      : backupStatus.status === "warning" || noBackupsFound
         ? "bg-yellow-500/10 text-yellow-700 border-yellow-500/20"
         : backupStatus.status === "error"
           ? "bg-red-500/10 text-red-700 border-red-500/20"
@@ -175,14 +270,18 @@ export default function AdminDashboardPage() {
   const backupLabel =
     backupStatus.status === "healthy"
       ? "Healthy"
-      : backupStatus.status === "warning"
-        ? "Warning"
-        : backupStatus.status === "error"
-          ? "Error"
-          : "Unknown";
+      : noBackupsFound
+        ? "No backups"
+        : backupStatus.status === "warning"
+          ? "Warning"
+          : backupStatus.status === "error"
+            ? "Error"
+            : "Unknown";
   const backupDescription = backupStatus.lastBackup
     ? `Last backup ${backupStatus.hoursAgo} hour${backupStatus.hoursAgo === 1 ? "" : "s"} ago${backupStatus.filename ? ` (${backupStatus.filename})` : ""}.`
-    : backupStatus.message || "No backup telemetry available.";
+    : noBackupsFound
+      ? "No backup files found in the configured locations. Schedule a backup job to start tracking."
+      : backupStatus.message || "Backup telemetry isn’t available yet.";
 
   return (
     <DashboardLayout>
@@ -214,40 +313,44 @@ export default function AdminDashboardPage() {
           </Alert>
         )}
 
-        {/* System Summary — onlineNow is session-based (API returns 0 until tracking exists); avoid calling it "active users" (that is activeUsers) */}
+        {/* System Summary — onlineNow is session-based (API returns 0
+            until tracking exists); avoid calling it "active users"
+            (that is activeUsers). "Last updated" was duplicated here
+            and in the page header — removed from the bar. */}
         <Card className="bg-gradient-to-r from-slate-900/50 to-slate-800/50 border-slate-700/50">
           <CardContent className="p-4">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-4">
-                <div className="flex items-center gap-2">
-                  <ShieldCheck className="h-5 w-5 text-green-500" />
-                  <span className="text-sm font-medium text-green-400">System Status: Operational</span>
-                </div>
-                <div className="hidden h-4 w-px bg-slate-600 sm:block" />
-                <div className="flex items-center gap-2">
-                  <Activity className="h-4 w-4 text-blue-400" />
-                  <span className="text-sm text-slate-300">
-                    {displayedOnlineNow} online now
-                    <span className="text-slate-500"> (API activity or login in last 15 min)</span>
-                  </span>
-                </div>
-                <div className="hidden h-4 w-px bg-slate-600 sm:block" />
-                <div className="flex items-center gap-2">
-                  <Building2 className="h-4 w-4 text-amber-400" />
-                  <span className="text-sm text-slate-300">{systemStats.activeClinics} clinics operational</span>
-                </div>
+            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-4">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="h-5 w-5 text-green-500" />
+                <span className="text-sm font-medium text-green-400">System Status: Operational</span>
               </div>
-              <div className="text-xs text-slate-400 sm:text-right">
-                <span>Last updated: {lastUpdated}</span>
+              <div className="hidden h-4 w-px bg-slate-600 sm:block" />
+              <div className="flex items-center gap-2">
+                <span className="relative inline-flex h-2 w-2" title="Auto-refreshing every 30s">
+                  <span className="absolute inset-0 rounded-full bg-green-400 opacity-75 animate-ping" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-green-500" />
+                </span>
+                <span className="text-sm text-slate-300">
+                  {displayedOnlineNow} online now
+                  <span className="text-slate-500"> (API activity or login in last 15 min)</span>
+                </span>
+              </div>
+              <div className="hidden h-4 w-px bg-slate-600 sm:block" />
+              <div className="flex items-center gap-2">
+                <Building2 className="h-4 w-4 text-amber-400" />
+                <span className="text-sm text-slate-300">{systemStats.activeClinics} clinics operational</span>
               </div>
             </div>
           </CardContent>
         </Card>
 
-        {/* Key Stats */}
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+        {/* Key Stats — five cards on lg+. The old "System Status" tile
+            was a constant string that already lives in the status bar
+            above and the System Alerts panel; removed to stop the
+            user-eye bouncing between three copies of the same word. */}
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
           {loading ? (
-            Array.from({ length: 6 }).map((_, i) => (
+            Array.from({ length: 5 }).map((_, i) => (
               <Card key={i}>
                 <CardContent className="p-4">
                   <div className="flex items-center justify-between">
@@ -286,10 +389,19 @@ export default function AdminDashboardPage() {
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-muted-foreground">Online Now</p>
+                  <div className="flex items-center gap-1.5">
+                    <p className="text-sm text-muted-foreground">Online Now</p>
+                    <span className="relative inline-flex h-2 w-2" title="Auto-refreshing every 30s">
+                      <span className="absolute inset-0 rounded-full bg-green-400 opacity-75 animate-ping" />
+                      <span className="relative inline-flex h-2 w-2 rounded-full bg-green-500" />
+                    </span>
+                  </div>
                   <p className="text-2xl font-bold text-green-500">{displayedOnlineNow}</p>
                 </div>
                 <Activity className="h-8 w-8 text-green-500/50" />
+              </div>
+              <div className="mt-2 text-[11px] text-muted-foreground">
+                Last 15 min · live
               </div>
             </CardContent>
           </Card>
@@ -302,6 +414,15 @@ export default function AdminDashboardPage() {
                   <p className="text-2xl font-bold text-violet-500">{systemStats.totalRoles}</p>
                 </div>
                 <Shield className="h-8 w-8 text-violet-500/50" />
+              </div>
+              <div className="mt-2 text-xs">
+                {systemStats.totalRoles === 0 ? (
+                  <Link href="/admin/roles" className="text-violet-600 hover:underline">
+                    Configure roles →
+                  </Link>
+                ) : (
+                  <span className="text-green-500">{systemStats.rolesInUse} in use</span>
+                )}
               </div>
             </CardContent>
           </Card>
@@ -331,22 +452,13 @@ export default function AdminDashboardPage() {
                 <DoorOpen className="h-8 w-8 text-cyan-500/50" />
               </div>
               <div className="mt-2 text-xs">
-                <span className="text-green-500">{systemStats.availableRooms} available</span>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-gradient-to-br from-rose-500/10 to-rose-600/5 border-rose-500/20">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">System Status</p>
-                  <p className="text-2xl font-bold text-rose-500">Healthy</p>
-                </div>
-                <ShieldCheck className="h-8 w-8 text-rose-500/50" />
-              </div>
-              <div className="mt-2 text-xs">
-                <span className="text-green-500">All systems operational</span>
+                {systemStats.totalRooms === 0 ? (
+                  <Link href="/admin/rooms" className="text-cyan-600 hover:underline">
+                    Configure rooms →
+                  </Link>
+                ) : (
+                  <span className="text-green-500">{systemStats.availableRooms} available</span>
+                )}
               </div>
             </CardContent>
           </Card>
@@ -457,7 +569,7 @@ export default function AdminDashboardPage() {
                   <div>
                     <CardTitle className="text-lg">System Alerts</CardTitle>
                     <p className="text-xs text-muted-foreground mt-1">
-                      License warnings use staff license expiry data; backup status comes from `/common/metrics/`.
+                      Backups, staff licenses expiring soon, and other items that need an admin&rsquo;s attention.
                     </p>
                   </div>
                   <Link href="/admin/audit">
@@ -473,13 +585,18 @@ export default function AdminDashboardPage() {
                   </div>
                 ) : (
                   <div className="space-y-3">
+                    {/* Baseline "all clear" row. We don't have an
+                        incident source feeding this yet, so the old
+                        "Live" badge over-promised real-time monitoring.
+                        Reads as a default no-alerts state until the
+                        backup, license, and (future) incident checks
+                        below say otherwise. */}
                     <div className="flex items-center gap-3 p-3 rounded-lg bg-green-500/5 border border-green-500/10 dark:text-green-100">
                       <CheckCircle className="h-5 w-5 text-green-500 flex-shrink-0" />
                       <div className="flex-1">
-                        <p className="text-sm font-medium text-green-700 dark:text-green-300">All Systems Operational</p>
-                        <p className="text-xs text-green-600 dark:text-green-400/90">No critical issues detected</p>
+                        <p className="text-sm font-medium text-green-700 dark:text-green-300">No active incidents</p>
+                        <p className="text-xs text-green-600 dark:text-green-400/90">Nothing reported by the checks below.</p>
                       </div>
-                      <span className="text-xs text-green-600 dark:text-green-400">Live</span>
                     </div>
 
                     <div className="flex items-center gap-3 p-3 rounded-lg border border-border/60 bg-muted/20">
@@ -559,7 +676,8 @@ export default function AdminDashboardPage() {
                             <div>
                               <span className="text-sm font-medium">{clinic.name}</span>
                               <div className="text-xs text-muted-foreground">
-                                {clinic.patients} patients • {clinic.doctors} doctors
+                                {clinic.patients} patients seen • {clinic.doctors} doctors active
+                                <span className="text-muted-foreground/60"> · last 30d</span>
                               </div>
                             </div>
                           </div>
@@ -598,15 +716,22 @@ export default function AdminDashboardPage() {
                   <div className="space-y-3">
                     {systemHealth.map((system) => {
                       const IconComponent = system.icon;
-                      const iconColorClass = getStatusColor(system.status);
+                      const iconColorClass = getStatusColor(system.status as string);
                       const iconClass = "h-5 w-5 " + iconColorClass;
+                      const uptimeText = (system as Record<string, unknown>).uptime as string | null | undefined;
+                      const detailText = (system as Record<string, unknown>).detail as string | undefined;
                       return (
-                        <div key={system.name} className="flex items-center justify-between p-3 rounded-lg bg-muted/30 border border-border/50">
-                          <div className="flex items-center gap-3">
+                        <div key={system.name as string} className="flex items-center justify-between p-3 rounded-lg bg-muted/30 border border-border/50">
+                          <div className="flex items-start gap-3 min-w-0">
                             <IconComponent className={iconClass} />
-                            <div>
-                              <span className="text-sm font-medium">{system.name}</span>
-                              <div className="text-xs text-muted-foreground">Uptime: {system.uptime}</div>
+                            <div className="min-w-0">
+                              <span className="text-sm font-medium">{system.name as string}</span>
+                              {uptimeText && (
+                                <div className="text-xs text-muted-foreground">Up {uptimeText}</div>
+                              )}
+                              {detailText && (
+                                <div className="text-[11px] text-muted-foreground/80 truncate" title={detailText}>{detailText}</div>
+                              )}
                             </div>
                           </div>
                           <div className="flex items-center gap-2">
@@ -637,12 +762,20 @@ export default function AdminDashboardPage() {
               </CardContent>
             </Card>
 
-            {/* Performance Metrics */}
+            {/* Performance Metrics — only renders values the backend
+                explicitly flags as ``live`` in /common/metrics/. The
+                old card cheerfully showed 245ms response time and 0.02%
+                error rate which were hardcoded defaults in the view;
+                until middleware/APM populates ``avg_response_time_ms``
+                and an error source, those rows show "Not connected".
+                The storage metric used to be labelled "Data Processed
+                today" but is actually the cumulative MEDIA_ROOT size,
+                so it's renamed accordingly. */}
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-lg">Performance Metrics</CardTitle>
-                <p className="text-xs text-muted-foreground font-normal">
-                  Illustrative values below — connect APM or analytics to replace with live data. &quot;Online now&quot; matches the summary bar (last 15 minutes, from user activity + login).
+                <p className="text-xs text-muted-foreground font-normal mt-1">
+                  Live values from the system. Rows marked &ldquo;Not connected&rdquo; need an APM or logging integration.
                 </p>
               </CardHeader>
               <CardContent>
@@ -653,35 +786,32 @@ export default function AdminDashboardPage() {
                   </div>
                 ) : (
                   <div className="space-y-4">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-sm text-muted-foreground">Response Time</span>
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium tabular-nums">{performanceMetrics.responseTimeMs}ms</span>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-sm text-muted-foreground">Error Rate</span>
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium tabular-nums">{performanceMetrics.errorRate.toFixed(2)}%</span>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-muted-foreground">Online now</span>
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium tabular-nums">{displayedOnlineNow}</span>
-                        <Activity className="h-4 w-4 text-blue-500" />
-                      </div>
-                    </div>
-
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-sm text-muted-foreground">Data Processed</span>
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium tabular-nums">{performanceMetrics.dataProcessedGb.toFixed(1)}GB</span>
-                        <span className="text-xs text-muted-foreground">today</span>
-                      </div>
-                    </div>
+                    <PerfRow
+                      label="Response Time"
+                      value={performanceMetrics.responseTimeMs !== undefined ? `${performanceMetrics.responseTimeMs}ms` : null}
+                      source={metricSources['responseTimeMs']}
+                      hint={
+                        performanceMetrics.responseTimeSample
+                          ? `Rolling 5-min avg over ${performanceMetrics.responseTimeSample} request${performanceMetrics.responseTimeSample === 1 ? '' : 's'}.`
+                          : 'Waiting for API traffic — the rolling average needs at least one request in the last 5 minutes.'
+                      }
+                    />
+                    <PerfRow
+                      label="Error Rate"
+                      value={performanceMetrics.errorRate !== undefined ? `${performanceMetrics.errorRate.toFixed(2)}%` : null}
+                      source={metricSources['errorRate']}
+                      hint={
+                        performanceMetrics.responseTimeSample
+                          ? `Share of 5xx responses over the last 5 minutes (${performanceMetrics.responseTimeSample} sampled).`
+                          : 'Waiting for API traffic — rolling 5-min window has no requests yet.'
+                      }
+                    />
+                    <PerfRow
+                      label="Media storage used"
+                      value={performanceMetrics.mediaStorageGb !== undefined ? `${performanceMetrics.mediaStorageGb.toFixed(2)} GB` : null}
+                      source={metricSources['mediaStorageGb']}
+                      hint="Cumulative size of MEDIA_ROOT on the API server."
+                    />
                   </div>
                 )}
               </CardContent>
@@ -770,5 +900,55 @@ export default function AdminDashboardPage() {
         onOpenChange={setShowGenericsModal} 
       />
     </DashboardLayout>
+  );
+}
+
+function PerfRow({
+  label,
+  value,
+  source,
+  hint,
+}: {
+  label: string;
+  /** Numeric value when the metric is live; null when the backend
+   *  omitted it because no real source is wired. */
+  value: string | null;
+  source?: 'live' | 'sample';
+  hint?: string;
+}) {
+  const isLive = value !== null && source === 'live';
+  const isSample = value !== null && source !== 'live';
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-col min-w-0">
+        <span className="text-sm text-muted-foreground truncate">{label}</span>
+        {hint && (
+          <span className="text-[11px] text-muted-foreground/70 truncate" title={hint}>{hint}</span>
+        )}
+      </div>
+      <div className="flex items-center gap-2 shrink-0">
+        {isLive && (
+          <span className="text-sm font-medium tabular-nums">{value}</span>
+        )}
+        {isSample && (
+          <>
+            <span
+              className="text-sm font-medium tabular-nums text-muted-foreground/80"
+              title="Sample value — not from a live metrics source"
+            >
+              {value}
+            </span>
+            <span className="text-[10px] uppercase tracking-wide text-amber-700 dark:text-amber-300 border border-amber-500/40 bg-amber-500/10 rounded px-1 py-0.5">
+              Sample
+            </span>
+          </>
+        )}
+        {value === null && (
+          <span className="text-[11px] uppercase tracking-wide text-muted-foreground border border-border bg-muted/40 rounded px-1.5 py-0.5">
+            Not connected
+          </span>
+        )}
+      </div>
+    </div>
   );
 }

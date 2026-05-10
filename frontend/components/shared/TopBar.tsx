@@ -39,14 +39,53 @@ export const TopBar = () => {
     setCurrentTime(new Date());
   }, []);
 
-  // Update time every minute
+  // Update the clock once per wall-clock minute, aligned to the
+  // :00-second boundary. A plain `setInterval(..., 60_000)` drifts
+  // relative to the wall clock (it fires every 60 s from mount), so a
+  // page loaded at HH:MM:35 keeps showing HH:MM until HH:(MM+1):35 —
+  // i.e. the display can be up to ~59 seconds behind. By scheduling
+  // the first tick at the next minute boundary and then running a
+  // 60 s interval, the clock flips at HH:(MM+1):00, HH:(MM+2):00, …
+  // matching the wall clock to within a second.
   useEffect(() => {
     if (!mounted) return;
-    
-    const timer = setInterval(() => {
-      setCurrentTime(new Date());
-    }, 60000);
-    return () => clearInterval(timer);
+
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+
+    const tick = () => setCurrentTime(new Date());
+
+    const now = new Date();
+    const msUntilNextMinute =
+      60_000 - (now.getSeconds() * 1000 + now.getMilliseconds());
+
+    const timeoutId = setTimeout(() => {
+      tick();
+      intervalId = setInterval(tick, 60_000);
+    }, msUntilNextMinute);
+
+    return () => {
+      clearTimeout(timeoutId);
+      if (intervalId !== null) clearInterval(intervalId);
+    };
+  }, [mounted]);
+
+  // Pull the clock forward when the tab regains focus — otherwise a
+  // backgrounded tab can have its setInterval throttled and stay
+  // stuck minutes behind the wall clock until the user manually
+  // refreshes.
+  useEffect(() => {
+    if (!mounted) return;
+    const onVisibility = () => {
+      if (typeof document !== 'undefined' && !document.hidden) {
+        setCurrentTime(new Date());
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('focus', onVisibility);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('focus', onVisibility);
+    };
   }, [mounted]);
 
   const handleLogout = async () => {

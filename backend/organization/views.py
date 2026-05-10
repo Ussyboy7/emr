@@ -1,8 +1,11 @@
 """
 Views for the Organization app.
 """
+from datetime import timedelta
+
 from django.db import transaction
 from django.db.models import Count, Q
+from django.utils import timezone
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import viewsets
 from rest_framework.decorators import action
@@ -31,12 +34,34 @@ class ClinicViewSet(viewsets.ModelViewSet):
     ordering_fields = ['name', 'created_at']
     ordering = ['name']
     
+    # Rolling window for "current activity" on the admin Clinic Status
+    # tile. Lifetime counts were too broad — a doctor who consulted
+    # once six months ago shouldn't show up as "active today".
+    CLINIC_ACTIVITY_WINDOW_DAYS = 30
+
     def get_queryset(self):
+        # We count *recent activity* rather than direct FKs because in
+        # practice ``Patient.location_clinic`` and ``User.clinic`` are
+        # rarely backfilled, but every Visit/ConsultationSession does
+        # carry a clinic linkage (Visit.location_clinic and
+        # ConsultationSession.room.clinic respectively). The 30-day
+        # window keeps the dashboard tile honest: it reflects current
+        # operational throughput, not "anyone who ever touched this
+        # clinic".
+        window_start = timezone.now() - timedelta(days=self.CLINIC_ACTIVITY_WINDOW_DAYS)
+        window_start_date = window_start.date()
         return Clinic.objects.annotate(
-            patient_count=Count("patients", distinct=True),
+            patient_count=Count(
+                "visits__patient",
+                filter=Q(visits__date__gte=window_start_date),
+                distinct=True,
+            ),
             doctor_count=Count(
-                "staff",
-                filter=Q(staff__is_active=True, staff__system_role="Medical Doctor"),
+                "consultation_rooms__sessions__doctor",
+                filter=Q(
+                    consultation_rooms__sessions__doctor__is_active=True,
+                    consultation_rooms__sessions__started_at__gte=window_start,
+                ),
                 distinct=True,
             ),
         )

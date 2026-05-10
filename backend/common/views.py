@@ -3,12 +3,14 @@ Common utility views.
 """
 import json
 import os
-from datetime import datetime, timezone as dt_timezone
+import time
+from datetime import datetime, timedelta, timezone as dt_timezone
 from pathlib import Path
 
 from django.conf import settings
 from django.core.cache import cache
 from django.db import connection
+from django.db.models import Q
 from django.http import JsonResponse
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods
@@ -17,7 +19,138 @@ from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from .middleware import read_api_timing_window
 from .services import FileUploadService, EmailService, SMSService, BackupService
+
+
+# Wall-clock seconds at which this Django process first imported this
+# module. ``common.urls`` is included from ``emr_backend.urls`` at boot,
+# so this value is set during the WSGI/ASGI startup pass and gives us a
+# close-enough "API server uptime" reading for the admin dashboard
+# without needing an external monitoring stack.
+API_PROCESS_STARTED_AT: float = time.time()
+
+
+def _format_uptime(seconds: float) -> str:
+    """Render a duration like ``3d 4h``, ``2h 15m``, ``45s``."""
+    seconds = max(0, int(seconds))
+    days, rem = divmod(seconds, 86400)
+    hours, rem = divmod(rem, 3600)
+    minutes, secs = divmod(rem, 60)
+    if days:
+        return f"{days}d {hours}h"
+    if hours:
+        return f"{hours}h {minutes}m"
+    if minutes:
+        return f"{minutes}m {secs}s"
+    return f"{secs}s"
+
+
+def _collect_system_health() -> list[dict]:
+    """Real availability + uptime for the three components shown on the
+    admin dashboard. This intentionally does NOT depend on an external
+    APM/monitoring stack — every value is something the API process
+    itself can answer:
+
+    * **API Server** — uptime is ``now - common.CommonConfig.api_started_at``
+      (recorded in ``apps.ready()``). Health is implicit: if this code
+      is executing, the API is up.
+    * **Database** — uptime comes from ``pg_postmaster_start_time()``
+      when Postgres is configured. Health is determined by ``SELECT 1``.
+    * **File Storage** — health is ``MEDIA_ROOT`` writability. We also
+      report free space on the volume.
+    """
+    results: list[dict] = []
+
+    # API Server — module-level timestamp captured at first import
+    # (effectively process boot, since common/urls.py is included at
+    # startup). Don't rely on apps.get_app_config('common'): the
+    # ``common`` package isn't registered in INSTALLED_APPS.
+    api_uptime_s = max(0.0, time.time() - API_PROCESS_STARTED_AT)
+    results.append({
+        'name': 'API Server',
+        'status': 'healthy',
+        'icon': 'Server',
+        'uptime_seconds': int(api_uptime_s),
+        'uptime': _format_uptime(api_uptime_s),
+        'detail': 'Process uptime since last restart.',
+    })
+
+    # Database — Postgres-aware, falls back to a simple ping otherwise.
+    db_entry: dict = {'name': 'Database', 'icon': 'Database'}
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT 1")
+            cursor.fetchone()
+        db_entry['status'] = 'healthy'
+        vendor = connection.vendor
+        if vendor == 'postgresql':
+            try:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        "SELECT EXTRACT(EPOCH FROM (NOW() - pg_postmaster_start_time()))"
+                    )
+                    row = cursor.fetchone()
+                    db_uptime_s = float(row[0]) if row and row[0] is not None else None
+            except Exception:
+                db_uptime_s = None
+            if db_uptime_s is not None:
+                db_entry['uptime_seconds'] = int(db_uptime_s)
+                db_entry['uptime'] = _format_uptime(db_uptime_s)
+                db_entry['detail'] = 'PostgreSQL uptime since postmaster start.'
+            else:
+                db_entry['uptime_seconds'] = None
+                db_entry['uptime'] = None
+                db_entry['detail'] = 'Reachable (uptime unavailable).'
+        else:
+            db_entry['uptime_seconds'] = None
+            db_entry['uptime'] = None
+            db_entry['detail'] = f'Reachable ({vendor}).'
+    except Exception as exc:
+        db_entry['status'] = 'error'
+        db_entry['uptime_seconds'] = None
+        db_entry['uptime'] = None
+        db_entry['detail'] = f'Connection failed: {exc}'
+    results.append(db_entry)
+
+    # File Storage
+    media_path = getattr(settings, 'MEDIA_ROOT', None) or ''
+    storage_entry: dict = {'name': 'File Storage', 'icon': 'HardDrive'}
+    try:
+        if media_path and os.path.exists(media_path) and os.access(media_path, os.W_OK):
+            storage_entry['status'] = 'healthy'
+            try:
+                stat = os.statvfs(media_path)
+                free_gb = stat.f_bavail * stat.f_frsize / (1024 ** 3)
+                total_gb = stat.f_blocks * stat.f_frsize / (1024 ** 3)
+                used_pct = (1 - (free_gb / total_gb)) * 100 if total_gb else 0
+                storage_entry['detail'] = (
+                    f"{free_gb:.1f} GB free of {total_gb:.1f} GB ({used_pct:.0f}% used)."
+                )
+                storage_entry['free_gb'] = round(free_gb, 2)
+                storage_entry['total_gb'] = round(total_gb, 2)
+                # Degrade the badge if the disk is uncomfortably full.
+                if used_pct >= 95:
+                    storage_entry['status'] = 'error'
+                elif used_pct >= 85:
+                    storage_entry['status'] = 'warning'
+            except (AttributeError, OSError):
+                # statvfs not available on Windows / unreadable mount.
+                storage_entry['detail'] = 'Writable; free-space stats unavailable.'
+        elif media_path and os.path.exists(media_path):
+            storage_entry['status'] = 'error'
+            storage_entry['detail'] = 'MEDIA_ROOT exists but is not writable by the API process.'
+        else:
+            storage_entry['status'] = 'warning'
+            storage_entry['detail'] = 'MEDIA_ROOT path does not exist.'
+    except Exception as exc:
+        storage_entry['status'] = 'error'
+        storage_entry['detail'] = f'Check failed: {exc}'
+    storage_entry['uptime_seconds'] = None
+    storage_entry['uptime'] = None
+    results.append(storage_entry)
+
+    return results
 
 
 @require_http_methods(["GET"])
@@ -93,46 +226,89 @@ def health_check(request):
 
 
 class SystemMetricsView(views.APIView):
-    """System monitoring metrics for dashboard."""
+    """System monitoring metrics for dashboard.
+
+    This endpoint only returns numbers that have a real source. Until an
+    APM/logging integration is wired, response time and error rate are
+    deliberately *omitted* rather than fabricated, so the frontend can't
+    pass off hardcoded defaults as live data.
+
+    What is real today:
+      * ``mediaStorageGb`` — cumulative size of ``MEDIA_ROOT`` on disk.
+        (This is NOT throughput "today"; the old key ``dataProcessedGb``
+        was mislabeled.)
+      * ``responseTimeMs`` — only set when the cache key
+        ``avg_response_time_ms`` is populated by middleware/job. Until
+        that exists, the key is absent.
+      * ``backupStatus`` — file-system scan of common backup locations.
+
+    Each key returned also has an entry in the ``sources`` map describing
+    whether it is ``"live"`` (real measurement) or ``"sample"`` (placeholder).
+    """
     
     permission_classes = [IsAuthenticated]
     
     def get(self, request):
         """Return current system metrics."""
         try:
-            metrics = {}
-            
-            # Response time (average of recent requests) - simulated from cache
-            avg_response_time = cache.get('avg_response_time_ms', 245)
-            metrics['responseTimeMs'] = int(avg_response_time)
-            
-            # Error rate (errors in last 15 minutes)
-            # Could integrate with logging/APM, for now use a conservative estimate
-            metrics['errorRate'] = 0.02
-            
-            # Data processed today (approximate from file storage)
+            metrics: dict = {}
+            sources: dict[str, str] = {}
+
+            # Response time + Error rate — derived from the rolling
+            # 5-minute window populated by ApiTimingMiddleware. If no
+            # API traffic has been observed in that window, both keys
+            # are omitted so the UI shows "Not connected" rather than
+            # a misleading zero. ``sample`` is exposed so an admin can
+            # see how many requests the average was computed from.
+            timing = read_api_timing_window()
+            if timing:
+                metrics['responseTimeMs'] = timing['avg_ms']
+                metrics['errorRate'] = timing['error_rate_pct']
+                metrics['responseTimeSample'] = timing['sample']
+                sources['responseTimeMs'] = 'live'
+                sources['errorRate'] = 'live'
+
+            # Media storage — real, measurable, but reflects cumulative
+            # MEDIA_ROOT usage. We expose the truthful name and also
+            # keep ``dataProcessedGb`` as a deprecated alias so older
+            # frontend builds don't break.
             try:
                 media_path = settings.MEDIA_ROOT
-                if os.path.exists(media_path):
+                if media_path and os.path.exists(media_path):
                     total_size = 0
-                    for dirpath, dirnames, filenames in os.walk(media_path):
+                    for dirpath, _dirnames, filenames in os.walk(media_path):
                         for filename in filenames:
                             filepath = os.path.join(dirpath, filename)
-                            total_size += os.path.getsize(filepath)
-                    # Convert to GB
-                    metrics['dataProcessedGb'] = round(total_size / (1024 ** 3), 2)
+                            try:
+                                total_size += os.path.getsize(filepath)
+                            except OSError:
+                                continue
+                    media_gb = round(total_size / (1024 ** 3), 2)
                 else:
-                    metrics['dataProcessedGb'] = 0.0
+                    media_gb = 0.0
+                metrics['mediaStorageGb'] = media_gb
+                metrics['dataProcessedGb'] = media_gb  # deprecated alias
+                sources['mediaStorageGb'] = 'live'
             except Exception:
-                metrics['dataProcessedGb'] = 0.0
-            
-            # Backup status
+                pass
+
+            # Backup status — real file-system check.
             backup_status = cache.get('last_backup_status', None)
             if backup_status:
                 metrics['backupStatus'] = backup_status
             else:
                 metrics['backupStatus'] = self._detect_backup_status()
-            
+            sources['backupStatus'] = 'live'
+
+            # System health — process uptime + DB ping + storage check.
+            try:
+                metrics['systemHealth'] = _collect_system_health()
+                sources['systemHealth'] = 'live'
+            except Exception:
+                # Never let a probe error break the dashboard.
+                metrics['systemHealth'] = []
+
+            metrics['sources'] = sources
             return Response(metrics)
         except Exception as e:
             return Response({'error': str(e)}, status=500)
@@ -219,6 +395,51 @@ class SystemMetricsView(views.APIView):
                     continue
 
         return candidates
+
+
+class LiveDashboardView(views.APIView):
+    """Lightweight payload for the admin dashboard's 30 s auto-poll.
+
+    Returning the full ``getDashboardStats()`` aggregate every 30 s is
+    overkill — it pulls 1000 users, 1000 roles, 1000 rooms, the audit
+    log, etc. just to update an "online now" count and three uptime
+    numbers. This endpoint exposes only the data that actually changes
+    on each tick:
+
+    * ``onlineNow`` — single ``COUNT`` against ``User`` using the
+      same 15-minute window as the frontend calculation.
+    * ``systemHealth`` — process uptime, DB ping, MEDIA_ROOT check.
+    * ``serverTime`` — useful for a future "last refreshed N s ago"
+      label rendered against the server clock.
+
+    The full dashboard fetch still runs on initial load and on a
+    user-triggered Refresh so all the other KPIs stay accurate.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    ONLINE_WINDOW = timedelta(minutes=15)
+
+    def get(self, request):
+        from accounts.models import User  # local import to avoid a circular boot dep
+
+        cutoff = timezone.now() - self.ONLINE_WINDOW
+        online_now = User.objects.filter(is_active=True).filter(
+            Q(last_activity__gte=cutoff) | Q(last_login__gte=cutoff)
+        ).count()
+
+        try:
+            system_health = _collect_system_health()
+        except Exception:
+            # Never let a probe failure break the live tick — the rest
+            # of the dashboard still uses the previous good payload.
+            system_health = []
+
+        return Response({
+            'onlineNow': online_now,
+            'systemHealth': system_health,
+            'serverTime': timezone.now().isoformat(),
+        })
 
 
 class FileUploadView(views.APIView):

@@ -70,13 +70,15 @@ class ConsultationRoomViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     serializer_class = ConsultationRoomSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['status', 'specialty', 'is_active', 'clinic']
+    filterset_fields = ['status', 'specialty', 'is_active', 'clinic', 'room_type']
     search_fields = ['name', 'room_number', 'location']
     ordering_fields = ['room_number', 'name']
     ordering = ['room_number']
     
     def get_queryset(self):
-        return ConsultationRoom.objects.filter(is_active=True).select_related('clinic')
+        # Admin listing must include inactive / maintenance rows so filters work.
+        # Use ``is_active`` / ``status`` query params to narrow results.
+        return ConsultationRoom.objects.all().select_related('clinic')
     
     @action(detail=True, methods=['get'])
     def queue(self, request, pk=None):
@@ -844,12 +846,14 @@ class ConsultationQueueViewSet(viewsets.ModelViewSet):
             title = "Patient sent to Consultation"
             message = f"{patient_name} has been sent to {room_name} for consultation."
 
+            # A patient is now waiting in the queue for this room — that
+            # outranks routine background pings.
             NotificationService.notify_role(
-                role_name='Medical Doctor',  # For now: notify all doctors
+                role_name='Medical Doctor',
                 title=title,
                 message=message,
                 notification_type='workflow',
-                priority='normal',
+                priority='high',
                 action_url=f"/consultation/room/{queue_item.room.id}",
                 object_type='consultation_queue',
                 object_id=str(queue_item.id),
@@ -929,12 +933,14 @@ class ConsultationQueueViewSet(viewsets.ModelViewSet):
                 title = "Patient reassigned to Consultation room"
                 message = f"{patient_name} has been reassigned to {updated.room.name}."
 
+                # Reassignment also means a patient is now in this
+                # room's queue waiting — same priority as initial send.
                 NotificationService.notify_role(
                     role_name='Medical Doctor',
                     title=title,
                     message=message,
                     notification_type='workflow',
-                    priority='normal',
+                    priority='high',
                     action_url=f"/consultation/room/{updated.room.id}",
                     object_type='consultation_queue',
                     object_id=str(updated.id),

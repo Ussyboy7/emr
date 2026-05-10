@@ -473,7 +473,14 @@ class AdminService {
   }
 
   /**
-   * Get all rooms
+   * Get all rooms.
+   *
+   * Hits ``/consultation/rooms/`` (``ConsultationRoom`` — the model the
+   * Room Management page at ``/admin/rooms`` actually manages). The
+   * older ``/organization/rooms/`` endpoint exposes a *different*
+   * ``organization.Room`` table that has no UI today and is typically
+   * empty, which is what caused the admin dashboard to show
+   * ``Rooms: 0`` while the management page listed 11 rows.
    */
   async getRooms(params?: {
     clinic?: number;
@@ -486,7 +493,7 @@ class AdminService {
     page_size?: number;
   }): Promise<{ results: Record<string, unknown>[]; count: number }> {
     const query = buildQueryString(params || {});
-    return apiFetch<{ results: Record<string, unknown>[]; count: number }>(`/organization/rooms/${query}`);
+    return apiFetch<{ results: Record<string, unknown>[]; count: number }>(`/consultation/rooms/${query}`);
   }
 
   /**
@@ -526,6 +533,28 @@ class AdminService {
   }
 
   /**
+   * Lightweight payload for the admin dashboard auto-poll. Returns
+   * just the data that actually changes every few seconds (online
+   * count + live system health) without dragging in the heavy
+   * users/roles/audit fetches that `getDashboardStats()` does.
+   *
+   * The server caps work to a single `COUNT` against `users` plus the
+   * three local probes (process clock, `SELECT 1`, `statvfs`), so this
+   * is safe to call on a 30 s timer.
+   */
+  async getDashboardLive(): Promise<{
+    onlineNow: number;
+    systemHealth: Record<string, unknown>[];
+    serverTime: string;
+  }> {
+    return apiFetch<{
+      onlineNow: number;
+      systemHealth: Record<string, unknown>[];
+      serverTime: string;
+    }>('/common/dashboard/live/');
+  }
+
+  /**
    * Get admin dashboard statistics
    */
   async getDashboardStats(): Promise<{
@@ -534,6 +563,8 @@ class AdminService {
     inactiveUsers: number;
     onlineNow: number;
     totalRoles: number;
+    /** Roles that have at least one user assigned. */
+    rolesInUse: number;
     totalClinics: number;
     activeClinics: number;
     totalRooms: number;
@@ -545,10 +576,19 @@ class AdminService {
     expiringLicenses: Record<string, unknown>[];
     clinicStatus: Record<string, unknown>[];
     pendingApprovals: Record<string, unknown>[];
+    /** Only set when /common/metrics/ flags it as `live`. */
     responseTimeMs?: number;
+    /** Only set when /common/metrics/ flags it as `live`. */
     errorRate?: number;
+    /** Number of requests measured in the rolling 5-minute window. */
+    responseTimeSample?: number;
+    /** Cumulative MEDIA_ROOT size — preferred truthful name. */
+    mediaStorageGb?: number;
+    /** @deprecated Mislabeled — same value as ``mediaStorageGb``. */
     dataProcessedGb?: number;
     backupStatus?: Record<string, unknown>;
+    /** Per-key data source: 'live' (real measurement) or 'sample' (placeholder). */
+    metricSources?: Record<string, 'live' | 'sample'>;
   }> {
     // Load all data in parallel
     const [usersResponse, rolesResponse, clinicsResponse, roomsResponse, auditResponse, metricsResponse] = await Promise.all([
@@ -585,11 +625,26 @@ class AdminService {
     }).length;
 
     const totalRoles = roles.length;
+    // RoleSerializer exposes ``user_count`` (count of UserRole rows
+    // pointing at that Role). A role is "in use" if at least one
+    // user is assigned to it — gives the dashboard a non-trivial
+    // subtext alongside the other KPI cards.
+    const rolesInUse = roles.filter((r: Role) => (r.user_count ?? 0) > 0).length;
     const totalClinics = clinics.length;
     const activeClinics = clinics.filter(c => c.is_active).length;
-    const totalRooms = rooms.length;
-    const availableRooms = rooms.filter((r: Record<string, unknown>) => r.status === 'active' && !r.assigned_doctor).length;
-    const occupiedRooms = rooms.filter((r: Record<string, unknown>) => r.status === 'active' && r.assigned_doctor).length;
+    // ``count`` is the full server total — robust past the 1000-row
+    // page_size we request. ``rooms.length`` would silently cap.
+    const totalRooms = roomsResponse.count ?? rooms.length;
+    // ConsultationRoom exposes ``active_session`` via the serializer:
+    // present (truthy object) when a session is in progress in that
+    // room. That's the correct "occupied" signal — the older code
+    // looked for ``assigned_doctor`` which doesn't exist on this model.
+    const availableRooms = rooms.filter(
+      (r: Record<string, unknown>) => r.status === 'active' && !r.active_session,
+    ).length;
+    const occupiedRooms = rooms.filter(
+      (r: Record<string, unknown>) => r.status === 'active' && Boolean(r.active_session),
+    ).length;
 
     // Users by role with proper role mapping
     const roleCounts: Record<string, number> = {};
@@ -630,16 +685,21 @@ class AdminService {
       status: log.result === 'success' ? 'success' : 'failed',
     }));
 
-    // System health - simulate realistic uptime (would be from monitoring system)
-    const baseUptime = 99.95; // Base uptime percentage
-    const randomVariation = (Math.random() - 0.5) * 0.1; // Small random variation
-    const realisticUptime = Math.max(99.5, Math.min(99.99, baseUptime + randomVariation));
-
-    const systemHealth = [
-      { name: 'API Server', status: 'healthy', uptime: `${realisticUptime.toFixed(1)}%`, icon: 'Server' },
-      { name: 'Database', status: 'healthy', uptime: `${(realisticUptime - 0.05).toFixed(1)}%`, icon: 'Database' },
-      { name: 'File Storage', status: 'healthy', uptime: `${realisticUptime.toFixed(1)}%`, icon: 'HardDrive' },
-    ];
+    // System health — prefer real values from /common/metrics/. The
+    // backend reports API uptime (process start time), Postgres uptime
+    // (pg_postmaster_start_time), and MEDIA_ROOT writability + free
+    // space. We only fall back to a static "Healthy" stub if the
+    // metrics endpoint failed or didn't include systemHealth (older
+    // backend deploy).
+    const metricsAny = metricsResponse as any;
+    const liveHealth = Array.isArray(metricsAny?.systemHealth) ? metricsAny.systemHealth : null;
+    const systemHealth = liveHealth && liveHealth.length > 0
+      ? liveHealth
+      : [
+          { name: 'API Server', status: 'healthy', uptime: null, detail: 'Health probe unavailable.', icon: 'Server' },
+          { name: 'Database', status: 'healthy', uptime: null, detail: 'Health probe unavailable.', icon: 'Database' },
+          { name: 'File Storage', status: 'healthy', uptime: null, detail: 'Health probe unavailable.', icon: 'HardDrive' },
+        ];
 
     // Expiring licenses (from users with license_expiry)
     const now = new Date();
@@ -679,6 +739,7 @@ class AdminService {
       inactiveUsers,
       onlineNow,
       totalRoles,
+      rolesInUse,
       totalClinics,
       activeClinics,
       totalRooms,
@@ -692,8 +753,11 @@ class AdminService {
       pendingApprovals,
       responseTimeMs: metrics?.responseTimeMs,
       errorRate: metrics?.errorRate,
+      responseTimeSample: metrics?.responseTimeSample,
+      mediaStorageGb: metrics?.mediaStorageGb ?? metrics?.dataProcessedGb,
       dataProcessedGb: metrics?.dataProcessedGb,
       backupStatus: metrics?.backupStatus,
+      metricSources: metrics?.sources,
     };
   }
 

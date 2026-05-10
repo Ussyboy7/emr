@@ -145,6 +145,11 @@ MIDDLEWARE = [
     # Annotates responses served under the legacy /api/ alias with
     # RFC 8594 deprecation headers. See common/middleware.py.
     "common.middleware.LegacyApiDeprecationMiddleware",
+    # Records per-minute response time + 5xx counts in the cache for
+    # the admin dashboard Performance Metrics card. Must come AFTER any
+    # middleware that does request work we want included in the timing
+    # (auth, deprecation header), but BEFORE any debug-only profilers.
+    "common.middleware.ApiTimingMiddleware",
 ]
 
 # Target removal date for the un-versioned /api/ URL alias. Emitted on every

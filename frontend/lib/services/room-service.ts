@@ -7,9 +7,12 @@ export interface Room {
   location: string;
   floor: string;
   specialty: string;
+  /** Physical category — drives scheduling behaviour (consultation vs procedure, etc.). */
+  room_type?: 'consultation' | 'procedure' | 'emergency' | 'examination';
   status: 'active' | 'inactive' | 'maintenance';
   capacity: number;
   is_active: boolean;
+  clinic?: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -18,6 +21,10 @@ export interface RoomFilters {
   status?: string;
   specialty?: string;
   is_active?: boolean;
+  /** organisation.Clinic pk — preferred over searching ``location`` text */
+  clinic?: number;
+  /** Lower-case slug matching ConsultationRoom.room_type */
+  room_type?: string;
   search?: string;
   page?: number;
   page_size?: number;
